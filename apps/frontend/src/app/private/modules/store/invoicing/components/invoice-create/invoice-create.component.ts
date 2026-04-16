@@ -1,5 +1,5 @@
-import { Component, Output, EventEmitter, Input, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject, input, output, signal } from '@angular/core';
+import { AsyncPipe } from '@angular/common';
 import { FormBuilder, FormGroup, FormArray, Validators, ReactiveFormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
 import { Observable, map } from 'rxjs';
@@ -18,18 +18,18 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
   selector: 'vendix-invoice-create',
   standalone: true,
   imports: [
-    CommonModule,
+    AsyncPipe,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
     InputComponent,
     SelectorComponent,
     TextareaComponent,
-    IconComponent,
-  ],
+    IconComponent
+],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onClose()"
       title="Nueva Factura"
@@ -41,33 +41,33 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
           <button
             type="button"
             class="flex-1 px-3 py-2 text-sm rounded-lg border transition-colors"
-            [class.bg-primary]="mode === 'manual'"
-            [class.text-white]="mode === 'manual'"
-            [class.border-primary]="mode === 'manual'"
-            [class.bg-surface]="mode !== 'manual'"
-            [class.text-text-primary]="mode !== 'manual'"
-            [class.border-border]="mode !== 'manual'"
-            (click)="mode = 'manual'"
+            [class.bg-primary]="mode() === 'manual'"
+            [class.text-white]="mode() === 'manual'"
+            [class.border-primary]="mode() === 'manual'"
+            [class.bg-surface]="mode() !== 'manual'"
+            [class.text-text-primary]="mode() !== 'manual'"
+            [class.border-border]="mode() !== 'manual'"
+            (click)="mode.set('manual')"
             >
             Factura Manual
           </button>
           <button
             type="button"
             class="flex-1 px-3 py-2 text-sm rounded-lg border transition-colors"
-            [class.bg-primary]="mode === 'from_order'"
-            [class.text-white]="mode === 'from_order'"
-            [class.border-primary]="mode === 'from_order'"
-            [class.bg-surface]="mode !== 'from_order'"
-            [class.text-text-primary]="mode !== 'from_order'"
-            [class.border-border]="mode !== 'from_order'"
-            (click)="mode = 'from_order'"
+            [class.bg-primary]="mode() === 'from_order'"
+            [class.text-white]="mode() === 'from_order'"
+            [class.border-primary]="mode() === 'from_order'"
+            [class.bg-surface]="mode() !== 'from_order'"
+            [class.text-text-primary]="mode() !== 'from_order'"
+            [class.border-border]="mode() !== 'from_order'"
+            (click)="mode.set('from_order')"
             >
             Desde Pedido
           </button>
         </div>
     
         <!-- From Order Mode -->
-        @if (mode === 'from_order') {
+        @if (mode() === 'from_order') {
           <div class="space-y-4">
             <app-input
               label="ID del Pedido"
@@ -82,7 +82,7 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
         }
     
         <!-- Manual Mode -->
-        @if (mode === 'manual') {
+        @if (mode() === 'manual') {
           <form [formGroup]="invoiceForm" (ngSubmit)="onSubmit()" class="space-y-4">
             <!-- Invoice Type -->
             <app-selector
@@ -242,9 +242,9 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
           <app-button
             variant="primary"
             (clicked)="onSubmit()"
-            [disabled]="mode === 'manual' ? (invoiceForm.invalid || submitting) : (!orderIdControl.value || submitting)"
-            [loading]="submitting">
-            {{ mode === 'from_order' ? 'Crear desde Pedido' : 'Crear Factura' }}
+            [disabled]="mode() === 'manual' ? (invoiceForm.invalid || submitting()) : (!orderIdControl.value || submitting())"
+            [loading]="submitting()">
+            {{ mode() === 'from_order' ? 'Crear desde Pedido' : 'Crear Factura' }}
           </app-button>
         </div>
       </div>
@@ -252,14 +252,14 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
     `
 })
 export class InvoiceCreateComponent {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
+  readonly isOpen = input<boolean>(false);
+  readonly isOpenChange = output<boolean>();
 
   private fb = inject(FormBuilder);
   private store = inject(Store);
 
-  mode: 'manual' | 'from_order' = 'manual';
-  submitting = false;
+  readonly mode = signal<'manual' | 'from_order'>('manual');
+  readonly submitting = signal(false);
 
   invoiceForm: FormGroup;
   orderIdControl = this.fb.control(null, [Validators.required, Validators.min(1)]);
@@ -321,12 +321,12 @@ export class InvoiceCreateComponent {
   }
 
   onSubmit(): void {
-    if (this.mode === 'from_order') {
+    if (this.mode() === 'from_order') {
       const orderId = this.orderIdControl.value;
       if (!orderId) return;
-      this.submitting = true;
+      this.submitting.set(true);
       this.store.dispatch(createFromOrder({ orderId: Number(orderId) }));
-      this.submitting = false;
+      this.submitting.set(false);
       this.resetForm();
       this.onClose();
       return;
@@ -337,7 +337,7 @@ export class InvoiceCreateComponent {
       return;
     }
 
-    this.submitting = true;
+    this.submitting.set(true);
     const formValue = this.invoiceForm.value;
 
     this.store.dispatch(createInvoice({
@@ -362,7 +362,7 @@ export class InvoiceCreateComponent {
       },
     }));
 
-    this.submitting = false;
+    this.submitting.set(false);
     this.resetForm();
     this.onClose();
   }
@@ -374,7 +374,7 @@ export class InvoiceCreateComponent {
     });
     this.itemsArray.clear();
     this.orderIdControl.reset();
-    this.mode = 'manual';
+    this.mode.set('manual');
   }
 
   onClose(): void {

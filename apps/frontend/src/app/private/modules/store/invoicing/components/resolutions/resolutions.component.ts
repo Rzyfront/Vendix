@@ -1,5 +1,5 @@
-import { Component, Input, Output, EventEmitter, inject, OnInit } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject, input, output, signal } from '@angular/core';
+import { NgClass, AsyncPipe, DatePipe } from '@angular/common';
 import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
 import { InvoiceResolution } from '../../interfaces/invoice.interface';
@@ -14,15 +14,17 @@ import { ResolutionCreateComponent } from './resolution-create/resolution-create
   selector: 'vendix-resolutions',
   standalone: true,
   imports: [
-    CommonModule,
+    NgClass,
+    AsyncPipe,
+    DatePipe,
     ModalComponent,
     ButtonComponent,
     IconComponent,
-    ResolutionCreateComponent,
-  ],
+    ResolutionCreateComponent
+],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onClose()"
       title="Resoluciones de Facturación"
@@ -116,35 +118,36 @@ import { ResolutionCreateComponent } from './resolution-create/resolution-create
     
     <!-- Create/Edit Resolution Modal -->
     <vendix-resolution-create
-      [(isOpen)]="isCreateModalOpen"
-      [resolution]="selectedResolution"
+      [isOpen]="isCreateModalOpen()"
+      (isOpenChange)="isCreateModalOpen.set($event)"
+      [resolution]="selectedResolution()"
     ></vendix-resolution-create>
     `
 })
-export class ResolutionsComponent implements OnInit {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
+export class ResolutionsComponent {
+  readonly isOpen = input<boolean>(false);
+  readonly isOpenChange = output<boolean>();
 
   private store = inject(Store);
 
   resolutions$: Observable<InvoiceResolution[]> = this.store.select(selectResolutions);
   loading$: Observable<boolean> = this.store.select(selectResolutionsLoading);
 
-  isCreateModalOpen = false;
-  selectedResolution: InvoiceResolution | null = null;
+  readonly isCreateModalOpen = signal(false);
+  readonly selectedResolution = signal<InvoiceResolution | null>(null);
 
-  ngOnInit(): void {
+  constructor() {
     this.store.dispatch(InvoicingActions.loadResolutions());
   }
 
   openCreateModal(): void {
-    this.selectedResolution = null;
-    this.isCreateModalOpen = true;
+    this.selectedResolution.set(null);
+    this.isCreateModalOpen.set(true);
   }
 
   editResolution(resolution: InvoiceResolution): void {
-    this.selectedResolution = resolution;
-    this.isCreateModalOpen = true;
+    this.selectedResolution.set(resolution);
+    this.isCreateModalOpen.set(true);
   }
 
   onDeleteResolution(id: number): void {

@@ -1,16 +1,9 @@
-import {
-  Component,
-  ChangeDetectionStrategy,
-  ChangeDetectorRef,
-  OnInit,
-  inject,
-} from '@angular/core';
+import { Component, inject, DestroyRef } from '@angular/core';
 
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { timer } from 'rxjs';
 import { filter, map, catchError } from 'rxjs/operators';
 import { of } from 'rxjs';
-import { DestroyRef } from '@angular/core';
 import { StatsComponent } from '../../../../../../shared/components';
 
 import {
@@ -34,8 +27,7 @@ import {
     MetricChartComponent,
     TimeRangeSelectorComponent,
     SlowEndpointsComponent
-],
-  changeDetection: ChangeDetectionStrategy.OnPush,
+  ],
   template: `
     <div class="space-y-6">
       <!-- Stats Cards + Time Range -->
@@ -43,13 +35,13 @@ import {
         <h3
           class="text-lg font-semibold"
           style="color: var(--color-text-primary);"
-          >
+        >
           Performance
           @if (performanceSnapshot) {
             <span
               class="text-xs font-mono px-2 py-0.5 rounded-full ml-2"
               style="background: var(--color-surface); color: var(--color-text-muted);"
-              >
+            >
               {{ performanceSnapshot.totalRecorded }} requests tracked
             </span>
           }
@@ -59,7 +51,7 @@ import {
           (rangeChange)="onTimeRangeChange($event)"
         ></app-time-range-selector>
       </div>
-    
+
       <!-- Performance Stats Cards -->
       <div class="stats-container">
         <app-stats
@@ -118,7 +110,7 @@ import {
           [loading]="loadingPerformance"
           />
       </div>
-    
+
       <!-- Response Time & Throughput Charts -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <app-metric-chart
@@ -142,13 +134,13 @@ import {
           [loading]="loadingPerformance"
         ></app-metric-chart>
       </div>
-    
+
       <!-- Slow Endpoints - Own section -->
       <app-slow-endpoints
         [endpoints]="performanceSnapshot?.slowestEndpoints ?? null"
         [loading]="loadingPerformance"
       ></app-slow-endpoints>
-    
+
       <!-- Error & Event Loop Charts -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <app-metric-chart
@@ -172,9 +164,8 @@ import {
     </div>
     `,
 })
-export class MonitoringPerformancePage implements OnInit {
+export class MonitoringPerformancePage {
   private readonly monitoringService = inject(MonitoringService);
-  private readonly cdr = inject(ChangeDetectorRef);
   private readonly destroyRef = inject(DestroyRef);
 
   performanceSnapshot: PerformanceSnapshot | null = null;
@@ -208,7 +199,7 @@ export class MonitoringPerformancePage implements OnInit {
     this.paused = document.hidden;
   };
 
-  ngOnInit(): void {
+  constructor() {
     document.addEventListener('visibilitychange', this.visibilityHandler);
 
     timer(0, 60_000)
@@ -220,6 +211,10 @@ export class MonitoringPerformancePage implements OnInit {
         this.fetchPerformance();
         this.fetchPerformanceHistory();
       });
+
+    this.destroyRef.onDestroy(() => {
+      document.removeEventListener('visibilitychange', this.visibilityHandler);
+    });
   }
 
   onTimeRangeChange(range: TimeRange): void {
@@ -239,7 +234,6 @@ export class MonitoringPerformancePage implements OnInit {
         this.performanceSnapshot = data;
         this.loadingPerformance = false;
         this.computeSnapshotValues();
-        this.cdr.markForCheck();
       });
   }
 
@@ -254,7 +248,6 @@ export class MonitoringPerformancePage implements OnInit {
       .subscribe((data) => {
         this.performanceHistory = data;
         this.computeHistoryPoints();
-        this.cdr.markForCheck();
       });
   }
 

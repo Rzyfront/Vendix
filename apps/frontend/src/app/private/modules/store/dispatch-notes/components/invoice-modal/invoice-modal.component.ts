@@ -1,12 +1,10 @@
 import {
   Component,
-  ChangeDetectionStrategy,
   inject,
   input,
   output,
   computed,
 } from '@angular/core';
-
 import {
   ModalComponent,
   ButtonComponent,
@@ -21,9 +19,8 @@ import { DispatchNote, DispatchNoteItem } from '../../interfaces/dispatch-note.i
   imports: [
     ModalComponent,
     ButtonComponent,
-    IconComponent
-],
-  changeDetection: ChangeDetectionStrategy.OnPush,
+    IconComponent,
+  ],
   template: `
     <app-modal
       [isOpen]="isOpen()"
@@ -31,12 +28,12 @@ import { DispatchNote, DispatchNoteItem } from '../../interfaces/dispatch-note.i
       (cancel)="onClose()"
       title="Generar Factura"
       size="md"
-      >
+    >
       <!-- Header icon -->
       <div slot="header" class="flex items-center justify-center w-10 h-10 rounded-full bg-blue-100">
         <app-icon name="file-plus" [size]="20" class="text-blue-600"></app-icon>
       </div>
-    
+
       <!-- Body -->
       <div class="space-y-5">
         <!-- Info Banner -->
@@ -46,7 +43,7 @@ import { DispatchNote, DispatchNoteItem } from '../../interfaces/dispatch-note.i
             Se generara una factura por el total de esta remision.
           </p>
         </div>
-    
+
         <!-- Items Summary — Desktop Table -->
         <div class="hidden md:block">
           <div class="rounded-xl border border-[var(--color-border)] overflow-hidden">
@@ -60,12 +57,11 @@ import { DispatchNote, DispatchNoteItem } from '../../interfaces/dispatch-note.i
                 </tr>
               </thead>
               <tbody>
-                @for (item of items(); track item; let last = $last) {
+                @for (item of items(); track item.id; let last = $last) {
                   <tr
                     class="transition-colors duration-150"
                     [class.border-b]="!last"
-                    [class.border-[var(--color-border)]]="!last"
-                    >
+                  >
                     <td class="px-4 py-3 text-[var(--fs-sm)] text-[var(--color-text-primary)]">
                       {{ getProductName(item) }}
                     </td>
@@ -84,13 +80,11 @@ import { DispatchNote, DispatchNoteItem } from '../../interfaces/dispatch-note.i
             </table>
           </div>
         </div>
-    
+
         <!-- Items Summary — Mobile Cards -->
         <div class="md:hidden space-y-3">
-          @for (item of items(); track item) {
-            <div
-              class="rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 space-y-2"
-              >
+          @for (item of items(); track item.id) {
+            <div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 space-y-2">
               <p class="text-[var(--fs-sm)] font-[var(--fw-medium)] text-[var(--color-text-primary)]">
                 {{ getProductName(item) }}
               </p>
@@ -105,7 +99,7 @@ import { DispatchNote, DispatchNoteItem } from '../../interfaces/dispatch-note.i
             </div>
           }
         </div>
-    
+
         <!-- Totals -->
         <div class="rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] p-4 space-y-2">
           <div class="flex items-center justify-between">
@@ -114,25 +108,23 @@ import { DispatchNote, DispatchNoteItem } from '../../interfaces/dispatch-note.i
               {{ formatCurrency(dispatchNote().subtotal_amount) }}
             </span>
           </div>
-    
+
           @if (hasDiscount()) {
-            <div
-              class="flex items-center justify-between"
-              >
+            <div class="flex items-center justify-between">
               <span class="text-[var(--fs-sm)] text-[var(--color-text-secondary)]">Descuento</span>
               <span class="text-[var(--fs-sm)] text-red-600">
                 -{{ formatCurrency(dispatchNote().discount_amount) }}
               </span>
             </div>
           }
-    
+
           <div class="flex items-center justify-between">
             <span class="text-[var(--fs-sm)] text-[var(--color-text-secondary)]">IVA</span>
             <span class="text-[var(--fs-sm)] text-[var(--color-text-primary)]">
               {{ formatCurrency(dispatchNote().tax_amount) }}
             </span>
           </div>
-    
+
           <div class="flex items-center justify-between pt-2 border-t border-[var(--color-border)]">
             <span class="text-[var(--fs-base)] font-[var(--fw-semibold)] text-[var(--color-text-primary)]">Total</span>
             <span class="text-[var(--fs-lg)] font-[var(--fw-bold)] text-[var(--color-text-primary)]">
@@ -140,7 +132,7 @@ import { DispatchNote, DispatchNoteItem } from '../../interfaces/dispatch-note.i
             </span>
           </div>
         </div>
-    
+
         <!-- Customer Info -->
         <div class="rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] p-4 space-y-2">
           <div class="flex items-center justify-between">
@@ -158,12 +150,10 @@ import { DispatchNote, DispatchNoteItem } from '../../interfaces/dispatch-note.i
             </div>
           }
         </div>
-    
+
         <!-- Linked Sales Order -->
         @if (dispatchNote().sales_order_id) {
-          <div
-            class="flex items-center gap-2 text-[var(--fs-sm)] text-[var(--color-text-secondary)]"
-            >
+          <div class="flex items-center gap-2 text-[var(--fs-sm)] text-[var(--color-text-secondary)]">
             <app-icon name="link" [size]="14" class="text-[var(--color-text-muted)]"></app-icon>
             <span>
               Orden de venta:
@@ -174,7 +164,7 @@ import { DispatchNote, DispatchNoteItem } from '../../interfaces/dispatch-note.i
           </div>
         }
       </div>
-    
+
       <!-- Footer -->
       <div slot="footer">
         <div class="flex items-center justify-end gap-3">
@@ -185,13 +175,13 @@ import { DispatchNote, DispatchNoteItem } from '../../interfaces/dispatch-note.i
             variant="primary"
             iconName="file-plus"
             (clicked)="onInvoice()"
-            >
+          >
             Generar Factura
           </app-button>
         </div>
       </div>
     </app-modal>
-    `,
+  `,
 })
 export class InvoiceModalComponent {
   private currencyService = inject(CurrencyFormatService);

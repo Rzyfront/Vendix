@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, signal } from '@angular/core';
 
 import { RouterModule } from '@angular/router';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
@@ -65,7 +65,7 @@ import './organizations.component.css';
   template: `
     <div class="space-y-6">
       <!-- Stats Cards -->
-      <app-organization-stats [stats]="stats"></app-organization-stats>
+      <app-organization-stats [stats]="stats()"></app-organization-stats>
 
       <!-- Organizations List -->
       <div class="bg-surface rounded-card shadow-card border border-border">
@@ -75,7 +75,7 @@ import './organizations.component.css';
           >
             <div class="flex-1 min-w-0">
               <h2 class="text-lg font-semibold text-text-primary">
-                All Organizations ({{ pagination.total }})
+                All Organizations ({{ pagination().total }})
               </h2>
             </div>
 
@@ -106,7 +106,7 @@ import './organizations.component.css';
                   variant="outline"
                   size="sm"
                   (clicked)="refreshOrganizations()"
-                  [disabled]="isLoading"
+                  [disabled]="isLoading()"
                   title="Refresh"
                 >
                   <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
@@ -126,14 +126,14 @@ import './organizations.component.css';
             <!-- Paginación info -->
             <div class="flex items-center gap-2 mt-2 sm:mt-0">
               <span class="text-sm text-text-secondary">
-                Page {{ pagination.page }} of {{ pagination.totalPages }}
+                Page {{ pagination().page }} of {{ pagination().totalPages }}
               </span>
             </div>
           </div>
         </div>
 
         <!-- Loading State -->
-        @if (isLoading) {
+        @if (isLoading()) {
           <div class="p-8 text-center">
             <div
               class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
@@ -143,7 +143,7 @@ import './organizations.component.css';
         }
 
         <!-- Empty State -->
-        @if (!isLoading && organizations.length === 0) {
+        @if (!isLoading() && organizations().length === 0) {
           <app-empty-state
             icon="building"
             [title]="getEmptyStateTitle()"
@@ -155,14 +155,14 @@ import './organizations.component.css';
         }
 
         <!-- Organizations Table -->
-        @if (!isLoading && organizations.length > 0) {
+        @if (!isLoading() && organizations().length > 0) {
           <div class="p-6">
             <app-responsive-data-view
-              [data]="organizations"
+              [data]="organizations()"
               [columns]="tableColumns"
               [cardConfig]="cardConfig"
               [actions]="tableActions"
-              [loading]="isLoading"
+              [loading]="isLoading()"
               emptyMessage="No hay organizaciones"
               emptyIcon="building"
             >
@@ -170,10 +170,10 @@ import './organizations.component.css';
             <!-- Pagination -->
             <div class="mt-6 flex justify-center">
               <app-pagination
-                [currentPage]="pagination.page"
-                [totalPages]="pagination.totalPages"
-                [total]="pagination.total"
-                [limit]="pagination.limit"
+                [currentPage]="pagination().page"
+                [totalPages]="pagination().totalPages"
+                [total]="pagination().total"
+                [limit]="pagination().limit"
                 infoStyle="page"
                 (pageChange)="changePage($event)"
               />
@@ -206,8 +206,8 @@ import './organizations.component.css';
   `,
 })
 export class OrganizationsComponent implements OnInit, OnDestroy {
-  organizations: OrganizationListItem[] = [];
-  isLoading = false;
+  readonly organizations = signal<OrganizationListItem[]>([]);
+  readonly isLoading = signal(false);
   searchTerm = '';
   selectedStatus = '';
   selectedMode = '';
@@ -321,21 +321,21 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
     ],
   };
 
-  stats = {
+  readonly stats = signal({
     total: 0,
     active: 0,
     inactive: 0,
     suspended: 0,
     demo: 0,
     test: 0,
-  };
+  });
 
-  pagination = {
+  readonly pagination = signal({
     page: 1,
     limit: 10,
     total: 0,
     totalPages: 0,
-  };
+  });
 
   // Modal state
   isCreateModalOpen = false;
@@ -463,11 +463,12 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
   }
 
   loadOrganizations(): void {
-    this.isLoading = true;
+    this.isLoading.set(true);
 
+    const pag = this.pagination();
     const query = {
-      page: this.pagination.page,
-      limit: this.pagination.limit,
+      page: pag.page,
+      limit: pag.limit,
       ...(this.searchTerm && { search: this.searchTerm }),
       ...(this.selectedStatus && { state: this.selectedStatus as any }),
       ...(this.selectedMode
@@ -481,7 +482,7 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
     const sub = this.organizationsService.getOrganizations(query).subscribe({
       next: (response) => {
         if (response.success) {
-          this.organizations = response.data.map((org: any) => ({
+          this.organizations.set(response.data.map((org: any) => ({
             id: org.id,
             name: org.name,
             slug: org.slug,
@@ -498,16 +499,15 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
               maxUsers: 50, // Default value
               allowMultipleStores: true, // Default value
             },
-          }));
+          })));
 
-          this.pagination.total = response.meta.total;
-          this.pagination.totalPages = response.meta.totalPages;
+          this.pagination.update((p) => ({ ...p, total: response.meta.total, totalPages: response.meta.totalPages }));
         }
-        this.isLoading = false;
+        this.isLoading.set(false);
       },
       error: (error) => {
         console.error('Error loading organizations:', error);
-        this.isLoading = false;
+        this.isLoading.set(false);
         // TODO: Show error notification
       },
     });
@@ -519,12 +519,14 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
     const sub = this.organizationsService.getOrganizationStatsList().subscribe({
       next: (response) => {
         if (response.success) {
-          this.stats.total = response.data.totalOrganizations;
-          this.stats.active = response.data.activeOrganizations;
-          this.stats.inactive = response.data.inactiveOrganizations;
-          this.stats.suspended = response.data.suspendedOrganizations;
-          this.stats.demo = response.data.demoOrganizations || 0;
-          this.stats.test = response.data.testOrganizations || 0;
+          this.stats.set({
+            total: response.data.totalOrganizations,
+            active: response.data.activeOrganizations,
+            inactive: response.data.inactiveOrganizations,
+            suspended: response.data.suspendedOrganizations,
+            demo: response.data.demoOrganizations || 0,
+            test: response.data.testOrganizations || 0,
+          });
         }
       },
       error: (error) => {
@@ -538,16 +540,14 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
   }
 
   updateStats(): void {
-    this.stats.total = this.organizations.length;
-    this.stats.active = this.organizations.filter(
-      (org) => org.status === 'active',
-    ).length;
-    this.stats.inactive = this.organizations.filter(
-      (org) => org.status === 'inactive',
-    ).length;
-    this.stats.suspended = this.organizations.filter(
-      (org) => org.status === 'suspended',
-    ).length;
+    const orgs = this.organizations();
+    this.stats.update((s) => ({
+      ...s,
+      total: orgs.length,
+      active: orgs.filter((org) => org.status === 'active').length,
+      inactive: orgs.filter((org) => org.status === 'inactive').length,
+      suspended: orgs.filter((org) => org.status === 'suspended').length,
+    }));
   }
 
   refreshOrganizations(): void {
@@ -556,13 +556,13 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
 
   onSearchChange(searchTerm: string): void {
     this.searchTerm = searchTerm;
-    this.pagination.page = 1;
+    this.pagination.update((p) => ({ ...p, page: 1 }));
     this.loadOrganizations();
   }
 
   onModeChange(value: string): void {
     this.selectedMode = value;
-    this.pagination.page = 1;
+    this.pagination.update((p) => ({ ...p, page: 1 }));
     this.loadOrganizations();
   }
 
@@ -576,7 +576,7 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
   }
 
   changePage(page: number): void {
-    this.pagination.page = page;
+    this.pagination.update((p) => ({ ...p, page }));
     this.loadOrganizations();
   }
 

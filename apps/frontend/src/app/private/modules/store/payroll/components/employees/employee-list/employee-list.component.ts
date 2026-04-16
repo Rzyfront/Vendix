@@ -1,8 +1,8 @@
-import { Component, Input, Output, EventEmitter, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input, output, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
+import { toSignal } from '@angular/core/rxjs-interop';
 
 import { Employee } from '../../../interfaces/payroll.interface';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
@@ -33,7 +33,6 @@ import {
   selector: 'app-employee-list',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     CardComponent,
     InputsearchComponent,
@@ -45,14 +44,14 @@ import {
   templateUrl: './employee-list.component.html',
 })
 export class EmployeeListComponent {
-  @Input() employees: Employee[] = [];
-  @Input() loading = false;
+  readonly employees = input<Employee[]>([]);
+  readonly loading = input<boolean>(false);
 
-  @Output() create = new EventEmitter<void>();
-  @Output() edit = new EventEmitter<Employee>();
-  @Output() detail = new EventEmitter<Employee>();
-  @Output() refresh = new EventEmitter<void>();
-  @Output() bulkUpload = new EventEmitter<void>();
+  readonly create = output<void>();
+  readonly edit = output<Employee>();
+  readonly detail = output<Employee>();
+  readonly refresh = output<void>();
+  readonly bulkUpload = output<void>();
 
   private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
@@ -62,6 +61,7 @@ export class EmployeeListComponent {
     selectEmployeeStatusFilter,
   );
   meta$ = this.store.select(selectEmployeeMeta);
+  readonly meta = toSignal(this.meta$, { initialValue: null as any });
   page$ = this.store.select(selectEmployeePage);
 
   searchTerm = '';
@@ -230,19 +230,9 @@ export class EmployeeListComponent {
   onActionClick(action: string): void {
     switch (action) {
       case 'create':
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
         this.create.emit();
         break;
       case 'bulk-upload':
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
         this.bulkUpload.emit();
         break;
     }

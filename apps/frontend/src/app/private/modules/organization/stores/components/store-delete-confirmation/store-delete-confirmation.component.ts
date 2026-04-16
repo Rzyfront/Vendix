@@ -1,4 +1,4 @@
-import { Component, Input, OnDestroy, input, output } from '@angular/core';
+import { Component, OnDestroy, input, output, model } from '@angular/core';
 
 import {
   FormsModule,
@@ -22,13 +22,13 @@ import { StoreListItem } from '../../interfaces/store.interface';
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
-    IconComponent
-],
+    IconComponent,
+  ],
   templateUrl: './store-delete-confirmation.component.html',
   styleUrl: './store-delete-confirmation.component.scss',
 })
 export class StoreDeleteConfirmationComponent implements OnDestroy {
-  @Input() isOpen = false;
+  readonly isOpen = model<boolean>(false);
   readonly store = input<StoreListItem | null>(null);
 
   readonly isOpenChange = output<boolean>();
@@ -86,11 +86,8 @@ export class StoreDeleteConfirmationComponent implements OnDestroy {
   }
 
   onCancel(): void {
+    this.isOpen.set(false);
     this.isOpenChange.emit(false);
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
     this.cancel.emit();
     this.slugInput.reset();
     this.showError = false;

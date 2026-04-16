@@ -1,12 +1,10 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
-  OnChanges,
-  SimpleChanges,
   inject,
-  ViewChild,
+  input,
+  output,
+  effect,
+  viewChild,
 } from '@angular/core';
 
 import { FormsModule } from '@angular/forms';
@@ -52,7 +50,7 @@ interface TransferItem {
 ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       [title]="modalTitle"
       size="md"
       (closed)="onCancel()"
@@ -382,8 +380,8 @@ interface TransferItem {
               variant="outline"
               type="button"
               (clicked)="onSubmitDraft()"
-              [loading]="isSubmitting"
-              [disabled]="isSubmitting || hasNegativeProjection()"
+              [loading]="isSubmitting()"
+              [disabled]="isSubmitting() || hasNegativeProjection()"
               customClasses="!rounded-xl font-bold"
             >
               <app-icon name="file-text" [size]="14" class="mr-1.5" slot="icon"></app-icon>
@@ -393,8 +391,8 @@ interface TransferItem {
               variant="primary"
               type="button"
               (clicked)="onSubmitAndComplete()"
-              [loading]="isSubmitting"
-              [disabled]="isSubmitting || hasNegativeProjection() || !confirmCreate"
+              [loading]="isSubmitting()"
+              [disabled]="isSubmitting() || hasNegativeProjection() || !confirmCreate"
               customClasses="!rounded-xl font-bold shadow-md shadow-primary-200 active:scale-95 transition-all"
             >
               <app-icon name="check-circle" [size]="14" class="mr-1.5" slot="icon"></app-icon>
@@ -406,17 +404,17 @@ interface TransferItem {
     </app-modal>
   `,
 })
-export class TransferCreateModalComponent implements OnChanges {
+export class TransferCreateModalComponent {
   private transfersService = inject(TransfersService);
 
-  @Input() isOpen = false;
-  @Input() isSubmitting = false;
-  @Input() locations: SelectorOption[] = [];
+  readonly isOpen = input(false);
+  readonly isSubmitting = input(false);
+  readonly locations = input<SelectorOption[]>([]);
 
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() cancel = new EventEmitter<void>();
-  @Output() save = new EventEmitter<CreateTransferRequest>();
-  @Output() saveAndComplete = new EventEmitter<CreateTransferRequest>();
+  readonly isOpenChange = output<boolean>();
+  readonly cancel = output<void>();
+  readonly save = output<CreateTransferRequest>();
+  readonly saveAndComplete = output<CreateTransferRequest>();
 
   currentStep = 1;
   steps: StepsLineItem[] = [
@@ -432,18 +430,18 @@ export class TransferCreateModalComponent implements OnChanges {
   notes = '';
 
   // Step 2
-  @ViewChild('productSearch') productSearchRef?: InputsearchComponent;
+  readonly productSearchRef = viewChild<InputsearchComponent>('productSearch');
   productSearchResults: TransferableProduct[] = [];
   confirmCreate = false;
   transferItems: TransferItem[] = [];
 
   get locationOptions(): SelectorOption[] {
-    return this.locations;
+    return this.locations();
   }
 
   get filteredToLocations(): SelectorOption[] {
-    if (!this.selectedFromLocation) return this.locations;
-    return this.locations.filter(l => l.value !== this.selectedFromLocation);
+    if (!this.selectedFromLocation) return this.locations();
+    return this.locations().filter(l => l.value !== this.selectedFromLocation);
   }
 
   get modalTitle(): string {
@@ -452,10 +450,12 @@ export class TransferCreateModalComponent implements OnChanges {
     return 'Confirmar Transferencia';
   }
 
-  ngOnChanges(changes: SimpleChanges): void {
-    if (changes['isOpen'] && this.isOpen) {
-      this.resetModal();
-    }
+  constructor() {
+    effect(() => {
+      if (this.isOpen()) {
+        this.resetModal();
+      }
+    });
   }
 
   onFromLocationChange(value: any): void {
@@ -505,7 +505,7 @@ export class TransferCreateModalComponent implements OnChanges {
       },
     ];
     this.productSearchResults = [];
-    this.productSearchRef?.clearInput();
+    this.productSearchRef()?.clearInput();
   }
 
   removeItem(index: number): void {
@@ -521,7 +521,7 @@ export class TransferCreateModalComponent implements OnChanges {
 
   getLocationName(id: number | null): string {
     if (!id) return '-';
-    return this.locations.find(l => l.value === id)?.label || '-';
+    return this.locations().find(l => l.value === id)?.label || '-';
   }
 
   getTotalQuantity(): number {
@@ -563,11 +563,6 @@ export class TransferCreateModalComponent implements OnChanges {
 
   onCancel(): void {
     this.resetModal();
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
     this.cancel.emit();
   }
 
@@ -613,6 +608,6 @@ export class TransferCreateModalComponent implements OnChanges {
     this.productSearchResults = [];
     this.transferItems = [];
     this.confirmCreate = false;
-    this.productSearchRef?.clearInput();
+    this.productSearchRef()?.clearInput();
   }
 }

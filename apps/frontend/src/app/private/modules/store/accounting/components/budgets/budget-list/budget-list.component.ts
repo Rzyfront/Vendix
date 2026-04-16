@@ -50,7 +50,7 @@ interface BudgetStats {
   templateUrl: './budget-list.component.html',
   styleUrls: ['./budget-list.component.scss'],
 })
-export class BudgetListComponent implements OnInit, OnDestroy {
+export class BudgetListComponent implements OnDestroy {
   private destroy$ = new Subject<void>();
   private accounting_service = inject(AccountingService);
   private router = inject(Router);
@@ -213,7 +213,7 @@ export class BudgetListComponent implements OnInit, OnDestroy {
     ],
   };
 
-  ngOnInit(): void {
+  constructor() {
     this.loadBudgets();
   }
 

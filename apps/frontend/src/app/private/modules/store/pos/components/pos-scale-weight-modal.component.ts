@@ -1,12 +1,11 @@
 import {
   Component,
-  EventEmitter,
-  Input,
-  Output,
-  OnInit,
-  OnDestroy,
+  input,
+  output,
+  inject,
+  DestroyRef,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Subject, takeUntil } from 'rxjs';
 import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
@@ -20,7 +19,7 @@ import { ScaleConnectionStatus } from '../../../../../core/models/store-settings
   selector: 'app-pos-scale-weight-modal',
   standalone: true,
   imports: [
-    CommonModule,
+    DecimalPipe,
     FormsModule,
     ModalComponent,
     ButtonComponent,
@@ -30,15 +29,15 @@ import { ScaleConnectionStatus } from '../../../../../core/models/store-settings
   template: `
     <app-modal
       [(isOpen)]="isOpen"
-      [title]="title"
+      [title]="title()"
       size="sm"
       [showCloseButton]="true"
       (isOpenChange)="onModalClose()"
       >
       <div class="scale-modal-body">
         <!-- Product info -->
-        @if (message) {
-          <p class="text-sm text-text-secondary mb-4 whitespace-pre-line">{{ message }}</p>
+        @if (message()) {
+          <p class="text-sm text-text-secondary mb-4 whitespace-pre-line">{{ message() }}</p>
         }
     
         <!-- Scale reading display -->
@@ -46,7 +45,7 @@ import { ScaleConnectionStatus } from '../../../../../core/models/store-settings
           <div class="scale-reading-container">
             <div class="scale-reading-display">
               <span class="scale-reading-value">{{ currentWeight | number:'1.3-3' }}</span>
-              <span class="scale-reading-unit">{{ weightUnit }}</span>
+              <span class="scale-reading-unit">{{ weightUnit() }}</span>
             </div>
             <div class="scale-status-indicator" [class.stable]="isStable" [class.unstable]="!isStable">
               <app-icon [name]="isStable ? 'check-circle' : 'loader'" [size]="16"></app-icon>
@@ -65,11 +64,11 @@ import { ScaleConnectionStatus } from '../../../../../core/models/store-settings
               </span>
             </div>
             <!-- Manual fallback input -->
-            @if (allowManualFallback && connectionStatus !== 'connecting') {
+            @if (allowManualFallback() && connectionStatus !== 'connecting') {
               <div class="manual-fallback">
                 <label class="text-xs text-text-secondary mb-1 block">Peso manual:</label>
                 <app-input
-                  [placeholder]="'Peso en ' + weightUnit"
+                  [placeholder]="'Peso en ' + weightUnit()"
                   [(ngModel)]="manualWeight"
                   (keyup.enter)="onConfirm()"
                   type="number"
@@ -173,17 +172,17 @@ import { ScaleConnectionStatus } from '../../../../../core/models/store-settings
     }
   `],
 })
-export class PosScaleWeightModalComponent implements OnInit, OnDestroy {
-  @Input() title = 'Lectura de Báscula';
-  @Input() message = '';
-  @Input() weightUnit = 'kg';
-  @Input() allowManualFallback = true;
-  @Input() size: 'sm' | 'md' | 'lg' = 'sm';
-  @Input() showCloseButton = true;
-  @Input() customClasses = '';
+export class PosScaleWeightModalComponent {
+  readonly title = input<string>('Lectura de Báscula');
+  readonly message = input<string>('');
+  readonly weightUnit = input<string>('kg');
+  readonly allowManualFallback = input<boolean>(true);
+  readonly size = input<'sm' | 'md' | 'lg'>('sm');
+  readonly showCloseButton = input<boolean>(true);
+  readonly customClasses = input<string>('');
 
-  @Output() confirm = new EventEmitter<number>();
-  @Output() cancel = new EventEmitter<void>();
+  readonly confirm = output<number>();
+  readonly cancel = output<void>();
 
   isOpen = true;
   currentWeight = 0;
@@ -192,10 +191,14 @@ export class PosScaleWeightModalComponent implements OnInit, OnDestroy {
   manualWeight = '';
 
   private destroy$ = new Subject<void>();
+  private scaleService = inject(PosScaleService);
 
-  constructor(private scaleService: PosScaleService) {}
+  constructor() {
+    inject(DestroyRef).onDestroy(() => {
+      this.destroy$.next();
+      this.destroy$.complete();
+    });
 
-  ngOnInit(): void {
     this.scaleService.weight$
       .pipe(takeUntil(this.destroy$))
       .subscribe(w => this.currentWeight = w);
@@ -209,16 +212,11 @@ export class PosScaleWeightModalComponent implements OnInit, OnDestroy {
       .subscribe(st => this.connectionStatus = st);
   }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
   get canConfirm(): boolean {
     if (this.connectionStatus === 'connected') {
       return this.isStable && this.currentWeight > 0;
     }
-    if (this.allowManualFallback && this.manualWeight) {
+    if (this.allowManualFallback() && this.manualWeight) {
       const val = parseFloat(this.manualWeight.replace(',', '.'));
       return !isNaN(val) && val > 0;
     }
@@ -240,22 +238,12 @@ export class PosScaleWeightModalComponent implements OnInit, OnDestroy {
   }
 
   onCancel(): void {
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
     this.cancel.emit();
     this.isOpen = false;
   }
 
   onModalClose(): void {
     if (!this.isOpen) {
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
       this.cancel.emit();
     }
   }

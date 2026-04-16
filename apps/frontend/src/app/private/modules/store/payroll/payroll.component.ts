@@ -1,5 +1,5 @@
-import { Component, OnInit, OnDestroy, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject, DestroyRef } from '@angular/core';
+import { AsyncPipe } from '@angular/common';
 import { Store } from '@ngrx/store';
 import { Observable, Subject } from 'rxjs';
 import { takeUntil, filter } from 'rxjs/operators';
@@ -39,7 +39,7 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
   selector: 'vendix-payroll',
   standalone: true,
   imports: [
-    CommonModule,
+    AsyncPipe,
     PayrollStatsComponent,
     EmployeeListComponent,
     EmployeeCreateComponent,
@@ -131,8 +131,9 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
     </div>
   `,
 })
-export class PayrollComponent implements OnInit, OnDestroy {
+export class PayrollComponent {
   private currencyService = inject(CurrencyFormatService);
+  private destroyRef = inject(DestroyRef);
   private destroy$ = new Subject<void>();
 
   employees$: Observable<Employee[]>;
@@ -171,6 +172,12 @@ export class PayrollComponent implements OnInit, OnDestroy {
     this.payrollRuns$ = this.store.select(selectPayrollRuns);
     this.payrollRunsLoading$ = this.store.select(selectPayrollRunsLoading);
 
+    this.currencyService.loadCurrency();
+    this.store.dispatch(loadEmployees());
+    this.store.dispatch(loadEmployeeStats());
+    this.store.dispatch(loadPayrollRuns());
+    this.store.dispatch(loadPayrollRunStats());
+
     // Keep detail modal in sync with store after state transitions
     this.store
       .select(selectCurrentPayrollRun)
@@ -186,14 +193,11 @@ export class PayrollComponent implements OnInit, OnDestroy {
           this.selectedPayrollRun = run;
         }
       });
-  }
 
-  ngOnInit(): void {
-    this.currencyService.loadCurrency();
-    this.store.dispatch(loadEmployees());
-    this.store.dispatch(loadEmployeeStats());
-    this.store.dispatch(loadPayrollRuns());
-    this.store.dispatch(loadPayrollRunStats());
+    this.destroyRef.onDestroy(() => {
+      this.destroy$.next();
+      this.destroy$.complete();
+    });
   }
 
   switchTab(tab: string): void {
@@ -238,11 +242,6 @@ export class PayrollComponent implements OnInit, OnDestroy {
     this.isPayrollRunDetailModalOpen = true;
     // Fetch full detail with payroll_items (list endpoint doesn't include items)
     this.store.dispatch(loadPayrollRun({ id: payrollRun.id }));
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
   }
 
   refreshPayrollRuns(): void {

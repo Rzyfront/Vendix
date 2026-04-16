@@ -1,5 +1,5 @@
-import { Component, EventEmitter, Input, Output, OnInit } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input, output, inject } from '@angular/core';
+import { AsyncPipe, DecimalPipe } from '@angular/common';
 import {
   FormBuilder,
   FormGroup,
@@ -17,16 +17,16 @@ import {
 @Component({
   selector: 'app-pos-payment',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule],
+  imports: [AsyncPipe, DecimalPipe, ReactiveFormsModule],
   template: `
     <div class="pos-payment-container">
       <div class="payment-header">
         <h2 class="text-2xl font-bold text-gray-900">Procesar Pago</h2>
         <p class="text-gray-600">
-          Total a pagar: \${{ totalAmount | number: '1.2-2' }}
+          Total a pagar: \${{ totalAmount() | number: '1.2-2' }}
         </p>
       </div>
-    
+
       @if (!processing) {
         <div class="payment-methods">
           <h3 class="text-lg font-semibold mb-4">Seleccionar Método de Pago</h3>
@@ -48,7 +48,7 @@ import {
           </div>
         </div>
       }
-    
+
       @if (selectedMethod && !processing) {
         <div class="payment-form">
           <form [formGroup]="paymentForm" (ngSubmit)="processPayment()">
@@ -64,13 +64,13 @@ import {
                   step="0.01"
                   min="0"
                   />
-                @if (cashReceived && cashReceived > totalAmount) {
+                @if (cashReceived && cashReceived > totalAmount()) {
                   <div
                     class="change-info"
                     >
                     <span class="change-amount"
                       >Cambio: \${{
-                      cashReceived - totalAmount | number: '1.2-2'
+                      cashReceived - totalAmount() | number: '1.2-2'
                       }}</span
                       >
                     </div>
@@ -109,7 +109,7 @@ import {
             </form>
           </div>
         }
-    
+
         @if (processing) {
           <div class="payment-processing">
             <div class="processing-content">
@@ -118,7 +118,7 @@ import {
             </div>
           </div>
         }
-    
+
         @if (awaitingConfirmation) {
           <div class="payment-awaiting">
             <div class="awaiting-content">
@@ -136,7 +136,7 @@ import {
             </div>
           </div>
         }
-    
+
         @if (paymentResult) {
           <div class="payment-result">
             <div
@@ -420,11 +420,11 @@ import {
     `,
   ],
 })
-export class PosPaymentComponent implements OnInit {
-  @Input() totalAmount: number = 0;
-  @Input() orderId: string = '';
-  @Output() paymentComplete = new EventEmitter<PaymentResponse>();
-  @Output() paymentCancelled = new EventEmitter<void>();
+export class PosPaymentComponent {
+  readonly totalAmount = input<number>(0);
+  readonly orderId = input<string>('');
+  readonly paymentComplete = output<PaymentResponse>();
+  readonly paymentCancelled = output<void>();
 
   paymentMethods$: Observable<PaymentMethod[]>;
   selectedMethod: PaymentMethod | null = null;
@@ -434,18 +434,16 @@ export class PosPaymentComponent implements OnInit {
   awaitingConfirmation: boolean = false;
   awaitingMessage: string = '';
 
-  constructor(
-    private paymentService: PosPaymentService,
-    private fb: FormBuilder,
-  ) {
+  private paymentService = inject(PosPaymentService);
+  private fb = inject(FormBuilder);
+
+  constructor() {
     this.paymentMethods$ = this.paymentService.getPaymentMethods();
     this.paymentForm = this.fb.group({
       cashReceived: ['', [Validators.required, Validators.min(0)]],
       reference: [''],
     });
-  }
 
-  ngOnInit(): void {
     this.paymentForm.get('reference')?.valueChanges.subscribe(() => {
       this.updateReferenceValidation();
     });
@@ -461,11 +459,10 @@ export class PosPaymentComponent implements OnInit {
         .get('cashReceived')
         ?.setValidators([
           Validators.required,
-          Validators.min(this.totalAmount),
+          Validators.min(this.totalAmount()),
         ]);
       this.paymentForm.get('reference')?.clearValidators();
     } else if (method.type === 'wallet') {
-      // Wallet: no requiere cash ni referencia
       this.paymentForm.get('cashReceived')?.clearValidators();
       this.paymentForm.get('reference')?.clearValidators();
     } else {
@@ -502,8 +499,8 @@ export class PosPaymentComponent implements OnInit {
     this.processing = true;
 
     const paymentRequest: PaymentRequest = {
-      orderId: this.orderId,
-      amount: this.totalAmount,
+      orderId: this.orderId(),
+      amount: this.totalAmount(),
       paymentMethod: this.selectedMethod,
       cashReceived:
         this.selectedMethod.type === 'cash' ? this.cashReceived : undefined,
@@ -513,13 +510,11 @@ export class PosPaymentComponent implements OnInit {
     this.paymentService.processPayment(paymentRequest).subscribe({
       next: (result) => {
         if (result.nextAction?.type === 'redirect' && result.nextAction.url) {
-          // PSE / Bancolombia: abrir URL de redirección
           window.open(result.nextAction.url, '_blank');
           this.processing = false;
           this.awaitingConfirmation = true;
           this.awaitingMessage = 'Se abrió la página del banco. Completa el pago y vuelve aquí.';
         } else if (result.nextAction?.type === 'await') {
-          // Nequi: esperar confirmación del usuario en su celular
           this.processing = false;
           this.awaitingConfirmation = true;
           this.awaitingMessage = 'Esperando confirmación en la app de Nequi del cliente...';
@@ -539,11 +534,6 @@ export class PosPaymentComponent implements OnInit {
   }
 
   cancelPayment(): void {
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
     this.paymentCancelled.emit();
   }
 
@@ -562,7 +552,6 @@ export class PosPaymentComponent implements OnInit {
   }
 
   checkPaymentStatus(): void {
-    // TODO: Implementar polling con getPaymentStatus cuando el backend lo soporte
     this.awaitingConfirmation = false;
     this.paymentResult = {
       success: true,

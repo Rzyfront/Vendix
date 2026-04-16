@@ -1,5 +1,4 @@
-import { Component, EventEmitter, Input, Output, OnChanges, SimpleChanges } from '@angular/core';
-
+import { Component, inject, input, output, effect } from '@angular/core';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import {
   ModalComponent,
@@ -18,14 +17,14 @@ import { Customer, CreateCustomerRequest } from '../../models/customer.model';
     ButtonComponent,
     InputComponent,
     SelectorComponent
-],
+  ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'md'"
-      [title]="customer ? 'Editar cliente' : 'Nuevo cliente'"
+      [title]="customer() ? 'Editar cliente' : 'Nuevo cliente'"
       subtitle="Administra la información del cliente"
     >
       <form [formGroup]="form" class="space-y-4">
@@ -100,23 +99,25 @@ import { Customer, CreateCustomerRequest } from '../../models/customer.model';
         <app-button variant="ghost" (clicked)="onCancel()">Cancelar</app-button>
         <app-button
           variant="primary"
-          [disabled]="form.invalid || loading"
-          [loading]="loading"
+          [disabled]="form.invalid || loading()"
+          [loading]="loading()"
           (clicked)="onSubmit()"
         >
-          {{ customer ? 'Actualizar' : 'Crear' }}
+          {{ customer() ? 'Actualizar' : 'Crear' }}
         </app-button>
       </div>
     </app-modal>
   `
 })
-export class CustomerModalComponent implements OnChanges {
-  @Input() isOpen = false;
-  @Input() customer: Customer | null = null;
-  @Input() loading = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() closed = new EventEmitter<void>();
-  @Output() save = new EventEmitter<CreateCustomerRequest>();
+export class CustomerModalComponent {
+  private fb = inject(FormBuilder);
+
+  readonly isOpen = input(false);
+  readonly customer = input<Customer | null>(null);
+  readonly loading = input(false);
+  readonly isOpenChange = output<boolean>();
+  readonly closed = output<void>();
+  readonly save = output<CreateCustomerRequest>();
 
   form: FormGroup;
 
@@ -126,7 +127,7 @@ export class CustomerModalComponent implements OnChanges {
     { value: 'LICENSE', label: 'Driver License' }
   ];
 
-  constructor(private fb: FormBuilder) {
+  constructor() {
     this.form = this.fb.group({
       email: ['', [Validators.required, Validators.email]],
       first_name: ['', [Validators.required, Validators.minLength(2)]],
@@ -135,38 +136,35 @@ export class CustomerModalComponent implements OnChanges {
       document_type: [''],
       document_number: ['']
     });
-  }
 
-  ngOnChanges(changes: SimpleChanges): void {
-    if (changes['customer'] && this.customer) {
-      this.form.patchValue({
-        email: this.customer.email,
-        first_name: this.customer.first_name,
-        last_name: this.customer.last_name,
-        phone: this.customer.phone,
-        document_type: this.customer.document_type,
-        document_number: this.customer.document_number
-      });
-    } else if (changes['isOpen'] && this.isOpen && !this.customer) {
-      this.form.reset();
-    }
+    // Reemplaza ngOnChanges para customer y isOpen
+    effect(() => {
+      const customer = this.customer();
+      if (customer) {
+        this.form.patchValue({
+          email: customer.email,
+          first_name: customer.first_name,
+          last_name: customer.last_name,
+          phone: customer.phone,
+          document_type: customer.document_type,
+          document_number: customer.document_number
+        });
+      }
+    });
+
+    effect(() => {
+      const isOpen = this.isOpen();
+      if (isOpen && !this.customer()) {
+        this.form.reset();
+      }
+    });
   }
 
   onClose() {
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
     this.closed.emit();
   }
 
   onCancel() {
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
     this.closed.emit();
     this.isOpenChange.emit(false);
   }

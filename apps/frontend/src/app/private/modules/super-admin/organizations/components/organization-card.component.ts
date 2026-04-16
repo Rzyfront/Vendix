@@ -1,5 +1,5 @@
 import { Component, input, output } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { DatePipe } from '@angular/common';
 import { RouterModule } from '@angular/router';
 
 import { OrganizationListItem } from '../interfaces/organization.interface';
@@ -8,7 +8,7 @@ import { IconComponent } from '../../../../../shared/components/index';
 @Component({
   selector: 'app-organization-card',
   standalone: true,
-  imports: [CommonModule, RouterModule, IconComponent],
+  imports: [DatePipe, RouterModule, IconComponent],
   template: `
     <div
       class="bg-white border border-border rounded-lg p-6 hover:shadow-md transition-shadow duration-200 cursor-pointer"

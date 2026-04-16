@@ -1,13 +1,13 @@
 <app-modal
-  [(isOpen)]="isOpen"
+  [isOpen]="isOpen()"
   [title]="
     'Order Details - ' +
-    (orderDetails?.order_number || order()?.order_number || '')
+    (orderDetails()?.order_number || order()?.order_number || '')
   "
   size="lg"
 
   >
-  @if (!isLoading && orderDetails) {
+  @if (!isLoading() && orderDetails(); as od) {
     <div class="space-y-2 md:space-y-4">
       <!-- Order Header -->
       <div class="bg-surface rounded-card border border-border p-4">
@@ -15,19 +15,19 @@
           <div>
             <p class="text-sm text-text-secondary">Número de orden</p>
             <p class="font-semibold text-text-primary">
-              {{ orderDetails.order_number }}
+              {{ od.order_number }}
             </p>
           </div>
           <div>
             <p class="text-sm text-text-secondary">Fecha del pedido</p>
             <p class="font-semibold text-text-primary">
-              {{ formatDate(orderDetails.order_date) }}
+              {{ formatDate(od.order_date) }}
             </p>
           </div>
           <div>
             <p class="text-sm text-text-secondary">Importe total</p>
             <p class="font-semibold text-text-primary">
-              {{ formatCurrency(orderDetails.total_amount) }}
+              {{ formatCurrency(od.total_amount) }}
             </p>
           </div>
         </div>
@@ -48,14 +48,14 @@
             <div>
               <p class="text-sm text-text-secondary">Email</p>
               <p class="font-medium text-text-primary">
-                {{ orderDetails.customer.email }}
+                {{ od.customer.email }}
               </p>
             </div>
-            @if (orderDetails.customer.phone) {
+            @if (od.customer.phone) {
               <div>
                 <p class="text-sm text-text-secondary">Teléfono</p>
                 <p class="font-medium text-text-primary">
-                  {{ orderDetails.customer.phone }}
+                  {{ od.customer.phone }}
                 </p>
               </div>
             }
@@ -75,7 +75,7 @@
             <div>
               <p class="text-sm text-text-secondary">Tipo de orden</p>
               <p class="font-medium text-text-primary">
-                {{ orderDetails.order_type }}
+                {{ od.order_type }}
               </p>
             </div>
           </div>
@@ -94,25 +94,25 @@
               <p class="text-sm text-text-secondary">Estado actual</p>
               <span
                 class="inline-flex px-2 py-1 text-xs font-medium rounded-full"
-                [class]="getStatusColor(orderDetails.status)"
+                [class]="getStatusColor(od.status)"
                 >
-                {{ orderDetails.status }}
+                {{ od.status }}
               </span>
             </div>
             <div>
               <p class="text-sm text-text-secondary">Estado del pago</p>
               <span
                 class="inline-flex px-2 py-1 text-xs font-medium rounded-full"
-                [class]="getPaymentStatusColor(orderDetails.payment_status)"
+                [class]="getPaymentStatusColor(od.payment_status)"
                 >
-                {{ orderDetails.payment_status }}
+                {{ od.payment_status }}
               </span>
             </div>
-            @if (orderDetails.payment_method) {
+            @if (od.payment_method) {
               <div>
                 <p class="text-sm text-text-secondary">Método de pago</p>
                 <p class="font-medium text-text-primary">
-                  {{ orderDetails.payment_method }}
+                  {{ od.payment_method }}
                 </p>
               </div>
             }
@@ -125,27 +125,27 @@
             Información de seguimiento
           </h3>
           <div class="space-y-3">
-            @if (orderDetails.tracking_number) {
+            @if (od.tracking_number) {
               <div>
                 <p class="text-sm text-text-secondary">El número de rastreo</p>
                 <p class="font-medium text-text-primary">
-                  {{ orderDetails.tracking_number }}
+                  {{ od.tracking_number }}
                 </p>
               </div>
             }
-            @if (orderDetails.estimated_delivery) {
+            @if (od.estimated_delivery) {
               <div>
                 <p class="text-sm text-text-secondary">Entrega estimada</p>
                 <p class="font-medium text-text-primary">
-                  {{ formatDate(orderDetails.estimated_delivery) }}
+                  {{ formatDate(od.estimated_delivery) }}
                 </p>
               </div>
             }
-            @if (orderDetails.delivered_at) {
+            @if (od.delivered_at) {
               <div>
                 <p class="text-sm text-text-secondary">Entregado en</p>
                 <p class="font-medium text-text-primary">
-                  {{ formatDate(orderDetails.delivered_at) }}
+                  {{ formatDate(od.delivered_at) }}
                 </p>
               </div>
             }
@@ -190,7 +190,7 @@
               </tr>
             </thead>
             <tbody class="bg-surface divide-y divide-border">
-              @for (item of orderDetails.items; track item) {
+              @for (item of od.items; track item) {
                 <tr>
                   <td class="px-4 py-2 text-sm text-text-primary">
                     {{ item.product_name }}
@@ -221,10 +221,10 @@
                 <td
                   class="px-4 py-2 text-sm font-medium text-text-primary text-right"
                   >
-                  {{ formatCurrency(orderDetails.subtotal) }}
+                  {{ formatCurrency(od.subtotal) }}
                 </td>
               </tr>
-              @if (orderDetails.tax_amount > 0) {
+              @if (od.tax_amount > 0) {
                 <tr>
                   <td
                     colspan="4"
@@ -235,11 +235,11 @@
                   <td
                     class="px-4 py-2 text-sm font-medium text-text-primary text-right"
                     >
-                    {{ formatCurrency(orderDetails.tax_amount) }}
+                    {{ formatCurrency(od.tax_amount) }}
                   </td>
                 </tr>
               }
-              @if (orderDetails.shipping_amount > 0) {
+              @if (od.shipping_amount > 0) {
                 <tr>
                   <td
                     colspan="4"
@@ -250,11 +250,11 @@
                   <td
                     class="px-4 py-2 text-sm font-medium text-text-primary text-right"
                     >
-                    {{ formatCurrency(orderDetails.shipping_amount) }}
+                    {{ formatCurrency(od.shipping_amount) }}
                   </td>
                 </tr>
               }
-              @if (orderDetails.discount_amount > 0) {
+              @if (od.discount_amount > 0) {
                 <tr>
                   <td
                     colspan="4"
@@ -263,7 +263,7 @@
                     Descuento:
                   </td>
                   <td class="px-4 py-2 text-sm font-medium text-red-600 text-right">
-                    -{{ formatCurrency(orderDetails.discount_amount) }}
+                    -{{ formatCurrency(od.discount_amount) }}
                   </td>
                 </tr>
               }
@@ -277,7 +277,7 @@
                 <td
                   class="px-4 py-2 text-sm font-bold text-text-primary text-right"
                   >
-                  {{ formatCurrency(orderDetails.total_amount) }}
+                  {{ formatCurrency(od.total_amount) }}
                 </td>
               </tr>
             </tfoot>
@@ -285,7 +285,7 @@
         </div>
       </div>
       <!-- Notes -->
-      @if (orderDetails.notes) {
+      @if (od.notes) {
         <div
           class="bg-surface rounded-card border border-border p-4"
           >
@@ -293,7 +293,7 @@
             <app-icon name="file-text" [size]="16" class="mr-2"></app-icon>
             Notas del pedido
           </h3>
-          <p class="text-sm text-text-primary">{{ orderDetails.notes }}</p>
+          <p class="text-sm text-text-primary">{{ od.notes }}</p>
         </div>
       }
       <!-- Update Form -->
@@ -352,7 +352,7 @@
     }
 
     <!-- Loading State -->
-    @if (isLoading) {
+    @if (isLoading()) {
       <div class="flex items-center justify-center py-8">
         <div
           class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
@@ -368,7 +368,7 @@
           variant="outline"
           size="sm"
           (clicked)="onPrintInvoice()"
-          [disabled]="isLoading"
+          [disabled]="isLoading()"
           >
           <app-icon name="printer" [size]="16" slot="icon"></app-icon>
           Imprimir factura
@@ -377,7 +377,7 @@
           variant="outline"
           size="sm"
           (clicked)="onPrintPackingSlip()"
-          [disabled]="isLoading"
+          [disabled]="isLoading()"
           >
           <app-icon name="package" [size]="16" slot="icon"></app-icon>
           Albarán de embalaje
@@ -390,7 +390,7 @@
             variant="danger"
             size="sm"
             (clicked)="onCancelOrder()"
-            [disabled]="isLoading"
+            [disabled]="isLoading()"
             >
             <app-icon name="x-circle" [size]="16" slot="icon"></app-icon>
             Cancelar pedido
@@ -402,7 +402,7 @@
             variant="secondary"
             size="sm"
             (clicked)="onRefundOrder()"
-            [disabled]="isLoading"
+            [disabled]="isLoading()"
             >
             <app-icon name="refresh-cw" [size]="16" slot="icon"></app-icon>
             Orden de reembolso
@@ -414,7 +414,7 @@
             variant="primary"
             size="sm"
             (clicked)="openDispatchModal()"
-            [disabled]="isLoading"
+            [disabled]="isLoading()"
             >
             <app-icon name="truck" [size]="16" slot="icon"></app-icon>
             Despachar Orden
@@ -425,10 +425,10 @@
           variant="primary"
           size="sm"
           (clicked)="onUpdateOrder()"
-          [disabled]="isLoading || isUpdating || updateForm.invalid"
+          [disabled]="isLoading() || isUpdating() || updateForm.invalid"
           >
           <app-icon name="save" [size]="16" slot="icon"></app-icon>
-          {{ isUpdating ? "Updating..." : "Update Order" }}
+          {{ isUpdating() ? "Updating..." : "Update Order" }}
         </app-button>
       </div>
     </div>
@@ -442,7 +442,7 @@
     >
     <div class="space-y-4">
       <p class="text-sm text-text-secondary">
-        Confirma el despacho de la orden <strong>{{ orderDetails?.order_number }}</strong>.
+        Confirma el despacho de la orden <strong>{{ orderDetails()?.order_number }}</strong>.
         Puedes agregar información de seguimiento opcional.
       </p>
 
@@ -482,7 +482,7 @@
         variant="outline"
         size="sm"
         (clicked)="closeDispatchModal()"
-        [disabled]="isDispatching"
+        [disabled]="isDispatching()"
         >
         Cancelar
       </app-button>
@@ -490,10 +490,10 @@
         variant="primary"
         size="sm"
         (clicked)="onDispatchOrder()"
-        [disabled]="isDispatching"
+        [disabled]="isDispatching()"
         >
         <app-icon name="truck" [size]="16" slot="icon"></app-icon>
-        {{ isDispatching ? 'Despachando...' : 'Confirmar Despacho' }}
+        {{ isDispatching() ? 'Despachando...' : 'Confirmar Despacho' }}
       </app-button>
     </div>
   </app-modal>

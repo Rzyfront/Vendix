@@ -1,21 +1,24 @@
 import {
   Component,
-  Input,
   inject,
   OnInit,
   OnDestroy,
   OnChanges,
   SimpleChanges,
-  ChangeDetectorRef,
   input,
-  output
+  output,
+  model,
+  signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule } from '@angular/forms';
 import { Subject, takeUntil } from 'rxjs';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 
-import { StoreSettings, ApiResponse } from '../../../../../../core/models/store-settings.interface';
+import {
+  StoreSettings,
+  ApiResponse,
+} from '../../../../../../core/models/store-settings.interface';
 
 // Interface for settings saved event
 export interface SettingsSavedEvent {
@@ -65,210 +68,278 @@ import { OrganizationStoreSettingsService } from '../../services/organization-st
       (cancel)="onCancel()"
       [size]="'xl'"
       title="Configuración de Tienda"
-      [subtitle]="storeName"
-      >
+      [subtitle]="storeName()"
+    >
       <!-- Status Header -->
-      <div class="flex items-center justify-between mb-6 pb-4 border-b border-border">
+      <div
+        class="flex items-center justify-between mb-6 pb-4 border-b border-border"
+      >
         <div class="flex items-center gap-3">
-          @if (hasUnsavedChanges) {
-            <span class="px-3 py-1.5 bg-orange-100 text-orange-700 text-xs font-bold uppercase rounded-lg animate-pulse flex items-center gap-2">
+          @if (hasUnsavedChanges()) {
+            <span
+              class="px-3 py-1.5 bg-orange-100 text-orange-700 text-xs font-bold uppercase rounded-lg animate-pulse flex items-center gap-2"
+            >
               <app-icon name="alert-circle" size="14"></app-icon>
               Pendiente de Guardar
             </span>
           } @else {
-            <span class="px-3 py-1.5 bg-green-100 text-green-700 text-xs font-bold uppercase rounded-lg flex items-center gap-2">
+            <span
+              class="px-3 py-1.5 bg-green-100 text-green-700 text-xs font-bold uppercase rounded-lg flex items-center gap-2"
+            >
               <app-icon name="check-circle" size="14"></app-icon>
               Sincronizado
             </span>
           }
-          @if (lastSaved) {
+          @if (lastSaved()) {
             <span class="text-xs text-text-secondary italic">
-              Último guardado: {{ lastSaved | date: 'HH:mm:ss' }}
+              Último guardado: {{ lastSaved() | date: 'HH:mm:ss' }}
             </span>
           }
         </div>
-    
+
         <div class="flex items-center gap-2">
           <app-button
             variant="outline-danger"
             size="sm"
             (clicked)="resetToDefaults()"
-            [disabled]="isLoading || isSaving"
-            >
+            [disabled]="isLoading() || isSaving()"
+          >
             <app-icon name="rotate-ccw" size="16" class="mr-2"></app-icon>
             Restablecer
           </app-button>
         </div>
       </div>
-    
-      @if (isLoading) {
+
+      @if (isLoading()) {
         <!-- Loading State -->
         <div class="text-center py-16">
-          <div class="inline-block animate-spin rounded-full h-12 w-12 border-4 border-primary/20 border-t-primary mb-4"></div>
-          <p class="text-text-secondary font-medium">Cargando configuración...</p>
+          <div
+            class="inline-block animate-spin rounded-full h-12 w-12 border-4 border-primary/20 border-t-primary mb-4"
+          ></div>
+          <p class="text-text-secondary font-medium">
+            Cargando configuración...
+          </p>
         </div>
       } @else {
         <!-- Tabs Navigation -->
         <div class="mb-6">
-          <nav class="flex gap-2 bg-surface rounded-xl p-1.5 border border-border" role="tablist">
+          <nav
+            class="flex gap-2 bg-surface rounded-xl p-1.5 border border-border"
+            role="tablist"
+          >
             @for (tab of tabs; track tab) {
               <button
                 (click)="switchTab(tab.id)"
-              [class]="
-                activeTabId === tab.id
-                  ? 'bg-[var(--color-primary)] text-white shadow-sm'
-                  : 'text-text-secondary hover:text-[var(--color-primary)] hover:bg-[var(--color-primary)]/10'
-              "
+                [class]="
+                  activeTabId() === tab.id
+                    ? 'bg-[var(--color-primary)] text-white shadow-sm'
+                    : 'text-text-secondary hover:text-[var(--color-primary)] hover:bg-[var(--color-primary)]/10'
+                "
                 class="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 min-w-[120px] justify-center"
-                [attr.aria-selected]="activeTabId === tab.id"
+                [attr.aria-selected]="activeTabId() === tab.id"
                 role="tab"
-                >
-                <app-icon [name]="tab.icon" color="currentColor" size="16"></app-icon>
+              >
+                <app-icon
+                  [name]="tab.icon"
+                  color="currentColor"
+                  size="16"
+                ></app-icon>
                 <span>{{ tab.label }}</span>
               </button>
             }
           </nav>
         </div>
-    
+
         <!-- Tab Content -->
         <div class="min-h-[500px] max-h-[75vh] overflow-y-auto pr-2">
-          @switch (activeTabId) {
+          @switch (activeTabId()) {
             @case ('general') {
               <div class="animate-fade-in">
                 <div class="bg-surface rounded-xl border border-border p-6">
-                  <h3 class="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
-                    <div class="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center">
-                      <app-icon name="settings" size="18" class="text-blue-600"></app-icon>
+                  <h3
+                    class="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2"
+                  >
+                    <div
+                      class="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center"
+                    >
+                      <app-icon
+                        name="settings"
+                        size="18"
+                        class="text-blue-600"
+                      ></app-icon>
                     </div>
                     Configuración General
                   </h3>
                   <app-general-settings-form
-                    [settings]="settings.general"
+                    [settings]="settings().general"
                     (settingsChange)="onSectionChange('general', $event)"
-                    />
+                  />
                 </div>
               </div>
             }
-    
+
             @case ('branding') {
               <div class="animate-fade-in">
                 <div class="bg-surface rounded-xl border border-border p-6">
-                  <h3 class="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
-                    <div class="w-8 h-8 rounded-lg bg-purple-50 flex items-center justify-center">
-                      <app-icon name="palette" size="18" class="text-purple-600"></app-icon>
+                  <h3
+                    class="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2"
+                  >
+                    <div
+                      class="w-8 h-8 rounded-lg bg-purple-50 flex items-center justify-center"
+                    >
+                      <app-icon
+                        name="palette"
+                        size="18"
+                        class="text-purple-600"
+                      ></app-icon>
                     </div>
                     Identidad y Marca
                   </h3>
                   <app-app-settings-form
-                    [settings]="settings.app"
+                    [settings]="settings().app"
                     (settingsChange)="onSectionChange('app', $event)"
-                    />
+                  />
                 </div>
               </div>
             }
-    
+
             @case ('inventory') {
               <div class="animate-fade-in">
                 <div class="bg-surface rounded-xl border border-border p-6">
-                  <h3 class="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
-                    <div class="w-8 h-8 rounded-lg bg-green-50 flex items-center justify-center">
-                      <app-icon name="package" size="18" class="text-green-600"></app-icon>
+                  <h3
+                    class="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2"
+                  >
+                    <div
+                      class="w-8 h-8 rounded-lg bg-green-50 flex items-center justify-center"
+                    >
+                      <app-icon
+                        name="package"
+                        size="18"
+                        class="text-green-600"
+                      ></app-icon>
                     </div>
                     Gestión de Inventario
                   </h3>
                   <app-inventory-settings-form
-                    [settings]="settings.inventory"
+                    [settings]="settings().inventory"
                     (settingsChange)="onSectionChange('inventory', $event)"
-                    />
+                  />
                 </div>
               </div>
             }
-    
+
             @case ('notifications') {
               <div class="animate-fade-in">
                 <div class="bg-surface rounded-xl border border-border p-6">
-                  <h3 class="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
-                    <div class="w-8 h-8 rounded-lg bg-yellow-50 flex items-center justify-center">
-                      <app-icon name="bell" size="18" class="text-yellow-600"></app-icon>
+                  <h3
+                    class="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2"
+                  >
+                    <div
+                      class="w-8 h-8 rounded-lg bg-yellow-50 flex items-center justify-center"
+                    >
+                      <app-icon
+                        name="bell"
+                        size="18"
+                        class="text-yellow-600"
+                      ></app-icon>
                     </div>
                     Configuración de Notificaciones
                   </h3>
                   <app-notifications-settings-form
-                    [settings]="settings.notifications"
+                    [settings]="settings().notifications"
                     (settingsChange)="onSectionChange('notifications', $event)"
-                    />
+                  />
                 </div>
               </div>
             }
-    
+
             @case ('pos') {
               <div class="animate-fade-in">
                 <div class="bg-surface rounded-xl border border-border p-6">
-                  <h3 class="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
-                    <div class="w-8 h-8 rounded-lg bg-orange-50 flex items-center justify-center">
-                      <app-icon name="monitor" size="18" class="text-orange-600"></app-icon>
+                  <h3
+                    class="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2"
+                  >
+                    <div
+                      class="w-8 h-8 rounded-lg bg-orange-50 flex items-center justify-center"
+                    >
+                      <app-icon
+                        name="monitor"
+                        size="18"
+                        class="text-orange-600"
+                      ></app-icon>
                     </div>
                     Punto de Venta (POS)
                   </h3>
                   <app-pos-settings-form
-                    [settings]="settings.pos"
+                    [settings]="settings().pos"
                     (settingsChange)="onSectionChange('pos', $event)"
-                    />
+                  />
                 </div>
               </div>
             }
-    
+
             @case ('receipts') {
               <div class="animate-fade-in">
                 <div class="bg-surface rounded-xl border border-border p-6">
-                  <h3 class="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2">
-                    <div class="w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center">
-                      <app-icon name="file-text" size="18" class="text-indigo-600"></app-icon>
+                  <h3
+                    class="text-lg font-semibold text-text-primary mb-4 flex items-center gap-2"
+                  >
+                    <div
+                      class="w-8 h-8 rounded-lg bg-indigo-50 flex items-center justify-center"
+                    >
+                      <app-icon
+                        name="file-text"
+                        size="18"
+                        class="text-indigo-600"
+                      ></app-icon>
                     </div>
                     Recibos y Facturación
                   </h3>
                   <app-receipts-settings-form
-                    [settings]="settings.receipts"
+                    [settings]="settings().receipts"
                     (settingsChange)="onSectionChange('receipts', $event)"
-                    />
+                  />
                 </div>
               </div>
             }
           }
         </div>
       }
-    
+
       <!-- Footer with actions -->
-      <div slot="footer" class="flex justify-between items-center pt-4 border-t border-border">
+      <div
+        slot="footer"
+        class="flex justify-between items-center pt-4 border-t border-border"
+      >
         <div class="text-sm text-text-secondary">
-          @if (hasUnsavedChanges) {
+          @if (hasUnsavedChanges()) {
             <span>Tienes cambios sin guardar</span>
           } @else {
             <span>Todos los cambios están guardados</span>
           }
         </div>
-    
+
         <div class="flex justify-end gap-3">
           <app-button
             (clicked)="onCancel()"
             variant="outline"
-            [disabled]="isSaving"
-            >
+            [disabled]="isSaving()"
+          >
             Cancelar
           </app-button>
           <app-button
             (clicked)="saveAllSettings()"
-            [disabled]="!hasUnsavedChanges || isLoading"
-            [loading]="isSaving"
+            [disabled]="!hasUnsavedChanges() || isLoading()"
+            [loading]="isSaving()"
             variant="primary"
-            >
+          >
             <app-icon name="save" size="16" class="mr-2"></app-icon>
             Guardar Cambios
           </app-button>
         </div>
       </div>
     </app-modal>
-    `,
+  `,
   styles: [
     `
       :host {
@@ -315,28 +386,29 @@ import { OrganizationStoreSettingsService } from '../../services/organization-st
     `,
   ],
 })
-export class StoreConfigurationModalComponent implements OnInit, OnDestroy, OnChanges {
+export class StoreConfigurationModalComponent
+  implements OnInit, OnDestroy, OnChanges
+{
   private currencyFormatService = inject(CurrencyFormatService);
   readonly isOpen = input<boolean>(false);
   readonly storeId = input<number | null>(null);
-  @Input() storeName: string = '';
+  readonly storeName = model<string>('');
   readonly isOpenChange = output<boolean>();
   readonly settingsSaved = output<SettingsSavedEvent>();
 
   private settings_service = inject(OrganizationStoreSettingsService);
   private toast_service = inject(ToastService);
   private dialog_service = inject(DialogService);
-  private cdr = inject(ChangeDetectorRef);
 
   // Estado principal
-  settings: StoreSettings = {} as StoreSettings;
-  isLoading = false;
-  isSaving = false;
-  hasUnsavedChanges = false;
-  lastSaved: Date | null = null;
+  readonly settings = signal<StoreSettings>({} as StoreSettings);
+  readonly isLoading = signal(false);
+  readonly isSaving = signal(false);
+  readonly hasUnsavedChanges = signal(false);
+  readonly lastSaved = signal<Date | null>(null);
 
   // Tabs del modal
-  activeTabId: string = 'general';
+  readonly activeTabId = signal<string>('general');
   tabs = [
     { id: 'general', label: 'General', icon: 'settings' },
     { id: 'branding', label: 'Identidad', icon: 'palette' },
@@ -433,77 +505,70 @@ export class StoreConfigurationModalComponent implements OnInit, OnDestroy, OnCh
     const storeId = this.storeId();
     if (!storeId) return;
 
-    this.isLoading = true;
-    this.settings_service.getStoreSettings(storeId).pipe(
-      takeUntil(this.destroy$$)
-    ).subscribe({
-      next: (response: ApiResponse<StoreSettings>) => {
-        if (response.data) {
-          this.settings = { ...this.defaultSettings, ...response.data };
-        } else {
-          this.settings = { ...this.defaultSettings };
-        }
-        this.isLoading = false;
-        this.hasUnsavedChanges = false;
-      },
-      error: (error: any) => {
-        console.error('Error loading settings:', error);
-        this.toast_service.error('Error cargando configuración');
-        this.settings = { ...this.defaultSettings };
-        this.isLoading = false;
-      },
-    });
+    this.isLoading.set(true);
+    this.settings_service
+      .getStoreSettings(storeId)
+      .pipe(takeUntil(this.destroy$$))
+      .subscribe({
+        next: (response: ApiResponse<StoreSettings>) => {
+          if (response.data) {
+            this.settings.set({ ...this.defaultSettings, ...response.data });
+          } else {
+            this.settings.set({ ...this.defaultSettings });
+          }
+          this.isLoading.set(false);
+          this.hasUnsavedChanges.set(false);
+        },
+        error: (error: any) => {
+          console.error('Error loading settings:', error);
+          this.toast_service.error('Error cargando configuración');
+          this.settings.set({ ...this.defaultSettings });
+          this.isLoading.set(false);
+        },
+      });
   }
 
   onSectionChange(section: keyof StoreSettings, newSettings: any): void {
-    // Create a new object reference for the settings to ensure Angular detects the change
-    // This is critical for proper change detection when switching between tabs
-    this.settings = {
-      ...this.settings,
-      [section]: { ...newSettings }, // Create new reference for nested object
-    };
-    this.hasUnsavedChanges = true;
-    this.lastSaved = null;
-
-    // Manually trigger change detection to ensure child components receive updated settings
-    this.cdr.markForCheck();
+    this.settings.update((s) => ({
+      ...s,
+      [section]: { ...newSettings },
+    }));
+    this.hasUnsavedChanges.set(true);
+    this.lastSaved.set(null);
   }
 
   switchTab(tabId: string): void {
-    this.activeTabId = tabId;
+    this.activeTabId.set(tabId);
   }
 
   async saveAllSettings(): Promise<void> {
     const storeId = this.storeId();
     if (!storeId) return;
 
-    this.isSaving = true;
-    this.settings_service.saveSettingsNow(storeId, this.settings).pipe(
-      takeUntil(this.destroy$$)
-    ).subscribe({
-      next: (response: ApiResponse<StoreSettings>) => {
-        // Merge the response with current local settings to preserve all changes
-        // This ensures we don't lose any local modifications
-        if (response.data) {
-          this.settings = this.mergeSettings(this.settings, response.data);
-          // Update the store name from settings.app.name
-          if (response.data.app?.name) {
-            this.storeName = response.data.app.name;
+    this.isSaving.set(true);
+    this.settings_service
+      .saveSettingsNow(storeId, this.settings())
+      .pipe(takeUntil(this.destroy$$))
+      .subscribe({
+        next: (response: ApiResponse<StoreSettings>) => {
+          if (response.data) {
+            this.settings.set(this.mergeSettings(this.settings(), response.data));
+            if (response.data.app?.name) {
+              this.storeName.set(response.data.app.name);
+            }
           }
-        }
-        this.isSaving = false;
-        this.hasUnsavedChanges = false;
-        this.lastSaved = new Date();
-        this.toast_service.success('Configuración guardada correctamente');
-        // Emit the updated store name so the parent can update its list
-        this.settingsSaved.emit({ storeName: this.storeName });
-      },
-      error: (error: any) => {
-        console.error('Error saving settings:', error);
-        this.toast_service.error('Error guardando configuración');
-        this.isSaving = false;
-      },
-    });
+          this.isSaving.set(false);
+          this.hasUnsavedChanges.set(false);
+          this.lastSaved.set(new Date());
+          this.toast_service.success('Configuración guardada correctamente');
+          this.settingsSaved.emit({ storeName: this.storeName() });
+        },
+        error: (error: any) => {
+          console.error('Error saving settings:', error);
+          this.toast_service.error('Error guardando configuración');
+          this.isSaving.set(false);
+        },
+      });
   }
 
   /**
@@ -525,7 +590,10 @@ export class StoreConfigurationModalComponent implements OnInit, OnDestroy, OnCh
       merged.inventory = { ...server.inventory, ...local.inventory };
     }
     if (server.notifications) {
-      merged.notifications = { ...server.notifications, ...local.notifications };
+      merged.notifications = {
+        ...server.notifications,
+        ...local.notifications,
+      };
     }
     if (server.pos) {
       merged.pos = { ...server.pos, ...local.pos };
@@ -550,7 +618,8 @@ export class StoreConfigurationModalComponent implements OnInit, OnDestroy, OnCh
     const confirmed = await this.dialog_service.confirm(
       {
         title: 'Restablecer Configuración',
-        message: '¿Estás seguro de restablecer todas las configuraciones a valores por defecto? Esta acción no se puede deshacer.',
+        message:
+          '¿Estás seguro de restablecer todas las configuraciones a valores por defecto? Esta acción no se puede deshacer.',
         confirmText: 'Restablecer',
         cancelText: 'Cancelar',
         confirmVariant: 'danger',
@@ -559,30 +628,31 @@ export class StoreConfigurationModalComponent implements OnInit, OnDestroy, OnCh
     );
 
     if (confirmed) {
-      this.isLoading = true;
-      this.settings_service.resetToDefault(storeId).pipe(
-        takeUntil(this.destroy$$)
-      ).subscribe({
-        next: (response: ApiResponse<StoreSettings>) => {
-          if (response.data) {
-            // For reset, we replace entirely since user wants defaults
-            this.settings = response.data;
-            // Update the store name from settings.app.name
-            if (response.data.app?.name) {
-              this.storeName = response.data.app.name;
+      this.isLoading.set(true);
+      this.settings_service
+        .resetToDefault(storeId)
+        .pipe(takeUntil(this.destroy$$))
+        .subscribe({
+          next: (response: ApiResponse<StoreSettings>) => {
+            if (response.data) {
+              this.settings.set(response.data);
+              if (response.data.app?.name) {
+                this.storeName.set(response.data.app.name);
+              }
             }
-          }
-          this.isLoading = false;
-          this.hasUnsavedChanges = false;
-          this.lastSaved = new Date();
-          this.toast_service.success('Configuración restablecida a valores por defecto');
-        },
-        error: (error: any) => {
-          console.error('Error resetting settings:', error);
-          this.toast_service.error('Error restableciendo configuración');
-          this.isLoading = false;
-        },
-      });
+            this.isLoading.set(false);
+            this.hasUnsavedChanges.set(false);
+            this.lastSaved.set(new Date());
+            this.toast_service.success(
+              'Configuración restablecida a valores por defecto',
+            );
+          },
+          error: (error: any) => {
+            console.error('Error resetting settings:', error);
+            this.toast_service.error('Error restableciendo configuración');
+            this.isLoading.set(false);
+          },
+        });
     }
   }
 
@@ -594,21 +664,22 @@ export class StoreConfigurationModalComponent implements OnInit, OnDestroy, OnCh
     }
 
     // If closing and no unsaved changes, allow it
-    if (!isOpen && !this.hasUnsavedChanges) {
+    if (!isOpen && !this.hasUnsavedChanges()) {
       this.isOpenChange.emit(isOpen);
       // Reset state when closing
-      this.activeTabId = 'general';
-      this.hasUnsavedChanges = false;
-      this.lastSaved = null;
+      this.activeTabId.set('general');
+      this.hasUnsavedChanges.set(false);
+      this.lastSaved.set(null);
       return;
     }
 
     // If closing with unsaved changes, confirm first
-    if (!isOpen && this.hasUnsavedChanges) {
+    if (!isOpen && this.hasUnsavedChanges()) {
       const confirmed = await this.dialog_service.confirm(
         {
           title: 'Cambios Sin Guardar',
-          message: 'Tienes cambios sin guardar. ¿Estás seguro de que deseas cerrar sin guardar?',
+          message:
+            'Tienes cambios sin guardar. ¿Estás seguro de que deseas cerrar sin guardar?',
           confirmText: 'Cerrar sin guardar',
           cancelText: 'Seguir editando',
           confirmVariant: 'danger',
@@ -619,9 +690,9 @@ export class StoreConfigurationModalComponent implements OnInit, OnDestroy, OnCh
       if (confirmed) {
         // User confirmed to close without saving
         this.isOpenChange.emit(false);
-        this.activeTabId = 'general';
-        this.hasUnsavedChanges = false;
-        this.lastSaved = null;
+        this.activeTabId.set('general');
+        this.hasUnsavedChanges.set(false);
+        this.lastSaved.set(null);
       }
       // If not confirmed, do nothing - modal stays open
     }
@@ -629,11 +700,12 @@ export class StoreConfigurationModalComponent implements OnInit, OnDestroy, OnCh
 
   async onCancel(): Promise<void> {
     // Check for unsaved changes before closing
-    if (this.hasUnsavedChanges) {
+    if (this.hasUnsavedChanges()) {
       const confirmed = await this.dialog_service.confirm(
         {
           title: 'Cambios Sin Guardar',
-          message: 'Tienes cambios sin guardar. ¿Estás seguro de que deseas cerrar sin guardar?',
+          message:
+            'Tienes cambios sin guardar. ¿Estás seguro de que deseas cerrar sin guardar?',
           confirmText: 'Cerrar sin guardar',
           cancelText: 'Seguir editando',
           confirmVariant: 'danger',
@@ -647,9 +719,9 @@ export class StoreConfigurationModalComponent implements OnInit, OnDestroy, OnCh
     }
 
     this.isOpenChange.emit(false);
-    this.activeTabId = 'general';
-    this.hasUnsavedChanges = false;
-    this.lastSaved = null;
+    this.activeTabId.set('general');
+    this.hasUnsavedChanges.set(false);
+    this.lastSaved.set(null);
   }
 
   ngOnDestroy(): void {

@@ -1,4 +1,4 @@
-<div class="table-container" [class]="getTableClasses()">
+<div class="table-container" [class]="tableClasses()">
   <!-- Loading overlay -->
   @if (loading()) {
     <div class="loading-overlay">
@@ -18,10 +18,10 @@
   <table class="table-element">
     <!-- Header -->
     @if (showHeader()) {
-      <thead [class]="getHeaderClasses()">
+      <thead [class]="headerClasses()">
         <tr>
           <!-- Column headers -->
-          @for (column of columns(); track column) {
+          @for (column of columns(); track column.key) {
             <th [class]="getCellClasses(column)" (click)="onSort(column)"
               [class.sortable-header]="sortable() && column.sortable">
               <div class="header-content" [class.header-align-right]="column.align === 'right'"
@@ -30,8 +30,9 @@
               </div>
             </th>
           }
+
           <!-- Actions header -->
-          @if (actions || actionsTemplate) {
+          @if (actions() || actionsTemplate) {
             <th class="actions-header">
               <span>Acciones</span>
             </th>
@@ -43,27 +44,27 @@
     <!-- Body -->
     <tbody>
       <!-- Data rows -->
-      @if (data.length > 0) {
-        @for (item of data; track item; let i = $index) {
+      @if (data().length > 0) {
+        @for (item of data(); track $index; let i = $index) {
           <tr [class]="getRowClasses(i)" (click)="onRowClick(item)"
-            [class.clickable-row]="clickableRows()">
+            [class.clickable-row]="true">
             <!-- Data cells -->
-            @for (column of columns(); track column) {
+            @for (column of columns(); track column.key) {
               <td [class]="getCellClasses(column)">
                 <!-- Badge template -->
                 @if (column.badge) {
-              <span class="status-badge" [ngClass]="
-                  getBadgeClasses(column, getNestedValue(item, column.key))
-                " [style.background-color]="
-                  getBadgeBackgroundColor(
-                    column,
-                    getNestedValue(item, column.key)
-                  )
-                " [style.color]="
-                  getBadgeTextColor(column, getNestedValue(item, column.key))
-                " [style.border-color]="
-                  getBadgeBorderColor(column, getNestedValue(item, column.key))
-                ">
+                  <span class="status-badge" [ngClass]="
+                      getBadgeClasses(column, getNestedValue(item, column.key))
+                    " [style.background-color]="
+                      getBadgeBackgroundColor(
+                        column,
+                        getNestedValue(item, column.key)
+                      )
+                    " [style.color]="
+                      getBadgeTextColor(column, getNestedValue(item, column.key))
+                    " [style.border-color]="
+                      getBadgeBorderColor(column, getNestedValue(item, column.key))
+                    ">
                     {{
                     column.transform
                     ? column.transform(getNestedValue(item, column.key), item)
@@ -71,11 +72,13 @@
                     }}
                   </span>
                 }
+
                 <!-- Custom template if provided (only when not a badge) -->
                 @if (!column.badge && column.template) {
                   <ng-container [ngTemplateOutlet]="column.template"
-                  [ngTemplateOutletContext]="{ $implicit: item, column: column }"></ng-container>
+                    [ngTemplateOutletContext]="{ $implicit: item, column: column }"></ng-container>
                 }
+
                 <!-- Image content -->
                 @if (column.type === 'image' && !column.badge && !column.template) {
                   <div class="cell-image-container">
@@ -90,13 +93,15 @@
                     </div>
                   </div>
                 }
+
                 <!-- Default content (only when not a badge, not an image, and no custom template) -->
                 @if (!column.badge && !column.template && column.type !== 'image') {
                   <span class="cell-content" [ngClass]="column.cellClass ? column.cellClass(getNestedValue(item, column.key), item) : ''" [ngStyle]="column.cellStyle ? column.cellStyle(getNestedValue(item, column.key), item) : {}">
                     @if (
                       getNestedValue(item, column.key) !== null &&
                       getNestedValue(item, column.key) !== undefined &&
-                      getNestedValue(item, column.key) !== '') {
+                      getNestedValue(item, column.key) !== ''
+                    ) {
                       {{
                       column.transform
                       ? column.transform(getNestedValue(item, column.key), item)
@@ -105,44 +110,44 @@
                     } @else {
                       <span class="cell-content-empty">{{
                         column.defaultValue || "No data"
-                      }}</span>
+                        }}</span>
                     }
                   </span>
                 }
               </td>
             }
+
             <!-- Actions cell -->
-            @if (actions || actionsTemplate) {
+            @if (actions() || actionsTemplate) {
               <td class="actions-cell">
                 <!-- Custom actions template -->
                 @if (actionsTemplate) {
                   <ng-container [ngTemplateOutlet]="actionsTemplate"
-                  [ngTemplateOutletContext]="{ $implicit: item }"></ng-container>
+                    [ngTemplateOutletContext]="{ $implicit: item }"></ng-container>
                 } @else {
+                  <!-- Default actions -->
                   <div class="table-actions">
-                    @for (action of actions; track action) {
-                      <!-- Debug: {{ action.icon ? 'Icon: ' + action.icon : 'No icon' }} -->
+                    @for (action of actions()!; track $index) {
                       @if (isActionVisible(action, item)) {
                         <button [class]="getActionClasses(action, item)"
-                    [disabled]="isActionDisabled(action, item)" (click)="
-                      executeAction(action, item); $event.stopPropagation()
-                    " [attr.title]="getActionTooltip(action, item)">
+                          [disabled]="isActionDisabled(action, item)" (click)="
+                            executeAction(action, item); $event.stopPropagation()
+                          " [attr.title]="getActionTooltip(action, item)">
                           <!-- Icon if provided -->
                           @if (getActionIcon(action, item)) {
                             <app-icon [name]="getActionIcon(action, item)"
-                            [size]="12"></app-icon>
+                              [size]="12"></app-icon>
                           }
+
                           <!-- Label (only show if no icon or on larger sizes) -->
                           @if (!getActionIcon(action, item) || size() === 'lg') {
-                            <span>{{ getActionLabel(action, item)
-                            }}</span>
+                            <span>{{ getActionLabel(action, item) }}</span>
                           }
                         </button>
                       }
                     }
                   </div>
                 }
-                <!-- Default actions -->
               </td>
             }
           </tr>
@@ -150,9 +155,9 @@
       }
 
       <!-- Empty state -->
-      @if (!loading() && data.length === 0) {
+      @if (!loading() && data().length === 0) {
         <tr>
-          <td [attr.colspan]="columns().length + (actions || actionsTemplate ? 1 : 0)" class="empty-cell">
+          <td [attr.colspan]="columns().length + (actions() || actionsTemplate ? 1 : 0)" class="empty-cell">
             <div class="empty-state">
               <svg class="empty-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"

@@ -1,5 +1,5 @@
-import { Component, OnInit, inject, signal, computed } from '@angular/core';
-import { CommonModule, CurrencyPipe, DatePipe } from '@angular/common';
+import { Component, inject, signal, computed } from '@angular/core';
+import { CurrencyPipe, DatePipe } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
 import {
   ButtonComponent,
@@ -25,7 +25,6 @@ type AccountingFilter = 'all' | 'unmatched' | 'matched';
   selector: 'vendix-reconciliation-workspace',
   standalone: true,
   imports: [
-    CommonModule,
     ButtonComponent,
     IconComponent,
     ScrollableTabsComponent,
@@ -279,7 +278,7 @@ type AccountingFilter = 'all' | 'unmatched' | 'matched';
     </div>
   `,
 })
-export class ReconciliationWorkspaceComponent implements OnInit {
+export class ReconciliationWorkspaceComponent {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private reconciliationService = inject(BankReconciliationService);
@@ -339,7 +338,7 @@ export class ReconciliationWorkspaceComponent implements OnInit {
     return all;
   });
 
-  ngOnInit(): void {
+  constructor() {
     const id = Number(this.route.snapshot.paramMap.get('id'));
     if (id) {
       this.loadReconciliation(id);

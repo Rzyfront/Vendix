@@ -1,4 +1,4 @@
-import { Component, inject, OnInit } from '@angular/core';
+import { Component, inject, OnInit, signal, computed } from '@angular/core';
 
 import {
   ReactiveFormsModule,
@@ -137,7 +137,7 @@ interface RegistrationError {
             ></app-input>
 
             <!-- Error Display -->
-            @if (hasError) {
+            @if (hasError()) {
               <div
                 class="rounded-md bg-[rgba(239,68,68,0.1)] p-3 sm:p-4 border border-[rgba(239,68,68,0.2)] mt-3 sm:mt-4"
               >
@@ -159,7 +159,7 @@ interface RegistrationError {
                     <h3
                       class="text-xs sm:text-sm font-medium text-[var(--color-destructive)]"
                     >
-                      {{ errorMessage }}
+                      {{ errorMessage() }}
                     </h3>
                   </div>
                 </div>
@@ -172,14 +172,14 @@ interface RegistrationError {
                 variant="primary"
                 size="md"
                 [disabled]="registerForm.invalid"
-                [loading]="isLoading"
+                [loading]="isLoading()"
                 [fullWidth]="true"
                 [showTextWhileLoading]="true"
               >
-                @if (!isLoading) {
+                @if (!isLoading()) {
                   <span>Crear cuenta</span>
                 }
-                @if (isLoading) {
+                @if (isLoading()) {
                   <span>Creando...</span>
                 }
               </app-button>
@@ -238,11 +238,11 @@ export class RegisterOwnerComponent implements OnInit {
   private configFacade = inject(ConfigFacade);
   private store = inject(Store);
 
-  registrationState: RegistrationState = 'idle';
-  registrationError: RegistrationError | null = null;
+  readonly registrationState = signal<RegistrationState>('idle');
+  readonly registrationError = signal<RegistrationError | null>(null);
   logoUrl: string = '';
 
-  isLoading = false;
+  readonly isLoading = signal(false);
 
   registerForm: FormGroup = this.fb.group({
     organization_name: ['', [Validators.required]],
@@ -284,7 +284,7 @@ export class RegisterOwnerComponent implements OnInit {
 
   onSubmit() {
     if (this.registerForm.valid) {
-      this.isLoading = true;
+      this.isLoading.set(true);
       this.clearError();
 
       this.authService.registerOwner(this.registerForm.value).subscribe({
@@ -314,7 +314,7 @@ export class RegisterOwnerComponent implements OnInit {
               }),
             );
 
-            this.registrationState = 'success';
+            this.registrationState.set('success');
           } else {
             // Manejar error (mostrar mensaje de error)
             if (result.message) {
@@ -329,7 +329,7 @@ export class RegisterOwnerComponent implements OnInit {
           this.handleRegistrationError(errorMessage);
         },
         complete: () => {
-          this.isLoading = false;
+          this.isLoading.set(false);
         },
       });
     } else {
@@ -346,7 +346,7 @@ export class RegisterOwnerComponent implements OnInit {
   }
 
   private handleRegistrationError(error: string): void {
-    this.registrationState = 'error';
+    this.registrationState.set('error');
     this.setRegistrationError({
       type: 'error',
       message: error,
@@ -354,8 +354,8 @@ export class RegisterOwnerComponent implements OnInit {
   }
 
   private setRegistrationError(error: RegistrationError): void {
-    this.registrationState = error.type;
-    this.registrationError = error;
+    this.registrationState.set(error.type);
+    this.registrationError.set(error);
 
     // Mostrar mensaje en toast
     const toastText = error.message;
@@ -369,16 +369,11 @@ export class RegisterOwnerComponent implements OnInit {
   }
 
   private clearError(): void {
-    this.registrationState = 'idle';
-    this.registrationError = null;
+    this.registrationState.set('idle');
+    this.registrationError.set(null);
   }
 
   // Computed properties for template
-  get hasError(): boolean {
-    return this.registrationState === 'error';
-  }
-
-  get errorMessage(): string {
-    return this.registrationError?.message || '';
-  }
+  readonly hasError = computed(() => this.registrationState() === 'error');
+  readonly errorMessage = computed(() => this.registrationError()?.message || '');
 }

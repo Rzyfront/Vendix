@@ -1,5 +1,5 @@
 
-import { ChangeDetectionStrategy, Component, input } from '@angular/core';
+import { Component, input } from '@angular/core';
 import { LucideAngularModule } from 'lucide-angular';
 import { ICON_REGISTRY, IconName } from './icons.registry';
 
@@ -34,7 +34,6 @@ import { ICON_REGISTRY, IconName } from './icons.registry';
       }
     `,
   ],
-  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class IconComponent {
   readonly name = input.required<IconName>();

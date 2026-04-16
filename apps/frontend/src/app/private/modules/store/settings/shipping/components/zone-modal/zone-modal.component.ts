@@ -1,11 +1,9 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
+  input,
+  output,
   OnInit,
   inject,
-  ChangeDetectorRef,
 } from '@angular/core';
 
 import {
@@ -14,7 +12,10 @@ import {
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms';
-import { ShippingZone, CreateZoneDto } from '../../interfaces/shipping-zones.interface';
+import {
+  ShippingZone,
+  CreateZoneDto,
+} from '../../interfaces/shipping-zones.interface';
 import { ShippingMethodsService } from '../../services/shipping-methods.service';
 import {
   CountryService,
@@ -41,12 +42,14 @@ import {
     ToggleComponent,
     IconComponent,
     SelectorComponent,
-    ButtonComponent
-],
+    ButtonComponent,
+  ],
   template: `
     <app-modal
       [isOpen]="true"
-      [title]="mode === 'create' ? 'Crear Zona de Envío' : 'Editar Zona de Envío'"
+      [title]="
+        mode() === 'create' ? 'Crear Zona de Envío' : 'Editar Zona de Envío'
+      "
       [subtitle]="'Define el alcance geográfico para calcular envíos'"
       (closed)="close.emit()"
       size="md"
@@ -83,11 +86,17 @@ import {
         ></app-input>
 
         <!-- País (Colombia, fijo) -->
-        <div class="flex items-center gap-3 p-3 rounded-xl border border-[var(--color-border)] bg-gray-50/30">
+        <div
+          class="flex items-center gap-3 p-3 rounded-xl border border-[var(--color-border)] bg-gray-50/30"
+        >
           <span class="text-xl">🇨🇴</span>
           <div>
-            <p class="text-sm font-semibold text-[var(--color-text-primary)]">Colombia</p>
-            <p class="text-xs text-[var(--color-text-secondary)]">País de cobertura</p>
+            <p class="text-sm font-semibold text-[var(--color-text-primary)]">
+              Colombia
+            </p>
+            <p class="text-xs text-[var(--color-text-secondary)]">
+              País de cobertura
+            </p>
           </div>
         </div>
 
@@ -107,7 +116,9 @@ import {
               (valueChange)="onDepartmentChange($event)"
             ></app-selector>
           }
-          <p class="text-[10px] text-gray-400 mt-1.5 px-1 flex items-center gap-1">
+          <p
+            class="text-[10px] text-gray-400 mt-1.5 px-1 flex items-center gap-1"
+          >
             <app-icon name="info" size="10"></app-icon>
             Dejar vacío para cubrir todo el país.
           </p>
@@ -129,9 +140,12 @@ import {
               placeholder="Todo el departamento"
             ></app-selector>
           }
-          <p class="text-[10px] text-gray-400 mt-1.5 px-1 flex items-center gap-1">
+          <p
+            class="text-[10px] text-gray-400 mt-1.5 px-1 flex items-center gap-1"
+          >
             <app-icon name="info" size="10"></app-icon>
-            Selecciona primero un departamento. Dejar vacío para todo el departamento.
+            Selecciona primero un departamento. Dejar vacío para todo el
+            departamento.
           </p>
         </div>
 
@@ -151,10 +165,16 @@ import {
             <div
               class="w-8 h-8 rounded-lg bg-green-50 flex items-center justify-center border border-green-100"
             >
-              <app-icon name="check" size="16" class="text-green-600"></app-icon>
+              <app-icon
+                name="check"
+                size="16"
+                class="text-green-600"
+              ></app-icon>
             </div>
             <div>
-              <span class="text-sm font-bold text-[var(--color-text-primary)]">Estado Activo</span>
+              <span class="text-sm font-bold text-[var(--color-text-primary)]"
+                >Estado Activo</span
+              >
               <p class="text-xs text-[var(--color-text-secondary)]">
                 Las zonas inactivas no se usan para calcular envíos.
               </p>
@@ -175,23 +195,22 @@ import {
           (clicked)="onSubmit()"
         >
           <app-icon name="save" size="18" slot="icon" class="mr-2"></app-icon>
-          {{ mode === 'edit' ? 'Guardar Cambios' : 'Crear Zona' }}
+          {{ mode() === 'edit' ? 'Guardar Cambios' : 'Crear Zona' }}
         </app-button>
       </div>
     </app-modal>
   `,
 })
 export class ZoneModalComponent implements OnInit {
-  @Input() zone?: ShippingZone;
-  @Input() mode: 'create' | 'edit' = 'create';
-  @Output() close = new EventEmitter<void>();
-  @Output() saved = new EventEmitter<void>();
+  readonly zone = input<ShippingZone>();
+  readonly mode = input<'create' | 'edit'>('create');
+  readonly close = output<void>();
+  readonly saved = output<void>();
 
   private fb = inject(FormBuilder);
   private shippingService = inject(ShippingMethodsService);
   private countryService = inject(CountryService);
   private toast = inject(ToastService);
-  private cdr = inject(ChangeDetectorRef);
 
   form: FormGroup;
   isSubmitting = false;
@@ -223,8 +242,10 @@ export class ZoneModalComponent implements OnInit {
   async ngOnInit(): Promise<void> {
     await this.loadDepartments();
 
-    if (this.zone && this.mode === 'edit') {
-      await this.populateForm(this.zone);
+    const currentZone = this.zone();
+    const currentMode = this.mode();
+    if (currentZone && currentMode === 'edit') {
+      await this.populateForm(currentZone);
     }
   }
 
@@ -237,7 +258,6 @@ export class ZoneModalComponent implements OnInit {
       this.departments = [];
     } finally {
       this.loadingDepartments = false;
-      this.cdr.markForCheck();
     }
   }
 
@@ -245,19 +265,16 @@ export class ZoneModalComponent implements OnInit {
     const dep = this.departments.find((d) => d.name === depName);
     if (!dep) {
       this.cities = [];
-      this.cdr.markForCheck();
       return;
     }
 
     this.loadingCities = true;
-    this.cdr.markForCheck();
     try {
       this.cities = await this.countryService.getCitiesByDepartment(dep.id);
     } catch {
       this.cities = [];
     } finally {
       this.loadingCities = false;
-      this.cdr.markForCheck();
     }
   }
 
@@ -278,7 +295,6 @@ export class ZoneModalComponent implements OnInit {
       await this.loadCities(depName);
       if (cityName) {
         this.form.patchValue({ city: cityName }, { emitEvent: false });
-        this.cdr.markForCheck();
       }
     }
   }
@@ -289,8 +305,6 @@ export class ZoneModalComponent implements OnInit {
 
     if (depName && typeof depName === 'string') {
       await this.loadCities(depName);
-    } else {
-      this.cdr.markForCheck();
     }
   }
 
@@ -305,7 +319,10 @@ export class ZoneModalComponent implements OnInit {
 
     const parseList = (text: string): string[] =>
       text
-        ? text.split(',').map((s) => s.trim()).filter((s) => s.length > 0)
+        ? text
+            .split(',')
+            .map((s) => s.trim())
+            .filter((s) => s.length > 0)
         : [];
 
     const dto: CreateZoneDto = {
@@ -318,18 +335,22 @@ export class ZoneModalComponent implements OnInit {
       is_active: values.is_active,
     };
 
-    const request$ = this.zone && this.mode === 'edit'
-      ? this.shippingService.updateZone(this.zone.id, dto)
-      : this.shippingService.createZone(dto);
+    const currentZone = this.zone();
+    const currentMode = this.mode();
+    const request$ =
+      currentZone && currentMode === 'edit'
+        ? this.shippingService.updateZone(currentZone.id, dto)
+        : this.shippingService.createZone(dto);
 
     request$.subscribe({
       next: () => {
         this.isSubmitting = false;
         this.toast.show({
           variant: 'success',
-          description: this.mode === 'edit'
-            ? 'Zona actualizada correctamente'
-            : 'Zona creada correctamente',
+          description:
+            currentMode === 'edit'
+              ? 'Zona actualizada correctamente'
+              : 'Zona creada correctamente',
         });
         // TODO: The 'emit' function requires a mandatory void argument
         // TODO: The 'emit' function requires a mandatory void argument
@@ -348,7 +369,8 @@ export class ZoneModalComponent implements OnInit {
         this.isSubmitting = false;
         this.toast.show({
           variant: 'error',
-          description: 'Error al guardar la zona: ' + (err.message || 'Error desconocido'),
+          description:
+            'Error al guardar la zona: ' + (err.message || 'Error desconocido'),
         });
       },
     });

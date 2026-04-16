@@ -1,4 +1,4 @@
-import { Component, OnChanges, input, output } from '@angular/core';
+import { Component, effect, input, output } from '@angular/core';
 
 import { FormsModule } from '@angular/forms';
 import { IconComponent } from '../icon/icon.component';
@@ -93,7 +93,7 @@ export type QuantityControlSize = 'sm' | 'md' | 'lg';
     `,
   ],
 })
-export class QuantityControlComponent implements OnChanges {
+export class QuantityControlComponent {
   readonly value = input(1);
   readonly min = input(1);
   readonly max = input<number | null>(null);
@@ -106,25 +106,17 @@ export class QuantityControlComponent implements OnChanges {
 
   readonly valueChange = output<number>();
 
-  /**
-   * The value displayed in the input
-   * This is kept separate from 'value' to handle user typing
-   */
   displayValue = 1;
 
-  /**
-   * Tracks if user is currently editing the input
-   * When true, we don't sync displayValue from value input
-   */
   private isEditing = false;
 
-  ngOnChanges(): void {
-    // Only sync from parent if user is not actively editing
-    // This prevents overwriting user's input while they type
-    const value = this.value();
-    if (!this.isEditing && this.displayValue !== value) {
-      this.displayValue = value;
-    }
+  constructor() {
+    effect(() => {
+      const val = this.value();
+      if (!this.isEditing && this.displayValue !== val) {
+        this.displayValue = val;
+      }
+    });
   }
 
   get iconSize(): number {

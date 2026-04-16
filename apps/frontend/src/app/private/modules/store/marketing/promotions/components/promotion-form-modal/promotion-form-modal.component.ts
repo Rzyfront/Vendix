@@ -1,11 +1,11 @@
-import { Component, Input, Output, EventEmitter, OnInit, inject } from '@angular/core';
-
+import { Component, DestroyRef, inject, input, output } from '@angular/core';
 import {
   ReactiveFormsModule,
   FormBuilder,
   FormGroup,
   Validators,
 } from '@angular/forms';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   Promotion,
   CreatePromotionDto,
@@ -38,14 +38,14 @@ import { CategoriesService } from '../../../../products/services/categories.serv
     InputComponent,
     SelectorComponent,
     TextareaComponent,
-    SettingToggleComponent
-],
+    SettingToggleComponent,
+  ],
   template: `
     <app-modal
       [isOpen]="true"
-      [title]="promotion ? 'Editar Promocion' : 'Nueva Promocion'"
+      [title]="promotion() ? 'Editar Promocion' : 'Nueva Promocion'"
       size="lg"
-      (closed)="close.emit()"
+      (closed)="close.emit(undefined)"
     >
       <form [formGroup]="form" class="space-y-3">
 
@@ -196,21 +196,22 @@ import { CategoriesService } from '../../../../products/services/categories.serv
 
       <!-- Footer -->
       <div slot="footer" class="flex justify-end items-center gap-3">
-        <app-button variant="outline" (clicked)="close.emit()">Cancelar</app-button>
+        <app-button variant="outline" (clicked)="close.emit(undefined)">Cancelar</app-button>
         <app-button variant="primary" (clicked)="onSubmit()" [disabled]="form.invalid">
-          {{ promotion ? 'Guardar cambios' : 'Crear Promocion' }}
+          {{ promotion() ? 'Guardar cambios' : 'Crear Promocion' }}
         </app-button>
       </div>
     </app-modal>
   `,
 })
-export class PromotionFormModalComponent implements OnInit {
-  @Input() promotion: Promotion | null = null;
-  @Output() save = new EventEmitter<CreatePromotionDto | UpdatePromotionDto>();
-  @Output() close = new EventEmitter<void>();
+export class PromotionFormModalComponent {
+  readonly promotion = input<Promotion | null>(null);
+  readonly save = output<CreatePromotionDto | UpdatePromotionDto>();
+  readonly close = output<void>();
 
   private productsService = inject(ProductsService);
   private categoriesService = inject(CategoriesService);
+  private destroyRef = inject(DestroyRef);
 
   form!: FormGroup;
   productOptions: MultiSelectorOption[] = [];
@@ -227,35 +228,39 @@ export class PromotionFormModalComponent implements OnInit {
     { value: 'category', label: 'Categoria' },
   ];
 
-  constructor(private fb: FormBuilder) {}
-
-  ngOnInit(): void {
+  constructor(private fb: FormBuilder) {
+    const p = this.promotion();
     this.form = this.fb.group({
-      name: [this.promotion?.name || '', Validators.required],
-      description: [this.promotion?.description || ''],
-      code: [this.promotion?.code || ''],
-      type: [this.promotion?.type || 'percentage', Validators.required],
-      value: [this.promotion?.value || null, [Validators.required, Validators.min(0.01)]],
-      scope: [this.promotion?.scope || 'order'],
-      start_date: [this.promotion?.start_date?.split('T')[0] || '', Validators.required],
-      end_date: [this.promotion?.end_date?.split('T')[0] || ''],
-      min_purchase_amount: [this.promotion?.min_purchase_amount || null],
-      max_discount_amount: [this.promotion?.max_discount_amount || null],
-      usage_limit: [this.promotion?.usage_limit || null],
-      per_customer_limit: [this.promotion?.per_customer_limit || null],
-      is_auto_apply: [this.promotion?.is_auto_apply ?? false],
-      priority: [this.promotion?.priority ?? 0],
-      product_ids: [this.promotion?.promotion_products?.map(pp => pp.product_id) || []],
-      category_ids: [this.promotion?.promotion_categories?.map(pc => pc.category_id) || []],
+      name: [p?.name || '', Validators.required],
+      description: [p?.description || ''],
+      code: [p?.code || ''],
+      type: [p?.type || 'percentage', Validators.required],
+      value: [p?.value || null, [Validators.required, Validators.min(0.01)]],
+      scope: [p?.scope || 'order'],
+      start_date: [p?.start_date?.split('T')[0] || '', Validators.required],
+      end_date: [p?.end_date?.split('T')[0] || ''],
+      min_purchase_amount: [p?.min_purchase_amount || null],
+      max_discount_amount: [p?.max_discount_amount || null],
+      usage_limit: [p?.usage_limit || null],
+      per_customer_limit: [p?.per_customer_limit || null],
+      is_auto_apply: [p?.is_auto_apply ?? false],
+      priority: [p?.priority ?? 0],
+      product_ids: [p?.promotion_products?.map(pp => pp.product_id) || []],
+      category_ids: [p?.promotion_categories?.map(pc => pc.category_id) || []],
     });
 
     // Load product and category options for multi-selectors
-    this.productsService.getProducts({ limit: 500 }).subscribe(res => {
-      this.productOptions = res.data.map(p => ({ value: p.id, label: p.name, description: p.sku }));
-    });
-    this.categoriesService.getCategories().subscribe(cats => {
-      this.categoryOptions = cats.map(c => ({ value: c.id, label: c.name }));
-    });
+    this.productsService.getProducts({ limit: 500 })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(res => {
+        this.productOptions = res.data.map(p => ({ value: p.id, label: p.name, description: p.sku }));
+      });
+
+    this.categoriesService.getCategories()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(cats => {
+        this.categoryOptions = cats.map(c => ({ value: c.id, label: c.name }));
+      });
   }
 
   onSubmit(): void {

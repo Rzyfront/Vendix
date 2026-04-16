@@ -1,4 +1,4 @@
-import { Component, Input, output } from '@angular/core';
+import { Component, model, input, output } from '@angular/core';
 
 import { FormsModule } from '@angular/forms';
 import { ModalComponent } from '../modal/modal.component';
@@ -13,36 +13,34 @@ import { InputComponent } from '../input/input.component';
   styleUrl: './prompt-modal.component.scss',
 })
 export class PromptModalComponent {
-  @Input() title = 'Ingresar valor';
-  @Input() message = '';
-  @Input() placeholder = '';
-  @Input() defaultValue = '';
-  @Input() confirmText = 'Aceptar';
-  @Input() cancelText = 'Cancelar';
-  @Input() size: 'sm' | 'md' | 'lg' = 'sm';
-  @Input() showCloseButton = true;
-  @Input() customClasses = '';
+  readonly title = input('Ingresar valor');
+  readonly message = input('');
+  readonly placeholder = input('');
+  readonly defaultValue = input('');
+  readonly confirmText = input('Aceptar');
+  readonly cancelText = input('Cancelar');
+  readonly size = input<'sm' | 'md' | 'lg'>('sm');
+  readonly showCloseButton = input(true);
+  readonly customClasses = input('');
+  readonly inputType = input<'text' | 'number'>('text');
+  readonly isOpen = model(true);
 
   readonly confirm = output<string>();
   readonly cancel = output<void>();
-  readonly isOpenChange = output<boolean>();
 
-  @Input() inputType: 'text' | 'number' = 'text';
-  @Input() isOpen = true;
   inputValue = '';
 
-  ngOnInit(): void {
-    this.inputValue = this.defaultValue;
+  constructor() {
+    this.inputValue = '';
   }
 
   onConfirm(): void {
     this.confirm.emit(this.inputValue);
-    this.isOpenChange.emit(false);
+    this.isOpen.set(false);
   }
 
   onCancel(): void {
-    // TODO: The 'emit' function requires a mandatory void argument
     this.cancel.emit();
-    this.isOpenChange.emit(false);
+    this.isOpen.set(false);
   }
 }

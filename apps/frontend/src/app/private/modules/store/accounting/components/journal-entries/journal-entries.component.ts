@@ -1,5 +1,5 @@
-import { Component, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject } from '@angular/core';
+import { AsyncPipe } from '@angular/common';
 import { Store } from '@ngrx/store';
 import { Observable, map } from 'rxjs';
 
@@ -41,7 +41,7 @@ interface EntryStats {
   selector: 'vendix-journal-entries',
   standalone: true,
   imports: [
-    CommonModule,
+    AsyncPipe,
     CardComponent,
     InputsearchComponent,
     StatsComponent,
@@ -173,7 +173,7 @@ interface EntryStats {
     </div>
   `,
 })
-export class JournalEntriesComponent implements OnInit {
+export class JournalEntriesComponent {
   private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
 
@@ -298,7 +298,7 @@ export class JournalEntriesComponent implements OnInit {
     ],
   };
 
-  ngOnInit(): void {
+  constructor() {
     this.store.dispatch(AccountingActions.loadEntries());
   }
 

@@ -1,13 +1,12 @@
 import {
   Component,
-  ChangeDetectionStrategy,
-  Input,
   signal,
   computed,
   HostListener,
   ElementRef,
   inject,
   input,
+  model,
   output
 } from '@angular/core';
 
@@ -19,7 +18,6 @@ import { ICON_REGISTRY, IconName } from '../icon/icons.registry';
   selector: 'app-icon-picker',
   standalone: true,
   imports: [FormsModule, IconComponent],
-  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="relative inline-block">
       <!-- Trigger button -->
@@ -28,12 +26,12 @@ import { ICON_REGISTRY, IconName } from '../icon/icons.registry';
         class="flex items-center gap-1.5 px-2 py-1 border rounded-md text-xs transition-colors"
         [style.border-color]="isOpen() ? 'var(--color-primary)' : 'var(--color-border)'"
         [style.background]="'var(--color-surface)'"
-        [style.color]="value ? 'var(--color-text)' : 'var(--color-text-muted)'"
+        [style.color]="value() ? 'var(--color-text)' : 'var(--color-text-muted)'"
         (click)="toggle()"
       >
-        @if (value) {
-          <app-icon [name]="value" [size]="size() === 'sm' ? 14 : 16"></app-icon>
-          <span>{{ value }}</span>
+        @if (value()) {
+          <app-icon [name]="value()" [size]="size() === 'sm' ? 14 : 16"></app-icon>
+          <span>{{ value() }}</span>
         } @else {
           <app-icon name="image" [size]="size() === 'sm' ? 14 : 16" color="var(--color-text-muted)"></app-icon>
           <span>{{ placeholder() }}</span>
@@ -70,8 +68,8 @@ import { ICON_REGISTRY, IconName } from '../icon/icons.registry';
                   <button
                     type="button"
                     class="flex flex-col items-center justify-center p-1.5 rounded-md transition-colors"
-                    [style.background]="value === icon ? 'color-mix(in srgb, var(--color-primary) 15%, transparent)' : 'transparent'"
-                    [style.color]="value === icon ? 'var(--color-primary)' : 'var(--color-text)'"
+                    [style.background]="value() === icon ? 'color-mix(in srgb, var(--color-primary) 15%, transparent)' : 'transparent'"
+                    [style.color]="value() === icon ? 'var(--color-primary)' : 'var(--color-text)'"
                     (click)="selectIcon(icon)"
                     [title]="icon"
                   >
@@ -87,7 +85,7 @@ import { ICON_REGISTRY, IconName } from '../icon/icons.registry';
           </div>
 
           <!-- Clear button -->
-          @if (value) {
+          @if (value()) {
             <div class="p-2" style="border-top: 1px solid var(--color-border)">
               <button
                 type="button"
@@ -107,11 +105,10 @@ import { ICON_REGISTRY, IconName } from '../icon/icons.registry';
 export class IconPickerComponent {
   private el = inject(ElementRef);
 
-  @Input() value = '';
+  readonly value = model<string>('');
   readonly placeholder = input('Icono');
   readonly size = input<'sm' | 'md'>('sm');
   readonly alignRight = input(false);
-  readonly valueChange = output<string>();
 
   isOpen = signal(false);
   searchQuery = signal('');
@@ -132,14 +129,12 @@ export class IconPickerComponent {
   }
 
   selectIcon(icon: string) {
-    this.value = icon;
-    this.valueChange.emit(icon);
+    this.value.set(icon);
     this.isOpen.set(false);
   }
 
   clearIcon() {
-    this.value = '';
-    this.valueChange.emit('');
+    this.value.set('');
     this.isOpen.set(false);
   }
 

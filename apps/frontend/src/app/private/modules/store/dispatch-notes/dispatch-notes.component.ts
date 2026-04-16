@@ -1,14 +1,6 @@
-import {
-  Component,
-  OnInit,
-  OnDestroy,
-  ViewChild,
-  inject,
-  signal,
-} from '@angular/core';
-
+import { Component, DestroyRef, ViewChild, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
-import { Subject, takeUntil } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ToastService } from '../../../../shared/components/toast/toast.service';
 import { DispatchNotesService } from './services/dispatch-notes.service';
 import { DispatchNotePrintService } from './services/dispatch-note-print.service';
@@ -47,52 +39,38 @@ import {
         (refresh)="refreshData()"
       ></app-dispatch-note-list>
 
-      @defer (when is_modal_open()) {
-        <app-dispatch-note-wizard
-          [isOpen]="is_modal_open()"
-          (isOpenChange)="onWizardOpenChange($event)"
-          (created)="onDispatchNoteCreated()"
-        ></app-dispatch-note-wizard>
-      }
+      <!-- Create Wizard -->
+      <app-dispatch-note-wizard
+        [isOpen]="is_modal_open()"
+        (isOpenChange)="onWizardOpenChange($event)"
+        (created)="onDispatchNoteCreated()"
+      ></app-dispatch-note-wizard>
     </div>
   `,
 })
-export class DispatchNotesComponent implements OnInit, OnDestroy {
+export class DispatchNotesComponent {
   private dispatchNotesService = inject(DispatchNotesService);
   private printService = inject(DispatchNotePrintService);
   private router = inject(Router);
   private toastService = inject(ToastService);
+  private destroyRef = inject(DestroyRef);
 
-  @ViewChild(DispatchNoteListComponent)
-  dispatch_note_list!: DispatchNoteListComponent;
+  @ViewChild(DispatchNoteListComponent) dispatch_note_list!: DispatchNoteListComponent;
 
   stats = signal<DispatchNoteStats>({
-    total: 0,
-    draft: 0,
-    confirmed: 0,
-    delivered: 0,
-    invoiced: 0,
-    voided: 0,
+    total: 0, draft: 0, confirmed: 0, delivered: 0, invoiced: 0, voided: 0,
   });
   stats_loading = signal(false);
   is_modal_open = signal(false);
 
-  private destroy$ = new Subject<void>();
-
-  ngOnInit(): void {
+  constructor() {
     this.loadStats();
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
   }
 
   loadStats(): void {
     this.stats_loading.set(true);
-    this.dispatchNotesService
-      .getStats()
-      .pipe(takeUntil(this.destroy$))
+    this.dispatchNotesService.getStats()
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (s) => {
           this.stats.set(s);

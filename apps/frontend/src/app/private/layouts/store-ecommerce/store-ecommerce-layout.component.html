@@ -42,10 +42,10 @@
       <div class="header-actions">
         <!-- Icons visible only if authenticated (Desktop Only) -->
         <div class="desktop-actions">
-          @if (is_authenticated$ | async) {
+          @if (is_authenticated()) {
           <!-- Wishlist with badge and animation -->
           <div class="wishlist-container">
-            @if (wishlist_badge$ | async; as badge) {
+            @if (wishlist_badge(); as badge) {
               <button class="action-btn wishlist-btn"
                       [class.shake-animation]="is_wishlist_animating"
                       [class.has-items]="badge.show"
@@ -86,7 +86,7 @@
           <button class="action-btn cart-btn" [class.shake-animation]="is_animating" (click)="goToCart()"
             title="Carrito">
             <app-icon name="shopping-cart" [size]="20"></app-icon>
-            @if (cart_badge$ | async; as badge) {
+            @if (cart_badge(); as badge) {
             @if (badge.show) {
             <span class="cart-badge">{{ badge.count }}</span>
             }
@@ -112,13 +112,13 @@
                 <app-icon name="shopping-cart" [size]="20" class="text-primary"></app-icon>
                 <h3>Mi Carrito</h3>
               </div>
-              @if (cart$ | async; as cart) {
+              @if (cart(); as cart) {
               <span>{{ cart.item_count }} items</span>
               }
             </div>
 
             <div class="cart-items">
-              @if (cart$ | async; as cart) {
+              @if (cart(); as cart) {
               @if (cart.items.length > 0) {
               @for (item of cart.items; track item.id) {
               <div class="cart-item">
@@ -154,7 +154,7 @@
               }
             </div>
 
-            @if (cart$ | async; as cart) {
+            @if (cart(); as cart) {
             @if (cart.items.length > 0) {
             <div class="cart-footer">
               <div class="cart-total">
@@ -175,8 +175,8 @@
         <!-- User Menu (Guest or Authenticated Dropdown) - DESKTOP ONLY -->
         <div class="user-menu-container desktop-only">
           <button class="user-btn" (click)="toggleUserMenu()">
-            @if (is_authenticated$ | async) {
-            <span class="user-name">{{ user_name$ | async }}</span>
+            @if (is_authenticated()) {
+            <span class="user-name">{{ user_name() }}</span>
             <app-icon name="chevron-down" [size]="12" class="chevron-icon"></app-icon>
             } @else {
             <app-icon name="user" [size]="20"></app-icon>
@@ -184,7 +184,7 @@
           </button>
           @if (show_user_menu) {
           <div class="user-dropdown">
-            @if (is_authenticated$ | async) {
+            @if (is_authenticated()) {
             <a (click)="goToAccount()">
               <app-icon name="user" [size]="16"></app-icon> Ver Perfil
             </a>
@@ -312,14 +312,14 @@
 <aside class="mobile-sidebar" [class.open]="show_mobile_menu">
   <!-- Mobile User Header -->
   <div class="mobile-nav-header">
-    @if (is_authenticated$ | async) {
+    @if (is_authenticated()) {
     <div class="user-info">
       <div class="avatar-circle">
         <app-icon name="user" [size]="20"></app-icon>
       </div>
       <div class="user-details">
         <span class="greeting">Hola,</span>
-        <span class="name">{{ user_name$ | async }}</span>
+        <span class="name">{{ user_name() }}</span>
       </div>
     </div>
     } @else {
@@ -348,11 +348,11 @@
 
     <div class="nav-section user-section">
       <h5 class="nav-subtitle">Mi Cuenta</h5>
-      @if (is_authenticated$ | async) {
+      @if (is_authenticated()) {
       <a (click)="goToAccount(); toggleMobileMenu()">
         <app-icon name="user" [size]="18"></app-icon> Mi Perfil
       </a>
-      @if (wishlist_badge$ | async; as badge) {
+      @if (wishlist_badge(); as badge) {
         <a (click)="goToWishlist(); toggleMobileMenu()"
            class="wishlist-mobile-link"
            [class.has-items]="badge.show">

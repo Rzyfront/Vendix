@@ -1,9 +1,7 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
-  ChangeDetectionStrategy,
+  input,
+  output,
   inject,
 } from '@angular/core';
 
@@ -15,7 +13,6 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
   selector: 'app-pop-mobile-footer',
   standalone: true,
   imports: [IconComponent],
-  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="pop-mobile-footer">
       <!-- Row 1: Cart Summary + View Order Button -->
@@ -23,22 +20,22 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
         <div class="cart-summary">
           <div class="cart-icon-wrapper">
             <app-icon name="shopping-bag" [size]="20"></app-icon>
-            @if (itemCount > 0) {
+            @if (itemCount() > 0) {
               <span class="cart-badge">
-                {{ itemCount > 99 ? '99+' : itemCount }}
+                {{ itemCount() > 99 ? '99+' : itemCount() }}
               </span>
             }
           </div>
           <div class="cart-totals">
             <span class="total-label">Total Estimado</span>
-            <span class="total-amount">{{ formatCurrency(cartSummary?.total || 0) }}</span>
+            <span class="total-amount">{{ formatCurrency(cartSummary()?.total || 0) }}</span>
           </div>
         </div>
-    
+
         <button
           class="view-order-btn"
           (click)="viewOrder.emit()"
-          [disabled]="itemCount === 0"
+          [disabled]="itemCount() === 0"
           >
           <span>Ver orden</span>
           <app-icon name="chevron-up" [size]="16"></app-icon>
@@ -50,7 +47,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
         <button
           class="action-btn draft-btn"
           (click)="saveDraft.emit()"
-          [disabled]="itemCount === 0"
+          [disabled]="itemCount() === 0"
           >
           <app-icon name="save" [size]="16"></app-icon>
           <span>Borrador</span>
@@ -58,7 +55,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
         <button
           class="action-btn create-btn"
           (click)="createOrder.emit()"
-          [disabled]="itemCount === 0"
+          [disabled]="itemCount() === 0"
           >
           <app-icon name="file-plus" [size]="16"></app-icon>
           <span>Crear</span>
@@ -68,7 +65,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
       <button
         class="action-btn receive-btn receive-btn-full"
         (click)="createAndReceive.emit()"
-        [disabled]="itemCount === 0"
+        [disabled]="itemCount() === 0"
         >
         <app-icon name="package-check" [size]="18"></app-icon>
         <span>Crear + Recibir</span>
@@ -304,13 +301,14 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
 })
 export class PopMobileFooterComponent {
   private currencyService = inject(CurrencyFormatService);
-  @Input() cartSummary: PopCartSummary | null = null;
-  @Input() itemCount: number = 0;
 
-  @Output() viewOrder = new EventEmitter<void>();
-  @Output() saveDraft = new EventEmitter<void>();
-  @Output() createOrder = new EventEmitter<void>();
-  @Output() createAndReceive = new EventEmitter<void>();
+  readonly cartSummary = input<PopCartSummary | null>(null);
+  readonly itemCount = input(0);
+
+  readonly viewOrder = output<void>();
+  readonly saveDraft = output<void>();
+  readonly createOrder = output<void>();
+  readonly createAndReceive = output<void>();
 
   formatCurrency(amount: number): string {
     return this.currencyService.format(amount, 0);

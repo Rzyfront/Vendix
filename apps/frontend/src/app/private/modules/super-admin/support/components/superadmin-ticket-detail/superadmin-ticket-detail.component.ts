@@ -34,7 +34,7 @@ import {
     StickyHeaderComponent,
   ],
   template: `
-    @if (!loading) {
+    @if (!loading()) {
       <div class="min-h-screen bg-background">
         <!-- Sticky Header -->
         <app-sticky-header
@@ -206,8 +206,8 @@ import {
                 <app-button
                   type="submit"
                   variant="primary"
-                  [disabled]="!commentForm.get('content')?.value || sendingComment"
-                  [loading]="sendingComment"
+                  [disabled]="!commentForm.get('content')?.value || sendingComment()"
+                  [loading]="sendingComment()"
                   size="sm"
                   >
                   <app-icon name="send" [size]="14" slot="icon"></app-icon>
@@ -312,7 +312,7 @@ import {
     </app-modal>
     
     <!-- Image Lightbox -->
-    <app-image-lightbox [currentImage]="lightboxCurrentImage" [isOpen]="lightboxOpen" (close)="closeLightbox()"></app-image-lightbox>
+    <app-image-lightbox [currentImage]="lightboxCurrentImage()" [isOpen]="lightboxOpen()" (close)="closeLightbox()"></app-image-lightbox>
     `,
   styles: [`
     :host {
@@ -330,10 +330,10 @@ export class SuperadminTicketDetailComponent implements OnInit, OnDestroy {
 
   // State
   ticket = signal<Ticket | null>(null);
-  loading = true;
-  sendingComment = false;
-  lightboxOpen = false;
-  lightboxCurrentImage = '';
+  readonly loading = signal(true);
+  readonly sendingComment = signal(false);
+  readonly lightboxOpen = signal(false);
+  readonly lightboxCurrentImage = signal('');
 
   // Modals
   showStatusModal = signal(false);
@@ -384,7 +384,7 @@ export class SuperadminTicketDetailComponent implements OnInit, OnDestroy {
 
     this.supportService.getTicketById(+id).pipe(
       takeUntil(this.destroy$),
-      finalize(() => this.loading = false)
+      finalize(() => this.loading.set(false))
     ).subscribe({
       next: (data) => {
         this.ticket.set(data);
@@ -397,7 +397,7 @@ export class SuperadminTicketDetailComponent implements OnInit, OnDestroy {
   }
 
   submitComment(): void {
-    if (this.commentForm.invalid || this.sendingComment) {
+    if (this.commentForm.invalid || this.sendingComment()) {
       return;
     }
 
@@ -409,10 +409,10 @@ export class SuperadminTicketDetailComponent implements OnInit, OnDestroy {
       return;
     }
 
-    this.sendingComment = true;
+    this.sendingComment.set(true);
 
     this.supportService.addComment(ticketId, content, false).pipe(
-      finalize(() => this.sendingComment = false)
+      finalize(() => this.sendingComment.set(false))
     ).subscribe({
       next: () => {
         this.toastService.success('Comentario agregado');
@@ -488,16 +488,16 @@ export class SuperadminTicketDetailComponent implements OnInit, OnDestroy {
 
   openAttachment(attachment: any): void {
     if (attachment.file_type === 'IMAGE') {
-      this.lightboxCurrentImage = attachment.file_url;
-      this.lightboxOpen = true;
+      this.lightboxCurrentImage.set(attachment.file_url);
+      this.lightboxOpen.set(true);
     } else {
       window.open(attachment.file_url, '_blank');
     }
   }
 
   closeLightbox(): void {
-    this.lightboxOpen = false;
-    this.lightboxCurrentImage = '';
+    this.lightboxOpen.set(false);
+    this.lightboxCurrentImage.set('');
   }
 
   goBack(): void {

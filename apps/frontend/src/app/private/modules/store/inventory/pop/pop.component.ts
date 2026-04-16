@@ -270,13 +270,13 @@ export class PopComponent implements OnInit, OnDestroy {
   get currentSupplierName(): string {
     const state = this.popCartService.currentState;
     if (!state.supplierId || !this.header) return '';
-    return this.header.suppliers.find(s => s.id === state.supplierId)?.name || '';
+    return this.header.suppliers().find(s => s.id === state.supplierId)?.name || '';
   }
 
   get currentLocationName(): string {
     const state = this.popCartService.currentState;
     if (!state.locationId || !this.header) return '';
-    return this.header.locations.find(l => l.id === state.locationId)?.name || '';
+    return this.header.locations().find(l => l.id === state.locationId)?.name || '';
   }
 
   // Route params
@@ -900,7 +900,7 @@ export class PopComponent implements OnInit, OnDestroy {
     // Close modal and expand header settings
     this.showCartModal = false;
     if (this.header) {
-      this.header.showMobileSettings = true;
+      this.header.showMobileSettings.set(true);
       // Delay flash so the DOM renders the expanded settings first
       setTimeout(() => this.header.flashConfigWarning(), 50);
     }

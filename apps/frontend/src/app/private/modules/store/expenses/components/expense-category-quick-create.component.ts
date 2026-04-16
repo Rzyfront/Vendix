@@ -1,5 +1,4 @@
-import { Component, EventEmitter, Input, Output } from '@angular/core';
-
+import { Component, inject, signal, input, output } from '@angular/core';
 import {
   FormBuilder,
   FormGroup,
@@ -24,13 +23,13 @@ import { ExpenseCategory } from '../interfaces/expense.interface';
     ModalComponent,
     ButtonComponent,
     InputComponent,
-    TextareaComponent
-],
+    TextareaComponent,
+  ],
   template: `
     <app-modal
       [size]="'md'"
       [title]="'Crear Categoría de Gasto'"
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (closed)="onCancel()"
     >
       <form [formGroup]="categoryForm" class="space-y-4">
@@ -59,14 +58,14 @@ import { ExpenseCategory } from '../interfaces/expense.interface';
         <app-button
           variant="outline"
           (clicked)="onCancel()"
-          [disabled]="isSubmitting"
+          [disabled]="isSubmitting()"
         >
           Cancelar
         </app-button>
         <app-button
           variant="primary"
           (clicked)="onSubmit()"
-          [loading]="isSubmitting"
+          [loading]="isSubmitting()"
           [disabled]="categoryForm.invalid"
         >
           Crear Categoría
@@ -76,30 +75,27 @@ import { ExpenseCategory } from '../interfaces/expense.interface';
   `,
 })
 export class ExpenseCategoryQuickCreateComponent {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() created = new EventEmitter<ExpenseCategory>();
+  readonly isOpen = input<boolean>(false);
+  readonly isOpenChange = output<boolean>();
+  readonly created = output<ExpenseCategory>();
 
-  categoryForm: FormGroup;
-  isSubmitting = false;
+  private fb = inject(FormBuilder);
+  private expensesService = inject(ExpensesService);
+  private toastService = inject(ToastService);
 
-  constructor(
-    private fb: FormBuilder,
-    private expensesService: ExpensesService,
-    private toastService: ToastService,
-  ) {
-    this.categoryForm = this.fb.group({
-      name: [
-        '',
-        [
-          Validators.required,
-          Validators.minLength(3),
-          Validators.maxLength(255),
-        ],
+  readonly isSubmitting = signal(false);
+
+  categoryForm: FormGroup = this.fb.group({
+    name: [
+      '',
+      [
+        Validators.required,
+        Validators.minLength(3),
+        Validators.maxLength(255),
       ],
-      description: ['', [Validators.maxLength(255)]],
-    });
-  }
+    ],
+    description: ['', [Validators.maxLength(255)]],
+  });
 
   onCancel() {
     this.categoryForm.reset();
@@ -109,21 +105,21 @@ export class ExpenseCategoryQuickCreateComponent {
   onSubmit() {
     if (this.categoryForm.invalid) return;
 
-    this.isSubmitting = true;
+    this.isSubmitting.set(true);
     const categoryData = this.categoryForm.value;
 
     this.expensesService.createExpenseCategory(categoryData).subscribe({
       next: (response) => {
         this.toastService.success('Categoría de gasto creada exitosamente');
         this.created.emit(response.data);
-        this.isSubmitting = false;
+        this.isSubmitting.set(false);
         this.categoryForm.reset();
         this.isOpenChange.emit(false);
       },
       error: (error) => {
         console.error('Error creating expense category:', error);
         this.toastService.error('Error al crear la categoría');
-        this.isSubmitting = false;
+        this.isSubmitting.set(false);
       },
     });
   }

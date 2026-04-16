@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, inject } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
 
 import { Subject, takeUntil, finalize } from 'rxjs';
 import { TicketListComponent, CreateTicketModalComponent } from './components';
@@ -25,7 +25,7 @@ import { FilterValues } from '../../../../../shared/components/options-dropdown/
       >
         <app-stats
           title="Total Tickets"
-          [value]="stats?.total || 0"
+          [value]="stats()?.total || 0"
           smallText="Todos los tickets"
           iconName="ticket"
           iconBgColor="bg-primary/10"
@@ -34,7 +34,7 @@ import { FilterValues } from '../../../../../shared/components/options-dropdown/
 
         <app-stats
           title="Abiertos"
-          [value]="stats?.open_tickets || 0"
+          [value]="stats()?.open_tickets || 0"
           smallText="Tickets en proceso"
           iconName="message-circle"
           iconBgColor="bg-green-100"
@@ -43,7 +43,7 @@ import { FilterValues } from '../../../../../shared/components/options-dropdown/
 
         <app-stats
           title="Resueltos"
-          [value]="stats?.resolved || 0"
+          [value]="stats()?.resolved || 0"
           smallText="Tickets cerrados"
           iconName="check-circle"
           iconBgColor="bg-purple-100"
@@ -52,7 +52,7 @@ import { FilterValues } from '../../../../../shared/components/options-dropdown/
 
         <app-stats
           title="Problemas"
-          [value]="stats?.by_category?.['PROBLEM'] || 0"
+          [value]="stats()?.by_category?.['PROBLEM'] || 0"
           smallText="Tickets de problema"
           iconName="alert-circle"
           iconBgColor="bg-orange-100"
@@ -62,9 +62,9 @@ import { FilterValues } from '../../../../../shared/components/options-dropdown/
 
       <!-- List -->
       <app-ticket-list
-        [tickets]="tickets"
-        [loading]="loading"
-        [totalItems]="totalItems"
+        [tickets]="tickets()"
+        [loading]="loading()"
+        [totalItems]="totalItems()"
         [page]="page"
         [limit]="limit"
         (search)="onSearch($event)"
@@ -90,16 +90,16 @@ export class SupportSettingsComponent implements OnInit, OnDestroy {
   private router = inject(Router);
   private route = inject(ActivatedRoute);
 
-  stats: TicketStats | null = null;
-  tickets: Ticket[] = [];
+  readonly stats = signal<TicketStats | null>(null);
+  readonly tickets = signal<Ticket[]>([]);
 
-  loading = false;
+  readonly loading = signal(false);
   actionLoading = false;
 
   // Pagination
   page = 1;
   limit = 10;
-  totalItems = 0;
+  readonly totalItems = signal(0);
   searchQuery = '';
   filters: FilterValues = {};
 
@@ -142,7 +142,7 @@ export class SupportSettingsComponent implements OnInit, OnDestroy {
             pending: byStatus.WAITING_RESPONSE || 0,
             my_tickets: 0,
           };
-          this.stats = computedStats;
+          this.stats.set(computedStats);
         },
         error: (error: any) => {
           console.error('Error loading stats:', error);
@@ -152,7 +152,7 @@ export class SupportSettingsComponent implements OnInit, OnDestroy {
   }
 
   loadTickets() {
-    this.loading = true;
+    this.loading.set(true);
     this.supportService
       .getTickets({
         page: this.page,
@@ -164,12 +164,12 @@ export class SupportSettingsComponent implements OnInit, OnDestroy {
       })
       .pipe(
         takeUntil(this.destroy$),
-        finalize(() => (this.loading = false)),
+        finalize(() => this.loading.set(false)),
       )
       .subscribe({
         next: (response: any) => {
-          this.tickets = response.data;
-          this.totalItems = response.meta.total;
+          this.tickets.set(response.data);
+          this.totalItems.set(response.meta.total);
         },
         error: (err: any) => {
           console.error(err);

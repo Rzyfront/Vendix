@@ -135,7 +135,7 @@ import { SessionCreateModalComponent } from '../session-create-modal/session-cre
     </div>
   `,
 })
-export class ConsolidationSessionsComponent implements OnInit, OnDestroy {
+export class ConsolidationSessionsComponent implements OnDestroy {
   private destroy$ = new Subject<void>();
   private accounting_service = inject(AccountingService);
   private toast_service = inject(ToastService);
@@ -254,7 +254,7 @@ export class ConsolidationSessionsComponent implements OnInit, OnDestroy {
     ],
   };
 
-  ngOnInit(): void {
+  constructor() {
     this.loadSessions();
   }
 

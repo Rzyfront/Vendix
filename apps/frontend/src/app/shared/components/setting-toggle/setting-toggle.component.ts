@@ -1,6 +1,5 @@
 import {
   Component,
-  Input,
   forwardRef,
   input,
   output
@@ -40,9 +39,9 @@ import { ToggleComponent } from '../toggle/toggle.component';
             <span class="new-badge">Nuevo</span>
           }
         </label>
-        @if (description) {
+        @if (description()) {
           <p class="text-[10px] text-gray-500 leading-tight mt-0.5">
-            {{ description }}
+            {{ description() }}
           </p>
         }
       </div>
@@ -79,8 +78,8 @@ import { ToggleComponent } from '../toggle/toggle.component';
 })
 export class SettingToggleComponent implements ControlValueAccessor {
     readonly label = input<string>('');
-    @Input() description?: string;
-    @Input() disabled = false;
+    readonly description = input<string | undefined>(undefined);
+    disabled = false;
     readonly isNew = input(false);
 
     readonly changed = output<boolean>();

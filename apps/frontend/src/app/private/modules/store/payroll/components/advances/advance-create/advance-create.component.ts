@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, OnInit, OnDestroy, inject } from '@angular/core';
+import { Component, input, output, model, OnDestroy, inject, DestroyRef } from '@angular/core';
 
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { Subject } from 'rxjs';
@@ -25,8 +25,8 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
 ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
-      (isOpenChange)="isOpenChange.emit($event)"
+      [isOpen]="isOpen()"
+      (isOpenChange)="isOpen.set($event)"
       (cancel)="onClose()"
       title="Nuevo Adelanto"
       size="md"
@@ -110,14 +110,21 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
     </app-modal>
   `,
 })
-export class AdvanceCreateComponent implements OnInit, OnDestroy {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() created = new EventEmitter<void>();
+export class AdvanceCreateComponent {
+  readonly isOpen = model<boolean>(false);
+  readonly created = output<void>();
 
   private fb = inject(FormBuilder);
   private payrollService = inject(PayrollService);
   private toastService = inject(ToastService);
+
+  constructor() {
+    inject(DestroyRef).onDestroy(() => this.destroy$.next());
+    this.loadEmployees();
+    const today = toLocalDateString();
+    this.form.patchValue({ advance_date: today });
+  }
+
   private destroy$ = new Subject<void>();
 
   submitting = false;
@@ -137,19 +144,6 @@ export class AdvanceCreateComponent implements OnInit, OnDestroy {
     advance_date: ['', [Validators.required]],
     reason: [''],
   });
-
-  ngOnInit(): void {
-    this.loadEmployees();
-
-    // Set default date to today
-    const today = toLocalDateString();
-    this.form.patchValue({ advance_date: today });
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
 
   private loadEmployees(): void {
     this.payrollService.getEmployees({ status: 'active', limit: 500 })
@@ -189,11 +183,6 @@ export class AdvanceCreateComponent implements OnInit, OnDestroy {
           this.toastService.show({ variant: 'success', description: 'Adelanto creado exitosamente' });
           this.submitting = false;
           this.form.reset({ installments: 1, frequency: 'monthly' });
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
           this.created.emit();
           this.onClose();
         },
@@ -205,6 +194,6 @@ export class AdvanceCreateComponent implements OnInit, OnDestroy {
   }
 
   onClose(): void {
-    this.isOpenChange.emit(false);
+    this.isOpen.set(false);
   }
 }

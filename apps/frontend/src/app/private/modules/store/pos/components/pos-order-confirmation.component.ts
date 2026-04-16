@@ -1,12 +1,10 @@
 import {
   Component,
-  EventEmitter,
-  Input,
-  Output,
-  OnInit,
-  OnChanges,
-  OnDestroy,
+  input,
+  output,
   inject,
+  effect,
+  DestroyRef,
 } from '@angular/core';
 import { Subject, takeUntil, take, filter } from 'rxjs';
 
@@ -35,7 +33,7 @@ import * as InvoicingActions from '../../invoicing/state/actions/invoicing.actio
 ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       [size]="'md'"
       [showCloseButton]="true"
       title="¡Venta Completada!"
@@ -264,12 +262,12 @@ import * as InvoicingActions from '../../invoicing/state/actions/invoicing.actio
     `,
   ],
 })
-export class PosOrderConfirmationComponent implements OnInit, OnChanges, OnDestroy {
-  @Input() isOpen = false;
-  @Input() orderData: any = null;
-  @Output() closed = new EventEmitter<void>();
-  @Output() newSale = new EventEmitter<void>();
-  @Output() viewDetail = new EventEmitter<string>();
+export class PosOrderConfirmationComponent {
+  readonly isOpen = input<boolean>(false);
+  readonly orderData = input<any>(null);
+  readonly closed = output<void>();
+  readonly newSale = output<void>();
+  readonly viewDetail = output<string>();
 
   printing = false;
   emailing = false;
@@ -297,38 +295,37 @@ export class PosOrderConfirmationComponent implements OnInit, OnChanges, OnDestr
   private store = inject(Store);
   private actions$ = inject(Actions);
 
-  ngOnInit(): void {
+  constructor() {
     const user = this.authFacade.getCurrentUser();
     this.cashierName = user ? `${user.first_name} ${user.last_name}` : 'Cajero';
-
-    // Asegurar que la moneda esté cargada para el modal
     this.currencyService.loadCurrency();
-  }
 
-  ngOnChanges(): void {
-    if (this.orderData) {
-      this.loadOrderData();
-    }
-  }
+    inject(DestroyRef).onDestroy(() => {
+      this.destroy$.next();
+      this.destroy$.complete();
+    });
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
+    effect(() => {
+      if (this.orderData()) {
+        this.loadOrderData();
+      }
+    });
   }
 
   private loadOrderData(): void {
-    this.orderId = this.orderData?.id?.toString?.() || null;
-    this.orderNumber = this.orderData.order_number || this.orderData.number || 'N/A';
-    this.currentDate = this.orderData.created_at
-      ? new Date(this.orderData.created_at).toLocaleString('es-AR')
+    const data = this.orderData();
+    this.orderId = data?.id?.toString?.() || null;
+    this.orderNumber = data.order_number || data.number || 'N/A';
+    this.currentDate = data.created_at
+      ? new Date(data.created_at).toLocaleString('es-AR')
       : new Date().toLocaleString('es-AR');
 
     // Show "Consumidor Final" if customer_name is empty or undefined (anonymous sale)
-    this.customerName = this.orderData.customer_name || 'Consumidor Final';
-    this.customerEmail = this.orderData.customer_email || '';
-    this.customerTaxId = this.orderData.customer_tax_id || this.orderData.customer?.tax_id || this.orderData.customer?.document_number || '';
+    this.customerName = data.customer_name || 'Consumidor Final';
+    this.customerEmail = data.customer_email || '';
+    this.customerTaxId = data.customer_tax_id || data.customer?.tax_id || data.customer?.document_number || '';
 
-    this.orderItems = (this.orderData.items || []).map((item: any) => {
+    this.orderItems = (data.items || []).map((item: any) => {
       const unitPrice = Number(item.unit_price || item.unitPrice || 0);
       const quantity = Number(item.quantity || 0);
       const totalPrice = Number(item.total_price || item.totalPrice || 0);
@@ -348,17 +345,17 @@ export class PosOrderConfirmationComponent implements OnInit, OnChanges, OnDestr
       };
     });
 
-    this.orderSubtotal = Number(this.orderData.subtotal || 0);
-    this.orderDiscount = Number(this.orderData.discount_amount || this.orderData.discount || 0);
-    this.orderTax = Number(this.orderData.tax_amount || this.orderData.tax || 0);
-    this.orderTotal = Number(this.orderData.total_amount || this.orderData.total || 0);
+    this.orderSubtotal = Number(data.subtotal || 0);
+    this.orderDiscount = Number(data.discount_amount || data.discount || 0);
+    this.orderTax = Number(data.tax_amount || data.tax || 0);
+    this.orderTotal = Number(data.total_amount || data.total || 0);
 
-    if (this.orderData.payment) {
+    if (data.payment) {
       this.paymentInfo = {
-        method: this.orderData.payment.payment_method || this.orderData.payment.method || 'Pago',
-        amount: Number(this.orderData.payment.amount || this.orderTotal),
+        method: data.payment.payment_method || data.payment.method || 'Pago',
+        amount: Number(data.payment.amount || this.orderTotal),
       };
-    } else if (this.orderData.isCreditSale) {
+    } else if (data.isCreditSale) {
       this.paymentInfo = {
         method: 'Venta a Crédito',
         amount: this.orderTotal,
@@ -367,23 +364,18 @@ export class PosOrderConfirmationComponent implements OnInit, OnChanges, OnDestr
   }
 
   onModalClosed(): void {
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
     this.closed.emit();
   }
 
   printReceipt(): void {
-    if (!this.orderData) return;
+    if (!this.orderData()) return;
 
     this.printing = true;
 
     // Create TicketData from orderData
     const ticketData: any = {
       id: this.orderNumber,
-      date: new Date(this.orderData.created_at || new Date()),
+      date: new Date(this.orderData().created_at || new Date()),
       items: this.orderItems.map(item => ({
         id: item.id || item.name,
         name: item.name,
@@ -424,8 +416,8 @@ export class PosOrderConfirmationComponent implements OnInit, OnChanges, OnDestr
       },
       cashier: this.cashierName,
       transactionId: this.orderNumber,
-      invoiceDataToken: this.orderData?.invoiceDataToken,
-      invoiceDataQrUrl: this.orderData?.invoiceDataQrUrl,
+      invoiceDataToken: this.orderData()?.invoiceDataToken,
+      invoiceDataQrUrl: this.orderData()?.invoiceDataQrUrl,
     };
 
     this.ticketService.printTicket(ticketData, { printReceipt: true }).subscribe({
@@ -460,11 +452,6 @@ export class PosOrderConfirmationComponent implements OnInit, OnChanges, OnDestr
   }
 
   startNewSale(): void {
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
     this.newSale.emit();
   }
 

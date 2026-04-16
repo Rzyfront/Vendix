@@ -1,4 +1,12 @@
-import { Component, OnInit, inject, signal, computed } from '@angular/core';
+import {
+  Component,
+  OnInit,
+  inject,
+  signal,
+  computed,
+  model,
+  input,
+} from '@angular/core';
 
 import { RouterModule } from '@angular/router';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
@@ -37,8 +45,8 @@ import { formatDateOnlyUTC } from '../../../../../shared/utils/date.util';
     InputsearchComponent,
     ResponsiveDataViewComponent,
     IconComponent,
-    CardComponent
-],
+    CardComponent,
+  ],
   template: `
     <div class="md:space-y-4">
       <!-- Stats -->

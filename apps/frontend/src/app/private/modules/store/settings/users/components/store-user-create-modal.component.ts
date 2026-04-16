@@ -1,8 +1,8 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
+  input,
+  output,
+  model,
   OnDestroy,
   inject,
 } from '@angular/core';
@@ -30,11 +30,11 @@ import { Subject, takeUntil } from 'rxjs';
     ReactiveFormsModule,
     InputComponent,
     ButtonComponent,
-    ModalComponent
-],
+    ModalComponent,
+  ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
@@ -43,7 +43,6 @@ import { Subject, takeUntil } from 'rxjs';
     >
       <form [formGroup]="userForm" (ngSubmit)="onSubmit()">
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-
           <app-input
             formControlName="first_name"
             label="Nombre *"
@@ -91,7 +90,6 @@ import { Subject, takeUntil } from 'rxjs';
             [disabled]="isCreating"
             helpText="Minimo 8 caracteres, debe incluir mayuscula, minuscula, numero y caracter especial"
           ></app-input>
-
         </div>
       </form>
 
@@ -123,9 +121,9 @@ import { Subject, takeUntil } from 'rxjs';
   ],
 })
 export class StoreUserCreateModalComponent implements OnDestroy {
-  @Input() isOpen: boolean = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() onUserCreated = new EventEmitter<void>();
+  readonly isOpen = model<boolean>(false);
+  readonly isOpenChange = output<boolean>();
+  readonly onUserCreated = output<void>();
 
   userForm: FormGroup;
   isCreating: boolean = false;
@@ -203,8 +201,7 @@ export class StoreUserCreateModalComponent implements OnDestroy {
         error: (error: any) => {
           this.isCreating = false;
           console.error('Error creating store user:', error);
-          const message =
-            error?.error?.message || 'Error al crear el usuario';
+          const message = error?.error?.message || 'Error al crear el usuario';
           this.toastService.error(message);
         },
       });

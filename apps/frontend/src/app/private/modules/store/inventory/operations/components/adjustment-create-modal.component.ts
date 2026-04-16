@@ -1,11 +1,10 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
-  OnChanges,
-  SimpleChanges,
+  input,
+  output,
   inject,
+  effect,
+  signal,
   ViewChild,
 } from '@angular/core';
 
@@ -45,7 +44,7 @@ import {
 ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       [title]="modalTitle"
       size="md"
       (closed)="onCancel()"
@@ -68,7 +67,7 @@ import {
           <div>
             <label class="block text-sm font-medium text-text-secondary mb-2">Ubicacion *</label>
             <app-selector
-              [options]="locations"
+              [options]="locations()"
               [ngModel]="selectedLocation"
               placeholder="Seleccionar ubicacion"
               (ngModelChange)="onLocationChange($event)"
@@ -82,7 +81,7 @@ import {
             </div>
           }
 
-          @if (isLoadingPreselectedStock) {
+          @if (isLoadingPreselectedStock()) {
             <div class="p-4 text-center">
               <div class="inline-block w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin mb-2"></div>
               <p class="text-sm text-text-secondary">Consultando stock del producto...</p>
@@ -116,9 +115,9 @@ import {
           </div>
 
           <!-- Search Results -->
-          @if (productSearchResults.length > 0) {
+          @if (productSearchResults().length > 0) {
             <div class="max-h-48 overflow-y-auto border border-border rounded-xl divide-y divide-border">
-              @for (product of productSearchResults; track product.id) {
+              @for (product of productSearchResults(); track product.id) {
                 <button
                   type="button"
                   class="w-full p-3 text-left hover:bg-primary/5 transition-colors"
@@ -444,8 +443,8 @@ import {
             variant="primary"
             type="button"
             (clicked)="onSubmitAndComplete()"
-            [loading]="isSubmitting"
-            [disabled]="isSubmitting || hasMissingType()"
+            [loading]="isSubmitting()"
+            [disabled]="isSubmitting() || hasMissingType()"
             customClasses="!rounded-xl font-bold shadow-md shadow-primary-200 active:scale-95 transition-all !w-full !justify-center !py-3.5 !text-base"
           >
             <app-icon name="check-circle" [size]="18" class="mr-2" slot="icon"></app-icon>
@@ -456,8 +455,8 @@ import {
             variant="primary"
             type="button"
             (clicked)="onSubmitDraft()"
-            [loading]="isSubmitting"
-            [disabled]="isSubmitting || hasMissingType()"
+            [loading]="isSubmitting()"
+            [disabled]="isSubmitting() || hasMissingType()"
             customClasses="!rounded-xl font-bold shadow-md shadow-primary-200 active:scale-95 transition-all !w-full !justify-center !py-3.5 !text-base"
           >
             <app-icon name="file-text" [size]="18" class="mr-2" slot="icon"></app-icon>
@@ -489,7 +488,7 @@ import {
               <button
                 type="button"
                 (click)="onSubmitDraft()"
-                [disabled]="isSubmitting || hasMissingType()"
+                [disabled]="isSubmitting() || hasMissingType()"
                 class="text-[var(--color-text-tertiary)] hover:text-[var(--color-text-secondary)] transition-colors p-1 disabled:opacity-40"
               >
                 <app-icon name="save" [size]="22"></app-icon>
@@ -498,7 +497,7 @@ import {
               <button
                 type="button"
                 (click)="onSubmitAndComplete()"
-                [disabled]="isSubmitting || !confirmCreate || hasMissingType()"
+                [disabled]="isSubmitting() || !confirmCreate || hasMissingType()"
                 class="text-[var(--color-text-tertiary)] transition-colors p-1 disabled:opacity-40"
               >
                 <app-icon name="check-circle" [size]="22"></app-icon>
@@ -510,18 +509,18 @@ import {
     </app-modal>
   `,
 })
-export class AdjustmentCreateModalComponent implements OnChanges {
+export class AdjustmentCreateModalComponent {
   private inventoryService = inject(InventoryService);
 
-  @Input() isOpen = false;
-  @Input() isSubmitting = false;
-  @Input() locations: SelectorOption[] = [];
-  @Input() preselectedProduct: PreselectedProduct | null = null;
+  readonly isOpen = input(false);
+  readonly isSubmitting = input(false);
+  readonly locations = input<SelectorOption[]>([]);
+  readonly preselectedProduct = input<PreselectedProduct | null>(null);
 
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() cancel = new EventEmitter<void>();
-  @Output() save = new EventEmitter<BatchCreateAdjustmentsRequest>();
-  @Output() saveAndComplete = new EventEmitter<BatchCreateAdjustmentsRequest>();
+  readonly isOpenChange = output<boolean>();
+  readonly cancel = output<void>();
+  readonly save = output<BatchCreateAdjustmentsRequest>();
+  readonly saveAndComplete = output<BatchCreateAdjustmentsRequest>();
 
   currentStep = 1;
   steps: StepsLineItem[] = [
@@ -535,14 +534,14 @@ export class AdjustmentCreateModalComponent implements OnChanges {
 
   // Step 2
   @ViewChild('productSearch') productSearchRef?: InputsearchComponent;
-  productSearchResults: AdjustableProduct[] = [];
+  readonly productSearchResults = signal<AdjustableProduct[]>([]);
   adjustmentItems: AdjustmentItem[] = [];
 
   // Step 3
   confirmCreate = false;
 
   // Preselected product loading
-  isLoadingPreselectedStock = false;
+  readonly isLoadingPreselectedStock = signal(false);
 
   adjustmentTypes: { label: string; value: AdjustmentType; icon: string }[] = [
     { label: 'Dano', value: 'damage', icon: 'alert-triangle' },
@@ -553,7 +552,7 @@ export class AdjustmentCreateModalComponent implements OnChanges {
     { label: 'Correccion', value: 'manual_correction', icon: 'edit-3' },
   ];
 
-  get hasPreselected(): boolean { return !!this.preselectedProduct; }
+  get hasPreselected(): boolean { return !!this.preselectedProduct(); }
 
   get isLocationStep(): boolean { return this.currentStep === 1; }
   get isProductsStep(): boolean { return !this.hasPreselected && this.currentStep === 2; }
@@ -565,33 +564,35 @@ export class AdjustmentCreateModalComponent implements OnChanges {
     return 'Confirmar Ajustes';
   }
 
-  ngOnChanges(changes: SimpleChanges): void {
-    if (changes['isOpen'] && this.isOpen) {
-      this.resetModal();
-    }
+  constructor() {
+    effect(() => {
+      if (this.isOpen()) {
+        this.resetModal();
+      }
+    });
   }
 
   onLocationChange(value: any): void {
     this.selectedLocation = value ? +value : null;
     this.adjustmentItems = [];
-    this.productSearchResults = [];
+    this.productSearchResults.set([]);
   }
 
   searchProducts(term: string): void {
     if (!term || term.length < 2 || !this.selectedLocation) {
-      this.productSearchResults = [];
+      this.productSearchResults.set([]);
       return;
     }
 
     this.inventoryService.searchAdjustableProducts(term, this.selectedLocation).subscribe({
       next: (response) => {
         const products = response.data || [];
-        this.productSearchResults = products.filter(
-          (p) => !this.adjustmentItems.some((ai) => ai.product_id === p.id),
+        this.productSearchResults.set(
+          products.filter((p) => !this.adjustmentItems.some((ai) => ai.product_id === p.id)),
         );
       },
       error: () => {
-        this.productSearchResults = [];
+        this.productSearchResults.set([]);
       },
     });
   }
@@ -612,7 +613,7 @@ export class AdjustmentCreateModalComponent implements OnChanges {
         description: '',
       },
     ];
-    this.productSearchResults = [];
+    this.productSearchResults.set([]);
     this.productSearchRef?.clearInput();
   }
 
@@ -642,7 +643,7 @@ export class AdjustmentCreateModalComponent implements OnChanges {
 
   getLocationName(id: number | null): string {
     if (!id) return '-';
-    return this.locations.find((l) => l.value === id)?.label || '-';
+    return this.locations().find((l) => l.value === id)?.label || '-';
   }
 
   getQuantityChange(item: AdjustmentItem): number {
@@ -683,7 +684,7 @@ export class AdjustmentCreateModalComponent implements OnChanges {
 
   canAdvance(): boolean {
     if (this.currentStep === 1) {
-      return !!this.selectedLocation && !this.isLoadingPreselectedStock;
+      return !!this.selectedLocation && !this.isLoadingPreselectedStock();
     }
     if (this.isProductsStep) {
       return this.adjustmentItems.length > 0 && !this.hasMissingType();
@@ -708,8 +709,8 @@ export class AdjustmentCreateModalComponent implements OnChanges {
   }
 
   private loadPreselectedProductStock(): void {
-    const product = this.preselectedProduct!;
-    this.isLoadingPreselectedStock = true;
+    const product = this.preselectedProduct()!;
+    this.isLoadingPreselectedStock.set(true);
 
     this.inventoryService.searchAdjustableProducts(product.name, this.selectedLocation!).subscribe({
       next: (response) => {
@@ -733,7 +734,7 @@ export class AdjustmentCreateModalComponent implements OnChanges {
           }];
         }
 
-        this.isLoadingPreselectedStock = false;
+        this.isLoadingPreselectedStock.set(false);
         this.currentStep = 2;
         this.steps = this.steps.map((s, i) => ({
           ...s,
@@ -741,7 +742,7 @@ export class AdjustmentCreateModalComponent implements OnChanges {
         }));
       },
       error: () => {
-        this.isLoadingPreselectedStock = false;
+        this.isLoadingPreselectedStock.set(false);
         // Fallback: add with 0 stock
         this.adjustmentItems = [{
           product_id: product.id,
@@ -764,11 +765,6 @@ export class AdjustmentCreateModalComponent implements OnChanges {
 
   onCancel(): void {
     this.resetModal();
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
     this.cancel.emit();
   }
 
@@ -813,10 +809,10 @@ export class AdjustmentCreateModalComponent implements OnChanges {
           { label: 'CONFIRMAR', completed: false },
         ];
     this.selectedLocation = null;
-    this.productSearchResults = [];
+    this.productSearchResults.set([]);
     this.adjustmentItems = [];
     this.productSearchRef?.clearInput();
     this.confirmCreate = false;
-    this.isLoadingPreselectedStock = false;
+    this.isLoadingPreselectedStock.set(false);
   }
 }

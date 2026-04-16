@@ -1,12 +1,13 @@
-import { Component, OnInit, OnDestroy, computed, signal, inject } from '@angular/core';
+import { Component, DestroyRef, computed, signal, inject } from '@angular/core';
 
 import {
   FormBuilder,
   FormGroup,
+  FormsModule,
   Validators,
   ReactiveFormsModule,
 } from '@angular/forms';
-import { Subject, takeUntil, map, startWith, take } from 'rxjs';
+import { Subject, takeUntil, map, startWith } from 'rxjs';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
@@ -48,6 +49,7 @@ import type { Currency } from '../../../../shared/pipes/currency';
   standalone: true,
   imports: [
     ReactiveFormsModule,
+    FormsModule,
     IconComponent,
     ButtonComponent,
     InputComponent,
@@ -61,7 +63,7 @@ import type { Currency } from '../../../../shared/pipes/currency';
   templateUrl: './ecommerce.component.html',
   styleUrls: ['./ecommerce.component.scss'],
 })
-export class EcommerceComponent implements OnInit, OnDestroy {
+export class EcommerceComponent {
   private fb = inject(FormBuilder);
   private ecommerceService = inject(EcommerceService);
   private toastService = inject(ToastService);
@@ -72,6 +74,7 @@ export class EcommerceComponent implements OnInit, OnDestroy {
   private router = inject(Router);
   private shippingMethodsService = inject(ShippingMethodsService);
   private tourService = inject(TourService);
+  private destroyRef = inject(DestroyRef);
 
   private destroy$ = new Subject<void>();
 
@@ -88,7 +91,7 @@ export class EcommerceComponent implements OnInit, OnDestroy {
 
   // Form & UI state
   settingsForm: FormGroup = this.createForm();
-  isLoading = false;
+  readonly isLoading = signal(false);
   isSaving = signal(false);
   hasShippingMethods = signal<boolean | null>(null);
 
@@ -171,30 +174,20 @@ export class EcommerceComponent implements OnInit, OnDestroy {
   });
 
   constructor() {
-    // Sincronizar trigger con cambios del formulario
     this.settingsForm.valueChanges.pipe(takeUntil(this.destroy$)).subscribe(() => this.formUpdateTrigger.update(v => v + 1));
     this.settingsForm.statusChanges.pipe(takeUntil(this.destroy$)).subscribe(() => this.formUpdateTrigger.update(v => v + 1));
-  }
 
-  ngOnInit(): void {
-    // Check if should show ecommerce tour
     this.checkAndStartEcommerceTour();
-
-    // Configurar prefijo +57 para WhatsApp ANTES de cargar datos
     this.setupWhatsappPrefixEnforcement();
-
     this.loadSettings();
-    // Asegurar que la moneda esté cargada
     this.currencyService.loadCurrency();
-    // Cargar monedas activas para el selector
     this.loadCurrencies();
-    // Verificar estado de métodos de envío
     this.checkShippingStatus();
-  }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
+    this.destroyRef.onDestroy(() => {
+      this.destroy$.next();
+      this.destroy$.complete();
+    });
   }
 
   /**
@@ -338,7 +331,7 @@ export class EcommerceComponent implements OnInit, OnDestroy {
    * Load settings and determine mode (setup vs edit)
    */
   private loadSettings(): void {
-    this.isLoading = true;
+    this.isLoading.set(true);
     this.ecommerceService
       .getSettings()
       .pipe(takeUntil(this.destroy$))
@@ -390,13 +383,13 @@ export class EcommerceComponent implements OnInit, OnDestroy {
             this.ecommerceUrl = null;
             this.loadTemplate();
           }
-          this.isLoading = false;
+          this.isLoading.set(false);
         },
         error: (error) => {
           this.toastService.error(
             'Error al cargar configuración: ' + error.message,
           );
-          this.isLoading = false;
+          this.isLoading.set(false);
         },
       });
   }
@@ -405,7 +398,7 @@ export class EcommerceComponent implements OnInit, OnDestroy {
    * Load default template (used in setup mode)
    */
   private loadTemplate(): void {
-    this.isLoading = true;
+    this.isLoading.set(true);
     this.ecommerceService
       .getTemplate('basic')
       .pipe(takeUntil(this.destroy$))
@@ -418,11 +411,11 @@ export class EcommerceComponent implements OnInit, OnDestroy {
           if (template.footer) {
             this.footerSettings = template.footer;
           }
-          this.isLoading = false;
+          this.isLoading.set(false);
         },
         error: (error) => {
           this.toastService.error('Error al cargar template: ' + error.message);
-          this.isLoading = false;
+          this.isLoading.set(false);
         },
       });
   }
@@ -923,26 +916,25 @@ export class EcommerceComponent implements OnInit, OnDestroy {
    * Sincronizar colores desde el branding de la tienda (source of truth)
    */
   syncColorsFromBranding(): void {
-    this.store.select(selectStoreSettings).pipe(take(1)).subscribe((storeSettings: any) => {
-      const branding = storeSettings?.branding;
+    const storeSettings: any = this.store.selectSignal(selectStoreSettings)();
+    const branding = storeSettings?.branding;
 
-      if (!branding) {
-        this.toastService.warning('No se encontró configuración de branding');
-        return;
-      }
+    if (!branding) {
+      this.toastService.warning('No se encontró configuración de branding');
+      return;
+    }
 
-      const coloresGroup = this.settingsForm.get('inicio.colores') as FormGroup;
-      if (coloresGroup) {
-        coloresGroup.patchValue({
-          primary_color: branding.primary_color || '#3B82F6',
-          secondary_color: branding.secondary_color || '#10B981',
-          accent_color: branding.accent_color || '#F59E0B',
-        });
-        this.settingsForm.markAsDirty();
-        this.formUpdateTrigger.update(v => v + 1);
-        this.toastService.success('Colores sincronizados desde el branding de la tienda');
-      }
-    });
+    const coloresGroup = this.settingsForm.get('inicio.colores') as FormGroup;
+    if (coloresGroup) {
+      coloresGroup.patchValue({
+        primary_color: branding.primary_color || '#3B82F6',
+        secondary_color: branding.secondary_color || '#10B981',
+        accent_color: branding.accent_color || '#F59E0B',
+      });
+      this.settingsForm.markAsDirty();
+      this.formUpdateTrigger.update(v => v + 1);
+      this.toastService.success('Colores sincronizados desde el branding de la tienda');
+    }
   }
 
   /**

@@ -1,11 +1,12 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
+  input,
+  output,
+  model,
   OnChanges,
   SimpleChanges,
   inject,
+  signal,
 } from '@angular/core';
 
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
@@ -31,30 +32,30 @@ import {
     ButtonComponent,
     InputComponent,
     SelectorComponent,
-    TextareaComponent
-],
+    TextareaComponent,
+  ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onClose()"
       title="Registrar Cobro"
       size="md"
     >
-      @if (receivable) {
+      @if (receivable(); as receivableData) {
         <div class="p-4 space-y-4">
           <!-- Account Info -->
           <div class="p-3 bg-gray-50 rounded-lg space-y-1">
             <div class="flex justify-between text-sm">
               <span class="text-gray-500">Cliente</span>
               <span class="font-medium">{{
-                receivable.customer?.name || '—'
+                receivableData.customer?.name || '—'
               }}</span>
             </div>
             <div class="flex justify-between text-sm">
               <span class="text-gray-500">Documento</span>
               <span class="font-mono">{{
-                receivable.document_number || '—'
+                receivableData.document_number || '—'
               }}</span>
             </div>
             <div class="flex justify-between text-sm">
@@ -78,10 +79,10 @@ import {
 
             <!-- Payment Method (optional for AR) -->
             <app-selector
-              label="Metodo de Pago"
+              label="Método de Pago"
               formControlName="payment_method"
               [options]="payment_method_options"
-              placeholder="Seleccionar metodo"
+              placeholder="Seleccionar método"
               (valueChange)="form.get('payment_method')!.setValue('' + $event)"
             ></app-selector>
 
@@ -90,7 +91,7 @@ import {
               label="Referencia"
               formControlName="reference"
               [control]="form.get('reference')"
-              placeholder="Numero de transaccion, recibo, etc."
+              placeholder="Número de transacción, recibo, etc."
             ></app-input>
 
             <!-- Notes -->
@@ -111,8 +112,8 @@ import {
             <app-button
               variant="primary"
               (clicked)="onSubmit()"
-              [loading]="is_submitting"
-              [disabled]="form.invalid || is_submitting"
+              [loading]="is_submitting()"
+              [disabled]="form.invalid || is_submitting()"
             >
               Registrar Cobro
             </app-button>
@@ -123,17 +124,17 @@ import {
   `,
 })
 export class ReceivablePaymentModalComponent implements OnChanges {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Input() receivable: AccountReceivable | null = null;
-  @Output() saved = new EventEmitter<void>();
+  readonly isOpen = model<boolean>(false);
+  readonly isOpenChange = output<boolean>();
+  readonly receivable = model<AccountReceivable | null>(null);
+  readonly saved = output<void>();
 
   private fb = inject(FormBuilder);
   private carteraService = inject(CarteraService);
   private currencyService = inject(CurrencyFormatService);
   private toastService = inject(ToastService);
 
-  is_submitting = false;
+  readonly is_submitting = signal(false);
 
   payment_method_options = [
     { value: 'cash', label: 'Efectivo' },
@@ -149,24 +150,27 @@ export class ReceivablePaymentModalComponent implements OnChanges {
   });
 
   get formatted_balance(): string {
-    return this.currencyService.format(this.receivable?.balance || 0);
+    const rec = this.receivable();
+    return this.currencyService.format(rec?.balance || 0);
   }
 
   ngOnChanges(changes: SimpleChanges): void {
-    if (changes['isOpen'] && this.isOpen && this.receivable) {
+    const currentRec = this.receivable();
+    if (changes['isOpen'] && this.isOpen() && currentRec) {
       this.form.reset();
-      this.form.patchValue({ amount: this.receivable.balance });
+      this.form.patchValue({ amount: currentRec.balance });
     }
   }
 
   onSubmit(): void {
-    if (this.form.invalid || !this.receivable) return;
+    const currentRec = this.receivable();
+    if (this.form.invalid || !currentRec) return;
 
     const val = this.form.value;
-    this.is_submitting = true;
+    this.is_submitting.set(true);
 
     this.carteraService
-      .registerArPayment(this.receivable.id, {
+      .registerArPayment(currentRec.id, {
         amount: Number(val.amount),
         payment_method: val.payment_method || undefined,
         reference: val.reference || undefined,
@@ -174,18 +178,13 @@ export class ReceivablePaymentModalComponent implements OnChanges {
       })
       .subscribe({
         next: () => {
-          this.is_submitting = false;
+          this.is_submitting.set(false);
           this.toastService.success('Cobro registrado exitosamente');
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
           this.saved.emit();
           this.onClose();
         },
         error: () => {
-          this.is_submitting = false;
+          this.is_submitting.set(false);
           this.toastService.error('Error al registrar el cobro');
         },
       });

@@ -1,6 +1,7 @@
-import { Component, OnInit, inject, signal, computed } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject, signal, computed, DestroyRef } from '@angular/core';
+import { DatePipe, NgClass } from '@angular/common';
 import { ActivatedRoute, RouterModule } from '@angular/router';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { LayawayApiService } from '../../services/layaway.service';
@@ -19,16 +20,20 @@ import { TableColumn, TableComponent } from '../../../../../../shared/components
 @Component({
   selector: 'app-layaway-detail-page',
   standalone: true,
-  imports: [CommonModule, RouterModule, IconComponent, FormsModule, ModalComponent, StatsComponent, StickyHeaderComponent, CardComponent, BadgeComponent, CurrencyPipe, TableComponent],
+  imports: [RouterModule, IconComponent, FormsModule, ModalComponent, StatsComponent, StickyHeaderComponent, CardComponent, BadgeComponent, CurrencyPipe, TableComponent,
+    DatePipe,
+    NgClass,
+  ],
   templateUrl: './layaway-detail-page.component.html',
   styleUrls: ['./layaway-detail-page.component.scss'],
 })
-export class LayawayDetailPageComponent implements OnInit {
+export class LayawayDetailPageComponent {
   private route = inject(ActivatedRoute);
   private layaway_service = inject(LayawayApiService);
   private toast = inject(ToastService);
   private payment_methods_service = inject(PaymentMethodsService);
   private currencyFormat = inject(CurrencyFormatService);
+  private destroyRef = inject(DestroyRef);
 
   plan = signal<LayawayPlan | null>(null);
   loading = signal(true);
@@ -53,16 +58,16 @@ export class LayawayDetailPageComponent implements OnInit {
   // Payment modal
   showPaymentModal = signal(false);
   selectedInstallment = signal<LayawayInstallment | null>(null);
-  paymentAmount = 0;
-  paymentMethodId: number | null = null;
-  paymentReference = '';
-  paymentNotes = '';
+  paymentAmount = signal(0);
+  paymentMethodId = signal<number | null>(null);
+  paymentReference = signal('');
+  paymentNotes = signal('');
   isProcessingPayment = signal(false);
   paymentMethods = signal<any[]>([]);
 
   // Cancel modal
   showCancelModal = signal(false);
-  cancelReason = '';
+  cancelReason = signal('');
   isProcessingCancel = signal(false);
 
   // Complete confirmation
@@ -71,31 +76,35 @@ export class LayawayDetailPageComponent implements OnInit {
 
   // Modify installments modal
   showModifyModal = signal(false);
-  modifiedInstallments: { amount: number; due_date: string }[] = [];
+  modifiedInstallments = signal<{ amount: number; due_date: string }[]>([]);
   isProcessingModify = signal(false);
 
-  ngOnInit() {
+  constructor() {
     const id = Number(this.route.snapshot.paramMap.get('id'));
     this.loadPlan(id);
-    this.payment_methods_service.getStorePaymentMethods({ is_active: true } as any).subscribe({
-      next: (response: any) => {
-        const methods = response.data || response;
-        this.paymentMethods.set(Array.isArray(methods) ? methods : []);
-      },
-    });
+    this.payment_methods_service.getStorePaymentMethods({ is_active: true } as any)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response: any) => {
+          const methods = response.data || response;
+          this.paymentMethods.set(Array.isArray(methods) ? methods : []);
+        },
+      });
   }
 
   loadPlan(id: number) {
     this.loading.set(true);
-    this.layaway_service.getById(id).subscribe({
-      next: (response) => {
-        this.plan.set(response.data);
-        this.loading.set(false);
-      },
-      error: () => {
-        this.loading.set(false);
-      },
-    });
+    this.layaway_service.getById(id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          this.plan.set(response.data);
+          this.loading.set(false);
+        },
+        error: () => {
+          this.loading.set(false);
+        },
+      });
   }
 
   getStateLabel(state: string): string {
@@ -188,10 +197,10 @@ export class LayawayDetailPageComponent implements OnInit {
   // Payment modal methods
   openPaymentModal(installment: LayawayInstallment): void {
     this.selectedInstallment.set(installment);
-    this.paymentAmount = Number(installment.amount);
-    this.paymentMethodId = null;
-    this.paymentReference = '';
-    this.paymentNotes = '';
+    this.paymentAmount.set(Number(installment.amount));
+    this.paymentMethodId.set(null);
+    this.paymentReference.set('');
+    this.paymentNotes.set('');
     this.showPaymentModal.set(true);
   }
 
@@ -208,10 +217,10 @@ export class LayawayDetailPageComponent implements OnInit {
     this.isProcessingPayment.set(true);
     this.layaway_service.makePayment(plan.id, {
       installment_id: installment.id,
-      amount: this.paymentAmount,
-      store_payment_method_id: this.paymentMethodId || undefined,
-      transaction_id: this.paymentReference || undefined,
-      notes: this.paymentNotes || undefined,
+      amount: this.paymentAmount(),
+      store_payment_method_id: this.paymentMethodId() || undefined,
+      transaction_id: this.paymentReference() || undefined,
+      notes: this.paymentNotes() || undefined,
     }).subscribe({
       next: () => {
         this.isProcessingPayment.set(false);
@@ -228,7 +237,7 @@ export class LayawayDetailPageComponent implements OnInit {
 
   // Cancel modal methods
   openCancelModal(): void {
-    this.cancelReason = '';
+    this.cancelReason.set('');
     this.showCancelModal.set(true);
   }
 
@@ -238,10 +247,10 @@ export class LayawayDetailPageComponent implements OnInit {
 
   submitCancel(): void {
     const plan = this.plan();
-    if (!plan || !this.cancelReason.trim()) return;
+    if (!plan || !this.cancelReason().trim()) return;
 
     this.isProcessingCancel.set(true);
-    this.layaway_service.cancel(plan.id, { cancellation_reason: this.cancelReason }).subscribe({
+    this.layaway_service.cancel(plan.id, { cancellation_reason: this.cancelReason() }).subscribe({
       next: () => {
         this.isProcessingCancel.set(false);
         this.closeCancelModal();
@@ -287,9 +296,11 @@ export class LayawayDetailPageComponent implements OnInit {
   openModifyModal(): void {
     const plan = this.plan();
     if (!plan) return;
-    this.modifiedInstallments = (plan.layaway_installments || [])
-      .filter(i => i.state === 'pending' || i.state === 'overdue')
-      .map(i => ({ amount: Number(i.amount), due_date: i.due_date.split('T')[0] }));
+    this.modifiedInstallments.set(
+      (plan.layaway_installments || [])
+        .filter(i => i.state === 'pending' || i.state === 'overdue')
+        .map(i => ({ amount: Number(i.amount), due_date: i.due_date.split('T')[0] }))
+    );
     this.showModifyModal.set(true);
   }
 
@@ -298,21 +309,34 @@ export class LayawayDetailPageComponent implements OnInit {
   }
 
   addInstallment(): void {
-    const last = this.modifiedInstallments[this.modifiedInstallments.length - 1];
+    const list = this.modifiedInstallments();
+    const last = list[list.length - 1];
     const next_date = last ? new Date(last.due_date) : new Date();
     next_date.setMonth(next_date.getMonth() + 1);
-    this.modifiedInstallments.push({
-      amount: 0,
-      due_date: toLocalDateString(next_date),
-    });
+    this.modifiedInstallments.set([
+      ...list,
+      { amount: 0, due_date: toLocalDateString(next_date) },
+    ]);
   }
 
   removeInstallment(index: number): void {
-    this.modifiedInstallments.splice(index, 1);
+    this.modifiedInstallments.update(list => list.filter((_, i) => i !== index));
+  }
+
+  updateInstallmentAmount(index: number, amount: number): void {
+    this.modifiedInstallments.update(list =>
+      list.map((it, i) => i === index ? { ...it, amount } : it)
+    );
+  }
+
+  updateInstallmentDueDate(index: number, date: string): void {
+    this.modifiedInstallments.update(list =>
+      list.map((it, i) => i === index ? { ...it, due_date: date } : it)
+    );
   }
 
   getModifyTotal(): number {
-    return this.modifiedInstallments.reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
+    return this.modifiedInstallments().reduce((sum, i) => sum + (Number(i.amount) || 0), 0);
   }
 
   isModifyTotalValid(): boolean {
@@ -327,7 +351,7 @@ export class LayawayDetailPageComponent implements OnInit {
 
     this.isProcessingModify.set(true);
     this.layaway_service.modifyInstallments(plan.id, {
-      installments: this.modifiedInstallments,
+      installments: this.modifiedInstallments(),
     }).subscribe({
       next: () => {
         this.isProcessingModify.set(false);

@@ -1,5 +1,5 @@
-import { Component, inject, OnInit } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject } from '@angular/core';
+import { AsyncPipe } from '@angular/common';
 import { Store } from '@ngrx/store';
 import { Observable, map } from 'rxjs';
 import {
@@ -13,7 +13,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 @Component({
   selector: 'vendix-expenses-stats',
   standalone: true,
-  imports: [CommonModule, StatsComponent],
+  imports: [AsyncPipe, StatsComponent],
   styleUrls: ['./expenses-stats.component.scss'],
   template: `
     <ng-container>
@@ -55,11 +55,11 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
     </ng-container>
   `,
 })
-export class ExpensesStatsComponent implements OnInit {
+export class ExpensesStatsComponent {
   private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
 
-  ngOnInit(): void {
+  constructor() {
     this.currencyService.loadCurrency();
   }
 

@@ -1,5 +1,5 @@
-import { Component, input, output, signal, computed, inject, effect, ChangeDetectionStrategy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input, output, signal, computed, inject, effect } from '@angular/core';
+import { CurrencyPipe, DatePipe, NgClass } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { ModalComponent, IconComponent, SpinnerComponent, TooltipComponent } from '../../../../../../shared/components';
@@ -12,10 +12,13 @@ import { finalize } from 'rxjs';
 @Component({
   selector: 'app-booking-detail-modal',
   standalone: true,
-  imports: [CommonModule, FormsModule, ModalComponent, IconComponent, SpinnerComponent, TooltipComponent],
+  imports: [FormsModule, ModalComponent, IconComponent, SpinnerComponent, TooltipComponent,
+    CurrencyPipe,
+    DatePipe,
+    NgClass,
+  ],
   templateUrl: './booking-detail-modal.component.html',
   styleUrls: ['./booking-detail-modal.component.scss'],
-  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class BookingDetailModalComponent {
   private reservationsService = inject(ReservationsService);

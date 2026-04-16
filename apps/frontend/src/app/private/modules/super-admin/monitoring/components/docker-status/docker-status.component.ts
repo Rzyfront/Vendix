@@ -1,4 +1,4 @@
-import { Component, Input, ChangeDetectionStrategy, input } from '@angular/core';
+import { Component, input } from '@angular/core';
 
 import { ProcessInfo } from '../../interfaces';
 import { formatBytes } from '../../../../../../core/utils/format.utils';
@@ -8,7 +8,6 @@ import { CardComponent } from '../../../../../../shared/components/card/card.com
   selector: 'app-process-info',
   standalone: true,
   imports: [CardComponent],
-  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <app-card
       [padding]="false"
@@ -28,7 +27,7 @@ import { CardComponent } from '../../../../../../shared/components/card/card.com
         </h4>
         <span
           class="ml-auto text-xs font-mono px-2 py-0.5 rounded-full bg-green-500/10 text-green-600"
-          >PID {{ info?.pid }}</span
+          >PID {{ info()?.pid }}</span
         >
       </div>
 
@@ -45,7 +44,7 @@ import { CardComponent } from '../../../../../../shared/components/card/card.com
         </div>
       }
 
-      @if (!loading() && info) {
+      @if (!loading() && info()) {
         <div class="p-4">
           <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
             <div
@@ -62,7 +61,7 @@ import { CardComponent } from '../../../../../../shared/components/card/card.com
                 class="font-mono text-sm font-bold"
                 style="color: var(--color-text-primary);"
               >
-                {{ info.nodeVersion }}
+                {{ info()!.nodeVersion }}
               </p>
             </div>
             <div
@@ -79,7 +78,7 @@ import { CardComponent } from '../../../../../../shared/components/card/card.com
                 class="font-mono text-sm font-bold"
                 style="color: var(--color-text-primary);"
               >
-                {{ formatUptime(info.uptime) }}
+                {{ formatUptime(info()!.uptime) }}
               </p>
             </div>
             <div
@@ -96,10 +95,10 @@ import { CardComponent } from '../../../../../../shared/components/card/card.com
                 class="font-mono text-sm font-bold"
                 style="color: var(--color-text-primary);"
               >
-                {{ formatBytes(info.memoryHeapUsed) }}
+                {{ formatBytes(info()!.memoryHeapUsed) }}
               </p>
               <p class="text-[10px]" style="color: var(--color-text-muted);">
-                de {{ formatBytes(info.memoryHeapTotal) }}
+                de {{ formatBytes(info()!.memoryHeapTotal) }}
               </p>
             </div>
             <div
@@ -116,7 +115,7 @@ import { CardComponent } from '../../../../../../shared/components/card/card.com
                 class="font-mono text-sm font-bold"
                 style="color: var(--color-text-primary);"
               >
-                {{ formatBytes(info.memoryRss) }}
+                {{ formatBytes(info()!.memoryRss) }}
               </p>
             </div>
           </div>
@@ -160,7 +159,7 @@ import { CardComponent } from '../../../../../../shared/components/card/card.com
   `,
 })
 export class ProcessInfoComponent {
-  @Input() info: ProcessInfo | null = null;
+  readonly info = input<ProcessInfo | null>(null);
   readonly loading = input<boolean>(false);
 
   trackByIndex(index: number): number {
@@ -168,9 +167,10 @@ export class ProcessInfoComponent {
   }
 
   get heapPercent(): number {
-    if (!this.info) return 0;
+    const info = this.info();
+    if (!info) return 0;
     return Math.round(
-      (this.info.memoryHeapUsed / this.info.memoryHeapTotal) * 100,
+      (info.memoryHeapUsed / info.memoryHeapTotal) * 100,
     );
   }
 

@@ -1,8 +1,7 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
+  input,
+  output,
   OnInit,
   OnChanges,
   SimpleChanges,
@@ -55,83 +54,125 @@ import {
       [subtitle]="'Configura las reglas de precio para la zona ' + zone.name"
       size="xl"
       (closed)="close.emit()"
-      >
+    >
       <div slot="header">
         <div
           class="w-10 h-10 rounded-xl bg-purple-50 flex items-center justify-center border border-purple-100"
-          >
-          <app-icon name="dollar-sign" size="20" class="text-purple-600"></app-icon>
+        >
+          <app-icon
+            name="dollar-sign"
+            size="20"
+            class="text-purple-600"
+          ></app-icon>
         </div>
       </div>
-    
+
       <div class="flex-1 overflow-hidden flex flex-col md:flex-row">
         <!-- Column 1: Rates List (35%) -->
-        <div class="w-full md:w-[35%] border-r border-[var(--color-border)] flex flex-col bg-white">
-          <div class="p-4 border-b border-[var(--color-border)] flex justify-between items-center bg-gray-50/30">
-            <h4 class="text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-widest">
-              {{ is_read_only ? 'Tarifas del Sistema' : 'Tus Tarifas' }}
+        <div
+          class="w-full md:w-[35%] border-r border-[var(--color-border)] flex flex-col bg-white"
+        >
+          <div
+            class="p-4 border-b border-[var(--color-border)] flex justify-between items-center bg-gray-50/30"
+          >
+            <h4
+              class="text-[10px] font-bold text-[var(--color-text-secondary)] uppercase tracking-widest"
+            >
+              {{ is_read_only() ? 'Tarifas del Sistema' : 'Tus Tarifas' }}
             </h4>
-            @if (!is_read_only) {
+            @if (!is_read_only()) {
               <app-button
                 (clicked)="prepareCreate()"
                 variant="outline"
                 size="sm"
                 customClasses="!text-[10px] !uppercase !tracking-widest !h-7"
-                >
-                <app-icon name="plus" size="12" slot="icon" class="mr-1"></app-icon>
+              >
+                <app-icon
+                  name="plus"
+                  size="12"
+                  slot="icon"
+                  class="mr-1"
+                ></app-icon>
                 Añadir Tarifa
               </app-button>
             }
           </div>
-    
+
           <div class="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
             <!-- Loading -->
             @if (is_loading_rates) {
-              <div class="flex flex-col items-center justify-center py-20 text-gray-400 gap-3">
+              <div
+                class="flex flex-col items-center justify-center py-20 text-gray-400 gap-3"
+              >
                 <app-icon name="loader-2" size="32" [spin]="true"></app-icon>
-                <span class="text-sm font-medium italic">Obteniendo tarifas...</span>
+                <span class="text-sm font-medium italic"
+                  >Obteniendo tarifas...</span
+                >
               </div>
             }
-    
+
             <!-- Empty -->
             @if (!is_loading_rates && rates.length === 0) {
               <div
                 class="py-20 text-center px-8 border-2 border-dashed border-gray-100 rounded-2xl mx-2"
+              >
+                <div
+                  class="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-4 border border-gray-100"
                 >
-                <div class="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-4 border border-gray-100">
-                  <app-icon name="tag" size="24" class="text-gray-300"></app-icon>
+                  <app-icon
+                    name="tag"
+                    size="24"
+                    class="text-gray-300"
+                  ></app-icon>
                 </div>
                 <h5 class="text-sm font-bold text-gray-700">
-                  {{ is_read_only ? 'Sin tarifas configuradas' : 'No hay tarifas aún' }}
+                  {{
+                    is_read_only()
+                      ? 'Sin tarifas configuradas'
+                      : 'No hay tarifas aún'
+                  }}
                 </h5>
                 <p class="text-xs text-gray-400 mt-2">
-                  {{ is_read_only ? 'Esta zona del sistema no tiene tarifas.' : 'Crea reglas de envío para esta zona.' }}
+                  {{
+                    is_read_only()
+                      ? 'Esta zona del sistema no tiene tarifas.'
+                      : 'Crea reglas de envío para esta zona.'
+                  }}
                 </p>
               </div>
             }
-    
+
             <!-- Rich Rate Cards -->
             @for (rate of rates; track rate) {
               <div
                 (click)="selectRate(rate)"
-                [class.border-[var(--color-primary)]]="selectedRate?.id === rate.id"
-                [class.bg-[var(--color-primary)]/5]="selectedRate?.id === rate.id"
+                [class.border-[var(--color-primary)]]="
+                  selectedRate?.id === rate.id
+                "
+                [class.bg-[var(--color-primary)]/5]="
+                  selectedRate?.id === rate.id
+                "
                 [class.shadow-md]="selectedRate?.id === rate.id"
                 [class.translate-x-1]="selectedRate?.id === rate.id"
                 class="p-4 rounded-2xl border border-[var(--color-border)] hover:bg-gray-50 transition-all duration-300 cursor-pointer group relative overflow-hidden"
-                >
+              >
                 <!-- Left accent bar -->
                 @if (selectedRate?.id === rate.id) {
-                  <div class="absolute left-0 top-0 bottom-0 w-1 bg-[var(--color-primary)]"></div>
+                  <div
+                    class="absolute left-0 top-0 bottom-0 w-1 bg-[var(--color-primary)]"
+                  ></div>
                 }
                 <div class="flex justify-between items-start mb-3">
                   <div>
                     @if (rate.source_type === 'system_copy') {
                       <span
                         class="text-[10px] font-bold text-purple-600 bg-purple-50 px-1.5 py-0.5 rounded uppercase tracking-tighter mb-1 inline-block"
-                      >Sistema</span>
+                        >Sistema</span
+                      >
                     }
-                    <span class="text-xs font-bold text-gray-400 block uppercase tracking-tighter mb-1">
+                    <span
+                      class="text-xs font-bold text-gray-400 block uppercase tracking-tighter mb-1"
+                    >
                       {{ rate.shipping_method?.name || 'Método' }}
                     </span>
                     <h5 class="font-bold text-[var(--color-text-primary)]">
@@ -142,20 +183,28 @@ import {
                     <span class="text-lg font-black text-emerald-600 block">
                       \${{ rate.base_cost | number }}
                     </span>
-                    <span class="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
+                    <span
+                      class="text-[10px] font-bold text-gray-400 uppercase tracking-widest"
+                    >
                       {{ getRateTypeLabel(rate.type) }}
                     </span>
                   </div>
                 </div>
-                <div class="flex flex-wrap items-center gap-2 text-[10px] border-t border-gray-100 pt-3 mt-3">
-                  <div class="flex items-center gap-1.5 px-2 py-1 bg-gray-100 rounded-md text-gray-600 font-bold">
+                <div
+                  class="flex flex-wrap items-center gap-2 text-[10px] border-t border-gray-100 pt-3 mt-3"
+                >
+                  <div
+                    class="flex items-center gap-1.5 px-2 py-1 bg-gray-100 rounded-md text-gray-600 font-bold"
+                  >
                     <app-icon name="list" size="10"></app-icon>
-                    <span>{{ rate.min_val || 0 }} - {{ rate.max_val || '∞' }}</span>
+                    <span
+                      >{{ rate.min_val || 0 }} - {{ rate.max_val || '∞' }}</span
+                    >
                   </div>
                   @if (rate.per_unit_cost) {
                     <div
                       class="flex items-center gap-1.5 px-2 py-1 bg-blue-50 rounded-md text-blue-600 font-bold"
-                      >
+                    >
                       <app-icon name="plus-circle" size="10"></app-icon>
                       <span>+\${{ rate.per_unit_cost }}/u</span>
                     </div>
@@ -163,9 +212,11 @@ import {
                   @if (rate.free_shipping_threshold) {
                     <div
                       class="flex items-center gap-1.5 px-2 py-1 bg-emerald-50 rounded-md text-emerald-600 font-bold"
-                      >
+                    >
                       <app-icon name="sparkles" size="10"></app-icon>
-                      <span>Gratis desde \${{ rate.free_shipping_threshold }}</span>
+                      <span
+                        >Gratis desde \${{ rate.free_shipping_threshold }}</span
+                      >
                     </div>
                   }
                 </div>
@@ -173,55 +224,104 @@ import {
             }
           </div>
         </div>
-    
+
         <!-- Column 2: Form / Read-only Detail (40%) -->
-        <div class="w-full md:w-[40%] flex flex-col bg-gray-50/50 border-r border-[var(--color-border)]">
+        <div
+          class="w-full md:w-[40%] flex flex-col bg-gray-50/50 border-r border-[var(--color-border)]"
+        >
           <!-- Read-only view -->
-          @if (is_read_only) {
+          @if (is_read_only()) {
             @if (selectedRate) {
               <div class="p-6 overflow-y-auto">
-                <h4 class="text-lg font-black text-gray-900 mb-6 flex items-center">
+                <h4
+                  class="text-lg font-black text-gray-900 mb-6 flex items-center"
+                >
                   Detalles de Tarifa
-                  <span class="ml-3 text-[10px] font-bold bg-purple-50 px-2 py-1 rounded-lg border border-purple-200 text-purple-600 tracking-widest">
+                  <span
+                    class="ml-3 text-[10px] font-bold bg-purple-50 px-2 py-1 rounded-lg border border-purple-200 text-purple-600 tracking-widest"
+                  >
                     REF: {{ selectedRate.id }}
                   </span>
                 </h4>
-                <div class="bg-white p-6 rounded-2xl border border-[var(--color-border)] shadow-sm space-y-5">
+                <div
+                  class="bg-white p-6 rounded-2xl border border-[var(--color-border)] shadow-sm space-y-5"
+                >
                   <div class="grid grid-cols-2 gap-4">
                     <div>
-                      <label class="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Método</label>
-                      <p class="font-bold text-[var(--color-text-primary)]">{{ selectedRate.shipping_method?.name || '-' }}</p>
+                      <label
+                        class="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1"
+                        >Método</label
+                      >
+                      <p class="font-bold text-[var(--color-text-primary)]">
+                        {{ selectedRate.shipping_method?.name || '-' }}
+                      </p>
                     </div>
                     <div>
-                      <label class="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Estrategia</label>
-                      <p class="font-bold text-[var(--color-text-primary)]">{{ getRateTypeLabel(selectedRate.type || '') }}</p>
+                      <label
+                        class="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1"
+                        >Estrategia</label
+                      >
+                      <p class="font-bold text-[var(--color-text-primary)]">
+                        {{ getRateTypeLabel(selectedRate.type || '') }}
+                      </p>
                     </div>
                     <div>
-                      <label class="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Costo Base</label>
-                      <p class="font-black text-emerald-600 text-lg">\${{ selectedRate.base_cost | number }}</p>
+                      <label
+                        class="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1"
+                        >Costo Base</label
+                      >
+                      <p class="font-black text-emerald-600 text-lg">
+                        \${{ selectedRate.base_cost | number }}
+                      </p>
                     </div>
                     @if (selectedRate.per_unit_cost) {
                       <div>
-                        <label class="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Costo Variable</label>
-                        <p class="font-bold text-[var(--color-text-primary)]">\${{ selectedRate.per_unit_cost | number }}</p>
+                        <label
+                          class="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1"
+                          >Costo Variable</label
+                        >
+                        <p class="font-bold text-[var(--color-text-primary)]">
+                          \${{ selectedRate.per_unit_cost | number }}
+                        </p>
                       </div>
                     }
-                    @if (selectedRate.min_val !== null && selectedRate.min_val !== undefined) {
+                    @if (
+                      selectedRate.min_val !== null &&
+                      selectedRate.min_val !== undefined
+                    ) {
                       <div>
-                        <label class="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Mínimo</label>
-                        <p class="font-bold text-[var(--color-text-primary)]">{{ selectedRate.min_val }}</p>
+                        <label
+                          class="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1"
+                          >Mínimo</label
+                        >
+                        <p class="font-bold text-[var(--color-text-primary)]">
+                          {{ selectedRate.min_val }}
+                        </p>
                       </div>
                     }
-                    @if (selectedRate.max_val !== null && selectedRate.max_val !== undefined) {
+                    @if (
+                      selectedRate.max_val !== null &&
+                      selectedRate.max_val !== undefined
+                    ) {
                       <div>
-                        <label class="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Máximo</label>
-                        <p class="font-bold text-[var(--color-text-primary)]">{{ selectedRate.max_val }}</p>
+                        <label
+                          class="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1"
+                          >Máximo</label
+                        >
+                        <p class="font-bold text-[var(--color-text-primary)]">
+                          {{ selectedRate.max_val }}
+                        </p>
                       </div>
                     }
                     @if (selectedRate.free_shipping_threshold) {
                       <div>
-                        <label class="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1">Envío Gratis Desde</label>
-                        <p class="font-bold text-emerald-600">\${{ selectedRate.free_shipping_threshold | number }}</p>
+                        <label
+                          class="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1"
+                          >Envío Gratis Desde</label
+                        >
+                        <p class="font-bold text-emerald-600">
+                          \${{ selectedRate.free_shipping_threshold | number }}
+                        </p>
                       </div>
                     }
                   </div>
@@ -229,18 +329,28 @@ import {
               </div>
             }
             @if (!selectedRate) {
-              <div class="flex flex-col items-center justify-center h-full text-center p-6">
-                <div class="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-4 border border-gray-100">
-                  <app-icon name="eye" size="24" class="text-gray-300"></app-icon>
+              <div
+                class="flex flex-col items-center justify-center h-full text-center p-6"
+              >
+                <div
+                  class="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-4 border border-gray-100"
+                >
+                  <app-icon
+                    name="eye"
+                    size="24"
+                    class="text-gray-300"
+                  ></app-icon>
                 </div>
                 <p class="font-bold text-gray-700">Selecciona una tarifa</p>
-                <p class="text-xs text-gray-400 mt-1">Haz clic en una tarifa para ver sus detalles</p>
+                <p class="text-xs text-gray-400 mt-1">
+                  Haz clic en una tarifa para ver sus detalles
+                </p>
               </div>
             }
           }
-    
+
           <!-- Editable form -->
-          @if (!is_read_only) {
+          @if (!is_read_only()) {
             <div class="p-6 overflow-y-auto flex-1">
               <div class="flex items-center justify-between mb-8">
                 <h4 class="text-lg font-black text-gray-900 flex items-center">
@@ -248,7 +358,8 @@ import {
                   @if (selectedRate) {
                     <span
                       class="ml-3 text-[10px] font-bold bg-purple-50 px-2 py-1 rounded-lg border border-purple-200 text-purple-600 tracking-widest"
-                    >REF: {{ selectedRate.id }}</span>
+                      >REF: {{ selectedRate.id }}</span
+                    >
                   }
                 </h4>
                 @if (selectedRate) {
@@ -258,14 +369,24 @@ import {
                       size="sm"
                       (clicked)="onDeleteRate(selectedRate)"
                       customClasses="!text-red-500 hover:!bg-red-50 !h-8 !px-3 !text-xs"
-                      >
-                      <app-icon name="trash" size="12" slot="icon" class="mr-1"></app-icon>
+                    >
+                      <app-icon
+                        name="trash"
+                        size="12"
+                        slot="icon"
+                        class="mr-1"
+                      ></app-icon>
                       Eliminar
                     </app-button>
                   </div>
                 }
               </div>
-              <form [formGroup]="form" id="rateForm" (ngSubmit)="onSubmitRate()" class="space-y-4">
+              <form
+                [formGroup]="form"
+                id="rateForm"
+                (ngSubmit)="onSubmitRate()"
+                class="space-y-4"
+              >
                 <!-- Method + Name row -->
                 <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <app-selector
@@ -285,28 +406,44 @@ import {
                 </div>
                 <!-- Strategy selector -->
                 <div class="space-y-3">
-                  <label class="block text-xs font-bold text-[var(--color-text-secondary)] uppercase tracking-widest px-1">
+                  <label
+                    class="block text-xs font-bold text-[var(--color-text-secondary)] uppercase tracking-widest px-1"
+                  >
                     Estrategia de Precio
                   </label>
                   <div class="grid grid-cols-2 lg:grid-cols-4 gap-2">
                     @for (strategy of rate_strategies; track strategy) {
                       <div
                         (click)="selectRateType(strategy.value)"
-                        [class.ring-2]="form.get('type')?.value === strategy.value"
-                        [class.ring-[var(--color-primary)]]="form.get('type')?.value === strategy.value"
-                        [class.bg-white]="form.get('type')?.value === strategy.value"
-                        [class.shadow-sm]="form.get('type')?.value === strategy.value"
+                        [class.ring-2]="
+                          form.get('type')?.value === strategy.value
+                        "
+                        [class.ring-[var(--color-primary)]]="
+                          form.get('type')?.value === strategy.value
+                        "
+                        [class.bg-white]="
+                          form.get('type')?.value === strategy.value
+                        "
+                        [class.shadow-sm]="
+                          form.get('type')?.value === strategy.value
+                        "
                         class="border rounded-2xl p-3 flex flex-col items-center justify-center cursor-pointer hover:bg-white transition-all duration-300 gap-1 text-center group"
-                        >
+                      >
                         <app-icon
                           [name]="strategy.icon"
                           size="18"
-                          [class]="form.get('type')?.value === strategy.value ? 'text-[var(--color-primary)]' : 'text-gray-400 group-hover:text-gray-600'"
+                          [class]="
+                            form.get('type')?.value === strategy.value
+                              ? 'text-[var(--color-primary)]'
+                              : 'text-gray-400 group-hover:text-gray-600'
+                          "
                         ></app-icon>
                         <span
                           class="text-[10px] font-bold uppercase tracking-tight"
-                          [class.text-[var(--color-primary)]]="form.get('type')?.value === strategy.value"
-                          >
+                          [class.text-[var(--color-primary)]]="
+                            form.get('type')?.value === strategy.value
+                          "
+                        >
                           {{ strategy.label }}
                         </span>
                       </div>
@@ -314,7 +451,9 @@ import {
                   </div>
                 </div>
                 <!-- Costs card -->
-                <div class="bg-white p-6 rounded-2xl border border-[var(--color-border)] shadow-sm space-y-6">
+                <div
+                  class="bg-white p-6 rounded-2xl border border-[var(--color-border)] shadow-sm space-y-6"
+                >
                   <div class="grid grid-cols-2 gap-4">
                     <app-input
                       label="Precio Base"
@@ -370,39 +509,56 @@ import {
               </form>
             </div>
             <!-- Submit button at bottom of column 2 -->
-            <div class="p-4 bg-white border-t border-[var(--color-border)] mt-auto">
+            <div
+              class="p-4 bg-white border-t border-[var(--color-border)] mt-auto"
+            >
               <app-button
                 variant="primary"
                 [fullWidth]="true"
                 [loading]="is_saving"
                 [disabled]="form.invalid"
                 (clicked)="onSubmitRate()"
-                >
-                <app-icon name="save" size="18" slot="icon" class="mr-2"></app-icon>
+              >
+                <app-icon
+                  name="save"
+                  size="18"
+                  slot="icon"
+                  class="mr-2"
+                ></app-icon>
                 {{ selectedRate ? 'Actualizar Tarifa' : 'Crear Tarifa' }}
               </app-button>
             </div>
           }
         </div>
-    
+
         <!-- Column 3: Help & Summary (25%, desktop only) -->
-        <div class="hidden lg:flex lg:w-[25%] flex-col bg-white overflow-y-auto">
+        <div
+          class="hidden lg:flex lg:w-[25%] flex-col bg-white overflow-y-auto"
+        >
           <div class="p-5 space-y-6">
             <!-- Strategy Help -->
             <div class="space-y-4">
               <div class="flex items-center gap-2 text-purple-600">
                 <app-icon name="help-circle" size="20"></app-icon>
-                <h4 class="text-sm font-bold uppercase tracking-widest">Ayuda</h4>
+                <h4 class="text-sm font-bold uppercase tracking-widest">
+                  Ayuda
+                </h4>
               </div>
-    
+
               <div class="space-y-2">
-                <h5 class="text-xs font-bold text-[var(--color-text-primary)]">{{ strategyHelp.title }}</h5>
-                <p class="text-xs text-[var(--color-text-secondary)] leading-relaxed">
+                <h5 class="text-xs font-bold text-[var(--color-text-primary)]">
+                  {{ strategyHelp.title }}
+                </h5>
+                <p
+                  class="text-xs text-[var(--color-text-secondary)] leading-relaxed"
+                >
                   {{ strategyHelp.description }}
                 </p>
               </div>
-    
-              <div class="p-3 bg-purple-50/30 rounded-xl space-y-2 border border-purple-100/50">
+
+              <div
+                class="p-3 bg-purple-50/30 rounded-xl space-y-2 border border-purple-100/50"
+              >
                 @for (ex of strategyHelp.examples; track ex) {
                   <p
                     class="text-[10px] text-purple-700 leading-normal"
@@ -411,13 +567,15 @@ import {
                 }
               </div>
             </div>
-    
+
             <!-- Real-time Summary (only when editing) -->
-            @if (!is_read_only) {
+            @if (!is_read_only()) {
               <div class="pt-6 border-t border-dashed border-gray-200">
                 <div class="flex items-center gap-2 text-blue-600 mb-3">
                   <app-icon name="info" size="16"></app-icon>
-                  <h5 class="text-[10px] font-bold uppercase tracking-widest">Resumen en Tiempo Real</h5>
+                  <h5 class="text-[10px] font-bold uppercase tracking-widest">
+                    Resumen en Tiempo Real
+                  </h5>
                 </div>
                 <p
                   class="text-[11px] text-gray-600 leading-relaxed italic bg-blue-50/30 p-3 rounded-xl border border-blue-100/50"
@@ -425,17 +583,20 @@ import {
                 ></p>
               </div>
             }
-    
+
             <!-- Store Note -->
             <div class="pt-6 space-y-3">
-              <h5 class="text-[10px] font-bold text-gray-400 uppercase tracking-widest">
-                {{ is_read_only ? 'Nota del Sistema' : 'Nota' }}
+              <h5
+                class="text-[10px] font-bold text-gray-400 uppercase tracking-widest"
+              >
+                {{ is_read_only() ? 'Nota del Sistema' : 'Nota' }}
               </h5>
               <div class="p-3 bg-purple-50 rounded-xl border border-purple-100">
                 <p class="text-[10px] text-purple-700 leading-normal">
-                  {{ is_read_only
-                  ? 'Esta tarifa del sistema está configurada globalmente y aplica a todas las tiendas de esta zona.'
-                  : 'Esta tarifa se aplicará a los pedidos de tu tienda que correspondan a esta zona de envío.'
+                  {{
+                    is_read_only()
+                      ? 'Esta tarifa del sistema está configurada globalmente y aplica a todas las tiendas de esta zona.'
+                      : 'Esta tarifa se aplicará a los pedidos de tu tienda que correspondan a esta zona de envío.'
                   }}
                 </p>
               </div>
@@ -444,13 +605,13 @@ import {
         </div>
       </div>
     </app-modal>
-    `,
+  `,
 })
 export class RatesModalComponent implements OnInit, OnChanges {
-  @Input() zone!: ShippingZone;
-  @Input() is_read_only = false;
-  @Output() close = new EventEmitter<void>();
-  @Output() rates_changed = new EventEmitter<void>();
+  readonly zone = input.required<ShippingZone>();
+  readonly is_read_only = input<boolean>(false);
+  readonly close = output<void>();
+  readonly rates_changed = output<void>();
 
   private fb = inject(FormBuilder);
   private shippingService = inject(ShippingMethodsService);
@@ -465,18 +626,20 @@ export class RatesModalComponent implements OnInit, OnChanges {
 
   form: FormGroup;
 
-  rate_strategies: { value: ShippingRateType; label: string; icon: string }[] = [
-    { value: 'flat', label: 'Fija', icon: 'tag' },
-    { value: 'weight_based', label: 'Peso', icon: 'package' },
-    { value: 'price_based', label: 'Precio', icon: 'dollar-sign' },
-    { value: 'free', label: 'Gratis', icon: 'sparkles' },
-  ];
+  rate_strategies: { value: ShippingRateType; label: string; icon: string }[] =
+    [
+      { value: 'flat', label: 'Fija', icon: 'tag' },
+      { value: 'weight_based', label: 'Peso', icon: 'package' },
+      { value: 'price_based', label: 'Precio', icon: 'dollar-sign' },
+      { value: 'free', label: 'Gratis', icon: 'sparkles' },
+    ];
 
   // ─── Computed getters ───
 
   get modal_title(): string {
-    if (!this.zone) return 'Tarifas de Envío';
-    return `Tarifas: ${this.zone.name}`;
+    const currentZone = this.zone();
+    if (!currentZone) return 'Tarifas de Envío';
+    return `Tarifas: ${currentZone.name}`;
   }
 
   get shipping_method_options(): { value: any; label: string }[] {
@@ -502,15 +665,19 @@ export class RatesModalComponent implements OnInit, OnChanges {
 
   get minTooltip(): string {
     const type = this.form.get('type')?.value;
-    if (type === 'weight_based') return 'Peso inicial (en kg) desde el cual se aplica esta tarifa.';
-    if (type === 'price_based') return 'Monto mínimo de compra necesario para aplicar esta tarifa.';
+    if (type === 'weight_based')
+      return 'Peso inicial (en kg) desde el cual se aplica esta tarifa.';
+    if (type === 'price_based')
+      return 'Monto mínimo de compra necesario para aplicar esta tarifa.';
     return 'Punto de inicio para aplicar esta tarifa.';
   }
 
   get maxTooltip(): string {
     const type = this.form.get('type')?.value;
-    if (type === 'weight_based') return 'Peso límite (en kg) para esta tarifa. Deja vacío si no hay límite.';
-    if (type === 'price_based') return 'Monto máximo de compra para esta tarifa. Deja vacío si no hay límite.';
+    if (type === 'weight_based')
+      return 'Peso límite (en kg) para esta tarifa. Deja vacío si no hay límite.';
+    if (type === 'price_based')
+      return 'Monto máximo de compra para esta tarifa. Deja vacío si no hay límite.';
     return 'Punto final para aplicar esta tarifa.';
   }
 
@@ -522,8 +689,10 @@ export class RatesModalComponent implements OnInit, OnChanges {
 
   get variableTooltip(): string {
     const type = this.form.get('type')?.value;
-    if (type === 'weight_based') return 'Monto que se sumará al precio base por cada kilogramo de peso del pedido.';
-    if (type === 'price_based') return 'Monto adicional que se suma al precio base (opcional).';
+    if (type === 'weight_based')
+      return 'Monto que se sumará al precio base por cada kilogramo de peso del pedido.';
+    if (type === 'price_based')
+      return 'Monto adicional que se suma al precio base (opcional).';
     return 'Costo adicional por cada unidad que exceda el mínimo.';
   }
 
@@ -553,7 +722,8 @@ export class RatesModalComponent implements OnInit, OnChanges {
     }
 
     if (min !== null || max !== null) {
-      const unit = type === 'weight_based' ? 'kg' : (type === 'price_based' ? '$' : '');
+      const unit =
+        type === 'weight_based' ? 'kg' : type === 'price_based' ? '$' : '';
       const minText = min !== null ? `${unit}${min}` : 'el inicio';
       const maxText = max !== null ? `${unit}${max}` : 'el infinito';
       text += `, siempre que el pedido esté entre **${minText}** y **${maxText}**`;
@@ -566,13 +736,21 @@ export class RatesModalComponent implements OnInit, OnChanges {
     return text + '.';
   }
 
-  get strategyHelp(): { title: string; description: string; examples: string[] } {
+  get strategyHelp(): {
+    title: string;
+    description: string;
+    examples: string[];
+  } {
     const type = this.form.get('type')?.value as ShippingRateType;
 
-    const helpData: Record<string, { title: string; description: string; examples: string[] }> = {
+    const helpData: Record<
+      string,
+      { title: string; description: string; examples: string[] }
+    > = {
       flat: {
         title: 'Tarifa Fija',
-        description: 'Se aplica un costo único sin importar el peso o el valor del carrito. Es la opción más sencilla para entregas locales.',
+        description:
+          'Se aplica un costo único sin importar el peso o el valor del carrito. Es la opción más sencilla para entregas locales.',
         examples: [
           '**Ejemplo:** Cobrar $150 fijos por envío a domicilio.',
           '**Uso:** Ideal si tienes un mensajero propio con precio pactado.',
@@ -580,7 +758,8 @@ export class RatesModalComponent implements OnInit, OnChanges {
       },
       weight_based: {
         title: 'Basada en Peso',
-        description: 'El costo depende de la masa total de los productos. Permite cobrar más por paquetes voluminosos o pesados.',
+        description:
+          'El costo depende de la masa total de los productos. Permite cobrar más por paquetes voluminosos o pesados.',
         examples: [
           '**Ejemplo:** $100 base + $20 por cada kg extra.',
           '**Uso:** Recomendado si usas transportadoras que cobran por peso.',
@@ -588,7 +767,8 @@ export class RatesModalComponent implements OnInit, OnChanges {
       },
       price_based: {
         title: 'Basada en Precio',
-        description: 'El envío varía según cuánto gaste el cliente. Útil para incentivar compras más grandes.',
+        description:
+          'El envío varía según cuánto gaste el cliente. Útil para incentivar compras más grandes.',
         examples: [
           '**Ejemplo:** $100 si compran menos de $500, y $50 si compran más.',
           '**Uso:** Estrategia clásica para aumentar el ticket promedio.',
@@ -596,7 +776,8 @@ export class RatesModalComponent implements OnInit, OnChanges {
       },
       free: {
         title: 'Envío Gratuito',
-        description: 'Elimina el costo de envío para el cliente. Puedes restringirlo a condiciones específicas.',
+        description:
+          'Elimina el costo de envío para el cliente. Puedes restringirlo a condiciones específicas.',
         examples: [
           '**Ejemplo:** Gratis si el pedido pesa menos de 0.5kg.',
           '**Uso:** Excelente para promociones de "Envío Gratis por Hoy".',
@@ -631,9 +812,11 @@ export class RatesModalComponent implements OnInit, OnChanges {
   }
 
   ngOnChanges(changes: SimpleChanges): void {
-    if (changes['zone'] && this.zone && !changes['zone'].firstChange) {
+    const currentZone = this.zone();
+    const currentReadOnly = this.is_read_only();
+    if (changes['zone'] && currentZone && !changes['zone'].firstChange) {
       this.loadRates();
-      if (!this.is_read_only) {
+      if (!currentReadOnly) {
         this.prepareCreate();
       }
     }
@@ -646,7 +829,7 @@ export class RatesModalComponent implements OnInit, OnChanges {
       next: (methods) => {
         this.shipping_methods = methods;
         // Auto-prepare create form after methods load (only for editable mode)
-        if (!this.is_read_only && !this.selectedRate) {
+        if (!this.is_read_only() && !this.selectedRate) {
           this.prepareCreate();
         }
       },
@@ -655,14 +838,15 @@ export class RatesModalComponent implements OnInit, OnChanges {
   }
 
   loadRates(): void {
-    if (!this.zone) return;
+    const currentZone = this.zone();
+    if (!currentZone) return;
 
     this.is_loading_rates = true;
     this.selectedRate = undefined;
 
-    const fetch$ = this.is_read_only
-      ? this.shippingService.getSystemZoneRates(this.zone.id)
-      : this.shippingService.getStoreZoneRates(this.zone.id);
+    const fetch$ = this.is_read_only()
+      ? this.shippingService.getSystemZoneRates(currentZone.id)
+      : this.shippingService.getStoreZoneRates(currentZone.id);
 
     fetch$.subscribe({
       next: (rates) => {
@@ -680,7 +864,7 @@ export class RatesModalComponent implements OnInit, OnChanges {
 
   selectRate(rate: ShippingRate): void {
     this.selectedRate = rate;
-    if (!this.is_read_only) {
+    if (!this.is_read_only()) {
       this.populateForm(rate);
     }
   }
@@ -702,7 +886,8 @@ export class RatesModalComponent implements OnInit, OnChanges {
   prepareCreate(): void {
     this.selectedRate = undefined;
     this.form.reset({
-      shipping_method_id: this.shipping_methods.length > 0 ? this.shipping_methods[0].id : null,
+      shipping_method_id:
+        this.shipping_methods.length > 0 ? this.shipping_methods[0].id : null,
       name: '',
       type: 'flat',
       base_cost: 0,
@@ -739,11 +924,12 @@ export class RatesModalComponent implements OnInit, OnChanges {
 
     this.is_saving = true;
     const values = this.form.value;
+    const currentZone = this.zone();
 
     if (!this.selectedRate) {
       // Create
       const dto: CreateRateDto = {
-        shipping_zone_id: this.zone.id,
+        shipping_zone_id: currentZone.id,
         shipping_method_id: values.shipping_method_id,
         name: values.name || undefined,
         type: values.type,
@@ -816,7 +1002,8 @@ export class RatesModalComponent implements OnInit, OnChanges {
     this.dialogService
       .confirm({
         title: 'Eliminar Tarifa',
-        message: '¿Estás seguro de que deseas eliminar esta tarifa? Esta acción no se puede deshacer.',
+        message:
+          '¿Estás seguro de que deseas eliminar esta tarifa? Esta acción no se puede deshacer.',
         confirmText: 'Eliminar',
         cancelText: 'Cancelar',
         confirmVariant: 'danger',

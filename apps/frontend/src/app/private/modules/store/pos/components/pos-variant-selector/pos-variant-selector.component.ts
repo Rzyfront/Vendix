@@ -1,10 +1,8 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
+  input,
+  output,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { IconComponent } from '../../../../../../shared/components';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
 import {
@@ -15,7 +13,7 @@ import {
 @Component({
   selector: 'app-pos-variant-selector',
   standalone: true,
-  imports: [CommonModule, IconComponent, CurrencyPipe],
+  imports: [IconComponent, CurrencyPipe],
   template: `
     <!-- Backdrop -->
     <div
@@ -35,7 +33,7 @@ import {
             <h3 class="text-lg font-semibold text-text-primary">
               Seleccionar variante
             </h3>
-            <p class="text-sm text-text-secondary mt-0.5">{{ product.name }}</p>
+            <p class="text-sm text-text-secondary mt-0.5">{{ product().name }}</p>
           </div>
           <button
             (click)="onClose()"
@@ -48,7 +46,7 @@ import {
         <!-- Variant List -->
         <div class="flex-1 overflow-y-auto p-3">
           <div class="flex flex-col gap-2">
-            @for (variant of variants; track variant.id) {
+            @for (variant of variants(); track variant.id) {
               <button
                 class="w-full flex items-center gap-3 p-3 rounded-xl border transition-all text-left"
                 [class]="isVariantAvailable(variant)
@@ -95,7 +93,7 @@ import {
                       {{ diff > 0 ? '+' : '' }}{{ diff | currency }}
                     </span>
                   }
-                  @if (product.track_inventory !== false) {
+                  @if (product().track_inventory !== false) {
                     @if (variant.stock > 0) {
                       <span class="text-xs mt-0.5"
                         [class]="variant.stock <= 5 ? 'text-warning' : 'text-text-muted'"
@@ -123,25 +121,25 @@ import {
   `],
 })
 export class PosVariantSelectorComponent {
-  @Input({ required: true }) product!: Product;
-  @Input({ required: true }) variants!: PosProductVariant[];
-  @Output() variantSelected = new EventEmitter<PosProductVariant>();
-  @Output() closed = new EventEmitter<void>();
+  readonly product = input.required<Product>();
+  readonly variants = input.required<PosProductVariant[]>();
+  readonly variantSelected = output<PosProductVariant>();
+  readonly closed = output<void>();
 
   /** Group variants by their first attribute for visual sections */
   get groupedAttributes(): { name: string; variants: PosProductVariant[] }[] {
-    if (!this.variants?.length) return [];
+    if (!this.variants()?.length) return [];
     // Only group if there are multiple attribute types
-    const firstVariant = this.variants[0];
+    const firstVariant = this.variants()[0];
     if (!firstVariant?.attributes || firstVariant.attributes.length <= 1) return [];
     const groups: Record<string, PosProductVariant[]> = {};
-    for (const v of this.variants) {
+    for (const v of this.variants()) {
       const groupKey = v.attributes?.[0]?.attribute_value || 'Otros';
       if (!groups[groupKey]) groups[groupKey] = [];
       groups[groupKey].push(v);
     }
     const groupName = firstVariant.attributes[0]?.attribute_name || 'Tipo';
-    return Object.entries(groups).map(([name, variants]) => ({
+    return Object.entries(groups).map(([name, variants]: [string, PosProductVariant[]]) => ({
       name: `${groupName}: ${name}`,
       variants,
     }));
@@ -149,7 +147,7 @@ export class PosVariantSelectorComponent {
 
   /** Check if a variant is available considering track_inventory */
   isVariantAvailable(variant: PosProductVariant): boolean {
-    if (this.product.track_inventory === false) return true;
+    if (this.product().track_inventory === false) return true;
     return variant.stock > 0;
   }
 
@@ -161,9 +159,9 @@ export class PosVariantSelectorComponent {
   }
 
   getVariantFinalPrice(variant: PosProductVariant): number {
-    const basePrice = variant.price_override ?? this.product.price;
+    const basePrice = variant.price_override ?? this.product().price;
     // Tax rates are stored as decimals in DB (e.g., 0.19 for 19%) — do NOT divide by 100
-    const taxRate = this.product.tax_assignments?.reduce((sum, ta) => {
+    const taxRate = this.product().tax_assignments?.reduce((sum, ta) => {
       return sum + (ta.tax_categories?.tax_rates?.reduce(
         (rateSum, tr) => rateSum + parseFloat(tr.rate || '0'),
         0,
@@ -181,13 +179,13 @@ export class PosVariantSelectorComponent {
   }
 
   private getBaseFinalPrice(): number {
-    const taxRate = this.product.tax_assignments?.reduce((sum, ta) => {
+    const taxRate = this.product().tax_assignments?.reduce((sum, ta) => {
       return sum + (ta.tax_categories?.tax_rates?.reduce(
         (rateSum, tr) => rateSum + parseFloat(tr.rate || '0'),
         0,
       ) || 0);
     }, 0) || 0;
-    return this.product.price * (1 + taxRate);
+    return this.product().price * (1 + taxRate);
   }
 
   onSelectVariant(variant: PosProductVariant): void {
@@ -196,11 +194,6 @@ export class PosVariantSelectorComponent {
   }
 
   onClose(): void {
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
     this.closed.emit();
   }
 

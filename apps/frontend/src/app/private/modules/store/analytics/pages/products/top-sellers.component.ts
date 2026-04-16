@@ -2,6 +2,7 @@ import { Component, OnInit, OnDestroy, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Store } from '@ngrx/store';
 import { Observable, Subject, takeUntil } from 'rxjs';
+import { toSignal } from '@angular/core/rxjs-interop';
 
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
@@ -53,6 +54,10 @@ export class TopSellersComponent implements OnInit, OnDestroy {
   dateRange$: Observable<DateRangeFilter> = this.store.select(
     ProductsSelectors.selectDateRange,
   );
+
+  readonly topSellers = toSignal(this.topSellers$, { initialValue: [] as TopSellingProduct[] });
+  readonly loadingTopSellers = toSignal(this.loadingTopSellers$, { initialValue: false });
+  readonly dateRange = toSignal(this.dateRange$);
 
   topSellersChartOptions: EChartsOption = {};
 

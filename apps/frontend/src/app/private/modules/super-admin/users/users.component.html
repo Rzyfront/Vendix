@@ -1,6 +1,6 @@
 <div class="flex flex-col gap-6">
   <!-- Stats Cards -->
-  <app-user-stats [stats]="userStats"></app-user-stats>
+  <app-user-stats [stats]="userStats()"></app-user-stats>
 
   <!-- Main Content Card -->
   <app-card [padding]="false" overflow="hidden">
@@ -39,7 +39,7 @@
             <select
               formControlName="state"
               class="w-full px-3 py-1.5 border border-border rounded-md bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary text-sm h-[38px]"
-              [disabled]="isLoading"
+              [disabled]="isLoading()"
             >
               @for (state of userStates; track state) {
                 <option [value]="state.value">
@@ -66,7 +66,7 @@
             variant="outline"
             size="sm"
             (clicked)="syncPanelUI()"
-            [disabled]="isLoading"
+            [disabled]="isLoading()"
             title="Sincronizar módulos visibles de usuarios admin"
           >
             <app-icon name="shield-check" [size]="16" slot="icon"></app-icon>
@@ -77,7 +77,7 @@
             variant="outline"
             size="sm"
             (clicked)="refreshUsers()"
-            [disabled]="isLoading"
+            [disabled]="isLoading()"
             title="Actualizar"
           >
             <app-icon name="refresh-cw" [size]="16" slot="icon"></app-icon>
@@ -99,7 +99,7 @@
     <!-- Table Content -->
     <div class="relative min-h-[400px] p-2 md:p-4">
       <!-- Loading Overlay -->
-      @if (isLoading) {
+      @if (isLoading()) {
         <div
           class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
         >
@@ -111,17 +111,17 @@
 
       <!-- Table Section -->
       <app-responsive-data-view
-        [data]="users"
+        [data]="users()"
         [columns]="tableColumns"
         [actions]="tableActions"
         [cardConfig]="cardConfig"
-        [loading]="isLoading"
+        [loading]="isLoading()"
         [emptyMessage]="getEmptyStateTitle()"
         (rowClick)="editUser($event)"
         (sort)="onSortChange($event.column, $event.direction)"
       >
         <!-- Empty State internal slot (standard practice) -->
-        @if (!isLoading && users.length === 0) {
+        @if (!isLoading() && users().length === 0) {
           <div class="p-8 flex justify-center w-full">
             <app-empty-state
               icon="users"
@@ -147,14 +147,14 @@
     </div>
   </app-card>
 
-  @defer (when showCreateModal) {
+  @defer (when showCreateModal()) {
     <app-user-create-modal
       [(isOpen)]="showCreateModal"
       (onUserCreated)="onUserCreated()"
     ></app-user-create-modal>
   }
 
-  @defer (when showEditModal) {
+  @defer (when showEditModal()) {
     <app-user-edit-modal
       [(isOpen)]="showEditModal"
       [user]="currentUser"

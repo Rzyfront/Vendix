@@ -1,4 +1,4 @@
-import { Component, inject, OnInit, OnDestroy, Input, Output, EventEmitter } from '@angular/core';
+import { Component, inject, OnDestroy, input, output } from '@angular/core';
 
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { Router } from '@angular/router';
@@ -30,16 +30,16 @@ import {
   templateUrl: './budget-create-modal.component.html',
   styleUrls: ['./budget-create-modal.component.scss'],
 })
-export class BudgetCreateModalComponent implements OnInit, OnDestroy {
+export class BudgetCreateModalComponent implements OnDestroy {
   private destroy$ = new Subject<void>();
   private fb = inject(FormBuilder);
   private accounting_service = inject(AccountingService);
   private toast_service = inject(ToastService);
   private router = inject(Router);
 
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() created = new EventEmitter<void>();
+  readonly isOpen = input(false);
+  readonly isOpenChange = output<boolean>();
+  readonly created = output<void>();
 
   fiscal_periods: SelectorOption[] = [];
   is_submitting = false;
@@ -51,7 +51,7 @@ export class BudgetCreateModalComponent implements OnInit, OnDestroy {
     variance_threshold: [10, [Validators.min(0), Validators.max(100)]],
   });
 
-  ngOnInit(): void {
+  constructor() {
     this.loadFiscalPeriods();
   }
 
@@ -90,11 +90,6 @@ export class BudgetCreateModalComponent implements OnInit, OnDestroy {
           this.is_submitting = false;
           this.form.reset({ variance_threshold: 10 });
           this.isOpenChange.emit(false);
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
           this.created.emit();
           // Navigate to editor
           if (res.data?.id) {

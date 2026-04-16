@@ -1,4 +1,4 @@
-import { Component, Input, ChangeDetectionStrategy, input } from '@angular/core';
+import { Component, input } from '@angular/core';
 
 import { SlowEndpoint } from '../../interfaces';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
@@ -8,7 +8,6 @@ import { CardComponent } from '../../../../../../shared/components/card/card.com
   selector: 'app-slow-endpoints',
   standalone: true,
   imports: [IconComponent, CardComponent],
-  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <app-card
       [padding]="false"
@@ -44,18 +43,18 @@ import { CardComponent } from '../../../../../../shared/components/card/card.com
             Endpoints Más Lentos
           </h4>
         </div>
-        @if (endpoints && endpoints.length > 0) {
+        @if (endpoints()?.length) {
           <span
             class="text-xs font-mono px-2 py-0.5 rounded-full"
             style="background: var(--color-surface); color: var(--color-text-muted);"
           >
             Mostrando
             {{
-              displayedCount > endpoints.length
-                ? endpoints.length
+              displayedCount > endpoints()!.length
+                ? endpoints()!.length
                 : displayedCount
             }}
-            de {{ endpoints.length }}
+            de {{ endpoints()!.length }}
           </span>
         }
       </div>
@@ -75,14 +74,14 @@ import { CardComponent } from '../../../../../../shared/components/card/card.com
 
       @if (!loading()) {
         <div>
-          @if (!endpoints || endpoints.length === 0) {
+          @if (!endpoints() || endpoints()!.length === 0) {
             <div class="py-8 text-center">
               <p class="text-sm" style="color: var(--color-text-muted);">
                 Sin datos de endpoints aún
               </p>
             </div>
           }
-          @if (endpoints && endpoints.length > 0) {
+          @if (endpoints() && endpoints()!.length > 0) {
             <div>
               <div class="divide-y" style="border-color: var(--color-border);">
                 @for (
@@ -153,7 +152,7 @@ import { CardComponent } from '../../../../../../shared/components/card/card.com
                 }
               </div>
               <!-- Pagination footer -->
-              @if (endpoints.length > pageSize) {
+              @if (endpoints()!.length > pageSize()) {
                 <div
                   class="px-4 py-3 flex justify-center"
                   style="border-top: 1px solid var(--color-border);"
@@ -171,7 +170,7 @@ import { CardComponent } from '../../../../../../shared/components/card/card.com
                       isExpanded
                         ? 'Ver menos'
                         : 'Ver más (' +
-                          (endpoints.length - pageSize) +
+                          (endpoints()!.length - pageSize()) +
                           ' restantes)'
                     }}
                   </button>
@@ -185,24 +184,25 @@ import { CardComponent } from '../../../../../../shared/components/card/card.com
   `,
 })
 export class SlowEndpointsComponent {
-  @Input() endpoints: SlowEndpoint[] | null = null;
+  readonly endpoints = input<SlowEndpoint[] | null>(null);
   readonly loading = input<boolean>(false);
-  @Input() pageSize: number = 10;
+  readonly pageSize = input<number>(10);
 
   displayedCount = 10;
   isExpanded = false;
 
   get visibleEndpoints(): SlowEndpoint[] {
-    if (!this.endpoints) return [];
-    return this.endpoints.slice(0, this.displayedCount);
+    const eps = this.endpoints();
+    if (!eps) return [];
+    return eps.slice(0, this.displayedCount);
   }
 
   toggleShowMore(): void {
     if (this.isExpanded) {
-      this.displayedCount = this.pageSize;
+      this.displayedCount = this.pageSize();
       this.isExpanded = false;
     } else {
-      this.displayedCount = this.endpoints?.length ?? this.pageSize;
+      this.displayedCount = this.endpoints()?.length ?? this.pageSize();
       this.isExpanded = true;
     }
   }

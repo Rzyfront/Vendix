@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, signal } from '@angular/core';
 
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
@@ -27,45 +27,55 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
 @Component({
   selector: 'app-catalog-page',
   standalone: true,
-  imports: [RouterModule, FormsModule, ProductCardComponent, ProductQuickViewModalComponent, ShareModalComponent, ButtonComponent, InputComponent, IconComponent, PaginationComponent],
+  imports: [
+    RouterModule,
+    FormsModule,
+    ProductCardComponent,
+    ProductQuickViewModalComponent,
+    ShareModalComponent,
+    ButtonComponent,
+    InputComponent,
+    IconComponent,
+    PaginationComponent,
+  ],
   templateUrl: './catalog.component.html',
   styleUrls: ['./catalog.component.scss'],
 })
 export class CatalogComponent implements OnInit, OnDestroy {
-  products: EcommerceProduct[] = [];
-  categories: Category[] = [];
-  brands: Brand[] = [];
+  readonly products = signal<EcommerceProduct[]>([]);
+  readonly categories = signal<Category[]>([]);
+  readonly brands = signal<Brand[]>([]);
 
   // Filters
-  search_term = '';
-  selected_category_id: number | null = null;
-  selected_brand_id: number | null = null;
+  readonly search_term = signal('');
+  readonly selected_category_id = signal<number | null>(null);
+  readonly selected_brand_id = signal<number | null>(null);
   min_price: number | null = null;
   max_price: number | null = null;
   sort_by: 'name' | 'price_asc' | 'price_desc' | 'newest' | 'oldest' = 'newest';
 
   // Pagination
-  current_page = 1;
-  total_pages = 1;
-  total_products = 0;
+  readonly current_page = signal(1);
+  readonly total_pages = signal(1);
+  readonly total_products = signal(0);
   limit = 12;
 
-  is_loading = false;
+  readonly is_loading = signal(false);
   show_filters = false;
 
   // Quick View Modal
-  quickViewOpen = false;
-  selectedProductSlug: string | null = null;
+  readonly quickViewOpen = signal(false);
+  readonly selectedProductSlug = signal<string | null>(null);
 
   // Share Modal
-  shareModalOpen = false;
-  shareProduct: EcommerceProduct | null = null;
+  readonly shareModalOpen = signal(false);
+  readonly shareProduct = signal<EcommerceProduct | null>(null);
 
   private destroy$ = new Subject<void>();
   private search_subject = new Subject<string>();
 
   // Wishlist state
-  wishlist_product_ids = new Set<number>();
+  readonly wishlist_product_ids = signal<Set<number>>(new Set<number>());
   private is_authenticated = false;
 
   constructor(
@@ -77,7 +87,7 @@ export class CatalogComponent implements OnInit, OnDestroy {
     private toast_service: ToastService,
     private route: ActivatedRoute,
     private router: Router,
-  ) { }
+  ) {}
 
   ngOnInit(): void {
     // Load categories and brands
@@ -88,7 +98,7 @@ export class CatalogComponent implements OnInit, OnDestroy {
     this.search_subject
       .pipe(debounceTime(400), distinctUntilChanged(), takeUntil(this.destroy$))
       .subscribe(() => {
-        this.current_page = 1;
+        this.current_page.set(1);
         this.loadProducts();
       });
 
@@ -107,13 +117,13 @@ export class CatalogComponent implements OnInit, OnDestroy {
       .pipe(takeUntil(this.destroy$))
       .subscribe((params) => {
         // Siempre actualizar search_term (vacío si no existe)
-        this.search_term = params['search'] || '';
+        this.search_term.set(params['search'] || '');
 
         if (params['category']) {
-          this.selected_category_id = +params['category'];
+          this.selected_category_id.set(+params['category']);
         }
         if (params['brand']) {
-          this.selected_brand_id = +params['brand'];
+          this.selected_brand_id.set(+params['brand']);
         }
         this.loadProducts();
       });
@@ -121,23 +131,23 @@ export class CatalogComponent implements OnInit, OnDestroy {
     // Subscribe to authentication state
     this.auth_facade.isAuthenticated$
       .pipe(takeUntil(this.destroy$))
-      .subscribe(is_auth => {
+      .subscribe((is_auth) => {
         this.is_authenticated = is_auth;
         if (is_auth) {
           // Load wishlist when user is authenticated
           this.wishlist_service.getWishlist().subscribe();
         } else {
           // Clear wishlist state when not authenticated
-          this.wishlist_product_ids.clear();
+          this.wishlist_product_ids.set(new Set<number>());
         }
       });
 
     // Subscribe to wishlist changes
     this.wishlist_service.wishlist$
       .pipe(takeUntil(this.destroy$))
-      .subscribe(wishlist => {
-        this.wishlist_product_ids = new Set(
-          wishlist?.items.map(item => item.product_id) || []
+      .subscribe((wishlist) => {
+        this.wishlist_product_ids.set(
+          new Set(wishlist?.items.map((item) => item.product_id) || []),
         );
       });
   }
@@ -148,21 +158,21 @@ export class CatalogComponent implements OnInit, OnDestroy {
   }
 
   loadProducts(): void {
-    this.is_loading = true;
+    this.is_loading.set(true);
 
     const routeData = this.route.snapshot.data;
     const defaults = routeData['defaultFilters'] || {};
 
     const query: CatalogQuery = {
-      page: this.current_page,
+      page: this.current_page(),
       limit: this.limit,
       sort_by: this.sort_by,
     };
 
-    if (this.search_term) query.search = this.search_term;
-    if (this.selected_category_id)
-      query.category_id = this.selected_category_id;
-    if (this.selected_brand_id) query.brand_id = this.selected_brand_id;
+    if (this.search_term()) query.search = this.search_term();
+    if (this.selected_category_id())
+      query.category_id = this.selected_category_id()!;
+    if (this.selected_brand_id()) query.brand_id = this.selected_brand_id()!;
     if (this.min_price) query.min_price = this.min_price;
     if (this.max_price) query.max_price = this.max_price;
 
@@ -172,14 +182,14 @@ export class CatalogComponent implements OnInit, OnDestroy {
 
     this.catalog_service.getProducts(query).subscribe({
       next: (response) => {
-        this.products = response.data;
-        this.total_products = response.meta.total;
-        this.total_pages = response.meta.total_pages;
-        this.current_page = response.meta.page;
-        this.is_loading = false;
+        this.products.set(response.data);
+        this.total_products.set(response.meta.total);
+        this.total_pages.set(response.meta.total_pages);
+        this.current_page.set(response.meta.page);
+        this.is_loading.set(false);
       },
       error: () => {
-        this.is_loading = false;
+        this.is_loading.set(false);
       },
     });
   }
@@ -188,7 +198,7 @@ export class CatalogComponent implements OnInit, OnDestroy {
     this.catalog_service.getCategories().subscribe({
       next: (response) => {
         if (response.success) {
-          this.categories = response.data;
+          this.categories.set(response.data);
         }
       },
     });
@@ -198,48 +208,48 @@ export class CatalogComponent implements OnInit, OnDestroy {
     this.catalog_service.getBrands().subscribe({
       next: (response) => {
         if (response.success) {
-          this.brands = response.data;
+          this.brands.set(response.data);
         }
       },
     });
   }
 
   onSearchChange(): void {
-    this.search_subject.next(this.search_term);
+    this.search_subject.next(this.search_term());
   }
 
   onCategorySelect(category_id: number | null): void {
-    this.selected_category_id = category_id;
-    this.current_page = 1;
+    this.selected_category_id.set(category_id);
+    this.current_page.set(1);
     this.updateUrl();
     this.loadProducts();
   }
 
   onBrandSelect(brand_id: number | null): void {
-    this.selected_brand_id = brand_id;
-    this.current_page = 1;
+    this.selected_brand_id.set(brand_id);
+    this.current_page.set(1);
     this.updateUrl();
     this.loadProducts();
   }
 
   onSortChange(): void {
-    this.current_page = 1;
+    this.current_page.set(1);
     this.loadProducts();
   }
 
   applyPriceFilter(): void {
-    this.current_page = 1;
+    this.current_page.set(1);
     this.loadProducts();
   }
 
   clearFilters(): void {
-    this.search_term = '';
-    this.selected_category_id = null;
-    this.selected_brand_id = null;
+    this.search_term.set('');
+    this.selected_category_id.set(null);
+    this.selected_brand_id.set(null);
     this.min_price = null;
     this.max_price = null;
     this.sort_by = 'newest';
-    this.current_page = 1;
+    this.current_page.set(1);
     this.updateUrl();
     this.loadProducts();
   }
@@ -249,8 +259,8 @@ export class CatalogComponent implements OnInit, OnDestroy {
   }
 
   goToPage(page: number): void {
-    if (page >= 1 && page <= this.total_pages) {
-      this.current_page = page;
+    if (page >= 1 && page <= this.total_pages()) {
+      this.current_page.set(page);
       this.loadProducts();
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
@@ -276,7 +286,7 @@ export class CatalogComponent implements OnInit, OnDestroy {
   onModalAddedToCart(_product: EcommerceProduct): void {
     // Handler para QuickViewModal - el modal ya agregó el producto al carrito
     // Este handler solo se usa para acciones post-adición (ej: cerrar modal, mostrar toast)
-    this.quickViewOpen = false;
+    this.quickViewOpen.set(false);
     // TODO: Show toast notification
   }
 
@@ -300,30 +310,30 @@ export class CatalogComponent implements OnInit, OnDestroy {
   }
 
   isInWishlist(product_id: number): boolean {
-    return this.wishlist_product_ids.has(product_id);
+    return this.wishlist_product_ids().has(product_id);
   }
 
   onQuickView(product: EcommerceProduct): void {
-    this.selectedProductSlug = product.slug;
-    this.quickViewOpen = true;
+    this.selectedProductSlug.set(product.slug);
+    this.quickViewOpen.set(true);
   }
 
   onShare(product: EcommerceProduct): void {
-    this.shareProduct = product;
-    this.shareModalOpen = true;
+    this.shareProduct.set(product);
+    this.shareModalOpen.set(true);
   }
 
   onShareModalClosed(): void {
-    this.shareModalOpen = false;
-    this.shareProduct = null;
+    this.shareModalOpen.set(false);
+    this.shareProduct.set(null);
   }
 
   private updateUrl(): void {
     const queryParams: any = {};
-    if (this.selected_category_id)
-      queryParams.category = this.selected_category_id;
-    if (this.selected_brand_id) queryParams.brand = this.selected_brand_id;
-    if (this.search_term) queryParams.search = this.search_term;
+    if (this.selected_category_id())
+      queryParams.category = this.selected_category_id();
+    if (this.selected_brand_id()) queryParams.brand = this.selected_brand_id();
+    if (this.search_term()) queryParams.search = this.search_term();
 
     this.router.navigate([], {
       relativeTo: this.route,
@@ -331,5 +341,4 @@ export class CatalogComponent implements OnInit, OnDestroy {
       queryParamsHandling: 'merge',
     });
   }
-
 }

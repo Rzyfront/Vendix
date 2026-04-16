@@ -43,7 +43,7 @@ import {
       >
         <app-stats
           title="Total Ajustes"
-          [value]="stats.total"
+          [value]="stats().total"
           smallText="Movimientos registrados"
           iconName="clipboard-list"
           iconBgColor="bg-blue-100"
@@ -52,7 +52,7 @@ import {
 
         <app-stats
           title="Pérdidas"
-          [value]="stats.losses"
+          [value]="stats().losses"
           smallText="Productos extraviados"
           iconName="trending-down"
           iconBgColor="bg-red-100"
@@ -61,7 +61,7 @@ import {
 
         <app-stats
           title="Daños"
-          [value]="stats.damages"
+          [value]="stats().damages"
           smallText="Productos dañados"
           iconName="alert-triangle"
           iconBgColor="bg-amber-100"
@@ -70,7 +70,7 @@ import {
 
         <app-stats
           title="Correcciones"
-          [value]="stats.corrections"
+          [value]="stats().corrections"
           smallText="Ajustes de inventario"
           iconName="edit-3"
           iconBgColor="bg-green-100"
@@ -80,9 +80,9 @@ import {
 
       <!-- Adjustments List -->
       <app-adjustment-list
-        [adjustments]="filtered_adjustments"
-        [isLoading]="is_loading"
-        [paginationData]="pagination"
+        [adjustments]="filtered_adjustments()"
+        [isLoading]="is_loading()"
+        [paginationData]="pagination()"
         (search)="onSearch($event)"
         (filterChange)="onFilterChange($event)"
         (clearFilters)="onClearFilters()"
@@ -112,12 +112,12 @@ import {
         ></app-bulk-adjustment-modal>
       }
 
-      @defer (when is_detail_modal_open) {
+      @defer (when is_detail_modal_open()) {
         <app-adjustment-detail-modal
-          [isOpen]="is_detail_modal_open"
-          [adjustment]="selected_adjustment"
+          [isOpen]="is_detail_modal_open()"
+          [adjustment]="selected_adjustment()"
           [isProcessing]="isSubmitting()"
-          (isOpenChange)="is_detail_modal_open = $event"
+          (isOpenChange)="is_detail_modal_open.set($event)"
           (close)="closeDetailModal()"
           (approve)="onApprove($event)"
           (deleteAdjustment)="onDelete($event)"
@@ -133,23 +133,23 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
   private http = inject(HttpClient);
 
   // Data
-  adjustments: InventoryAdjustment[] = [];
-  filtered_adjustments: InventoryAdjustment[] = [];
+  readonly adjustments = signal<InventoryAdjustment[]>([]);
+  readonly filtered_adjustments = signal<InventoryAdjustment[]>([]);
 
   // Stats
-  stats = { total: 0, losses: 0, damages: 0, corrections: 0 };
+  readonly stats = signal({ total: 0, losses: 0, damages: 0, corrections: 0 });
 
   // Pagination
-  pagination = { page: 1, limit: 10, total: 0, totalPages: 0 };
+  readonly pagination = signal({ page: 1, limit: 10, total: 0, totalPages: 0 });
 
   // Filters
   current_type: AdjustmentType | 'all' = 'all';
   search_term = '';
 
   // UI State
-  is_loading = false;
-  is_detail_modal_open = false;
-  selected_adjustment: InventoryAdjustment | null = null;
+  readonly is_loading = signal(false);
+  readonly is_detail_modal_open = signal(false);
+  readonly selected_adjustment = signal<InventoryAdjustment | null>(null);
 
   // Signals
   showCreateModal = signal(false);
@@ -174,11 +174,12 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
   // ============================================================
 
   loadAdjustments(): void {
-    this.is_loading = true;
+    this.is_loading.set(true);
+    const pag = this.pagination();
     const query: any = {
       ...(this.current_type !== 'all' ? { type: this.current_type } : {}),
-      limit: this.pagination.limit,
-      offset: (this.pagination.page - 1) * this.pagination.limit,
+      limit: pag.limit,
+      offset: (pag.page - 1) * pag.limit,
     };
 
     this.inventoryService
@@ -187,24 +188,25 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
       .subscribe({
         next: (response) => {
           if (response.data?.adjustments) {
-            this.adjustments = response.data.adjustments;
-            this.pagination.total = response.data.total;
-            this.pagination.totalPages = Math.ceil(
-              response.data.total / this.pagination.limit,
-            );
+            this.adjustments.set(response.data.adjustments);
+            this.pagination.update(p => ({
+              ...p,
+              total: response.data.total,
+              totalPages: Math.ceil(response.data.total / p.limit),
+            }));
             this.applyFilters();
             this.calculateStats();
           }
-          if (this.adjustments.length === 0 && this.pagination.page > 1) {
-            this.pagination.page--;
+          if (this.adjustments().length === 0 && this.pagination().page > 1) {
+            this.pagination.update(p => ({ ...p, page: p.page - 1 }));
             this.loadAdjustments();
             return;
           }
-          this.is_loading = false;
+          this.is_loading.set(false);
         },
         error: (error) => {
           this.toastService.error(error || 'Error al cargar ajustes');
-          this.is_loading = false;
+          this.is_loading.set(false);
         },
       });
   }
@@ -228,7 +230,7 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
   }
 
   applyFilters(): void {
-    let filtered = [...this.adjustments];
+    let filtered = [...this.adjustments()];
 
     if (this.current_type !== 'all') {
       filtered = filtered.filter(
@@ -246,20 +248,17 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
       );
     }
 
-    this.filtered_adjustments = filtered;
+    this.filtered_adjustments.set(filtered);
   }
 
   calculateStats(): void {
-    this.stats.total = this.adjustments.length;
-    this.stats.losses = this.adjustments.filter(
-      (a) => a.adjustment_type === 'loss',
-    ).length;
-    this.stats.damages = this.adjustments.filter(
-      (a) => a.adjustment_type === 'damage',
-    ).length;
-    this.stats.corrections = this.adjustments.filter(
-      (a) => a.adjustment_type === 'manual_correction',
-    ).length;
+    const adjs = this.adjustments();
+    this.stats.set({
+      total: adjs.length,
+      losses: adjs.filter((a) => a.adjustment_type === 'loss').length,
+      damages: adjs.filter((a) => a.adjustment_type === 'damage').length,
+      corrections: adjs.filter((a) => a.adjustment_type === 'manual_correction').length,
+    });
   }
 
   // ============================================================
@@ -274,19 +273,19 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
   onFilterChange(values: FilterValues): void {
     const typeValue = values['adjustment_type'] as string;
     this.current_type = typeValue ? (typeValue as AdjustmentType) : 'all';
-    this.pagination.page = 1;
+    this.pagination.update(p => ({ ...p, page: 1 }));
     this.loadAdjustments();
   }
 
   onClearFilters(): void {
     this.current_type = 'all';
     this.search_term = '';
-    this.pagination.page = 1;
+    this.pagination.update(p => ({ ...p, page: 1 }));
     this.loadAdjustments();
   }
 
   changePage(page: number): void {
-    this.pagination.page = page;
+    this.pagination.update(p => ({ ...p, page }));
     this.loadAdjustments();
   }
 
@@ -305,13 +304,13 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
   }
 
   viewDetail(adjustment: InventoryAdjustment): void {
-    this.selected_adjustment = adjustment;
-    this.is_detail_modal_open = true;
+    this.selected_adjustment.set(adjustment);
+    this.is_detail_modal_open.set(true);
   }
 
   closeDetailModal(): void {
-    this.is_detail_modal_open = false;
-    this.selected_adjustment = null;
+    this.is_detail_modal_open.set(false);
+    this.selected_adjustment.set(null);
   }
 
   // ============================================================
@@ -378,7 +377,7 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
       .subscribe({
         next: () => {
           this.toastService.success('Ajuste aprobado');
-          this.is_detail_modal_open = false;
+          this.is_detail_modal_open.set(false);
           this.isSubmitting.set(false);
           this.refresh();
         },
@@ -406,7 +405,7 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
       .subscribe({
         next: () => {
           this.toastService.success('Ajuste eliminado');
-          this.is_detail_modal_open = false;
+          this.is_detail_modal_open.set(false);
           this.isSubmitting.set(false);
           this.refresh();
         },

@@ -1,5 +1,5 @@
 <app-modal
-  [isOpen]="isOpen"
+  [isOpen]="isOpen()"
   [size]="'xl'"
   [title]="'Orden con Envío'"
   [subtitle]="'Configura envío, pago y cliente'"
@@ -16,7 +16,7 @@
 
       <!-- Product List -->
       <div class="product-list">
-        @for (item of cartState?.items; track item) {
+        @for (item of cartState()?.items; track item) {
           <div class="product-item">
             <span class="product-name">{{ item.product.name }}@if (item.variant_display_name) {
               <span style="font-size: 0.85em; opacity: 0.7;"> - {{ item.variant_display_name }}</span>
@@ -24,7 +24,7 @@
             <span class="product-qty">x{{ item.quantity }}</span>
           </div>
         }
-        @if (!cartState?.items?.length) {
+        @if (!cartState()?.items?.length) {
           <div class="empty-cart">
             El carrito está vacío
           </div>
@@ -35,16 +35,16 @@
       <div class="summary-details">
         <div class="summary-row">
           <span>Subtotal</span>
-          <span class="summary-value">{{ cartState?.summary?.subtotal || 0 | currency }}</span>
+          <span class="summary-value">{{ cartState()?.summary?.subtotal || 0 | currency }}</span>
         </div>
         <div class="summary-row">
           <span>Impuestos</span>
-          <span class="summary-value">{{ cartState?.summary?.taxAmount || 0 | currency }}</span>
+          <span class="summary-value">{{ cartState()?.summary?.taxAmount || 0 | currency }}</span>
         </div>
-        @if ((cartState?.summary?.discountAmount ?? 0) > 0) {
+        @if ((cartState()?.summary?.discountAmount ?? 0) > 0) {
           <div class="summary-row">
             <span>Descuento</span>
-            <span class="summary-value discount">-{{ cartState?.summary?.discountAmount | currency }}</span>
+            <span class="summary-value discount">-{{ cartState()?.summary?.discountAmount | currency }}</span>
           </div>
         }
         <div class="summary-row">
@@ -365,14 +365,14 @@
       </div>
 
       <!-- Selected Customer Display -->
-      @if (cartState?.customer) {
+      @if (cartState()?.customer) {
         <div class="selected-customer">
           <div class="customer-avatar">
             <app-icon name="user-check" [size]="16"></app-icon>
           </div>
           <div class="customer-info">
             <span class="customer-name">{{ customerDisplayName }}</span>
-            <span class="customer-email">{{ cartState?.customer?.email }}</span>
+            <span class="customer-email">{{ cartState()?.customer?.email }}</span>
           </div>
           <button type="button" class="change-customer-btn" (click)="openCustomerSelector()">
             <app-icon name="edit-2" [size]="14"></app-icon>
@@ -381,7 +381,7 @@
       }
 
       <!-- Select Customer Button -->
-      @if (!cartState?.customer && !showCustomerSelector) {
+      @if (!cartState()?.customer && !showCustomerSelector) {
         <button
           type="button"
           class="select-customer-btn"
@@ -526,7 +526,7 @@
             </div>
           }
           <!-- New address hint -->
-          @if (!selectedCustomerAddressId && cartState?.customer) {
+          @if (!selectedCustomerAddressId && cartState()?.customer) {
             <div style="display: flex; align-items: center; gap: 6px; padding: 8px 12px; background: rgba(var(--color-primary-rgb), 0.05); border: 1px solid rgba(var(--color-primary-rgb), 0.2); border-radius: 8px; margin-bottom: 8px;">
               <app-icon name="plus-circle" [size]="14" style="color: var(--color-primary);"></app-icon>
               <span style="font-size: 12px; font-weight: 500; color: var(--color-text-secondary);">Nueva dirección (se guardará al cliente)</span>

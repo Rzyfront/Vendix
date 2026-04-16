@@ -1,9 +1,14 @@
 import {
   Component,
   inject,
-  Input,
-  OnInit,
-  output
+  input,
+  output,
+  model,
+  signal,
+  viewChild,
+  effect,
+  ChangeDetectionStrategy,
+  ChangeDetectorRef,
 } from '@angular/core';
 
 import {
@@ -36,8 +41,8 @@ import { APP_MODULES } from '../../constants/app-modules.constant';
     ButtonComponent,
     IconComponent,
     SettingToggleComponent,
-    InputsearchComponent
-],
+    InputsearchComponent,
+  ],
   template: `
     <app-modal
       [(isOpen)]="isOpen"
@@ -46,13 +51,13 @@ import { APP_MODULES } from '../../constants/app-modules.constant';
       [size]="'xl'"
       (closed)="onClose()"
       (opened)="onOpen()"
-      >
+    >
       @if (!loading) {
         <form
           [formGroup]="settingsForm"
           (ngSubmit)="onSubmit()"
           class="settings-form"
-          >
+        >
           <!-- Top Section: App Type & Upgrade -->
           <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
             <!-- App Type Selection -->
@@ -64,24 +69,20 @@ import { APP_MODULES } from '../../constants/app-modules.constant';
               <div
                 class="app-type-selection"
                 [class.read-only]="!canChangeAppType"
-                >
+              >
                 @if (!isSingleStore) {
                   <div
                     class="app-type-card"
                     [class.selected]="currentAppType === 'ORG_ADMIN'"
                     (click)="selectAppType('ORG_ADMIN')"
-                    >
+                  >
                     <app-icon name="building" [size]="24"></app-icon>
                     <div class="card-content">
                       <h3>Organización</h3>
                       <p>Gestión multi-tienda</p>
                     </div>
                     @if (currentAppType === 'ORG_ADMIN') {
-                      <div
-                        class="status-badge"
-                        >
-                        Actual
-                      </div>
+                      <div class="status-badge">Actual</div>
                     }
                   </div>
                 }
@@ -89,25 +90,21 @@ import { APP_MODULES } from '../../constants/app-modules.constant';
                   class="app-type-card"
                   [class.selected]="currentAppType === 'STORE_ADMIN'"
                   (click)="selectAppType('STORE_ADMIN')"
-                  >
+                >
                   <app-icon name="store" [size]="24"></app-icon>
                   <div class="card-content">
                     <h3>Tienda</h3>
                     <p>Operaciones locales</p>
                   </div>
                   @if (currentAppType === 'STORE_ADMIN') {
-                    <div
-                      class="status-badge"
-                      >
-                      Actual
-                    </div>
+                    <div class="status-badge">Actual</div>
                   }
                 </div>
               </div>
               @if (!canChangeAppType) {
                 <p
                   class="text-[10px] text-gray-400 mt-2 flex items-center gap-1"
-                  >
+                >
                   <app-icon name="lock" [size]="10"></app-icon>
                   Cambio restringido a administradores
                 </p>
@@ -124,20 +121,20 @@ import { APP_MODULES } from '../../constants/app-modules.constant';
                 <div class="theme-grid">
                   <div
                     class="theme-box"
-                  [class.active]="
-                    settingsForm.get('preferences.theme')?.value === 'default'
-                  "
+                    [class.active]="
+                      settingsForm.get('preferences.theme')?.value === 'default'
+                    "
                     (click)="selectTheme('default')"
-                    >
+                  >
                     <div class="theme-preview bg-gray-200"></div>
                     <span>Default</span>
                   </div>
                   <div
                     class="theme-box disabled"
-                  [class.active]="
-                    settingsForm.get('preferences.theme')?.value === 'aura'
-                  "
-                    >
+                    [class.active]="
+                      settingsForm.get('preferences.theme')?.value === 'aura'
+                    "
+                  >
                     <div
                       class="theme-preview bg-gradient-to-br from-purple-500 to-pink-500"
                     ></div>
@@ -146,20 +143,21 @@ import { APP_MODULES } from '../../constants/app-modules.constant';
                   </div>
                   <div
                     class="theme-box"
-                  [class.active]="
-                    settingsForm.get('preferences.theme')?.value === 'monocromo'
-                  "
+                    [class.active]="
+                      settingsForm.get('preferences.theme')?.value ===
+                      'monocromo'
+                    "
                     (click)="selectTheme('monocromo')"
-                    >
+                  >
                     <div class="theme-preview bg-slate-700"></div>
                     <span>Mono</span>
                   </div>
                   <div
                     class="theme-box disabled"
-                  [class.active]="
-                    settingsForm.get('preferences.theme')?.value === 'glass'
-                  "
-                    >
+                    [class.active]="
+                      settingsForm.get('preferences.theme')?.value === 'glass'
+                    "
+                  >
                     <div class="theme-preview glass-preview"></div>
                     <span>Glass</span>
                     <span class="coming-soon-label">Próximamente</span>
@@ -178,150 +176,149 @@ import { APP_MODULES } from '../../constants/app-modules.constant';
               </h4>
               <span class="text-xs text-gray-400"
                 >Personaliza la visibilidad de tus herramientas</span
-                >
-              </div>
-              <app-inputsearch
-                placeholder="Buscar módulos..."
-                size="sm"
-                [debounceTime]="200"
-                (searchChange)="onModuleSearch($event)"
-                class="mb-4 block"
-              ></app-inputsearch>
-              <div formGroupName="panel_ui" class="relative">
-                <div [formGroupName]="currentAppType" class="flex flex-col gap-6">
-                  <!-- SECTION A: Modules WITH Children (larger cards/areas) -->
+              >
+            </div>
+            <app-inputsearch
+              placeholder="Buscar módulos..."
+              size="sm"
+              [debounceTime]="200"
+              (searchChange)="onModuleSearch($event)"
+              class="mb-4 block"
+            ></app-inputsearch>
+            <div formGroupName="panel_ui" class="relative">
+              <div [formGroupName]="currentAppType" class="flex flex-col gap-6">
+                <!-- SECTION A: Modules WITH Children (larger cards/areas) -->
+                <div class="compact-modules-grid">
+                  @for (module of filteredModulesWithChildren; track module) {
+                    <div
+                      class="module-group is-parent"
+                      [class.new-module]="isNewModule(module.key)"
+                    >
+                      <div class="toggle-wrapper">
+                        <app-setting-toggle
+                          [formControlName]="module.key"
+                          [label]="module.label"
+                          [description]="module.description"
+                          [isNew]="isNewModule(module.key)"
+                          (changed)="onParentToggle($event, module)"
+                        ></app-setting-toggle>
+                      </div>
+                      <div class="children-grid">
+                        @for (child of module.children; track child) {
+                          <div
+                            class="child-item"
+                            [class.new-module]="isNewModule(child.key)"
+                          >
+                            <app-setting-toggle
+                              [formControlName]="child.key"
+                              [label]="child.label"
+                              [isNew]="isNewModule(child.key)"
+                              [disabled]="!isParentModuleEnabled(module.key)"
+                            ></app-setting-toggle>
+                          </div>
+                        }
+                      </div>
+                    </div>
+                  }
+                </div>
+                <!-- SECTION B: STANDALONE Modules (grouped together) -->
+                <div class="standalone-container mt-2">
+                  <h5
+                    class="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-3"
+                  >
+                    Herramientas Directas
+                  </h5>
                   <div class="compact-modules-grid">
-                    @for (module of filteredModulesWithChildren; track module) {
+                    @for (module of filteredStandaloneModules; track module) {
                       <div
-                        class="module-group is-parent"
+                        class="module-group"
                         [class.new-module]="isNewModule(module.key)"
-                        >
-                        <div class="toggle-wrapper">
-                          <app-setting-toggle
-                            [formControlName]="module.key"
-                            [label]="module.label"
-                            [description]="module.description"
-                            [isNew]="isNewModule(module.key)"
-                            (changed)="onParentToggle($event, module)"
-                          ></app-setting-toggle>
-                        </div>
-                        <div class="children-grid">
-                          @for (child of module.children; track child) {
-                            <div
-                              class="child-item"
-                              [class.new-module]="isNewModule(child.key)"
-                              >
-                              <app-setting-toggle
-                                [formControlName]="child.key"
-                                [label]="child.label"
-                                [isNew]="isNewModule(child.key)"
-                                [disabled]="!isParentModuleEnabled(module.key)"
-                              ></app-setting-toggle>
-                            </div>
-                          }
-                        </div>
+                      >
+                        <app-setting-toggle
+                          [formControlName]="module.key"
+                          [label]="module.label"
+                          [description]="module.description"
+                          [isNew]="isNewModule(module.key)"
+                        ></app-setting-toggle>
                       </div>
                     }
                   </div>
-                  <!-- SECTION B: STANDALONE Modules (grouped together) -->
-                  <div class="standalone-container mt-2">
-                    <h5
-                      class="text-[11px] font-bold text-gray-400 uppercase tracking-wider mb-3"
-                      >
-                      Herramientas Directas
-                    </h5>
-                    <div class="compact-modules-grid">
-                      @for (module of filteredStandaloneModules; track module) {
-                        <div
-                          class="module-group"
-                          [class.new-module]="isNewModule(module.key)"
-                          >
-                          <app-setting-toggle
-                            [formControlName]="module.key"
-                            [label]="module.label"
-                            [description]="module.description"
-                            [isNew]="isNewModule(module.key)"
-                          ></app-setting-toggle>
-                        </div>
-                      }
-                    </div>
-                  </div>
-                  <!-- No results message -->
-                  @if (moduleSearchTerm && filteredModulesWithChildren.length === 0 && filteredStandaloneModules.length === 0) {
-                    <p
-                      class="text-sm text-gray-400 text-center py-4"
-                      >
-                      No se encontraron módulos para "{{ moduleSearchTerm }}"
-                    </p>
-                  }
                 </div>
+                <!-- No results message -->
+                @if (
+                  moduleSearchTerm &&
+                  filteredModulesWithChildren.length === 0 &&
+                  filteredStandaloneModules.length === 0
+                ) {
+                  <p class="text-sm text-gray-400 text-center py-4">
+                    No se encontraron módulos para "{{ moduleSearchTerm }}"
+                  </p>
+                }
               </div>
-              @if (hasModuleError()) {
-                <div
-                  class="text-xs text-red-500 mt-4 flex items-center gap-1"
-                  >
-                  <app-icon name="alert-circle" [size]="14"></app-icon>
-                  Debes habilitar al menos un módulo para poder navegar
-                </div>
-              }
             </div>
-            <!-- Upgrade single store if applicable -->
-            @if (isSingleStore && isOwner) {
-              <div
-                class="mt-8 pt-6 border-t border-gray-100"
-                >
-                <div class="upgrade-banner">
-                  <div class="flex items-center gap-4">
-                    <div class="p-3 bg-primary/10 rounded-xl text-primary">
-                      <app-icon name="zap" [size]="32"></app-icon>
-                    </div>
-                    <div class="flex-1">
-                      <h5 class="font-bold text-gray-900">¿Necesitas más tiendas?</h5>
-                      <p class="text-xs text-gray-500">
-                        Convierte tu cuenta en una Organización para gestionar
-                        múltiples sucursales y reportes consolidados.
-                      </p>
-                    </div>
-                    <app-button
-                      variant="primary"
-                      [loading]="upgrading"
-                      (clicked)="upgradeToOrganization()"
-                      size="sm"
-                      >
-                      Ver más
-                    </app-button>
-                  </div>
-                </div>
+            @if (hasModuleError()) {
+              <div class="text-xs text-red-500 mt-4 flex items-center gap-1">
+                <app-icon name="alert-circle" [size]="14"></app-icon>
+                Debes habilitar al menos un módulo para poder navegar
               </div>
             }
-          </form>
-        } @else {
-          <div class="flex items-center justify-center py-12">
-            <div
-              class="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)]"
-            ></div>
           </div>
-        }
-    
-    
-        <div slot="footer" class="flex justify-end gap-3">
-          <app-button variant="outline-danger" (clicked)="isOpen = false"
-            >Cancelar</app-button
-            >
-            <app-button
-              variant="primary"
-              (clicked)="onSubmit()"
-              [loading]="saving"
-              [disabled]="settingsForm.invalid"
-              >Guardar Cambios</app-button
-              >
+          <!-- Upgrade single store if applicable -->
+          @if (isSingleStore && isOwner) {
+            <div class="mt-8 pt-6 border-t border-gray-100">
+              <div class="upgrade-banner">
+                <div class="flex items-center gap-4">
+                  <div class="p-3 bg-primary/10 rounded-xl text-primary">
+                    <app-icon name="zap" [size]="32"></app-icon>
+                  </div>
+                  <div class="flex-1">
+                    <h5 class="font-bold text-gray-900">
+                      ¿Necesitas más tiendas?
+                    </h5>
+                    <p class="text-xs text-gray-500">
+                      Convierte tu cuenta en una Organización para gestionar
+                      múltiples sucursales y reportes consolidados.
+                    </p>
+                  </div>
+                  <app-button
+                    variant="primary"
+                    [loading]="upgrading()"
+                    (clicked)="upgradeToOrganization()"
+                    size="sm"
+                  >
+                    Ver más
+                  </app-button>
+                </div>
+              </div>
             </div>
-          </app-modal>
-    `,
+          }
+        </form>
+      } @else {
+        <div class="flex items-center justify-center py-12">
+          <div
+            class="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)]"
+          ></div>
+        </div>
+      }
+
+      <div slot="footer" class="flex justify-end gap-3">
+        <app-button variant="outline-danger" (clicked)="isOpen.set(false)"
+          >Cancelar</app-button
+        >
+        <app-button
+          variant="primary"
+          (clicked)="onSubmit()"
+          [loading]="saving()"
+          [disabled]="settingsForm.invalid"
+          >Guardar Cambios</app-button
+        >
+      </div>
+    </app-modal>
+  `,
   styleUrls: ['./settings-modal.component.scss'],
 })
-export class SettingsModalComponent implements OnInit {
-  @Input() isOpen = false;
+export class SettingsModalComponent {
+  readonly isOpen = model(false);
   readonly isOpenChange = output<boolean>();
 
   private fb = inject(FormBuilder);
@@ -335,14 +332,14 @@ export class SettingsModalComponent implements OnInit {
   private themeService = inject(ThemeService);
 
   settingsForm: FormGroup;
-  loading = false;
-  saving = false;
+  readonly loading = signal(false);
+  readonly saving = signal(false);
   currentSettings: any = null;
   currentAppType: string = 'ORG_ADMIN';
   canChangeAppType: boolean = false;
   isSingleStore = false;
   isOwner = false;
-  upgrading = false;
+  readonly upgrading = signal(false);
   defaultPanelUi: Record<string, Record<string, boolean>> | null = null;
   newModuleKeys = new Set<string>();
   moduleSearchTerm = '';
@@ -387,8 +384,6 @@ export class SettingsModalComponent implements OnInit {
     this.recomputeFilteredModules();
   }
 
-  ngOnInit() {}
-
   onOpen() {
     this.loadSettings();
 
@@ -418,7 +413,7 @@ export class SettingsModalComponent implements OnInit {
   }
 
   closeModal() {
-    this.isOpen = false;
+    this.isOpen.set(false);
     this.isOpenChange.emit(false);
     this.settingsForm.reset();
   }
@@ -543,11 +538,13 @@ export class SettingsModalComponent implements OnInit {
         .map((module) => {
           const parentMatches =
             module.label.toLowerCase().includes(term) ||
-            (module.description && module.description.toLowerCase().includes(term));
+            (module.description &&
+              module.description.toLowerCase().includes(term));
           const matchingChildren = module.children.filter(
             (child: any) =>
               child.label.toLowerCase().includes(term) ||
-              (child.description && child.description.toLowerCase().includes(term)),
+              (child.description &&
+                child.description.toLowerCase().includes(term)),
           );
           if (parentMatches) return module;
           if (matchingChildren.length > 0) {
@@ -599,10 +596,10 @@ export class SettingsModalComponent implements OnInit {
   }
 
   loadSettings() {
-    this.loading = true;
+    this.loading.set(true);
     this.authService
       .getSettings()
-      .pipe(finalize(() => (this.loading = false)))
+      .pipe(finalize(() => this.loading.set(false)))
       .subscribe({
         next: (response) => {
           const settings = response.data || response;
@@ -740,7 +737,7 @@ export class SettingsModalComponent implements OnInit {
   onSubmit() {
     if (this.settingsForm.invalid) return;
 
-    this.saving = true;
+    this.saving.set(true);
     const formValue = this.settingsForm.getRawValue();
 
     // 🔥 CRÍTICO: Preservar datos existentes con deep merge
@@ -774,19 +771,19 @@ export class SettingsModalComponent implements OnInit {
         const dto = { config: configObj };
 
         // Use AuthFacade to update settings through NgRx
-        // This ensures the store is updated and the sidebar reacts immediately
+        // This ensures the store is updated and sidebar reacts immediately
         this.authFacade.updateUserSettings(dto);
-        this.saving = false;
+        this.saving.set(false);
 
-        // Close modal after a short delay to allow the store to update
+        // Close modal after a short delay to allow store to update
         setTimeout(() => {
-          this.isOpen = false;
+          this.isOpen.set(false);
           this.isOpenChange.emit(false);
         }, 100);
       },
       error: (err) => {
         console.error('Error loading current config for merge', err);
-        this.saving = false;
+        this.saving.set(false);
       },
     });
   }
@@ -819,7 +816,7 @@ export class SettingsModalComponent implements OnInit {
 
     if (!confirmed) return;
 
-    this.upgrading = true;
+    this.upgrading.set(true);
 
     try {
       const response = await this.environmentContextService
@@ -830,7 +827,7 @@ export class SettingsModalComponent implements OnInit {
         'Tu cuenta ha sido actualizada a organización multi-tienda.',
       );
 
-      this.upgrading = false;
+      this.upgrading.set(false);
 
       setTimeout(async () => {
         try {
@@ -849,7 +846,7 @@ export class SettingsModalComponent implements OnInit {
         }
       }, 500);
     } catch (error: any) {
-      this.upgrading = false;
+      this.upgrading.set(false);
       console.error('❌ Error al actualizar tipo de cuenta:', error);
       this.toastService.error(
         error.error?.message ||

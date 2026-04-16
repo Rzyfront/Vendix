@@ -1,5 +1,5 @@
-import { Component, OnInit, DestroyRef, inject, signal, computed, ChangeDetectionStrategy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, DestroyRef, inject, signal, computed } from '@angular/core';
+import { DatePipe } from '@angular/common';
 import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Observable } from 'rxjs';
@@ -47,7 +47,7 @@ const STATUS_BADGE_COLORS: Record<QuotationStatus, StickyHeaderBadgeColor> = {
   selector: 'app-quotation-detail',
   standalone: true,
   imports: [
-    CommonModule,
+    DatePipe,
     RouterLink,
     StickyHeaderComponent,
     IconComponent,
@@ -57,7 +57,6 @@ const STATUS_BADGE_COLORS: Record<QuotationStatus, StickyHeaderBadgeColor> = {
     ButtonComponent,
     CurrencyPipe,
   ],
-  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (loading()) {
       <div class="flex items-center justify-center py-20">
@@ -322,7 +321,7 @@ const STATUS_BADGE_COLORS: Record<QuotationStatus, StickyHeaderBadgeColor> = {
   `,
   styles: [],
 })
-export class QuotationDetailComponent implements OnInit {
+export class QuotationDetailComponent {
   private readonly route = inject(ActivatedRoute);
   private readonly router = inject(Router);
   private readonly destroyRef = inject(DestroyRef);
@@ -509,17 +508,17 @@ export class QuotationDetailComponent implements OnInit {
     return steps;
   });
 
+  constructor() {
+    const id = Number(this.route.snapshot.paramMap.get('id'));
+    if (id) {
+      this.loadQuotation(id);
+    }
+  }
+
   printQuotation(): void {
     const q = this.quotation();
     if (q) {
       this.printService.printQuotation(q);
-    }
-  }
-
-  ngOnInit(): void {
-    const id = Number(this.route.snapshot.paramMap.get('id'));
-    if (id) {
-      this.loadQuotation(id);
     }
   }
 
@@ -640,7 +639,7 @@ export class QuotationDetailComponent implements OnInit {
     action()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (result) => {
+        next: (result: Quotation) => {
           if (result && (result as any).success === false) {
             this.actionLoading.set(null);
             this.toastService.error((result as any).message || 'Error al realizar la acción');
@@ -649,9 +648,9 @@ export class QuotationDetailComponent implements OnInit {
           this.quotation.set(result);
           this.actionLoading.set(null);
           this.quotationsService.invalidateCache();
-          this.toastService.success(`Cotización ${STATUS_LABELS[result.status]?.toLowerCase() || 'actualizada'} exitosamente`);
+          this.toastService.success(`Cotización ${STATUS_LABELS[result.status as QuotationStatus]?.toLowerCase() || 'actualizada'} exitosamente`);
         },
-        error: (err) => {
+        error: (err: any) => {
           this.actionLoading.set(null);
           this.toastService.error(err.message || 'Error al realizar la acción');
         },

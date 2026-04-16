@@ -1,5 +1,5 @@
 import { Component, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { AsyncPipe } from '@angular/common';
 import { ProfileModalComponent } from '../profile-modal/profile-modal.component';
 import { SettingsModalComponent } from '../settings-modal/settings-modal.component';
 import { UserUiService } from '../../services/user-ui.service';
@@ -7,7 +7,7 @@ import { UserUiService } from '../../services/user-ui.service';
 @Component({
   selector: 'app-global-user-modals',
   standalone: true,
-  imports: [CommonModule, ProfileModalComponent, SettingsModalComponent],
+  imports: [AsyncPipe, ProfileModalComponent, SettingsModalComponent],
   template: `
     <app-profile-modal
       [isOpen]="(userUiService.isProfileOpen$ | async) || false"

@@ -1,4 +1,4 @@
-import { Component, Input, input } from '@angular/core';
+import { Component, input } from '@angular/core';
 
 
 export type SpinnerSize = 'sm' | 'md' | 'lg' | 'xl';
@@ -25,9 +25,9 @@ export type SpinnerSize = 'sm' | 'md' | 'lg' | 'xl';
         ></path>
       </svg>
     
-      @if (text) {
+      @if (text()) {
         <span [class]="textClasses">
-          {{ text }}
+          {{ text() }}
         </span>
       }
     </div>
@@ -35,7 +35,7 @@ export type SpinnerSize = 'sm' | 'md' | 'lg' | 'xl';
 })
 export class SpinnerComponent {
   readonly size = input<SpinnerSize>('md');
-  @Input() text?: string;
+  readonly text = input<string | undefined>(undefined);
   readonly color = input('text-primary');
   readonly center = input(false);
   readonly customClasses = input('');

@@ -1,7 +1,7 @@
 <!-- Standard Module Layout -->
 <div class="flex flex-col gap-6">
   <!-- Stats Grid -->
-  <app-store-stats [stats]="stats"></app-store-stats>
+  <app-store-stats [stats]="stats()"></app-store-stats>
 
   <!-- Main Content Card -->
   <app-card [padding]="false" overflow="hidden">
@@ -67,7 +67,7 @@
             variant="outline"
             size="sm"
             (clicked)="refreshStores()"
-            [disabled]="isLoading"
+            [disabled]="isLoading()"
             title="Actualizar lista"
           >
             <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
@@ -89,7 +89,7 @@
     <!-- Table Content Wrapper -->
     <div class="relative min-h-[400px] p-2 md:p-4">
       <!-- Loading Overlay -->
-      @if (isLoading) {
+      @if (isLoading()) {
         <div
           class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
         >
@@ -100,7 +100,7 @@
       }
 
       <!-- Empty State -->
-      @if (!isLoading && stores.length === 0) {
+      @if (!isLoading() && stores().length === 0) {
         <div class="p-8 flex justify-center w-full">
           <app-empty-state
             icon="store"
@@ -119,13 +119,13 @@
 
       <!-- Stores Table -->
       <!-- Stores Table -->
-      @if (!isLoading && stores.length > 0) {
+      @if (!isLoading() && stores().length > 0) {
         <app-responsive-data-view
-          [data]="stores"
+          [data]="stores()"
           [columns]="tableColumns"
           [actions]="tableActions"
           [cardConfig]="cardConfig"
-          [loading]="isLoading"
+          [loading]="isLoading()"
           [sortable]="true"
           [hoverable]="true"
           [striped]="true"
@@ -138,7 +138,7 @@
     </div>
 
     <!-- Pagination -->
-    @if (!isLoading && stores.length > 0) {
+    @if (!isLoading() && stores().length > 0) {
       <div
         class="px-6 py-4 border-t border-border bg-muted/30 flex justify-center"
       >
@@ -154,27 +154,27 @@
     }
   </app-card>
 
-  @defer (when isCreateModalOpen) {
+  @defer (when isCreateModalOpen()) {
     <app-store-create-modal
       [(isOpen)]="isCreateModalOpen"
-      [isSubmitting]="isCreatingStore"
+      [isSubmitting]="isCreatingStore()"
       (cancel)="onCreateModalCancel()"
     ></app-store-create-modal>
   }
 
-  @defer (when isEditModalOpen) {
+  @defer (when isEditModalOpen()) {
     <app-store-edit-modal
       [(isOpen)]="isEditModalOpen"
-      [isSubmitting]="isUpdatingStore"
+      [isSubmitting]="isUpdatingStore()"
       [store]="selectedStore"
       (cancel)="onEditModalCancel()"
     ></app-store-edit-modal>
   }
 
-  @defer (when isSettingsModalOpen) {
+  @defer (when isSettingsModalOpen()) {
     <app-store-settings-modal
       [(isOpen)]="isSettingsModalOpen"
-      [isSubmitting]="isUpdatingSettings"
+      [isSubmitting]="isUpdatingSettings()"
       [settings]="selectedStoreForSettings?.settings"
       (submit)="updateStoreSettings($event)"
     ></app-store-settings-modal>

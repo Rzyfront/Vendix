@@ -1,21 +1,18 @@
 import {
   Component,
-  Input,
   inject,
-  OnChanges,
   DestroyRef,
-  SimpleChanges,
-  ChangeDetectorRef,
   input,
-  output
+  output,
+  effect,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import {
   FormBuilder,
   FormGroup,
   Validators,
   ReactiveFormsModule,
 } from '@angular/forms';
+import { AsyncPipe } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { filter } from 'rxjs/operators';
 import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
@@ -33,7 +30,7 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
   selector: 'app-auth-modal',
   standalone: true,
   imports: [
-    CommonModule,
+    AsyncPipe,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
@@ -42,7 +39,7 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
     LegalPreviewModalComponent,
   ],
   template: `
-    <app-modal [isOpen]="isOpen" (closed)="onClose()" size="sm" title=" " [overlayCloseButton]="true">
+    <app-modal [isOpen]="isOpen()" (closed)="onClose()" size="sm" title=" " [overlayCloseButton]="true">
       <!-- Custom Header with Logo -->
       <div
         slot="header"
@@ -50,9 +47,9 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
       >
         <!-- Store Logo -->
         <div class="mb-4">
-          @if (storeLogo) {
+          @if (storeLogo()) {
             <img
-              [src]="storeLogo"
+              [src]="storeLogo()"
               [alt]="storeName()"
               class="h-12 w-auto object-contain"
             />
@@ -213,10 +210,10 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
     ></app-legal-preview-modal>
   `,
 })
-export class AuthModalComponent implements OnChanges {
-  @Input() isOpen = false;
+export class AuthModalComponent {
+  readonly isOpen = input(false);
   readonly initialMode = input<'login' | 'register'>('login');
-  @Input() storeLogo: string | null = null;
+  readonly storeLogo = input<string | null>(null);
   readonly storeName = input('Tienda');
   readonly closed = output<void>();
 
@@ -235,7 +232,6 @@ export class AuthModalComponent implements OnChanges {
   private tenantFacade = inject(TenantFacade);
   private legalService = inject(LegalService);
   private destroyRef = inject(DestroyRef);
-  private cdr = inject(ChangeDetectorRef);
   private toast = inject(ToastService);
 
   loading$ = this.authFacade.loading$;
@@ -261,7 +257,7 @@ export class AuthModalComponent implements OnChanges {
     this.authFacade.isAuthenticated$
       .pipe(
         takeUntilDestroyed(this.destroyRef),
-        filter((isAuth) => isAuth && this.isOpen),
+        filter((isAuth) => isAuth && this.isOpen()),
       )
       .subscribe(() => {
         // Al autenticarse (especialmente tras registro), registrar aceptaciones si hay pendientes
@@ -273,7 +269,7 @@ export class AuthModalComponent implements OnChanges {
     this.authFacade.error$
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((error) => {
-        if (error && this.isOpen) {
+        if (error && this.isOpen()) {
           const rawMessage =
             typeof error === 'string' ? error : extractApiErrorMessage(error);
           const { title, message } = this.mapErrorToUserFriendly(rawMessage);
@@ -291,6 +287,22 @@ export class AuthModalComponent implements OnChanges {
           this.errorMessage = null;
         }
       });
+
+    // React to input changes (replaces ngOnChanges)
+    effect(() => {
+      const mode = this.initialMode();
+      const open = this.isOpen();
+
+      this.isLogin = mode === 'login';
+      this.updateValidators();
+
+      if (open) {
+        this.errorMessage = null;
+        if (!this.isLogin) {
+          this.loadPendingDocuments();
+        }
+      }
+    });
   }
 
   // Typed getters for form controls
@@ -376,29 +388,6 @@ export class AuthModalComponent implements OnChanges {
     };
   }
 
-  ngOnChanges(changes: SimpleChanges): void {
-    let shouldLoadDocs = false;
-
-    if (changes['initialMode']) {
-      this.isLogin = this.initialMode() === 'login';
-      this.updateValidators();
-      if (!this.isLogin) {
-        shouldLoadDocs = true;
-      }
-    }
-    // Clear error when modal opens
-    if (changes['isOpen'] && this.isOpen) {
-      this.errorMessage = null;
-      if (!this.isLogin) {
-        shouldLoadDocs = true;
-      }
-    }
-
-    if (shouldLoadDocs) {
-      this.loadPendingDocuments();
-    }
-  }
-
   loadPendingDocuments(): void {
     this.legalService.getPendingDocumentsForCustomer().subscribe({
       next: (docs) => {
@@ -424,8 +413,6 @@ export class AuthModalComponent implements OnChanges {
         this.pendingDocuments.forEach((doc) => {
           this.acceptedDocuments[doc.document_id] = false;
         });
-
-        this.cdr.markForCheck();
       },
       error: (err) => {
         console.error('Error loading legal docs', err);
@@ -506,11 +493,7 @@ export class AuthModalComponent implements OnChanges {
   }
 
   onClose(): void {
-    this.isOpen = false;
     this.errorMessage = null;
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
     this.closed.emit();
     this.authForm.reset();
     this.pendingDocuments = [];

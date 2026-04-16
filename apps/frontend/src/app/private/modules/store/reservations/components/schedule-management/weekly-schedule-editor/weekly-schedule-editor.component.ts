@@ -1,17 +1,17 @@
 import {
   Component,
-  ChangeDetectionStrategy,
+  DestroyRef,
   inject,
   input,
   output,
   signal,
   effect,
   untracked,
-  OnDestroy,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
-import { Subject, takeUntil, finalize } from 'rxjs';
+import { finalize } from 'rxjs';
 import { ReservationsService } from '../../../services/reservations.service';
 import { ProviderSchedule } from '../../../interfaces/reservation.interface';
 import {
@@ -38,12 +38,11 @@ interface ScheduleDay {
   imports: [FormsModule, IconComponent, SpinnerComponent, ButtonComponent, ToggleComponent],
   templateUrl: './weekly-schedule-editor.component.html',
   styleUrls: ['./weekly-schedule-editor.component.scss'],
-  changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class WeeklyScheduleEditorComponent implements OnDestroy {
+export class WeeklyScheduleEditorComponent {
   private reservationsService = inject(ReservationsService);
   private toastService = inject(ToastService);
-  private destroy$ = new Subject<void>();
+  private destroyRef = inject(DestroyRef);
 
   readonly providerId = input.required<number>();
   readonly scheduleChanged = output<{ activeDays: number; weeklyHours: number }>();
@@ -69,17 +68,12 @@ export class WeeklyScheduleEditorComponent implements OnDestroy {
     });
   }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
   private loadSchedule(providerId: number): void {
     this.loading.set(true);
     this.reservationsService
       .getProviderSchedule(providerId)
       .pipe(
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
         finalize(() => this.loading.set(false)),
       )
       .subscribe({
@@ -241,7 +235,7 @@ export class WeeklyScheduleEditorComponent implements OnDestroy {
     this.reservationsService
       .upsertProviderSchedule(this.providerId(), items)
       .pipe(
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
         finalize(() => this.saving.set(false)),
       )
       .subscribe({

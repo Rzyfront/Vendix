@@ -1,4 +1,5 @@
-import { Component, Input, Output, EventEmitter, OnInit, inject } from '@angular/core';
+import { Component, DestroyRef, effect, inject, input, output } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormBuilder, FormGroup, FormArray, Validators, ReactiveFormsModule } from '@angular/forms';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
@@ -36,7 +37,7 @@ import { InventoryService } from '../../../inventory/services';
 ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
@@ -188,8 +189,8 @@ import { InventoryService } from '../../../inventory/services';
           variant="primary"
           type="button"
           (clicked)="onSubmit()"
-          [loading]="isSubmitting"
-          [disabled]="form.invalid || isSubmitting"
+          [loading]="isSubmitting()"
+          [disabled]="form.invalid || isSubmitting()"
           >
           Crear Orden
         </app-button>
@@ -197,36 +198,33 @@ import { InventoryService } from '../../../inventory/services';
     </app-modal>
     `,
 })
-export class PurchaseOrderCreateModalComponent implements OnInit {
+export class PurchaseOrderCreateModalComponent {
   private currencyService = inject(CurrencyFormatService);
-  @Input() isOpen = false;
-  @Input() suppliers: Supplier[] = [];
-  @Input() isSubmitting = false;
+  private fb = inject(FormBuilder);
+  private inventoryService = inject(InventoryService);
+  private destroyRef = inject(DestroyRef);
 
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() cancel = new EventEmitter<void>();
-  @Output() save = new EventEmitter<CreatePurchaseOrderDto>();
+  readonly isOpen = input<boolean>(false);
+  readonly suppliers = input<Supplier[]>([]);
+  readonly isSubmitting = input<boolean>(false);
+
+  readonly isOpenChange = output<boolean>();
+  readonly cancel = output<void>();
+  readonly save = output<CreatePurchaseOrderDto>();
 
   form: FormGroup;
   supplier_options: SelectorOption[] = [];
   location_options: SelectorOption[] = [];
 
-  constructor(
-    private fb: FormBuilder,
-    private inventoryService: InventoryService
-  ) {
+  constructor() {
     this.form = this.createForm();
-  }
-
-  ngOnInit(): void {
     this.loadLocations();
-  }
-
-  ngOnChanges(): void {
-    this.supplier_options = this.suppliers.map((s) => ({
-      value: s.id,
-      label: s.name,
-    }));
+    effect(() => {
+      this.supplier_options = this.suppliers().map((s) => ({
+        value: s.id,
+        label: s.name,
+      }));
+    });
   }
 
   private createForm(): FormGroup {
@@ -251,16 +249,19 @@ export class PurchaseOrderCreateModalComponent implements OnInit {
   }
 
   loadLocations(): void {
-    this.inventoryService.getLocations().subscribe({
-      next: (response) => {
-        if (response.data) {
-          this.location_options = response.data.map((l) => ({
-            value: l.id,
-            label: l.name,
-          }));
-        }
-      },
-    });
+    this.inventoryService
+      .getLocations()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          if (response.data) {
+            this.location_options = response.data.map((l) => ({
+              value: l.id,
+              label: l.name,
+            }));
+          }
+        },
+      });
   }
 
   get items(): FormArray {
@@ -302,11 +303,6 @@ export class PurchaseOrderCreateModalComponent implements OnInit {
     this.form.reset();
     this.items.clear();
     this.items.push(this.createItemGroup());
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
     this.cancel.emit();
   }
 

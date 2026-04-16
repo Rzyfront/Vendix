@@ -1,5 +1,5 @@
 import { Component, input, output } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { NgClass } from '@angular/common';
 
 export interface StepsLineItem {
   label: string;
@@ -11,7 +11,7 @@ export type StepsLineSize = 'sm' | 'md' | 'lg';
 @Component({
   selector: 'app-steps-line',
   standalone: true,
-  imports: [CommonModule],
+  imports: [NgClass],
   template: `
     <div class="w-full py-3 px-4">
       <!-- Horizontal -->

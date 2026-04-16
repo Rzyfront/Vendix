@@ -1,4 +1,4 @@
-import { Injectable, inject, OnDestroy } from '@angular/core';
+import { Injectable, inject, DestroyRef } from '@angular/core';
 import { Subscription, timer, EMPTY } from 'rxjs';
 import { tap, catchError, take } from 'rxjs/operators';
 import { AuthService } from './auth.service';
@@ -14,12 +14,17 @@ import * as AuthActions from '../store/auth/auth.actions';
  * - At 80% of the token lifetime (whichever is smaller)
  */
 @Injectable({ providedIn: 'root' })
-export class TokenRefreshTimerService implements OnDestroy {
+export class TokenRefreshTimerService {
   private timerSubscription?: Subscription;
   private isRefreshing = false;
 
   private authService = inject(AuthService);
   private store = inject(Store);
+  private destroyRef = inject(DestroyRef);
+
+  constructor() {
+    this.destroyRef.onDestroy(() => this.stopTimer());
+  }
 
   /**
    * Starts the proactive refresh timer based on token expiration time.
@@ -117,7 +122,4 @@ export class TokenRefreshTimerService implements OnDestroy {
     }
   }
 
-  ngOnDestroy(): void {
-    this.stopTimer();
-  }
 }

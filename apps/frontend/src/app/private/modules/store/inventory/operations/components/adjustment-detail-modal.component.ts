@@ -1,5 +1,5 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input, output } from '@angular/core';
+import { DatePipe } from '@angular/common';
 
 // Shared Components
 import {
@@ -14,16 +14,16 @@ import { InventoryAdjustment, AdjustmentType } from '../../interfaces';
 @Component({
   selector: 'app-adjustment-detail-modal',
   standalone: true,
-  imports: [CommonModule, ModalComponent, ButtonComponent, IconComponent],
+  imports: [DatePipe, ModalComponent, ButtonComponent, IconComponent],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       title="Detalle del Ajuste"
       size="md"
       (closed)="onClose()"
       (isOpenChange)="isOpenChange.emit($event)"
     >
-      @if (adjustment) {
+      @if (adjustment()) {
         <div class="space-y-6">
           <!-- Header with Type Badge -->
           <div
@@ -44,12 +44,12 @@ import { InventoryAdjustment, AdjustmentType } from '../../interfaces';
             <div
               class="px-3 py-1.5 rounded-full text-sm font-medium"
               [class]="
-                adjustment.approved_at
+                adjustment()!.approved_at
                   ? 'bg-success/10 text-success'
                   : 'bg-warning/10 text-warning'
               "
             >
-              {{ adjustment.approved_at ? 'Aprobado' : 'Pendiente' }}
+              {{ adjustment()!.approved_at ? 'Aprobado' : 'Pendiente' }}
             </div>
           </div>
 
@@ -64,25 +64,25 @@ import { InventoryAdjustment, AdjustmentType } from '../../interfaces';
             <div class="p-4 bg-surface rounded-xl border border-border">
               <p class="font-semibold text-text-primary">
                 {{
-                  adjustment.products?.name ||
-                    adjustment.product?.name ||
+                  adjustment()!.products?.name ||
+                    adjustment()!.product?.name ||
                     'Producto desconocido'
                 }}
               </p>
               <p class="text-sm text-text-secondary mt-1">
                 SKU:
                 {{
-                  adjustment.products?.sku || adjustment.product?.sku || 'N/A'
+                  adjustment()!.products?.sku || adjustment()!.product?.sku || 'N/A'
                 }}
               </p>
-              @if (adjustment.product_variants) {
+              @if (adjustment()!.product_variants) {
                 <p class="text-sm text-primary mt-1">
                   <app-icon
                     name="git-branch"
                     [size]="14"
                     class="inline mr-1"
                   ></app-icon>
-                  Variante: {{ adjustment.product_variants.sku }}
+                  Variante: {{ adjustment()!.product_variants?.sku }}
                 </p>
               }
             </div>
@@ -99,30 +99,30 @@ import { InventoryAdjustment, AdjustmentType } from '../../interfaces';
             <div class="p-4 bg-surface rounded-xl border border-border">
               <p class="font-semibold text-text-primary">
                 {{
-                  adjustment.inventory_locations?.name ||
-                    adjustment.location?.name ||
+                  adjustment()!.inventory_locations?.name ||
+                    adjustment()!.location?.name ||
                     'Ubicacion desconocida'
                 }}
               </p>
               <p class="text-sm text-text-secondary">
                 Codigo:
                 {{
-                  adjustment.inventory_locations?.code ||
-                    adjustment.location?.code ||
+                  adjustment()!.inventory_locations?.code ||
+                    adjustment()!.location?.code ||
                     'N/A'
                 }}
               </p>
-              @if (adjustment.inventory_batches) {
+              @if (adjustment()!.inventory_batches) {
                 <div class="mt-3 pt-3 border-t border-border">
                   <p class="text-sm text-text-secondary">Lote</p>
                   <p class="font-medium text-text-primary">
-                    {{ adjustment.inventory_batches.batch_number }}
+                    {{ adjustment()!.inventory_batches?.batch_number }}
                   </p>
-                  @if (adjustment.inventory_batches.expiration_date) {
+                  @if (adjustment()!.inventory_batches?.expiration_date) {
                     <p class="text-xs text-text-muted mt-1">
                       Vence:
                       {{
-                        adjustment.inventory_batches.expiration_date
+                        adjustment()!.inventory_batches?.expiration_date
                           | date: 'dd/MM/yyyy'
                       }}
                     </p>
@@ -146,32 +146,32 @@ import { InventoryAdjustment, AdjustmentType } from '../../interfaces';
               >
                 <p class="text-sm text-text-secondary mb-1">Antes</p>
                 <p class="text-2xl font-bold text-text-primary">
-                  {{ adjustment.quantity_before }}
+                  {{ adjustment()!.quantity_before }}
                 </p>
               </div>
               <div
                 class="p-4 rounded-xl text-center flex flex-col items-center justify-center"
                 [class]="
-                  adjustment.quantity_change > 0
+                  adjustment()!.quantity_change > 0
                     ? 'bg-success/10 border border-success/30'
-                    : adjustment.quantity_change < 0
+                    : adjustment()!.quantity_change < 0
                       ? 'bg-error/10 border border-error/30'
                       : 'bg-muted/10 border border-border'
                 "
               >
                 <app-icon
                   [name]="
-                    adjustment.quantity_change > 0
+                    adjustment()!.quantity_change > 0
                       ? 'trending-up'
-                      : adjustment.quantity_change < 0
+                      : adjustment()!.quantity_change < 0
                         ? 'trending-down'
                         : 'minus'
                   "
                   [size]="20"
                   [class]="
-                    adjustment.quantity_change > 0
+                    adjustment()!.quantity_change > 0
                       ? 'text-success'
-                      : adjustment.quantity_change < 0
+                      : adjustment()!.quantity_change < 0
                         ? 'text-error'
                         : 'text-muted'
                   "
@@ -179,15 +179,15 @@ import { InventoryAdjustment, AdjustmentType } from '../../interfaces';
                 <p
                   class="text-lg font-bold mt-1"
                   [class]="
-                    adjustment.quantity_change > 0
+                    adjustment()!.quantity_change > 0
                       ? 'text-success'
-                      : adjustment.quantity_change < 0
+                      : adjustment()!.quantity_change < 0
                         ? 'text-error'
                         : 'text-text-secondary'
                   "
                 >
-                  {{ adjustment.quantity_change > 0 ? '+' : ''
-                  }}{{ adjustment.quantity_change }}
+                  {{ adjustment()!.quantity_change > 0 ? '+' : ''
+                  }}{{ adjustment()!.quantity_change }}
                 </p>
               </div>
               <div
@@ -195,14 +195,14 @@ import { InventoryAdjustment, AdjustmentType } from '../../interfaces';
               >
                 <p class="text-sm text-text-secondary mb-1">Despues</p>
                 <p class="text-2xl font-bold text-text-primary">
-                  {{ adjustment.quantity_after }}
+                  {{ adjustment()!.quantity_after }}
                 </p>
               </div>
             </div>
           </div>
 
           <!-- Reason Section -->
-          @if (adjustment.reason_code || adjustment.description) {
+          @if (adjustment()!.reason_code || adjustment()!.description) {
             <div class="space-y-3">
               <h3
                 class="text-sm font-semibold text-text-secondary uppercase tracking-wide flex items-center gap-2"
@@ -211,17 +211,17 @@ import { InventoryAdjustment, AdjustmentType } from '../../interfaces';
                 Motivo
               </h3>
               <div class="p-4 bg-surface rounded-xl border border-border">
-                @if (adjustment.reason_code) {
+                @if (adjustment()!.reason_code) {
                   <div class="flex items-center gap-2 mb-2">
                     <span
                       class="px-2 py-1 bg-muted/20 rounded-lg text-sm font-medium text-text-secondary"
                     >
-                      {{ getReasonLabel(adjustment.reason_code) }}
+                      {{ getReasonLabel(adjustment()!.reason_code!) }}
                     </span>
                   </div>
                 }
-                @if (adjustment.description) {
-                  <p class="text-text-primary">{{ adjustment.description }}</p>
+                @if (adjustment()!.description) {
+                  <p class="text-text-primary">{{ adjustment()!.description }}</p>
                 } @else {
                   <p class="text-text-muted italic">
                     Sin descripcion adicional
@@ -257,23 +257,23 @@ import { InventoryAdjustment, AdjustmentType } from '../../interfaces';
                   <p class="text-sm text-text-secondary">Creado por</p>
                   <p class="font-medium text-text-primary">
                     {{
-                      adjustment.created_by_user?.user_name ||
+                      adjustment()!.created_by_user?.user_name ||
                         'Usuario desconocido'
                     }}
                   </p>
-                  @if (adjustment.created_by_user?.email) {
+                  @if (adjustment()!.created_by_user?.email) {
                     <p class="text-xs text-text-muted">
-                      {{ adjustment.created_by_user?.email }}
+                      {{ adjustment()!.created_by_user?.email }}
                     </p>
                   }
                   <p class="text-xs text-text-muted mt-1">
-                    {{ adjustment.created_at | date: 'dd/MM/yyyy HH:mm' }}
+                    {{ adjustment()!.created_at | date: 'dd/MM/yyyy HH:mm' }}
                   </p>
                 </div>
               </div>
 
               <!-- Approved By -->
-              @if (adjustment.approved_at) {
+              @if (adjustment()!.approved_at) {
                 <div class="flex items-start gap-3 pt-3 border-t border-border">
                   <div
                     class="w-8 h-8 bg-success/10 rounded-full flex items-center justify-center flex-shrink-0"
@@ -288,17 +288,17 @@ import { InventoryAdjustment, AdjustmentType } from '../../interfaces';
                     <p class="text-sm text-text-secondary">Aprobado por</p>
                     <p class="font-medium text-text-primary">
                       {{
-                        adjustment.approved_by_user?.user_name ||
+                        adjustment()!.approved_by_user?.user_name ||
                           'Usuario desconocido'
                       }}
                     </p>
-                    @if (adjustment.approved_by_user?.email) {
+                    @if (adjustment()!.approved_by_user?.email) {
                       <p class="text-xs text-text-muted">
-                        {{ adjustment.approved_by_user?.email }}
+                        {{ adjustment()!.approved_by_user?.email }}
                       </p>
                     }
                     <p class="text-xs text-text-muted mt-1">
-                      {{ adjustment.approved_at | date: 'dd/MM/yyyy HH:mm' }}
+                      {{ adjustment()!.approved_at | date: 'dd/MM/yyyy HH:mm' }}
                     </p>
                   </div>
                 </div>
@@ -320,13 +320,13 @@ import { InventoryAdjustment, AdjustmentType } from '../../interfaces';
         class="flex justify-between px-6 py-4 bg-gray-50 rounded-b-xl"
       >
         <div>
-          @if (isPending && adjustment) {
+          @if (isPending && adjustment()) {
             <app-button
               variant="outline"
               type="button"
-              (clicked)="deleteAdjustment.emit(adjustment)"
-              [loading]="isProcessing"
-              [disabled]="isProcessing"
+              (clicked)="deleteAdjustment.emit(adjustment()!)"
+              [loading]="isProcessing()"
+              [disabled]="isProcessing()"
               customClasses="!rounded-xl font-bold !text-error !border-error hover:!bg-error/5"
             >
               Eliminar
@@ -342,13 +342,13 @@ import { InventoryAdjustment, AdjustmentType } from '../../interfaces';
           >
             Cerrar
           </app-button>
-          @if (isPending && adjustment) {
+          @if (isPending && adjustment()) {
             <app-button
               variant="primary"
               type="button"
-              (clicked)="approve.emit(adjustment)"
-              [loading]="isProcessing"
-              [disabled]="isProcessing"
+              (clicked)="approve.emit(adjustment()!)"
+              [loading]="isProcessing()"
+              [disabled]="isProcessing()"
               customClasses="!rounded-xl font-bold shadow-md shadow-primary-200"
             >
               Aprobar
@@ -360,17 +360,17 @@ import { InventoryAdjustment, AdjustmentType } from '../../interfaces';
   `,
 })
 export class AdjustmentDetailModalComponent {
-  @Input() isOpen = false;
-  @Input() adjustment: InventoryAdjustment | null = null;
-  @Input() isProcessing = false;
+  readonly isOpen = input(false);
+  readonly adjustment = input<InventoryAdjustment | null>(null);
+  readonly isProcessing = input(false);
 
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() close = new EventEmitter<void>();
-  @Output() approve = new EventEmitter<InventoryAdjustment>();
-  @Output() deleteAdjustment = new EventEmitter<InventoryAdjustment>();
+  readonly isOpenChange = output<boolean>();
+  readonly close = output<void>();
+  readonly approve = output<InventoryAdjustment>();
+  readonly deleteAdjustment = output<InventoryAdjustment>();
 
   get isPending(): boolean {
-    return !!this.adjustment && !this.adjustment.approved_at;
+    return !!this.adjustment() && !this.adjustment()!.approved_at;
   }
 
   private typeConfig: Record<
@@ -419,24 +419,24 @@ export class AdjustmentDetailModalComponent {
   };
 
   getTypeLabel(): string {
-    if (!this.adjustment) return '';
+    if (!this.adjustment()) return '';
     return (
-      this.typeConfig[this.adjustment.adjustment_type]?.label ||
-      this.adjustment.adjustment_type
+      this.typeConfig[this.adjustment()!.adjustment_type]?.label ||
+      this.adjustment()!.adjustment_type
     );
   }
 
   getTypeIcon(): string {
-    if (!this.adjustment) return 'help-circle';
+    if (!this.adjustment()) return 'help-circle';
     return (
-      this.typeConfig[this.adjustment.adjustment_type]?.icon || 'help-circle'
+      this.typeConfig[this.adjustment()!.adjustment_type]?.icon || 'help-circle'
     );
   }
 
   getTypeColorClasses(): string {
-    if (!this.adjustment) return 'bg-muted/10 text-muted';
+    if (!this.adjustment()) return 'bg-muted/10 text-muted';
     return (
-      this.typeConfig[this.adjustment.adjustment_type]?.colorClass ||
+      this.typeConfig[this.adjustment()!.adjustment_type]?.colorClass ||
       'bg-muted/10 text-muted'
     );
   }
@@ -446,11 +446,6 @@ export class AdjustmentDetailModalComponent {
   }
 
   onClose(): void {
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
     this.close.emit();
   }
 }

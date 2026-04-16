@@ -5,6 +5,8 @@ import {
   OnChanges,
   SimpleChanges,
   inject,
+  signal,
+  computed,
 } from '@angular/core';
 
 import { RouterModule, Router } from '@angular/router';
@@ -68,8 +70,8 @@ import './stores.component.css';
     ResponsiveDataViewComponent,
     ButtonComponent,
     PaginationComponent,
-    CardComponent
-],
+    CardComponent,
+  ],
   providers: [StoresService],
   templateUrl: './stores.component.html',
 })
@@ -82,8 +84,8 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
   private readonly router = inject(Router);
 
   // State
-  stores: StoreListItem[] = [];
-  isLoading = false;
+  readonly stores = signal<StoreListItem[]>([]);
+  readonly isLoading = signal(false);
   searchTerm = '';
   selectedOrganization = '';
   pagination = { page: 1, limit: 10, total: 0, totalPages: 0 };
@@ -241,7 +243,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
     },
   ];
 
-  stats = {
+  readonly stats = signal({
     total_stores: 0,
     active_stores: 0,
     inactive_stores: 0,
@@ -250,21 +252,21 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
     total_revenue: 0,
     total_orders: 0,
     total_products: 0,
-  };
+  });
 
   // Modal state
-  isCreateModalOpen = false;
-  isCreatingStore = false;
+  readonly isCreateModalOpen = signal(false);
+  readonly isCreatingStore = signal(false);
   createStoreForm!: FormGroup;
 
   // Edit Modal state
-  isEditModalOpen = false;
-  isUpdatingStore = false;
+  readonly isEditModalOpen = signal(false);
+  readonly isUpdatingStore = signal(false);
   selectedStore?: StoreListItem;
 
   // Settings Modal state
-  isSettingsModalOpen = false;
-  isUpdatingSettings = false;
+  readonly isSettingsModalOpen = signal(false);
+  readonly isUpdatingSettings = signal(false);
   selectedStoreForSettings?: StoreListItem;
 
   private destroy$ = new Subject<void>();
@@ -296,17 +298,17 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
     // Subscribe to loading states from service
     this.storesService.isLoading$
       .pipe(takeUntil(this.destroy$))
-      .subscribe((loading) => (this.isLoading = loading));
+      .subscribe((loading) => this.isLoading.set(loading));
 
     this.storesService.isCreatingStore$
       .pipe(takeUntil(this.destroy$))
-      .subscribe((loading) => (this.isCreatingStore = loading));
+      .subscribe((loading) => this.isCreatingStore.set(loading));
 
     this.storesService.isUpdatingStore$
       .pipe(takeUntil(this.destroy$))
       .subscribe((loading) => {
-        this.isUpdatingStore = loading;
-        this.isUpdatingSettings = loading;
+        this.isUpdatingStore.set(loading);
+        this.isUpdatingSettings.set(loading);
       });
 
     // Subscribe to filter changes
@@ -355,7 +357,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
   }
 
   openCreateStoreModal(): void {
-    this.isCreateModalOpen = true;
+    this.isCreateModalOpen.set(true);
     this.createStoreForm.reset({
       name: '',
       slug: '',
@@ -372,14 +374,14 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
   }
 
   onCreateModalChange(isOpen: boolean): void {
-    this.isCreateModalOpen = isOpen;
+    this.isCreateModalOpen.set(isOpen);
     if (!isOpen) {
       this.createStoreForm.reset();
     }
   }
 
   onCreateModalCancel(): void {
-    this.isCreateModalOpen = false;
+    this.isCreateModalOpen.set(false);
     this.createStoreForm.reset();
   }
 
@@ -416,7 +418,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       .subscribe({
         next: (response) => {
           if (response.success && response.data) {
-            this.isCreateModalOpen = false;
+            this.isCreateModalOpen.set(false);
             this.loadStores();
             this.loadStats();
             this.toastService.success('Tienda creada exitosamente');
@@ -462,32 +464,35 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
               Math.ceil(this.pagination.total / this.pagination.limit);
           }
           if (response.success && response.data) {
-            this.stores = response.data.map((store: any) => ({
-              id: store.id,
-              name: store.name,
-              slug: store.slug,
-              store_code: store.store_code || '',
-              store_type: store.store_type || StoreType.PHYSICAL,
-              timezone: store.timezone || 'America/Bogota',
-              is_active: store.is_active !== undefined ? store.is_active : true,
-              manager_user_id: store.manager_user_id,
-              organization_id: store.organization_id,
-              created_at: store.created_at || new Date().toISOString(),
-              updated_at: store.updated_at || new Date().toISOString(),
-              organizations: store.organizations || {
-                id: store.organization_id,
-                name: 'Unknown',
-                slug: 'unknown',
-              },
-              addresses: store.addresses || [],
-              _count: store._count || {
-                products: 0,
-                orders: 0,
-                store_users: 0,
-              },
-            }));
+            this.stores.set(
+              response.data.map((store: any) => ({
+                id: store.id,
+                name: store.name,
+                slug: store.slug,
+                store_code: store.store_code || '',
+                store_type: store.store_type || StoreType.PHYSICAL,
+                timezone: store.timezone || 'America/Bogota',
+                is_active:
+                  store.is_active !== undefined ? store.is_active : true,
+                manager_user_id: store.manager_user_id,
+                organization_id: store.organization_id,
+                created_at: store.created_at || new Date().toISOString(),
+                updated_at: store.updated_at || new Date().toISOString(),
+                organizations: store.organizations || {
+                  id: store.organization_id,
+                  name: 'Unknown',
+                  slug: 'unknown',
+                },
+                addresses: store.addresses || [],
+                _count: store._count || {
+                  products: 0,
+                  orders: 0,
+                  store_users: 0,
+                },
+              })),
+            );
           } else {
-            this.stores = [];
+            this.stores.set([]);
           }
         },
         error: (error) => {
@@ -504,7 +509,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       .subscribe({
         next: (response) => {
           if (response.success && response.data) {
-            this.stats = {
+            this.stats.set({
               total_stores: response.data.totalStores || 0,
               active_stores: response.data.activeStores || 0,
               inactive_stores: response.data.storesByState?.['false'] || 0,
@@ -513,7 +518,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
               total_revenue: 0,
               total_orders: 0,
               total_products: 0,
-            };
+            });
           } else {
             this.updateStats();
           }
@@ -525,15 +530,15 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
   }
 
   updateStats(): void {
-    this.stats.total_stores = this.stores.length;
-    this.stats.active_stores = this.stores.filter(
-      (store) => store.is_active === true,
-    ).length;
-    this.stats.inactive_stores = this.stores.filter(
-      (store) => store.is_active === false,
-    ).length;
-    this.stats.suspended_stores = 0;
-    this.stats.draft_stores = 0;
+    const list = this.stores();
+    this.stats.update((s) => ({
+      ...s,
+      total_stores: list.length,
+      active_stores: list.filter((store) => store.is_active === true).length,
+      inactive_stores: list.filter((store) => store.is_active === false).length,
+      suspended_stores: 0,
+      draft_stores: 0,
+    }));
   }
 
   refreshStores(): void {
@@ -560,18 +565,18 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
 
   openSettingsModal(store: StoreListItem): void {
     this.selectedStoreForSettings = store;
-    this.isSettingsModalOpen = true;
+    this.isSettingsModalOpen.set(true);
   }
 
   onSettingsModalChange(isOpen: boolean): void {
-    this.isSettingsModalOpen = isOpen;
+    this.isSettingsModalOpen.set(isOpen);
     if (!isOpen) {
       this.selectedStoreForSettings = undefined;
     }
   }
 
   onSettingsModalCancel(): void {
-    this.isSettingsModalOpen = false;
+    this.isSettingsModalOpen.set(false);
     this.selectedStoreForSettings = undefined;
   }
 
@@ -584,7 +589,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       .subscribe({
         next: (response) => {
           if (response.success && response.data) {
-            this.isSettingsModalOpen = false;
+            this.isSettingsModalOpen.set(false);
             this.selectedStoreForSettings = undefined;
             this.toastService.success('Configuración actualizada exitosamente');
           } else {
@@ -686,18 +691,18 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
 
   editStore(store: StoreListItem): void {
     this.selectedStore = store;
-    this.isEditModalOpen = true;
+    this.isEditModalOpen.set(true);
   }
 
   onEditModalChange(isOpen: boolean): void {
-    this.isEditModalOpen = isOpen;
+    this.isEditModalOpen.set(isOpen);
     if (!isOpen) {
       this.selectedStore = undefined;
     }
   }
 
   onEditModalCancel(): void {
-    this.isEditModalOpen = false;
+    this.isEditModalOpen.set(false);
     this.selectedStore = undefined;
   }
 
@@ -724,7 +729,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       .subscribe({
         next: (response) => {
           if (response.success && response.data) {
-            this.isEditModalOpen = false;
+            this.isEditModalOpen.set(false);
             this.selectedStore = undefined;
             this.loadStores();
             this.loadStats();

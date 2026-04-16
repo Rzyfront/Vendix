@@ -1,12 +1,11 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
   OnInit,
   OnChanges,
   OnDestroy,
   inject,
+  input,
+  output,
 } from '@angular/core';
 
 import {
@@ -28,16 +27,22 @@ import { LucideAngularModule } from 'lucide-angular';
     ReactiveFormsModule,
     IconComponent,
     ButtonComponent,
-    LucideAngularModule
-],
+    LucideAngularModule,
+  ],
   templateUrl: './app-settings-form.component.html',
   styleUrls: ['./app-settings-form.component.scss'],
 })
 export class AppSettingsForm implements OnInit, OnChanges, OnDestroy {
-  @Input() settings!: AppSettings;
-  @Output() settingsChange = new EventEmitter<AppSettings>();
-  @Output() pendingLogoUpload = new EventEmitter<{ file: File; preview: string } | null>();
-  @Output() pendingFaviconUpload = new EventEmitter<{ file: File; preview: string } | null>();
+  readonly settings = input.required<AppSettings>();
+  readonly settingsChange = output<AppSettings>();
+  readonly pendingLogoUpload = output<{
+    file: File;
+    preview: string;
+  } | null>();
+  readonly pendingFaviconUpload = output<{
+    file: File;
+    preview: string;
+  } | null>();
 
   logoPreview: string | null = null;
   faviconPreview: string | null = null;
@@ -47,7 +52,6 @@ export class AppSettingsForm implements OnInit, OnChanges, OnDestroy {
   private faviconInputRef: HTMLInputElement | null = null;
 
   private toastService = inject(ToastService);
-
 
   form: FormGroup = new FormGroup({
     name: new FormControl('Vendix', [
@@ -105,14 +109,15 @@ export class AppSettingsForm implements OnInit, OnChanges, OnDestroy {
   }
 
   patchForm() {
-    if (this.settings) {
-      this.form.patchValue(this.settings);
+    const currentSettings = this.settings();
+    if (currentSettings) {
+      this.form.patchValue(currentSettings);
       // Preserve local blob preview if user already selected a file
       if (!this.logoBlobUrl) {
-        this.logoPreview = this.settings.logo_url || null;
+        this.logoPreview = currentSettings.logo_url || null;
       }
       if (!this.faviconBlobUrl) {
-        this.faviconPreview = this.settings.favicon_url || null;
+        this.faviconPreview = currentSettings.favicon_url || null;
       }
     }
   }
@@ -138,7 +143,9 @@ export class AppSettingsForm implements OnInit, OnChanges, OnDestroy {
       this.logoInputRef = document.createElement('input');
       this.logoInputRef.type = 'file';
       this.logoInputRef.accept = 'image/*';
-      this.logoInputRef.addEventListener('change', (e) => this.onLogoFileSelect(e));
+      this.logoInputRef.addEventListener('change', (e) =>
+        this.onLogoFileSelect(e),
+      );
     }
     this.logoInputRef.click();
   }
@@ -183,7 +190,9 @@ export class AppSettingsForm implements OnInit, OnChanges, OnDestroy {
       this.faviconInputRef = document.createElement('input');
       this.faviconInputRef.type = 'file';
       this.faviconInputRef.accept = 'image/*';
-      this.faviconInputRef.addEventListener('change', (e) => this.onFaviconFileSelect(e));
+      this.faviconInputRef.addEventListener('change', (e) =>
+        this.onFaviconFileSelect(e),
+      );
     }
     this.faviconInputRef.click();
   }

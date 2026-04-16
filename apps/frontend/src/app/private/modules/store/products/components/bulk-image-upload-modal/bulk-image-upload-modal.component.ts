@@ -1,5 +1,5 @@
-import { Component, EventEmitter, Input, Output, inject, OnChanges, SimpleChanges, OnDestroy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject, input, output, effect } from '@angular/core';
+import { NgClass } from '@angular/common';
 import { ProductsService } from '../../services/products.service';
 import {
   ModalComponent,
@@ -19,10 +19,10 @@ import {
 @Component({
   selector: 'app-bulk-image-upload-modal',
   standalone: true,
-  imports: [CommonModule, ModalComponent, ButtonComponent, IconComponent, StepsLineComponent],
+  imports: [NgClass, ModalComponent, ButtonComponent, IconComponent, StepsLineComponent],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
@@ -490,10 +490,10 @@ import {
     `,
   ],
 })
-export class BulkImageUploadModalComponent implements OnChanges, OnDestroy {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() uploadComplete = new EventEmitter<void>();
+export class BulkImageUploadModalComponent {
+  readonly isOpen = input(false);
+  readonly isOpenChange = output<boolean>();
+  readonly uploadComplete = output<void>();
 
   private static readonly INTRO_CACHE_KEY = 'vendix_bulk_image_intro_dismissed';
   private static readonly INTRO_DURATION = 20000; // 20 seconds
@@ -537,6 +537,17 @@ export class BulkImageUploadModalComponent implements OnChanges, OnDestroy {
   private productsService = inject(ProductsService);
   private toastService = inject(ToastService);
 
+  constructor() {
+    effect(() => {
+      const open = this.isOpen();
+      if (open) {
+        this.onModalOpen();
+      } else {
+        this.clearIntroTimer();
+      }
+    });
+  }
+
   // Computed properties
   get canProceed(): boolean {
     if (!this.analysisResult) return false;
@@ -548,20 +559,6 @@ export class BulkImageUploadModalComponent implements OnChanges, OnDestroy {
     return this.analysisResult.skus
       .filter(s => s.status !== 'error')
       .reduce((sum, s) => sum + s.images_to_upload, 0);
-  }
-
-  // Lifecycle
-  ngOnChanges(changes: SimpleChanges) {
-    if (changes['isOpen'] && this.isOpen) {
-      this.onModalOpen();
-    }
-    if (changes['isOpen'] && !this.isOpen) {
-      this.clearIntroTimer();
-    }
-  }
-
-  ngOnDestroy() {
-    this.clearIntroTimer();
   }
 
   // Intro logic
@@ -620,11 +617,6 @@ export class BulkImageUploadModalComponent implements OnChanges, OnDestroy {
   // Cancel/Close
   onCancel() {
     if ((this.uploadResults?.successful ?? 0) > 0) {
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
       this.uploadComplete.emit();
     }
     this.isOpenChange.emit(false);

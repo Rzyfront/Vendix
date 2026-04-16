@@ -1,14 +1,13 @@
 import {
   Component,
-  OnInit,
-  OnDestroy,
   NO_ERRORS_SCHEMA,
-  Output,
-  EventEmitter,
   signal,
-  ChangeDetectionStrategy,
+  output,
+  inject,
+  DestroyRef,
 } from '@angular/core';
-import { Subject, debounceTime, distinctUntilChanged, takeUntil } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Subject, debounceTime, distinctUntilChanged } from 'rxjs';
 
 
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
@@ -29,7 +28,6 @@ import {
 @Component({
   selector: 'app-pop-product-selection',
   standalone: true,
-  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     IconComponent,
     InputsearchComponent,
@@ -273,7 +271,7 @@ import {
     `,
   ],
 })
-export class PopProductSelectionComponent implements OnInit, OnDestroy {
+export class PopProductSelectionComponent {
   loading = signal(false);
   searchQuery = '';
   filteredProducts = signal<any[]>([]);
@@ -306,37 +304,26 @@ export class PopProductSelectionComponent implements OnInit, OnDestroy {
     },
   ];
 
-  @Output() productSelected = new EventEmitter<any>();
-  @Output() requestManualAdd = new EventEmitter<void>();
-  @Output() bulkDataLoaded = new EventEmitter<any[]>();
-  @Output() productAddedToCart = new EventEmitter<{
-    product: any;
-    quantity: number;
-  }>();
-  @Output() scanInvoice = new EventEmitter<void>();
+  readonly productSelected = output<any>();
+  readonly requestManualAdd = output<void>();
+  readonly bulkDataLoaded = output<any[]>();
+  readonly productAddedToCart = output<{ product: any; quantity: number }>();
+  readonly scanInvoice = output<void>();
 
-  private destroy$ = new Subject<void>();
+  private destroyRef = inject(DestroyRef);
+  private productsService = inject(ProductsService);
+  private cartService = inject(PopCartService);
+  private toastService = inject(ToastService);
   private searchSubject$ = new Subject<string>();
 
-  constructor(
-    private productsService: ProductsService,
-    private cartService: PopCartService,
-    private toastService: ToastService,
-  ) {}
-
-  ngOnInit(): void {
+  constructor() {
     this.setupSearchSubscription();
     this.loadProducts();
   }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
   private setupSearchSubscription(): void {
     this.searchSubject$
-      .pipe(debounceTime(300), distinctUntilChanged(), takeUntil(this.destroy$))
+      .pipe(debounceTime(300), distinctUntilChanged(), takeUntilDestroyed(this.destroyRef))
       .subscribe((query) => {
         this.searchQuery = query;
         this.filterProducts();
@@ -363,7 +350,7 @@ export class PopProductSelectionComponent implements OnInit, OnDestroy {
 
     this.productsService
       .getProducts(filters)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           this.filteredProducts.set(response.data || []);
@@ -494,19 +481,9 @@ export class PopProductSelectionComponent implements OnInit, OnDestroy {
   onDropdownAction(action: string): void {
     switch (action) {
       case 'scan-invoice':
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
         this.scanInvoice.emit();
         break;
       case 'new-product':
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
         this.requestManualAdd.emit();
         break;
       case 'bulk-import':

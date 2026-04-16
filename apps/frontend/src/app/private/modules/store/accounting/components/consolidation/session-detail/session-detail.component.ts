@@ -1,13 +1,12 @@
 import {
   Component,
-  OnInit,
   OnDestroy,
   inject,
   signal,
   computed,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
+import { DatePipe } from '@angular/common';
 import {
   ReactiveFormsModule,
   FormsModule,
@@ -49,7 +48,6 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
   selector: 'vendix-session-detail',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     FormsModule,
     ModalComponent,
@@ -62,11 +60,12 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
     IconComponent,
     ScrollableTabsComponent,
     ResponsiveDataViewComponent,
+    DatePipe,
   ],
   templateUrl: './session-detail.component.html',
   styleUrls: ['./session-detail.component.scss'],
 })
-export class SessionDetailComponent implements OnInit, OnDestroy {
+export class SessionDetailComponent implements OnDestroy {
   private destroy$ = new Subject<void>();
   private route = inject(ActivatedRoute);
   private router = inject(Router);
@@ -313,7 +312,7 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
   ];
 
   // ── Lifecycle ──────────────────────────────────────────────────
-  ngOnInit(): void {
+  constructor() {
     const id = Number(this.route.snapshot.paramMap.get('id'));
     if (id) {
       this.loadSession(id);

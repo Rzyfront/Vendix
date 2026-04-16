@@ -4,7 +4,7 @@
   <div class="stats-container">
     <app-stats
       title="Total Tickets"
-      [value]="ticketStats.total"
+      [value]="ticketStats().total"
       smallText="Todos los tickets"
       iconName="ticket"
       iconBgColor="bg-blue-100"
@@ -12,7 +12,7 @@
     ></app-stats>
     <app-stats
       title="Abiertos"
-      [value]="ticketStats.open_tickets"
+      [value]="ticketStats().open_tickets"
       smallText="Tickets en proceso"
       iconName="folder"
       iconBgColor="bg-yellow-100"
@@ -20,7 +20,7 @@
     ></app-stats>
     <app-stats
       title="Resueltos"
-      [value]="ticketStats.resolved"
+      [value]="ticketStats().resolved"
       smallText="Tickets cerrados"
       iconName="check-circle"
       iconBgColor="bg-emerald-100"
@@ -28,7 +28,7 @@
     ></app-stats>
     <app-stats
       title="Vencidos"
-      [value]="ticketStats.overdue"
+      [value]="ticketStats().overdue"
       smallText="SLA vencido"
       iconName="alert-triangle"
       iconBgColor="bg-red-100"
@@ -41,7 +41,7 @@
     <!-- Table Header (Title, Description, Controls) -->
     <div
       class="p-2 md:px-6 md:py-4 border-b border-[var(--color-border)] flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between"
-      >
+    >
       <div class="flex-1 min-w-0">
         <h3 class="text-lg font-semibold text-text-primary">
           Tickets de Soporte
@@ -55,7 +55,7 @@
       <form
         [formGroup]="filterForm"
         class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto"
-        >
+      >
         <!-- Search -->
         <div class="w-full sm:w-60">
           <app-inputsearch
@@ -94,10 +94,10 @@
     <!-- Table Container -->
     <div class="relative min-h-[400px] p-2 md:p-4">
       <!-- Loading Overlay -->
-      @if (isLoading) {
+      @if (isLoading()) {
         <div
           class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
-          >
+        >
           <div
             class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
           ></div>
@@ -105,9 +105,9 @@
       }
 
       <!-- Table -->
-      @if (!isLoading) {
+      @if (!isLoading()) {
         <app-responsive-data-view
-          [data]="tickets"
+          [data]="tickets()"
           [columns]="columns"
           [actions]="actions"
           [cardConfig]="cardConfig"
@@ -117,16 +117,16 @@
           [emptyIcon]="'ticket'"
           tableSize="md"
           (rowClick)="viewTicket($event)"
-          >
+        >
         </app-responsive-data-view>
       }
     </div>
 
     <!-- Pagination -->
-    @if (tickets.length > 0) {
+    @if (tickets().length > 0) {
       <div
         class="px-6 py-4 border-t border-border bg-muted/30 flex justify-center"
-        >
+      >
         <app-pagination
           [currentPage]="pagination.page"
           [totalPages]="pagination.totalPages"
@@ -134,7 +134,7 @@
           [limit]="pagination.limit"
           infoStyle="range"
           (pageChange)="onPageChange($event)"
-          />
+        />
       </div>
     }
   </app-card>
@@ -142,12 +142,12 @@
 
 <!-- Assign Modal -->
 <app-modal
-  [isOpen]="showAssignModal"
+  [isOpen]="showAssignModal()"
   [title]="'Asignar Ticket'"
   [subtitle]="'Selecciona un usuario para asignar este ticket'"
-  (cancel)="showAssignModal = false"
-  (isOpenChange)="showAssignModal = $event"
-  >
+  (cancel)="showAssignModal.set(false)"
+  (isOpenChange)="showAssignModal.set($event)"
+>
   <form [formGroup]="assignForm" class="space-y-4">
     <div>
       <label class="block text-sm font-semibold text-text-primary mb-2">
@@ -158,10 +158,10 @@
         class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary focus:border-transparent"
         placeholder="Escribe el nombre o correo del usuario..."
         (input)="onUserSearch($event)"
-        />
+      />
     </div>
 
-    @if (loadingUsers) {
+    @if (loadingUsers()) {
       <div class="text-center py-4">
         <div
           class="animate-spin rounded-full h-6 w-6 border-b-2 border-primary mx-auto"
@@ -169,21 +169,19 @@
       </div>
     }
 
-    @if (!loadingUsers && users.length > 0) {
-      <div
-        class="max-h-60 overflow-y-auto border border-gray-200 rounded-lg"
-        >
-        @for (user of users; track user) {
+    @if (!loadingUsers() && users().length > 0) {
+      <div class="max-h-60 overflow-y-auto border border-gray-200 rounded-lg">
+        @for (user of users(); track user) {
           <div
             class="flex items-center gap-3 p-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
             (click)="selectUser(user.id)"
-        [class.bg-primary\/10]="
-          assignForm.get('assigned_to_user_id')?.value === user.id
-        "
-            >
+            [class.bg-primary\/10]="
+              assignForm.get('assigned_to_user_id')?.value === user.id
+            "
+          >
             <div
               class="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center"
-              >
+            >
               <span class="text-sm font-semibold text-primary">
                 {{ user.first_name?.[0] || "?" }}{{ user.last_name?.[0] || "" }}
               </span>
@@ -196,10 +194,8 @@
                 {{ user.email }}
               </div>
             </div>
-            @if (assignForm.get('assigned_to_user_id')?.value === user.id) {
-              <div
-                class="text-primary"
-                >
+            @if (assignForm.get("assigned_to_user_id")?.value === user.id) {
+              <div class="text-primary">
                 <app-icon name="check" [size]="18"></app-icon>
               </div>
             }
@@ -208,10 +204,8 @@
       </div>
     }
 
-    @if (!loadingUsers && users.length === 0) {
-      <div
-        class="text-center py-4 text-text-secondary text-sm"
-        >
+    @if (!loadingUsers() && users().length === 0) {
+      <div class="text-center py-4 text-text-secondary text-sm">
         No se encontraron usuarios
       </div>
     }
@@ -220,7 +214,11 @@
   </form>
 
   <div slot="footer" class="flex justify-end gap-3">
-    <app-button variant="ghost" (clicked)="showAssignModal = false" size="sm">
+    <app-button
+      variant="ghost"
+      (clicked)="showAssignModal.set(false)"
+      size="sm"
+    >
       Cancelar
     </app-button>
     <app-button variant="primary" (clicked)="assignTicket()" size="sm">

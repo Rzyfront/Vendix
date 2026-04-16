@@ -1,13 +1,11 @@
 import {
   Component,
-  OnInit,
   ViewChild,
   inject,
   signal,
   computed,
   DestroyRef,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import {
   SidebarComponent,
@@ -38,7 +36,6 @@ import { ToastService } from '../../../shared/components/toast/toast.service';
   selector: 'app-organization-admin-layout',
   standalone: true,
   imports: [
-    CommonModule,
     RouterModule,
     SidebarComponent,
     HeaderComponent,
@@ -97,7 +94,7 @@ import { ToastService } from '../../../shared/components/toast/toast.service';
   `,
   styleUrls: ['./organization-admin-layout.component.scss'],
 })
-export class OrganizationAdminLayoutComponent implements OnInit {
+export class OrganizationAdminLayoutComponent {
   @ViewChild('sidebarRef') sidebarRef!: SidebarComponent;
 
   private readonly destroyRef = inject(DestroyRef);
@@ -216,7 +213,7 @@ export class OrganizationAdminLayoutComponent implements OnInit {
     this.addDynamicStoresToMenu(this.baseFilteredMenuItems()),
   );
 
-  ngOnInit(): void {
+  constructor() {
     // Check onboarding status considering both organization state and user role
     this.checkOnboardingWithRoleValidation();
 

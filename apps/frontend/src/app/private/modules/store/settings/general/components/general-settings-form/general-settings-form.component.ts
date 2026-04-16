@@ -1,16 +1,18 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
   OnInit,
   OnChanges,
   inject,
+  input,
+  output,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
-import { SelectorComponent, SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
+import {
+  SelectorComponent,
+  SelectorOption,
+} from '../../../../../../../shared/components/selector/selector.component';
 import { CurrencyService } from '../../../../../../../services/currency.service';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 
@@ -30,13 +32,18 @@ export interface GeneralSettings {
 @Component({
   selector: 'app-general-settings-form',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, InputComponent, SelectorComponent],
+  imports: [
+    CommonModule,
+    ReactiveFormsModule,
+    InputComponent,
+    SelectorComponent,
+  ],
   templateUrl: './general-settings-form.component.html',
   styleUrls: ['./general-settings-form.component.scss'],
 })
 export class GeneralSettingsForm implements OnInit, OnChanges {
-  @Input() settings!: GeneralSettings;
-  @Output() settingsChange = new EventEmitter<GeneralSettings>();
+  readonly settings = input.required<GeneralSettings>();
+  readonly settingsChange = output<GeneralSettings>();
 
   private currencyService = inject(CurrencyService);
   private currencyFormatService = inject(CurrencyFormatService);
@@ -47,7 +54,9 @@ export class GeneralSettingsForm implements OnInit, OnChanges {
     store_type: new FormControl('physical'),
     // Campos de store_settings
     timezone: new FormControl('America/Bogota'),
-    currency: new FormControl(this.currencyFormatService.currencyCode() || 'COP'),
+    currency: new FormControl(
+      this.currencyFormatService.currencyCode() || 'COP',
+    ),
     language: new FormControl('es'),
     tax_included: new FormControl(false),
   });
@@ -146,8 +155,9 @@ export class GeneralSettingsForm implements OnInit, OnChanges {
   }
 
   patchForm() {
-    if (this.settings) {
-      this.form.patchValue(this.settings);
+    const currentSettings = this.settings();
+    if (currentSettings) {
+      this.form.patchValue(currentSettings);
     }
   }
 
@@ -156,5 +166,4 @@ export class GeneralSettingsForm implements OnInit, OnChanges {
       this.settingsChange.emit(this.form.value);
     }
   }
-
 }

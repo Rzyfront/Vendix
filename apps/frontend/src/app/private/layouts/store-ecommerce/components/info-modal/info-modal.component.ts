@@ -1,4 +1,4 @@
-import { Component, Input, input, output } from '@angular/core';
+import { Component, input, output } from '@angular/core';
 
 import { IconComponent } from '../../../../../shared/components';
 
@@ -30,9 +30,9 @@ import { IconComponent } from '../../../../../shared/components';
 
         <!-- Content -->
         <div class="p-4 md:p-6 overflow-y-auto max-h-[calc(80vh-120px)]">
-          @if (content) {
+          @if (content()) {
           <div class="prose prose-gray max-w-none">
-            <p class="text-gray-700 whitespace-pre-wrap leading-relaxed">{{ content }}</p>
+            <p class="text-gray-700 whitespace-pre-wrap leading-relaxed">{{ content() }}</p>
           </div>
           } @else {
           <p class="text-gray-500 text-center py-8">No hay información disponible.</p>
@@ -56,13 +56,10 @@ import { IconComponent } from '../../../../../shared/components';
 export class InfoModalComponent {
   readonly isOpen = input(false);
   readonly title = input('');
-  @Input() content = '';
+  readonly content = input('');
   readonly closed = output<void>();
 
   close(): void {
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
     this.closed.emit();
   }
 }

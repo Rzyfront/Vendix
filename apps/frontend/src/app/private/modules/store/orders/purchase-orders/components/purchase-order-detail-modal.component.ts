@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, inject } from '@angular/core';
+import { Component, inject, input, output, signal } from '@angular/core';
 
 import { FormsModule } from '@angular/forms';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
@@ -24,32 +24,32 @@ import { PurchaseOrder, PurchaseOrderItem, ReceivePurchaseOrderItemDto } from '.
 ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
-      [title]="'Orden ' + (order?.order_number || '')"
+      [title]="'Orden ' + (order()?.order_number || '')"
       subtitle="Detalles de la orden de compra"
       >
-      @if (order) {
+      @if (order()) {
         <div class="space-y-6">
           <!-- Header Info -->
           <div class="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-muted/10 rounded-lg">
             <div>
               <span class="text-xs text-text-secondary block">Proveedor</span>
-              <span class="font-medium">{{ order.suppliers?.name || order.supplier?.name || '-' }}</span>
+              <span class="font-medium">{{ order()?.suppliers?.name || order()?.supplier?.name || '-' }}</span>
             </div>
             <div>
               <span class="text-xs text-text-secondary block">Fecha de Orden</span>
-              <span class="font-medium">{{ formatDate(order.order_date) }}</span>
+              <span class="font-medium">{{ formatDate(order()?.order_date) }}</span>
             </div>
             <div>
               <span class="text-xs text-text-secondary block">Fecha Esperada</span>
-              <span class="font-medium">{{ formatDate(order.expected_date) }}</span>
+              <span class="font-medium">{{ formatDate(order()?.expected_date) }}</span>
             </div>
             <div>
               <span class="text-xs text-text-secondary block">Estado</span>
-              <span [class]="getStatusClasses(order.status)">{{ getStatusLabel(order.status) }}</span>
+              <span [class]="getStatusClasses(order()!.status)">{{ getStatusLabel(order()!.status) }}</span>
             </div>
           </div>
           <!-- Items Table -->
@@ -67,7 +67,7 @@ import { PurchaseOrder, PurchaseOrderItem, ReceivePurchaseOrderItemDto } from '.
                   </tr>
                 </thead>
                 <tbody>
-                  @for (item of (order.purchase_order_items || order.items); track item; let i = $index) {
+                  @for (item of (order()?.purchase_order_items || order()?.items); track item; let i = $index) {
                     <tr class="border-t border-border">
                       <td class="px-4 py-3">{{ item.products?.name || item.product?.name || 'Producto #' + item.product_id }}</td>
                       <td class="px-4 py-3 text-center">{{ item.quantity_ordered || item.quantity }}</td>
@@ -85,23 +85,23 @@ import { PurchaseOrder, PurchaseOrderItem, ReceivePurchaseOrderItemDto } from '.
             <div class="w-64 space-y-2 text-sm">
               <div class="flex justify-between">
                 <span class="text-text-secondary">Subtotal:</span>
-                <span>{{ formatCurrency(order.subtotal_amount || 0) }}</span>
+                <span>{{ formatCurrency(order()?.subtotal_amount || 0) }}</span>
               </div>
               <div class="flex justify-between">
                 <span class="text-text-secondary">Envío:</span>
-                <span>{{ formatCurrency(order.shipping_cost || 0) }}</span>
+                <span>{{ formatCurrency(order()?.shipping_cost || 0) }}</span>
               </div>
               <div class="flex justify-between font-semibold text-base border-t border-border pt-2">
                 <span>Total:</span>
-                <span class="text-primary">{{ formatCurrency(order.total_amount || 0) }}</span>
+                <span class="text-primary">{{ formatCurrency(order()?.total_amount || 0) }}</span>
               </div>
             </div>
           </div>
           <!-- Notes -->
-          @if (order.notes) {
+          @if (order()?.notes) {
             <div class="p-3 bg-muted/10 rounded-lg">
               <span class="text-xs text-text-secondary block mb-1">Notas:</span>
-              <p class="text-sm">{{ order.notes }}</p>
+              <p class="text-sm">{{ order()?.notes }}</p>
             </div>
           }
         </div>
@@ -152,33 +152,35 @@ import { PurchaseOrder, PurchaseOrderItem, ReceivePurchaseOrderItemDto } from '.
 })
 export class PurchaseOrderDetailModalComponent {
   private currencyService = inject(CurrencyFormatService);
-  @Input() isOpen = false;
-  @Input() order: PurchaseOrder | null = null;
 
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() close = new EventEmitter<void>();
-  @Output() receive = new EventEmitter<{ order_id: number; items: ReceivePurchaseOrderItemDto[] }>();
-  @Output() cancel = new EventEmitter<number>();
-  @Output() edit = new EventEmitter<PurchaseOrder>();
+  readonly isOpen = input<boolean>(false);
+  readonly order = input<PurchaseOrder | null>(null);
 
-  is_receiving_mode = false;
-  receive_quantities: number[] = [];
+  readonly isOpenChange = output<boolean>();
+  readonly close = output<void>();
+  readonly receive = output<{ order_id: number; items: ReceivePurchaseOrderItemDto[] }>();
+  readonly cancel = output<number>();
+  readonly edit = output<PurchaseOrder>();
+
+  readonly is_receiving_mode = signal(false);
+  readonly receive_quantities = signal<number[]>([]);
 
   get canEdit(): boolean {
-    return !!this.order && this.order.status === 'draft';
+    return !!this.order() && this.order()!.status === 'draft';
   }
 
   get canReceive(): boolean {
     // Added 'approved' status
-    return !!this.order && ['approved', 'ordered', 'partial'].includes(this.order.status);
+    return !!this.order() && ['approved', 'ordered', 'partial'].includes(this.order()!.status);
   }
 
   get canCancel(): boolean {
-    return !!this.order && ['draft', 'submitted', 'approved', 'ordered'].includes(this.order.status);
+    return !!this.order() && ['draft', 'submitted', 'approved', 'ordered'].includes(this.order()!.status);
   }
 
   startReceiving(): void {
-    const items = this.order?.purchase_order_items || this.order?.items; // Support both
+    const orderVal = this.order();
+    const items = orderVal?.purchase_order_items || orderVal?.items; // Support both
     if (items) {
       // One-click receive: assume receiving all remaining quantities
       const itemsToReceive: ReceivePurchaseOrderItemDto[] = items
@@ -190,7 +192,7 @@ export class PurchaseOrderDetailModalComponent {
 
       if (itemsToReceive.length > 0) {
         // Emit immediately without entering edit mode
-        this.receive.emit({ order_id: this.order!.id, items: itemsToReceive });
+        this.receive.emit({ order_id: orderVal!.id, items: itemsToReceive });
       }
     }
   }
@@ -201,37 +203,29 @@ export class PurchaseOrderDetailModalComponent {
   }
 
   onCancelOrder(): void {
-    if (this.order) {
-      this.cancel.emit(this.order.id);
+    const orderVal = this.order();
+    if (orderVal) {
+      this.cancel.emit(orderVal.id);
     }
   }
 
   onEditOrder(): void {
-    if (this.order) {
-      this.edit.emit(this.order);
+    const orderVal = this.order();
+    if (orderVal) {
+      this.edit.emit(orderVal);
     }
   }
 
   onClose(): void {
-    this.is_receiving_mode = false;
-    this.receive_quantities = [];
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
+    this.is_receiving_mode.set(false);
+    this.receive_quantities.set([]);
     this.close.emit();
     this.isOpenChange.emit(false);
   }
 
   onCancel(): void {
-    this.is_receiving_mode = false;
-    this.receive_quantities = [];
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
+    this.is_receiving_mode.set(false);
+    this.receive_quantities.set([]);
     this.close.emit();
     this.isOpenChange.emit(false);
   }

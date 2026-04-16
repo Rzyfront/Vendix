@@ -1,5 +1,5 @@
-import { Component, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject } from '@angular/core';
+import { AsyncPipe } from '@angular/common';
 import { Store } from '@ngrx/store';
 import { Observable, map } from 'rxjs';
 
@@ -33,7 +33,7 @@ interface PeriodStats {
   selector: 'vendix-fiscal-periods',
   standalone: true,
   imports: [
-    CommonModule,
+    AsyncPipe,
     CardComponent,
     StatsComponent,
     ResponsiveDataViewComponent,
@@ -129,7 +129,7 @@ interface PeriodStats {
     </div>
   `,
 })
-export class FiscalPeriodsComponent implements OnInit {
+export class FiscalPeriodsComponent {
   private store = inject(Store);
 
   periods$: Observable<FiscalPeriod[]> = this.store.select(selectFiscalPeriods);
@@ -225,10 +225,6 @@ export class FiscalPeriodsComponent implements OnInit {
       },
     ],
   };
-
-  ngOnInit(): void {
-    // Fiscal periods already loaded by parent AccountingComponent
-  }
 
   onActionClick(action: string): void {
     if (action === 'create') {

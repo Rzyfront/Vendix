@@ -1,10 +1,10 @@
-import { Component, Output, EventEmitter, Input, ViewChild, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, ViewChild, inject, signal, input, output } from '@angular/core';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule, FormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
-import { Observable, map } from 'rxjs';
+import { map } from 'rxjs';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { loadExpenses, loadExpensesSummary, loadExpenseCategories } from '../../state/actions/expenses.actions';
-import { selectActiveExpenseCategories, selectExpensesLoading } from '../../state/selectors/expenses.selectors';
+import { selectActiveExpenseCategories } from '../../state/selectors/expenses.selectors';
 import { ExpenseCategory } from '../../interfaces/expense.interface';
 import { ExpensesService } from '../../services/expenses.service';
 import {
@@ -27,7 +27,6 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
   selector: 'vendix-expense-create',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     FormsModule,
     ModalComponent,
@@ -43,16 +42,16 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onClose()"
-      [title]="currentStep === 1 ? 'Nuevo Gasto' : 'Confirmar Gasto'"
+      [title]="currentStep() === 1 ? 'Nuevo Gasto' : 'Confirmar Gasto'"
       size="md"
     >
       <!-- Steps -->
       <app-steps-line
         [steps]="steps"
-        [currentStep]="currentStep - 1"
+        [currentStep]="currentStep() - 1"
         size="md"
         primaryColor="var(--color-primary)"
         secondaryColor="var(--color-secondary)"
@@ -60,7 +59,7 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
       ></app-steps-line>
 
       <!-- STEP 1: PREPARAR -->
-      @if (currentStep === 1) {
+      @if (currentStep() === 1) {
         <div class="p-4">
           <form [formGroup]="expenseForm" class="space-y-4">
 
@@ -103,12 +102,12 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
                 <app-selector
                   class="flex-1"
                   formControlName="category_id"
-                  [options]="(categoryOptions$ | async) || []"
+                  [options]="categoryOptions() || []"
                   placeholder="Seleccione una categoría"
                 ></app-selector>
                 <button
                   type="button"
-                  (click)="showCategoryQuickCreate = true"
+                  (click)="showCategoryQuickCreate.set(true)"
                   class="flex items-center justify-center w-10 h-10 rounded-xl border border-border bg-surface hover:bg-primary/5 hover:border-primary text-text-secondary hover:text-primary transition-colors shrink-0"
                   title="Crear categoría"
                 >
@@ -143,14 +142,14 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
 
         <!-- Quick Create Category Modal -->
         <vendix-expense-category-quick-create
-          [isOpen]="showCategoryQuickCreate"
-          (isOpenChange)="showCategoryQuickCreate = $event"
+          [isOpen]="showCategoryQuickCreate()"
+          (isOpenChange)="showCategoryQuickCreate.set($event)"
           (created)="onCategoryCreated($event)"
         ></vendix-expense-category-quick-create>
       }
 
       <!-- STEP 2: CONFIRMAR -->
-      @if (currentStep === 2) {
+      @if (currentStep() === 2) {
         <div class="p-4 space-y-4">
           <!-- Summary Card -->
           <div class="rounded-xl border border-border overflow-hidden">
@@ -190,10 +189,10 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
             <div class="p-4">
               <p class="text-xs text-text-secondary mb-1">Comprobante</p>
               <div class="flex items-center gap-2">
-                <app-icon [name]="receiptFile ? 'file-check' : 'file'" [size]="16"
-                  [class]="receiptFile ? 'text-success' : 'text-text-secondary'"></app-icon>
+                <app-icon [name]="receiptFile() ? 'file-check' : 'file'" [size]="16"
+                  [class]="receiptFile() ? 'text-success' : 'text-text-secondary'"></app-icon>
                 <p class="text-sm text-text-primary">
-                  {{ receiptFile ? receiptFile.name : 'No adjunto' }}
+                  {{ receiptFile() ? receiptFile()!.name : 'No adjunto' }}
                 </p>
               </div>
             </div>
@@ -203,7 +202,8 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
           <label class="flex items-start gap-3 p-3 bg-success/5 rounded-xl border border-success/20 cursor-pointer select-none">
             <input
               type="checkbox"
-              [(ngModel)]="confirmApprove"
+              [ngModel]="confirmApprove()"
+              (ngModelChange)="confirmApprove.set($event)"
               class="mt-0.5 w-4 h-4 rounded border-border text-success focus:ring-success"
             />
             <div>
@@ -215,11 +215,12 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
           </label>
 
           <!-- Pay Checkbox (only if approved) -->
-          @if (confirmApprove) {
+          @if (confirmApprove()) {
             <label class="flex items-start gap-3 p-3 bg-primary/5 rounded-xl border border-primary/20 cursor-pointer select-none">
               <input
                 type="checkbox"
-                [(ngModel)]="confirmPay"
+                [ngModel]="confirmPay()"
+                (ngModelChange)="confirmPay.set($event)"
                 class="mt-0.5 w-4 h-4 rounded border-border text-primary focus:ring-primary"
               />
               <div>
@@ -239,8 +240,8 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
         class="flex justify-between gap-3 px-6 py-4 bg-gray-50 rounded-b-xl"
       >
         <div>
-          @if (currentStep > 1) {
-            <app-button variant="outline" type="button" (clicked)="goToStep(currentStep - 1)" customClasses="!rounded-xl">
+          @if (currentStep() > 1) {
+            <app-button variant="outline" type="button" (clicked)="goToStep(currentStep() - 1)" customClasses="!rounded-xl">
               <app-icon name="arrow-left" [size]="14" class="mr-1.5" slot="icon"></app-icon>
               Atrás
             </app-button>
@@ -255,11 +256,11 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
           >
             Cancelar
           </app-button>
-          @if (currentStep < 2) {
+          @if (currentStep() < 2) {
             <app-button
               variant="primary"
               type="button"
-              (clicked)="goToStep(currentStep + 1)"
+              (clicked)="goToStep(currentStep() + 1)"
               [disabled]="!canAdvance()"
               customClasses="!rounded-xl font-bold shadow-md shadow-primary-200"
             >
@@ -271,33 +272,33 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
               variant="outline"
               type="button"
               (clicked)="onSubmit('pending')"
-              [loading]="submitting"
-              [disabled]="submitting"
+              [loading]="submitting()"
+              [disabled]="submitting()"
               customClasses="!rounded-xl font-bold"
             >
               <app-icon name="file-text" [size]="14" class="mr-1.5" slot="icon"></app-icon>
               Guardar
             </app-button>
-            @if (confirmApprove && !confirmPay) {
+            @if (confirmApprove() && !confirmPay()) {
               <app-button
                 variant="primary"
                 type="button"
                 (clicked)="onSubmit('approved')"
-                [loading]="submitting"
-                [disabled]="submitting"
+                [loading]="submitting()"
+                [disabled]="submitting()"
                 customClasses="!rounded-xl font-bold shadow-md shadow-primary-200 active:scale-95 transition-all"
               >
                 <app-icon name="check-circle" [size]="14" class="mr-1.5" slot="icon"></app-icon>
                 Guardar y Aprobar
               </app-button>
             }
-            @if (confirmApprove && confirmPay) {
+            @if (confirmApprove() && confirmPay()) {
               <app-button
                 variant="primary"
                 type="button"
                 (clicked)="onSubmit('paid')"
-                [loading]="submitting"
-                [disabled]="submitting"
+                [loading]="submitting()"
+                [disabled]="submitting()"
                 customClasses="!rounded-xl font-bold shadow-md shadow-primary-200 active:scale-95 transition-all"
               >
                 <app-icon name="check-circle" [size]="14" class="mr-1.5" slot="icon"></app-icon>
@@ -311,71 +312,62 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
   `
 })
 export class ExpenseCreateComponent {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
+  readonly isOpen = input<boolean>(false);
+  readonly isOpenChange = output<boolean>();
 
   private expensesService = inject(ExpensesService);
+  private fb = inject(FormBuilder);
+  private store = inject(Store);
 
-  expenseForm: FormGroup;
-  categories$: Observable<ExpenseCategory[]>;
-  categoryOptions$: Observable<SelectorOption[]>;
-  loading$: Observable<boolean>;
-
-  receiptFile: File | null = null;
-  submitting = false;
-
-  // Steps
-  currentStep = 1;
-  steps: StepsLineItem[] = [
-    { label: 'PREPARAR', completed: false },
-    { label: 'CONFIRMAR', completed: false },
-  ];
-  confirmApprove = false;
-  confirmPay = false;
-  showCategoryQuickCreate = false;
-
-  @ViewChild('dropzone') dropzoneRef!: FileUploadDropzoneComponent;
-
-  constructor(
-    private fb: FormBuilder,
-    private store: Store
-  ) {
-    this.categories$ = this.store.select(selectActiveExpenseCategories);
-    this.loading$ = this.store.select(selectExpensesLoading);
-
-    this.categoryOptions$ = this.categories$.pipe(
+  private readonly categories = toSignal(this.store.select(selectActiveExpenseCategories), { initialValue: [] as ExpenseCategory[] });
+  readonly categoryOptions = toSignal(
+    this.store.select(selectActiveExpenseCategories).pipe(
       map(categories => categories.map(cat => ({
         label: cat.name,
         value: cat.id
       })))
-    );
+    ),
+    { initialValue: [] as { label: string; value: number }[] }
+  );
 
-    const today = toLocalDateString();
+  readonly receiptFile = signal<File | null>(null);
+  readonly submitting = signal(false);
+  readonly confirmApprove = signal(false);
+  readonly confirmPay = signal(false);
+  readonly showCategoryQuickCreate = signal(false);
 
-    this.expenseForm = this.fb.group({
-      description: ['', [Validators.required, Validators.minLength(3)]],
-      amount: [null, [Validators.required, Validators.min(0.01)]],
-      category_id: [null],
-      expense_date: [today, [Validators.required]],
-      notes: ['']
-    });
-  }
+  // Steps
+  readonly currentStep = signal(1);
+  steps: StepsLineItem[] = [
+    { label: 'PREPARAR', completed: false },
+    { label: 'CONFIRMAR', completed: false },
+  ];
+
+  @ViewChild('dropzone') dropzoneRef!: FileUploadDropzoneComponent;
+
+  expenseForm: FormGroup = this.fb.group({
+    description: ['', [Validators.required, Validators.minLength(3)]],
+    amount: [null, [Validators.required, Validators.min(0.01)]],
+    category_id: [null],
+    expense_date: [toLocalDateString(), [Validators.required]],
+    notes: ['']
+  });
 
   // --- Step Navigation ---
 
   canAdvance(): boolean {
-    if (this.currentStep === 1) {
+    if (this.currentStep() === 1) {
       return this.expenseForm.valid;
     }
     return true;
   }
 
   goToStep(step: number): void {
-    if (step > this.currentStep && !this.canAdvance()) {
+    if (step > this.currentStep() && !this.canAdvance()) {
       this.expenseForm.markAllAsTouched();
       return;
     }
-    this.currentStep = step;
+    this.currentStep.set(step);
     this.steps = this.steps.map((s, i) => ({
       ...s,
       completed: i < step - 1,
@@ -387,27 +379,23 @@ export class ExpenseCreateComponent {
   getCategoryName(): string {
     const categoryId = this.expenseForm.value.category_id;
     if (!categoryId) return '';
-    let name = '';
-    this.categories$.pipe(
-      map(cats => cats.find(c => c.id === +categoryId)?.name || '')
-    ).subscribe(n => name = n).unsubscribe();
-    return name;
+    return this.categories().find(c => c.id === +categoryId)?.name || '';
   }
 
   onCategoryCreated(category: ExpenseCategory): void {
     this.store.dispatch(loadExpenseCategories());
     this.expenseForm.patchValue({ category_id: category.id });
-    this.showCategoryQuickCreate = false;
+    this.showCategoryQuickCreate.set(false);
   }
 
   // --- File Handling ---
 
   onFileSelected(file: File): void {
-    this.receiptFile = file;
+    this.receiptFile.set(file);
   }
 
   onFileRemoved(): void {
-    this.receiptFile = null;
+    this.receiptFile.set(null);
   }
 
   // --- Submit ---
@@ -418,7 +406,7 @@ export class ExpenseCreateComponent {
       return;
     }
 
-    this.submitting = true;
+    this.submitting.set(true);
 
     const formValue = this.expenseForm.value;
     const categoryId = formValue.category_id ? Number(formValue.category_id) : undefined;
@@ -446,24 +434,25 @@ export class ExpenseCreateComponent {
               if (targetState === 'paid') {
                 this.expensesService.payExpense(expenseId).subscribe({
                   next: () => this.finishSubmit(),
-                  error: () => this.finishSubmit(), // approved but not paid — still refresh
+                  error: () => this.finishSubmit(),
                 });
               } else {
                 this.finishSubmit();
               }
             },
-            error: () => this.finishSubmit(), // created but not approved — still refresh
+            error: () => this.finishSubmit(),
           });
         },
         error: () => {
-          this.submitting = false;
+          this.submitting.set(false);
         }
       });
     };
 
     // Upload receipt first if present
-    if (this.receiptFile) {
-      this.expensesService.uploadReceipt(this.receiptFile).subscribe({
+    const currentFile = this.receiptFile();
+    if (currentFile) {
+      this.expensesService.uploadReceipt(currentFile).subscribe({
         next: (result: { key: string; url: string }) => createAndFinish(result.key),
         error: () => createAndFinish(),
       });
@@ -475,7 +464,7 @@ export class ExpenseCreateComponent {
   private finishSubmit(): void {
     this.store.dispatch(loadExpenses());
     this.store.dispatch(loadExpensesSummary());
-    this.submitting = false;
+    this.submitting.set(false);
     this.resetForm();
     this.onClose();
   }
@@ -486,12 +475,12 @@ export class ExpenseCreateComponent {
     this.expenseForm.reset({
       expense_date: toLocalDateString(),
     });
-    this.receiptFile = null;
+    this.receiptFile.set(null);
     this.dropzoneRef?.clear();
-    this.currentStep = 1;
-    this.confirmApprove = false;
-    this.confirmPay = false;
-    this.showCategoryQuickCreate = false;
+    this.currentStep.set(1);
+    this.confirmApprove.set(false);
+    this.confirmPay.set(false);
+    this.showCategoryQuickCreate.set(false);
     this.steps = [
       { label: 'PREPARAR', completed: false },
       { label: 'CONFIRMAR', completed: false },

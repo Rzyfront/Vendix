@@ -1,5 +1,5 @@
-import { Component, OnInit, OnDestroy, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject, DestroyRef } from '@angular/core';
+import { AsyncPipe } from '@angular/common';
 import { Store } from '@ngrx/store';
 import { Observable, Subject } from 'rxjs';
 import { takeUntil, filter } from 'rxjs/operators';
@@ -25,7 +25,7 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
   selector: 'vendix-payroll-employees-page',
   standalone: true,
   imports: [
-    CommonModule,
+    AsyncPipe,
     PayrollStatsComponent,
     EmployeeListComponent,
     EmployeeCreateComponent,
@@ -64,9 +64,10 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
     </div>
   `,
 })
-export class PayrollEmployeesPageComponent implements OnInit, OnDestroy {
+export class PayrollEmployeesPageComponent {
   private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
+  private destroyRef = inject(DestroyRef);
   private destroy$ = new Subject<void>();
 
   employees$: Observable<Employee[]> = this.store.select(selectEmployees);
@@ -77,15 +78,15 @@ export class PayrollEmployeesPageComponent implements OnInit, OnDestroy {
   isEmployeeBulkUploadModalOpen = false;
   selectedEmployee: Employee | null = null;
 
-  ngOnInit(): void {
+  constructor() {
     this.currencyService.loadCurrency();
     this.store.dispatch(loadEmployees());
     this.store.dispatch(loadEmployeeStats());
-  }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
+    this.destroyRef.onDestroy(() => {
+      this.destroy$.next();
+      this.destroy$.complete();
+    });
   }
 
   openEmployeeCreateModal(): void {

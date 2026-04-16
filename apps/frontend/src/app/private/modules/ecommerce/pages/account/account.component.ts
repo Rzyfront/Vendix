@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, DestroyRef } from '@angular/core';
+import { Component, OnInit, inject, DestroyRef, signal } from '@angular/core';
 
 import { RouterModule, Router } from '@angular/router';
 import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup, Validators } from '@angular/forms';
@@ -25,23 +25,23 @@ export class AccountComponent implements OnInit {
   private destroy_ref = inject(DestroyRef);
   private router = inject(Router);
 
-  profile: UserProfile | null = null;
+  readonly profile = signal<UserProfile | null>(null);
 
   profile_form!: FormGroup;
   password_form!: FormGroup;
 
-  is_loading = true;
-  is_saving = false;
-  is_changing_password = false;
+  readonly is_loading = signal(true);
+  readonly is_saving = signal(false);
+  readonly is_changing_password = signal(false);
 
-  show_password_form = false;
-  success_message = '';
-  error_message = '';
+  readonly show_password_form = signal(false);
+  readonly success_message = signal('');
+  readonly error_message = signal('');
 
   // Address Modal State
-  show_address_modal = false;
-  address_modal_mode: 'create' | 'edit' = 'create';
-  editing_address: Address | undefined = undefined;
+  readonly show_address_modal = signal(false);
+  readonly address_modal_mode = signal<'create' | 'edit'>('create');
+  readonly editing_address = signal<Address | undefined>(undefined);
 
   // Address type labels mapping
   private address_type_labels: Record<string, string> = {
@@ -81,7 +81,7 @@ export class AccountComponent implements OnInit {
   }
 
   loadProfile(): void {
-    this.is_loading = true;
+    this.is_loading.set(true);
     this.clearMessages();
 
     this.account_service.getProfile()
@@ -89,7 +89,7 @@ export class AccountComponent implements OnInit {
       .subscribe({
         next: (response) => {
           if (response.success) {
-            this.profile = response.data;
+            this.profile.set(response.data);
             this.profile_form.patchValue({
               first_name: response.data.first_name || '',
               last_name: response.data.last_name || '',
@@ -98,11 +98,11 @@ export class AccountComponent implements OnInit {
               document_number: response.data.document_number || '',
             });
           }
-          this.is_loading = false;
+          this.is_loading.set(false);
         },
         error: (err) => {
-          this.error_message = err.error?.message || 'Error al cargar el perfil';
-          this.is_loading = false;
+          this.error_message.set(err.error?.message || 'Error al cargar el perfil');
+          this.is_loading.set(false);
         },
       });
   }
@@ -113,7 +113,7 @@ export class AccountComponent implements OnInit {
       return;
     }
 
-    this.is_saving = true;
+    this.is_saving.set(true);
     this.clearMessages();
 
     this.account_service.updateProfile(this.profile_form.value)
@@ -121,15 +121,15 @@ export class AccountComponent implements OnInit {
       .subscribe({
         next: (response) => {
           if (response.success) {
-            this.profile = response.data;
-            this.success_message = 'Perfil actualizado correctamente';
+            this.profile.set(response.data);
+            this.success_message.set('Perfil actualizado correctamente');
             setTimeout(() => this.clearMessages(), 3000);
           }
-          this.is_saving = false;
+          this.is_saving.set(false);
         },
         error: (err) => {
-          this.error_message = err.error?.message || 'Error al actualizar el perfil';
-          this.is_saving = false;
+          this.error_message.set(err.error?.message || 'Error al actualizar el perfil');
+          this.is_saving.set(false);
         },
       });
   }
@@ -143,11 +143,11 @@ export class AccountComponent implements OnInit {
     const { current_password, new_password, confirm_password } = this.password_form.value;
 
     if (new_password !== confirm_password) {
-      this.error_message = 'Las contraseñas no coinciden';
+      this.error_message.set('Las contraseñas no coinciden');
       return;
     }
 
-    this.is_changing_password = true;
+    this.is_changing_password.set(true);
     this.clearMessages();
 
     this.account_service.changePassword(current_password, new_password)
@@ -155,38 +155,40 @@ export class AccountComponent implements OnInit {
       .subscribe({
         next: (response) => {
           if (response.success) {
-            this.success_message = 'Contraseña cambiada correctamente';
+            this.success_message.set('Contraseña cambiada correctamente');
             this.password_form.reset();
-            this.show_password_form = false;
+            this.show_password_form.set(false);
             setTimeout(() => this.clearMessages(), 3000);
           }
-          this.is_changing_password = false;
+          this.is_changing_password.set(false);
         },
         error: (err) => {
-          this.error_message = err.error?.message || 'Error al cambiar la contraseña';
-          this.is_changing_password = false;
+          this.error_message.set(err.error?.message || 'Error al cambiar la contraseña');
+          this.is_changing_password.set(false);
         },
       });
   }
 
   // Address Modal Methods
   openAddressModal(mode: 'create' | 'edit', address?: Address): void {
-    this.address_modal_mode = mode;
-    this.editing_address = address;
-    this.show_address_modal = true;
+    this.address_modal_mode.set(mode);
+    this.editing_address.set(address);
+    this.show_address_modal.set(true);
     this.clearMessages();
   }
 
   onAddressSaved(address: Address): void {
     // Reload profile to get updated addresses
     this.loadProfile();
-    this.success_message = this.address_modal_mode === 'create'
-      ? 'Dirección agregada correctamente'
-      : 'Dirección actualizada correctamente';
+    this.success_message.set(
+      this.address_modal_mode() === 'create'
+        ? 'Dirección agregada correctamente'
+        : 'Dirección actualizada correctamente',
+    );
     setTimeout(() => this.clearMessages(), 3000);
     // Reset modal state after modal closes
-    this.address_modal_mode = 'create';
-    this.editing_address = undefined;
+    this.address_modal_mode.set('create');
+    this.editing_address.set(undefined);
   }
 
   setAddressPrimary(address_id: number): void {
@@ -199,12 +201,12 @@ export class AccountComponent implements OnInit {
           if (response.success) {
             // Reload profile to get updated addresses
             this.loadProfile();
-            this.success_message = 'Dirección principal establecida';
+            this.success_message.set('Dirección principal establecida');
             setTimeout(() => this.clearMessages(), 3000);
           }
         },
         error: (err) => {
-          this.error_message = err.error?.message || 'Error al establecer dirección principal';
+          this.error_message.set(err.error?.message || 'Error al establecer dirección principal');
         },
       });
   }
@@ -220,15 +222,19 @@ export class AccountComponent implements OnInit {
         next: (response) => {
           if (response.success) {
             // Remove from local profile addresses
-            if (this.profile) {
-              this.profile.addresses = this.profile.addresses.filter((a) => a.id !== address_id);
+            const p = this.profile();
+            if (p) {
+              this.profile.set({
+                ...p,
+                addresses: p.addresses.filter((a) => a.id !== address_id),
+              });
             }
-            this.success_message = 'Dirección eliminada correctamente';
+            this.success_message.set('Dirección eliminada correctamente');
             setTimeout(() => this.clearMessages(), 3000);
           }
         },
         error: (err) => {
-          this.error_message = err.error?.message || 'Error al eliminar la dirección';
+          this.error_message.set(err.error?.message || 'Error al eliminar la dirección');
         },
       });
   }
@@ -243,8 +249,8 @@ export class AccountComponent implements OnInit {
   }
 
   clearMessages(): void {
-    this.success_message = '';
-    this.error_message = '';
+    this.success_message.set('');
+    this.error_message.set('');
   }
 
   private markFormGroupTouched(formGroup: FormGroup): void {

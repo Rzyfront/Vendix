@@ -1,10 +1,10 @@
-import { Component, Input, input } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input } from '@angular/core';
+import { NgStyle } from '@angular/common';
 
 @Component({
   selector: 'app-card',
   standalone: true,
-  imports: [CommonModule],
+  imports: [NgStyle],
   template: `
     <div [class]="cardClasses" [ngStyle]="cardStyles">
       <!-- Header -->
@@ -13,18 +13,18 @@ import { CommonModule } from '@angular/common';
           [class]="headerClasses"
           [class.pb-0]="!hasBody && !hasFooter"
           >
-          @if (title) {
+          @if (title()) {
             <h3
               class="text-lg font-semibold text-[var(--color-text-primary)]"
               >
-              {{ title }}
+              {{ title() }}
             </h3>
           }
-          @if (subtitle) {
+          @if (subtitle()) {
             <p
               class="text-sm text-[var(--color-text-secondary)] mt-1"
               >
-              {{ subtitle }}
+              {{ subtitle() }}
             </p>
           }
           <ng-content select="[slot=header]"></ng-content>
@@ -69,8 +69,8 @@ import { CommonModule } from '@angular/common';
   ],
 })
 export class CardComponent {
-  @Input() title?: string;
-  @Input() subtitle?: string;
+  readonly title = input<string>();
+  readonly subtitle = input<string>();
   readonly shadow = input<'none' | 'sm' | 'md' | 'lg' | 'xl'>('sm');
   readonly padding = input(true);
   readonly customClasses = input('');
@@ -144,7 +144,7 @@ export class CardComponent {
   readonly showHeader = input(false);
 
   get hasHeader(): boolean {
-    return !!(this.title || this.subtitle || this.showHeader());
+    return !!(this.title() || this.subtitle() || this.showHeader());
   }
 
   get hasBody(): boolean {

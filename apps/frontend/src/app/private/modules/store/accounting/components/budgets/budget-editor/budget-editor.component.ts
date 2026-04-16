@@ -1,11 +1,9 @@
 import {
   Component,
-  OnInit,
   OnDestroy,
   inject,
   signal,
   computed,
-  ChangeDetectionStrategy,
 } from '@angular/core';
 
 import { ActivatedRoute, Router } from '@angular/router';
@@ -54,9 +52,8 @@ interface EditorLine {
 ],
   templateUrl: './budget-editor.component.html',
   styleUrls: ['./budget-editor.component.scss'],
-  changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class BudgetEditorComponent implements OnInit, OnDestroy {
+export class BudgetEditorComponent implements OnDestroy {
   private destroy$ = new Subject<void>();
   private route = inject(ActivatedRoute);
   private router = inject(Router);
@@ -108,7 +105,7 @@ export class BudgetEditorComponent implements OnInit, OnDestroy {
 
   private budget_id = 0;
 
-  ngOnInit(): void {
+  constructor() {
     this.budget_id = Number(this.route.snapshot.paramMap.get('budgetId'));
     if (!this.budget_id) {
       this.router.navigate(['/store/accounting/budgets']);

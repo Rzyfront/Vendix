@@ -1,6 +1,5 @@
 <app-modal
-    [isOpen]="isOpen"
-    (isOpenChange)="isOpenChange.emit($event)"
+    [(isOpen)]="isOpen"
     (cancel)="close()"
     [title]="title"
     size="md"
@@ -147,7 +146,7 @@
                 [loading]="is_saving"
                 [disabled]="is_saving || address_form.invalid"
             >
-                {{ mode === 'create' ? 'Crear dirección' : 'Guardar cambios' }}
+                {{ mode() === 'create' ? 'Crear dirección' : 'Guardar cambios' }}
             </app-button>
         </div>
     </div>

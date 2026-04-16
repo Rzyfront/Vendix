@@ -1,6 +1,6 @@
-import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
+import { Component, DestroyRef, inject, signal } from '@angular/core';
 import { ActivatedRoute } from '@angular/router';
-import { Subject, takeUntil } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { DialogService } from '../../../../../../shared/components/dialog/dialog.service';
 import { DispatchNotesService } from '../../services/dispatch-notes.service';
@@ -75,12 +75,13 @@ import { DispatchNote } from '../../interfaces/dispatch-note.interface';
     </div>
   `,
 })
-export class DispatchNoteDetailPageComponent implements OnInit, OnDestroy {
+export class DispatchNoteDetailPageComponent {
   private route = inject(ActivatedRoute);
   private dispatchNotesService = inject(DispatchNotesService);
   private printService = inject(DispatchNotePrintService);
   private toastService = inject(ToastService);
   private dialogService = inject(DialogService);
+  private destroyRef = inject(DestroyRef);
 
   dispatch_note = signal<DispatchNote | null>(null);
   is_loading = signal(false);
@@ -88,24 +89,17 @@ export class DispatchNoteDetailPageComponent implements OnInit, OnDestroy {
   showVoidModal = signal(false);
   showInvoiceModal = signal(false);
 
-  private destroy$ = new Subject<void>();
-
-  ngOnInit(): void {
+  constructor() {
     const id = Number(this.route.snapshot.paramMap.get('id'));
     if (id) {
       this.loadDispatchNote(id);
     }
   }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
   loadDispatchNote(id: number): void {
     this.is_loading.set(true);
     this.dispatchNotesService.getDispatchNote(id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (dn) => {
           this.dispatch_note.set(dn);
@@ -128,7 +122,7 @@ export class DispatchNoteDetailPageComponent implements OnInit, OnDestroy {
     if (!confirmed) return;
 
     this.dispatchNotesService.confirm(dn.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.success('Remision confirmada');
@@ -156,7 +150,7 @@ export class DispatchNoteDetailPageComponent implements OnInit, OnDestroy {
 
     this.showDeliverModal.set(false);
     this.dispatchNotesService.deliver(dn.id, payload)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.success('Remision marcada como entregada');
@@ -172,7 +166,7 @@ export class DispatchNoteDetailPageComponent implements OnInit, OnDestroy {
 
     this.showVoidModal.set(false);
     this.dispatchNotesService.void(dn.id, payload)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.success('Remision anulada');
@@ -188,7 +182,7 @@ export class DispatchNoteDetailPageComponent implements OnInit, OnDestroy {
 
     this.showInvoiceModal.set(false);
     this.dispatchNotesService.invoice(dn.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.success('Factura generada exitosamente');

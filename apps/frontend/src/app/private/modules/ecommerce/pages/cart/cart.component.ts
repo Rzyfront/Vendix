@@ -27,15 +27,22 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
   styleUrls: ['./cart.component.scss'],
 })
 export class CartComponent implements OnInit, OnDestroy {
-  cart: Cart | null = null;
-  is_loading = true;
-  is_authenticated = false;
-  updating_item_id: number | null = null;
+  readonly cart = signal<Cart | null>(null);
+  readonly is_loading = signal(true);
+  readonly is_authenticated = signal(false);
+  readonly updating_item_id = signal<number | null>(null);
 
   // Recommendations
   recommendedProducts = signal<EcommerceProduct[]>([]);
-  quickViewOpen = false;
-  selectedProductSlug: string | null = null;
+  readonly quickViewOpen = signal(false);
+  readonly selectedProductSlug = signal<string | null>(null);
+
+  readonly is_whatsapp_loading = signal(false);
+
+  whatsappEnabled(): boolean {
+    const config = this.tenantFacade.getCurrentDomainConfig();
+    return !!config?.customConfig?.ecommerce?.checkout?.whatsapp_checkout;
+  }
 
   private destroy$ = new Subject<void>();
   private catalogService = inject(CatalogService);
@@ -57,7 +64,7 @@ export class CartComponent implements OnInit, OnDestroy {
     this.currencyService.loadCurrency();
 
     this.auth_facade.isAuthenticated$.pipe(takeUntil(this.destroy$)).subscribe((is_auth: boolean) => {
-      this.is_authenticated = is_auth;
+      this.is_authenticated.set(is_auth);
       if (is_auth) {
         this.loadCart();
       } else {
@@ -81,26 +88,26 @@ export class CartComponent implements OnInit, OnDestroy {
   }
 
   loadCart(): void {
-    this.is_loading = true;
+    this.is_loading.set(true);
     this.cart_service.getCart().subscribe({
       next: () => {
-        this.is_loading = false;
+        this.is_loading.set(false);
       },
       error: (err) => {
-        this.is_loading = false;
+        this.is_loading.set(false);
         this.toast.error('No pudimos cargar tu carrito. Intenta de nuevo.', 'Error');
       },
     });
 
     this.cart_service.cart$.pipe(takeUntil(this.destroy$)).subscribe((cart) => {
-      this.cart = cart;
+      this.cart.set(cart);
     });
   }
 
   loadLocalCart(): void {
     this.cart_service.cart$.pipe(takeUntil(this.destroy$)).subscribe((cart) => {
-      this.cart = cart;
-      this.is_loading = false;
+      this.cart.set(cart);
+      this.is_loading.set(false);
     });
   }
 
@@ -127,7 +134,7 @@ export class CartComponent implements OnInit, OnDestroy {
 
     if (new_quantity === item.quantity) return;
 
-    this.updating_item_id = item.id;
+    this.updating_item_id.set(item.id);
 
     const result = this.cart_service.updateCartItem(
       {
@@ -140,14 +147,14 @@ export class CartComponent implements OnInit, OnDestroy {
 
     if (result) {
       result.subscribe({
-        next: () => { this.updating_item_id = null; },
+        next: () => { this.updating_item_id.set(null); },
         error: (err: any) => {
-          this.updating_item_id = null;
+          this.updating_item_id.set(null);
           this.toast.error(this.extractErrorMessage(err), 'Error al actualizar');
         },
       });
     } else {
-      this.updating_item_id = null;
+      this.updating_item_id.set(null);
     }
   }
 
@@ -170,7 +177,7 @@ export class CartComponent implements OnInit, OnDestroy {
   }
 
   proceedToCheckout(): void {
-    if (!this.is_authenticated) {
+    if (!this.is_authenticated()) {
       this.store_ui_service.openLoginModal();
     } else {
       this.router.navigate(['/checkout']);
@@ -181,29 +188,21 @@ export class CartComponent implements OnInit, OnDestroy {
     this.router.navigate(['/catalog']);
   }
 
-  // WhatsApp checkout
-  is_whatsapp_loading = false;
-
-  get whatsappEnabled(): boolean {
-    const config = this.tenantFacade.getCurrentDomainConfig();
-    return !!config?.customConfig?.ecommerce?.checkout?.whatsapp_checkout;
-  }
-
   whatsappCheckout(): void {
     const config = this.tenantFacade.getCurrentDomainConfig();
     const requiresRegistration = !!config?.customConfig?.ecommerce?.checkout?.require_registration;
 
-    if (requiresRegistration && !this.is_authenticated) {
+    if (requiresRegistration && !this.is_authenticated()) {
       this.store_ui_service.openLoginModal();
       return;
     }
 
-    this.is_whatsapp_loading = true;
+    this.is_whatsapp_loading.set(true);
 
     // Always send items from frontend cart (localStorage) so the backend
     // can fallback to them if the backend cart is empty (e.g. user logged
     // in after adding items as guest and cart wasn't synced)
-    const items = this.cart?.items.map(i => ({
+    const items = this.cart()?.items.map(i => ({
       product_id: i.product_id,
       product_variant_id: i.product_variant_id ?? undefined,
       quantity: i.quantity,
@@ -211,15 +210,15 @@ export class CartComponent implements OnInit, OnDestroy {
 
     this.checkoutService.whatsappCheckout(undefined, items).pipe(takeUntil(this.destroy$)).subscribe({
       next: (response) => {
-        this.is_whatsapp_loading = false;
+        this.is_whatsapp_loading.set(false);
         // Clear local cart for guests
-        if (!this.is_authenticated) {
+        if (!this.is_authenticated()) {
           this.cart_service.clearAllCart();
         }
         this.openWhatsApp(response.data);
       },
       error: (err: any) => {
-        this.is_whatsapp_loading = false;
+        this.is_whatsapp_loading.set(false);
         const msg = this.extractErrorMessage(err);
         this.toast.error(msg, 'No se pudo procesar tu pedido');
       },
@@ -276,8 +275,8 @@ export class CartComponent implements OnInit, OnDestroy {
   }
 
   onQuickView(product: EcommerceProduct): void {
-    this.selectedProductSlug = product.slug;
-    this.quickViewOpen = true;
+    this.selectedProductSlug.set(product.slug);
+    this.quickViewOpen.set(true);
   }
 
   onAddToCartFromSlider(product: EcommerceProduct): void {

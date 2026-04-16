@@ -1,4 +1,4 @@
-import { Component, Input, input, output } from '@angular/core';
+import { Component, input, output } from '@angular/core';
 
 import { TableComponent } from '../table/table.component';
 import { ItemListComponent } from '../item-list/item-list.component';
@@ -33,7 +33,7 @@ export type { ItemListCardConfig, ItemListSize };
   imports: [TableComponent, ItemListComponent, EmptyStateComponent],
   template: `
     <!-- Empty State (shared between desktop and mobile) -->
-    @if (!loading && data.length === 0) {
+    @if (!loading() && data().length === 0) {
       <app-empty-state
         [icon]="emptyIcon()"
         [title]="emptyTitle() || emptyMessage()"
@@ -50,14 +50,14 @@ export type { ItemListCardConfig, ItemListSize };
     }
     
     <!-- Desktop: Table (hidden on mobile) -->
-    @if (data.length > 0 || loading) {
+    @if (data().length > 0 || loading()) {
       <div class="hidden md:block">
         <app-table
-          [data]="data"
+          [data]="data()"
           [columns]="columns()"
           [actions]="actions()"
           [size]="tableSize()"
-          [loading]="loading"
+          [loading]="loading()"
           [emptyMessage]="emptyMessage()"
           [showHeader]="showHeader()"
           [striped]="striped()"
@@ -72,13 +72,13 @@ export type { ItemListCardConfig, ItemListSize };
     }
     
     <!-- Mobile: Item List (hidden on desktop) -->
-    @if (data.length > 0 || loading) {
+    @if (data().length > 0 || loading()) {
       <div class="block md:hidden">
         <app-item-list
-          [data]="data"
+          [data]="data()"
           [cardConfig]="cardConfig()"
           [actions]="actions()"
-          [loading]="loading"
+          [loading]="loading()"
           [emptyMessage]="emptyMessage()"
           [emptyIcon]="emptyIcon()"
           [size]="itemListSize()"
@@ -96,7 +96,7 @@ export type { ItemListCardConfig, ItemListSize };
 })
 export class ResponsiveDataViewComponent {
   // Data
-  @Input() data: any[] = [];
+  readonly data = input<any[]>([]);
 
   // Table configuration
   readonly columns = input<TableColumn[]>([]);
@@ -115,7 +115,7 @@ export class ResponsiveDataViewComponent {
 
   // Shared configuration
   readonly actions = input<TableAction[]>();
-  @Input() loading = false;
+  readonly loading = input(false);
   readonly emptyMessage = input('No hay datos disponibles');
 
   // Empty state enhanced inputs

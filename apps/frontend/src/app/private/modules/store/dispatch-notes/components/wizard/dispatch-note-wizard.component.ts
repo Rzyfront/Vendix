@@ -1,16 +1,12 @@
 import {
   Component,
-  ChangeDetectionStrategy,
   HostListener,
   inject,
   input,
   output,
   signal,
   computed,
-  OnInit,
-  OnDestroy,
 } from '@angular/core';
-
 import { switchMap, of } from 'rxjs';
 
 import {
@@ -48,10 +44,9 @@ import { ReviewStepComponent } from './review-step.component';
     CustomerStepComponent,
     ProductsStepComponent,
     DetailsStepComponent,
-    ReviewStepComponent
-],
+    ReviewStepComponent,
+  ],
   providers: [DispatchNoteWizardService],
-  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <app-modal
       [isOpen]="isOpen()"

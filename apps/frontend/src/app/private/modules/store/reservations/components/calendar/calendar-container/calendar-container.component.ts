@@ -1,4 +1,4 @@
-import { Component, signal, effect, inject, input, output, ChangeDetectionStrategy, untracked } from '@angular/core';
+import { Component, signal, effect, inject, input, output, untracked } from '@angular/core';
 
 import { ReservationsService } from '../../../services/reservations.service';
 import { Booking, CalendarViewMode } from '../../../interfaces/reservation.interface';
@@ -21,7 +21,6 @@ import { finalize } from 'rxjs';
 ],
   templateUrl: './calendar-container.component.html',
   styleUrls: ['./calendar-container.component.scss'],
-  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class CalendarContainerComponent {
   private reservationsService = inject(ReservationsService);

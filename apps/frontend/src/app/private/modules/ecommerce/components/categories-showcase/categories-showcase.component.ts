@@ -1,4 +1,4 @@
-import { Component, Input, inject } from '@angular/core';
+import { Component, inject, input, signal } from '@angular/core';
 
 import { RouterModule, Router } from '@angular/router';
 import { Category } from '../../services/catalog.service';
@@ -12,17 +12,17 @@ import { CatalogService } from '../../services/catalog.service';
   styleUrls: ['./categories-showcase.component.scss'],
 })
 export class CategoriesShowcaseComponent {
-  @Input() limit = 6;
-  @Input() show_all_link = true;
-  @Input() class = '';
+  readonly limit = input<number>(6);
+  readonly show_all_link = input<boolean>(true);
+  readonly class = input<string>('');
 
-  categories: Category[] = [];
-  is_loading = true;
+  readonly categories = signal<Category[]>([]);
+  readonly is_loading = signal(true);
 
   private catalog_service = inject(CatalogService);
   private router = inject(Router);
 
-  ngOnInit(): void {
+  constructor() {
     this.loadCategories();
   }
 
@@ -30,13 +30,13 @@ export class CategoriesShowcaseComponent {
     this.catalog_service.getCategories().subscribe({
       next: response => {
         if (response.success) {
-          this.categories = response.data.slice(0, this.limit);
+          this.categories.set(response.data.slice(0, this.limit()));
         }
-        this.is_loading = false;
+        this.is_loading.set(false);
       },
       error: () => {
-        this.categories = [];
-        this.is_loading = false;
+        this.categories.set([]);
+        this.is_loading.set(false);
       },
     });
   }

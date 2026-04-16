@@ -1,7 +1,6 @@
-import { Component, OnDestroy, ViewChild } from '@angular/core';
-
+import { Component, DestroyRef, ViewChild, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
-import { Subject, takeUntil } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { ToastService } from '../../../../../shared/components/index';
 
@@ -27,38 +26,30 @@ import { PoDetailModalComponent } from '../../inventory/pop/components/po-detail
   imports: [
     PurchaseOrderStatsComponent,
     PurchaseOrderListComponent,
-    PoDetailModalComponent
-],
+    PoDetailModalComponent,
+  ],
   templateUrl: './purchase-orders.component.html',
   styleUrls: ['./purchase-orders.component.scss'],
 })
-export class PurchaseOrdersComponent implements OnDestroy {
+export class PurchaseOrdersComponent {
   @ViewChild(PurchaseOrderListComponent) purchaseOrderList!: PurchaseOrderListComponent;
 
+  private router = inject(Router);
+  private toastService = inject(ToastService);
+  private purchaseOrdersService = inject(PurchaseOrdersService);
+  private destroyRef = inject(DestroyRef);
+
   // Stats data (updated by child via statsUpdated event)
-  stats: PurchaseOrderStats = {
+  readonly stats = signal<PurchaseOrderStats>({
     total: 0,
     pending: 0,
     received: 0,
     total_value: 0,
-  };
+  });
 
   // Modal state
-  isDetailModalOpen = false;
-  selectedOrder: PurchaseOrder | null = null;
-
-  private destroy$ = new Subject<void>();
-
-  constructor(
-    private router: Router,
-    private toastService: ToastService,
-    private purchaseOrdersService: PurchaseOrdersService
-  ) {}
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
+  readonly isDetailModalOpen = signal(false);
+  readonly selectedOrder = signal<PurchaseOrder | null>(null);
 
   // Navigate to POP for new order
   createOrder(): void {
@@ -69,28 +60,28 @@ export class PurchaseOrdersComponent implements OnDestroy {
   viewOrderDetails(order: PurchaseOrder): void {
     this.purchaseOrdersService
       .getPurchaseOrderById(order.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: any) => {
-          this.selectedOrder = response.data || response;
-          this.isDetailModalOpen = true;
+          this.selectedOrder.set(response.data || response);
+          this.isDetailModalOpen.set(true);
         },
         error: () => {
           // Fallback to list data if detail fetch fails
-          this.selectedOrder = order;
-          this.isDetailModalOpen = true;
+          this.selectedOrder.set(order);
+          this.isDetailModalOpen.set(true);
         },
       });
   }
 
   closeDetailModal(): void {
-    this.isDetailModalOpen = false;
-    this.selectedOrder = null;
+    this.isDetailModalOpen.set(false);
+    this.selectedOrder.set(null);
   }
 
   // Handle stats update from child component
   onStatsUpdated(stats: PurchaseOrderStats): void {
-    this.stats = stats;
+    this.stats.set(stats);
   }
 
   // Refresh purchase orders list (called when order is updated inside modal)

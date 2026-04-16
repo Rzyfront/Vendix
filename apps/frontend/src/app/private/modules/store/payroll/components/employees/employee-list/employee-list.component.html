@@ -6,7 +6,7 @@
       <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
         <h2 class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary">
           Empleados
-          @if (meta$ | async; as meta) {
+          @if (meta(); as meta) {
             <span class="text-text-secondary font-normal">
               ({{ meta.total }})
             </span>
@@ -19,7 +19,7 @@
           (ngModelChange)="onSearchChange($event)"></app-inputsearch>
 
           <app-options-dropdown
-            [filters]="filterConfigs" [filterValues]="filterValues" [actions]="dropdownActions" [isLoading]="loading"
+            [filters]="filterConfigs" [filterValues]="filterValues" [actions]="dropdownActions" [isLoading]="loading()"
             (filterChange)="onFilterChange($event)" (clearAllFilters)="onClearFilters()"
           (actionClick)="onActionClick($event)"></app-options-dropdown>
         </div>
@@ -27,7 +27,7 @@
     </div>
 
     <!-- Loading State -->
-    @if (loading) {
+    @if (loading()) {
       <div class="p-4 md:p-6 text-center">
         <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
         <p class="mt-2 text-text-secondary">Cargando empleados...</p>
@@ -51,13 +51,13 @@
     }
 
     <!-- Employee List -->
-    @if (!loading && employees.length > 0) {
+    @if (!loading() && employees().length > 0) {
       <div class="px-2 pb-2 pt-3 md:p-4">
-        <app-responsive-data-view [data]="employees" [columns]="columns" [actions]="tableActions"
-          [cardConfig]="cardConfig" [loading]="loading" emptyMessage="No hay empleados registrados" emptyIcon="users"
+        <app-responsive-data-view [data]="employees()" [columns]="columns" [actions]="tableActions"
+          [cardConfig]="cardConfig" [loading]="loading()" emptyMessage="No hay empleados registrados" emptyIcon="users"
         (rowClick)="onRowClick($event)"></app-responsive-data-view>
         <!-- Pagination -->
-        @if (meta$ | async; as meta) {
+        @if (meta(); as meta) {
           <div class="flex justify-center pt-3 mt-3 border-t border-border">
             <app-pagination
               [currentPage]="meta.page"

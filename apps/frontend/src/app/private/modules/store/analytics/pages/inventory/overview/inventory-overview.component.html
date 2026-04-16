@@ -1,6 +1,6 @@
 <div>
   <!-- Stats Cards -->
-  @if (loading$ | async) {
+  @if (loading()) {
     <div class="stats-container">
       @for (i of [1, 2, 3, 4]; track i) {
         <div
@@ -17,7 +17,7 @@
     >
       <app-stats
         title="Valor en Stock"
-        [value]="(summary$ | async)?.total_stock_value | currency"
+        [value]="summary()?.total_stock_value | currency"
         smallText="Costo total del inventario actual"
         iconName="dollar-sign"
         iconBgColor="bg-green-100"
@@ -26,7 +26,7 @@
 
       <app-stats
         title="Unidades en Mano"
-        [value]="(summary$ | async)?.total_quantity_on_hand || 0"
+        [value]="summary()?.total_quantity_on_hand || 0"
         smallText="Cantidad total disponible"
         iconName="layers"
         iconBgColor="bg-purple-100"
@@ -35,8 +35,8 @@
 
       <app-stats
         title="Bajo Stock"
-        [value]="(summary$ | async)?.low_stock_count || 0"
-        [smallText]="(lowStockPct$ | async) + '% del total de SKUs'"
+        [value]="summary()?.low_stock_count || 0"
+        [smallText]="lowStockPct() + '% del total de SKUs'"
         iconName="alert-triangle"
         iconBgColor="bg-amber-100"
         iconColor="text-amber-600"
@@ -44,8 +44,8 @@
 
       <app-stats
         title="Sin Stock"
-        [value]="(summary$ | async)?.out_of_stock_count || 0"
-        [smallText]="(outOfStockPct$ | async) + '% del total de SKUs'"
+        [value]="summary()?.out_of_stock_count || 0"
+        [smallText]="outOfStockPct() + '% del total de SKUs'"
         iconName="x-circle"
         iconBgColor="bg-red-100"
         iconColor="text-red-600"
@@ -74,7 +74,7 @@
       <div class="flex items-center gap-2 flex-shrink-0">
         <vendix-export-button
           class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-          [loading]="(exporting$ | async) ?? false"
+          [loading]="exporting()"
           (export)="exportReport()"
         ></vendix-export-button>
 
@@ -110,7 +110,7 @@
         >
       </div>
       <div class="p-4">
-        @if (loadingTrends$ | async) {
+        @if (loadingTrends()) {
           <div class="h-64 flex items-center justify-center">
             <div
               class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
@@ -149,7 +149,7 @@
           >
         </div>
         <div class="p-4">
-          @if (loadingValuation$ | async) {
+          @if (loadingValuation()) {
             <div class="h-64 flex items-center justify-center">
               <div
                 class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
@@ -186,7 +186,7 @@
           >
         </div>
         <div class="p-4">
-          @if (loadingValuation$ | async) {
+          @if (loadingValuation()) {
             <div class="h-64 flex items-center justify-center">
               <div
                 class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"

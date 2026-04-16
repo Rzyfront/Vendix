@@ -1,6 +1,5 @@
 import {
   Component,
-  ChangeDetectionStrategy,
   computed,
   inject,
   input,
@@ -53,7 +52,6 @@ const BADGE_COLOR_MAP: Record<DispatchNoteStatus, StickyHeaderBadgeColor> = {
     IconComponent
 ],
   templateUrl: './dispatch-note-detail.component.html',
-  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class DispatchNoteDetailComponent {
   private currencyService = inject(CurrencyFormatService);

@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, input, output } from '@angular/core';
+import { Component, inject, input, output, signal } from '@angular/core';
 
 import { FormsModule } from '@angular/forms';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
@@ -20,7 +20,7 @@ export interface AvailabilitySlot {
   templateUrl: './booking-slot-picker.component.html',
   styleUrls: ['./booking-slot-picker.component.scss'],
 })
-export class BookingSlotPickerComponent implements OnInit {
+export class BookingSlotPickerComponent {
   readonly productId = input.required<number>();
   readonly productName = input<string>('');
   readonly serviceDuration = input<number>(60);
@@ -37,18 +37,20 @@ export class BookingSlotPickerComponent implements OnInit {
   private http = inject(HttpClient);
   private domainService = inject(TenantFacade);
 
-  availableSlots: AvailabilitySlot[] = [];
-  selectedDate: string = '';
-  selectedSlot: AvailabilitySlot | null = null;
-  loading = false;
-  errorLoading = false;
+  readonly availableSlots = signal<AvailabilitySlot[]>([]);
+  readonly selectedDate = signal<string>('');
+  readonly selectedSlot = signal<AvailabilitySlot | null>(null);
+  readonly loading = signal(false);
+  readonly errorLoading = signal(false);
 
-  availableDates: string[] = [];
-  slotsForSelectedDate: AvailabilitySlot[] = [];
-  freeBookingSlots: { time: string; endTime: string }[] = [];
-  selectedFreeSlot: { time: string; endTime: string } | null = null;
+  readonly availableDates = signal<string[]>([]);
+  readonly slotsForSelectedDate = signal<AvailabilitySlot[]>([]);
+  readonly freeBookingSlots = signal<{ time: string; endTime: string }[]>([]);
+  readonly selectedFreeSlot = signal<{ time: string; endTime: string } | null>(
+    null,
+  );
 
-  ngOnInit() {
+  constructor() {
     this.generateDates();
     this.loadAvailability();
   }
@@ -69,35 +71,38 @@ export class BookingSlotPickerComponent implements OnInit {
       date.setDate(date.getDate() + i);
       dates.push(toLocalDateString(date));
     }
-    this.availableDates = dates;
+    this.availableDates.set(dates);
   }
 
   private loadAvailability() {
-    this.loading = true;
-    this.errorLoading = false;
+    this.loading.set(true);
+    this.errorLoading.set(false);
 
     if (this.bookingMode() === 'free_booking') {
       const duration = this.serviceDuration() || 60;
-      this.freeBookingSlots = [];
+      const slots: { time: string; endTime: string }[] = [];
       for (let mins = 480; mins + duration <= 1080; mins += duration) {
         const h = Math.floor(mins / 60);
         const m = mins % 60;
         const eh = Math.floor((mins + duration) / 60);
         const em = (mins + duration) % 60;
-        this.freeBookingSlots.push({
+        slots.push({
           time: `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}`,
           endTime: `${eh.toString().padStart(2, '0')}:${em.toString().padStart(2, '0')}`,
         });
       }
-      this.loading = false;
-      if (this.availableDates.length > 0) {
-        this.selectDate(this.availableDates[0]);
+      this.freeBookingSlots.set(slots);
+      this.loading.set(false);
+      const dates = this.availableDates();
+      if (dates.length > 0) {
+        this.selectDate(dates[0]);
       }
       return;
     }
 
-    const dateFrom = this.availableDates[0];
-    const dateTo = this.availableDates[this.availableDates.length - 1];
+    const dates = this.availableDates();
+    const dateFrom = dates[0];
+    const dateTo = dates[dates.length - 1];
 
     this.http
       .get<any>(
@@ -109,11 +114,12 @@ export class BookingSlotPickerComponent implements OnInit {
       )
       .subscribe({
         next: (response) => {
-          this.availableSlots = response.data || response || [];
-          this.loading = false;
-          if (this.availableSlots.length > 0) {
-            const firstAvailableDate = this.availableSlots.find(
-              (s) => s.available > 0,
+          const slots = response.data || response || [];
+          this.availableSlots.set(slots);
+          this.loading.set(false);
+          if (slots.length > 0) {
+            const firstAvailableDate = slots.find(
+              (s: AvailabilitySlot) => s.available > 0,
             )?.date;
             if (firstAvailableDate) {
               this.selectDate(firstAvailableDate);
@@ -121,22 +127,22 @@ export class BookingSlotPickerComponent implements OnInit {
           }
         },
         error: () => {
-          this.loading = false;
-          this.errorLoading = true;
+          this.loading.set(false);
+          this.errorLoading.set(true);
         },
       });
   }
 
   selectDate(date: string) {
-    this.selectedDate = date;
-    this.selectedSlot = null;
-    this.slotsForSelectedDate = this.availableSlots.filter(
-      (s) => s.date === date && s.available > 0,
+    this.selectedDate.set(date);
+    this.selectedSlot.set(null);
+    this.slotsForSelectedDate.set(
+      this.availableSlots().filter((s) => s.date === date && s.available > 0),
     );
   }
 
   selectSlot(slot: AvailabilitySlot) {
-    this.selectedSlot = slot;
+    this.selectedSlot.set(slot);
     this.slotSelected.emit({
       date: slot.date,
       start_time: slot.start_time,
@@ -145,9 +151,9 @@ export class BookingSlotPickerComponent implements OnInit {
   }
 
   selectFreeSlot(slot: { time: string; endTime: string }) {
-    this.selectedFreeSlot = slot;
+    this.selectedFreeSlot.set(slot);
     this.slotSelected.emit({
-      date: this.selectedDate,
+      date: this.selectedDate(),
       start_time: slot.time,
       end_time: slot.endTime,
     });
@@ -182,7 +188,9 @@ export class BookingSlotPickerComponent implements OnInit {
   }
 
   hasAvailableSlotsForDate(date: string): boolean {
-    return this.availableSlots.some((s) => s.date === date && s.available > 0);
+    return this.availableSlots().some(
+      (s) => s.date === date && s.available > 0,
+    );
   }
 
   retryLoad() {

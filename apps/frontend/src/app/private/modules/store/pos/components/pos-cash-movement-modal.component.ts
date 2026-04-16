@@ -1,10 +1,10 @@
 import {
   Component,
-  EventEmitter,
-  Input,
-  Output,
-  OnChanges,
-  SimpleChanges,
+  input,
+  output,
+  effect,
+  untracked,
+  inject,
 } from '@angular/core';
 
 import {
@@ -34,7 +34,7 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
 ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'sm'"
@@ -159,32 +159,32 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
     </app-modal>
   `,
 })
-export class PosCashMovementModalComponent implements OnChanges {
-  @Input() isOpen = false;
-  @Input() sessionId: number | null = null;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() movementCreated = new EventEmitter<any>();
+export class PosCashMovementModalComponent {
+  readonly isOpen = input<boolean>(false);
+  readonly sessionId = input<number | null>(null);
+  readonly isOpenChange = output<boolean>();
+  readonly movementCreated = output<any>();
 
   submitting = false;
   form: FormGroup;
 
-  constructor(
-    private fb: FormBuilder,
-    private cashRegisterService: PosCashRegisterService,
-    private toastService: ToastService,
-  ) {
+  private fb = inject(FormBuilder);
+  private cashRegisterService = inject(PosCashRegisterService);
+  private toastService = inject(ToastService);
+
+  constructor() {
     this.form = this.fb.group({
       type: ['cash_in', Validators.required],
       amount: [null, [Validators.required, Validators.min(0.01)]],
       reference: [''],
       notes: [''],
     });
-  }
 
-  ngOnChanges(changes: SimpleChanges) {
-    if (changes['isOpen'] && this.isOpen) {
-      this.form.reset({ type: 'cash_in' });
-    }
+    effect(() => {
+      if (this.isOpen()) {
+        untracked(() => this.form.reset({ type: 'cash_in' }));
+      }
+    });
   }
 
   getFieldError(fieldName: string): string | undefined {
@@ -201,11 +201,11 @@ export class PosCashMovementModalComponent implements OnChanges {
   }
 
   onSubmit() {
-    if (!this.form.valid || !this.sessionId) return;
+    if (!this.form.valid || !this.sessionId()) return;
     this.submitting = true;
 
     this.cashRegisterService
-      .addMovement(this.sessionId, this.form.value)
+      .addMovement(this.sessionId()!, this.form.value)
       .subscribe({
         next: (movement) => {
           this.submitting = false;

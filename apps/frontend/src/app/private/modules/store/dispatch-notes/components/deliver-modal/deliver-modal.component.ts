@@ -1,6 +1,5 @@
 import {
   Component,
-  ChangeDetectionStrategy,
   inject,
   input,
   output,
@@ -29,7 +28,6 @@ import { DispatchNote } from '../../interfaces/dispatch-note.interface';
     TextareaComponent,
     IconComponent
 ],
-  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <app-modal
       [isOpen]="isOpen()"

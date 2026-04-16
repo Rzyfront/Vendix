@@ -1,15 +1,13 @@
 import {
   Component,
-  OnChanges,
-  OnDestroy,
-  SimpleChanges,
-  Output,
-  EventEmitter,
-  Input,
+  input,
+  output,
   inject,
-  ChangeDetectionStrategy,
+  effect,
+  DestroyRef,
+  signal,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { DatePipe, AsyncPipe } from '@angular/common';
 import { Store } from '@ngrx/store';
 import { Actions, ofType } from '@ngrx/effects';
 import { Subject } from 'rxjs';
@@ -51,7 +49,8 @@ import { PayrollItemDetailComponent } from '../payroll-item-detail/payroll-item-
   selector: 'vendix-payroll-run-detail',
   standalone: true,
   imports: [
-    CommonModule,
+    DatePipe,
+    AsyncPipe,
     ModalComponent,
     ButtonComponent,
     IconComponent,
@@ -59,18 +58,17 @@ import { PayrollItemDetailComponent } from '../payroll-item-detail/payroll-item-
     ResponsiveDataViewComponent,
     PayrollItemDetailComponent,
   ],
-  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onClose()"
-      [title]="payrollRun?.payroll_number || 'Detalle de Nomina'"
-      [subtitle]="payrollRun ? getFrequencyLabel(payrollRun.frequency) : ''"
+      [title]="payrollRun()?.payroll_number || 'Detalle de Nomina'"
+      [subtitle]="payrollRun() ? getFrequencyLabel(payrollRun()!.frequency) : ''"
       size="xl"
     >
       <!-- Header slot: icono de nómina -->
-      @if (payrollRun) {
+      @if (payrollRun()) {
         <div slot="header"
              class="flex items-center justify-center w-9 h-9 rounded-lg bg-[var(--color-primary)]/10 text-[var(--color-primary)] flex-shrink-0">
           <app-icon name="banknote" [size]="18"></app-icon>
@@ -78,15 +76,15 @@ import { PayrollItemDetailComponent } from '../payroll-item-detail/payroll-item-
       }
 
       <!-- Header-end slot: badge de estado -->
-      @if (payrollRun) {
+      @if (payrollRun()) {
         <span slot="header-end"
-              [class]="getStatusBadgeClass(payrollRun.status)"
+              [class]="getStatusBadgeClass(payrollRun()!.status)"
               class="px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap">
-          {{ getStatusLabel(payrollRun.status) }}
+          {{ getStatusLabel(payrollRun()!.status) }}
         </span>
       }
 
-      @if (payrollRun) {
+      @if (payrollRun()) {
         <div class="space-y-4">
 
           <!-- 1. STEPS LINE -->
@@ -101,19 +99,19 @@ import { PayrollItemDetailComponent } from '../payroll-item-detail/payroll-item-
           <div class="p-3 bg-[var(--color-background)] rounded-lg grid grid-cols-2 md:grid-cols-4 gap-3">
             <div>
               <span class="text-xs text-[var(--color-text-secondary)] block">Inicio del Periodo</span>
-              <span class="text-sm font-medium">{{ payrollRun.period_start | date:'dd/MM/yyyy' }}</span>
+              <span class="text-sm font-medium">{{ payrollRun()!.period_start | date:'dd/MM/yyyy' }}</span>
             </div>
             <div>
               <span class="text-xs text-[var(--color-text-secondary)] block">Fin del Periodo</span>
-              <span class="text-sm font-medium">{{ payrollRun.period_end | date:'dd/MM/yyyy' }}</span>
+              <span class="text-sm font-medium">{{ payrollRun()!.period_end | date:'dd/MM/yyyy' }}</span>
             </div>
             <div>
               <span class="text-xs text-[var(--color-text-secondary)] block">Fecha de Pago</span>
-              <span class="text-sm font-medium">{{ payrollRun.payment_date ? (payrollRun.payment_date | date:'dd/MM/yyyy') : 'Sin definir' }}</span>
+              <span class="text-sm font-medium">{{ payrollRun()!.payment_date ? (payrollRun()!.payment_date | date:'dd/MM/yyyy') : 'Sin definir' }}</span>
             </div>
             <div>
               <span class="text-xs text-[var(--color-text-secondary)] block">Items</span>
-              <span class="text-sm font-medium">{{ payrollRun.items?.length || 0 }} empleados</span>
+              <span class="text-sm font-medium">{{ payrollRun()!.items?.length || 0 }} empleados</span>
             </div>
           </div>
 
@@ -121,30 +119,30 @@ import { PayrollItemDetailComponent } from '../payroll-item-detail/payroll-item-
           <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
             <div class="p-3 bg-blue-50 rounded-lg border border-blue-100">
               <span class="text-xs text-blue-600 block">Total Devengado</span>
-              <span class="text-lg font-bold text-blue-800">{{ formatNumber(payrollRun.total_earnings) }}</span>
+              <span class="text-lg font-bold text-blue-800">{{ formatNumber(payrollRun()!.total_earnings) }}</span>
             </div>
             <div class="p-3 bg-red-50 rounded-lg border border-red-100">
               <span class="text-xs text-red-600 block">Total Deducciones</span>
-              <span class="text-lg font-bold text-red-800">{{ formatNumber(payrollRun.total_deductions) }}</span>
+              <span class="text-lg font-bold text-red-800">{{ formatNumber(payrollRun()!.total_deductions) }}</span>
             </div>
             <div class="p-3 bg-yellow-50 rounded-lg border border-yellow-100">
               <span class="text-xs text-yellow-600 block">Costo Empleador</span>
-              <span class="text-lg font-bold text-yellow-800">{{ formatNumber(payrollRun.total_employer_costs) }}</span>
+              <span class="text-lg font-bold text-yellow-800">{{ formatNumber(payrollRun()!.total_employer_costs) }}</span>
             </div>
             <div class="p-3 bg-green-50 rounded-lg border border-green-100">
               <span class="text-xs text-green-600 block">Neto a Pagar</span>
-              <span class="text-lg font-bold text-green-800">{{ formatNumber(payrollRun.total_net_pay) }}</span>
+              <span class="text-lg font-bold text-green-800">{{ formatNumber(payrollRun()!.total_net_pay) }}</span>
             </div>
           </div>
 
           <!-- 5. DESGLOSE POR EMPLEADO -->
-          @if (payrollRun.items && payrollRun.items.length > 0) {
+          @if (payrollRun()!.items && payrollRun()!.items!.length > 0) {
             <div>
               <h3 class="text-sm font-semibold text-[var(--color-text-secondary)] uppercase tracking-wide mb-3">
                 Desglose por Empleado
               </h3>
               <app-responsive-data-view
-                [data]="employeeTableData"
+                [data]="employeeTableData()"
                 [columns]="employeeColumns"
                 [cardConfig]="employeeCardConfig"
                 tableSize="sm"
@@ -156,9 +154,9 @@ import { PayrollItemDetailComponent } from '../payroll-item-detail/payroll-item-
           }
 
           <!-- 6. EMPTY STATE (contextual segun status) -->
-          @if (!payrollRun.items || payrollRun.items.length === 0) {
+          @if (!payrollRun()!.items || payrollRun()!.items!.length === 0) {
             <div class="text-center py-8 text-[var(--color-text-secondary)]">
-              @if (payrollRun.status === 'draft') {
+              @if (payrollRun()!.status === 'draft') {
                 <p class="text-sm">Esta nomina aun no ha sido calculada</p>
                 <p class="text-xs mt-1">Presione "Calcular Nomina" para generar el desglose por empleado</p>
               } @else {
@@ -169,7 +167,7 @@ import { PayrollItemDetailComponent } from '../payroll-item-detail/payroll-item-
           }
 
           <!-- 7. PROCESAMIENTO COMPLETO (en body, al final del scroll) -->
-          @if (showQuickProcess && !fastTracking) {
+          @if (showQuickProcess && !fastTracking()) {
             <div class="mt-6 pt-4 border-t border-[var(--color-border)]">
               <label class="flex items-start gap-3 p-3 rounded-xl cursor-pointer select-none transition-all"
                      [class]="quickProcessEnabled
@@ -196,7 +194,7 @@ import { PayrollItemDetailComponent } from '../payroll-item-detail/payroll-item-
           }
 
           <!-- 8. CANCELAR NOMINA (en body, al final, con doble confirmacion) -->
-          @if (canProcess && payrollRun.status !== 'draft') {
+          @if (canProcess && payrollRun()!.status !== 'draft') {
             <div class="mt-4 pt-4 border-t border-[var(--color-border)]">
               @if (!cancelConfirmStep) {
                 <button (click)="cancelConfirmStep = 1"
@@ -205,7 +203,7 @@ import { PayrollItemDetailComponent } from '../payroll-item-detail/payroll-item-
                 </button>
               } @else if (cancelConfirmStep === 1) {
                 <div class="p-3 bg-red-50 rounded-xl border border-red-200">
-                  <p class="text-sm font-semibold text-red-700">Cancelar nomina {{ payrollRun.payroll_number }}</p>
+                  <p class="text-sm font-semibold text-red-700">Cancelar nomina {{ payrollRun()!.payroll_number }}</p>
                   <p class="text-xs text-red-600 mt-1">
                     Esta accion no se puede deshacer. Todos los asientos contables asociados permaneceran registrados.
                   </p>
@@ -222,10 +220,10 @@ import { PayrollItemDetailComponent } from '../payroll-item-detail/payroll-item-
                 <div class="p-3 bg-red-100 rounded-xl border-2 border-red-300">
                   <p class="text-sm font-bold text-red-800">Confirmacion final</p>
                   <p class="text-xs text-red-700 mt-1">
-                    Presione "Confirmar cancelacion" para cancelar definitivamente la nomina {{ payrollRun.payroll_number }}.
+                    Presione "Confirmar cancelacion" para cancelar definitivamente la nomina {{ payrollRun()!.payroll_number }}.
                   </p>
                   <div class="flex items-center gap-2 mt-3">
-                    <app-button variant="danger" size="sm" (clicked)="onCancelPayroll(); cancelConfirmStep = 0" [loading]="loading">
+                    <app-button variant="danger" size="sm" (clicked)="onCancelPayroll(); cancelConfirmStep = 0" [loading]="loading()">
                       Confirmar cancelacion
                     </app-button>
                     <app-button variant="ghost" size="sm" (clicked)="cancelConfirmStep = 0">
@@ -251,19 +249,19 @@ import { PayrollItemDetailComponent } from '../payroll-item-detail/payroll-item-
 
           <!-- Derecha: accion principal -->
           <div class="flex items-center gap-2">
-            @if (fastTracking) {
+            @if (fastTracking()) {
               <div class="flex items-center gap-2 px-3 py-2">
                 <div class="w-4 h-4 border-2 border-[var(--color-primary)] border-t-transparent rounded-full animate-spin"></div>
-                <span class="text-xs font-semibold text-[var(--color-text-primary)]">{{ fastTrackCurrentLabel }}</span>
+                <span class="text-xs font-semibold text-[var(--color-text-primary)]">{{ fastTrackCurrentLabel() }}</span>
               </div>
             } @else if (canProcess) {
               @if (quickProcessEnabled) {
-                <app-button variant="primary" (clicked)="onFastTrack()" [loading]="loading">
+                <app-button variant="primary" (clicked)="onFastTrack()" [loading]="loading()">
                   <app-icon name="zap" [size]="16" class="mr-1"></app-icon>
                   Procesar Completo
                 </app-button>
               } @else {
-                <app-button [variant]="nextStepVariant" (clicked)="onNextStep()" [loading]="loading">
+                <app-button [variant]="nextStepVariant" (clicked)="onNextStep()" [loading]="loading()">
                   {{ nextStepLabel }}
                 </app-button>
               }
@@ -282,14 +280,15 @@ import { PayrollItemDetailComponent } from '../payroll-item-detail/payroll-item-
     ></vendix-payroll-item-detail>
   `,
 })
-export class PayrollRunDetailComponent implements OnChanges, OnDestroy {
-  @Input() isOpen = false;
-  @Input() payrollRun: PayrollRun | null = null;
-  @Output() isOpenChange = new EventEmitter<boolean>();
+export class PayrollRunDetailComponent {
+  readonly isOpen = input<boolean>(false);
+  readonly payrollRun = input<PayrollRun | null>(null);
+  readonly isOpenChange = output<boolean>();
 
   private currencyService = inject(CurrencyFormatService);
   private store = inject(Store);
   private actions$ = inject(Actions);
+  private destroyRef = inject(DestroyRef);
 
   private destroy$ = new Subject<void>();
   private fastTrackCancel$ = new Subject<void>();
@@ -306,11 +305,11 @@ export class PayrollRunDetailComponent implements OnChanges, OnDestroy {
 
   // ── Quick process ─────────────────────────────────────
   quickProcessEnabled = false;
-  loading = false;
+  readonly loading = signal(false);
 
   // ── Fast-track state ──────────────────────────────────
-  fastTracking = false;
-  fastTrackCurrentLabel = '';
+  readonly fastTracking = signal(false);
+  readonly fastTrackCurrentLabel = signal('');
 
   // ── Cancel confirmation (0=hidden, 1=first confirm, 2=final confirm) ──
   cancelConfirmStep: 0 | 1 | 2 = 0;
@@ -320,7 +319,7 @@ export class PayrollRunDetailComponent implements OnChanges, OnDestroy {
   selectedItem: PayrollItem | null = null;
 
   // ── ResponsiveDataView ────────────────────────────────
-  employeeTableData: any[] = [];
+  readonly employeeTableData = signal<any[]>([]);
 
   employeeColumns: TableColumn[] = [
     {
@@ -386,51 +385,45 @@ export class PayrollRunDetailComponent implements OnChanges, OnDestroy {
 
   // ── Lifecycle ─────────────────────────────────────────
 
-  ngOnChanges(changes: SimpleChanges): void {
-    if (changes['payrollRun']) {
-      const prev = changes['payrollRun'].previousValue;
-      const curr = changes['payrollRun'].currentValue;
-
-      // Reset on payroll change
-      if (prev?.id !== curr?.id) {
-        this.quickProcessEnabled = false;
-        this.cancelConfirmStep = 0;
-        this.stopFastTrack();
-      }
-
-      // Always update derived state
+  constructor() {
+    effect(() => {
+      const run = this.payrollRun();
       this.updateStatusIndex();
       this.rebuildTableData();
-    }
-  }
+    });
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-    this.fastTrackCancel$.next();
-    this.fastTrackCancel$.complete();
+    this.destroyRef.onDestroy(() => {
+      this.destroy$.next();
+      this.destroy$.complete();
+      this.fastTrackCancel$.next();
+      this.fastTrackCancel$.complete();
+    });
   }
 
   // ── Computed getters ──────────────────────────────────
 
   get showQuickProcess(): boolean {
-    if (!this.payrollRun) return false;
-    const remaining = this.getRemainingSteps(this.payrollRun.status);
+    const run = this.payrollRun();
+    if (!run) return false;
+    const remaining = this.getRemainingSteps(run.status);
     return remaining.length > 1;
   }
 
   get remainingStepsDescription(): string {
-    if (!this.payrollRun) return '';
-    const remaining = this.getRemainingSteps(this.payrollRun.status);
+    const run = this.payrollRun();
+    if (!run) return '';
+    const remaining = this.getRemainingSteps(run.status);
     return remaining.map(s => this.getStepActionLabel(s)).join(' \u2192 ');
   }
 
   get canProcess(): boolean {
-    return !!this.payrollRun && !['paid', 'cancelled'].includes(this.payrollRun.status);
+    const run = this.payrollRun();
+    return !!run && !['paid', 'cancelled'].includes(run.status);
   }
 
   get nextStepLabel(): string {
-    if (!this.payrollRun) return '';
+    const run = this.payrollRun();
+    if (!run) return '';
     const labels: Record<string, string> = {
       draft: 'Calcular Nomina',
       calculated: 'Aprobar',
@@ -438,11 +431,12 @@ export class PayrollRunDetailComponent implements OnChanges, OnDestroy {
       sent: 'Marcar Pagada',
       accepted: 'Marcar Pagada',
     };
-    return labels[this.payrollRun.status] || '';
+    return labels[run.status] || '';
   }
 
   get nextStepVariant(): ButtonVariant {
-    if (!this.payrollRun) return 'primary';
+    const run = this.payrollRun();
+    if (!run) return 'primary';
     const variants: Record<string, ButtonVariant> = {
       draft: 'primary',
       calculated: 'success',
@@ -450,7 +444,7 @@ export class PayrollRunDetailComponent implements OnChanges, OnDestroy {
       sent: 'success',
       accepted: 'success',
     };
-    return variants[this.payrollRun.status] || 'primary';
+    return variants[run.status] || 'primary';
   }
 
   // ── Employee detail ───────────────────────────────────
@@ -464,10 +458,11 @@ export class PayrollRunDetailComponent implements OnChanges, OnDestroy {
   // ── Step actions ──────────────────────────────────────
 
   onNextStep(): void {
-    if (!this.payrollRun) return;
-    this.loading = true;
-    const status = this.payrollRun.status;
-    const id = this.payrollRun.id;
+    const run = this.payrollRun();
+    if (!run) return;
+    this.loading.set(true);
+    const status = run.status;
+    const id = run.id;
 
     const actionMap: Record<string, () => void> = {
       draft: () => this.store.dispatch(calculatePayrollRun({ id })),
@@ -487,30 +482,32 @@ export class PayrollRunDetailComponent implements OnChanges, OnDestroy {
           take(1),
           takeUntil(this.destroy$),
         ).subscribe(() => {
-          this.loading = false;
+          this.loading.set(false);
         });
       }
       dispatchFn();
     } else {
-      this.loading = false;
+      this.loading.set(false);
     }
   }
 
   onCancelPayroll(): void {
-    if (this.payrollRun) {
-      this.store.dispatch(cancelPayrollRun({ id: this.payrollRun.id }));
+    const run = this.payrollRun();
+    if (run) {
+      this.store.dispatch(cancelPayrollRun({ id: run.id }));
     }
   }
 
   // ── Fast-track ────────────────────────────────────────
 
   onFastTrack(): void {
-    if (!this.payrollRun) return;
-    this.fastTracking = true;
-    this.loading = true;
+    const run = this.payrollRun();
+    if (!run) return;
+    this.fastTracking.set(true);
+    this.loading.set(true);
     // Do NOT recreate fastTrackCancel$ — just signal to cancel previous subscriptions
     this.fastTrackCancel$.next();
-    this.dispatchNextStep(this.payrollRun.status, this.payrollRun.id);
+    this.dispatchNextStep(run.status, run.id);
   }
 
   private dispatchNextStep(currentStatus: string, id: number): void {
@@ -520,7 +517,7 @@ export class PayrollRunDetailComponent implements OnChanges, OnDestroy {
       return;
     }
 
-    this.fastTrackCurrentLabel = config.label;
+    this.fastTrackCurrentLabel.set(config.label);
 
     const successFailure = this.getSuccessFailureActions(currentStatus);
     if (!successFailure) {
@@ -581,9 +578,9 @@ export class PayrollRunDetailComponent implements OnChanges, OnDestroy {
   }
 
   private stopFastTrack(): void {
-    this.fastTracking = false;
-    this.fastTrackCurrentLabel = '';
-    this.loading = false;
+    this.fastTracking.set(false);
+    this.fastTrackCurrentLabel.set('');
+    this.loading.set(false);
     this.fastTrackCancel$.next();
   }
 
@@ -610,6 +607,7 @@ export class PayrollRunDetailComponent implements OnChanges, OnDestroy {
   }
 
   private updateStatusIndex(): void {
+    const run = this.payrollRun();
     const statusMap: Record<string, number> = {
       draft: 0,
       calculated: 1,
@@ -620,16 +618,17 @@ export class PayrollRunDetailComponent implements OnChanges, OnDestroy {
       cancelled: -1,
       rejected: -1,
     };
-    this.currentStatusIndex = statusMap[this.payrollRun?.status || 'draft'] ?? 0;
+    this.currentStatusIndex = statusMap[run?.status || 'draft'] ?? 0;
   }
 
   private rebuildTableData(): void {
-    if (!this.payrollRun?.items) {
-      this.employeeTableData = [];
+    const run = this.payrollRun();
+    if (!run?.items) {
+      this.employeeTableData.set([]);
       return;
     }
 
-    this.employeeTableData = this.payrollRun.items.map((item) => ({
+    this.employeeTableData.set(run.items.map((item) => ({
       _originalItem: item,
       employee_name: item.employee
         ? `${item.employee.first_name} ${item.employee.last_name}`
@@ -641,7 +640,7 @@ export class PayrollRunDetailComponent implements OnChanges, OnDestroy {
       total_deductions_fmt: this.formatNumber(item.total_deductions),
       total_employer_costs_fmt: this.formatNumber(item.total_employer_costs),
       net_pay_fmt: this.formatNumber(item.net_pay),
-    }));
+    })));
   }
 
   private getSuccessFailureActions(status: string): { success: any; failure: any } | null {

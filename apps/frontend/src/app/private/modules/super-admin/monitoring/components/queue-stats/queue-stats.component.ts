@@ -1,13 +1,12 @@
-import { Component, Input, ChangeDetectionStrategy, input } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input } from '@angular/core';
+import { DecimalPipe } from '@angular/common';
 import { QueueStats } from '../../interfaces';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 
 @Component({
   selector: 'app-queue-stats',
   standalone: true,
-  imports: [CommonModule, CardComponent],
-  changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [DecimalPipe, CardComponent],
   template: `
     <app-card
       [padding]="false"
@@ -122,9 +121,9 @@ import { CardComponent } from '../../../../../../shared/components/card/card.com
             </div>
           </div>
           <!-- Per-queue cards (better than table for mobile) -->
-          @if (queues && queues.length > 0) {
+          @if (queues() && queues()!.length > 0) {
             <div class="space-y-2">
-              @for (q of queues; track trackByName($index, q)) {
+              @for (q of queues()!; track trackByName($index, q)) {
                 <div
                   class="flex items-center gap-3 p-3 rounded-lg transition-colors"
                   style="background: var(--color-surface); border: 1px solid var(--color-border);"
@@ -191,7 +190,7 @@ import { CardComponent } from '../../../../../../shared/components/card/card.com
             </div>
           }
           <!-- Empty state -->
-          @if (!queues || queues.length === 0) {
+          @if (!queues() || queues()!.length === 0) {
             <div class="py-6 text-center">
               <p class="text-sm" style="color: var(--color-text-muted);">
                 Sin colas activas
@@ -204,7 +203,7 @@ import { CardComponent } from '../../../../../../shared/components/card/card.com
   `,
 })
 export class QueueStatsComponent {
-  @Input() queues: QueueStats[] | undefined | null;
+  readonly queues = input<QueueStats[] | undefined | null>(undefined);
   readonly loading = input<boolean>(false);
 
   trackByName(index: number, queue: QueueStats): string {
@@ -216,18 +215,18 @@ export class QueueStatsComponent {
   }
 
   get totalActive(): number {
-    return this.queues?.reduce((sum, q) => sum + q.active, 0) ?? 0;
+    return this.queues()?.reduce((sum, q) => sum + q.active, 0) ?? 0;
   }
 
   get totalWaiting(): number {
-    return this.queues?.reduce((sum, q) => sum + q.waiting, 0) ?? 0;
+    return this.queues()?.reduce((sum, q) => sum + q.waiting, 0) ?? 0;
   }
 
   get totalCompleted(): number {
-    return this.queues?.reduce((sum, q) => sum + q.completed, 0) ?? 0;
+    return this.queues()?.reduce((sum, q) => sum + q.completed, 0) ?? 0;
   }
 
   get totalFailed(): number {
-    return this.queues?.reduce((sum, q) => sum + q.failed, 0) ?? 0;
+    return this.queues()?.reduce((sum, q) => sum + q.failed, 0) ?? 0;
   }
 }

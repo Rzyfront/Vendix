@@ -1,6 +1,5 @@
 import {
   Component,
-  OnInit,
   OnDestroy,
   inject,
   signal,
@@ -34,7 +33,7 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
   templateUrl: './budget-variance.component.html',
   styleUrls: ['./budget-variance.component.scss'],
 })
-export class BudgetVarianceComponent implements OnInit, OnDestroy {
+export class BudgetVarianceComponent implements OnDestroy {
   private destroy$ = new Subject<void>();
   private route = inject(ActivatedRoute);
   private router = inject(Router);
@@ -75,7 +74,7 @@ export class BudgetVarianceComponent implements OnInit, OnDestroy {
 
   private budget_id = 0;
 
-  ngOnInit(): void {
+  constructor() {
     this.budget_id = Number(this.route.snapshot.paramMap.get('budgetId'));
     if (!this.budget_id) {
       this.router.navigate(['/store/accounting/budgets']);

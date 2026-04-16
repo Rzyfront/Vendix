@@ -1,4 +1,4 @@
-import { Component, ChangeDetectionStrategy, ChangeDetectorRef, inject, OnDestroy } from '@angular/core';
+import { Component, inject, DestroyRef } from '@angular/core';
 
 import { RouterModule } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -10,7 +10,6 @@ import { MonitoringService } from './services/monitoring.service';
   selector: 'app-monitoring-layout',
   standalone: true,
   imports: [RouterModule, IconComponent, StickyHeaderComponent],
-  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <app-sticky-header
       title="Monitoreo del Sistema"
@@ -20,7 +19,7 @@ import { MonitoringService } from './services/monitoring.service';
       [actions]="headerActions"
       (actionClicked)="onHeaderAction($event)"
     ></app-sticky-header>
-    
+
     <!-- Tabs -->
     <div class="flex items-center gap-1 border-b border-border px-4 md:px-6">
       @for (tab of tabs; track tab) {
@@ -41,16 +40,16 @@ import { MonitoringService } from './services/monitoring.service';
         </a>
       }
     </div>
-    
+
     <!-- Content -->
     <div class="p-4 md:p-6">
       <router-outlet></router-outlet>
     </div>
     `,
 })
-export class MonitoringLayoutComponent implements OnDestroy {
+export class MonitoringLayoutComponent {
   private readonly monitoringService = inject(MonitoringService);
-  private readonly cdr = inject(ChangeDetectorRef);
+  private readonly destroyRef = inject(DestroyRef);
   private tickInterval: ReturnType<typeof setInterval> | null = null;
 
   autoRefresh = true;
@@ -72,7 +71,6 @@ export class MonitoringLayoutComponent implements OnDestroy {
     ).subscribe(v => {
       this.autoRefresh = v;
       this.updateHeaderActions();
-      this.cdr.markForCheck();
     });
 
     this.monitoringService.manualRefresh$.pipe(
@@ -83,8 +81,13 @@ export class MonitoringLayoutComponent implements OnDestroy {
 
     this.tickInterval = setInterval(() => {
       this.secondsSinceRefresh++;
-      this.cdr.markForCheck();
     }, 1000);
+
+    this.destroyRef.onDestroy(() => {
+      if (this.tickInterval) {
+        clearInterval(this.tickInterval);
+      }
+    });
   }
 
   onHeaderAction(actionId: string): void {
@@ -93,12 +96,6 @@ export class MonitoringLayoutComponent implements OnDestroy {
       this.secondsSinceRefresh = 0;
     } else if (actionId === 'auto-refresh') {
       this.monitoringService.toggleAutoRefresh();
-    }
-  }
-
-  ngOnDestroy(): void {
-    if (this.tickInterval) {
-      clearInterval(this.tickInterval);
     }
   }
 

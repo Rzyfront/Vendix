@@ -1,8 +1,9 @@
-import { Component, OnInit, OnDestroy, inject } from '@angular/core';
+import { Component, inject, signal, DestroyRef } from '@angular/core';
 
 import { ActivatedRoute } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { Subject, takeUntil, debounceTime, distinctUntilChanged } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Subject, debounceTime, distinctUntilChanged } from 'rxjs';
 
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { SpinnerComponent } from '../../../../../shared/components/spinner/spinner.component';
@@ -35,10 +36,10 @@ import { HelpArticleCardComponent } from './components/help-article-card/help-ar
             type="text"
             class="search-input"
             placeholder="Buscar artículos..."
-            [(ngModel)]="searchQuery"
+            [ngModel]="searchQuery()"
             (ngModelChange)="onSearchChange($event)"
             />
-          @if (searchQuery) {
+          @if (searchQuery()) {
             <button
               class="clear-btn"
               (click)="clearSearch()"
@@ -51,19 +52,19 @@ import { HelpArticleCardComponent } from './components/help-article-card/help-ar
       </div>
     
       <!-- Category Filters -->
-      @if (categories.length > 0 && !searchQuery) {
+      @if (categories().length > 0 && !searchQuery()) {
         <div class="category-filters">
           <button
             class="category-chip"
-            [class.active]="!selectedCategory"
+            [class.active]="!selectedCategory()"
             (click)="selectCategory(null)"
             >
             Todos
           </button>
-          @for (cat of categories; track cat) {
+          @for (cat of categories(); track cat) {
             <button
               class="category-chip"
-              [class.active]="selectedCategory === cat.slug"
+              [class.active]="selectedCategory() === cat.slug"
               (click)="selectCategory(cat.slug)"
               >
               @if (cat.icon) {
@@ -79,19 +80,19 @@ import { HelpArticleCardComponent } from './components/help-article-card/help-ar
       }
     
       <!-- Loading State -->
-      @if (isLoading) {
+      @if (isLoading()) {
         <div class="loading-state">
           <app-spinner size="md"></app-spinner>
         </div>
       }
     
       <!-- Articles Grid -->
-      @if (!isLoading && articles.length > 0) {
+      @if (!isLoading() && articles().length > 0) {
         <div class="articles-grid">
-          @for (article of articles; track trackBySlug($index, article)) {
+          @for (article of articles(); track trackBySlug($index, article)) {
             <app-help-article-card
               [article]="article"
-              [isExpanded]="expandedSlug === article.slug"
+              [isExpanded]="expandedSlug() === article.slug"
               (expanded)="onArticleExpanded($event)"
             ></app-help-article-card>
           }
@@ -99,27 +100,27 @@ import { HelpArticleCardComponent } from './components/help-article-card/help-ar
       }
     
       <!-- Empty State -->
-      @if (!isLoading && articles.length === 0) {
+      @if (!isLoading() && articles().length === 0) {
         <div class="empty-state">
           <app-icon name="search" [size]="48" class="empty-icon"></app-icon>
           <h3>No se encontraron artículos</h3>
-          @if (searchQuery) {
+          @if (searchQuery()) {
             <p>Intenta con otros términos de búsqueda</p>
           }
-          @if (!searchQuery) {
+          @if (!searchQuery()) {
             <p>Aún no hay artículos en esta categoría</p>
           }
         </div>
       }
     
       <!-- Load More -->
-      @if (!isLoading && hasMore && !searchQuery) {
+      @if (!isLoading() && hasMore() && !searchQuery()) {
         <div class="load-more">
-          <button class="load-more-btn" (click)="loadMore()" [disabled]="isLoadingMore">
-            @if (isLoadingMore) {
+          <button class="load-more-btn" (click)="loadMore()" [disabled]="isLoadingMore()">
+            @if (isLoadingMore()) {
               <app-spinner size="sm"></app-spinner>
             }
-            @if (!isLoadingMore) {
+            @if (!isLoadingMore()) {
               <span>Cargar más artículos</span>
             }
           </button>
@@ -344,35 +345,35 @@ import { HelpArticleCardComponent } from './components/help-article-card/help-ar
     }
   `],
 })
-export class HelpCenterComponent implements OnInit, OnDestroy {
+export class HelpCenterComponent {
   private helpCenterService = inject(HelpCenterService);
   private route = inject(ActivatedRoute);
-  private destroy$ = new Subject<void>();
+  private destroyRef = inject(DestroyRef);
   private searchSubject$ = new Subject<string>();
 
-  articles: HelpArticle[] = [];
-  categories: HelpCategory[] = [];
-  searchQuery = '';
-  selectedCategory: string | null = null;
-  expandedSlug: string | null = null;
-  isLoading = false;
-  isLoadingMore = false;
-  hasMore = false;
-  currentPage = 1;
+  articles = signal<HelpArticle[]>([]);
+  categories = signal<HelpCategory[]>([]);
+  searchQuery = signal('');
+  selectedCategory = signal<string | null>(null);
+  expandedSlug = signal<string | null>(null);
+  isLoading = signal(false);
+  isLoadingMore = signal(false);
+  hasMore = signal(false);
+  currentPage = signal(1);
   private readonly PAGE_SIZE = 10;
 
-  ngOnInit(): void {
+  constructor() {
     // Load categories
     this.helpCenterService.getCategories()
-      .pipe(takeUntil(this.destroy$))
-      .subscribe(cats => this.categories = cats);
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(cats => this.categories.set(cats));
 
     // Setup search debounce
     this.searchSubject$
       .pipe(
         debounceTime(300),
         distinctUntilChanged(),
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
       )
       .subscribe(query => {
         if (query.trim().length >= 2) {
@@ -383,9 +384,9 @@ export class HelpCenterComponent implements OnInit, OnDestroy {
       });
 
     // Check for slug param (deep link to specific article)
-    this.route.params.pipe(takeUntil(this.destroy$)).subscribe(params => {
+    this.route.params.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(params => {
       if (params['slug']) {
-        this.expandedSlug = params['slug'];
+        this.expandedSlug.set(params['slug']);
       }
     });
 
@@ -393,86 +394,92 @@ export class HelpCenterComponent implements OnInit, OnDestroy {
   }
 
   loadArticles(): void {
-    this.isLoading = true;
-    this.currentPage = 1;
+    this.isLoading.set(true);
+    this.currentPage.set(1);
 
     this.helpCenterService.getArticles({
       page: 1,
       limit: this.PAGE_SIZE,
-      category: this.selectedCategory || undefined,
-    }).pipe(takeUntil(this.destroy$))
+      category: this.selectedCategory() || undefined,
+    }).pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
-          this.articles = res.data;
-          this.hasMore = res.meta.page < res.meta.total_pages;
-          this.isLoading = false;
+          this.articles.set(res.data);
+          this.hasMore.set(res.meta.page < res.meta.total_pages);
+          this.isLoading.set(false);
 
           // Auto-scroll to expanded article if slug provided
-          if (this.expandedSlug) {
-            setTimeout(() => this.scrollToArticle(this.expandedSlug!), 100);
+          const slug = this.expandedSlug();
+          if (slug) {
+            setTimeout(() => this.scrollToArticle(slug), 100);
           }
         },
         error: () => {
-          this.isLoading = false;
+          this.isLoading.set(false);
         },
       });
   }
 
   loadMore(): void {
-    this.isLoadingMore = true;
-    this.currentPage++;
+    this.isLoadingMore.set(true);
+    this.currentPage.update(p => p + 1);
 
     this.helpCenterService.getArticles({
-      page: this.currentPage,
+      page: this.currentPage(),
       limit: this.PAGE_SIZE,
-      category: this.selectedCategory || undefined,
-    }).pipe(takeUntil(this.destroy$))
+      category: this.selectedCategory() || undefined,
+    }).pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
-          this.articles = [...this.articles, ...res.data];
-          this.hasMore = res.meta.page < res.meta.total_pages;
-          this.isLoadingMore = false;
+          this.articles.update(prev => [...prev, ...res.data]);
+          this.hasMore.set(res.meta.page < res.meta.total_pages);
+          this.isLoadingMore.set(false);
         },
         error: () => {
-          this.isLoadingMore = false;
+          this.isLoadingMore.set(false);
         },
       });
   }
 
   onSearchChange(query: string): void {
+    this.searchQuery.set(query);
     this.searchSubject$.next(query);
   }
 
   clearSearch(): void {
-    this.searchQuery = '';
+    this.searchQuery.set('');
     this.loadArticles();
   }
 
   private performSearch(query: string): void {
-    this.isLoading = true;
+    this.isLoading.set(true);
     this.helpCenterService.searchArticles(query)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (results) => {
-          this.articles = results;
-          this.hasMore = false;
-          this.isLoading = false;
+          this.articles.set(results);
+          this.hasMore.set(false);
+          this.isLoading.set(false);
         },
         error: () => {
-          this.isLoading = false;
+          this.isLoading.set(false);
         },
       });
   }
 
   selectCategory(slug: string | null): void {
-    this.selectedCategory = slug;
+    this.selectedCategory.set(slug);
     this.loadArticles();
   }
 
-  onArticleExpanded(article: HelpArticle): void {
-    this.expandedSlug = article.slug;
+  onArticleExpanded(article: HelpArticle | null): void {
+    if (!article) {
+      this.expandedSlug.set(null);
+      return;
+    }
+    this.expandedSlug.set(article.slug);
     this.helpCenterService.incrementView(article.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe();
   }
 
@@ -485,10 +492,5 @@ export class HelpCenterComponent implements OnInit, OnDestroy {
     if (el) {
       el.scrollIntoView({ behavior: 'smooth', block: 'center' });
     }
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
   }
 }

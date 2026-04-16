@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
+import { Component, input, output } from '@angular/core';
 
 import { FormsModule } from '@angular/forms';
 
@@ -28,7 +28,7 @@ import { LocationType, CreateLocationDto } from '../../interfaces';
 ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       size="md"
       title="Crear Bodega Rápido"
       subtitle="Agrega una nueva bodega sin salir del punto de compra"
@@ -98,10 +98,10 @@ import { LocationType, CreateLocationDto } from '../../interfaces';
   ],
 })
 export class PopWarehouseQuickCreateComponent {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() close = new EventEmitter<void>();
-  @Output() warehouseCreated = new EventEmitter<number>();
+  readonly isOpen = input(false);
+  readonly isOpenChange = output<boolean>();
+  readonly close = output<void>();
+  readonly warehouseCreated = output<number>();
 
   isLoading = false;
 
@@ -145,11 +145,6 @@ export class PopWarehouseQuickCreateComponent {
           this.warehouseCreated.emit(response.data.id);
           this.resetForm();
           this.isOpenChange.emit(false);
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
           this.close.emit();
         }
         this.isLoading = false;
@@ -164,11 +159,6 @@ export class PopWarehouseQuickCreateComponent {
   onClose(): void {
     this.resetForm();
     this.isOpenChange.emit(false);
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
     this.close.emit();
   }
 

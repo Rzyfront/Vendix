@@ -1,17 +1,15 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
-  OnInit,
-  OnDestroy,
+  input,
+  output,
+  DestroyRef,
+  inject,
 } from '@angular/core';
 
 import {
   PosKeyboardService,
   ShortcutGroup,
 } from '../services/pos-keyboard.service';
-import { Subject } from 'rxjs';
 
 @Component({
   selector: 'app-pos-keyboard-shortcuts',
@@ -293,27 +291,20 @@ import { Subject } from 'rxjs';
     `,
   ],
 })
-export class PosKeyboardShortcutsComponent implements OnInit, OnDestroy {
-  @Input() customShortcuts: ShortcutGroup[] = [];
-  @Output() shortcutTriggered = new EventEmitter<{
-    key: string;
-    action: string;
-  }>();
+export class PosKeyboardShortcutsComponent {
+  readonly customShortcuts = input<ShortcutGroup[]>([]);
+  readonly shortcutTriggered = output<{ key: string; action: string }>();
 
   showHelp: boolean = false;
   shortcutGroups: ShortcutGroup[] = [];
-  private destroy$ = new Subject<void>();
 
-  constructor(private keyboardService: PosKeyboardService) {}
+  private keyboardService = inject(PosKeyboardService);
+  private destroyRef = inject(DestroyRef);
 
-  ngOnInit(): void {
+  constructor() {
     this.initializeDefaultShortcuts();
     this.setupKeyboardService();
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
+    this.destroyRef.onDestroy(() => {});
   }
 
   private initializeDefaultShortcuts(): void {
@@ -428,7 +419,7 @@ export class PosKeyboardShortcutsComponent implements OnInit, OnDestroy {
       },
     ];
 
-    this.shortcutGroups = [...defaultGroups, ...this.customShortcuts];
+    this.shortcutGroups = [...defaultGroups, ...this.customShortcuts()];
   }
 
   private setupKeyboardService(): void {

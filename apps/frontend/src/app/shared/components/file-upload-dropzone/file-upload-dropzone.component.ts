@@ -1,12 +1,10 @@
 import {
   Component,
-  Input,
+  ViewChild,
   ElementRef,
-  ChangeDetectionStrategy,
-  ChangeDetectorRef,
+  signal,
   input,
   output,
-  viewChild
 } from '@angular/core';
 
 import { IconComponent } from '../icon/icon.component';
@@ -15,10 +13,9 @@ import { IconComponent } from '../icon/icon.component';
   selector: 'app-file-upload-dropzone',
   standalone: true,
   imports: [IconComponent],
-  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <!-- State: file selected -->
-    @if (selectedFile) {
+    @if (selectedFile()) {
       <div class="relative border-2 border-gray-200 rounded-xl bg-gray-50/50 p-4">
         <!-- Remove button -->
         <button
@@ -30,10 +27,10 @@ import { IconComponent } from '../icon/icon.component';
           <app-icon name="x" size="14" class="text-gray-500 hover:text-red-500"></app-icon>
         </button>
         <!-- Image preview -->
-        @if (previewUrl) {
+        @if (previewUrl()) {
           <div class="flex flex-col items-center gap-2">
             <img
-              [src]="previewUrl"
+              [src]="previewUrl()"
               alt="Preview"
               class="max-h-32 rounded-lg border border-border object-contain"
               />
@@ -48,13 +45,13 @@ import { IconComponent } from '../icon/icon.component';
           </div>
         }
         <!-- Non-image file display -->
-        @if (!previewUrl) {
+        @if (!previewUrl()) {
           <div class="flex items-center gap-3">
             <div class="p-2 bg-white rounded-lg shadow-sm border border-gray-100">
               <app-icon name="file-text" size="24" class="text-primary-500"></app-icon>
             </div>
             <div class="flex-1 min-w-0">
-              <p class="text-sm font-medium text-gray-700 truncate">{{ selectedFile.name }}</p>
+              <p class="text-sm font-medium text-gray-700 truncate">{{ selectedFile()!.name }}</p>
               <button
                 type="button"
                 class="text-xs text-primary-600 hover:text-primary-700 hover:underline font-medium"
@@ -78,8 +75,8 @@ import { IconComponent } from '../icon/icon.component';
           <app-icon [name]="icon()" size="24" class="text-primary-500"></app-icon>
         </div>
         <p class="text-[13px] font-semibold text-gray-700">{{ label() }}</p>
-        @if (helperText) {
-          <p class="text-xs text-gray-500 mt-0.5">{{ helperText }}</p>
+        @if (helperText()) {
+          <p class="text-xs text-gray-500 mt-0.5">{{ helperText() }}</p>
         }
       </div>
     }
@@ -97,53 +94,50 @@ import { IconComponent } from '../icon/icon.component';
     `,
 })
 export class FileUploadDropzoneComponent {
-  readonly label = input('Subir archivo');
-  @Input() helperText = '';
-  readonly accept = input('*');
-  readonly icon = input('upload-cloud');
-  readonly disabled = input(false);
+  readonly label = input<string>('Subir archivo');
+  readonly helperText = input<string>('');
+  readonly accept = input<string>('*');
+  readonly icon = input<string>('upload-cloud');
+  readonly disabled = input<boolean>(false);
 
   readonly fileSelected = output<File>();
   readonly fileRemoved = output<void>();
 
-  readonly fileInputRef = viewChild.required<ElementRef<HTMLInputElement>>('fileInput');
+  @ViewChild('fileInput') fileInputRef!: ElementRef<HTMLInputElement>;
 
-  selectedFile: File | null = null;
-  previewUrl: string | null = null;
-
-  constructor(private cdr: ChangeDetectorRef) {}
+  readonly selectedFile = signal<File | null>(null);
+  readonly previewUrl = signal<string | null>(null);
 
   triggerFileInput(): void {
     if (!this.disabled()) {
-      this.fileInputRef().nativeElement.click();
+      this.fileInputRef.nativeElement.click();
     }
   }
 
   onInputChange(event: Event): void {
     const input = event.target as HTMLInputElement;
     if (input.files && input.files[0]) {
-      this.selectedFile = input.files[0];
+      const file = input.files[0];
+      this.selectedFile.set(file);
 
-      if (this.selectedFile.type.startsWith('image/')) {
+      if (file.type.startsWith('image/')) {
         const reader = new FileReader();
         reader.onload = (e) => {
-          this.previewUrl = e.target?.result as string;
-          this.cdr.markForCheck();
+          this.previewUrl.set(e.target?.result as string);
         };
-        reader.readAsDataURL(this.selectedFile);
+        reader.readAsDataURL(file);
       } else {
-        this.previewUrl = null;
+        this.previewUrl.set(null);
       }
 
-      this.fileSelected.emit(this.selectedFile);
+      this.fileSelected.emit(file);
     }
   }
 
   removeFile(): void {
-    this.selectedFile = null;
-    this.previewUrl = null;
-    this.fileInputRef().nativeElement.value = '';
-    // TODO: The 'emit' function requires a mandatory void argument
+    this.selectedFile.set(null);
+    this.previewUrl.set(null);
+    this.fileInputRef.nativeElement.value = '';
     this.fileRemoved.emit();
   }
 

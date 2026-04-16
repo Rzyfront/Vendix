@@ -1,10 +1,11 @@
 import {
   Component,
-  Input,
   OnInit,
   OnDestroy,
   inject,
-  output
+  input,
+  output,
+  model,
 } from '@angular/core';
 
 import {
@@ -22,7 +23,6 @@ import { UsersService } from '../services/users.service';
 import { User, UpdateUserDto, UserState } from '../interfaces/user.interface';
 import { Subject, takeUntil } from 'rxjs';
 
-
 @Component({
   selector: 'app-user-edit-modal',
   standalone: true,
@@ -30,18 +30,18 @@ import { Subject, takeUntil } from 'rxjs';
     ReactiveFormsModule,
     InputComponent,
     ButtonComponent,
-    ModalComponent
-],
+    ModalComponent,
+  ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
       title="Editar Usuario"
       subtitle="Actualiza la información del usuario seleccionado"
-      >
-      @if (user) {
+    >
+      @if (user()) {
         <form [formGroup]="userForm" (ngSubmit)="onSubmit()">
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <app-input
@@ -90,14 +90,14 @@ import { Subject, takeUntil } from 'rxjs';
             <div class="space-y-2">
               <label
                 class="block text-sm font-medium text-[var(--color-text-primary)]"
-                >
+              >
                 Estado
               </label>
               <select
                 formControlName="state"
                 class="w-full px-3 py-2 border border-[var(--color-border)] rounded-md bg-[var(--color-surface)] text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:border-[var(--color-primary)]"
                 [disabled]="isUpdating"
-                >
+              >
                 <option value="">Seleccionar estado</option>
                 <option [value]="UserState.ACTIVE">Activo</option>
                 <option [value]="UserState.INACTIVE">Inactivo</option>
@@ -111,70 +111,78 @@ import { Subject, takeUntil } from 'rxjs';
           </div>
           <!-- User Info -->
           <div class="mt-6 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
-            <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <h4
+              class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+            >
               Información del Usuario
             </h4>
             <div class="grid grid-cols-2 gap-4 text-sm">
               <div>
                 <span class="text-gray-500 dark:text-gray-400">ID:</span>
                 <span class="ml-2 text-gray-900 dark:text-gray-100">{{
-                  user.id
+                  user()?.id
                 }}</span>
               </div>
               <div>
                 <span class="text-gray-500 dark:text-gray-400">Creado:</span>
                 <span class="ml-2 text-gray-900 dark:text-gray-100">{{
-                  formatDate(user.created_at)
+                  formatDate(user()?.created_at ?? '')
                 }}</span>
               </div>
               <div>
                 <span class="text-gray-500 dark:text-gray-400"
                   >Email Verificado:</span
-                  >
-                  <span
-                    class="ml-2"
-                [class]="
-                  user.email_verified ? 'text-green-600' : 'text-yellow-600'
-                "
-                    >
-                    {{ user.email_verified ? 'Sí' : 'No' }}
-                  </span>
-                </div>
-                <div>
-                  <span class="text-gray-500 dark:text-gray-400">2FA:</span>
-                  <span
-                    class="ml-2"
-                [class]="
-                  user.two_factor_enabled ? 'text-green-600' : 'text-gray-600'
-                "
-                    >
-                    {{ user.two_factor_enabled ? 'Habilitado' : 'Deshabilitado' }}
-                  </span>
-                </div>
+                >
+                <span
+                  class="ml-2"
+                  [class]="
+                    user()?.email_verified
+                      ? 'text-green-600'
+                      : 'text-yellow-600'
+                  "
+                >
+                  {{ user()?.email_verified ? 'Sí' : 'No' }}
+                </span>
+              </div>
+              <div>
+                <span class="text-gray-500 dark:text-gray-400">2FA:</span>
+                <span
+                  class="ml-2"
+                  [class]="
+                    user()?.two_factor_enabled
+                      ? 'text-green-600'
+                      : 'text-gray-600'
+                  "
+                >
+                  {{
+                    user()?.two_factor_enabled ? 'Habilitado' : 'Deshabilitado'
+                  }}
+                </span>
               </div>
             </div>
-          </form>
-        }
-    
-        <div slot="footer" class="flex justify-end gap-3">
-          <app-button
-            variant="outline"
-            (clicked)="onCancel()"
-            [disabled]="isUpdating"
-            >
-            Cancelar
-          </app-button>
-          <app-button
-            variant="primary"
-            (clicked)="onSubmit()"
-            [disabled]="userForm.invalid || isUpdating"
-            [loading]="isUpdating"
-            >
-            Actualizar Usuario
-          </app-button>
-        </div>
-      </app-modal>
-    `,
+          </div>
+        </form>
+      }
+
+      <div slot="footer" class="flex justify-end gap-3">
+        <app-button
+          variant="outline"
+          (clicked)="onCancel()"
+          [disabled]="isUpdating"
+        >
+          Cancelar
+        </app-button>
+        <app-button
+          variant="primary"
+          (clicked)="onSubmit()"
+          [disabled]="userForm.invalid || isUpdating"
+          [loading]="isUpdating"
+        >
+          Actualizar Usuario
+        </app-button>
+      </div>
+    </app-modal>
+  `,
   styles: [
     `
       :host {
@@ -184,8 +192,8 @@ import { Subject, takeUntil } from 'rxjs';
   ],
 })
 export class UserEditModalComponent implements OnInit, OnDestroy {
-  @Input() user: User | null = null;
-  @Input() isOpen: boolean = false;
+  readonly user = input<User | null>(null);
+  readonly isOpen = model<boolean>(false);
   readonly isOpenChange = output<boolean>();
   readonly onUserUpdated = output<void>();
 
@@ -227,10 +235,10 @@ export class UserEditModalComponent implements OnInit, OnDestroy {
     });
   }
 
-  ngOnInit(): void { }
+  ngOnInit(): void {}
 
   onCancel(): void {
-    this.isOpen = false;
+    this.isOpen.set(false);
     this.isOpenChange.emit(false);
   }
 
@@ -240,19 +248,21 @@ export class UserEditModalComponent implements OnInit, OnDestroy {
   }
 
   ngOnChanges(): void {
-    if (this.user) {
+    const user = this.user();
+    if (user) {
       this.userForm.patchValue({
-        first_name: this.user.first_name,
-        last_name: this.user.last_name,
-        username: this.user.username,
-        email: this.user.email,
-        state: this.user.state,
+        first_name: user.first_name,
+        last_name: user.last_name,
+        username: user.username,
+        email: user.email,
+        state: user.state,
       });
     }
   }
 
   onSubmit(): void {
-    if (this.userForm.invalid || this.isUpdating || !this.user) {
+    const user = this.user();
+    if (this.userForm.invalid || this.isUpdating || !user) {
       // Mark all fields as touched to trigger validation messages
       Object.keys(this.userForm.controls).forEach((key) => {
         this.userForm.get(key)?.markAsTouched();
@@ -269,7 +279,7 @@ export class UserEditModalComponent implements OnInit, OnDestroy {
     }
 
     this.usersService
-      .updateUser(this.user.id, userData)
+      .updateUser(user.id, userData)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: () => {

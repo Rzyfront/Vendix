@@ -1,5 +1,5 @@
-import { Component, inject, OnInit, OnDestroy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject, DestroyRef } from '@angular/core';
+import { NgClass } from '@angular/common';
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 import { EnvironmentContextService } from '../../../core/services/environment-context.service';
@@ -8,7 +8,7 @@ import { AppEnvironment } from '../../../core/models/domain-config.interface';
 @Component({
   selector: 'app-environment-indicator',
   standalone: true,
-  imports: [CommonModule],
+  imports: [NgClass],
   template: `
     <div class="environment-indicator" [ngClass]="environmentClass">
       <div class="indicator-content">
@@ -143,8 +143,9 @@ import { AppEnvironment } from '../../../core/models/domain-config.interface';
     `,
   ],
 })
-export class EnvironmentIndicatorComponent implements OnInit, OnDestroy {
+export class EnvironmentIndicatorComponent {
   private environmentContextService = inject(EnvironmentContextService);
+  private destroyRef = inject(DestroyRef);
   private destroy$ = new Subject<void>();
 
   context: any = null;
@@ -154,13 +155,12 @@ export class EnvironmentIndicatorComponent implements OnInit, OnDestroy {
   showSwitchButton = false;
   canSwitch = false;
 
-  ngOnInit(): void {
+  constructor() {
     this.loadEnvironmentContext();
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
+    this.destroyRef.onDestroy(() => {
+      this.destroy$.next();
+      this.destroy$.complete();
+    });
   }
 
   private loadEnvironmentContext(): void {

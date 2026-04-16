@@ -45,7 +45,7 @@
 
     <!-- Content -->
     <div class="relative p-2 md:p-4">
-      @if (loading$ | async) {
+      @if (loading()) {
         <div
           class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
         >
@@ -55,7 +55,7 @@
         </div>
       }
 
-      @if (mapping_groups.length === 0 && !(loading$ | async)) {
+      @if (mapping_groups.length === 0 && !(loading())) {
         <app-empty-state
           icon="link"
           title="No hay mapeos configurados"

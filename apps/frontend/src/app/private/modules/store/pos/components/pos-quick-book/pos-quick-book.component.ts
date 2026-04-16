@@ -1,13 +1,11 @@
 import {
   Component,
-  OnInit,
   inject,
   output,
   signal,
-  ChangeDetectionStrategy,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
+import { CurrencyPipe } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
@@ -17,12 +15,13 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
 @Component({
   selector: 'app-pos-quick-book',
   standalone: true,
-  imports: [CommonModule, FormsModule, IconComponent, ButtonComponent, SpinnerComponent],
+  imports: [FormsModule, IconComponent, ButtonComponent, SpinnerComponent,
+    CurrencyPipe,
+  ],
   templateUrl: './pos-quick-book.component.html',
   styleUrls: ['./pos-quick-book.component.scss'],
-  changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class PosQuickBookComponent implements OnInit {
+export class PosQuickBookComponent {
   close = output<void>();
   created = output<any>();
 
@@ -50,7 +49,7 @@ export class PosQuickBookComponent implements OnInit {
   slotsLoading = signal(false);
   submitting = signal(false);
 
-  ngOnInit() {
+  constructor() {
     this.loadServices();
     this.generateDates();
   }

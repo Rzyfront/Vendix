@@ -1,6 +1,5 @@
 import {
   Component,
-  ChangeDetectionStrategy,
   input,
   output
 } from '@angular/core';
@@ -14,7 +13,6 @@ export type PaginationInfoStyle = 'range' | 'page' | 'none';
   imports: [IconComponent],
   templateUrl: './pagination.component.html',
   styleUrls: ['./pagination.component.scss'],
-  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class PaginationComponent {
   readonly currentPage = input<number>(1);

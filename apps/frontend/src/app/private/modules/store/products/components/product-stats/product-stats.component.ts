@@ -1,5 +1,4 @@
-import { Component, Input, inject, OnInit } from '@angular/core';
-
+import { Component, input, inject } from '@angular/core';
 import { ProductStats } from '../../interfaces/product.interface';
 import { StatsComponent } from '../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
@@ -11,15 +10,14 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
   templateUrl: './product-stats.component.html',
   styleUrls: ['./product-stats.component.scss'],
 })
-export class ProductStatsComponent implements OnInit {
+export class ProductStatsComponent {
   private currencyService = inject(CurrencyFormatService);
 
-  ngOnInit(): void {
-    // Asegurar que la moneda esté cargada
+  readonly stats = input<ProductStats | null>(null);
+
+  constructor() {
     this.currencyService.loadCurrency();
   }
-
-  @Input() stats: ProductStats | null = null;
 
   // Formatear número para visualización
   formatNumber(num: number): string {

@@ -1,8 +1,8 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
+  input,
+  output,
+  model,
   OnDestroy,
   inject,
 } from '@angular/core';
@@ -20,7 +20,10 @@ import {
   ToastService,
 } from '../../../../../../shared/components/index';
 import { StoreRolesService } from '../services/store-roles.service';
-import { StoreRole, UpdateStoreRoleDto } from '../interfaces/store-role.interface';
+import {
+  StoreRole,
+  UpdateStoreRoleDto,
+} from '../interfaces/store-role.interface';
 import { Subject, takeUntil } from 'rxjs';
 
 @Component({
@@ -30,18 +33,18 @@ import { Subject, takeUntil } from 'rxjs';
     ReactiveFormsModule,
     InputComponent,
     ButtonComponent,
-    ModalComponent
-],
+    ModalComponent,
+  ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'md'"
       title="Editar Rol"
       subtitle="Actualiza la informacion del rol seleccionado"
-      >
-      @if (role) {
+    >
+      @if (role()) {
         <form [formGroup]="roleForm" (ngSubmit)="onSubmit()">
           <div class="space-y-4">
             <app-input
@@ -62,37 +65,47 @@ import { Subject, takeUntil } from 'rxjs';
           </div>
           <!-- Role Info -->
           <div class="mt-6 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
-            <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+            <h4
+              class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2"
+            >
               Informacion del Rol
             </h4>
             <div class="grid grid-cols-2 gap-4 text-sm">
               <div>
                 <span class="text-gray-500 dark:text-gray-400">ID:</span>
-                <span class="ml-2 text-gray-900 dark:text-gray-100">{{ role.id }}</span>
+                <span class="ml-2 text-gray-900 dark:text-gray-100">{{
+                  role()?.id
+                }}</span>
               </div>
               <div>
                 <span class="text-gray-500 dark:text-gray-400">Tipo:</span>
-                <span class="ml-2 text-gray-900 dark:text-gray-100">{{ role.system_role ? 'Sistema' : 'Personalizado' }}</span>
+                <span class="ml-2 text-gray-900 dark:text-gray-100">{{
+                  role()?.system_role ? 'Sistema' : 'Personalizado'
+                }}</span>
               </div>
               <div>
                 <span class="text-gray-500 dark:text-gray-400">Usuarios:</span>
-                <span class="ml-2 text-gray-900 dark:text-gray-100">{{ role._count?.user_roles || 0 }}</span>
+                <span class="ml-2 text-gray-900 dark:text-gray-100">{{
+                  role()?._count?.user_roles || 0
+                }}</span>
               </div>
               <div>
                 <span class="text-gray-500 dark:text-gray-400">Permisos:</span>
-                <span class="ml-2 text-gray-900 dark:text-gray-100">{{ role.permissions.length || 0 }}</span>
+                <span class="ml-2 text-gray-900 dark:text-gray-100">{{
+                  role()?.permissions?.length || 0
+                }}</span>
               </div>
             </div>
           </div>
         </form>
       }
-    
+
       <div slot="footer" class="flex justify-end gap-3">
         <app-button
           variant="outline"
           (clicked)="onCancel()"
           [disabled]="isUpdating"
-          >
+        >
           Cancelar
         </app-button>
         <app-button
@@ -100,12 +113,12 @@ import { Subject, takeUntil } from 'rxjs';
           (clicked)="onSubmit()"
           [disabled]="roleForm.invalid || isUpdating"
           [loading]="isUpdating"
-          >
+        >
           Actualizar Rol
         </app-button>
       </div>
     </app-modal>
-    `,
+  `,
   styles: [
     `
       :host {
@@ -115,10 +128,10 @@ import { Subject, takeUntil } from 'rxjs';
   ],
 })
 export class StoreRoleEditModalComponent implements OnDestroy {
-  @Input() role: StoreRole | null = null;
-  @Input() isOpen: boolean = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() onRoleUpdated = new EventEmitter<void>();
+  readonly role = model<StoreRole | null>(null);
+  readonly isOpen = model<boolean>(false);
+  readonly isOpenChange = output<boolean>();
+  readonly onRoleUpdated = output<void>();
 
   roleForm: FormGroup;
   isUpdating: boolean = false;
@@ -129,7 +142,14 @@ export class StoreRoleEditModalComponent implements OnDestroy {
 
   constructor(private fb: FormBuilder) {
     this.roleForm = this.fb.group({
-      name: ['', [Validators.required, Validators.minLength(2), Validators.maxLength(50)]],
+      name: [
+        '',
+        [
+          Validators.required,
+          Validators.minLength(2),
+          Validators.maxLength(50),
+        ],
+      ],
       description: [''],
     });
   }
@@ -140,16 +160,18 @@ export class StoreRoleEditModalComponent implements OnDestroy {
   }
 
   ngOnChanges(): void {
-    if (this.role) {
+    const currentRole = this.role();
+    if (currentRole) {
       this.roleForm.patchValue({
-        name: this.role.name,
-        description: this.role.description || '',
+        name: currentRole.name,
+        description: currentRole.description || '',
       });
     }
   }
 
   onSubmit(): void {
-    if (this.roleForm.invalid || this.isUpdating || !this.role) {
+    const currentRole = this.role();
+    if (this.roleForm.invalid || this.isUpdating || !currentRole) {
       Object.keys(this.roleForm.controls).forEach((key) => {
         this.roleForm.get(key)?.markAsTouched();
       });
@@ -160,7 +182,7 @@ export class StoreRoleEditModalComponent implements OnDestroy {
     const roleData: UpdateStoreRoleDto = this.roleForm.value;
 
     this.storeRolesService
-      .updateRole(this.role.id, roleData)
+      .updateRole(currentRole.id, roleData)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: () => {
@@ -177,15 +199,13 @@ export class StoreRoleEditModalComponent implements OnDestroy {
         error: (error: any) => {
           this.isUpdating = false;
           console.error('Error updating store role:', error);
-          const message =
-            error?.error?.message || 'Error al actualizar el rol';
+          const message = error?.error?.message || 'Error al actualizar el rol';
           this.toastService.error(message);
         },
       });
   }
 
   onCancel(): void {
-    this.isOpen = false;
-    this.isOpenChange.emit(false);
+    this.isOpen.set(false);
   }
 }

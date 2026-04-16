@@ -1,8 +1,8 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
+  input,
+  output,
+  model,
   OnChanges,
   SimpleChanges,
   inject,
@@ -31,30 +31,30 @@ import {
     ButtonComponent,
     InputComponent,
     SelectorComponent,
-    TextareaComponent
-],
+    TextareaComponent,
+  ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onClose()"
       title="Registrar Pago"
       size="md"
     >
-      @if (payable) {
+      @if (payable(); as payableData) {
         <div class="p-4 space-y-4">
           <!-- Account Info -->
           <div class="p-3 bg-gray-50 rounded-lg space-y-1">
             <div class="flex justify-between text-sm">
               <span class="text-gray-500">Proveedor</span>
               <span class="font-medium">{{
-                payable.supplier?.name || '—'
+                payableData.supplier?.name || '—'
               }}</span>
             </div>
             <div class="flex justify-between text-sm">
               <span class="text-gray-500">Documento</span>
               <span class="font-mono">{{
-                payable.document_number || '—'
+                payableData.document_number || '—'
               }}</span>
             </div>
             <div class="flex justify-between text-sm">
@@ -132,10 +132,10 @@ import {
   `,
 })
 export class PayablePaymentModalComponent implements OnChanges {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Input() payable: AccountPayable | null = null;
-  @Output() saved = new EventEmitter<void>();
+  readonly isOpen = model<boolean>(false);
+  readonly isOpenChange = output<boolean>();
+  readonly payable = model<AccountPayable | null>(null);
+  readonly saved = output<void>();
 
   private fb = inject(FormBuilder);
   private carteraService = inject(CarteraService);
@@ -159,24 +159,27 @@ export class PayablePaymentModalComponent implements OnChanges {
   });
 
   get formatted_balance(): string {
-    return this.currencyService.format(this.payable?.balance || 0);
+    const pay = this.payable();
+    return this.currencyService.format(pay?.balance || 0);
   }
 
   ngOnChanges(changes: SimpleChanges): void {
-    if (changes['isOpen'] && this.isOpen && this.payable) {
+    const currentPayable = this.payable();
+    if (changes['isOpen'] && this.isOpen() && currentPayable) {
       this.form.reset();
-      this.form.patchValue({ amount: this.payable.balance });
+      this.form.patchValue({ amount: currentPayable.balance });
     }
   }
 
   onSubmit(): void {
-    if (this.form.invalid || !this.payable) return;
+    const currentPayable = this.payable();
+    if (this.form.invalid || !currentPayable) return;
 
     const val = this.form.value;
     this.is_submitting = true;
 
     this.carteraService
-      .registerApPayment(this.payable.id, {
+      .registerApPayment(currentPayable.id, {
         amount: Number(val.amount),
         payment_method: val.payment_method!,
         reference: val.reference || undefined,

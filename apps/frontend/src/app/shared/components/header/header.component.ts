@@ -5,7 +5,7 @@ import {
   output,
   signal,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { AsyncPipe } from '@angular/common';
 import { Router, RouterModule } from '@angular/router';
 import { Observable } from 'rxjs';
 
@@ -23,44 +23,44 @@ import { ConfigFacade } from '../../../core/store/config';
   selector: 'app-header',
   standalone: true,
   imports: [
-    CommonModule,
+    AsyncPipe,
     RouterModule,
     IconComponent,
     UserDropdownComponent,
     NotificationsDropdownComponent,
-    HelpSearchOverlayComponent,
-  ],
+    HelpSearchOverlayComponent
+],
   template: `
     <header
       class="bg-transparent border-b-0 sticky top-0 backdrop-blur-md text-slate-900 relative"
       style="z-index: var(--z-header)"
-    >
+      >
       <div
         class="flex items-center justify-between px-2 py-1 sm:px-3 sm:py-2 md:p-2 gap-1.5 md:gap-6"
-      >
+        >
         <div class="flex items-center gap-1.5 sm:gap-5 flex-1 min-w-0">
           <!-- Desktop: Toggle Sidebar Button (hamburger) - hidden on mobile -->
           <button
             (click)="toggleSidebar.emit()"
             class="desktop-menu-btn hidden md:flex items-center justify-center flex-shrink-0 p-2 rounded-lg transition-all duration-200 hover:bg-black/5 dark:hover:bg-white/10 border-0 bg-transparent cursor-pointer"
             aria-label="Toggle sidebar"
-          >
+            >
             <app-icon name="menu" [size]="20"></app-icon>
           </button>
-
+    
           <!-- Mobile: Store Logo + Arrow to open sidebar -->
           <button
             (click)="toggleSidebar.emit()"
             class="flex md:hidden items-center gap-1.5 flex-shrink-0 p-1 rounded-lg transition-all duration-200 hover:bg-black/5 dark:hover:bg-white/10 border-0 bg-transparent cursor-pointer"
             aria-label="Abrir menú"
-          >
+            >
             <div class="mobile-logo-container">
               @if (storeLogo()) {
                 <img
                   [src]="storeLogo()"
                   [alt]="storeName() || 'Logo'"
                   class="mobile-logo"
-                />
+                  />
               } @else {
                 <div class="mobile-logo-placeholder">
                   <app-icon name="store" [size]="18"></app-icon>
@@ -73,79 +73,85 @@ import { ConfigFacade } from '../../../core/store/config';
               class="text-slate-400"
             ></app-icon>
           </button>
-
+    
           <!-- Dynamic Breadcrumb -->
           <div class="flex flex-col gap-0 min-w-0 flex-1">
-            <div
-              class="flex items-center gap-1 sm:gap-2 flex-nowrap overflow-hidden"
-              *ngIf="breadcrumb$ | async as breadcrumbData"
-            >
-              <ng-container *ngIf="breadcrumbData.parent">
-                <a
-                  *ngIf="breadcrumbData.parent.url"
-                  [routerLink]="breadcrumbData.parent.url"
-                  class="flex items-center gap-1 text-[10px] sm:text-xs font-medium text-slate-600 no-underline transition-colors duration-200 hover:text-blue-600 min-w-0"
+            @if (breadcrumb$ | async; as breadcrumbData) {
+              <div
+                class="flex items-center gap-1 sm:gap-2 flex-nowrap overflow-hidden"
                 >
-                  <app-icon
-                    *ngIf="breadcrumbData.parent.icon"
-                    [name]="breadcrumbData.parent.icon"
-                    [size]="14"
-                    class="opacity-70 hidden sm:block flex-shrink-0"
-                  ></app-icon>
-                  <span class="truncate">{{
-                    breadcrumbData.parent.label
-                  }}</span>
-                </a>
-                <span
-                  *ngIf="!breadcrumbData.parent.url"
-                  class="flex items-center gap-1 text-[10px] sm:text-xs font-medium text-slate-600 min-w-0"
+                @if (breadcrumbData.parent) {
+                  @if (breadcrumbData.parent.url) {
+                    <a
+                      [routerLink]="breadcrumbData.parent.url"
+                      class="flex items-center gap-1 text-[10px] sm:text-xs font-medium text-slate-600 no-underline transition-colors duration-200 hover:text-blue-600 min-w-0"
+                      >
+                      @if (breadcrumbData.parent.icon) {
+                        <app-icon
+                          [name]="breadcrumbData.parent.icon"
+                          [size]="14"
+                          class="opacity-70 hidden sm:block flex-shrink-0"
+                        ></app-icon>
+                      }
+                      <span class="truncate">{{
+                        breadcrumbData.parent.label
+                      }}</span>
+                    </a>
+                  }
+                  @if (!breadcrumbData.parent.url) {
+                    <span
+                      class="flex items-center gap-1 text-[10px] sm:text-xs font-medium text-slate-600 min-w-0"
+                      >
+                      @if (breadcrumbData.parent.icon) {
+                        <app-icon
+                          [name]="breadcrumbData.parent.icon"
+                          [size]="14"
+                          class="opacity-70 hidden sm:block flex-shrink-0"
+                        ></app-icon>
+                      }
+                      <span class="truncate">{{
+                        breadcrumbData.parent.label
+                      }}</span>
+                    </span>
+                  }
+                  <span
+                    class="text-slate-600 opacity-70 mx-0.5 text-[10px] sm:text-xs font-normal flex-shrink-0"
+                    >/</span
+                    >
+                  }
+                  <span
+                    class="flex items-center gap-1 text-[10px] sm:text-xs font-semibold text-slate-900 min-w-0"
+                    >
+                    @if (breadcrumbData.current.icon) {
+                      <app-icon
+                        [name]="breadcrumbData.current.icon"
+                        [size]="14"
+                        class="text-blue-600 hidden sm:block flex-shrink-0"
+                      ></app-icon>
+                    }
+                    <span class="truncate">{{ breadcrumbData.current.label }}</span>
+                  </span>
+                </div>
+              }
+              <h1
+                class="text-sm sm:text-xl md:text-2xl lg:text-3xl font-bold text-slate-900 m-0 leading-none tracking-tight block truncate"
                 >
-                  <app-icon
-                    *ngIf="breadcrumbData.parent.icon"
-                    [name]="breadcrumbData.parent.icon"
-                    [size]="14"
-                    class="opacity-70 hidden sm:block flex-shrink-0"
-                  ></app-icon>
-                  <span class="truncate">{{
-                    breadcrumbData.parent.label
-                  }}</span>
-                </span>
-                <span
-                  class="text-slate-600 opacity-70 mx-0.5 text-[10px] sm:text-xs font-normal flex-shrink-0"
-                  >/</span
-                >
-              </ng-container>
-              <span
-                class="flex items-center gap-1 text-[10px] sm:text-xs font-semibold text-slate-900 min-w-0"
-              >
-                <app-icon
-                  *ngIf="breadcrumbData.current.icon"
-                  [name]="breadcrumbData.current.icon"
-                  [size]="14"
-                  class="text-blue-600 hidden sm:block flex-shrink-0"
-                ></app-icon>
-                <span class="truncate">{{ breadcrumbData.current.label }}</span>
-              </span>
+                {{ (breadcrumb$ | async)?.title || title() }}
+              </h1>
             </div>
-            <h1
-              class="text-sm sm:text-xl md:text-2xl lg:text-3xl font-bold text-slate-900 m-0 leading-none tracking-tight block truncate"
-            >
-              {{ (breadcrumb$ | async)?.title || title() }}
-            </h1>
+          </div>
+    
+          <!-- Notifications + User Dropdown -->
+          <div class="flex-shrink-0 flex items-center gap-2">
+            <app-help-search-overlay></app-help-search-overlay>
+            <app-notifications-dropdown></app-notifications-dropdown>
+            <app-user-dropdown
+              (closeDropdown)="onDropdownClose()"
+            ></app-user-dropdown>
           </div>
         </div>
-
-        <!-- Notifications + User Dropdown -->
-        <div class="flex-shrink-0 flex items-center gap-2">
-          <app-help-search-overlay></app-help-search-overlay>
-          <app-notifications-dropdown></app-notifications-dropdown>
-          <app-user-dropdown
-            (closeDropdown)="onDropdownClose()"
-          ></app-user-dropdown>
-        </div>
-      </div>
-    </header>
-  `,
+      </header>
+    `,
   styles: [
     `
       .mobile-logo-container {

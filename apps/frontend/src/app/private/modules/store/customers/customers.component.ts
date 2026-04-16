@@ -1,7 +1,7 @@
-import { Component, OnInit, OnDestroy, inject } from '@angular/core';
-
+import { Component, inject, signal, DestroyRef } from '@angular/core';
 import { Router } from '@angular/router';
-import { Subject, takeUntil, finalize } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { finalize } from 'rxjs';
 import { CustomerListComponent, CustomerModalComponent, CustomerBulkUploadModalComponent } from './components';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
 import { CustomersService } from './services/customers.service';
@@ -22,15 +22,15 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
     StatsComponent,
     CustomerListComponent,
     CustomerModalComponent,
-    CustomerBulkUploadModalComponent
-],
+    CustomerBulkUploadModalComponent,
+  ],
   template: `
     <div class="w-full">
       <!-- Stats Grid -->
       <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
         <app-stats
           title="Total de Clientes"
-          [value]="stats?.total_customers || 0"
+          [value]="stats()?.total_customers || 0"
           smallText="+12% vs last month"
           iconName="users"
           iconBgColor="bg-primary/10"
@@ -39,7 +39,7 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 
         <app-stats
           title="Clientes Activos"
-          [value]="stats?.active_customers || 0"
+          [value]="stats()?.active_customers || 0"
           smallText="+5% vs last month"
           iconName="user-check"
           iconBgColor="bg-green-100"
@@ -48,7 +48,7 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 
         <app-stats
           title="Nuevos Este Mes"
-          [value]="stats?.new_customers_this_month || 0"
+          [value]="stats()?.new_customers_this_month || 0"
           smallText="+8% vs last month"
           iconName="user-plus"
           iconBgColor="bg-blue-100"
@@ -57,7 +57,7 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 
         <app-stats
           title="Ingresos Totales"
-          [value]="formatRevenue(stats?.total_revenue || 0)"
+          [value]="formatRevenue(stats()?.total_revenue || 0)"
           smallText="+15% vs last month"
           iconName="dollar-sign"
           iconBgColor="bg-purple-100"
@@ -67,11 +67,11 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 
       <!-- List -->
       <app-customer-list
-        [customers]="customers"
-        [loading]="loading"
-        [totalItems]="totalItems"
-        [page]="page"
-        [limit]="limit"
+        [customers]="customers()"
+        [loading]="loading()"
+        [totalItems]="totalItems()"
+        [page]="page()"
+        [limit]="limit()"
         (search)="onSearch($event)"
         (pageChange)="onPageChange($event)"
         (create)="openCreateModal()"
@@ -83,66 +83,62 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 
       <!-- Modal -->
       <app-customer-modal
-        [isOpen]="isModalOpen"
-        [customer]="selectedCustomer"
-        [loading]="actionLoading"
+        [isOpen]="isModalOpen()"
+        [customer]="selectedCustomer()"
+        [loading]="actionLoading()"
         (closed)="closeModal()"
         (save)="onSave($event)"
       ></app-customer-modal>
 
       <!-- Bulk Upload Modal -->
       <app-customer-bulk-upload-modal
-        [isOpen]="isBulkUploadModalOpen"
-        (isOpenChange)="isBulkUploadModalOpen = $event"
+        [isOpen]="isBulkUploadModalOpen()"
+        (isOpenChange)="isBulkUploadModalOpen.set($event)"
         (uploadComplete)="onBulkUploadComplete()"
       ></app-customer-bulk-upload-modal>
     </div>
   `,
 })
-export class CustomersComponent implements OnInit, OnDestroy {
+export class CustomersComponent {
+  private destroyRef = inject(DestroyRef);
   private currencyService = inject(CurrencyFormatService);
+  private customersService = inject(CustomersService);
+  private toastService = inject(ToastService);
+  private dialogService = inject(DialogService);
+  private authFacade = inject(AuthFacade);
+  private router = inject(Router);
 
-  stats: CustomerStats | null = null;
-  customers: Customer[] = [];
+  stats = signal<CustomerStats | null>(null);
+  customers = signal<Customer[]>([]);
 
-  loading = false;
-  actionLoading = false;
-  storeId: string | null = null;
+  loading = signal(false);
+  actionLoading = signal(false);
+  private storeId = signal<string | null>(null);
 
   // Pagination
-  page = 1;
-  limit = 10;
-  totalItems = 0;
-  searchQuery = '';
+  page = signal(1);
+  limit = signal(10);
+  totalItems = signal(0);
+  private searchQuery = signal('');
 
   // Modal
-  isModalOpen = false;
-  selectedCustomer: Customer | null = null;
+  isModalOpen = signal(false);
+  selectedCustomer = signal<Customer | null>(null);
 
   // Bulk Upload Modal
-  isBulkUploadModalOpen = false;
+  isBulkUploadModalOpen = signal(false);
 
-  private destroy$ = new Subject<void>();
-
-  constructor(
-    private customersService: CustomersService,
-    private toastService: ToastService,
-    private dialogService: DialogService,
-    private authFacade: AuthFacade,
-    private router: Router,
-  ) { }
-
-  ngOnInit(): void {
+  constructor() {
     // Asegurar que la moneda esté cargada
     this.currencyService.loadCurrency();
 
     // Subscribe to userStore$ observable to get the store ID
     this.authFacade.userStore$
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((store: any) => {
         const storeId = store?.id;
-        if (storeId && !this.storeId) {
-          this.storeId = String(storeId);
+        if (storeId && !this.storeId()) {
+          this.storeId.set(String(storeId));
           this.loadStats();
         }
       });
@@ -150,19 +146,14 @@ export class CustomersComponent implements OnInit, OnDestroy {
     this.loadCustomers();
   }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
   loadStats() {
-    if (!this.storeId) return;
+    if (!this.storeId()) return;
 
     this.customersService
-      .getStats(parseInt(this.storeId, 10))
-      .pipe(takeUntil(this.destroy$))
+      .getStats(parseInt(this.storeId()!, 10))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (stats: CustomerStats) => (this.stats = stats),
+        next: (stats: CustomerStats) => this.stats.set(stats),
         error: (error: any) => {
           console.error('Error loading stats:', error);
           this.toastService.error('Error al cargar estadísticas');
@@ -171,17 +162,17 @@ export class CustomersComponent implements OnInit, OnDestroy {
   }
 
   loadCustomers() {
-    this.loading = true;
+    this.loading.set(true);
     this.customersService
-      .getCustomers(this.page, this.limit, { search: this.searchQuery })
+      .getCustomers(this.page(), this.limit(), { search: this.searchQuery() })
       .pipe(
-        takeUntil(this.destroy$),
-        finalize(() => (this.loading = false)),
+        takeUntilDestroyed(this.destroyRef),
+        finalize(() => this.loading.set(false)),
       )
       .subscribe({
         next: (response) => {
-          this.customers = response.data;
-          this.totalItems = response.meta.total;
+          this.customers.set(response.data);
+          this.totalItems.set(response.meta.total);
         },
         error: () => {
           this.toastService.error('Error al cargar clientes');
@@ -190,13 +181,13 @@ export class CustomersComponent implements OnInit, OnDestroy {
   }
 
   onSearch(query: string) {
-    this.searchQuery = query;
-    this.page = 1;
+    this.searchQuery.set(query);
+    this.page.set(1);
     this.loadCustomers();
   }
 
   onPageChange(page: number) {
-    this.page = page;
+    this.page.set(page);
     this.loadCustomers();
   }
 
@@ -209,31 +200,31 @@ export class CustomersComponent implements OnInit, OnDestroy {
   }
 
   openModal(customer?: Customer) {
-    this.selectedCustomer = customer || null;
-    this.isModalOpen = true;
+    this.selectedCustomer.set(customer || null);
+    this.isModalOpen.set(true);
   }
 
   closeModal() {
-    this.isModalOpen = false;
-    this.selectedCustomer = null;
+    this.isModalOpen.set(false);
+    this.selectedCustomer.set(null);
   }
 
   onSave(data: CreateCustomerRequest) {
-    this.actionLoading = true;
+    this.actionLoading.set(true);
 
-    const request$ = this.selectedCustomer
-      ? this.customersService.updateCustomer(this.selectedCustomer.id, data)
+    const request$ = this.selectedCustomer()
+      ? this.customersService.updateCustomer(this.selectedCustomer()!.id, data)
       : this.customersService.createCustomer(data);
 
     request$
       .pipe(
-        takeUntil(this.destroy$),
-        finalize(() => (this.actionLoading = false)),
+        takeUntilDestroyed(this.destroyRef),
+        finalize(() => this.actionLoading.set(false)),
       )
       .subscribe({
         next: () => {
           this.toastService.success(
-            `Cliente ${this.selectedCustomer ? 'actualizado' : 'creado'} exitosamente`,
+            `Cliente ${this.selectedCustomer() ? 'actualizado' : 'creado'} exitosamente`,
           );
           this.closeModal();
           this.loadCustomers();
@@ -266,7 +257,7 @@ export class CustomersComponent implements OnInit, OnDestroy {
         if (confirmed) {
           this.customersService
             .deleteCustomer(customer.id)
-            .pipe(takeUntil(this.destroy$))
+            .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe({
               next: () => {
                 this.toastService.success('Cliente eliminado');
@@ -282,7 +273,7 @@ export class CustomersComponent implements OnInit, OnDestroy {
   }
 
   openBulkUploadModal() {
-    this.isBulkUploadModalOpen = true;
+    this.isBulkUploadModalOpen.set(true);
   }
 
   onBulkUploadComplete() {

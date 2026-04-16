@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, inject } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
 
 import { debounceTime, distinctUntilChanged, Subject, takeUntil } from 'rxjs';
 import {
@@ -54,8 +54,8 @@ import {
     ButtonComponent,
     SelectorComponent,
     PaginationComponent,
-    CardComponent
-],
+    CardComponent,
+  ],
   templateUrl: './users.component.html',
   styleUrls: ['./users.component.css'],
 })
@@ -67,12 +67,12 @@ export class UsersComponent implements OnInit, OnDestroy {
   private toastService = inject(ToastService);
 
   // State
-  users: User[] = [];
-  userStats: UserStats | null = null;
-  isLoading = false;
+  readonly users = signal<User[]>([]);
+  readonly userStats = signal<UserStats | null>(null);
+  readonly isLoading = signal(false);
   currentUser: User | null = null;
-  showCreateModal = false;
-  showEditModal = false;
+  readonly showCreateModal = signal(false);
+  readonly showEditModal = signal(false);
 
   private searchSubject = new Subject<string>();
   private destroy$ = new Subject<void>();
@@ -205,7 +205,7 @@ export class UsersComponent implements OnInit, OnDestroy {
   }
 
   loadUsers(): void {
-    this.isLoading = true;
+    this.isLoading.set(true);
     const filters = this.filterForm.value;
     const query: UserQueryDto = {
       page: this.pagination.page,
@@ -222,7 +222,7 @@ export class UsersComponent implements OnInit, OnDestroy {
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (response: PaginatedUsersResponse) => {
-          this.users = response.data || [];
+          this.users.set(response.data || []);
           if (response.pagination) {
             this.pagination = {
               page: response.pagination.page || 1,
@@ -234,12 +234,12 @@ export class UsersComponent implements OnInit, OnDestroy {
         },
         error: (error) => {
           console.error('Error loading users:', error);
-          this.users = [];
+          this.users.set([]);
           this.toastService.error('Error al cargar usuarios');
         },
       })
       .add(() => {
-        this.isLoading = false;
+        this.isLoading.set(false);
       });
   }
 
@@ -249,7 +249,7 @@ export class UsersComponent implements OnInit, OnDestroy {
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (stats: UserStats) => {
-          this.userStats = stats;
+          this.userStats.set(stats);
         },
         error: (error) => {
           console.error('Error loading user stats:', error);
@@ -287,16 +287,16 @@ export class UsersComponent implements OnInit, OnDestroy {
       })
       .then((confirmed: boolean) => {
         if (!confirmed) return;
-        this.isLoading = true;
+        this.isLoading.set(true);
         this.usersService.syncPanelUI('merge').subscribe({
           next: (result) => {
-            this.isLoading = false;
+            this.isLoading.set(false);
             this.toastService.success(
               `Sincronización completada: ${result.updated} actualizados, ${result.skipped} sin cambios`,
             );
           },
           error: (error) => {
-            this.isLoading = false;
+            this.isLoading.set(false);
             console.error('Error syncing panel UI:', error);
             this.toastService.error('Error al sincronizar Panel UI');
           },
@@ -305,22 +305,22 @@ export class UsersComponent implements OnInit, OnDestroy {
   }
 
   createUser(): void {
-    this.showCreateModal = true;
+    this.showCreateModal.set(true);
   }
 
   onUserCreated(): void {
-    this.showCreateModal = false;
+    this.showCreateModal.set(false);
     this.refreshUsers();
     this.toastService.success('Usuario creado correctamente');
   }
 
   editUser(user: User): void {
     this.currentUser = user;
-    this.showEditModal = true;
+    this.showEditModal.set(true);
   }
 
   onUserUpdated(): void {
-    this.showEditModal = false;
+    this.showEditModal.set(false);
     this.currentUser = null;
     this.refreshUsers();
   }

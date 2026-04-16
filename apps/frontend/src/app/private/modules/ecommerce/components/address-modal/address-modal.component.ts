@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, DestroyRef, Input, Output, EventEmitter, ChangeDetectorRef } from '@angular/core';
+import { Component, inject, DestroyRef, input, output, model } from '@angular/core';
 
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { Observable } from 'rxjs';
@@ -24,21 +24,19 @@ export interface AddressModalData {
     templateUrl: './address-modal.component.html',
     styleUrls: ['./address-modal.component.scss'],
 })
-export class AddressModalComponent implements OnInit {
+export class AddressModalComponent {
     private fb = inject(FormBuilder);
     private account_service = inject(AccountService);
     private destroy_ref = inject(DestroyRef);
     private country_service = inject(CountryService);
-    private cdr = inject(ChangeDetectorRef);
 
     // Modal state (two-way binding)
-    @Input() isOpen = false;
-    @Output() isOpenChange = new EventEmitter<boolean>();
+    readonly isOpen = model<boolean>(false);
 
     // Inputs
-    @Input() mode: 'create' | 'edit' = 'create';
-    @Input() address?: Address;
-    @Output() saved = new EventEmitter<Address>();
+    readonly mode = input<'create' | 'edit'>('create');
+    readonly address = input<Address | undefined>(undefined);
+    readonly saved = output<Address>();
 
     // Form
     address_form!: FormGroup;
@@ -73,15 +71,15 @@ export class AddressModalComponent implements OnInit {
         return this.cities.map(c => ({ value: c.id, label: c.name }));
     }
 
-    ngOnInit(): void {
+    constructor() {
         // Load static countries
         this.countries = this.country_service.getCountries();
 
         this.initForm();
         this.setupLocationListeners();
 
-        if (this.mode === 'edit' && this.address) {
-            this.patchForm(this.address);
+        if (this.mode() === 'edit' && this.address()) {
+            this.patchForm(this.address()!);
         }
     }
 
@@ -117,7 +115,6 @@ export class AddressModalComponent implements OnInit {
                 this.cities = [];
                 depControl?.setValue('');
                 cityControl?.setValue('');
-                this.cdr.markForCheck();
             }
         });
 
@@ -131,7 +128,6 @@ export class AddressModalComponent implements OnInit {
             } else {
                 this.cities = [];
                 cityControl?.setValue('');
-                this.cdr.markForCheck();
             }
         });
     }
@@ -140,14 +136,12 @@ export class AddressModalComponent implements OnInit {
         this.loading_departments = true;
         this.departments = await this.country_service.getDepartments();
         this.loading_departments = false;
-        this.cdr.markForCheck();
     }
 
     private async loadCities(depId: number): Promise<void> {
         this.loading_cities = true;
         this.cities = await this.country_service.getCitiesByDepartment(depId);
         this.loading_cities = false;
-        this.cdr.markForCheck();
     }
 
     private async patchForm(address: Address): Promise<void> {
@@ -187,12 +181,11 @@ export class AddressModalComponent implements OnInit {
                     }
                 }
             }
-            this.cdr.markForCheck();
         }
     }
 
     get title(): string {
-        return this.mode === 'create' ? 'Agregar dirección' : 'Editar dirección';
+        return this.mode() === 'create' ? 'Agregar dirección' : 'Editar dirección';
     }
 
     save(): void {
@@ -230,10 +223,10 @@ export class AddressModalComponent implements OnInit {
 
         let operation: Observable<{ success: boolean; data: Address }>;
 
-        if (this.mode === 'create') {
+        if (this.mode() === 'create') {
             operation = this.account_service.createAddress(form_value as Omit<Address, 'id'>);
         } else {
-            operation = this.account_service.updateAddress(this.address!.id, form_value);
+            operation = this.account_service.updateAddress(this.address()!.id, form_value);
         }
 
         operation.pipe(takeUntilDestroyed(this.destroy_ref)).subscribe({
@@ -252,7 +245,7 @@ export class AddressModalComponent implements OnInit {
     }
 
     close(): void {
-        this.isOpenChange.emit(false);
+        this.isOpen.set(false);
     }
 
     private clearErrors(): void {

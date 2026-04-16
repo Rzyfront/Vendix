@@ -1,6 +1,6 @@
 <section
   class="hero-banner"
-  [class]="class"
+  [class]="class()"
   [style.background-color]="banner_config.background_color"
 >
   @if (banner_config.image_url) {
@@ -25,9 +25,9 @@
     </button>
   </div>
 
-  @if (slides.length > 1) {
+  @if (slides().length > 1) {
     <div class="slider-indicators">
-      @for (slide of slides; track $index) {
+      @for (slide of slides(); track $index) {
         <button
           class="indicator"
           [class.active]="$index === current_slide_index"

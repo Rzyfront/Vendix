@@ -1,14 +1,10 @@
 import {
   Component,
-  Input,
   forwardRef,
-  OnInit,
-  OnDestroy,
-  ChangeDetectionStrategy,
-  ChangeDetectorRef,
   inject,
+  signal,
   input,
-  output
+  output,
 } from '@angular/core';
 
 import {
@@ -17,7 +13,6 @@ import {
   FormsModule,
   ReactiveFormsModule,
 } from '@angular/forms';
-import { Subject, takeUntil } from 'rxjs';
 import { IconComponent } from '../icon/icon.component';
 import { FormStyleVariant } from '../../types/form.types';
 
@@ -45,17 +40,17 @@ export type SelectorVariant = 'default' | 'outline' | 'filled';
   ],
   template: `
     <div [class]="containerClasses">
-      @if (label) {
+      @if (label()) {
         <label
           [class]="labelClasses"
           [for]="id()"
           class="label-with-tooltip"
           >
-          <span>{{ label }}</span>
-          @if (tooltipText) {
+          <span>{{ label() }}</span>
+          @if (tooltipText()) {
             <span
               class="help-icon"
-              [attr.data-tooltip]="tooltipText"
+              [attr.data-tooltip]="tooltipText()"
               >
               <svg
                 class="h-4 w-4"
@@ -85,16 +80,16 @@ export type SelectorVariant = 'default' | 'outline' | 'filled';
           <select
             [id]="id()"
             [class]="selectClasses"
-            [disabled]="disabled"
+            [disabled]="disabled()"
             [required]="required()"
-            [ngModel]="selectedValue"
+            [ngModel]="selectedValue()"
             (ngModelChange)="onModelChange($event)"
             (blur)="onBlur()"
             (focus)="onFocus()"
             >
-            @if (placeholder) {
+            @if (placeholder()) {
               <option [ngValue]="null" disabled selected class="text-text-muted">
-                {{ placeholder }}
+                {{ placeholder() }}
               </option>
             }
             @for (option of options(); track trackByOption($index, option)) {
@@ -112,17 +107,17 @@ export type SelectorVariant = 'default' | 'outline' | 'filled';
           </div>
         </div>
     
-        @if (helpText || errorText) {
+        @if (helpText() || errorText()) {
           <div class="mt-1 text-sm">
-            @if (helpText && !errorText) {
+            @if (helpText() && !errorText()) {
               <span class="text-[var(--color-text-secondary)]">
-                {{ helpText }}
+                {{ helpText() }}
               </span>
             }
-            @if (errorText) {
+            @if (errorText()) {
               <span class="text-[var(--color-destructive)] flex items-center gap-1 font-medium">
                 <app-icon name="alert-circle" [size]="12"></app-icon>
-                {{ errorText }}
+                {{ errorText() }}
               </span>
             }
           </div>
@@ -130,47 +125,34 @@ export type SelectorVariant = 'default' | 'outline' | 'filled';
       </div>
     `,
   styleUrls: ['./selector.component.scss'],
-  changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class SelectorComponent
-  implements ControlValueAccessor, OnInit, OnDestroy {
-  private cdr = inject(ChangeDetectorRef);
-
-  readonly id = input(`selector-${Math.random().toString(36).substr(2, 9)}`);
-  @Input() label = '';
-  @Input() placeholder = '';
-  @Input() helpText = '';
-  @Input() errorText = '';
-  readonly required = input(false);
-  @Input() disabled = false;
+export class SelectorComponent implements ControlValueAccessor {
+  readonly id = input<string>(`selector-${Math.random().toString(36).substr(2, 9)}`);
+  readonly label = input<string>('');
+  readonly placeholder = input<string>('');
+  readonly helpText = input<string>('');
+  readonly errorText = input<string>('');
+  readonly required = input<boolean>(false);
+  readonly disabled = input<boolean>(false);
   readonly size = input<SelectorSize>('md');
   readonly variant = input<SelectorVariant>('default');
   readonly styleVariant = input<FormStyleVariant>('modern');
   readonly options = input<SelectorOption[]>([]);
-  @Input() tooltipText?: string;
+  readonly tooltipText = input<string | undefined>(undefined);
 
   readonly valueChange = output<string | number | null>();
   readonly blur = output<void>();
   readonly focus = output<void>();
 
-  selectedValue: string | number | null = null;
-  private destroy$ = new Subject<void>();
+  readonly selectedValue = signal<string | number | null>(null);
 
   // ControlValueAccessor callbacks
   private onChange: (value: string | number | null) => void = () => { };
   private onTouched: () => void = () => { };
 
-  ngOnInit(): void { }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
   // ControlValueAccessor implementation
   writeValue(value: string | number | null): void {
-    this.selectedValue = value;
-    this.cdr.markForCheck();
+    this.selectedValue.set(value);
   }
 
   registerOnChange(fn: (value: string | number | null) => void): void {
@@ -181,24 +163,22 @@ export class SelectorComponent
     this.onTouched = fn;
   }
 
-  setDisabledState(isDisabled: boolean): void {
-    this.disabled = isDisabled;
+  setDisabledState(_isDisabled: boolean): void {
+    // disabled is managed via input() signal — no action needed
   }
 
   onModelChange(value: string | number | null): void {
-    this.selectedValue = value;
+    this.selectedValue.set(value);
     this.onChange(value);
     this.valueChange.emit(value);
   }
 
   onFocus(): void {
-    // TODO: The 'emit' function requires a mandatory void argument
     this.focus.emit();
   }
 
   onBlur(): void {
     this.onTouched();
-    // TODO: The 'emit' function requires a mandatory void argument
     this.blur.emit();
   }
 
@@ -208,11 +188,7 @@ export class SelectorComponent
 
   // CSS classes
   get containerClasses(): string {
-    return [
-      'w-full',
-    ]
-      .filter(Boolean)
-      .join(' ');
+    return ['w-full'].filter(Boolean).join(' ');
   }
 
   get labelClasses(): string {
@@ -225,7 +201,7 @@ export class SelectorComponent
         'uppercase',
         'tracking-[0.05em]',
         'text-[var(--color-text-muted)]',
-        this.disabled ? 'opacity-50 cursor-not-allowed' : '',
+        this.disabled() ? 'opacity-50 cursor-not-allowed' : '',
       ]
         .filter(Boolean)
         .join(' ');
@@ -235,7 +211,7 @@ export class SelectorComponent
       ...baseClasses,
       'text-sm',
       'text-[var(--color-text-primary)]',
-      this.disabled ? 'opacity-50 cursor-not-allowed' : '',
+      this.disabled() ? 'opacity-50 cursor-not-allowed' : '',
     ]
       .filter(Boolean)
       .join(' ');
@@ -260,7 +236,7 @@ export class SelectorComponent
     ];
 
     let stateClasses: string[];
-    if (this.errorText) {
+    if (this.errorText()) {
       stateClasses = [
         'border-[var(--color-destructive)]',
         'focus:border-[var(--color-destructive)]',
@@ -293,7 +269,7 @@ export class SelectorComponent
         'rounded-xl',
         '!bg-[var(--color-background)]',
         'focus:!bg-[var(--color-surface)]',
-        this.errorText
+        this.errorText()
           ? 'focus:shadow-[0_0_0_3px_rgba(239,68,68,0.3)]'
           : 'focus:shadow-[0_0_0_3px_var(--color-ring)]',
       ];
@@ -303,18 +279,17 @@ export class SelectorComponent
         ...sizeClasses[this.size()],
         'rounded-xl',
         'focus:ring-2',
-        this.errorText
+        this.errorText()
           ? 'focus:ring-[var(--color-destructive)]/30'
           : 'focus:ring-secondary/40',
       ];
     }
 
-    const variant = this.variant();
     return [
       ...baseClasses,
       ...variantClasses,
       ...stateClasses,
-      variant && variant !== 'default' ? `selector-${variant}` : '',
+      this.variant() && this.variant() !== 'default' ? `selector-${this.variant()}` : '',
     ]
       .filter(Boolean)
       .join(' ');
@@ -325,11 +300,10 @@ export class SelectorComponent
   }
 
   get placeholderClasses(): string {
-    const size = this.size();
     return [
       'selector-placeholder',
-      size && `selector-placeholder-${size}`,
-      this.disabled ? 'selector-placeholder-disabled' : '',
+      this.size() && `selector-placeholder-${this.size()}`,
+      this.disabled() ? 'selector-placeholder-disabled' : '',
     ]
       .filter(Boolean)
       .join(' ');

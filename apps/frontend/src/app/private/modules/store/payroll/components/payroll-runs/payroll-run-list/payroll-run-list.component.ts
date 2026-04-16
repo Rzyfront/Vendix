@@ -1,8 +1,8 @@
-import { Component, Input, Output, EventEmitter, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input, output, inject } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
+import { toSignal } from '@angular/core/rxjs-interop';
 
 import { PayrollRun } from '../../../interfaces/payroll.interface';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
@@ -35,7 +35,6 @@ import {
   selector: 'app-payroll-run-list',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     CardComponent,
     InputsearchComponent,
@@ -48,12 +47,12 @@ import {
   templateUrl: './payroll-run-list.component.html',
 })
 export class PayrollRunListComponent {
-  @Input() payrollRuns: PayrollRun[] = [];
-  @Input() loading = false;
+  readonly payrollRuns = input<PayrollRun[]>([]);
+  readonly loading = input<boolean>(false);
 
-  @Output() create = new EventEmitter<void>();
-  @Output() detail = new EventEmitter<PayrollRun>();
-  @Output() refresh = new EventEmitter<void>();
+  readonly create = output<void>();
+  readonly detail = output<PayrollRun>();
+  readonly refresh = output<void>();
 
   private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
@@ -63,6 +62,7 @@ export class PayrollRunListComponent {
     selectPayrollRunStatusFilter,
   );
   meta$ = this.store.select(selectPayrollRunMeta);
+  readonly meta = toSignal(this.meta$, { initialValue: null as any });
   page$ = this.store.select(selectPayrollRunPage);
 
   searchTerm = '';
@@ -229,11 +229,6 @@ export class PayrollRunListComponent {
   onActionClick(action: string): void {
     switch (action) {
       case 'create':
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
         this.create.emit();
         break;
     }

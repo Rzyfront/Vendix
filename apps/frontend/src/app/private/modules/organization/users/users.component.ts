@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, signal } from '@angular/core';
 
 import { debounceTime, distinctUntilChanged, Subject, takeUntil } from 'rxjs';
 import {
@@ -67,10 +67,10 @@ interface StatItem {
   styleUrls: ['./users.component.css'],
 })
 export class UsersComponent implements OnInit, OnDestroy {
-  users: User[] = [];
-  userStats: UserStats | null = null;
-  statsItems: StatItem[] = [];
-  isLoading = false;
+  readonly users = signal<User[]>([]);
+  readonly userStats = signal<UserStats | null>(null);
+  readonly statsItems = signal<StatItem[]>([]);
+  readonly isLoading = signal(false);
   currentUser: User | null = null;
   showCreateModal = false;
   showEditModal = false;
@@ -264,7 +264,7 @@ export class UsersComponent implements OnInit, OnDestroy {
   }
 
   loadUsers(): void {
-    this.isLoading = true;
+    this.isLoading.set(true);
     const filters = this.filterForm.value;
     const query: UserQueryDto = {
       page: this.pagination.page,
@@ -277,7 +277,7 @@ export class UsersComponent implements OnInit, OnDestroy {
       .getUsers(query)
       .subscribe({
         next: (response: PaginatedUsersResponse) => {
-          this.users = response.data || [];
+          this.users.set(response.data || []);
 
           // Validar que response.pagination exista y tenga las propiedades esperadas
           if (response.pagination) {
@@ -292,14 +292,14 @@ export class UsersComponent implements OnInit, OnDestroy {
             this.pagination = {
               page: 1,
               limit: 10,
-              total: this.users.length,
+              total: this.users().length,
               totalPages: 1,
             };
           }
         },
         error: (error) => {
           console.error('Error loading organization users:', error);
-          this.users = []; // Limpiar usuarios en caso de error
+          this.users.set([]); // Limpiar usuarios en caso de error
           // Resetear paginación a valores seguros
           this.pagination = {
             page: 1,
@@ -311,7 +311,7 @@ export class UsersComponent implements OnInit, OnDestroy {
         },
       })
       .add(() => {
-        this.isLoading = false; // Asegurar que el estado de carga se resetee
+        this.isLoading.set(false); // Asegurar que el estado de carga se resetee
       });
   }
 
@@ -331,7 +331,7 @@ export class UsersComponent implements OnInit, OnDestroy {
 
     this.usersService.getUsersStats().subscribe({
       next: (stats) => {
-        this.userStats = stats;
+        this.userStats.set(stats);
         this.updateStatsItems();
       },
       error: (err) => console.error('Error loading user stats', err),
@@ -339,7 +339,7 @@ export class UsersComponent implements OnInit, OnDestroy {
   }
 
   private updateStatsItems(): void {
-    const s = this.userStats || {
+    const s = this.userStats() || {
       total_usuarios: 0,
       activos: 0,
       pendientes: 0,
@@ -351,7 +351,7 @@ export class UsersComponent implements OnInit, OnDestroy {
     };
     const total = s.total_usuarios || 0;
 
-    this.statsItems = [
+    this.statsItems.set([
       {
         title: 'Total Usuarios',
         value: total,
@@ -416,7 +416,7 @@ export class UsersComponent implements OnInit, OnDestroy {
         iconBgColor: 'bg-red-100',
         iconColor: 'text-red-600',
       },
-    ];
+    ]);
   }
 
   private calculatePercentage(part: number, total: number): number {

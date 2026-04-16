@@ -1,10 +1,11 @@
 import {
   Component,
-  EventEmitter,
-  Input,
-  Output,
-  OnChanges,
-  SimpleChanges,
+  input,
+  output,
+  effect,
+  untracked,
+  inject,
+  signal,
 } from '@angular/core';
 
 import {
@@ -37,7 +38,7 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
 ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'md'"
@@ -58,7 +59,7 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
       </div>
 
       <!-- Body -->
-      @if (loading) {
+      @if (loading()) {
         <div class="flex justify-center py-12">
           <div
             class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
@@ -81,7 +82,7 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
                 (change)="onRegisterSelected()"
               >
                 <option [ngValue]="null" disabled>Seleccionar caja...</option>
-                @for (register of registers; track register.id) {
+                @for (register of registers(); track register.id) {
                   <option [ngValue]="register.id">
                     {{ register.name }} ({{ register.code }})
                     @if (register.sessions?.length) {
@@ -90,7 +91,7 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
                   </option>
                 }
               </select>
-              @if (registers.length === 0) {
+              @if (registers().length === 0) {
                 <p class="text-xs text-destructive mt-1">
                   No hay cajas registradoras disponibles. Crea una desde
                   Configuración.
@@ -139,10 +140,10 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
           variant="primary"
           size="md"
           (clicked)="onOpen()"
-          [disabled]="!form.valid || submitting || loading"
+          [disabled]="!form.valid || submitting() || loading()"
         >
           <app-icon name="unlock" [size]="16" slot="icon"></app-icon>
-          @if (submitting) {
+          @if (submitting()) {
             Abriendo...
           } @else {
             Abrir Caja
@@ -152,48 +153,48 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
     </app-modal>
   `,
 })
-export class PosSessionOpenModalComponent implements OnChanges {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() sessionOpened = new EventEmitter<any>();
+export class PosSessionOpenModalComponent {
+  readonly isOpen = input<boolean>(false);
+  readonly isOpenChange = output<boolean>();
+  readonly sessionOpened = output<any>();
 
-  registers: CashRegister[] = [];
-  loading = false;
-  submitting = false;
+  readonly registers = signal<CashRegister[]>([]);
+  readonly loading = signal(false);
+  readonly submitting = signal(false);
 
   form: FormGroup;
 
-  constructor(
-    private fb: FormBuilder,
-    private cashRegisterService: PosCashRegisterService,
-    private toastService: ToastService,
-  ) {
+  private fb = inject(FormBuilder);
+  private cashRegisterService = inject(PosCashRegisterService);
+  private toastService = inject(ToastService);
+
+  constructor() {
     this.form = this.fb.group({
       cash_register_id: [null, [Validators.required]],
       opening_amount: [0, [Validators.required, Validators.min(0)]],
     });
-  }
 
-  ngOnChanges(changes: SimpleChanges) {
-    if (changes['isOpen'] && this.isOpen) {
-      this.loadRegisters();
-    }
+    effect(() => {
+      if (this.isOpen()) {
+        untracked(() => this.loadRegisters());
+      }
+    });
   }
 
   loadRegisters() {
-    this.loading = true;
+    this.loading.set(true);
     this.cashRegisterService.getCashRegisters().subscribe({
       next: (registers) => {
-        this.registers = registers.filter((r) => r.is_active);
-        this.loading = false;
-        // Auto-select if only one register
-        if (this.registers.length === 1) {
-          this.form.patchValue({ cash_register_id: this.registers[0].id });
+        const active = registers.filter((r) => r.is_active);
+        this.registers.set(active);
+        this.loading.set(false);
+        if (active.length === 1) {
+          this.form.patchValue({ cash_register_id: active[0].id });
           this.onRegisterSelected();
         }
       },
       error: () => {
-        this.loading = false;
+        this.loading.set(false);
         this.toastService.error('Error al cargar las cajas registradoras');
       },
     });
@@ -201,7 +202,7 @@ export class PosSessionOpenModalComponent implements OnChanges {
 
   onRegisterSelected() {
     const registerId = this.form.value.cash_register_id;
-    const register = this.registers.find((r) => r.id === +registerId);
+    const register = this.registers().find((r) => r.id === +registerId);
     if (register?.default_opening_amount) {
       this.form.patchValue({
         opening_amount: Number(register.default_opening_amount),
@@ -224,7 +225,7 @@ export class PosSessionOpenModalComponent implements OnChanges {
 
   onOpen() {
     if (!this.form.valid) return;
-    this.submitting = true;
+    this.submitting.set(true);
 
     const { cash_register_id, opening_amount } = this.form.value;
 
@@ -232,13 +233,13 @@ export class PosSessionOpenModalComponent implements OnChanges {
       .openSession(+cash_register_id, opening_amount)
       .subscribe({
         next: (session) => {
-          this.submitting = false;
+          this.submitting.set(false);
           this.toastService.success('Caja abierta correctamente');
           this.sessionOpened.emit(session);
           this.isOpenChange.emit(false);
         },
         error: (err) => {
-          this.submitting = false;
+          this.submitting.set(false);
           this.toastService.error(
             err.error?.message || 'Error al abrir la caja',
           );

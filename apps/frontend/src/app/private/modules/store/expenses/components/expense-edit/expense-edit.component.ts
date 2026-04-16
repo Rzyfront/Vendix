@@ -1,13 +1,12 @@
 import {
   Component,
-  OnChanges,
-  SimpleChanges,
-  Output,
-  EventEmitter,
-  Input,
   inject,
+  signal,
+  effect,
+  input,
+  output,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { DatePipe } from '@angular/common';
 import {
   FormBuilder,
   FormGroup,
@@ -16,7 +15,8 @@ import {
   FormsModule,
 } from '@angular/forms';
 import { Store } from '@ngrx/store';
-import { Observable, map } from 'rxjs';
+import { map } from 'rxjs';
+import { toSignal } from '@angular/core/rxjs-interop';
 import {
   updateExpense,
   approveExpense,
@@ -47,7 +47,7 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
   selector: 'vendix-expense-edit',
   standalone: true,
   imports: [
-    CommonModule,
+    DatePipe,
     ReactiveFormsModule,
     FormsModule,
     ModalComponent,
@@ -55,48 +55,48 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
     InputComponent,
     SelectorComponent,
     TextareaComponent,
-    FileUploadDropzoneComponent,
-  ],
+    FileUploadDropzoneComponent
+],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onClose()"
       title="Editar Gasto"
       size="md"
       >
       <!-- State Badge in header -->
-      @if (expense) {
+      @if (expense()) {
         <span
           slot="header-end"
-          [class]="getStateBadgeClass(expense.state)"
+          [class]="getStateBadgeClass(expense()!.state)"
           class="px-2 py-0.5 rounded-full text-xs font-medium shrink-0"
           >
-          {{ getStateLabel(expense.state) }}
+          {{ getStateLabel(expense()!.state) }}
         </span>
       }
     
       <div class="p-4">
         <!-- Refund Info -->
-        @if (expense?.state === 'refunded') {
+        @if (expense()?.state === 'refunded') {
           <div
             class="mb-4 p-3 bg-orange-50 rounded-lg border border-orange-200 w-full"
             >
             <p class="text-sm text-orange-800">
               <strong>Reembolsado:</strong>
-              {{ expense!.refunded_at | date: 'short' }}
+              {{ expense()!.refunded_at | date: 'short' }}
             </p>
-            @if (expense!.refunded_by_user) {
+            @if (expense()!.refunded_by_user) {
               <p class="text-sm text-orange-700">
-                <strong>Por:</strong> {{ expense!.refunded_by_user.first_name }}
-                {{ expense!.refunded_by_user.last_name }}
+                <strong>Por:</strong> {{ expense()!.refunded_by_user!.first_name }}
+                {{ expense()!.refunded_by_user!.last_name }}
               </p>
             }
-            @if (expense!.refund_reason) {
+            @if (expense()!.refund_reason) {
               <p
                 class="text-sm text-orange-700 mt-1"
                 >
-                <strong>Motivo:</strong> {{ expense!.refund_reason }}
+                <strong>Motivo:</strong> {{ expense()!.refund_reason }}
               </p>
             }
           </div>
@@ -142,7 +142,7 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
           <app-selector
             label="Categoría"
             formControlName="category_id"
-            [options]="(categoryOptions$ | async) || []"
+            [options]="categoryOptions() || []"
             placeholder="Seleccione una categoría"
           ></app-selector>
     
@@ -157,11 +157,11 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
     
           <!-- Receipt -->
           <div class="space-y-2">
-            @if (expense?.receipt_url) {
+            @if (expense()?.receipt_url) {
               <div class="flex items-center gap-2">
                 <span class="text-sm text-text-secondary">Comprobante:</span>
                 <a
-                  [href]="expense!.receipt_url"
+                  [href]="expense()!.receipt_url"
                   target="_blank"
                   class="text-sm text-primary hover:underline"
                   >
@@ -170,7 +170,7 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
               </div>
             }
             <!-- Upload new receipt (only for pending) -->
-            @if (expense?.state === 'pending') {
+            @if (expense()?.state === 'pending') {
               <app-file-upload-dropzone
                 label="Subir comprobante"
                 helperText="Imagenes o PDF"
@@ -183,12 +183,12 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
         </form>
     
         <!-- Action buttons (state transitions) -->
-        @if (expense) {
+        @if (expense()) {
           @if (
-            expense.state === 'pending' ||
-            expense.state === 'approved' ||
-            expense.state === 'rejected' ||
-            expense.state === 'paid'
+            expense()!.state === 'pending' ||
+            expense()!.state === 'approved' ||
+            expense()!.state === 'rejected' ||
+            expense()!.state === 'paid'
             ) {
             <div
               class="mt-5 pt-4 border-t border-border space-y-2"
@@ -198,7 +198,7 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
                 >Acciones</span
                 >
                 <!-- Pending: Approve / Reject -->
-                @if (expense.state === 'pending') {
+                @if (expense()!.state === 'pending') {
                   <div
                     class="grid grid-cols-2 gap-2"
                     >
@@ -207,7 +207,7 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
                       size="sm"
                       [fullWidth]="true"
                       (clicked)="onApprove()"
-                      [loading]="(loading$ | async) || false"
+                      [loading]="loading() || false"
                       >
                       Aprobar
                     </app-button>
@@ -216,14 +216,14 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
                       size="sm"
                       [fullWidth]="true"
                       (clicked)="onReject()"
-                      [loading]="(loading$ | async) || false"
+                      [loading]="loading() || false"
                       >
                       Rechazar
                     </app-button>
                   </div>
                 }
                 <!-- Pending: Cancel + Delete -->
-                @if (expense.state === 'pending') {
+                @if (expense()!.state === 'pending') {
                   <div
                     class="grid grid-cols-2 gap-2"
                     >
@@ -232,7 +232,7 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
                       size="sm"
                       [fullWidth]="true"
                       (clicked)="onCancel()"
-                      [loading]="(loading$ | async) || false"
+                      [loading]="loading() || false"
                       >
                       Cancelar Gasto
                     </app-button>
@@ -241,14 +241,14 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
                       size="sm"
                       [fullWidth]="true"
                       (clicked)="onDelete()"
-                      [loading]="(loading$ | async) || false"
+                      [loading]="loading() || false"
                       >
                       Eliminar
                     </app-button>
                   </div>
                 }
                 <!-- Approved: Pay + Cancel -->
-                @if (expense.state === 'approved') {
+                @if (expense()!.state === 'approved') {
                   <div
                     class="grid grid-cols-2 gap-2"
                     >
@@ -257,7 +257,7 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
                       size="sm"
                       [fullWidth]="true"
                       (clicked)="onPay()"
-                      [loading]="(loading$ | async) || false"
+                      [loading]="loading() || false"
                       >
                       Marcar Pagado
                     </app-button>
@@ -266,40 +266,40 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
                       size="sm"
                       [fullWidth]="true"
                       (clicked)="onCancel()"
-                      [loading]="(loading$ | async) || false"
+                      [loading]="loading() || false"
                       >
                       Cancelar
                     </app-button>
                   </div>
                 }
                 <!-- Rejected: Delete only -->
-                @if (expense.state === 'rejected') {
+                @if (expense()!.state === 'rejected') {
                   <div class="flex justify-end">
                     <app-button
                       variant="outline-danger"
                       size="sm"
                       (clicked)="onDelete()"
-                      [loading]="(loading$ | async) || false"
+                      [loading]="loading() || false"
                       >
                       Eliminar
                     </app-button>
                   </div>
                 }
                 <!-- Paid: Refund -->
-                @if (expense.state === 'paid') {
+                @if (expense()!.state === 'paid') {
                   <div class="flex justify-end">
                     <app-button
                       variant="outline-warning"
                       size="sm"
-                      (clicked)="showRefundModal = true"
-                      [loading]="(loading$ | async) || false"
+                      (clicked)="showRefundModal.set(true)"
+                      [loading]="loading() || false"
                       >
                       Reembolsar
                     </app-button>
                   </div>
                 }
                 <!-- Refund Confirmation Modal -->
-                @if (showRefundModal) {
+                @if (showRefundModal()) {
                   <div
                     class="mt-3 p-3 bg-orange-50 rounded-lg border border-orange-200"
                     >
@@ -307,7 +307,8 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
                       Confirme el motivo del reembolso:
                     </p>
                     <textarea
-                      [(ngModel)]="refundReason"
+                      [ngModel]="refundReason()"
+                      (ngModelChange)="refundReason.set($event)"
                       [ngModelOptions]="{ standalone: true }"
                       class="w-full p-2 text-sm border border-orange-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-400"
                       placeholder="Ingrese el motivo del reembolso..."
@@ -317,7 +318,7 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
                       <app-button
                         variant="outline"
                         size="sm"
-                        (clicked)="showRefundModal = false"
+                        (clicked)="showRefundModal.set(false)"
                         >
                         Cancelar
                       </app-button>
@@ -325,8 +326,8 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
                         variant="danger"
                         size="sm"
                         (clicked)="onRefund()"
-                        [disabled]="!refundReason.trim()"
-                        [loading]="(loading$ | async) || false"
+                        [disabled]="!refundReason().trim()"
+                        [loading]="loading() || false"
                         >
                         Confirmar Reembolso
                       </app-button>
@@ -347,13 +348,13 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
               Cerrar
             </app-button>
     
-            @if (expense?.state === 'pending') {
+            @if (expense()?.state === 'pending') {
               <app-button
                 variant="primary"
                 size="sm"
                 (clicked)="onSubmit()"
-                [disabled]="expenseForm.invalid || (loading$ | async) || false"
-                [loading]="(loading$ | async) || false"
+                [disabled]="expenseForm.invalid || loading() || false"
+                [loading]="loading() || false"
                 >
                 Actualizar Gasto
               </app-button>
@@ -363,58 +364,53 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
       </app-modal>
     `,
 })
-export class ExpenseEditComponent implements OnChanges {
-  @Input() isOpen = false;
-  @Input() expense: Expense | null = null;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-
-  expenseForm: FormGroup;
-  categories$: Observable<ExpenseCategory[]>;
-  categoryOptions$: Observable<SelectorOption[]>;
-  loading$: Observable<boolean>;
-
-  receiptFile: File | null = null;
-  submitting = false;
-  showRefundModal = false;
-  refundReason = '';
+export class ExpenseEditComponent {
+  readonly isOpen = input<boolean>(false);
+  readonly expense = input<Expense | null>(null);
+  readonly isOpenChange = output<boolean>();
 
   private expensesService = inject(ExpensesService);
+  private fb = inject(FormBuilder);
+  private store = inject(Store);
 
-  constructor(
-    private fb: FormBuilder,
-    private store: Store,
-  ) {
-    this.categories$ = this.store.select(selectActiveExpenseCategories);
-    this.loading$ = this.store.select(selectExpensesLoading);
-
-    this.categoryOptions$ = this.categories$.pipe(
+  readonly loading = toSignal(this.store.select(selectExpensesLoading), { initialValue: false });
+  readonly categoryOptions = toSignal(
+    this.store.select(selectActiveExpenseCategories).pipe(
       map((categories) =>
         categories.map((cat) => ({
           label: cat.name,
           value: cat.id,
         })),
       ),
-    );
+    ),
+    { initialValue: [] as { label: string; value: number }[] }
+  );
 
-    this.expenseForm = this.fb.group({
-      description: ['', [Validators.required, Validators.minLength(3)]],
-      amount: [null, [Validators.required, Validators.min(0.01)]],
-      category_id: [null],
-      expense_date: ['', [Validators.required]],
-      notes: [''],
-    });
-  }
+  readonly receiptFile = signal<File | null>(null);
+  readonly submitting = signal(false);
+  readonly showRefundModal = signal(false);
+  readonly refundReason = signal('');
 
-  ngOnChanges(changes: SimpleChanges) {
-    if (changes['expense'] && this.expense) {
-      this.patchForm(this.expense);
-      // Disable form for non-pending expenses
-      if (this.expense.state !== 'pending') {
-        this.expenseForm.disable();
-      } else {
-        this.expenseForm.enable();
+  expenseForm: FormGroup = this.fb.group({
+    description: ['', [Validators.required, Validators.minLength(3)]],
+    amount: [null, [Validators.required, Validators.min(0.01)]],
+    category_id: [null],
+    expense_date: ['', [Validators.required]],
+    notes: [''],
+  });
+
+  constructor() {
+    effect(() => {
+      const expense = this.expense();
+      if (expense) {
+        this.patchForm(expense);
+        if (expense.state !== 'pending') {
+          this.expenseForm.disable();
+        } else {
+          this.expenseForm.enable();
+        }
       }
-    }
+    });
   }
 
   private patchForm(expense: Expense) {
@@ -434,24 +430,25 @@ export class ExpenseEditComponent implements OnChanges {
   }
 
   onFileSelected(file: File): void {
-    this.receiptFile = file;
+    this.receiptFile.set(file);
   }
 
   onFileRemoved(): void {
-    this.receiptFile = null;
+    this.receiptFile.set(null);
   }
 
   onSubmit() {
+    const expense = this.expense();
     if (
       this.expenseForm.invalid ||
-      !this.expense ||
-      this.expense.state !== 'pending'
+      !expense ||
+      expense.state !== 'pending'
     ) {
       this.expenseForm.markAllAsTouched();
       return;
     }
 
-    this.submitting = true;
+    this.submitting.set(true);
     const formValue = this.expenseForm.value;
     const categoryId = formValue.category_id
       ? Number(formValue.category_id)
@@ -461,7 +458,7 @@ export class ExpenseEditComponent implements OnChanges {
     const dispatchUpdate = (receiptUrl?: string) => {
       this.store.dispatch(
         updateExpense({
-          id: this.expense!.id,
+          id: expense.id,
           expense: {
             description: formValue.description,
             amount: Number(formValue.amount),
@@ -472,17 +469,18 @@ export class ExpenseEditComponent implements OnChanges {
           },
         }),
       );
-      this.submitting = false;
-      this.receiptFile = null;
+      this.submitting.set(false);
+      this.receiptFile.set(null);
       this.onClose();
     };
 
-    if (this.receiptFile) {
-      this.expensesService.uploadReceipt(this.receiptFile).subscribe({
+    const currentFile = this.receiptFile();
+    if (currentFile) {
+      this.expensesService.uploadReceipt(currentFile).subscribe({
         next: (result: { key: string; url: string }) =>
           dispatchUpdate(result.key),
         error: () => {
-          this.submitting = false;
+          this.submitting.set(false);
           dispatchUpdate();
         },
       });
@@ -492,50 +490,57 @@ export class ExpenseEditComponent implements OnChanges {
   }
 
   onApprove(): void {
-    if (this.expense) {
-      this.store.dispatch(approveExpense({ id: this.expense.id }));
+    const expense = this.expense();
+    if (expense) {
+      this.store.dispatch(approveExpense({ id: expense.id }));
       this.onClose();
     }
   }
 
   onReject(): void {
-    if (this.expense) {
-      this.store.dispatch(rejectExpense({ id: this.expense.id }));
+    const expense = this.expense();
+    if (expense) {
+      this.store.dispatch(rejectExpense({ id: expense.id }));
       this.onClose();
     }
   }
 
   onPay(): void {
-    if (this.expense) {
-      this.store.dispatch(payExpense({ id: this.expense.id }));
+    const expense = this.expense();
+    if (expense) {
+      this.store.dispatch(payExpense({ id: expense.id }));
       this.onClose();
     }
   }
 
   onCancel(): void {
-    if (this.expense) {
-      this.store.dispatch(cancelExpense({ id: this.expense.id }));
+    const expense = this.expense();
+    if (expense) {
+      this.store.dispatch(cancelExpense({ id: expense.id }));
       this.onClose();
     }
   }
 
   onDelete(): void {
-    if (this.expense) {
-      this.store.dispatch(deleteExpense({ id: this.expense.id }));
+    const expense = this.expense();
+    if (expense) {
+      this.store.dispatch(deleteExpense({ id: expense.id }));
       this.onClose();
     }
   }
 
   onRefund(): void {
-    if (this.expense && this.refundReason.trim()) {
+    const expense = this.expense();
+    const reason = this.refundReason().trim();
+    if (expense && reason) {
       this.store.dispatch(
         refundExpense({
-          id: this.expense.id,
-          reason: this.refundReason.trim(),
+          id: expense.id,
+          reason,
         }),
       );
-      this.showRefundModal = false;
-      this.refundReason = '';
+      this.showRefundModal.set(false);
+      this.refundReason.set('');
       this.onClose();
     }
   }

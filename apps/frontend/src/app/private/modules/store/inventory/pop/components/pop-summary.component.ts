@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, OnInit, inject } from '@angular/core';
+import { Component, input, output, inject } from '@angular/core';
 
 import { FormsModule } from '@angular/forms';
 
@@ -44,7 +44,7 @@ const PAYMENT_TERM_LABELS = {
         <div class="space-y-2">
           <div class="flex justify-between text-sm">
             <span class="text-[var(--color-text-secondary)]">Subtotal</span>
-            <span class="text-[var(--color-text-primary)] font-medium">{{ formatCurrency(summary.subtotal) }}</span>
+            <span class="text-[var(--color-text-primary)] font-medium">{{ formatCurrency(summary().subtotal) }}</span>
           </div>
     
           <div class="flex justify-between text-sm">
@@ -64,14 +64,14 @@ const PAYMENT_TERM_LABELS = {
     
           <div class="flex justify-between text-sm text-[var(--color-text-secondary)]">
             <span>Impuestos</span>
-            <span>{{ formatCurrency(summary.tax_amount) }}</span>
+            <span>{{ formatCurrency(summary().tax_amount) }}</span>
           </div>
     
           <div class="h-px bg-[var(--color-border)] my-2"></div>
     
           <div class="flex justify-between">
             <span class="text-[var(--color-text-primary)] font-semibold">Total</span>
-            <span class="text-[var(--color-text-primary)] text-lg font-bold">{{ formatCurrency(summary.total + shippingCost) }}</span>
+            <span class="text-[var(--color-text-primary)] text-lg font-bold">{{ formatCurrency(summary().total + shippingCost) }}</span>
           </div>
         </div>
       </div>
@@ -175,14 +175,15 @@ const PAYMENT_TERM_LABELS = {
     `,
   styleUrls: ['./pop-summary.component.scss'],
 })
-export class PopSummaryComponent implements OnInit {
+export class PopSummaryComponent {
   private currencyService = inject(CurrencyFormatService);
+  private popCartService = inject(PopCartService);
 
-  @Input() summary!: PopCartSummary;
-  @Output() saveAsDraft = new EventEmitter<void>();
-  @Output() submitOrder = new EventEmitter<void>();
-  @Output() printOrder = new EventEmitter<void>();
-  @Output() clearCart = new EventEmitter<void>();
+  readonly summary = input.required<PopCartSummary>();
+  readonly saveAsDraft = output<void>();
+  readonly submitOrder = output<void>();
+  readonly printOrder = output<void>();
+  readonly clearCart = output<void>();
 
   shippingCost: number = 0;
   selectedPaymentPreset: string = '';
@@ -192,9 +193,7 @@ export class PopSummaryComponent implements OnInit {
 
   paymentTermPresets = Object.entries(PAYMENT_TERM_LABELS).map(([value, label]) => ({ value, label }));
 
-  constructor(private popCartService: PopCartService) { }
-
-  ngOnInit(): void {
+  constructor() {
     this.initializeFromCart();
   }
 

@@ -1,8 +1,7 @@
 import {
   Component,
-  OnInit,
-  OnDestroy,
   inject,
+  DestroyRef,
   signal,
   computed,
 } from '@angular/core';
@@ -104,10 +103,11 @@ import { SettlementDetailComponent } from '../components/settlements/settlement-
     </div>
   `,
 })
-export class PayrollSettlementsPageComponent implements OnInit, OnDestroy {
+export class PayrollSettlementsPageComponent {
   private payrollService = inject(PayrollService);
   protected currencyService = inject(CurrencyFormatService);
   private toastService = inject(ToastService);
+  private destroyRef = inject(DestroyRef);
   private destroy$ = new Subject<void>();
 
   // State
@@ -130,15 +130,15 @@ export class PayrollSettlementsPageComponent implements OnInit, OnDestroy {
     return Object.values(s.by_status).reduce((sum, entry) => sum + (entry?.count || 0), 0);
   });
 
-  ngOnInit(): void {
+  constructor() {
     this.currencyService.loadCurrency();
     this.loadSettlements();
     this.loadStats();
-  }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
+    this.destroyRef.onDestroy(() => {
+      this.destroy$.next();
+      this.destroy$.complete();
+    });
   }
 
   loadSettlements(): void {

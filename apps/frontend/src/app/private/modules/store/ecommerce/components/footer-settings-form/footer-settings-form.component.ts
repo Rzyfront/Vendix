@@ -1,6 +1,20 @@
-import { Component, EventEmitter, inject, Input, OnChanges, OnInit, Output, SimpleChanges } from '@angular/core';
+import {
+  Component,
+  inject,
+  input,
+  output,
+  OnChanges,
+  OnInit,
+  SimpleChanges,
+} from '@angular/core';
 
-import { FormArray, FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
+import {
+  FormArray,
+  FormBuilder,
+  FormGroup,
+  ReactiveFormsModule,
+  Validators,
+} from '@angular/forms';
 import { debounceTime, filter, skip } from 'rxjs';
 
 import {
@@ -24,15 +38,15 @@ import {
     ReactiveFormsModule,
     InputComponent,
     IconComponent,
-    TextareaComponent
-],
+    TextareaComponent,
+  ],
   templateUrl: './footer-settings-form.component.html',
 })
 export class FooterSettingsFormComponent implements OnInit, OnChanges {
   private fb = inject(FormBuilder);
 
-  @Input() initialData?: FooterSettings;
-  @Output() valueChange = new EventEmitter<FooterSettings>();
+  readonly initialData = input<FooterSettings | undefined>(undefined);
+  readonly valueChange = output<FooterSettings>();
 
   footerForm!: FormGroup;
 
@@ -52,9 +66,10 @@ export class FooterSettingsFormComponent implements OnInit, OnChanges {
 
   ngOnInit(): void {
     this.createForm();
-    if (this.initialData) {
+    const data = this.initialData();
+    if (data) {
       this.isPatching = true;
-      this.patchForm(this.initialData);
+      this.patchForm(data);
       this.isPatching = false;
     }
 
@@ -72,9 +87,13 @@ export class FooterSettingsFormComponent implements OnInit, OnChanges {
   }
 
   ngOnChanges(changes: SimpleChanges): void {
-    if (changes['initialData'] && !changes['initialData'].firstChange && this.footerForm) {
+    if (
+      changes['initialData'] &&
+      !changes['initialData'].firstChange &&
+      this.footerForm
+    ) {
       this.isPatching = true;
-      this.patchForm(this.initialData);
+      this.patchForm(this.initialData());
       this.isPatching = false;
     }
   }

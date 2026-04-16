@@ -1,4 +1,4 @@
-import { Component, Input, input, output } from '@angular/core';
+import { Component, input, output } from '@angular/core';
 
 import { IconComponent } from '../../../../../shared/components';
 
@@ -40,9 +40,9 @@ export interface FaqItem {
 
         <!-- Content -->
         <div class="p-4 md:p-6 overflow-y-auto max-h-[calc(80vh-180px)]">
-          @if (items && items.length > 0) {
+          @if (items() && items().length > 0) {
           <div class="space-y-3">
-            @for (item of items; track item.question; let i = $index) {
+            @for (item of items(); track item.question; let i = $index) {
             <div class="border border-gray-200 rounded-xl overflow-hidden">
               <!-- Question (Accordion Header) -->
               <button
@@ -93,19 +93,16 @@ export interface FaqItem {
 })
 export class FaqModalComponent {
   readonly isOpen = input(false);
-  @Input() items: FaqItem[] = [];
+  readonly items = input<FaqItem[]>([]);
   readonly closed = output<void>();
 
-  expandedIndex: number | null = 0; // First item expanded by default
+  expandedIndex: number | null = 0;
 
   toggleItem(index: number): void {
     this.expandedIndex = this.expandedIndex === index ? null : index;
   }
 
   close(): void {
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
     this.closed.emit();
   }
 }

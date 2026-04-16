@@ -1,8 +1,8 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
+  input,
+  output,
+  model,
   OnDestroy,
   inject,
 } from '@angular/core';
@@ -30,11 +30,11 @@ import { Subject, takeUntil } from 'rxjs';
     ReactiveFormsModule,
     InputComponent,
     ButtonComponent,
-    ModalComponent
-],
+    ModalComponent,
+  ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'md'"
@@ -43,7 +43,6 @@ import { Subject, takeUntil } from 'rxjs';
     >
       <form [formGroup]="roleForm" (ngSubmit)="onSubmit()">
         <div class="space-y-4">
-
           <app-input
             formControlName="name"
             label="Nombre del Rol *"
@@ -60,7 +59,6 @@ import { Subject, takeUntil } from 'rxjs';
             [control]="roleForm.get('description')"
             [disabled]="isCreating"
           ></app-input>
-
         </div>
       </form>
 
@@ -92,9 +90,9 @@ import { Subject, takeUntil } from 'rxjs';
   ],
 })
 export class StoreRoleCreateModalComponent implements OnDestroy {
-  @Input() isOpen: boolean = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() onRoleCreated = new EventEmitter<void>();
+  readonly isOpen = model<boolean>(false);
+  readonly isOpenChange = output<boolean>();
+  readonly onRoleCreated = output<void>();
 
   roleForm: FormGroup;
   isCreating: boolean = false;
@@ -105,7 +103,14 @@ export class StoreRoleCreateModalComponent implements OnDestroy {
 
   constructor(private fb: FormBuilder) {
     this.roleForm = this.fb.group({
-      name: ['', [Validators.required, Validators.minLength(2), Validators.maxLength(50)]],
+      name: [
+        '',
+        [
+          Validators.required,
+          Validators.minLength(2),
+          Validators.maxLength(50),
+        ],
+      ],
       description: [''],
     });
   }
@@ -150,8 +155,7 @@ export class StoreRoleCreateModalComponent implements OnDestroy {
         error: (error: any) => {
           this.isCreating = false;
           console.error('Error creating store role:', error);
-          const message =
-            error?.error?.message || 'Error al crear el rol';
+          const message = error?.error?.message || 'Error al crear el rol';
           this.toastService.error(message);
         },
       });

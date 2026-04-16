@@ -1,11 +1,9 @@
 import {
   Component,
-  OnInit,
-  OnDestroy,
   inject,
   output,
-  ChangeDetectionStrategy,
   signal,
+  DestroyRef,
 } from '@angular/core';
 
 import { HttpClient } from '@angular/common/http';
@@ -20,9 +18,8 @@ import { ButtonComponent } from '../../../../../../shared/components/button/butt
   imports: [IconComponent, SpinnerComponent, ButtonComponent],
   templateUrl: './pos-reservations-panel.component.html',
   styleUrls: ['./pos-reservations-panel.component.scss'],
-  changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class PosReservationsPanelComponent implements OnInit, OnDestroy {
+export class PosReservationsPanelComponent {
   close = output<void>();
   quickBook = output<void>();
   walkIn = output<void>();
@@ -50,19 +47,17 @@ export class PosReservationsPanelComponent implements OnInit, OnDestroy {
       const label = h.toString().padStart(2, '0') + ':00';
       this.timeSlots.push(label);
     }
-  }
 
-  ngOnInit() {
     this.loadTodayBookings();
     this.updateCurrentTime();
     this.timeInterval = setInterval(() => this.updateCurrentTime(), 60_000);
-  }
 
-  ngOnDestroy() {
-    if (this.timeInterval) {
-      clearInterval(this.timeInterval);
-      this.timeInterval = null;
-    }
+    inject(DestroyRef).onDestroy(() => {
+      if (this.timeInterval) {
+        clearInterval(this.timeInterval);
+        this.timeInterval = null;
+      }
+    });
   }
 
   loadTodayBookings() {

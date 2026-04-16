@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, inject, signal, output, Input } from '@angular/core';
+import { Component, OnDestroy, inject, signal, output, input } from '@angular/core';
 
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { Subject, takeUntil } from 'rxjs';
@@ -31,7 +31,7 @@ import {
 ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onClose()"
       title="Nueva Sesion de Consolidacion"
@@ -83,15 +83,15 @@ import {
     </app-modal>
   `,
 })
-export class SessionCreateModalComponent implements OnInit, OnDestroy {
+export class SessionCreateModalComponent implements OnDestroy {
   private destroy$ = new Subject<void>();
   private fb = inject(FormBuilder);
   private accounting_service = inject(AccountingService);
   private toast_service = inject(ToastService);
 
-  @Input() isOpen = false;
-  isOpenChange = output<boolean>();
-  created = output<ConsolidationSession>();
+  readonly isOpen = input(false);
+  readonly isOpenChange = output<boolean>();
+  readonly created = output<ConsolidationSession>();
 
   is_submitting = signal(false);
   fiscal_periods = signal<FiscalPeriod[]>([]);
@@ -103,7 +103,7 @@ export class SessionCreateModalComponent implements OnInit, OnDestroy {
     notes: [''],
   });
 
-  ngOnInit(): void {
+  constructor() {
     this.loadPeriods();
   }
 

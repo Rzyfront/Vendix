@@ -1,15 +1,15 @@
 import {
   Component,
-  OnInit,
-  OnDestroy,
-  Input,
-  Output,
-  EventEmitter,
+  DestroyRef,
   inject,
+  input,
+  output,
+  signal,
+  computed,
 } from '@angular/core';
-
 import { FormsModule } from '@angular/forms';
-import { Subject, takeUntil, forkJoin } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { forkJoin } from 'rxjs';
 
 import {
   TableColumn,
@@ -53,34 +53,49 @@ import { OrderPrintService } from '../../services/order-print.service';
     ButtonComponent,
     IconComponent,
     PaginationComponent,
-    CardComponent
-],
+    CardComponent,
+  ],
   templateUrl: './orders-list.component.html',
   styleUrls: ['./orders-list.component.css'],
 })
-export class OrdersListComponent implements OnInit, OnDestroy {
+export class OrdersListComponent {
   private currencyService = inject(CurrencyFormatService);
   private printService = inject(OrderPrintService);
+  private ordersService = inject(StoreOrdersService);
+  private customersService = inject(CustomersService);
+  private dialogService = inject(DialogService);
+  private toastService = inject(ToastService);
+  private destroyRef = inject(DestroyRef);
 
   // State
-  orders: Order[] = [];
-  loading = false;
-  totalItems = 0;
-  searchTerm = '';
-  selectedStatus = '';
-  selectedChannel = '';
-  selectedPaymentStatus = '';
-  selectedDateRange = '';
-
-  // Lifecycle
-  private destroy$ = new Subject<void>();
+  readonly orders = signal<Order[]>([]);
+  readonly loading = signal(false);
+  readonly totalItems = signal(0);
+  readonly searchTerm = signal('');
+  readonly selectedStatus = signal('');
+  readonly selectedChannel = signal('');
+  readonly selectedPaymentStatus = signal('');
+  readonly selectedDateRange = signal('');
 
   // Outputs
-  @Output() create = new EventEmitter<void>();
-  @Output() viewOrder = new EventEmitter<string>();
-  @Output() refresh = new EventEmitter<void>();
+  readonly create = output<void>();
+  readonly viewOrder = output<string>();
+  readonly refresh = output<void>();
 
-  @Input() filters: OrderQuery = {
+  readonly filters = input<OrderQuery>({
+    search: '',
+    status: undefined,
+    channel: undefined,
+    payment_status: undefined,
+    date_range: undefined,
+    page: 1,
+    limit: 10,
+    sort_by: 'created_at',
+    sort_order: 'desc',
+  });
+
+  // Internal mutable filters (for pagination/sorting driven from inside the component)
+  protected _filters: OrderQuery = {
     search: '',
     status: undefined,
     channel: undefined,
@@ -153,7 +168,7 @@ export class OrdersListComponent implements OnInit, OnDestroy {
   ];
 
   // Current filter values
-  filterValues: FilterValues = {};
+  readonly filterValues = signal<FilterValues>({});
 
   // Dropdown actions
   dropdownActions: DropdownAction[] = [];
@@ -303,89 +318,77 @@ export class OrdersListComponent implements OnInit, OnDestroy {
     ],
   };
 
-  constructor(
-    private ordersService: StoreOrdersService,
-    private customersService: CustomersService,
-    private dialogService: DialogService,
-    private toastService: ToastService,
-  ) {}
-
-  ngOnInit(): void {
+  constructor() {
     this.loadOrders();
   }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
   // Computed property for hasFilters
-  get hasFilters(): boolean {
-    return !!(
-      this.searchTerm ||
-      this.selectedStatus ||
-      this.selectedChannel ||
-      this.selectedPaymentStatus ||
-      this.selectedDateRange
-    );
-  }
+  readonly hasFilters = computed(() =>
+    !!(
+      this.searchTerm() ||
+      this.selectedStatus() ||
+      this.selectedChannel() ||
+      this.selectedPaymentStatus() ||
+      this.selectedDateRange()
+    ),
+  );
 
   getEmptyStateTitle(): string {
-    return this.hasFilters
+    return this.hasFilters()
       ? 'Ninguna orden coincide con sus filtros'
       : 'No se encontraron órdenes';
   }
 
   getEmptyStateDescription(): string {
-    return this.hasFilters
+    return this.hasFilters()
       ? 'Intente ajustar sus términos de búsqueda o filtros'
       : 'Comience creando su primera orden.';
   }
 
   // Event handlers
   onSearchChange(term: string): void {
-    this.searchTerm = term;
-    this.filters.search = term;
-    this.filters.page = 1;
+    this.searchTerm.set(term);
+    this._filters.search = term;
+    this._filters.page = 1;
     this.loadOrders();
   }
 
   onFilterChange(values: FilterValues): void {
-    this.filterValues = values;
-    this.selectedStatus = (values['status'] as string) || '';
-    this.selectedChannel = (values['channel'] as string) || '';
-    this.selectedPaymentStatus = (values['payment_status'] as string) || '';
-    this.selectedDateRange = (values['date_range'] as string) || '';
+    this.filterValues.set(values);
+    this.selectedStatus.set((values['status'] as string) || '');
+    this.selectedChannel.set((values['channel'] as string) || '');
+    this.selectedPaymentStatus.set((values['payment_status'] as string) || '');
+    this.selectedDateRange.set((values['date_range'] as string) || '');
 
-    this.filters.status = this.selectedStatus
-      ? (this.selectedStatus as OrderState)
+    this._filters.status = this.selectedStatus()
+      ? (this.selectedStatus() as OrderState)
       : undefined;
-    this.filters.channel = this.selectedChannel
-      ? (this.selectedChannel as OrderChannel)
+    this._filters.channel = this.selectedChannel()
+      ? (this.selectedChannel() as OrderChannel)
       : undefined;
-    this.filters.payment_status = this.selectedPaymentStatus
-      ? (this.selectedPaymentStatus as PaymentStatus)
+    this._filters.payment_status = this.selectedPaymentStatus()
+      ? (this.selectedPaymentStatus() as PaymentStatus)
       : undefined;
-    this.filters.date_range = this.selectedDateRange || undefined;
-    this.filters.page = 1;
+    this._filters.date_range = this.selectedDateRange() || undefined;
+    this._filters.page = 1;
 
     this.loadOrders();
   }
 
   clearFilters(): void {
-    this.searchTerm = '';
-    this.selectedStatus = '';
-    this.selectedChannel = '';
-    this.selectedPaymentStatus = '';
-    this.selectedDateRange = '';
-    this.filterValues = {};
+    this.searchTerm.set('');
+    this.selectedStatus.set('');
+    this.selectedChannel.set('');
+    this.selectedPaymentStatus.set('');
+    this.selectedDateRange.set('');
+    this.filterValues.set({});
 
-    this.filters.search = '';
-    this.filters.status = undefined;
-    this.filters.channel = undefined;
-    this.filters.payment_status = undefined;
-    this.filters.date_range = undefined;
-    this.filters.page = 1;
+    this._filters.search = '';
+    this._filters.status = undefined;
+    this._filters.channel = undefined;
+    this._filters.payment_status = undefined;
+    this._filters.date_range = undefined;
+    this._filters.page = 1;
 
     this.loadOrders();
   }
@@ -393,11 +396,6 @@ export class OrdersListComponent implements OnInit, OnDestroy {
   onActionClick(action: string): void {
     switch (action) {
       case 'create':
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
         this.create.emit();
         break;
       case 'export':
@@ -408,11 +406,11 @@ export class OrdersListComponent implements OnInit, OnDestroy {
 
   // Load orders with current filters
   loadOrders(): void {
-    this.loading = true;
+    this.loading.set(true);
 
     this.ordersService
-      .getOrders(this.filters)
-      .pipe(takeUntil(this.destroy$))
+      .getOrders(this._filters)
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: any) => {
           // Unwrap ResponseService wrapper if present
@@ -453,7 +451,7 @@ export class OrdersListComponent implements OnInit, OnDestroy {
           const paginationInfo = paginatedData.pagination || {
             total: rawOrders.length,
           };
-          this.totalItems = paginationInfo.total || 0;
+          this.totalItems.set(paginationInfo.total || 0);
 
           // Fetch customer details
           const customerIds: number[] = [
@@ -467,61 +465,58 @@ export class OrdersListComponent implements OnInit, OnDestroy {
             forkJoin(
               customerIds.map((id) => this.customersService.getCustomer(id)),
             )
-              .pipe(takeUntil(this.destroy$))
+              .pipe(takeUntilDestroyed(this.destroyRef))
               .subscribe({
                 next: (customers) => {
                   const customerMap = new Map(customers.map((c) => [c.id, c]));
-                  this.orders = normalizedOrders.map((order: any) => ({
+                  this.orders.set(normalizedOrders.map((order: any) => ({
                     ...order,
                     // Show "Consumidor Final" for anonymous sales (no customer_id), otherwise show customer name
                     customer_name: order.customer_id
                       ? `${customerMap.get(order.customer_id)?.first_name || ''} ${customerMap.get(order.customer_id)?.last_name || ''}`.trim() ||
                         'N/A'
                       : 'Consumidor Final',
-                  }));
-
-                  this.loading = false;
+                  })));
+                  this.loading.set(false);
                 },
                 error: (error) => {
                   console.error('Error loading customers:', error);
-                  this.orders = normalizedOrders.map((order: any) => ({
+                  this.orders.set(normalizedOrders.map((order: any) => ({
                     ...order,
                     customer_name: order.customer_id
                       ? 'N/A'
                       : 'Consumidor Final',
-                  }));
-                  this.loading = false;
+                  })));
+                  this.loading.set(false);
                 },
               });
           } else {
             // No customer IDs to fetch, show "Consumidor Final" for orders without customer
-            this.orders = normalizedOrders.map((order: any) => ({
+            this.orders.set(normalizedOrders.map((order: any) => ({
               ...order,
               customer_name: order.customer_id ? 'N/A' : 'Consumidor Final',
-            }));
-            this.loading = false;
+            })));
+            this.loading.set(false);
           }
         },
         error: (error: any) => {
           console.error('Error loading orders:', error);
           this.toastService.error('Failed to load orders. Please try again.');
-          this.loading = false;
+          this.loading.set(false);
         },
       });
   }
 
   // Pagination and sorting
   onPageChange(page: number): void {
-    if (this.filters.page !== undefined) {
-      this.filters.page = page;
-      this.loadOrders();
-    }
+    this._filters.page = page;
+    this.loadOrders();
   }
 
   onSort(event: { column: string; direction: 'asc' | 'desc' | null }): void {
     if (event.direction) {
-      this.filters.sort_by = event.column as any;
-      this.filters.sort_order = event.direction;
+      this._filters.sort_by = event.column as any;
+      this._filters.sort_order = event.direction;
       this.loadOrders();
     }
   }
@@ -546,16 +541,11 @@ export class OrdersListComponent implements OnInit, OnDestroy {
     if (confirmed) {
       this.ordersService
         .updateOrderStatus(order.id.toString(), 'cancelled')
-        .pipe(takeUntil(this.destroy$))
+        .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: () => {
             this.toastService.success('Orden cancelada exitosamente');
             this.loadOrders();
-            // TODO: The 'emit' function requires a mandatory void argument
-            // TODO: The 'emit' function requires a mandatory void argument
-            // TODO: The 'emit' function requires a mandatory void argument
-            // TODO: The 'emit' function requires a mandatory void argument
-            // TODO: The 'emit' function requires a mandatory void argument
             this.refresh.emit();
           },
           error: (error: any) => {
@@ -570,8 +560,8 @@ export class OrdersListComponent implements OnInit, OnDestroy {
 
   exportOrders(): void {
     this.ordersService
-      .exportOrders(this.filters)
-      .pipe(takeUntil(this.destroy$))
+      .exportOrders(this._filters)
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: any) => {
           // Handle file download
@@ -652,7 +642,7 @@ export class OrdersListComponent implements OnInit, OnDestroy {
   }
 
   // Math utility for template
-  get totalPages(): number {
-    return Math.ceil(this.totalItems / (this.filters.limit || 10));
-  }
+  readonly totalPages = computed(() =>
+    Math.ceil(this.totalItems() / (this._filters.limit || 10)),
+  );
 }

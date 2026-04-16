@@ -1,14 +1,19 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
   OnInit,
   OnChanges,
   inject,
+  input,
+  output,
 } from '@angular/core';
 
-import { ReactiveFormsModule, FormsModule, FormGroup, FormControl, Validators } from '@angular/forms';
+import {
+  ReactiveFormsModule,
+  FormsModule,
+  FormGroup,
+  FormControl,
+  Validators,
+} from '@angular/forms';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
 import { SettingToggleComponent } from '../../../../../../../shared/components/setting-toggle/setting-toggle.component';
 import { NotificationsApiService } from '../../../../../../../core/services/notifications.service';
@@ -25,17 +30,21 @@ export interface NotificationsSettings {
   new_order_alerts_phone?: string | null;
 }
 
-
 @Component({
   selector: 'app-notifications-settings-form',
   standalone: true,
-  imports: [ReactiveFormsModule, FormsModule, InputComponent, SettingToggleComponent],
+  imports: [
+    ReactiveFormsModule,
+    FormsModule,
+    InputComponent,
+    SettingToggleComponent,
+  ],
   templateUrl: './notifications-settings-form.component.html',
   styleUrls: ['./notifications-settings-form.component.scss'],
 })
 export class NotificationsSettingsForm implements OnInit, OnChanges {
-  @Input() settings!: NotificationsSettings;
-  @Output() settingsChange = new EventEmitter<NotificationsSettings>();
+  readonly settings = input.required<NotificationsSettings>();
+  readonly settingsChange = output<NotificationsSettings>();
 
   private notificationsApi = inject(NotificationsApiService);
   pushService = inject(PushSubscriptionService);
@@ -65,8 +74,12 @@ export class NotificationsSettingsForm implements OnInit, OnChanges {
     new_order_alerts: new FormControl(true),
     low_stock_alerts_email: new FormControl(null),
     new_order_alerts_email: new FormControl(null),
-    low_stock_alerts_phone: new FormControl(null, [Validators.pattern(/^[\d+#*\s()-]*$/)]),
-    new_order_alerts_phone: new FormControl(null, [Validators.pattern(/^[\d+#*\s()-]*$/)]),
+    low_stock_alerts_phone: new FormControl(null, [
+      Validators.pattern(/^[\d+#*\s()-]*$/),
+    ]),
+    new_order_alerts_phone: new FormControl(null, [
+      Validators.pattern(/^[\d+#*\s()-]*$/),
+    ]),
   });
 
   // Typed getters for FormControls
@@ -130,8 +143,9 @@ export class NotificationsSettingsForm implements OnInit, OnChanges {
   }
 
   patchForm() {
-    if (this.settings) {
-      this.form.patchValue(this.settings);
+    const currentSettings = this.settings();
+    if (currentSettings) {
+      this.form.patchValue(currentSettings);
     }
   }
 

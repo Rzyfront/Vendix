@@ -1,10 +1,9 @@
-import { Component, ChangeDetectionStrategy, ChangeDetectorRef, OnInit, inject } from '@angular/core';
+import { Component, inject, DestroyRef } from '@angular/core';
 
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { timer } from 'rxjs';
 import { filter, map, catchError } from 'rxjs/operators';
 import { of } from 'rxjs';
-import { DestroyRef } from '@angular/core';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ProcessInfoComponent, QueueStatsComponent } from '../../components';
@@ -16,7 +15,6 @@ import { formatBytes as _formatBytes } from '../../../../../../core/utils/format
   selector: 'app-monitoring-health-page',
   standalone: true,
   imports: [CardComponent, IconComponent, ProcessInfoComponent, QueueStatsComponent],
-  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="space-y-6">
       <!-- Server Memory -->
@@ -54,19 +52,19 @@ import { formatBytes as _formatBytes } from '../../../../../../core/utils/format
           </div>
         </app-card>
       }
-    
+
       <!-- Process Info -->
       <app-process-info
         [info]="appMetrics?.process ?? null"
         [loading]="loadingApp"
       ></app-process-info>
-    
+
       <!-- Queue Stats -->
       <app-queue-stats
         [queues]="appMetrics?.queues"
         [loading]="loadingApp"
       ></app-queue-stats>
-    
+
       <!-- Redis Info -->
       @if (appMetrics?.redis) {
         <app-card [padding]="false" overflow="hidden" customClasses="!overflow-hidden">
@@ -118,9 +116,8 @@ import { formatBytes as _formatBytes } from '../../../../../../core/utils/format
     </div>
     `,
 })
-export class MonitoringHealthPage implements OnInit {
+export class MonitoringHealthPage {
   private readonly monitoringService = inject(MonitoringService);
-  private readonly cdr = inject(ChangeDetectorRef);
   private readonly destroyRef = inject(DestroyRef);
 
   appMetrics: AppMetrics | null = null;
@@ -133,7 +130,7 @@ export class MonitoringHealthPage implements OnInit {
   private paused = false;
   private visibilityHandler = () => { this.paused = document.hidden; };
 
-  ngOnInit(): void {
+  constructor() {
     document.addEventListener('visibilitychange', this.visibilityHandler);
 
     // Fetch server info once
@@ -143,7 +140,6 @@ export class MonitoringHealthPage implements OnInit {
       takeUntilDestroyed(this.destroyRef),
     ).subscribe(data => {
       this.serverInfo = data;
-      this.cdr.markForCheck();
     });
 
     // Poll app metrics every 30s
@@ -151,6 +147,10 @@ export class MonitoringHealthPage implements OnInit {
       filter(() => !this.paused),
       takeUntilDestroyed(this.destroyRef),
     ).subscribe(() => this.fetchAppMetrics());
+
+    this.destroyRef.onDestroy(() => {
+      document.removeEventListener('visibilitychange', this.visibilityHandler);
+    });
   }
 
   formatBytes(bytes?: number): string {
@@ -178,7 +178,6 @@ export class MonitoringHealthPage implements OnInit {
       this.appMetrics = data;
       this.loadingApp = false;
       this.computeValues();
-      this.cdr.markForCheck();
     });
   }
 

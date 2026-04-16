@@ -41,8 +41,8 @@ import {
     StatusIndicatorComponent,
     ProcessInfoComponent,
     QueueStatsComponent,
-    SlowEndpointsComponent
-],
+    SlowEndpointsComponent,
+  ],
   providers: [MonitoringService],
   template: `
     <div style="background-color: var(--color-background);" class="space-y-6">
@@ -85,34 +85,58 @@ import {
           [loading]="loadingOverview"
         ></app-stats>
       </div>
-    
+
       <!-- Status bar -->
-      <app-card [padding]="false" customClasses="!p-4 flex items-center justify-between flex-wrap gap-3">
+      <app-card
+        [padding]="false"
+        customClasses="!p-4 flex items-center justify-between flex-wrap gap-3"
+      >
         <div class="flex items-center gap-4">
           <app-status-indicator
             [status]="overallStatus"
             [label]="overallStatusLabel"
           ></app-status-indicator>
           <span class="text-sm" style="color: var(--color-text-secondary);">
-            <app-icon name="clock" [size]="14" style="display: inline; vertical-align: middle; margin-right: 4px; color: var(--color-text-muted);"></app-icon>
-            Uptime: <strong style="color: var(--color-text-primary);">{{ formatUptime(overview?.server?.uptime) }}</strong>
+            <app-icon
+              name="clock"
+              [size]="14"
+              style="display: inline; vertical-align: middle; margin-right: 4px; color: var(--color-text-muted);"
+            ></app-icon>
+            Uptime:
+            <strong style="color: var(--color-text-primary);">{{
+              formatUptime(overview?.server?.uptime)
+            }}</strong>
           </span>
         </div>
-        <span class="text-xs font-mono px-2 py-1 rounded-full" style="background: var(--color-background); color: var(--color-text-muted);">
+        <span
+          class="text-xs font-mono px-2 py-1 rounded-full"
+          style="background: var(--color-background); color: var(--color-text-muted);"
+        >
           Auto-refresh: 30s
         </span>
       </app-card>
-    
+
       <!-- EC2 Metrics Section -->
       <app-card [padding]="false" [showHeader]="true">
-        <div slot="header"
+        <div
+          slot="header"
           class="flex justify-between items-center"
-          style="background: linear-gradient(135deg, rgba(249,115,22,0.05) 0%, transparent 100%);">
+          style="background: linear-gradient(135deg, rgba(249,115,22,0.05) 0%, transparent 100%);"
+        >
           <div class="flex items-center gap-3">
-            <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-orange-500/10">
-              <app-icon name="server" [size]="16" class="text-orange-500"></app-icon>
+            <div
+              class="w-8 h-8 rounded-lg flex items-center justify-center bg-orange-500/10"
+            >
+              <app-icon
+                name="server"
+                [size]="16"
+                class="text-orange-500"
+              ></app-icon>
             </div>
-            <h3 class="text-lg font-semibold" style="color: var(--color-text-primary);">
+            <h3
+              class="text-lg font-semibold"
+              style="color: var(--color-text-primary);"
+            >
               Metricas EC2
             </h3>
           </div>
@@ -124,48 +148,61 @@ import {
         <div class="p-6 grid grid-cols-1 lg:grid-cols-2 gap-8">
           <app-metric-chart
             label="CPU Utilization"
-            [datapoints]="ec2Metrics?.cpu?.utilization?.datapoints"
+            [datapoints]="ec2Metrics?.cpu?.utilization?.datapoints ?? null"
             unit="%"
             color="#f97316"
             [loading]="loadingEc2"
           ></app-metric-chart>
           <app-metric-chart
             label="Network I/O"
-            [datapoints]="ec2Metrics?.network?.bytesIn?.datapoints"
+            [datapoints]="ec2Metrics?.network?.bytesIn?.datapoints ?? null"
             unit="bytes"
             color="#3b82f6"
-            [secondaryDatapoints]="ec2Metrics?.network?.bytesOut?.datapoints"
+            [secondaryDatapoints]="
+              ec2Metrics?.network?.bytesOut?.datapoints ?? null
+            "
             secondaryLabel="Out"
             secondaryColor="#ef4444"
             [loading]="loadingEc2"
           ></app-metric-chart>
           <app-metric-chart
             label="Disk Read"
-            [datapoints]="ec2Metrics?.disk?.readBytes?.datapoints"
+            [datapoints]="ec2Metrics?.disk?.readBytes?.datapoints ?? null"
             unit="bytes"
             color="#8b5cf6"
             [loading]="loadingEc2"
           ></app-metric-chart>
           <app-metric-chart
             label="Disk Write"
-            [datapoints]="ec2Metrics?.disk?.writeBytes?.datapoints"
+            [datapoints]="ec2Metrics?.disk?.writeBytes?.datapoints ?? null"
             unit="bytes"
             color="#ec4899"
             [loading]="loadingEc2"
           ></app-metric-chart>
         </div>
       </app-card>
-    
+
       <!-- RDS Metrics Section -->
       <app-card [padding]="false" [showHeader]="true">
-        <div slot="header"
+        <div
+          slot="header"
           class="flex justify-between items-center"
-          style="background: linear-gradient(135deg, rgba(16,185,129,0.05) 0%, transparent 100%);">
+          style="background: linear-gradient(135deg, rgba(16,185,129,0.05) 0%, transparent 100%);"
+        >
           <div class="flex items-center gap-3">
-            <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-emerald-500/10">
-              <app-icon name="database" [size]="16" class="text-emerald-500"></app-icon>
+            <div
+              class="w-8 h-8 rounded-lg flex items-center justify-center bg-emerald-500/10"
+            >
+              <app-icon
+                name="database"
+                [size]="16"
+                class="text-emerald-500"
+              ></app-icon>
             </div>
-            <h3 class="text-lg font-semibold" style="color: var(--color-text-primary);">
+            <h3
+              class="text-lg font-semibold"
+              style="color: var(--color-text-primary);"
+            >
               Metricas RDS (PostgreSQL)
             </h3>
           </div>
@@ -177,55 +214,71 @@ import {
         <div class="p-6 grid grid-cols-1 lg:grid-cols-2 gap-8">
           <app-metric-chart
             label="CPU Utilization"
-            [datapoints]="rdsMetrics?.cpu?.utilization?.datapoints"
+            [datapoints]="rdsMetrics?.cpu?.utilization?.datapoints ?? null"
             unit="%"
             color="#10b981"
             [loading]="loadingRds"
           ></app-metric-chart>
           <app-metric-chart
             label="Conexiones Activas"
-            [datapoints]="rdsMetrics?.connections?.active?.datapoints"
+            [datapoints]="rdsMetrics?.connections?.active?.datapoints ?? null"
             unit=""
             color="#6366f1"
             [loading]="loadingRds"
           ></app-metric-chart>
           <app-metric-chart
             label="IOPS (Read/Write)"
-            [datapoints]="rdsMetrics?.iops?.read?.datapoints"
+            [datapoints]="rdsMetrics?.iops?.read?.datapoints ?? null"
             unit="ops"
             color="#3b82f6"
-            [secondaryDatapoints]="rdsMetrics?.iops?.write?.datapoints"
+            [secondaryDatapoints]="rdsMetrics?.iops?.write?.datapoints ?? null"
             secondaryLabel="Write"
             secondaryColor="#f97316"
             [loading]="loadingRds"
           ></app-metric-chart>
           <app-metric-chart
             label="Latencia (Read/Write)"
-            [datapoints]="rdsMetrics?.latency?.read?.datapoints"
+            [datapoints]="rdsMetrics?.latency?.read?.datapoints ?? null"
             unit="ms"
             color="#14b8a6"
-            [secondaryDatapoints]="rdsMetrics?.latency?.write?.datapoints"
+            [secondaryDatapoints]="
+              rdsMetrics?.latency?.write?.datapoints ?? null
+            "
             secondaryLabel="Write"
             secondaryColor="#f43f5e"
             [loading]="loadingRds"
           ></app-metric-chart>
         </div>
       </app-card>
-    
+
       <!-- Performance Section -->
       <app-card [padding]="false" [showHeader]="true">
-        <div slot="header"
+        <div
+          slot="header"
           class="flex justify-between items-center"
-          style="background: linear-gradient(135deg, rgba(168,85,247,0.05) 0%, transparent 100%);">
+          style="background: linear-gradient(135deg, rgba(168,85,247,0.05) 0%, transparent 100%);"
+        >
           <div class="flex items-center gap-3">
-            <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-purple-500/10">
-              <app-icon name="zap" [size]="16" class="text-purple-500"></app-icon>
+            <div
+              class="w-8 h-8 rounded-lg flex items-center justify-center bg-purple-500/10"
+            >
+              <app-icon
+                name="zap"
+                [size]="16"
+                class="text-purple-500"
+              ></app-icon>
             </div>
-            <h3 class="text-lg font-semibold" style="color: var(--color-text-primary);">
+            <h3
+              class="text-lg font-semibold"
+              style="color: var(--color-text-primary);"
+            >
               Performance
             </h3>
             @if (performanceSnapshot) {
-              <span class="text-xs font-mono px-2 py-0.5 rounded-full" style="background: var(--color-background); color: var(--color-text-muted);">
+              <span
+                class="text-xs font-mono px-2 py-0.5 rounded-full"
+                style="background: var(--color-background); color: var(--color-text-muted);"
+              >
                 {{ performanceSnapshot.totalRecorded }} requests tracked
               </span>
             }
@@ -235,13 +288,23 @@ import {
             (rangeChange)="onPerformanceTimeRangeChange($event)"
           ></app-time-range-selector>
         </div>
-    
+
         <div class="p-6 space-y-6">
           <!-- Performance Stats Cards -->
           <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
             <app-card [padding]="false" customClasses="!p-3 !rounded-xl">
-              <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Avg Response</p>
-              <p class="text-xl font-bold font-mono" [class]="avgResponseTimeColor">{{ avgResponseTime }}</p>
+              <p
+                class="text-[10px] uppercase tracking-wider font-medium mb-1"
+                style="color: var(--color-text-muted);"
+              >
+                Avg Response
+              </p>
+              <p
+                class="text-xl font-bold font-mono"
+                [class]="avgResponseTimeColor"
+              >
+                {{ avgResponseTime }}
+              </p>
               @if (performanceSnapshot) {
                 <p class="text-[10px]" style="color: var(--color-text-muted);">
                   p95: {{ performanceSnapshot.responseTime.p95.toFixed(0) }}ms
@@ -249,8 +312,15 @@ import {
               }
             </app-card>
             <app-card [padding]="false" customClasses="!p-3 !rounded-xl">
-              <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Requests/seg</p>
-              <p class="text-xl font-bold font-mono text-blue-500">{{ reqPerSec }}</p>
+              <p
+                class="text-[10px] uppercase tracking-wider font-medium mb-1"
+                style="color: var(--color-text-muted);"
+              >
+                Requests/seg
+              </p>
+              <p class="text-xl font-bold font-mono text-blue-500">
+                {{ reqPerSec }}
+              </p>
               @if (performanceSnapshot) {
                 <p class="text-[10px]" style="color: var(--color-text-muted);">
                   {{ performanceSnapshot.activeRequests }} activos
@@ -258,25 +328,43 @@ import {
               }
             </app-card>
             <app-card [padding]="false" customClasses="!p-3 !rounded-xl">
-              <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Error Rate (5m)</p>
-              <p class="text-xl font-bold font-mono" [class]="errorRateColor">{{ errorRate }}</p>
+              <p
+                class="text-[10px] uppercase tracking-wider font-medium mb-1"
+                style="color: var(--color-text-muted);"
+              >
+                Error Rate (5m)
+              </p>
+              <p class="text-xl font-bold font-mono" [class]="errorRateColor">
+                {{ errorRate }}
+              </p>
               @if (performanceSnapshot) {
                 <p class="text-[10px]" style="color: var(--color-text-muted);">
-                  {{ performanceSnapshot.errors.last5min.errors5xx }} errores 5xx
+                  {{ performanceSnapshot.errors.last5min.errors5xx }} errores
+                  5xx
                 </p>
               }
             </app-card>
             <app-card [padding]="false" customClasses="!p-3 !rounded-xl">
-              <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Event Loop p99</p>
-              <p class="text-xl font-bold font-mono" [class]="eventLoopColor">{{ eventLoopP99 }}</p>
+              <p
+                class="text-[10px] uppercase tracking-wider font-medium mb-1"
+                style="color: var(--color-text-muted);"
+              >
+                Event Loop p99
+              </p>
+              <p class="text-xl font-bold font-mono" [class]="eventLoopColor">
+                {{ eventLoopP99 }}
+              </p>
               @if (performanceSnapshot?.eventLoop?.current) {
                 <p class="text-[10px]" style="color: var(--color-text-muted);">
-                  mean: {{ performanceSnapshot!.eventLoop!.current!.mean.toFixed(1) }}ms
+                  mean:
+                  {{
+                    performanceSnapshot!.eventLoop!.current!.mean.toFixed(1)
+                  }}ms
                 </p>
               }
             </app-card>
           </div>
-    
+
           <!-- Charts Grid -->
           <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <app-metric-chart
@@ -300,13 +388,13 @@ import {
               [loading]="loadingPerformance"
             ></app-metric-chart>
           </div>
-    
+
           <!-- Slow Endpoints -->
           <app-slow-endpoints
             [endpoints]="performanceSnapshot?.slowestEndpoints ?? null"
             [loading]="loadingPerformance"
           ></app-slow-endpoints>
-    
+
           <!-- More Charts -->
           <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <app-metric-chart
@@ -329,16 +417,27 @@ import {
           </div>
         </div>
       </app-card>
-    
+
       <!-- Application Health Section -->
       <app-card [padding]="false" [showHeader]="true">
-        <div slot="header"
+        <div
+          slot="header"
           class="flex items-center gap-3"
-          style="background: linear-gradient(135deg, rgba(6,182,212,0.05) 0%, transparent 100%);">
-          <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-cyan-500/10">
-            <app-icon name="heart-pulse" [size]="16" class="text-cyan-500"></app-icon>
+          style="background: linear-gradient(135deg, rgba(6,182,212,0.05) 0%, transparent 100%);"
+        >
+          <div
+            class="w-8 h-8 rounded-lg flex items-center justify-center bg-cyan-500/10"
+          >
+            <app-icon
+              name="heart-pulse"
+              [size]="16"
+              class="text-cyan-500"
+            ></app-icon>
           </div>
-          <h3 class="text-lg font-semibold" style="color: var(--color-text-primary);">
+          <h3
+            class="text-lg font-semibold"
+            style="color: var(--color-text-primary);"
+          >
             Salud de la Aplicacion
           </h3>
         </div>
@@ -348,94 +447,291 @@ import {
             <app-card [padding]="false" customClasses="!rounded-xl">
               <div class="p-4">
                 <div class="flex items-center gap-2 mb-3">
-                  <span class="w-5 h-5 rounded flex items-center justify-center bg-blue-500/10">
-                    <app-icon name="memory-stick" [size]="12" class="text-blue-500"></app-icon>
+                  <span
+                    class="w-5 h-5 rounded flex items-center justify-center bg-blue-500/10"
+                  >
+                    <app-icon
+                      name="memory-stick"
+                      [size]="12"
+                      class="text-blue-500"
+                    ></app-icon>
                   </span>
-                  <h4 class="text-sm font-semibold" style="color: var(--color-text-primary);">Memoria del Servidor</h4>
+                  <h4
+                    class="text-sm font-semibold"
+                    style="color: var(--color-text-primary);"
+                  >
+                    Memoria del Servidor
+                  </h4>
                 </div>
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
-                  <div class="p-3 rounded-lg text-center" style="background: var(--color-surface);">
-                    <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Total</p>
-                    <p class="font-mono text-sm font-bold" style="color: var(--color-text-primary);">{{ formatBytes(serverInfo!.memory.total) }}</p>
+                  <div
+                    class="p-3 rounded-lg text-center"
+                    style="background: var(--color-surface);"
+                  >
+                    <p
+                      class="text-[10px] uppercase tracking-wider font-medium mb-1"
+                      style="color: var(--color-text-muted);"
+                    >
+                      Total
+                    </p>
+                    <p
+                      class="font-mono text-sm font-bold"
+                      style="color: var(--color-text-primary);"
+                    >
+                      {{ formatBytes(serverInfo!.memory.total) }}
+                    </p>
                   </div>
-                  <div class="p-3 rounded-lg text-center" style="background: var(--color-surface);">
-                    <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Usado</p>
-                    <p class="font-mono text-sm font-bold" style="color: var(--color-text-primary);">{{ formatBytes(serverInfo!.memory.used) }}</p>
+                  <div
+                    class="p-3 rounded-lg text-center"
+                    style="background: var(--color-surface);"
+                  >
+                    <p
+                      class="text-[10px] uppercase tracking-wider font-medium mb-1"
+                      style="color: var(--color-text-muted);"
+                    >
+                      Usado
+                    </p>
+                    <p
+                      class="font-mono text-sm font-bold"
+                      style="color: var(--color-text-primary);"
+                    >
+                      {{ formatBytes(serverInfo!.memory.used) }}
+                    </p>
                   </div>
-                  <div class="p-3 rounded-lg text-center" style="background: var(--color-surface);">
-                    <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Libre</p>
-                    <p class="font-mono text-sm font-bold" style="color: var(--color-text-primary);">{{ formatBytes(serverInfo!.memory.free) }}</p>
+                  <div
+                    class="p-3 rounded-lg text-center"
+                    style="background: var(--color-surface);"
+                  >
+                    <p
+                      class="text-[10px] uppercase tracking-wider font-medium mb-1"
+                      style="color: var(--color-text-muted);"
+                    >
+                      Libre
+                    </p>
+                    <p
+                      class="font-mono text-sm font-bold"
+                      style="color: var(--color-text-primary);"
+                    >
+                      {{ formatBytes(serverInfo!.memory.free) }}
+                    </p>
                   </div>
-                  <div class="p-3 rounded-lg text-center" style="background: var(--color-surface);">
-                    <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Uso</p>
-                    <p class="font-mono text-sm font-bold" [style.color]="serverInfo!.memory.usedPercent > 80 ? '#ef4444' : serverInfo!.memory.usedPercent > 60 ? '#eab308' : '#22c55e'">{{ serverInfo!.memory.usedPercent.toFixed(1) }}%</p>
+                  <div
+                    class="p-3 rounded-lg text-center"
+                    style="background: var(--color-surface);"
+                  >
+                    <p
+                      class="text-[10px] uppercase tracking-wider font-medium mb-1"
+                      style="color: var(--color-text-muted);"
+                    >
+                      Uso
+                    </p>
+                    <p
+                      class="font-mono text-sm font-bold"
+                      [style.color]="
+                        serverInfo!.memory.usedPercent > 80
+                          ? '#ef4444'
+                          : serverInfo!.memory.usedPercent > 60
+                            ? '#eab308'
+                            : '#22c55e'
+                      "
+                    >
+                      {{ serverInfo!.memory.usedPercent.toFixed(1) }}%
+                    </p>
                   </div>
                 </div>
-                <div class="w-full h-2.5 rounded-full overflow-hidden" style="background: var(--color-border);">
-                  <div class="h-full rounded-full transition-all duration-500"
+                <div
+                  class="w-full h-2.5 rounded-full overflow-hidden"
+                  style="background: var(--color-border);"
+                >
+                  <div
+                    class="h-full rounded-full transition-all duration-500"
                     [style.width.%]="serverInfo!.memory.usedPercent"
-                    [style.background]="serverInfo!.memory.usedPercent > 80 ? '#ef4444' : serverInfo!.memory.usedPercent > 60 ? '#eab308' : '#22c55e'">
-                  </div>
+                    [style.background]="
+                      serverInfo!.memory.usedPercent > 80
+                        ? '#ef4444'
+                        : serverInfo!.memory.usedPercent > 60
+                          ? '#eab308'
+                          : '#22c55e'
+                    "
+                  ></div>
                 </div>
               </div>
             </app-card>
           }
-    
+
           <!-- Process Info -->
           <app-process-info
             [info]="appMetrics?.process ?? null"
             [loading]="loadingApp"
           ></app-process-info>
-    
+
           <!-- Queue Stats -->
           <app-queue-stats
             [queues]="appMetrics?.queues"
             [loading]="loadingApp"
           ></app-queue-stats>
-    
+
           <!-- Redis Info - Redesigned -->
           @if (appMetrics?.redis) {
-            <app-card [padding]="false" customClasses="!rounded-xl overflow-hidden">
-              <div slot="header" class="flex items-center gap-2" style="background: linear-gradient(135deg, rgba(239,68,68,0.05) 0%, transparent 100%);">
-                <span class="w-5 h-5 rounded flex items-center justify-center bg-red-500/10">
-                  <svg class="w-3 h-3 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/>
+            <app-card
+              [padding]="false"
+              customClasses="!rounded-xl overflow-hidden"
+            >
+              <div
+                slot="header"
+                class="flex items-center gap-2"
+                style="background: linear-gradient(135deg, rgba(239,68,68,0.05) 0%, transparent 100%);"
+              >
+                <span
+                  class="w-5 h-5 rounded flex items-center justify-center bg-red-500/10"
+                >
+                  <svg
+                    class="w-3 h-3 text-red-500"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  >
+                    <path
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                      d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"
+                    />
                   </svg>
                 </span>
-                <h4 class="text-sm font-semibold" style="color: var(--color-text-primary);">Redis</h4>
-                <span class="ml-auto text-xs font-mono px-2 py-0.5 rounded-full bg-red-500/10 text-red-600">v{{ appMetrics!.redis!.redisVersion }}</span>
+                <h4
+                  class="text-sm font-semibold"
+                  style="color: var(--color-text-primary);"
+                >
+                  Redis
+                </h4>
+                <span
+                  class="ml-auto text-xs font-mono px-2 py-0.5 rounded-full bg-red-500/10 text-red-600"
+                  >v{{ appMetrics!.redis!.redisVersion }}</span
+                >
               </div>
               <div class="p-4">
                 <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
-                  <div class="p-3 rounded-lg text-center" style="background: var(--color-surface);">
-                    <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Memoria</p>
-                    <p class="font-mono text-sm font-bold" style="color: var(--color-text-primary);">{{ appMetrics!.redis!.usedMemory }}</p>
+                  <div
+                    class="p-3 rounded-lg text-center"
+                    style="background: var(--color-surface);"
+                  >
+                    <p
+                      class="text-[10px] uppercase tracking-wider font-medium mb-1"
+                      style="color: var(--color-text-muted);"
+                    >
+                      Memoria
+                    </p>
+                    <p
+                      class="font-mono text-sm font-bold"
+                      style="color: var(--color-text-primary);"
+                    >
+                      {{ appMetrics!.redis!.usedMemory }}
+                    </p>
                   </div>
-                  <div class="p-3 rounded-lg text-center" style="background: var(--color-surface);">
-                    <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Clientes</p>
-                    <p class="font-mono text-sm font-bold" style="color: var(--color-text-primary);">{{ appMetrics!.redis!.connectedClients }}</p>
+                  <div
+                    class="p-3 rounded-lg text-center"
+                    style="background: var(--color-surface);"
+                  >
+                    <p
+                      class="text-[10px] uppercase tracking-wider font-medium mb-1"
+                      style="color: var(--color-text-muted);"
+                    >
+                      Clientes
+                    </p>
+                    <p
+                      class="font-mono text-sm font-bold"
+                      style="color: var(--color-text-primary);"
+                    >
+                      {{ appMetrics!.redis!.connectedClients }}
+                    </p>
                   </div>
-                  <div class="p-3 rounded-lg text-center" style="background: var(--color-surface);">
-                    <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Ops/seg</p>
-                    <p class="font-mono text-sm font-bold" style="color: var(--color-text-primary);">{{ appMetrics!.redis!.opsPerSec }}</p>
+                  <div
+                    class="p-3 rounded-lg text-center"
+                    style="background: var(--color-surface);"
+                  >
+                    <p
+                      class="text-[10px] uppercase tracking-wider font-medium mb-1"
+                      style="color: var(--color-text-muted);"
+                    >
+                      Ops/seg
+                    </p>
+                    <p
+                      class="font-mono text-sm font-bold"
+                      style="color: var(--color-text-primary);"
+                    >
+                      {{ appMetrics!.redis!.opsPerSec }}
+                    </p>
                   </div>
-                  <div class="p-3 rounded-lg text-center" style="background: var(--color-surface);">
-                    <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Hit Rate</p>
-                    <p class="font-mono text-sm font-bold" style="color: var(--color-text-primary);">{{ hitRate }}%</p>
+                  <div
+                    class="p-3 rounded-lg text-center"
+                    style="background: var(--color-surface);"
+                  >
+                    <p
+                      class="text-[10px] uppercase tracking-wider font-medium mb-1"
+                      style="color: var(--color-text-muted);"
+                    >
+                      Hit Rate
+                    </p>
+                    <p
+                      class="font-mono text-sm font-bold"
+                      style="color: var(--color-text-primary);"
+                    >
+                      {{ hitRate }}%
+                    </p>
                   </div>
                 </div>
                 <div class="grid grid-cols-3 gap-3">
-                  <div class="p-2 rounded-lg text-center" style="background: var(--color-surface);">
-                    <p class="text-[9px] uppercase tracking-wider" style="color: var(--color-text-muted);">Max Memory</p>
-                    <p class="font-mono text-xs" style="color: var(--color-text-secondary);">{{ appMetrics!.redis!.maxMemory }}</p>
+                  <div
+                    class="p-2 rounded-lg text-center"
+                    style="background: var(--color-surface);"
+                  >
+                    <p
+                      class="text-[9px] uppercase tracking-wider"
+                      style="color: var(--color-text-muted);"
+                    >
+                      Max Memory
+                    </p>
+                    <p
+                      class="font-mono text-xs"
+                      style="color: var(--color-text-secondary);"
+                    >
+                      {{ appMetrics!.redis!.maxMemory }}
+                    </p>
                   </div>
-                  <div class="p-2 rounded-lg text-center" style="background: var(--color-surface);">
-                    <p class="text-[9px] uppercase tracking-wider" style="color: var(--color-text-muted);">Eviction</p>
-                    <p class="font-mono text-xs" style="color: var(--color-text-secondary);">{{ appMetrics!.redis!.evictionPolicy }}</p>
+                  <div
+                    class="p-2 rounded-lg text-center"
+                    style="background: var(--color-surface);"
+                  >
+                    <p
+                      class="text-[9px] uppercase tracking-wider"
+                      style="color: var(--color-text-muted);"
+                    >
+                      Eviction
+                    </p>
+                    <p
+                      class="font-mono text-xs"
+                      style="color: var(--color-text-secondary);"
+                    >
+                      {{ appMetrics!.redis!.evictionPolicy }}
+                    </p>
                   </div>
-                  <div class="p-2 rounded-lg text-center" style="background: var(--color-surface);">
-                    <p class="text-[9px] uppercase tracking-wider" style="color: var(--color-text-muted);">Uptime</p>
-                    <p class="font-mono text-xs" style="color: var(--color-text-secondary);">{{ formatUptime(appMetrics!.redis!.uptimeInSeconds) }}</p>
+                  <div
+                    class="p-2 rounded-lg text-center"
+                    style="background: var(--color-surface);"
+                  >
+                    <p
+                      class="text-[9px] uppercase tracking-wider"
+                      style="color: var(--color-text-muted);"
+                    >
+                      Uptime
+                    </p>
+                    <p
+                      class="font-mono text-xs"
+                      style="color: var(--color-text-secondary);"
+                    >
+                      {{ formatUptime(appMetrics!.redis!.uptimeInSeconds) }}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -444,7 +740,7 @@ import {
         </div>
       </app-card>
     </div>
-    `,
+  `,
   styleUrls: ['./monitoring.component.css'],
 })
 export class MonitoringComponent implements OnInit, OnDestroy {
@@ -493,7 +789,9 @@ export class MonitoringComponent implements OnInit, OnDestroy {
   }
 
   get ec2CpuValue(): string {
-    return this.overview ? `${this.overview.ec2.cpuUtilization.toFixed(1)}%` : '--';
+    return this.overview
+      ? `${this.overview.ec2.cpuUtilization.toFixed(1)}%`
+      : '--';
   }
 
   get ec2CpuSmall(): string {
@@ -509,7 +807,9 @@ export class MonitoringComponent implements OnInit, OnDestroy {
   }
 
   get rdsCpuValue(): string {
-    return this.overview ? `${this.overview.rds.cpuUtilization.toFixed(1)}%` : '--';
+    return this.overview
+      ? `${this.overview.rds.cpuUtilization.toFixed(1)}%`
+      : '--';
   }
 
   get rdsConnectionsSmall(): string {
@@ -547,7 +847,9 @@ export class MonitoringComponent implements OnInit, OnDestroy {
 
   // Performance computed values
   get avgResponseTime(): string {
-    return this.performanceSnapshot ? `${this.performanceSnapshot.responseTime.mean.toFixed(0)}ms` : '--';
+    return this.performanceSnapshot
+      ? `${this.performanceSnapshot.responseTime.mean.toFixed(0)}ms`
+      : '--';
   }
 
   get avgResponseTimeBg(): string {
@@ -565,7 +867,9 @@ export class MonitoringComponent implements OnInit, OnDestroy {
   }
 
   get reqPerSec(): string {
-    return this.performanceSnapshot ? `${this.performanceSnapshot.throughput.current.toFixed(1)}` : '--';
+    return this.performanceSnapshot
+      ? `${this.performanceSnapshot.throughput.current.toFixed(1)}`
+      : '--';
   }
 
   get errorRate(): string {
@@ -578,7 +882,8 @@ export class MonitoringComponent implements OnInit, OnDestroy {
   get errorRateBg(): string {
     if (!this.performanceSnapshot) return 'bg-green-500/10';
     const e = this.performanceSnapshot.errors.last5min;
-    const rate = e.total > 0 ? (e.errors4xx + e.errors5xx) / e.total * 100 : 0;
+    const rate =
+      e.total > 0 ? ((e.errors4xx + e.errors5xx) / e.total) * 100 : 0;
     if (rate >= 5) return 'bg-red-500/10';
     if (rate >= 1) return 'bg-yellow-500/10';
     return 'bg-green-500/10';
@@ -587,14 +892,17 @@ export class MonitoringComponent implements OnInit, OnDestroy {
   get errorRateColor(): string {
     if (!this.performanceSnapshot) return 'text-green-500';
     const e = this.performanceSnapshot.errors.last5min;
-    const rate = e.total > 0 ? (e.errors4xx + e.errors5xx) / e.total * 100 : 0;
+    const rate =
+      e.total > 0 ? ((e.errors4xx + e.errors5xx) / e.total) * 100 : 0;
     if (rate >= 5) return 'text-red-500';
     if (rate >= 1) return 'text-yellow-500';
     return 'text-green-500';
   }
 
   get eventLoopP99(): string {
-    return this.performanceSnapshot?.eventLoop?.current ? `${this.performanceSnapshot.eventLoop.current.p99.toFixed(1)}ms` : '--';
+    return this.performanceSnapshot?.eventLoop?.current
+      ? `${this.performanceSnapshot.eventLoop.current.p99.toFixed(1)}ms`
+      : '--';
   }
 
   get eventLoopBg(): string {
@@ -613,25 +921,60 @@ export class MonitoringComponent implements OnInit, OnDestroy {
 
   // Time series mappers for charts
   get rtP50Points(): TimeSeriesPoint[] {
-    return this.performanceHistory?.responseTimes?.map(r => ({ timestamp: r.timestamp, value: r.p50 })) || [];
+    return (
+      this.performanceHistory?.responseTimes?.map((r) => ({
+        timestamp: r.timestamp,
+        value: r.p50,
+      })) || []
+    );
   }
   get rtP95Points(): TimeSeriesPoint[] {
-    return this.performanceHistory?.responseTimes?.map(r => ({ timestamp: r.timestamp, value: r.p95 })) || [];
+    return (
+      this.performanceHistory?.responseTimes?.map((r) => ({
+        timestamp: r.timestamp,
+        value: r.p95,
+      })) || []
+    );
   }
   get rtP99Points(): TimeSeriesPoint[] {
-    return this.performanceHistory?.responseTimes?.map(r => ({ timestamp: r.timestamp, value: r.p99 })) || [];
+    return (
+      this.performanceHistory?.responseTimes?.map((r) => ({
+        timestamp: r.timestamp,
+        value: r.p99,
+      })) || []
+    );
   }
   get throughputPoints(): TimeSeriesPoint[] {
-    return this.performanceHistory?.throughput?.map(t => ({ timestamp: t.timestamp, value: t.requestsPerSecond })) || [];
+    return (
+      this.performanceHistory?.throughput?.map((t) => ({
+        timestamp: t.timestamp,
+        value: t.requestsPerSecond,
+      })) || []
+    );
   }
   get errors4xxPoints(): TimeSeriesPoint[] {
-    return this.performanceHistory?.errors?.map(e => ({ timestamp: e.timestamp, value: e.errors4xx })) || [];
+    return (
+      this.performanceHistory?.errors?.map((e) => ({
+        timestamp: e.timestamp,
+        value: e.errors4xx,
+      })) || []
+    );
   }
   get errors5xxPoints(): TimeSeriesPoint[] {
-    return this.performanceHistory?.errors?.map(e => ({ timestamp: e.timestamp, value: e.errors5xx })) || [];
+    return (
+      this.performanceHistory?.errors?.map((e) => ({
+        timestamp: e.timestamp,
+        value: e.errors5xx,
+      })) || []
+    );
   }
   get eventLoopLagPoints(): TimeSeriesPoint[] {
-    return this.performanceHistory?.eventLoopLag?.map(e => ({ timestamp: e.timestamp, value: e.p99 })) || [];
+    return (
+      this.performanceHistory?.eventLoopLag?.map((e) => ({
+        timestamp: e.timestamp,
+        value: e.p99,
+      })) || []
+    );
   }
 
   get hitRate(): string {
@@ -789,24 +1132,30 @@ export class MonitoringComponent implements OnInit, OnDestroy {
   }
 
   private fetchPerformance(): void {
-    this.monitoringService.getPerformance().pipe(
-      map((res) => res.data),
-      catchError(() => of(null)),
-      takeUntil(this.destroy$),
-    ).subscribe((data) => {
-      this.performanceSnapshot = data;
-      this.loadingPerformance = false;
-    });
+    this.monitoringService
+      .getPerformance()
+      .pipe(
+        map((res) => res.data),
+        catchError(() => of(null)),
+        takeUntil(this.destroy$),
+      )
+      .subscribe((data) => {
+        this.performanceSnapshot = data;
+        this.loadingPerformance = false;
+      });
   }
 
   private fetchPerformanceHistory(): void {
-    this.monitoringService.getPerformanceHistory(this.performanceTimeRange).pipe(
-      map((res) => res.data),
-      catchError(() => of(null)),
-      takeUntil(this.destroy$),
-    ).subscribe((data) => {
-      this.performanceHistory = data;
-    });
+    this.monitoringService
+      .getPerformanceHistory(this.performanceTimeRange)
+      .pipe(
+        map((res) => res.data),
+        catchError(() => of(null)),
+        takeUntil(this.destroy$),
+      )
+      .subscribe((data) => {
+        this.performanceHistory = data;
+      });
   }
 
   private fetchAppMetrics(): void {

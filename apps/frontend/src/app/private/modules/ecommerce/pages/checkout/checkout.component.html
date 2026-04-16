@@ -38,7 +38,7 @@
     </div>
   </div>
 
-  @if (is_loading) {
+  @if (is_loading()) {
     <div class="loading">
       <div class="spinner"></div>
       <p>Cargando...</p>
@@ -289,7 +289,7 @@
             </div>
 
             <!-- Wompi Info Panel -->
-            @if (isWompiPayment) {
+            @if (isWompiPayment()) {
               <div class="wompi-info-panel">
                 <div class="wompi-info-header">
                   <app-icon name="shield-check" [size]="20"></app-icon>
@@ -376,10 +376,10 @@
           </div>
         }
 
-        @if (error_message) {
+        @if (error_message()) {
           <div class="error-message">
             <i class="pi pi-exclamation-circle"></i>
-            {{ error_message }}
+            {{ error_message() }}
           </div>
         }
 
@@ -413,20 +413,20 @@
             <app-button
               variant="primary"
               (clicked)="placeOrder()"
-              [loading]="is_submitting || wompiWidgetLoading"
-              [disabled]="is_submitting || wompiWidgetLoading"
+              [loading]="is_submitting() || wompiWidgetLoading()"
+              [disabled]="is_submitting() || wompiWidgetLoading()"
             >
-              @if (!is_submitting && !wompiWidgetLoading) {
+              @if (!is_submitting() && !wompiWidgetLoading()) {
                 <app-icon
                   slot="icon"
-                  [name]="isWompiPayment ? 'shield-check' : 'check'"
+                  [name]="isWompiPayment() ? 'shield-check' : 'check'"
                   [size]="16"
                 ></app-icon>
               }
               {{
-                is_submitting || wompiWidgetLoading
+                is_submitting() || wompiWidgetLoading()
                   ? "Procesando..."
-                  : isWompiPayment
+                  : isWompiPayment()
                     ? "Pagar con Wompi"
                     : "Confirmar Pedido"
               }}
@@ -480,7 +480,7 @@
     </div>
   }
 
-  @if (recommendedProducts().length > 0 && !is_submitting) {
+  @if (recommendedProducts().length > 0 && !is_submitting()) {
     <div class="checkout-offers">
       <app-product-carousel
         title="Agrega ofertas imperdibles a tu compra"
@@ -498,7 +498,7 @@
     (addedToCart)="onAddToCartFromSlider($event)"
   />
 
-  @if (wompiWidgetLoading) {
+  @if (wompiWidgetLoading()) {
     <div class="wompi-loading-overlay">
       <div class="spinner"></div>
       <p>Preparando pago seguro...</p>

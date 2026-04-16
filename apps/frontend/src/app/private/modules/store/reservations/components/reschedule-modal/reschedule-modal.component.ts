@@ -1,4 +1,4 @@
-import { Component, input, output, signal, inject, ChangeDetectionStrategy } from '@angular/core';
+import { Component, input, output, signal, inject } from '@angular/core';
 
 import {
   ModalComponent,
@@ -17,7 +17,6 @@ import { finalize } from 'rxjs';
   imports: [ModalComponent, ButtonComponent, IconComponent, SpinnerComponent],
   templateUrl: './reschedule-modal.component.html',
   styleUrls: ['./reschedule-modal.component.scss'],
-  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class RescheduleModalComponent {
   private reservationsService = inject(ReservationsService);

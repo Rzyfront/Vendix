@@ -1,4 +1,4 @@
-import { Component, Input, input } from '@angular/core';
+import { Component, input } from '@angular/core';
 
 import { IconComponent } from '../icon/icon.component';
 
@@ -12,7 +12,7 @@ import { IconComponent } from '../icon/icon.component';
 export class StatsComponent {
   readonly title = input.required<string>();
   readonly value = input<string | number>('');
-  @Input() smallText?: string;
+  readonly smallText = input<string | undefined>(undefined);
   readonly iconName = input<string>('info');
   readonly iconBgColor = input<string>('bg-primary/10');
   readonly iconColor = input<string>('text-primary');

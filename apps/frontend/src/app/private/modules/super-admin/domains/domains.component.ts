@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, signal } from '@angular/core';
 
 import { RouterModule } from '@angular/router';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
@@ -59,7 +59,7 @@ import './domains.component.css';
   template: `
     <div class="space-y-6">
       <!-- Domain Stats Component -->
-      <app-domain-stats [stats]="stats"></app-domain-stats>
+      <app-domain-stats [stats]="stats()"></app-domain-stats>
 
       <!-- Domains List -->
       <div class="bg-surface rounded-card shadow-card border border-border">
@@ -69,7 +69,7 @@ import './domains.component.css';
           >
             <div class="flex-1 min-w-0">
               <h2 class="text-lg font-semibold text-text-primary">
-                Todos los Dominios ({{ pagination.total }})
+                Todos los Dominios ({{ pagination().total }})
               </h2>
             </div>
 
@@ -99,7 +99,7 @@ import './domains.component.css';
                   variant="outline"
                   size="sm"
                   (clicked)="refreshDomains()"
-                  [disabled]="isLoading"
+                  [disabled]="isLoading()"
                   title="Actualizar"
                 >
                   <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
@@ -110,7 +110,7 @@ import './domains.component.css';
         </div>
 
         <!-- Loading State -->
-        @if (isLoading) {
+        @if (isLoading()) {
           <div class="p-8 text-center">
             <div
               class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
@@ -120,7 +120,7 @@ import './domains.component.css';
         }
 
         <!-- Empty State -->
-        @if (!isLoading && domains.length === 0) {
+        @if (!isLoading() && domains().length === 0) {
           <div class="p-8 text-center">
             <div class="flex flex-col items-center justify-center space-y-4">
               <div class="p-4 bg-surface rounded-full">
@@ -151,24 +151,24 @@ import './domains.component.css';
         }
 
         <!-- Domains Table -->
-        @if (!isLoading && domains.length > 0) {
+        @if (!isLoading() && domains().length > 0) {
           <div class="p-6">
             <app-responsive-data-view
-              [data]="domains"
+              [data]="domains()"
               [columns]="tableColumns"
               [cardConfig]="cardConfig"
               [actions]="tableActions"
-              [loading]="isLoading"
+              [loading]="isLoading()"
               emptyMessage="No hay dominios"
               emptyIcon="globe"
             >
             </app-responsive-data-view>
             <!-- Pagination -->
             <app-pagination
-              [currentPage]="pagination.page"
-              [totalPages]="pagination.totalPages"
-              [total]="pagination.total"
-              [limit]="pagination.limit"
+              [currentPage]="pagination().page"
+              [totalPages]="pagination().totalPages"
+              [total]="pagination().total"
+              [limit]="pagination().limit"
               infoStyle="range"
               (pageChange)="changePage($event)"
             />
@@ -200,8 +200,8 @@ import './domains.component.css';
   `,
 })
 export class DomainsComponent implements OnInit, OnDestroy {
-  domains: DomainListItem[] = [];
-  isLoading = false;
+  readonly domains = signal<DomainListItem[]>([]);
+  readonly isLoading = signal(false);
   searchTerm = '';
 
   // Table configuration
@@ -316,7 +316,7 @@ export class DomainsComponent implements OnInit, OnDestroy {
     ],
   };
 
-  stats: DomainStats = {
+  readonly stats = signal<DomainStats>({
     totalDomains: 0,
     activeDomains: 0,
     pendingDomains: 0,
@@ -327,14 +327,14 @@ export class DomainsComponent implements OnInit, OnDestroy {
     vendixSubdomains: 0,
     customerCustomDomains: 0,
     customerSubdomains: 0,
-  };
+  });
 
-  pagination = {
+  readonly pagination = signal({
     page: 1,
     limit: 10,
     total: 0,
     totalPages: 0,
-  };
+  });
 
   // Modal state
   isCreateModalOpen = false;
@@ -469,18 +469,19 @@ export class DomainsComponent implements OnInit, OnDestroy {
   }
 
   loadDomains(): void {
-    this.isLoading = true;
+    this.isLoading.set(true);
 
+    const pag = this.pagination();
     const query = {
-      page: this.pagination.page,
-      limit: this.pagination.limit,
+      page: pag.page,
+      limit: pag.limit,
       ...(this.searchTerm && { search: this.searchTerm }),
     };
 
     const sub = this.domainsService.getDomains(query).subscribe({
       next: (response) => {
         if (response.success) {
-          this.domains = response.data.map((domain: any) => ({
+          this.domains.set(response.data.map((domain: any) => ({
             id: domain.id,
             hostname: domain.hostname,
             domain_type: domain.domain_type,
@@ -494,16 +495,15 @@ export class DomainsComponent implements OnInit, OnDestroy {
             store: domain.store || undefined,
             created_at: domain.created_at || new Date().toISOString(),
             updated_at: domain.updated_at || new Date().toISOString(),
-          }));
+          })));
 
-          this.pagination.total = response.meta.total;
-          this.pagination.totalPages = response.meta.totalPages;
+          this.pagination.update((p) => ({ ...p, total: response.meta.total, totalPages: response.meta.totalPages }));
         }
-        this.isLoading = false;
+        this.isLoading.set(false);
       },
       error: (error) => {
         console.error('Error loading domains:', error);
-        this.isLoading = false;
+        this.isLoading.set(false);
       },
     });
 
@@ -514,7 +514,7 @@ export class DomainsComponent implements OnInit, OnDestroy {
     const sub = this.domainsService.getDomainStatsList().subscribe({
       next: (response) => {
         if (response.success) {
-          this.stats = response.data;
+          this.stats.set(response.data);
         }
       },
       error: (error) => {
@@ -527,30 +527,22 @@ export class DomainsComponent implements OnInit, OnDestroy {
   }
 
   updateStats(): void {
-    this.stats.totalDomains = this.domains.length;
-    this.stats.activeDomains = this.domains.filter(
-      (domain) => domain.status === DomainStatus.ACTIVE,
-    ).length;
-    this.stats.pendingDomains = this.domains.filter(
-      (domain) => domain.status === DomainStatus.PENDING,
-    ).length;
-    this.stats.verifiedDomains = this.domains.filter(
-      (domain) => domain.status === DomainStatus.VERIFIED,
-    ).length;
-    this.stats.primaryDomains = this.domains.filter(
-      (domain) => domain.domain_type === DomainType.PRIMARY,
-    ).length;
-    this.stats.aliasDomains = this.domains.filter(
-      (domain) => domain.domain_type === DomainType.ALIAS,
-    ).length;
-    this.stats.customerDomains = this.domains.filter(
-      (domain) => domain.domain_type === DomainType.CUSTOMER,
-    ).length;
-
-    // Calculate new stats
-    this.stats.vendixSubdomains = this.stats.primaryDomains;
-    this.stats.customerCustomDomains = this.stats.customerDomains;
-    this.stats.customerSubdomains = this.stats.aliasDomains;
+    const domains = this.domains();
+    const primaryDomains = domains.filter((d) => d.domain_type === DomainType.PRIMARY).length;
+    const aliasDomains = domains.filter((d) => d.domain_type === DomainType.ALIAS).length;
+    const customerDomains = domains.filter((d) => d.domain_type === DomainType.CUSTOMER).length;
+    this.stats.set({
+      totalDomains: domains.length,
+      activeDomains: domains.filter((d) => d.status === DomainStatus.ACTIVE).length,
+      pendingDomains: domains.filter((d) => d.status === DomainStatus.PENDING).length,
+      verifiedDomains: domains.filter((d) => d.status === DomainStatus.VERIFIED).length,
+      primaryDomains,
+      aliasDomains,
+      customerDomains,
+      vendixSubdomains: primaryDomains,
+      customerCustomDomains: customerDomains,
+      customerSubdomains: aliasDomains,
+    });
   }
 
   refreshDomains(): void {
@@ -559,7 +551,7 @@ export class DomainsComponent implements OnInit, OnDestroy {
 
   onSearchChange(searchTerm: string): void {
     this.searchTerm = searchTerm;
-    this.pagination.page = 1;
+    this.pagination.update((p) => ({ ...p, page: 1 }));
     this.loadDomains();
   }
 
@@ -571,7 +563,7 @@ export class DomainsComponent implements OnInit, OnDestroy {
   }
 
   changePage(page: number): void {
-    this.pagination.page = page;
+    this.pagination.update((p) => ({ ...p, page }));
     this.loadDomains();
   }
 

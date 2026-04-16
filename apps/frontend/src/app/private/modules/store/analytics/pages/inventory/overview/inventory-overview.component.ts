@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { Observable, Subject, combineLatest, takeUntil } from 'rxjs';
+import { toSignal } from '@angular/core/rxjs-interop';
 
 import { CardComponent } from '../../../../../../../shared/components/card/card.component';
 import { StatsComponent } from '../../../../../../../shared/components/stats/stats.component';
@@ -88,6 +89,14 @@ export class InventoryOverviewComponent implements OnInit, OnDestroy {
   outOfStockPct$: Observable<string> = this.store.select(
     InventorySelectors.selectOutOfStockPercentage,
   );
+
+  readonly summary = toSignal(this.summary$, { initialValue: null });
+  readonly loading = toSignal(this.loading$, { initialValue: false });
+  readonly loadingTrends = toSignal(this.loadingTrends$, { initialValue: false });
+  readonly loadingValuation = toSignal(this.loadingValuation$, { initialValue: false });
+  readonly exporting = toSignal(this.exporting$, { initialValue: false });
+  readonly lowStockPct = toSignal(this.lowStockPct$, { initialValue: '0' });
+  readonly outOfStockPct = toSignal(this.outOfStockPct$, { initialValue: '0' });
 
   // Chart options
   movementTrendChartOptions: EChartsOption = {};

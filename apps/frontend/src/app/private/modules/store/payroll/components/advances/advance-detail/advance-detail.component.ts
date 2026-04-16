@@ -1,5 +1,5 @@
-import { Component, Input, Output, EventEmitter, OnDestroy, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input, output, model, inject, signal, effect, DestroyRef } from '@angular/core';
+import { DatePipe } from '@angular/common';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
@@ -18,7 +18,7 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
   selector: 'app-advance-detail',
   standalone: true,
   imports: [
-    CommonModule,
+    DatePipe,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
@@ -27,39 +27,39 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
-      (isOpenChange)="isOpenChange.emit($event)"
+      [isOpen]="isOpen()"
+      (isOpenChange)="isOpen.set($event)"
       (cancel)="onClose()"
       title="Detalle de Adelanto"
       size="xl"
       >
-      @if (advance) {
+      @if (advance()) {
         <div class="p-4 max-h-[75vh] overflow-y-auto">
           <!-- Header -->
           <div class="mb-4 flex flex-wrap items-center gap-3">
-            <span class="text-lg font-semibold text-text-primary">{{ advance.advance_number }}</span>
-            <span [class]="getStatusBadgeClass(advance.status)" class="px-2 py-0.5 rounded-full text-xs font-medium">
-              {{ getStatusLabel(advance.status) }}
+            <span class="text-lg font-semibold text-text-primary">{{ advance()?.advance_number }}</span>
+            <span [class]="getStatusBadgeClass(advance()!.status)" class="px-2 py-0.5 rounded-full text-xs font-medium">
+              {{ getStatusLabel(advance()!.status) }}
             </span>
             <span class="text-sm text-text-secondary ml-auto">
-              {{ getFrequencyLabel(advance.frequency) }}
+              {{ getFrequencyLabel(advance()!.frequency) }}
             </span>
           </div>
           <!-- Employee Info -->
-          @if (advance.employee) {
+          @if (advance()?.employee) {
             <div class="mb-4 p-3 bg-gray-50 rounded-lg">
               <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
                 <div>
                   <span class="text-xs text-text-secondary block">Empleado</span>
-                  <span class="text-sm font-medium">{{ advance.employee.first_name }} {{ advance.employee.last_name }}</span>
+                  <span class="text-sm font-medium">{{ advance()?.employee.first_name }} {{ advance()?.employee.last_name }}</span>
                 </div>
                 <div>
                   <span class="text-xs text-text-secondary block">Documento</span>
-                  <span class="text-sm font-medium">{{ advance.employee.document_number }}</span>
+                  <span class="text-sm font-medium">{{ advance()?.employee.document_number }}</span>
                 </div>
                 <div>
                   <span class="text-xs text-text-secondary block">Fecha Solicitud</span>
-                  <span class="text-sm font-medium">{{ advance.advance_date | date:'dd/MM/yyyy' }}</span>
+                  <span class="text-sm font-medium">{{ advance()?.advance_date | date:'dd/MM/yyyy' }}</span>
                 </div>
               </div>
             </div>
@@ -68,38 +68,38 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
           <div class="mb-4 grid grid-cols-2 md:grid-cols-4 gap-3">
             <div class="p-3 bg-blue-50 rounded-lg border border-blue-100">
               <span class="text-xs text-blue-600 block">Solicitado</span>
-              <span class="text-lg font-bold text-blue-800">{{ formatNumber(advance.amount_requested) }}</span>
+              <span class="text-lg font-bold text-blue-800">{{ formatNumber(advance()!.amount_requested) }}</span>
             </div>
             <div class="p-3 bg-indigo-50 rounded-lg border border-indigo-100">
               <span class="text-xs text-indigo-600 block">Aprobado</span>
-              <span class="text-lg font-bold text-indigo-800">{{ formatNumber(advance.amount_approved) }}</span>
+              <span class="text-lg font-bold text-indigo-800">{{ formatNumber(advance()!.amount_approved) }}</span>
             </div>
             <div class="p-3 bg-green-50 rounded-lg border border-green-100">
               <span class="text-xs text-green-600 block">Pagado</span>
-              <span class="text-lg font-bold text-green-800">{{ formatNumber(advance.amount_paid) }}</span>
+              <span class="text-lg font-bold text-green-800">{{ formatNumber(advance()!.amount_paid) }}</span>
             </div>
             <div class="p-3 bg-red-50 rounded-lg border border-red-100">
               <span class="text-xs text-red-600 block">Pendiente</span>
-              <span class="text-lg font-bold text-red-800">{{ formatNumber(advance.amount_pending) }}</span>
+              <span class="text-lg font-bold text-red-800">{{ formatNumber(advance()!.amount_pending) }}</span>
             </div>
           </div>
           <!-- Installment Info -->
           <div class="mb-4 p-3 bg-gray-50 rounded-lg grid grid-cols-2 md:grid-cols-3 gap-3">
             <div>
               <span class="text-xs text-text-secondary block">Cuotas</span>
-              <span class="text-sm font-medium">{{ advance.installments }}</span>
+              <span class="text-sm font-medium">{{ advance()?.installments }}</span>
             </div>
             <div>
               <span class="text-xs text-text-secondary block">Valor por Cuota</span>
-              <span class="text-sm font-medium">{{ formatNumber(advance.installment_value) }}</span>
+              <span class="text-sm font-medium">{{ formatNumber(advance()!.installment_value) }}</span>
             </div>
             <div>
               <span class="text-xs text-text-secondary block">Frecuencia</span>
-              <span class="text-sm font-medium">{{ getFrequencyLabel(advance.frequency) }}</span>
+              <span class="text-sm font-medium">{{ getFrequencyLabel(advance()!.frequency) }}</span>
             </div>
           </div>
           <!-- Repayment Progress -->
-          @if (advance.status !== 'pending' && advance.status !== 'rejected') {
+          @if (advance()?.status !== 'pending' && advance()!.status !== 'rejected') {
             <div class="mb-4">
               <div class="flex justify-between text-xs text-text-secondary mb-1">
                 <span>Progreso de Pago</span>
@@ -111,13 +111,13 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
                 </div>
               </div>
               <div class="flex justify-between text-[10px] text-text-secondary mt-0.5">
-                <span>{{ getPaidInstallments() }} de {{ advance.installments }} cuotas</span>
-                <span>{{ formatNumber(advance.amount_paid) }} / {{ formatNumber(advance.amount_approved) }}</span>
+                <span>{{ getPaidInstallments() }} de {{ advance()?.installments }} cuotas</span>
+                <span>{{ formatNumber(advance()!.amount_paid) }} / {{ formatNumber(advance()!.amount_approved) }}</span>
               </div>
             </div>
           }
           <!-- Installment Schedule -->
-          @if (advance.advance_installments && advance.advance_installments.length > 0) {
+          @if (advance()?.advance_installments && advance()!.advance_installments!.length > 0) {
             <div class="mb-4">
               <h3 class="text-xs font-bold text-text-primary uppercase tracking-wider mb-3">Cronograma de Cuotas</h3>
               <!-- Desktop Table -->
@@ -134,7 +134,7 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
                     </tr>
                   </thead>
                   <tbody>
-                    @for (inst of advance.advance_installments; track inst) {
+                    @for (inst of advance()!.advance_installments; track inst) {
                       <tr
                         class="border-b border-border"
                         [class.bg-green-50]="inst.status === 'paid'"
@@ -166,7 +166,7 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
               </div>
               <!-- Mobile Cards -->
               <div class="md:hidden space-y-2">
-                @for (inst of advance.advance_installments; track inst) {
+                @for (inst of advance()!.advance_installments; track inst) {
                   <div
                     class="p-3 rounded-lg border"
                     [class.bg-green-50]="inst.status === 'paid'"
@@ -205,21 +205,21 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
             </div>
           }
           <!-- Reason -->
-          @if (advance.reason) {
+          @if (advance()?.reason) {
             <div class="mb-4 p-3 bg-yellow-50 rounded-lg border border-yellow-100">
               <h3 class="text-xs font-bold text-yellow-700 uppercase tracking-wider mb-1">Motivo</h3>
-              <p class="text-sm text-yellow-800">{{ advance.reason }}</p>
+              <p class="text-sm text-yellow-800">{{ advance()?.reason }}</p>
             </div>
           }
           <!-- Notes -->
-          @if (advance.notes) {
+          @if (advance()?.notes) {
             <div class="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-100">
               <h3 class="text-xs font-bold text-blue-700 uppercase tracking-wider mb-1">Notas</h3>
-              <p class="text-sm text-blue-800">{{ advance.notes }}</p>
+              <p class="text-sm text-blue-800">{{ advance()?.notes }}</p>
             </div>
           }
           <!-- Payment History -->
-          @if (advance.advance_payments && advance.advance_payments.length > 0) {
+          @if (advance()?.advance_payments && advance()!.advance_payments!.length > 0) {
             <div class="mb-4">
               <h3 class="text-xs font-bold text-text-primary uppercase tracking-wider mb-3">Historial de Pagos</h3>
               <!-- Desktop Table -->
@@ -234,7 +234,7 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
                     </tr>
                   </thead>
                   <tbody>
-                    @for (payment of advance.advance_payments; track payment) {
+                    @for (payment of advance()!.advance_payments; track payment) {
                       <tr class="border-b border-border">
                         <td class="py-2 px-3">{{ payment.payment_date | date:'dd/MM/yyyy' }}</td>
                         <td class="py-2 px-3 text-right font-medium">{{ formatNumber(payment.amount) }}</td>
@@ -252,7 +252,7 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
               </div>
               <!-- Mobile Cards -->
               <div class="md:hidden space-y-2">
-                @for (payment of advance.advance_payments; track payment) {
+                @for (payment of advance()!.advance_payments; track payment) {
                   <div
                     class="p-3 bg-surface rounded-lg border border-border">
                     <div class="flex justify-between items-center mb-1">
@@ -272,7 +272,7 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
             </div>
           }
           <!-- Empty payment history -->
-          @if (!advance.advance_payments || advance.advance_payments.length === 0) {
+          @if (!advance()?.advance_payments || advance()!.advance_payments!.length === 0) {
             <div
               class="mb-4 py-6 flex flex-col items-center rounded-lg border-2 border-dashed border-border">
               <app-icon name="receipt" [size]="28" class="text-gray-400 mb-2"></app-icon>
@@ -280,7 +280,7 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
             </div>
           }
           <!-- Manual Payment Form (inline) -->
-          @if (advance.status === 'approved' || advance.status === 'repaying') {
+          @if (advance()?.status === 'approved' || advance()!.status === 'repaying') {
             <div
               class="mb-4 p-4 bg-gray-50 rounded-xl border border-border">
               <h3 class="text-xs font-bold text-text-primary uppercase tracking-wider mb-3">Registrar Pago Manual</h3>
@@ -327,13 +327,13 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
             </div>
           }
           <!-- Actions -->
-          @if (advance.status !== 'paid' && advance.status !== 'rejected' && advance.status !== 'cancelled') {
+          @if (advance()?.status !== 'paid' && advance()!.status !== 'rejected' && advance()!.status !== 'cancelled') {
             <div class="mt-6 pt-4 border-t border-border"
               >
               <h3 class="text-xs font-bold text-text-primary uppercase tracking-wider mb-3">Acciones</h3>
               <div class="space-y-2">
                 <!-- Approve (pending) -->
-                @if (advance.status === 'pending') {
+                @if (advance()?.status === 'pending') {
                   <app-button
                     variant="success"
                     [fullWidth]="true"
@@ -354,7 +354,7 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
                   </app-button>
                 }
                 <!-- Cancel -->
-                @if (advance.status === 'approved' || advance.status === 'repaying') {
+                @if (advance()?.status === 'approved' || advance()!.status === 'repaying') {
                   <app-button
                     variant="outline-danger"
                     [fullWidth]="true"
@@ -382,17 +382,23 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
     </app-modal>
     `,
 })
-export class AdvanceDetailComponent implements OnDestroy {
-  @Input() isOpen = false;
-  @Input() advance: EmployeeAdvance | null = null;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() updated = new EventEmitter<void>();
+export class AdvanceDetailComponent {
+  readonly isOpen = model<boolean>(false);
+  readonly advanceInput = input<EmployeeAdvance | null>(null);
+  readonly updated = output<void>();
+
+  readonly advance = signal<EmployeeAdvance | null>(null);
 
   private fb = inject(FormBuilder);
   private payrollService = inject(PayrollService);
   private toastService = inject(ToastService);
   private currencyService = inject(CurrencyFormatService);
   private destroy$ = new Subject<void>();
+
+  constructor() {
+    inject(DestroyRef).onDestroy(() => this.destroy$.next());
+    effect(() => { this.advance.set(this.advanceInput()); });
+  }
 
   actionLoading = false;
   paymentLoading = false;
@@ -403,30 +409,21 @@ export class AdvanceDetailComponent implements OnDestroy {
     notes: [''],
   });
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
   formatNumber(value: number): string {
     return this.currencyService.format(Number(value) || 0);
   }
 
   onApprove(): void {
-    if (!this.advance) return;
+    const adv = this.advance();
+    if (!adv) return;
     this.actionLoading = true;
-    this.payrollService.approveAdvance(this.advance.id)
+    this.payrollService.approveAdvance(adv.id)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (res) => {
-          this.advance = res.data;
+          this.advance.set(res.data);
           this.actionLoading = false;
           this.toastService.show({ variant: 'success', description: 'Adelanto aprobado' });
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
           this.updated.emit();
         },
         error: () => {
@@ -437,20 +434,16 @@ export class AdvanceDetailComponent implements OnDestroy {
   }
 
   onReject(): void {
-    if (!this.advance) return;
+    const adv = this.advance();
+    if (!adv) return;
     this.actionLoading = true;
-    this.payrollService.rejectAdvance(this.advance.id)
+    this.payrollService.rejectAdvance(adv.id)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (res) => {
-          this.advance = res.data;
+          this.advance.set(res.data);
           this.actionLoading = false;
           this.toastService.show({ variant: 'success', description: 'Adelanto rechazado' });
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
           this.updated.emit();
         },
         error: () => {
@@ -461,20 +454,16 @@ export class AdvanceDetailComponent implements OnDestroy {
   }
 
   onCancel(): void {
-    if (!this.advance) return;
+    const adv = this.advance();
+    if (!adv) return;
     this.actionLoading = true;
-    this.payrollService.cancelAdvance(this.advance.id)
+    this.payrollService.cancelAdvance(adv.id)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (res) => {
-          this.advance = res.data;
+          this.advance.set(res.data);
           this.actionLoading = false;
           this.toastService.show({ variant: 'success', description: 'Adelanto cancelado' });
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
           this.updated.emit();
         },
         error: () => {
@@ -485,7 +474,8 @@ export class AdvanceDetailComponent implements OnDestroy {
   }
 
   onRegisterPayment(): void {
-    if (!this.advance || this.paymentForm.invalid) return;
+    const adv = this.advance();
+    if (!adv || this.paymentForm.invalid) return;
     this.paymentLoading = true;
 
     const val = this.paymentForm.value;
@@ -495,21 +485,16 @@ export class AdvanceDetailComponent implements OnDestroy {
       notes: val.notes || undefined,
     };
 
-    this.payrollService.registerAdvancePayment(this.advance.id, dto)
+    this.payrollService.registerAdvancePayment(adv.id, dto)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (res) => {
-          this.advance = res.data;
+          this.advance.set(res.data);
           this.paymentLoading = false;
           this.paymentForm.reset({
             payment_date: toLocalDateString(),
           });
           this.toastService.show({ variant: 'success', description: 'Pago registrado' });
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
           this.updated.emit();
         },
         error: () => {
@@ -520,7 +505,7 @@ export class AdvanceDetailComponent implements OnDestroy {
   }
 
   onClose(): void {
-    this.isOpenChange.emit(false);
+    this.isOpen.set(false);
   }
 
   getStatusLabel(status: string): string {
@@ -559,12 +544,13 @@ export class AdvanceDetailComponent implements OnDestroy {
   // ─── Installment Methods ───────────────────────
 
   getProgressPercent(): number {
-    if (!this.advance || !Number(this.advance.amount_approved)) return 0;
-    return Math.min(100, Math.round((Number(this.advance.amount_paid) / Number(this.advance.amount_approved)) * 100));
+    const adv = this.advance();
+    if (!adv || !Number(adv.amount_approved)) return 0;
+    return Math.min(100, Math.round((Number(adv.amount_paid) / Number(adv.amount_approved)) * 100));
   }
 
   getPaidInstallments(): number {
-    return this.advance?.advance_installments?.filter(i => i.status === 'paid').length || 0;
+    return this.advance()?.advance_installments?.filter(i => i.status === 'paid').length || 0;
   }
 
   getInstallmentLabel(status: string): string {
@@ -589,7 +575,8 @@ export class AdvanceDetailComponent implements OnDestroy {
   }
 
   onMarkInstallmentPaid(installment: AdvanceInstallment): void {
-    if (!this.advance) return;
+    const adv = this.advance();
+    if (!adv) return;
     this.paymentLoading = true;
 
     const dto: AdvanceManualPaymentDto = {
@@ -597,18 +584,13 @@ export class AdvanceDetailComponent implements OnDestroy {
       payment_date: toLocalDateString(),
     };
 
-    this.payrollService.markInstallmentPaid(this.advance.id, installment.id, dto)
+    this.payrollService.markInstallmentPaid(adv.id, installment.id, dto)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (res) => {
-          this.advance = res.data;
+          this.advance.set(res.data);
           this.paymentLoading = false;
           this.toastService.show({ variant: 'success', description: `Cuota #${installment.installment_number} pagada` });
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
           this.updated.emit();
         },
         error: () => {

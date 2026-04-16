@@ -1,8 +1,8 @@
-import { Component, Input, Output, EventEmitter, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject, signal, input, output } from '@angular/core';
+
 import { FormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
-import { Observable } from 'rxjs';
+import { toSignal } from '@angular/core/rxjs-interop';
 
 import { Expense } from '../../interfaces/expense.interface';
 import * as ExpensesActions from '../../state/actions/expenses.actions';
@@ -36,7 +36,6 @@ import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
   selector: 'app-expenses-list',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     InputsearchComponent,
     OptionsDropdownComponent,
@@ -45,31 +44,31 @@ import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
     IconComponent,
     PaginationComponent,
     EmptyStateComponent,
-    CardComponent,
-  ],
+    CardComponent
+],
   templateUrl: './expenses-list.component.html',
 })
 export class ExpensesListComponent {
-  @Input() expenses: Expense[] = [];
-  @Input() loading = false;
+  readonly expenses = input<Expense[]>([]);
+  readonly loading = input<boolean>(false);
 
-  @Output() create = new EventEmitter<void>();
-  @Output() edit = new EventEmitter<Expense>();
-  @Output() categories = new EventEmitter<void>();
-  @Output() refresh = new EventEmitter<void>();
+  readonly create = output<void>();
+  readonly edit = output<Expense>();
+  readonly categories = output<void>();
+  readonly refresh = output<void>();
 
   private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
 
-  // Observables from store for current filter values
-  search$: Observable<string> = this.store.select(selectSearch);
-  stateFilter$: Observable<string> = this.store.select(selectStateFilter);
-  meta$ = this.store.select(selectExpensesMeta);
-  page$ = this.store.select(selectPage);
+  // Signals from store for current filter values
+  readonly search = toSignal(this.store.select(selectSearch), { initialValue: '' });
+  readonly stateFilter = toSignal(this.store.select(selectStateFilter), { initialValue: '' });
+  readonly meta = toSignal(this.store.select(selectExpensesMeta), { initialValue: null });
+  readonly page = toSignal(this.store.select(selectPage), { initialValue: 1 });
 
   // Local tracking for template binding
-  searchTerm = '';
-  filterValues: FilterValues = {};
+  readonly searchTerm = signal('');
+  readonly filterValues = signal<FilterValues>({});
 
   // Filter configuration for the options dropdown
   filterConfigs: FilterConfig[] = [
@@ -191,39 +190,29 @@ export class ExpensesListComponent {
 
   // Event handlers — dispatch NgRx actions instead of local state
   onSearchChange(term: string): void {
-    this.searchTerm = term;
+    this.searchTerm.set(term);
     this.store.dispatch(ExpensesActions.setSearch({ search: term }));
   }
 
   onFilterChange(values: FilterValues): void {
-    this.filterValues = { ...values };
+    this.filterValues.set({ ...values });
     const stateFilter = (values['state'] as string) || '';
     this.store.dispatch(ExpensesActions.setStateFilter({ stateFilter }));
   }
 
   onClearFilters(): void {
-    this.searchTerm = '';
-    this.filterValues = {};
+    this.searchTerm.set('');
+    this.filterValues.set({});
     this.store.dispatch(ExpensesActions.clearFilters());
   }
 
   onActionClick(action: string): void {
     switch (action) {
       case 'create':
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        this.create.emit();
+        this.create.emit(undefined);
         break;
       case 'categories':
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        this.categories.emit();
+        this.categories.emit(undefined);
         break;
     }
   }
@@ -250,7 +239,7 @@ export class ExpensesListComponent {
   }
 
   get hasFilters(): boolean {
-    return !!(this.searchTerm || this.filterValues['state']);
+    return !!(this.searchTerm() || this.filterValues()['state']);
   }
 
   getEmptyStateTitle(): string {

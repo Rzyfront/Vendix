@@ -1,11 +1,12 @@
 import {
   Component,
-  Input,
   TemplateRef,
   ContentChild,
-  AfterContentInit,
+  ChangeDetectionStrategy,
   input,
-  output
+  output,
+  signal,
+  computed,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { IconComponent } from '../icon/icon.component';
@@ -49,69 +50,110 @@ export type SortDirection = 'asc' | 'desc' | null;
 @Component({
   selector: 'app-table',
   standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [CommonModule, IconComponent],
   templateUrl: './table.component.html',
   styleUrl: './table.component.scss',
 })
-export class TableComponent implements AfterContentInit {
-  @Input() data: any[] = [];
+export class TableComponent {
+  // --- Inputs ---
+  readonly data = input<any[]>([]);
   readonly columns = input<TableColumn[]>([]);
-  @Input() actions?: TableAction[];
+  readonly actions = input<TableAction[] | undefined>(undefined);
   readonly size = input<TableSize>('md');
-  readonly loading = input(false);
-  readonly emptyMessage = input('No hay datos disponibles');
-  readonly showHeader = input(true);
-  readonly striped = input(false);
-  readonly hoverable = input(true);
-  readonly bordered = input(false);
-  readonly compact = input(false);
-  readonly sortable = input(false);
-  readonly customClasses = input('');
-  readonly clickableRows = input<boolean>(false);
+  readonly loading = input<boolean>(false);
+  readonly emptyMessage = input<string>('No hay datos disponibles');
+  readonly showHeader = input<boolean>(true);
+  readonly striped = input<boolean>(false);
+  readonly hoverable = input<boolean>(true);
+  readonly bordered = input<boolean>(false);
+  readonly compact = input<boolean>(false);
+  readonly sortable = input<boolean>(false);
+  readonly customClasses = input<string>('');
 
-  readonly sort = output<{
-    column: string;
-    direction: SortDirection;
-}>();
+  // --- Outputs ---
+  readonly sort = output<{ column: string; direction: SortDirection }>();
   readonly rowClick = output<any>();
 
   @ContentChild('actionsTemplate') actionsTemplate?: TemplateRef<any>;
 
-  sortColumn: string | null = null;
-  sortDirection: SortDirection = null;
+  // --- Internal state ---
+  readonly sortColumn = signal<string | null>(null);
+  readonly sortDirection = signal<SortDirection>(null);
 
-  ngAfterContentInit(): void {
-    // Validar que las columnas tengan las propiedades necesarias
-    this.columns().forEach((col) => {
-      if (!col.key || !col.label) {
-        // Columna inválida: cada columna debe tener key y label
-      }
-    });
-  }
+  // --- Computed ---
+  readonly tableClasses = computed(() => {
+    const baseClasses = [
+      'w-full',
+      'border-collapse',
+      'bg-surface',
+      'overflow-hidden',
+    ];
+
+    const sizeClasses: Record<TableSize, string[]> = {
+      sm: ['text-xs'],
+      md: ['text-sm'],
+      lg: ['text-base'],
+    };
+
+    const classes = [...baseClasses, ...sizeClasses[this.size()]];
+
+    if (this.bordered()) {
+      classes.push('border', 'border-border');
+    }
+
+    const custom = this.customClasses();
+    if (custom) {
+      classes.push(custom);
+    }
+
+    return classes.join(' ');
+  });
+
+  readonly headerClasses = computed(() => {
+    const baseClasses = [
+      'bg-muted/20',
+      'font-semibold',
+      'text-text-primary',
+      'border-b',
+      'border-border',
+    ];
+
+    const sizeClasses: Record<TableSize, string[]> = {
+      sm: ['px-3', 'py-2'],
+      md: ['px-4', 'py-3'],
+      lg: ['px-6', 'py-4'],
+    };
+
+    return [...baseClasses, ...sizeClasses[this.size()]].join(' ');
+  });
 
   onSort(column: TableColumn): void {
     if (!this.sortable() || !column.sortable) {
       return;
     }
 
-    if (this.sortColumn === column.key) {
+    const currentColumn = this.sortColumn();
+    const currentDirection = this.sortDirection();
+
+    if (currentColumn === column.key) {
       // Cambiar dirección: asc -> desc -> null
-      if (this.sortDirection === 'asc') {
-        this.sortDirection = 'desc';
-      } else if (this.sortDirection === 'desc') {
-        this.sortDirection = null;
-        this.sortColumn = null;
+      if (currentDirection === 'asc') {
+        this.sortDirection.set('desc');
+      } else if (currentDirection === 'desc') {
+        this.sortDirection.set(null);
+        this.sortColumn.set(null);
       } else {
-        this.sortDirection = 'asc';
+        this.sortDirection.set('asc');
       }
     } else {
-      this.sortColumn = column.key;
-      this.sortDirection = 'asc';
+      this.sortColumn.set(column.key);
+      this.sortDirection.set('asc');
     }
 
     this.sort.emit({
-      column: this.sortColumn!,
-      direction: this.sortDirection!,
+      column: this.sortColumn()!,
+      direction: this.sortDirection()!,
     });
   }
 
@@ -156,61 +198,15 @@ export class TableComponent implements AfterContentInit {
   }
 
   getSortIcon(column: TableColumn): string {
-    if (this.sortColumn !== column.key) {
+    if (this.sortColumn() !== column.key) {
       return 'M7 16l-4-4m0 0l4-4m-4 4h18';
     }
 
-    if (this.sortDirection === 'asc') {
+    if (this.sortDirection() === 'asc') {
       return 'M5 15l7-7 7 7';
     }
 
     return 'M19 9l-7 7-7-7';
-  }
-
-  getTableClasses(): string {
-    const baseClasses = [
-      'w-full',
-      'border-collapse',
-      'bg-surface',
-      'overflow-hidden',
-    ];
-
-    const sizeClasses = {
-      sm: ['text-xs'],
-      md: ['text-sm'],
-      lg: ['text-base'],
-    };
-
-    const classes = [...baseClasses, ...sizeClasses[this.size()]];
-
-    if (this.bordered()) {
-      classes.push('border', 'border-border');
-    }
-
-    const customClasses = this.customClasses();
-    if (customClasses) {
-      classes.push(customClasses);
-    }
-
-    return classes.join(' ');
-  }
-
-  getHeaderClasses(): string {
-    const baseClasses = [
-      'bg-muted/20',
-      'font-semibold',
-      'text-text-primary',
-      'border-b',
-      'border-border',
-    ];
-
-    const sizeClasses = {
-      sm: ['px-3', 'py-2'],
-      md: ['px-4', 'py-3'],
-      lg: ['px-6', 'py-4'],
-    };
-
-    return [...baseClasses, ...sizeClasses[this.size()]].join(' ');
   }
 
   getRowClasses(index: number): string {
@@ -221,7 +217,7 @@ export class TableComponent implements AfterContentInit {
       'duration-150',
     ];
 
-    const sizeClasses = {
+    const sizeClasses: Record<TableSize, string[]> = {
       sm: ['px-3', 'py-2'],
       md: ['px-4', 'py-3'],
       lg: ['px-6', 'py-4'],
@@ -239,7 +235,7 @@ export class TableComponent implements AfterContentInit {
   }
 
   getCellClasses(column: TableColumn): string {
-    const alignClasses = {
+    const alignClasses: Record<string, string[]> = {
       left: ['text-left'],
       center: ['text-center'],
       right: ['text-right'],
@@ -262,10 +258,11 @@ export class TableComponent implements AfterContentInit {
    */
   getResponsiveClasses(column: TableColumn): string[] {
     const classes: string[] = [];
+    const cols = this.columns();
 
-    // Find index of column to determine implicity priority
-    const index = this.columns().indexOf(column);
-    const totalColumns = this.columns().length;
+    // Find index of column to determine implicit priority
+    const index = cols.indexOf(column);
+    const totalColumns = cols.length;
 
     // Explicit priority Logic
     if (column.priority !== undefined) {
@@ -338,9 +335,6 @@ export class TableComponent implements AfterContentInit {
     if (column.badgeConfig.type === 'status') {
       // For status type, use predefined color classes
       // Apply transform if exists to get display value, but use original for class
-      const displayValue = column.transform
-        ? column.transform(value, undefined)
-        : value;
       const originalValue = value; // Use original value for CSS class
 
       // Handle UserState enum values and common status strings

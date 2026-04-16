@@ -9,6 +9,7 @@ import {
 
 import {
   ReactiveFormsModule,
+  FormsModule,
   FormBuilder,
   FormGroup,
   Validators,
@@ -33,6 +34,7 @@ import {
   standalone: true,
   imports: [
     ReactiveFormsModule,
+    FormsModule,
     ModalComponent,
     InputComponent,
     ButtonComponent,
@@ -114,21 +116,24 @@ import {
 
               <app-input
                 label="Código de Moneda"
-                [value]="currencyDetails()?.code || ''"
+                [ngModel]="currencyDetails()?.code || ''"
+                [ngModelOptions]="{ standalone: true }"
                 [disabled]="true"
                 helpText="Código ISO 4217"
               ></app-input>
 
               <app-input
                 label="Nombre de Moneda"
-                [value]="currencyDetails()?.name || ''"
+                [ngModel]="currencyDetails()?.name || ''"
+                [ngModelOptions]="{ standalone: true }"
                 [disabled]="true"
                 helpText="Nombre completo desde API"
               ></app-input>
 
               <app-input
                 label="Símbolo"
-                [value]="currencyDetails()?.symbol || ''"
+                [ngModel]="currencyDetails()?.symbol || ''"
+                [ngModelOptions]="{ standalone: true }"
                 [disabled]="true"
                 helpText="Símbolo de moneda desde API"
               ></app-input>

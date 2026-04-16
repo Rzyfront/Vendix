@@ -1,5 +1,6 @@
-import { Component, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject, signal, DestroyRef } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { NgClass, DatePipe } from '@angular/common';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule, FormsModule } from '@angular/forms';
 import { InvoicingService } from '../../services/invoicing.service';
 import { DianConfig, DianNitType, DianTestResult, DianAuditLog } from '../../interfaces/invoice.interface';
@@ -15,7 +16,8 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
   selector: 'vendix-dian-config',
   standalone: true,
   imports: [
-    CommonModule,
+    NgClass,
+    DatePipe,
     ReactiveFormsModule,
     FormsModule,
     ButtonComponent,
@@ -23,8 +25,8 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
     IconComponent,
     SelectorComponent,
     SpinnerComponent,
-    StepsLineComponent,
-  ],
+    StepsLineComponent
+],
   template: `
     <div class="w-full max-w-4xl mx-auto p-4 md:p-6 space-y-6">
     
@@ -40,17 +42,17 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
           </div>
         </div>
         <div class="flex items-center gap-2">
-          @if (viewMode === 'list') {
+          @if (viewMode() === 'list') {
             <app-button
-              [variant]="showDashboard ? 'outline' : 'ghost'"
+              [variant]="showDashboard() ? 'outline' : 'ghost'"
               size="sm"
               (clicked)="toggleDashboard()"
               >
               <app-icon slot="icon" name="bar-chart-2" [size]="14"></app-icon>
-              {{ showDashboard ? 'Configuraciones' : 'Dashboard' }}
+              {{ showDashboard() ? 'Configuraciones' : 'Dashboard' }}
             </app-button>
           }
-          @if (viewMode === 'detail') {
+          @if (viewMode() === 'detail') {
             <app-button
               variant="outline"
               size="sm"
@@ -66,77 +68,77 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
       <!-- ═══════════════════════════════════════════════════════ -->
       <!-- DASHBOARD VIEW                                         -->
       <!-- ═══════════════════════════════════════════════════════ -->
-      @if (!loading && viewMode === 'list' && showDashboard) {
+      @if (!loading() && viewMode() === 'list' && showDashboard()) {
         <div class="space-y-4">
-          @if (loadingDashboard) {
+          @if (loadingDashboard()) {
             <div class="flex justify-center py-12">
               <app-spinner size="lg"></app-spinner>
             </div>
           }
-          @if (!loadingDashboard && dashboardData) {
+          @if (!loadingDashboard() && dashboardData()) {
             <div class="space-y-4">
               <!-- Stats Cards -->
               <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
                 <div class="border border-border rounded-xl p-4 bg-white">
                   <div class="text-xs text-text-secondary mb-1">Total Enviados</div>
-                  <div class="text-2xl font-bold text-text-primary">{{ dashboardData.stats.total_sent }}</div>
+                  <div class="text-2xl font-bold text-text-primary">{{ dashboardData()!.stats.total_sent }}</div>
                 </div>
                 <div class="border border-border rounded-xl p-4 bg-white">
                   <div class="text-xs text-text-secondary mb-1">Exitosos</div>
-                  <div class="text-2xl font-bold text-green-600">{{ dashboardData.stats.total_success }}</div>
+                  <div class="text-2xl font-bold text-green-600">{{ dashboardData()!.stats.total_success }}</div>
                 </div>
                 <div class="border border-border rounded-xl p-4 bg-white">
                   <div class="text-xs text-text-secondary mb-1">Errores</div>
-                  <div class="text-2xl font-bold text-red-600">{{ dashboardData.stats.total_errors }}</div>
+                  <div class="text-2xl font-bold text-red-600">{{ dashboardData()!.stats.total_errors }}</div>
                 </div>
                 <div class="border border-border rounded-xl p-4 bg-white">
                   <div class="text-xs text-text-secondary mb-1">Tasa de Exito</div>
-                  <div class="text-2xl font-bold text-text-primary">{{ dashboardData.stats.success_rate }}%</div>
+                  <div class="text-2xl font-bold text-text-primary">{{ dashboardData()!.stats.success_rate }}%</div>
                   <div class="mt-2 h-2 bg-gray-100 rounded-full overflow-hidden">
                     <div
                       class="h-full rounded-full transition-all duration-500"
                   [ngClass]="{
-                    'bg-green-500': dashboardData.stats.success_rate >= 90,
-                    'bg-yellow-500': dashboardData.stats.success_rate >= 70 && dashboardData.stats.success_rate < 90,
-                    'bg-red-500': dashboardData.stats.success_rate < 70
+                    'bg-green-500': dashboardData()!.stats.success_rate >= 90,
+                    'bg-yellow-500': dashboardData()!.stats.success_rate >= 70 && dashboardData()!.stats.success_rate < 90,
+                    'bg-red-500': dashboardData()!.stats.success_rate < 70
                   }"
-                      [style.width.%]="dashboardData.stats.success_rate"
+                      [style.width.%]="dashboardData()!.stats.success_rate"
                     ></div>
                   </div>
                 </div>
               </div>
               <!-- Certificate Indicator -->
-              @if (dashboardData.certificate_status) {
+              @if (dashboardData()!.certificate_status) {
                 <div class="border border-border rounded-xl p-4 bg-white">
                   <div class="flex items-center justify-between">
                     <div class="flex items-center gap-2">
                       <app-icon name="shield" [size]="18"
                   [ngClass]="{
-                    'text-green-600': dashboardData.certificate_status.status === 'valid',
-                    'text-yellow-600': dashboardData.certificate_status.status === 'expiring_soon',
-                    'text-red-600': dashboardData.certificate_status.status === 'expired',
-                    'text-gray-400': dashboardData.certificate_status.status === 'not_configured'
+                    'text-green-600': dashboardData()!.certificate_status.status === 'valid',
+                    'text-yellow-600': dashboardData()!.certificate_status.status === 'expiring_soon',
+                    'text-red-600': dashboardData()!.certificate_status.status === 'expired',
+                    'text-gray-400': dashboardData()!.certificate_status.status === 'not_configured'
                   }"
                       ></app-icon>
                       <span class="text-sm font-medium text-text-primary">Certificado Digital</span>
                     </div>
                     <span class="px-2 py-0.5 text-xs rounded-full font-medium"
                 [ngClass]="{
-                  'bg-green-100 text-green-700': dashboardData.certificate_status.status === 'valid',
-                  'bg-yellow-100 text-yellow-700': dashboardData.certificate_status.status === 'expiring_soon',
-                  'bg-red-100 text-red-700': dashboardData.certificate_status.status === 'expired',
-                  'bg-gray-100 text-gray-600': dashboardData.certificate_status.status === 'not_configured'
+                  'bg-green-100 text-green-700': dashboardData()!.certificate_status.status === 'valid',
+                  'bg-yellow-100 text-yellow-700': dashboardData()!.certificate_status.status === 'expiring_soon',
+                  'bg-red-100 text-red-700': dashboardData()!.certificate_status.status === 'expired',
+                  'bg-gray-100 text-gray-600': dashboardData()!.certificate_status.status === 'not_configured'
                 }"
                       >
-                      {{ getCertStatusLabel(dashboardData.certificate_status.status) }}
+                      {{ getCertStatusLabel(dashboardData()!.certificate_status.status) }}
                     </span>
                   </div>
-                  @if (dashboardData.certificate_status.expires) {
+                  @if (dashboardData()!.certificate_status.expires) {
                     <div class="mt-2 text-xs text-text-secondary">
-                      Expira: {{ dashboardData.certificate_status.expires | date:'dd/MM/yyyy' }}
-                      @if (dashboardData.certificate_status.days_remaining !== null) {
+                      Expira: {{ dashboardData()!.certificate_status.expires | date:'dd/MM/yyyy' }}
+                      @if (dashboardData()!.certificate_status.days_remaining !== null) {
                         <span>
-                          ({{ dashboardData.certificate_status.days_remaining }} dias restantes)
+                          ({{ dashboardData()!.certificate_status.days_remaining }} dias restantes)
                         </span>
                       }
                     </div>
@@ -147,7 +149,7 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
               <div class="border border-border rounded-xl p-4 bg-white">
                 <h3 class="text-sm font-semibold text-text-primary mb-3">Ultimos 20 Envios</h3>
                 <div class="overflow-x-auto">
-                  @if (dashboardData.recent_submissions.length > 0) {
+                  @if (dashboardData()!.recent_submissions.length > 0) {
                     <table class="w-full text-sm">
                       <thead>
                         <tr class="border-b border-border">
@@ -159,7 +161,7 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
                         </tr>
                       </thead>
                       <tbody>
-                        @for (log of dashboardData.recent_submissions; track log) {
+                        @for (log of dashboardData()!.recent_submissions; track log) {
                           <tr class="border-b border-border/50 hover:bg-gray-50">
                             <td class="py-2 px-3">
                               <div class="text-text-primary">{{ log.action }}</div>
@@ -195,7 +197,7 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
                       </tbody>
                     </table>
                   }
-                  @if (dashboardData.recent_submissions.length === 0) {
+                  @if (dashboardData()!.recent_submissions.length === 0) {
                     <div class="py-8 text-center">
                       <app-icon name="bar-chart-2" [size]="32" class="text-gray-400 mx-auto mb-2"></app-icon>
                       <p class="text-text-secondary text-sm">No hay envios registrados</p>
@@ -209,7 +211,7 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
       }
     
       <!-- Loading State -->
-      @if (loading) {
+      @if (loading()) {
         <div class="flex justify-center py-12">
           <app-spinner size="lg"></app-spinner>
         </div>
@@ -218,7 +220,7 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
       <!-- ═══════════════════════════════════════════════════════ -->
       <!-- LIST VIEW                                              -->
       <!-- ═══════════════════════════════════════════════════════ -->
-      @if (!loading && viewMode === 'list' && !showDashboard) {
+      @if (!loading() && viewMode() === 'list' && !showDashboard()) {
         <div class="space-y-4">
           <!-- Add Button -->
           <div class="flex justify-end">
@@ -228,9 +230,9 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
             </app-button>
           </div>
           <!-- Config Cards -->
-          @if (configs.length > 0) {
+          @if (configs().length > 0) {
             <div class="space-y-3">
-              @for (cfg of configs; track cfg) {
+              @for (cfg of configs(); track cfg) {
                 <div
                   class="border border-border rounded-xl p-4 bg-white hover:shadow-sm transition-shadow"
                   >
@@ -295,7 +297,7 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
                         size="sm"
                         (clicked)="confirmDelete(cfg)"
                         title="Eliminar"
-                        [disabled]="deletingId === cfg.id"
+                        [disabled]="deletingId() === cfg.id"
                         >
                         <app-icon name="trash-2" [size]="14" class="text-red-500"></app-icon>
                       </app-button>
@@ -306,7 +308,7 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
             </div>
           }
           <!-- Empty State -->
-          @if (configs.length === 0) {
+          @if (configs().length === 0) {
             <div class="py-12 text-center border border-dashed border-border rounded-xl">
               <app-icon name="shield" [size]="40" class="text-gray-300 mx-auto mb-3"></app-icon>
               <h3 class="text-sm font-medium text-text-primary mb-1">Sin configuraciones DIAN</h3>
@@ -323,19 +325,19 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
       <!-- ═══════════════════════════════════════════════════════ -->
       <!-- DETAIL VIEW (Stepper Wizard)                           -->
       <!-- ═══════════════════════════════════════════════════════ -->
-      @if (!loading && viewMode === 'detail') {
+      @if (!loading() && viewMode() === 'detail') {
         <div>
           <!-- Stepper Navigation -->
           <app-steps-line
             [steps]="stepsConfig"
-            [currentStep]="activeStep"
+            [currentStep]="activeStep()"
             [clickable]="true"
             size="md"
-            (stepClicked)="activeStep = $event"
+            (stepClicked)="activeStep.set($event)"
           ></app-steps-line>
           <div class="mt-6">
             <!-- ═══ Step 1: Credentials ═══ -->
-            @if (activeStep === 0) {
+            @if (activeStep() === 0) {
               <div class="border border-border rounded-xl p-4 md:p-6 space-y-4 bg-white">
                 <div class="flex items-center gap-2 mb-2">
                   <app-icon name="key" [size]="18" class="text-primary"></app-icon>
@@ -402,16 +404,16 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
                   <app-button
                     variant="primary"
                     (clicked)="saveCredentials()"
-                    [disabled]="credentialsForm.invalid || savingCredentials"
-                    [loading]="savingCredentials"
+                    [disabled]="credentialsForm.invalid || savingCredentials()"
+                    [loading]="savingCredentials()"
                     >
-                    {{ selectedConfig ? 'Actualizar' : 'Guardar' }} Credenciales
+                    {{ selectedConfig() ? 'Actualizar' : 'Guardar' }} Credenciales
                   </app-button>
                 </div>
               </div>
             }
             <!-- ═══ Step 2: Certificate ═══ -->
-            @if (activeStep === 1) {
+            @if (activeStep() === 1) {
               <div class="border border-border rounded-xl p-4 md:p-6 space-y-4 bg-white">
                 <div class="flex items-center gap-2 mb-2">
                   <app-icon name="upload" [size]="18" class="text-primary"></app-icon>
@@ -420,7 +422,7 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
                 <p class="text-sm text-text-secondary mb-4">
                   Suba su certificado digital (.p12) para firmar las facturas electronicas.
                 </p>
-                @if (!selectedConfig) {
+                @if (!selectedConfig()) {
                   <div class="p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-sm">
                     <div class="flex items-center gap-2">
                       <app-icon name="alert-triangle" [size]="16"></app-icon>
@@ -428,17 +430,17 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
                     </div>
                   </div>
                 }
-                @if (selectedConfig) {
+                @if (selectedConfig()) {
                   <div class="space-y-4">
-                    @if (selectedConfig.certificate_s3_key) {
+                    @if (selectedConfig()!.certificate_s3_key) {
                       <div class="p-3 rounded-lg bg-green-50 border border-green-200 text-green-700 text-sm">
                         <div class="flex items-center gap-2">
                           <app-icon name="check-circle" [size]="16"></app-icon>
                           <span>Certificado cargado</span>
                         </div>
-                        @if (selectedConfig.certificate_expiry) {
+                        @if (selectedConfig()!.certificate_expiry) {
                           <div class="mt-1 text-xs">
-                            Expira: {{ selectedConfig.certificate_expiry | date:'dd/MM/yyyy' }}
+                            Expira: {{ selectedConfig()!.certificate_expiry | date:'dd/MM/yyyy' }}
                           </div>
                         }
                       </div>
@@ -453,9 +455,9 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
                         >
                         <app-icon name="upload-cloud" [size]="32" class="text-gray-400 mx-auto mb-2"></app-icon>
                         <p class="text-sm text-text-secondary">
-                          {{ selectedFile ? selectedFile.name : 'Haga clic o arrastre su archivo .p12 aqui' }}
+                          {{ selectedFile() ? selectedFile()!.name : 'Haga clic o arrastre su archivo .p12 aqui' }}
                         </p>
-                        @if (!selectedFile) {
+                        @if (!selectedFile()) {
                           <p class="text-xs text-gray-400 mt-1">Solo archivos .p12</p>
                         }
                       </div>
@@ -481,8 +483,8 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
                       <app-button
                         variant="primary"
                         (clicked)="uploadCertificate()"
-                        [disabled]="!selectedFile || certificateForm.invalid || uploadingCertificate"
-                        [loading]="uploadingCertificate"
+                        [disabled]="!selectedFile() || certificateForm.invalid || uploadingCertificate()"
+                        [loading]="uploadingCertificate()"
                         >
                         Subir Certificado
                       </app-button>
@@ -492,7 +494,7 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
               </div>
             }
             <!-- ═══ Step 3: Environment ═══ -->
-            @if (activeStep === 2) {
+            @if (activeStep() === 2) {
               <div class="border border-border rounded-xl p-4 md:p-6 space-y-4 bg-white">
                 <div class="flex items-center gap-2 mb-2">
                   <app-icon name="globe" [size]="18" class="text-primary"></app-icon>
@@ -501,7 +503,7 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
                 <p class="text-sm text-text-secondary mb-4">
                   Seleccione el ambiente de facturacion electronica.
                 </p>
-                @if (!selectedConfig) {
+                @if (!selectedConfig()) {
                   <div class="p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-sm">
                     <div class="flex items-center gap-2">
                       <app-icon name="alert-triangle" [size]="16"></app-icon>
@@ -509,25 +511,25 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
                     </div>
                   </div>
                 }
-                @if (selectedConfig) {
+                @if (selectedConfig()) {
                   <div class="space-y-4">
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <button
                         (click)="setEnvironment('test')"
                         class="p-4 rounded-lg border-2 text-left transition-all"
                   [ngClass]="{
-                    'border-primary bg-primary/5': selectedEnvironment === 'test',
-                    'border-border hover:border-primary/30': selectedEnvironment !== 'test'
+                    'border-primary bg-primary/5': selectedEnvironment() === 'test',
+                    'border-border hover:border-primary/30': selectedEnvironment() !== 'test'
                   }"
                         >
                         <div class="flex items-center gap-2 mb-2">
                           <div class="w-4 h-4 rounded-full border-2 flex items-center justify-center"
                       [ngClass]="{
-                        'border-primary': selectedEnvironment === 'test',
-                        'border-gray-300': selectedEnvironment !== 'test'
+                        'border-primary': selectedEnvironment() === 'test',
+                        'border-gray-300': selectedEnvironment() !== 'test'
                       }"
                             >
-                            @if (selectedEnvironment === 'test') {
+                            @if (selectedEnvironment() === 'test') {
                               <div class="w-2 h-2 rounded-full bg-primary"></div>
                             }
                           </div>
@@ -541,18 +543,18 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
                         (click)="setEnvironment('production')"
                         class="p-4 rounded-lg border-2 text-left transition-all"
                   [ngClass]="{
-                    'border-primary bg-primary/5': selectedEnvironment === 'production',
-                    'border-border hover:border-primary/30': selectedEnvironment !== 'production'
+                    'border-primary bg-primary/5': selectedEnvironment() === 'production',
+                    'border-border hover:border-primary/30': selectedEnvironment() !== 'production'
                   }"
                         >
                         <div class="flex items-center gap-2 mb-2">
                           <div class="w-4 h-4 rounded-full border-2 flex items-center justify-center"
                       [ngClass]="{
-                        'border-primary': selectedEnvironment === 'production',
-                        'border-gray-300': selectedEnvironment !== 'production'
+                        'border-primary': selectedEnvironment() === 'production',
+                        'border-gray-300': selectedEnvironment() !== 'production'
                       }"
                             >
-                            @if (selectedEnvironment === 'production') {
+                            @if (selectedEnvironment() === 'production') {
                               <div class="w-2 h-2 rounded-full bg-primary"></div>
                             }
                           </div>
@@ -567,24 +569,24 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
                       <div class="flex items-center justify-between">
                         <span class="text-text-secondary">Estado de habilitacion:</span>
                         <span class="px-2 py-0.5 rounded-full text-xs font-medium"
-                          [ngClass]="getEnablementStatusClass(selectedConfig.enablement_status)"
+                          [ngClass]="getEnablementStatusClass(selectedConfig()!.enablement_status)"
                           >
-                          {{ getEnablementStatusLabel(selectedConfig.enablement_status) }}
+                          {{ getEnablementStatusLabel(selectedConfig()!.enablement_status) }}
                         </span>
                       </div>
                       <div class="flex items-center justify-between mt-2">
                         <span class="text-text-secondary">Ambiente actual:</span>
-                        <span class="text-text-primary font-medium">{{ selectedConfig.environment === 'test' ? 'Pruebas' : 'Produccion' }}</span>
+                        <span class="text-text-primary font-medium">{{ selectedConfig()!.environment === 'test' ? 'Pruebas' : 'Produccion' }}</span>
                       </div>
                     </div>
                     <div class="flex items-center justify-end gap-3 pt-4 border-t border-border">
                       <app-button
                         variant="primary"
                         (clicked)="saveEnvironment()"
-                        [disabled]="savingEnvironment"
-                        [loading]="savingEnvironment"
+                        [disabled]="savingEnvironment()"
+                        [loading]="savingEnvironment()"
                         >
-                        {{ selectedEnvironment === selectedConfig.environment ? 'Continuar' : 'Guardar Ambiente' }}
+                        {{ selectedEnvironment() === selectedConfig()!.environment ? 'Continuar' : 'Guardar Ambiente' }}
                       </app-button>
                     </div>
                   </div>
@@ -592,7 +594,7 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
               </div>
             }
             <!-- ═══ Step 4: Test Connection ═══ -->
-            @if (activeStep === 3) {
+            @if (activeStep() === 3) {
               <div class="border border-border rounded-xl p-4 md:p-6 space-y-4 bg-white">
                 <div class="flex items-center gap-2 mb-2">
                   <app-icon name="zap" [size]="18" class="text-primary"></app-icon>
@@ -601,7 +603,7 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
                 <p class="text-sm text-text-secondary mb-4">
                   Verifique la conexion con la DIAN y ejecute el set de pruebas de habilitacion.
                 </p>
-                @if (!selectedConfig) {
+                @if (!selectedConfig()) {
                   <div class="p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-sm">
                     <div class="flex items-center gap-2">
                       <app-icon name="alert-triangle" [size]="16"></app-icon>
@@ -609,16 +611,17 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
                     </div>
                   </div>
                 }
-                @if (selectedConfig) {
+                @if (selectedConfig()) {
                   <div class="space-y-4">
                     <div class="space-y-3 mb-4">
                       <label class="text-sm font-medium text-text-primary">Resolucion para el set de pruebas</label>
                       <select
                         class="w-full px-3 py-2 border border-border rounded-lg text-sm bg-white focus:border-primary focus:ring-1 focus:ring-primary outline-none"
-                        [(ngModel)]="selectedResolutionId"
+                        [ngModel]="selectedResolutionId()"
+                        (ngModelChange)="selectedResolutionId.set($event)"
                         >
                         <option [ngValue]="null" disabled>Seleccione una resolucion</option>
-                        @for (res of resolutions; track res) {
+                        @for (res of resolutions(); track res) {
                           <option [ngValue]="res.id">
                             {{ res.prefix }} — Resolucion {{ res.resolution_number }} ({{ res.range_from }} - {{ res.range_to }})
                           </option>
@@ -629,8 +632,8 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
                       <app-button
                         variant="outline"
                         (clicked)="testConnection()"
-                        [disabled]="testingConnection"
-                        [loading]="testingConnection"
+                        [disabled]="testingConnection()"
+                        [loading]="testingConnection()"
                         >
                         <app-icon slot="icon" name="wifi" [size]="14"></app-icon>
                         Probar Conexion
@@ -638,81 +641,81 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
                       <app-button
                         variant="primary"
                         (clicked)="runTestSet()"
-                        [disabled]="runningTestSet || !selectedResolutionId"
-                        [loading]="runningTestSet"
+                        [disabled]="runningTestSet() || !selectedResolutionId()"
+                        [loading]="runningTestSet()"
                         >
                         <app-icon slot="icon" name="play" [size]="14"></app-icon>
                         Ejecutar Set de Pruebas
                       </app-button>
                     </div>
-                    @if (testResult) {
+                    @if (testResult()) {
                       <div class="p-4 rounded-lg border"
                 [ngClass]="{
-                  'bg-green-50 border-green-200': testResult.success,
-                  'bg-red-50 border-red-200': !testResult.success
+                  'bg-green-50 border-green-200': testResult()!.success,
+                  'bg-red-50 border-red-200': !testResult()!.success
                 }"
                         >
                         <div class="flex items-center gap-2 mb-2">
                           <app-icon
-                            [name]="testResult.success ? 'check-circle' : 'x-circle'"
+                            [name]="testResult()!.success ? 'check-circle' : 'x-circle'"
                             [size]="18"
-                            [class]="testResult.success ? 'text-green-600' : 'text-red-600'"
+                            [class]="testResult()!.success ? 'text-green-600' : 'text-red-600'"
                           ></app-icon>
-                          <span class="text-sm font-medium" [class]="testResult.success ? 'text-green-700' : 'text-red-700'">
-                            {{ testResult.success ? 'Conexion exitosa' : 'Error de conexion' }}
+                          <span class="text-sm font-medium" [class]="testResult()!.success ? 'text-green-700' : 'text-red-700'">
+                            {{ testResult()!.success ? 'Conexion exitosa' : 'Error de conexion' }}
                           </span>
                         </div>
-                        <div class="text-xs space-y-1 pl-6" [class]="testResult.success ? 'text-green-600' : 'text-red-600'">
-                          <div>{{ testResult.message }}</div>
-                          <div>Ambiente: {{ testResult.environment === 'test' ? 'Pruebas' : 'Produccion' }}</div>
-                          <div>Tiempo de respuesta: {{ testResult.response_time_ms }}ms</div>
-                          @if (testResult.dian_status) {
-                            <div>Estado DIAN: {{ testResult.dian_status }}</div>
+                        <div class="text-xs space-y-1 pl-6" [class]="testResult()!.success ? 'text-green-600' : 'text-red-600'">
+                          <div>{{ testResult()!.message }}</div>
+                          <div>Ambiente: {{ testResult()!.environment === 'test' ? 'Pruebas' : 'Produccion' }}</div>
+                          <div>Tiempo de respuesta: {{ testResult()!.response_time_ms }}ms</div>
+                          @if (testResult()!.dian_status) {
+                            <div>Estado DIAN: {{ testResult()!.dian_status }}</div>
                           }
                         </div>
                       </div>
                     }
-                    @if (testSetResult) {
+                    @if (testSetResult()) {
                       <div class="p-4 rounded-lg border"
                 [ngClass]="{
-                  'bg-green-50 border-green-200': testSetResult.success,
-                  'bg-blue-50 border-blue-200': !testSetResult.success
+                  'bg-green-50 border-green-200': testSetResult()!.success,
+                  'bg-blue-50 border-blue-200': !testSetResult()!.success
                 }"
                         >
                         <div class="flex items-center gap-2 mb-3">
                           <app-icon
-                            [name]="testSetResult.success ? 'check-circle' : 'info'"
+                            [name]="testSetResult()!.success ? 'check-circle' : 'info'"
                             [size]="18"
-                            [class]="testSetResult.success ? 'text-green-600' : 'text-blue-600'"
+                            [class]="testSetResult()!.success ? 'text-green-600' : 'text-blue-600'"
                           ></app-icon>
-                          <span class="text-sm font-medium" [class]="testSetResult.success ? 'text-green-700' : 'text-blue-700'">
-                            {{ testSetResult.message }}
+                          <span class="text-sm font-medium" [class]="testSetResult()!.success ? 'text-green-700' : 'text-blue-700'">
+                            {{ testSetResult()!.message }}
                           </span>
                         </div>
                         <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
                           <div class="p-2 bg-white rounded border border-border text-center">
                             <div class="text-text-secondary">Total</div>
-                            <div class="text-lg font-semibold text-text-primary">{{ testSetResult.total_documents }}</div>
+                            <div class="text-lg font-semibold text-text-primary">{{ testSetResult()!.total_documents }}</div>
                           </div>
                           <div class="p-2 bg-white rounded border border-border text-center">
                             <div class="text-text-secondary">Facturas</div>
-                            <div class="text-lg font-semibold text-text-primary">{{ testSetResult.invoices_count }}</div>
+                            <div class="text-lg font-semibold text-text-primary">{{ testSetResult()!.invoices_count }}</div>
                           </div>
                           <div class="p-2 bg-white rounded border border-border text-center">
                             <div class="text-text-secondary">Notas Debito</div>
-                            <div class="text-lg font-semibold text-text-primary">{{ testSetResult.debit_notes_count }}</div>
+                            <div class="text-lg font-semibold text-text-primary">{{ testSetResult()!.debit_notes_count }}</div>
                           </div>
                           <div class="p-2 bg-white rounded border border-border text-center">
                             <div class="text-text-secondary">Notas Credito</div>
-                            <div class="text-lg font-semibold text-text-primary">{{ testSetResult.credit_notes_count }}</div>
+                            <div class="text-lg font-semibold text-text-primary">{{ testSetResult()!.credit_notes_count }}</div>
                           </div>
                         </div>
-                        @if (testSetResult.tracking_id && testSetResult.tracking_id !== 's:Sender') {
+                        @if (testSetResult()!.tracking_id && testSetResult()!.tracking_id !== 's:Sender') {
                           <div class="mt-3 text-xs text-text-secondary">
-                            Tracking ID: <span class="font-mono">{{ testSetResult.tracking_id }}</span>
+                            Tracking ID: <span class="font-mono">{{ testSetResult()!.tracking_id }}</span>
                           </div>
                         }
-                        @if (testSetResult.dian_status === 's:Sender') {
+                        @if (testSetResult()!.dian_status === 's:Sender') {
                           <div class="mt-3 p-2 rounded bg-amber-50 border border-amber-200 text-xs text-amber-700">
                             <strong>Nota:</strong> Los 50 documentos se generaron y firmaron correctamente. La DIAN requiere WS-Security en el envelope SOAP para procesar el set. Esta funcionalidad esta en desarrollo.
                           </div>
@@ -721,11 +724,11 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
                     }
                     <!-- Navigation buttons -->
                     <div class="flex items-center justify-between pt-4 border-t border-border">
-                      <app-button variant="outline" size="sm" (clicked)="activeStep = 2">
+                      <app-button variant="outline" size="sm" (clicked)="activeStep.set(2)">
                         <app-icon slot="icon" name="arrow-left" [size]="14"></app-icon>
                         Anterior
                       </app-button>
-                      <app-button variant="primary" size="sm" (clicked)="activeStep = 4">
+                      <app-button variant="primary" size="sm" (clicked)="activeStep.set(4)">
                         Registros
                         <app-icon slot="icon" name="arrow-right" [size]="14"></app-icon>
                       </app-button>
@@ -735,7 +738,7 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
               </div>
             }
             <!-- ═══ Step 5: Audit Logs ═══ -->
-            @if (activeStep === 4) {
+            @if (activeStep() === 4) {
               <div class="border border-border rounded-xl p-4 md:p-6 space-y-4 bg-white">
                 <div class="flex items-center gap-2 mb-2">
                   <app-icon name="file-text" [size]="18" class="text-primary"></app-icon>
@@ -749,20 +752,20 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
                     variant="outline"
                     size="sm"
                     (clicked)="loadAuditLogs()"
-                    [loading]="loadingAuditLogs"
+                    [loading]="loadingAuditLogs()"
                     >
                     <app-icon slot="icon" name="refresh-cw" [size]="14"></app-icon>
                     Actualizar
                   </app-button>
                 </div>
-                @if (loadingAuditLogs) {
+                @if (loadingAuditLogs()) {
                   <div class="py-6 text-center">
                     <div class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
                   </div>
                 }
-                @if (!loadingAuditLogs) {
+                @if (!loadingAuditLogs()) {
                   <div class="overflow-x-auto">
-                    @if (auditLogs.length > 0) {
+                    @if (auditLogs().length > 0) {
                       <table class="w-full text-sm">
                         <thead>
                           <tr class="border-b border-border">
@@ -774,7 +777,7 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
                           </tr>
                         </thead>
                         <tbody>
-                          @for (log of auditLogs; track log) {
+                          @for (log of auditLogs(); track log) {
                             <tr class="border-b border-border/50 hover:bg-gray-50">
                               <td class="py-2 px-3">
                                 <div class="text-text-primary">{{ log.action }}</div>
@@ -815,7 +818,7 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
                         </tbody>
                       </table>
                     }
-                    @if (auditLogs.length === 0) {
+                    @if (auditLogs().length === 0) {
                       <div class="py-8 text-center">
                         <app-icon name="file-text" [size]="32" class="text-gray-400 mx-auto mb-2"></app-icon>
                         <p class="text-text-secondary text-sm">No hay registros de operaciones</p>
@@ -823,11 +826,11 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
                     }
                   </div>
                 }
-                @if (auditLogs.length > 0) {
+                @if (auditLogs().length > 0) {
                   <div class="flex items-center justify-between pt-3 border-t border-border">
-                    <span class="text-xs text-text-secondary">Pagina {{ auditLogPage }}</span>
+                    <span class="text-xs text-text-secondary">Pagina {{ auditLogPage() }}</span>
                     <div class="flex gap-2">
-                      <app-button variant="outline" size="sm" (clicked)="prevAuditPage()" [disabled]="auditLogPage <= 1">
+                      <app-button variant="outline" size="sm" (clicked)="prevAuditPage()" [disabled]="auditLogPage() <= 1">
                         Anterior
                       </app-button>
                       <app-button variant="outline" size="sm" (clicked)="nextAuditPage()">
@@ -845,23 +848,24 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
     </div>
     `,
 })
-export class DianConfigComponent implements OnInit {
+export class DianConfigComponent {
   private invoicingService = inject(InvoicingService);
   private fb = inject(FormBuilder);
   private toast = inject(ToastService);
+  private destroyRef = inject(DestroyRef);
 
   // State
-  loading = true;
-  configs: DianConfig[] = [];
-  selectedConfig: DianConfig | null = null;
-  viewMode: 'list' | 'detail' = 'list';
-  activeStep = 0;
-  deletingId: number | null = null;
+  readonly loading = signal(true);
+  readonly configs = signal<DianConfig[]>([]);
+  readonly selectedConfig = signal<DianConfig | null>(null);
+  readonly viewMode = signal<'list' | 'detail'>('list');
+  readonly activeStep = signal(0);
+  readonly deletingId = signal<number | null>(null);
 
   // Dashboard
-  showDashboard = false;
-  loadingDashboard = false;
-  dashboardData: any = null;
+  readonly showDashboard = signal(false);
+  readonly loadingDashboard = signal(false);
+  readonly dashboardData = signal<any>(null);
 
   // NIT types for selector
   nitTypeOptions: SelectorOption[] = [
@@ -875,29 +879,29 @@ export class DianConfigComponent implements OnInit {
 
   // Step 1: Credentials
   credentialsForm: FormGroup;
-  savingCredentials = false;
+  readonly savingCredentials = signal(false);
 
   // Step 2: Certificate
   certificateForm: FormGroup;
-  selectedFile: File | null = null;
-  uploadingCertificate = false;
+  readonly selectedFile = signal<File | null>(null);
+  readonly uploadingCertificate = signal(false);
 
   // Step 3: Environment
-  selectedEnvironment: 'test' | 'production' = 'test';
-  savingEnvironment = false;
+  readonly selectedEnvironment = signal<'test' | 'production'>('test');
+  readonly savingEnvironment = signal(false);
 
   // Step 4: Test Connection
-  testingConnection = false;
-  runningTestSet = false;
-  testResult: DianTestResult | null = null;
-  resolutions: any[] = [];
-  selectedResolutionId: number | null = null;
-  testSetResult: any = null;
+  readonly testingConnection = signal(false);
+  readonly runningTestSet = signal(false);
+  readonly testResult = signal<DianTestResult | null>(null);
+  readonly resolutions = signal<any[]>([]);
+  readonly selectedResolutionId = signal<number | null>(null);
+  readonly testSetResult = signal<any>(null);
 
   // Step 5: Audit Logs
-  auditLogs: DianAuditLog[] = [];
-  loadingAuditLogs = false;
-  auditLogPage = 1;
+  readonly auditLogs = signal<DianAuditLog[]>([]);
+  readonly loadingAuditLogs = signal(false);
+  readonly auditLogPage = signal(1);
 
   stepsConfig: StepsLineItem[] = [
     { label: 'Credenciales' },
@@ -921,9 +925,7 @@ export class DianConfigComponent implements OnInit {
     this.certificateForm = this.fb.group({
       certificate_password: ['', [Validators.required]],
     });
-  }
 
-  ngOnInit(): void {
     this.loadConfigs();
     this.loadResolutions();
   }
@@ -931,40 +933,45 @@ export class DianConfigComponent implements OnInit {
   // ── Data Loading ──────────────────────────────────────────
 
   loadConfigs(): void {
-    this.loading = true;
-    this.invoicingService.getDianConfigs().subscribe({
-      next: (response: any) => {
-        this.configs = response?.data || [];
-        this.loading = false;
-      },
-      error: () => {
-        this.configs = [];
-        this.loading = false;
-      },
-    });
+    this.loading.set(true);
+    this.invoicingService.getDianConfigs()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response: any) => {
+          this.configs.set(response?.data || []);
+          this.loading.set(false);
+        },
+        error: () => {
+          this.configs.set([]);
+          this.loading.set(false);
+        },
+      });
   }
 
   // ── Dashboard ─────────────────────────────────────────────
 
   toggleDashboard(): void {
-    this.showDashboard = !this.showDashboard;
-    if (this.showDashboard && !this.dashboardData) {
+    const current = this.showDashboard();
+    this.showDashboard.set(!current);
+    if (!current && !this.dashboardData()) {
       this.loadDashboard();
     }
   }
 
   loadDashboard(): void {
-    this.loadingDashboard = true;
-    this.invoicingService.getDianDashboard().subscribe({
-      next: (response: any) => {
-        this.dashboardData = response?.data || null;
-        this.loadingDashboard = false;
-      },
-      error: () => {
-        this.dashboardData = null;
-        this.loadingDashboard = false;
-      },
-    });
+    this.loadingDashboard.set(true);
+    this.invoicingService.getDianDashboard()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response: any) => {
+          this.dashboardData.set(response?.data || null);
+          this.loadingDashboard.set(false);
+        },
+        error: () => {
+          this.dashboardData.set(null);
+          this.loadingDashboard.set(false);
+        },
+      });
   }
 
   getCertStatusLabel(status: string): string {
@@ -980,30 +987,30 @@ export class DianConfigComponent implements OnInit {
   // ── View Navigation ───────────────────────────────────────
 
   startNewConfig(): void {
-    this.selectedConfig = null;
+    this.selectedConfig.set(null);
     this.resetForms();
-    this.activeStep = 0;
-    this.viewMode = 'detail';
+    this.activeStep.set(0);
+    this.viewMode.set('detail');
   }
 
   editConfig(cfg: DianConfig): void {
-    this.selectedConfig = cfg;
+    this.selectedConfig.set(cfg);
     this.patchCredentialsForm();
-    this.selectedEnvironment = cfg.environment;
-    this.testResult = null;
-    this.testSetResult = null;
-    this.activeStep = 0;
-    this.viewMode = 'detail';
+    this.selectedEnvironment.set(cfg.environment);
+    this.testResult.set(null);
+    this.testSetResult.set(null);
+    this.activeStep.set(0);
+    this.viewMode.set('detail');
   }
 
   continueConfig(cfg: DianConfig): void {
-    this.selectedConfig = cfg;
+    this.selectedConfig.set(cfg);
     this.patchCredentialsForm();
-    this.selectedEnvironment = cfg.environment;
-    this.testResult = null;
-    this.testSetResult = null;
-    this.activeStep = this.getNextStep(cfg);
-    this.viewMode = 'detail';
+    this.selectedEnvironment.set(cfg.environment);
+    this.testResult.set(null);
+    this.testSetResult.set(null);
+    this.activeStep.set(this.getNextStep(cfg));
+    this.viewMode.set('detail');
   }
 
   getNextStep(cfg: DianConfig): number {
@@ -1019,8 +1026,8 @@ export class DianConfigComponent implements OnInit {
   }
 
   backToList(): void {
-    this.viewMode = 'list';
-    this.selectedConfig = null;
+    this.viewMode.set('list');
+    this.selectedConfig.set(null);
     this.resetForms();
     this.loadConfigs();
   }
@@ -1042,18 +1049,20 @@ export class DianConfigComponent implements OnInit {
   confirmDelete(cfg: DianConfig): void {
     if (!confirm(`Eliminar la configuracion "${cfg.name}"? Esta accion no se puede deshacer.`)) return;
 
-    this.deletingId = cfg.id;
-    this.invoicingService.deleteDianConfig(cfg.id).subscribe({
-      next: () => {
-        this.toast.success(`Configuracion "${cfg.name}" eliminada`);
-        this.deletingId = null;
-        this.loadConfigs();
-      },
-      error: (err: any) => {
-        this.deletingId = null;
-        this.toast.error(err?.error?.message || 'Error al eliminar configuracion');
-      },
-    });
+    this.deletingId.set(cfg.id);
+    this.invoicingService.deleteDianConfig(cfg.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toast.success(`Configuracion "${cfg.name}" eliminada`);
+          this.deletingId.set(null);
+          this.loadConfigs();
+        },
+        error: (err: any) => {
+          this.deletingId.set(null);
+          this.toast.error(err?.error?.message || 'Error al eliminar configuracion');
+        },
+      });
   }
 
   // ── Form Helpers ──────────────────────────────────────────
@@ -1061,24 +1070,25 @@ export class DianConfigComponent implements OnInit {
   private resetForms(): void {
     this.credentialsForm.reset({ name: '', nit_type: 'NIT', nit: '', nit_dv: '', software_id: '', software_pin: '', test_set_id: '' });
     this.certificateForm.reset();
-    this.selectedFile = null;
-    this.selectedEnvironment = 'test';
-    this.testResult = null;
-    this.testSetResult = null;
-    this.selectedResolutionId = null;
-    this.auditLogs = [];
+    this.selectedFile.set(null);
+    this.selectedEnvironment.set('test');
+    this.testResult.set(null);
+    this.testSetResult.set(null);
+    this.selectedResolutionId.set(null);
+    this.auditLogs.set([]);
   }
 
   private patchCredentialsForm(): void {
-    if (!this.selectedConfig) return;
+    const cfg = this.selectedConfig();
+    if (!cfg) return;
     this.credentialsForm.patchValue({
-      name: this.selectedConfig.name,
-      nit_type: this.selectedConfig.nit_type,
-      nit: this.selectedConfig.nit,
-      nit_dv: this.selectedConfig.nit_dv || '',
-      software_id: this.selectedConfig.software_id,
-      software_pin: this.selectedConfig.software_pin_encrypted,
-      test_set_id: this.selectedConfig.test_set_id || '',
+      name: cfg.name,
+      nit_type: cfg.nit_type,
+      nit: cfg.nit,
+      nit_dv: cfg.nit_dv || '',
+      software_id: cfg.software_id,
+      software_pin: cfg.software_pin_encrypted,
+      test_set_id: cfg.test_set_id || '',
     });
   }
 
@@ -1124,7 +1134,7 @@ export class DianConfigComponent implements OnInit {
       return;
     }
 
-    this.savingCredentials = true;
+    this.savingCredentials.set(true);
     const payload = {
       name: this.credentialsForm.value.name,
       nit: this.credentialsForm.value.nit,
@@ -1135,22 +1145,26 @@ export class DianConfigComponent implements OnInit {
       test_set_id: this.credentialsForm.value.test_set_id || null,
     };
 
-    const request$ = this.selectedConfig
-      ? this.invoicingService.updateDianConfig(this.selectedConfig.id, payload)
+    const cfg = this.selectedConfig();
+    const request$ = cfg
+      ? this.invoicingService.updateDianConfig(cfg.id, payload)
       : this.invoicingService.createDianConfig(payload);
 
-    request$.subscribe({
-      next: (response: any) => {
-        this.selectedConfig = response.data || response;
-        this.savingCredentials = false;
-        this.toast.success(this.selectedConfig ? 'Credenciales actualizadas' : 'Credenciales guardadas');
-        this.activeStep = 1;
-      },
-      error: (err: any) => {
-        this.savingCredentials = false;
-        this.toast.error(err?.error?.message || 'Error al guardar credenciales');
-      },
-    });
+    request$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response: any) => {
+          const saved = response.data || response;
+          this.selectedConfig.set(saved);
+          this.savingCredentials.set(false);
+          this.toast.success(cfg ? 'Credenciales actualizadas' : 'Credenciales guardadas');
+          this.activeStep.set(1);
+        },
+        error: (err: any) => {
+          this.savingCredentials.set(false);
+          this.toast.error(err?.error?.message || 'Error al guardar credenciales');
+        },
+      });
   }
 
   // ── Step 2: Certificate Upload ────────────────────────────
@@ -1158,7 +1172,7 @@ export class DianConfigComponent implements OnInit {
   onFileSelected(event: Event): void {
     const input = event.target as HTMLInputElement;
     if (input.files && input.files.length > 0) {
-      this.selectedFile = input.files[0];
+      this.selectedFile.set(input.files[0]);
     }
   }
 
@@ -1173,7 +1187,7 @@ export class DianConfigComponent implements OnInit {
     if (event.dataTransfer?.files && event.dataTransfer.files.length > 0) {
       const file = event.dataTransfer.files[0];
       if (file.name.endsWith('.p12') || file.name.endsWith('.pfx')) {
-        this.selectedFile = file;
+        this.selectedFile.set(file);
       } else {
         this.toast.error('Solo se permiten archivos .p12 o .pfx');
       }
@@ -1181,148 +1195,168 @@ export class DianConfigComponent implements OnInit {
   }
 
   uploadCertificate(): void {
-    if (!this.selectedFile || !this.selectedConfig || this.certificateForm.invalid) return;
+    const file = this.selectedFile();
+    const cfg = this.selectedConfig();
+    if (!file || !cfg || this.certificateForm.invalid) return;
 
-    this.uploadingCertificate = true;
+    this.uploadingCertificate.set(true);
     const password = this.certificateForm.value.certificate_password;
 
-    this.invoicingService.uploadDianCertificate(this.selectedConfig.id, this.selectedFile, password).subscribe({
-      next: (response: any) => {
-        this.selectedConfig = response.data || response;
-        this.uploadingCertificate = false;
-        this.selectedFile = null;
-        this.certificateForm.reset();
-        this.toast.success('Certificado subido correctamente');
-        this.activeStep = 2;
-      },
-      error: (err: any) => {
-        this.uploadingCertificate = false;
-        this.toast.error(err?.error?.message || 'Error al subir certificado');
-      },
-    });
+    this.invoicingService.uploadDianCertificate(cfg.id, file, password)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response: any) => {
+          this.selectedConfig.set(response.data || response);
+          this.uploadingCertificate.set(false);
+          this.selectedFile.set(null);
+          this.certificateForm.reset();
+          this.toast.success('Certificado subido correctamente');
+          this.activeStep.set(2);
+        },
+        error: (err: any) => {
+          this.uploadingCertificate.set(false);
+          this.toast.error(err?.error?.message || 'Error al subir certificado');
+        },
+      });
   }
 
   // ── Step 3: Environment ───────────────────────────────────
 
   setEnvironment(env: 'test' | 'production'): void {
-    this.selectedEnvironment = env;
+    this.selectedEnvironment.set(env);
   }
 
   saveEnvironment(): void {
-    if (!this.selectedConfig) return;
+    const cfg = this.selectedConfig();
+    if (!cfg) return;
 
     // If environment hasn't changed, just advance to next step
-    if (this.selectedEnvironment === this.selectedConfig.environment) {
-      this.activeStep = 3;
+    if (this.selectedEnvironment() === cfg.environment) {
+      this.activeStep.set(3);
       return;
     }
 
-    this.savingEnvironment = true;
-    this.invoicingService.updateDianConfig(this.selectedConfig.id, { environment: this.selectedEnvironment }).subscribe({
-      next: (response: any) => {
-        this.selectedConfig = response.data || response;
-        this.savingEnvironment = false;
-        this.toast.success('Ambiente actualizado');
-        this.activeStep = 3;
-      },
-      error: (err: any) => {
-        this.savingEnvironment = false;
-        this.toast.error(err?.error?.message || 'Error al cambiar ambiente');
-      },
-    });
+    this.savingEnvironment.set(true);
+    this.invoicingService.updateDianConfig(cfg.id, { environment: this.selectedEnvironment() })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response: any) => {
+          this.selectedConfig.set(response.data || response);
+          this.savingEnvironment.set(false);
+          this.toast.success('Ambiente actualizado');
+          this.activeStep.set(3);
+        },
+        error: (err: any) => {
+          this.savingEnvironment.set(false);
+          this.toast.error(err?.error?.message || 'Error al cambiar ambiente');
+        },
+      });
   }
 
   // ── Step 4: Test Connection ───────────────────────────────
 
   loadResolutions(): void {
-    this.invoicingService.getResolutions().subscribe({
-      next: (response: any) => {
-        this.resolutions = response?.data || [];
-      },
-      error: () => {
-        this.resolutions = [];
-      },
-    });
+    this.invoicingService.getResolutions()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response: any) => {
+          this.resolutions.set(response?.data || []);
+        },
+        error: () => {
+          this.resolutions.set([]);
+        },
+      });
   }
 
   testConnection(): void {
-    if (!this.selectedConfig) return;
-    this.testingConnection = true;
-    this.invoicingService.testDianConnection(this.selectedConfig.id).subscribe({
-      next: (response: any) => {
-        this.testResult = response.data || response;
-        this.testingConnection = false;
-        if (this.testResult?.success) {
-          this.toast.success('Conexion exitosa con la DIAN');
-        } else {
-          this.toast.error('Fallo la conexion con la DIAN');
-        }
-      },
-      error: (err: any) => {
-        this.testingConnection = false;
-        this.testResult = {
-          success: false,
-          environment: this.selectedConfig?.environment || 'test',
-          response_time_ms: 0,
-          message: err?.error?.message || 'Error al probar conexion',
-        };
-        this.toast.error('Error al probar conexion');
-      },
-    });
+    const cfg = this.selectedConfig();
+    if (!cfg) return;
+    this.testingConnection.set(true);
+    this.invoicingService.testDianConnection(cfg.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response: any) => {
+          const result = response.data || response;
+          this.testResult.set(result);
+          this.testingConnection.set(false);
+          if (result?.success) {
+            this.toast.success('Conexion exitosa con la DIAN');
+          } else {
+            this.toast.error('Fallo la conexion con la DIAN');
+          }
+        },
+        error: (err: any) => {
+          this.testingConnection.set(false);
+          this.testResult.set({
+            success: false,
+            environment: cfg.environment || 'test',
+            response_time_ms: 0,
+            message: err?.error?.message || 'Error al probar conexion',
+          });
+          this.toast.error('Error al probar conexion');
+        },
+      });
   }
 
   runTestSet(): void {
-    if (!this.selectedConfig || !this.selectedResolutionId) return;
-    this.runningTestSet = true;
-    this.testSetResult = null;
-    this.invoicingService.runDianTestSet(this.selectedConfig.id, this.selectedResolutionId).subscribe({
-      next: (response: any) => {
-        this.testSetResult = response.data || response;
-        this.runningTestSet = false;
-        if (this.testSetResult.success) {
-          this.toast.success('Set de pruebas enviado exitosamente');
-          // Reload config to reflect updated enablement_status
-          if (this.selectedConfig) {
-            this.invoicingService.getDianConfigById(this.selectedConfig.id).subscribe({
-              next: (cfgResponse: any) => {
-                this.selectedConfig = cfgResponse.data || cfgResponse;
-              },
-            });
+    const cfg = this.selectedConfig();
+    const resId = this.selectedResolutionId();
+    if (!cfg || !resId) return;
+    this.runningTestSet.set(true);
+    this.testSetResult.set(null);
+    this.invoicingService.runDianTestSet(cfg.id, resId)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response: any) => {
+          const result = response.data || response;
+          this.testSetResult.set(result);
+          this.runningTestSet.set(false);
+          if (result.success) {
+            this.toast.success('Set de pruebas enviado exitosamente');
+            // Reload config to reflect updated enablement_status
+            this.invoicingService.getDianConfigById(cfg.id)
+              .pipe(takeUntilDestroyed(this.destroyRef))
+              .subscribe({
+                next: (cfgResponse: any) => {
+                  this.selectedConfig.set(cfgResponse.data || cfgResponse);
+                },
+              });
           }
-        }
-      },
-      error: (err: any) => {
-        this.runningTestSet = false;
-        this.toast.error(err?.error?.message || 'Error al ejecutar set de pruebas');
-      },
-    });
+        },
+        error: (err: any) => {
+          this.runningTestSet.set(false);
+          this.toast.error(err?.error?.message || 'Error al ejecutar set de pruebas');
+        },
+      });
   }
 
   // ── Step 5: Audit Logs ────────────────────────────────────
 
   loadAuditLogs(): void {
-    this.loadingAuditLogs = true;
-    const config_id = this.selectedConfig?.id;
-    this.invoicingService.getDianAuditLogs(this.auditLogPage, 20, config_id).subscribe({
-      next: (response: any) => {
-        this.auditLogs = response.data || [];
-        this.loadingAuditLogs = false;
-      },
-      error: () => {
-        this.loadingAuditLogs = false;
-      },
-    });
+    this.loadingAuditLogs.set(true);
+    const config_id = this.selectedConfig()?.id;
+    this.invoicingService.getDianAuditLogs(this.auditLogPage(), 20, config_id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response: any) => {
+          this.auditLogs.set(response.data || []);
+          this.loadingAuditLogs.set(false);
+        },
+        error: () => {
+          this.loadingAuditLogs.set(false);
+        },
+      });
   }
 
   prevAuditPage(): void {
-    if (this.auditLogPage > 1) {
-      this.auditLogPage--;
+    if (this.auditLogPage() > 1) {
+      this.auditLogPage.update(p => p - 1);
       this.loadAuditLogs();
     }
   }
 
   nextAuditPage(): void {
-    this.auditLogPage++;
+    this.auditLogPage.update(p => p + 1);
     this.loadAuditLogs();
   }
 }

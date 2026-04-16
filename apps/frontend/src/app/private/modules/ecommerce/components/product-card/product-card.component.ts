@@ -1,5 +1,4 @@
-import { Component, Input, Output, EventEmitter, inject, OnInit } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject, input, output } from '@angular/core';
 import { RouterModule, Router } from '@angular/router';
 import { EcommerceProduct } from '../../services/catalog.service';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
@@ -10,12 +9,12 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
 @Component({
   selector: 'app-product-card',
   standalone: true,
-  imports: [CommonModule, RouterModule, IconComponent, CurrencyPipe, ButtonComponent, BadgeComponent],
+  imports: [RouterModule, IconComponent, CurrencyPipe, ButtonComponent, BadgeComponent],
   template: `
     <article class="product-card" (click)="onQuickView($event)">
       <div class="product-image">
-        @if (product.image_url) {
-          <img [src]="product.image_url" [alt]="product.name" loading="lazy">
+        @if (product().image_url) {
+          <img [src]="product().image_url" [alt]="product().name" loading="lazy">
         } @else {
           <div class="no-image">
             <app-icon name="image" [size]="24" class="text-muted"></app-icon>
@@ -23,18 +22,18 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
         }
 
         <!-- Service Badge -->
-        @if (product.product_type === 'service') {
+        @if (product().product_type === 'service') {
           <app-badge class="stock-badge-pos" variant="service" size="sm" badgeStyle="outline">
             Servicio
           </app-badge>
-        } @else if (product.track_inventory !== false) {
+        } @else if (product().track_inventory !== false) {
           <!-- Stock Badge (POS style con backdrop-blur) — Solo para productos con inventario -->
-          @if (product.stock_quantity !== null && product.stock_quantity <= 5 && product.stock_quantity > 0) {
+          @if (product().stock_quantity !== null && product().stock_quantity! <= 5 && product().stock_quantity! > 0) {
             <app-badge class="stock-badge-pos" variant="warning" size="sm" badgeStyle="outline">
-              ¡Últimas {{ product.stock_quantity }}!
+              ¡Últimas {{ product().stock_quantity }}!
             </app-badge>
           }
-          @if (product.stock_quantity === 0) {
+          @if (product().stock_quantity === 0) {
             <app-badge class="stock-badge-pos" variant="error" size="sm" badgeStyle="outline">
               Agotado
             </app-badge>
@@ -46,9 +45,9 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
         }
 
         <!-- Variant Badge -->
-        @if (product.variant_count && product.variant_count > 0) {
+        @if (product().variant_count && product().variant_count! > 0) {
           <div class="variant-badge">
-            {{ product.variant_count }} variantes
+            {{ product().variant_count }} variantes
           </div>
         }
 
@@ -58,7 +57,7 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
             variant="ghost"
             size="sm"
             customClasses="action-btn"
-            [class.active]="in_wishlist"
+            [class.active]="in_wishlist()"
             (clicked)="onWishlistClick($event)">
             <app-icon slot="icon" name="heart" [size]="18"></app-icon>
           </app-button>
@@ -72,37 +71,37 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
         </div>
       </div>
       <div class="product-info">
-        @if (product.brand) {
-          <span class="product-brand">{{ product.brand.name }}</span>
+        @if (product().brand) {
+          <span class="product-brand">{{ product().brand?.name }}</span>
         }
-        <h3 class="product-name">{{ product.name }}</h3>
+        <h3 class="product-name">{{ product().name }}</h3>
         <div class="product-price">
-          <span class="price">{{ product.final_price | currency }}</span>
-          @if (product.pricing_type === 'weight') {
+          <span class="price">{{ product().final_price | currency }}</span>
+          @if (product().pricing_type === 'weight') {
             <span class="weight-unit">/kg</span>
           }
-          @if (product.is_on_sale) {
-            <span class="original-price">{{ product.base_price | currency }}</span>
+          @if (product().is_on_sale) {
+            <span class="original-price">{{ product().base_price | currency }}</span>
           }
         </div>
-        @if (product.pricing_type === 'weight') {
+        @if (product().pricing_type === 'weight') {
           <div class="weight-indicator">
             <app-icon name="scale" [size]="12"></app-icon>
             <span>Venta por peso</span>
           </div>
         }
-        @if (product.product_type === 'service') {
+        @if (product().product_type === 'service') {
           <div class="service-indicators">
-            @if (product.service_duration_minutes) {
+            @if (product().service_duration_minutes) {
               <div class="service-indicator">
                 <app-icon name="clock" [size]="12"></app-icon>
-                <span>{{ product.service_duration_minutes }} min</span>
+                <span>{{ product().service_duration_minutes }} min</span>
               </div>
             }
-            @if (product.service_modality) {
+            @if (product().service_modality) {
               <div class="service-indicator">
-                <app-icon name="{{ product.service_modality === 'virtual' ? 'monitor' : product.service_modality === 'hybrid' ? 'repeat' : 'map-pin' }}" [size]="12"></app-icon>
-                <span>{{ product.service_modality === 'virtual' ? 'Virtual' : product.service_modality === 'hybrid' ? 'Híbrido' : 'Presencial' }}</span>
+                <app-icon name="{{ product().service_modality === 'virtual' ? 'monitor' : product().service_modality === 'hybrid' ? 'repeat' : 'map-pin' }}" [size]="12"></app-icon>
+                <span>{{ product().service_modality === 'virtual' ? 'Virtual' : product().service_modality === 'hybrid' ? 'Híbrido' : 'Presencial' }}</span>
               </div>
             }
           </div>
@@ -113,18 +112,18 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
           variant="primary"
           size="sm"
           customClasses="buy-btn"
-          [disabled]="product.product_type !== 'service' && product.track_inventory !== false && product.stock_quantity === 0"
+          [disabled]="product().product_type !== 'service' && product().track_inventory !== false && product().stock_quantity === 0"
           (clicked)="onBuyNow($event)">
-          {{ product.product_type === 'service' ? 'Agendar' : 'Comprar' }}
+          {{ product().product_type === 'service' ? 'Agendar' : 'Comprar' }}
         </app-button>
         <app-button
           variant="secondary"
           size="sm"
           customClasses="add-to-cart-btn"
-          [disabled]="product.product_type !== 'service' && product.track_inventory !== false && product.stock_quantity === 0"
-          [title]="product.requires_booking && product.product_type === 'service' ? 'Agendar' : 'Agregar al carrito'"
+          [disabled]="product().product_type !== 'service' && product().track_inventory !== false && product().stock_quantity === 0"
+          [title]="product().requires_booking && product().product_type === 'service' ? 'Agendar' : 'Agregar al carrito'"
           (clicked)="onAddToCart($event)">
-          <app-icon slot="icon" [name]="product.requires_booking && product.product_type === 'service' ? 'calendar-check' : 'shopping-cart'" [size]="16"></app-icon>
+          <app-icon slot="icon" [name]="product().requires_booking && product().product_type === 'service' ? 'calendar-check' : 'shopping-cart'" [size]="16"></app-icon>
         </app-button>
       </div>
     </article>
@@ -430,24 +429,24 @@ import { BadgeComponent } from '../../../../../shared/components/badge/badge.com
     }
   `],
 })
-export class ProductCardComponent implements OnInit {
-  @Input() product!: EcommerceProduct;
-  @Input() in_wishlist = false;
-  @Output() add_to_cart = new EventEmitter<EcommerceProduct>();
-  @Output() toggle_wishlist = new EventEmitter<EcommerceProduct>();
-  @Output() quick_view = new EventEmitter<EcommerceProduct>();
-  @Output() share = new EventEmitter<EcommerceProduct>();
+export class ProductCardComponent {
+  readonly product = input.required<EcommerceProduct>();
+  readonly in_wishlist = input<boolean>(false);
+  readonly add_to_cart = output<EcommerceProduct>();
+  readonly toggle_wishlist = output<EcommerceProduct>();
+  readonly quick_view = output<EcommerceProduct>();
+  readonly share = output<EcommerceProduct>();
 
   private router = inject(Router);
   private currencyService = inject(CurrencyFormatService);
 
-  private get hasVariants(): boolean {
-    return !!this.product.variant_count && this.product.variant_count > 0;
-  }
-
-  ngOnInit(): void {
+  constructor() {
     // Asegurar que la moneda esté cargada para mostrar precios correctamente
     this.currencyService.loadCurrency();
+  }
+
+  private get hasVariants(): boolean {
+    return !!this.product().variant_count && this.product().variant_count! > 0;
   }
 
   onQuickView(event: Event): void {
@@ -457,47 +456,47 @@ export class ProductCardComponent implements OnInit {
       return;
     }
     event.preventDefault();
-    this.quick_view.emit(this.product);
+    this.quick_view.emit(this.product());
   }
 
   onBuyNow(event: Event): void {
     event.stopPropagation();
     event.preventDefault();
-    if (this.product.requires_booking && this.product.product_type === 'service') {
-      this.router.navigate(['/book', this.product.id]);
+    if (this.product().requires_booking && this.product().product_type === 'service') {
+      this.router.navigate(['/book', this.product().id]);
       return;
     }
     if (this.hasVariants) {
-      this.router.navigate(['/catalog', this.product.slug]);
+      this.router.navigate(['/catalog', this.product().slug]);
       return;
     }
-    this.add_to_cart.emit(this.product);
+    this.add_to_cart.emit(this.product());
     this.router.navigate(['/cart']);
   }
 
   onAddToCart(event: Event): void {
     event.stopPropagation();
     event.preventDefault();
-    if (this.product.requires_booking && this.product.product_type === 'service') {
-      this.router.navigate(['/book', this.product.id]);
+    if (this.product().requires_booking && this.product().product_type === 'service') {
+      this.router.navigate(['/book', this.product().id]);
       return;
     }
     if (this.hasVariants) {
-      this.router.navigate(['/catalog', this.product.slug]);
+      this.router.navigate(['/catalog', this.product().slug]);
       return;
     }
-    this.add_to_cart.emit(this.product);
+    this.add_to_cart.emit(this.product());
   }
 
   onWishlistClick(event: Event): void {
     event.stopPropagation();
     event.preventDefault();
-    this.toggle_wishlist.emit(this.product);
+    this.toggle_wishlist.emit(this.product());
   }
 
   onShareClick(event: Event): void {
     event.stopPropagation();
     event.preventDefault();
-    this.share.emit(this.product);
+    this.share.emit(this.product());
   }
 }

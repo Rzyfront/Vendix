@@ -1,13 +1,11 @@
 import {
   Component,
-  OnInit,
-  OnDestroy,
-  ChangeDetectionStrategy,
-  Input,
-  Output,
-  EventEmitter,
+  input,
+  output,
+  inject,
+  DestroyRef,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { AsyncPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Observable, Subject } from 'rxjs';
 import { takeUntil, map, distinctUntilChanged, skip } from 'rxjs/operators';
@@ -29,12 +27,11 @@ import { PosApiService } from '../services/pos-api.service';
   selector: 'app-pos-cart',
   standalone: true,
   imports: [
-    CommonModule,
+    AsyncPipe,
     FormsModule,
     IconComponent,
     QuantityControlComponent,
   ],
-  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
       class="h-full flex flex-col bg-surface rounded-card shadow-card border border-border overflow-hidden"
@@ -72,7 +69,7 @@ import { PosApiService } from '../services/pos-api.service';
             </div>
     
             <!-- Promotions & Coupons (hidden in quotation mode) -->
-            @if (!isQuotationMode && !isLayawayMode) {
+            @if (!isQuotationMode() && !isLayawayMode()) {
               <!-- Promotions Applied -->
               @if (getPromotionDiscounts().length > 0) {
                 <div class="pt-1.5 border-t border-border/30">
@@ -160,7 +157,7 @@ import { PosApiService } from '../services/pos-api.service';
     
           <!-- Checkout Actions -->
           <div class="cart-actions">
-            @if (isQuotationMode) {
+            @if (isQuotationMode()) {
               <!-- Quotation mode: only quote button, styled as primary -->
               <button
                 type="button"
@@ -171,7 +168,7 @@ import { PosApiService } from '../services/pos-api.service';
                 <app-icon name="file-text" [size]="18"></app-icon>
                 <span>Crear Cotización</span>
               </button>
-            } @else if (isLayawayMode) {
+            } @else if (isLayawayMode()) {
               <!-- Layaway mode: only layaway button -->
               <button
                 type="button"
@@ -210,8 +207,8 @@ import { PosApiService } from '../services/pos-api.service';
                 (click)="proceedToPayment()"
                 [disabled]="(isEmpty$ | async) ?? false"
                 >
-                <app-icon [name]="isEditMode ? 'check' : 'credit-card'" [size]="18"></app-icon>
-                <span>{{ isEditMode ? 'Actualizar Orden' : 'Cobrar' }}</span>
+                <app-icon [name]="isEditMode() ? 'check' : 'credit-card'" [size]="18"></app-icon>
+                <span>{{ isEditMode() ? 'Actualizar Orden' : 'Cobrar' }}</span>
               </button>
             }
           </div>
@@ -453,8 +450,14 @@ import { PosApiService } from '../services/pos-api.service';
 `,
   ],
 })
-export class PosCartComponent implements OnInit, OnDestroy {
+export class PosCartComponent {
   private destroy$ = new Subject<void>();
+  private cartService = inject(PosCartService);
+  private toastService = inject(ToastService);
+  private dialogService = inject(DialogService);
+  private currencyService = inject(CurrencyFormatService);
+  private scaleService = inject(PosScaleService);
+  private posApiService = inject(PosApiService);
 
   cartState$: Observable<CartState>;
   isEmpty$: Observable<boolean>;
@@ -464,29 +467,25 @@ export class PosCartComponent implements OnInit, OnDestroy {
   couponCode = '';
   couponLoading = false;
 
-  @Input() isEditMode = false;
-  @Input() isQuotationMode = false;
-  @Input() isLayawayMode = false;
-  @Output() saveDraft = new EventEmitter<void>();
-  @Output() shipping = new EventEmitter<void>();
-  @Output() checkout = new EventEmitter<void>();
-  @Output() quote = new EventEmitter<void>();
-  @Output() layaway = new EventEmitter<void>();
+  readonly isEditMode = input<boolean>(false);
+  readonly isQuotationMode = input<boolean>(false);
+  readonly isLayawayMode = input<boolean>(false);
+  readonly saveDraft = output<void>();
+  readonly shipping = output<void>();
+  readonly checkout = output<void>();
+  readonly quote = output<void>();
+  readonly layaway = output<void>();
 
-  constructor(
-    private cartService: PosCartService,
-    private toastService: ToastService,
-    private dialogService: DialogService,
-    private currencyService: CurrencyFormatService,
-    private scaleService: PosScaleService,
-    private posApiService: PosApiService,
-  ) {
+  constructor() {
     this.cartState$ = this.cartService.cartState;
     this.isEmpty$ = this.cartService.isEmpty;
     this.summary$ = this.cartService.summary;
-  }
 
-  ngOnInit(): void {
+    inject(DestroyRef).onDestroy(() => {
+      this.destroy$.next();
+      this.destroy$.complete();
+    });
+
     // Load active promotions
     this.posApiService.getActivePromotions()
       .pipe(takeUntil(this.destroy$))
@@ -515,11 +514,6 @@ export class PosCartComponent implements OnInit, OnDestroy {
             .subscribe();
         }
       });
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
   }
 
   trackByItemId(_index: number, item: CartItem): string {
@@ -587,11 +581,6 @@ export class PosCartComponent implements OnInit, OnDestroy {
   }
 
   saveCart(): void {
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
     this.saveDraft.emit();
   }
 
@@ -602,11 +591,6 @@ export class PosCartComponent implements OnInit, OnDestroy {
       return;
     }
 
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
     this.checkout.emit();
   }
 

@@ -1,15 +1,13 @@
 import {
   Component,
-  Input,
   forwardRef,
-  OnInit,
-  OnDestroy,
-  ChangeDetectionStrategy,
   HostListener,
   ElementRef,
-  ChangeDetectorRef,
+  inject,
+  signal,
+  computed,
   input,
-  output
+  output,
 } from '@angular/core';
 
 import {
@@ -18,7 +16,6 @@ import {
   FormsModule,
   ReactiveFormsModule,
 } from '@angular/forms';
-import { Subject } from 'rxjs';
 import { IconComponent } from '../icon/icon.component';
 import { FormStyleVariant } from '../../types/form.types';
 
@@ -45,12 +42,12 @@ export type MultiSelectorSize = 'sm' | 'md' | 'lg';
   ],
   template: `
     <div class="w-full">
-      @if (label) {
+      @if (label()) {
         <label
           [class]="labelClasses"
-          [class.opacity-50]="disabled"
+          [class.opacity-50]="disabled()"
           >
-          {{ label }}
+          {{ label() }}
           @if (required()) {
             <span class="text-[var(--color-destructive)] ml-0.5">*</span>
           }
@@ -61,15 +58,15 @@ export type MultiSelectorSize = 'sm' | 'md' | 'lg';
         <!-- Trigger Button -->
         <button
           type="button"
-          [disabled]="disabled"
+          [disabled]="disabled()"
           (click)="toggleDropdown()"
           [class]="triggerClasses"
-          [class.border-border]="!errorText"
-          [class.border-destructive]="errorText"
+          [class.border-border]="!errorText()"
+          [class.border-destructive]="errorText()"
           >
           <div class="flex flex-wrap gap-1.5 items-center">
             <!-- Selected chips -->
-            @for (value of selectedValues; track value) {
+            @for (value of selectedValues(); track value) {
               <span
               class="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium
                      bg-primary-50 text-primary-600 border border-primary-200"
@@ -87,23 +84,23 @@ export type MultiSelectorSize = 'sm' | 'md' | 'lg';
             }
     
             <!-- Placeholder -->
-            @if (selectedValues.length === 0) {
+            @if (selectedValues().length === 0) {
               <span
                 class="text-[var(--color-text-secondary)]"
                 >
-              {{ placeholder() }}
+                {{ placeholder() }}
               </span>
             }
           </div>
     
           <!-- Chevron -->
           <div class="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-[var(--color-text-secondary)]">
-            <app-icon [name]="isOpen ? 'chevron-up' : 'chevron-down'" [size]="16"></app-icon>
+            <app-icon [name]="isOpen() ? 'chevron-up' : 'chevron-down'" [size]="16"></app-icon>
           </div>
         </button>
     
         <!-- Dropdown -->
-        @if (isOpen) {
+        @if (isOpen()) {
           <div
             class="absolute z-50 w-full mt-1 bg-[var(--color-surface)] border border-border shadow-lg max-h-60 overflow-auto"
             style="border-radius: var(--radius-sm);"
@@ -112,8 +109,8 @@ export type MultiSelectorSize = 'sm' | 'md' | 'lg';
             <div class="p-2 border-b border-border sticky top-0 bg-[var(--color-surface)]">
               <input
                 type="text"
-                [(ngModel)]="searchTerm"
-                (input)="onSearch()"
+                [ngModel]="searchTerm()"
+                (ngModelChange)="onSearch($event)"
               class="w-full px-3 py-1.5 text-sm border border-border
                      focus:outline-none focus:ring-1 focus:ring-secondary/40 focus:border-primary
                      bg-[var(--color-surface)] text-[var(--color-text-primary)]"
@@ -123,7 +120,7 @@ export type MultiSelectorSize = 'sm' | 'md' | 'lg';
             </div>
             <!-- Options -->
             <div class="py-1">
-              @for (option of filteredOptions; track option) {
+              @for (option of filteredOptions(); track option) {
                 <button
                   type="button"
                   [disabled]="option.disabled"
@@ -157,7 +154,7 @@ export type MultiSelectorSize = 'sm' | 'md' | 'lg';
                   }
                 </button>
               }
-              @if (filteredOptions.length === 0) {
+              @if (filteredOptions().length === 0) {
                 <div
                   class="px-3 py-4 text-center text-sm text-[var(--color-text-secondary)]"
                   >
@@ -170,17 +167,17 @@ export type MultiSelectorSize = 'sm' | 'md' | 'lg';
       </div>
     
       <!-- Help/Error text -->
-      @if (helpText || errorText) {
+      @if (helpText() || errorText()) {
         <div class="mt-1 text-sm">
-          @if (helpText && !errorText) {
+          @if (helpText() && !errorText()) {
             <span class="text-[var(--color-text-secondary)]">
-              {{ helpText }}
+              {{ helpText() }}
             </span>
           }
-          @if (errorText) {
+          @if (errorText()) {
             <span class="text-[var(--color-destructive)] flex items-center gap-1 font-medium">
               <app-icon name="alert-circle" [size]="12"></app-icon>
-              {{ errorText }}
+              {{ errorText() }}
             </span>
           }
         </div>
@@ -192,55 +189,48 @@ export type MultiSelectorSize = 'sm' | 'md' | 'lg';
       display: block;
     }
   `],
-  changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class MultiSelectorComponent implements ControlValueAccessor, OnInit, OnDestroy {
-  @Input() label = '';
-  readonly placeholder = input('Seleccionar...');
-  @Input() helpText = '';
-  @Input() errorText = '';
-  readonly required = input(false);
-  @Input() disabled = false;
+export class MultiSelectorComponent implements ControlValueAccessor {
+  private elementRef = inject(ElementRef);
+
+  readonly label = input<string>('');
+  readonly placeholder = input<string>('Seleccionar...');
+  readonly helpText = input<string>('');
+  readonly errorText = input<string>('');
+  readonly required = input<boolean>(false);
+  readonly disabled = input<boolean>(false);
   readonly size = input<MultiSelectorSize>('md');
   readonly styleVariant = input<FormStyleVariant>('modern');
   readonly options = input<MultiSelectorOption[]>([]);
 
   readonly valueChange = output<(string | number)[]>();
 
-  selectedValues: (string | number)[] = [];
-  isOpen = false;
-  searchTerm = '';
-  filteredOptions: MultiSelectorOption[] = [];
+  readonly selectedValues = signal<(string | number)[]>([]);
+  readonly isOpen = signal<boolean>(false);
+  readonly searchTerm = signal<string>('');
 
-  private destroy$ = new Subject<void>();
+  readonly filteredOptions = computed(() => {
+    const term = this.searchTerm().toLowerCase();
+    if (!term) return this.options();
+    return this.options().filter(
+      o => o.label.toLowerCase().includes(term) ||
+        (o.description && o.description.toLowerCase().includes(term))
+    );
+  });
+
   private onChange: (value: (string | number)[]) => void = () => { };
   private onTouched: () => void = () => { };
-
-  constructor(
-    private elementRef: ElementRef,
-    private cdr: ChangeDetectorRef
-  ) { }
-
-  ngOnInit(): void {
-    this.filteredOptions = [...this.options()];
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
 
   @HostListener('document:click', ['$event'])
   onDocumentClick(event: MouseEvent): void {
     if (!this.elementRef.nativeElement.contains(event.target)) {
-      this.isOpen = false;
+      this.isOpen.set(false);
     }
   }
 
   // ControlValueAccessor
   writeValue(value: (string | number)[] | null): void {
-    this.selectedValues = value || [];
-    this.cdr.markForCheck();
+    this.selectedValues.set(value || []);
   }
 
   registerOnChange(fn: (value: (string | number)[]) => void): void {
@@ -251,43 +241,41 @@ export class MultiSelectorComponent implements ControlValueAccessor, OnInit, OnD
     this.onTouched = fn;
   }
 
-  setDisabledState(isDisabled: boolean): void {
-    this.disabled = isDisabled;
+  setDisabledState(_isDisabled: boolean): void {
+    // disabled is managed via input() signal — no action needed
   }
 
   // UI Methods
   toggleDropdown(): void {
-    if (this.disabled) return;
-    this.isOpen = !this.isOpen;
-    if (this.isOpen) {
-      this.searchTerm = '';
-      this.filteredOptions = [...this.options()];
+    if (this.disabled()) return;
+    if (!this.isOpen()) {
+      this.searchTerm.set('');
     }
+    this.isOpen.update(v => !v);
   }
 
   toggleOption(option: MultiSelectorOption): void {
     if (option.disabled) return;
 
-    const index = this.selectedValues.findIndex(v => v == option.value);
+    const current = this.selectedValues();
+    const index = current.findIndex(v => v == option.value);
     if (index === -1) {
-      this.selectedValues = [...this.selectedValues, option.value];
+      this.selectedValues.set([...current, option.value]);
     } else {
-      this.selectedValues = this.selectedValues.filter(v => v != option.value);
+      this.selectedValues.set(current.filter(v => v != option.value));
     }
 
     this.emitChange();
-    this.cdr.markForCheck();
   }
 
   removeValue(value: string | number, event: MouseEvent): void {
     event.stopPropagation();
-    this.selectedValues = this.selectedValues.filter(v => v != value);
+    this.selectedValues.update(current => current.filter(v => v != value));
     this.emitChange();
-    this.cdr.markForCheck();
   }
 
   isSelected(value: string | number): boolean {
-    return this.selectedValues.some(v => v == value);
+    return this.selectedValues().some(v => v == value);
   }
 
   getOptionLabel(value: string | number): string {
@@ -295,18 +283,15 @@ export class MultiSelectorComponent implements ControlValueAccessor, OnInit, OnD
     return option?.label || String(value);
   }
 
-  onSearch(): void {
-    const term = this.searchTerm.toLowerCase();
-    this.filteredOptions = this.options().filter(
-      o => o.label.toLowerCase().includes(term) ||
-        (o.description && o.description.toLowerCase().includes(term))
-    );
+  onSearch(term: string): void {
+    this.searchTerm.set(term);
   }
 
   private emitChange(): void {
-    this.onChange(this.selectedValues);
+    const current = this.selectedValues();
+    this.onChange(current);
     this.onTouched();
-    this.valueChange.emit(this.selectedValues);
+    this.valueChange.emit(current);
   }
 
   // CSS class getters

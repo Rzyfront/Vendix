@@ -1,5 +1,5 @@
-import { Component, Input, Output, EventEmitter, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input, output, inject } from '@angular/core';
+import { DecimalPipe } from '@angular/common';
 import { ReactiveFormsModule, FormBuilder, FormArray, Validators } from '@angular/forms';
 import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
@@ -28,7 +28,7 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
   selector: 'vendix-journal-entry-create',
   standalone: true,
   imports: [
-    CommonModule,
+    DecimalPipe,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
@@ -39,7 +39,7 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onClose()"
       title="Nuevo Asiento Contable"
@@ -213,9 +213,9 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
     </app-modal>
   `,
 })
-export class JournalEntryCreateComponent implements OnInit {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
+export class JournalEntryCreateComponent {
+  readonly isOpen = input(false);
+  readonly isOpenChange = output<boolean>();
 
   private fb = inject(FormBuilder);
   private store = inject(Store);
@@ -269,7 +269,7 @@ export class JournalEntryCreateComponent implements OnInit {
     return Math.abs(this.total_debit - this.total_credit) < 0.01 && this.total_debit > 0;
   }
 
-  ngOnInit(): void {
+  constructor() {
     this.leaf_accounts$.subscribe((accounts) => {
       this.account_options = accounts.map((a) => ({
         value: a.id,
@@ -284,7 +284,6 @@ export class JournalEntryCreateComponent implements OnInit {
       }));
     });
 
-    // Set default date to today
     const today = toLocalDateString();
     this.form.patchValue({ entry_date: today });
   }

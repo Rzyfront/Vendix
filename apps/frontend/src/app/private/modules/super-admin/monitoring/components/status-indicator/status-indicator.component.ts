@@ -1,30 +1,29 @@
-import { Component, Input, ChangeDetectionStrategy, input } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input } from '@angular/core';
+import { NgClass } from '@angular/common';
 import { MetricStatus } from '../../interfaces';
 
 @Component({
   selector: 'app-status-indicator',
   standalone: true,
-  imports: [CommonModule],
-  changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [NgClass],
   template: `
     <span class="inline-flex items-center gap-1.5">
       <span
         class="w-2.5 h-2.5 rounded-full"
         [ngClass]="dotClass"
       ></span>
-      @if (label) {
+      @if (label()) {
         <span
           class="text-sm font-medium"
           style="color: var(--color-text-secondary);"
-        >{{ label }}</span>
+        >{{ label() }}</span>
       }
     </span>
     `,
 })
 export class StatusIndicatorComponent {
   readonly status = input<MetricStatus>('healthy');
-  @Input() label?: string;
+  readonly label = input<string | undefined>(undefined);
 
   get dotClass(): string {
     switch (this.status()) {

@@ -4,7 +4,7 @@ import {
   inject,
   ElementRef,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { AsyncPipe } from '@angular/common';
 import { Router } from '@angular/router';
 import { IconComponent } from '../icon/icon.component';
 import { NotificationsFacade, AppNotification } from '../../../core/store/notifications';
@@ -12,7 +12,7 @@ import { NotificationsFacade, AppNotification } from '../../../core/store/notifi
 @Component({
   selector: 'app-notifications-dropdown',
   standalone: true,
-  imports: [CommonModule, IconComponent],
+  imports: [AsyncPipe, IconComponent],
   template: `
     <div class="notif-dropdown-container" [class.open]="isOpen">
       <!-- Bell trigger button -->

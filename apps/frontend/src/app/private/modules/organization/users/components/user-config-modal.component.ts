@@ -1,12 +1,12 @@
 import {
   Component,
-  Input,
   OnInit,
   OnDestroy,
   inject,
   OnChanges,
   input,
-  output
+  output,
+  model,
 } from '@angular/core';
 
 import {
@@ -34,17 +34,17 @@ import { Subject, takeUntil } from 'rxjs';
     ButtonComponent,
     ModalComponent,
     InputComponent,
-    TextareaComponent
-],
+    TextareaComponent,
+  ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
       title="Configuración de Usuario"
       subtitle="Administra los roles, tiendas y configuraciones del panel UI"
-      >
+    >
       @if (user()) {
         <form [formGroup]="configForm" (ngSubmit)="onSubmit()">
           <!-- Tabs -->
@@ -57,7 +57,7 @@ import { Subject, takeUntil } from 'rxjs';
               [class.border-transparent]="activeTab !== 'general'"
               [class.text-gray-500]="activeTab !== 'general'"
               (click)="activeTab = 'general'"
-              >
+            >
               General
             </button>
             <button
@@ -68,7 +68,7 @@ import { Subject, takeUntil } from 'rxjs';
               [class.border-transparent]="activeTab !== 'roles'"
               [class.text-gray-500]="activeTab !== 'roles'"
               (click)="activeTab = 'roles'"
-              >
+            >
               Roles
             </button>
             <button
@@ -79,7 +79,7 @@ import { Subject, takeUntil } from 'rxjs';
               [class.border-transparent]="activeTab !== 'stores'"
               [class.text-gray-500]="activeTab !== 'stores'"
               (click)="activeTab = 'stores'"
-              >
+            >
               Tiendas
             </button>
             <button
@@ -90,7 +90,7 @@ import { Subject, takeUntil } from 'rxjs';
               [class.border-transparent]="activeTab !== 'panel_ui'"
               [class.text-gray-500]="activeTab !== 'panel_ui'"
               (click)="activeTab = 'panel_ui'"
-              >
+            >
               Panel UI
             </button>
           </div>
@@ -103,21 +103,21 @@ import { Subject, takeUntil } from 'rxjs';
                   <div class="space-y-2">
                     <label
                       class="block text-sm font-medium text-[var(--color-text-primary)]"
-                      >
+                    >
                       Aplicación Asignada
                     </label>
                     <select
                       formControlName="app"
                       class="w-full px-3 py-2 border border-[var(--color-border)] rounded-md bg-[var(--color-surface)] text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:border-[var(--color-primary)]"
-                      >
+                    >
                       <option value="VENDIX_LANDING">VENDIX_LANDING</option>
                       <option value="ORG_ADMIN">ORG_ADMIN</option>
                       <option value="STORE_ADMIN">STORE_ADMIN</option>
                       <option value="STORE_ECOMMERCE">STORE_ECOMMERCE</option>
                     </select>
                     <p class="text-xs text-gray-500">
-                      Selecciona la aplicación principal a la que tendrá acceso el
-                      usuario.
+                      Selecciona la aplicación principal a la que tendrá acceso
+                      el usuario.
                     </p>
                   </div>
                 </div>
@@ -129,9 +129,9 @@ import { Subject, takeUntil } from 'rxjs';
                     <!-- Placeholder for dynamic roles. In a real scenario, we'd fetch available roles. For now, manual input or simplified list -->
                     <div class="p-3 border rounded bg-gray-50 dark:bg-gray-800">
                       <p class="text-sm text-gray-500 italic">
-                        La gestión dinámica de roles se implementará conectando con el
-                        servicio de roles. Por ahora, puedes ingresar IDs de roles
-                        manualmente (separados por coma).
+                        La gestión dinámica de roles se implementará conectando
+                        con el servicio de roles. Por ahora, puedes ingresar IDs
+                        de roles manualmente (separados por coma).
                       </p>
                       <app-input
                         styleVariant="modern"
@@ -148,8 +148,8 @@ import { Subject, takeUntil } from 'rxjs';
                 <div class="space-y-4">
                   <div class="p-3 border rounded bg-gray-50 dark:bg-gray-800">
                     <p class="text-sm text-gray-500 italic">
-                      La selección de tiendas se conectará con el servicio de tiendas.
-                      Por ahora, ingresa IDs de tiendas manualmente.
+                      La selección de tiendas se conectará con el servicio de
+                      tiendas. Por ahora, ingresa IDs de tiendas manualmente.
                     </p>
                     <app-input
                       styleVariant="modern"
@@ -184,17 +184,17 @@ import { Subject, takeUntil } from 'rxjs';
           </div>
         </form>
       }
-    
+
       <div
         class="flex justify-between items-center pt-4 border-t border-[var(--color-border)]"
         slot="footer"
-        >
+      >
         <app-button
           variant="outline-danger"
           (clicked)="onCancel()"
           [disabled]="isSaving"
           size="sm"
-          >
+        >
           Cancelar
         </app-button>
         <app-button
@@ -203,12 +203,12 @@ import { Subject, takeUntil } from 'rxjs';
           [disabled]="configForm.invalid || isSaving || !!jsonError"
           [loading]="isSaving"
           size="sm"
-          >
+        >
           Guardar Configuración
         </app-button>
       </div>
     </app-modal>
-    `,
+  `,
   styles: [
     `
       :host {
@@ -219,7 +219,7 @@ import { Subject, takeUntil } from 'rxjs';
 })
 export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
   readonly user = input<User | null>(null);
-  @Input() isOpen: boolean = false;
+  readonly isOpen = model<boolean>(false);
   readonly isOpenChange = output<boolean>();
   readonly onSaved = output<void>();
 
@@ -259,12 +259,12 @@ export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
   ngOnInit(): void {}
 
   onCancel(): void {
-    this.isOpen = false;
+    this.isOpen.set(false);
     this.isOpenChange.emit(false);
   }
 
   ngOnChanges(): void {
-    if (this.isOpen && this.user()) {
+    if (this.isOpen() && this.user()) {
       this.loadConfiguration();
     }
   }

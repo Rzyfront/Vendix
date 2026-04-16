@@ -1,4 +1,4 @@
-import { Component, input, output, computed, ChangeDetectionStrategy } from '@angular/core';
+import { Component, input, output, computed } from '@angular/core';
 
 import { Booking } from '../../../interfaces/reservation.interface';
 
@@ -17,7 +17,6 @@ interface MonthCell {
   imports: [],
   templateUrl: './calendar-month-view.component.html',
   styleUrls: ['./calendar-month-view.component.scss'],
-  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class CalendarMonthViewComponent {
   readonly bookingsByDate = input.required<Record<string, Booking[]>>();

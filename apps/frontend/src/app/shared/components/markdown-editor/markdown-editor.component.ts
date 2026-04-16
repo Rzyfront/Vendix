@@ -1,10 +1,10 @@
 import {
   Component,
-  Input,
   ElementRef,
   signal,
   computed,
   input,
+  model,
   output,
   viewChild
 } from '@angular/core';
@@ -112,7 +112,7 @@ interface UploadResult {
         <textarea
           #editorTextarea
           class="w-full min-h-[300px] p-4 text-sm font-mono text-text-primary bg-surface resize-y focus:outline-none"
-          [ngModel]="content"
+          [ngModel]="content()"
           (ngModelChange)="onContentChange($event)"
           (paste)="onPaste($event)"
           placeholder="Escribe el contenido en Markdown..."
@@ -172,10 +172,9 @@ interface UploadResult {
   `],
 })
 export class MarkdownEditorComponent {
-  @Input() content = '';
+  readonly content = model<string>('');
   readonly uploadFn = input<(file: File) => Observable<UploadResult>>();
 
-  readonly contentChange = output<string>();
   readonly uploadError = output<string>();
 
   readonly textareaRef = viewChild.required<ElementRef<HTMLTextAreaElement>>('editorTextarea');
@@ -196,12 +195,11 @@ export class MarkdownEditorComponent {
   constructor(private sanitizer: DomSanitizer) {}
 
   previewHtml = computed((): SafeHtml => {
-    return this.sanitizer.bypassSecurityTrustHtml(markdownToHtml(this.content));
+    return this.sanitizer.bypassSecurityTrustHtml(markdownToHtml(this.content()));
   });
 
   onContentChange(value: string): void {
-    this.content = value;
-    this.contentChange.emit(value);
+    this.content.set(value);
   }
 
   insertMarkdown(type: string): void {
@@ -210,7 +208,8 @@ export class MarkdownEditorComponent {
 
     const start = textarea.selectionStart;
     const end = textarea.selectionEnd;
-    const selected = this.content.substring(start, end);
+    const current = this.content();
+    const selected = current.substring(start, end);
 
     let insertion = '';
     let cursorOffset = 0;
@@ -255,12 +254,11 @@ export class MarkdownEditorComponent {
     }
 
     const newContent =
-      this.content.substring(0, start) +
+      current.substring(0, start) +
       insertion +
-      this.content.substring(end);
+      current.substring(end);
 
-    this.content = newContent;
-    this.contentChange.emit(newContent);
+    this.content.set(newContent);
 
     // Restore cursor position
     setTimeout(() => {
@@ -375,13 +373,13 @@ export class MarkdownEditorComponent {
     const pos = textarea.selectionStart;
     const imageMarkdown = `![image](${url})`;
 
+    const current = this.content();
     const newContent =
-      this.content.substring(0, pos) +
+      current.substring(0, pos) +
       imageMarkdown +
-      this.content.substring(pos);
+      current.substring(pos);
 
-    this.content = newContent;
-    this.contentChange.emit(newContent);
+    this.content.set(newContent);
 
     setTimeout(() => {
       textarea.focus();

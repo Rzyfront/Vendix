@@ -1,5 +1,5 @@
 <app-modal
-  [isOpen]="isOpen"
+  [isOpen]="isOpen()"
   [size]="'xl'"
   [title]="'Procesar Pago'"
   [subtitle]="'Selecciona método de pago y cliente'"
@@ -16,7 +16,7 @@
 
       <!-- Product List -->
       <div class="product-list">
-        @for (item of cartState?.items; track item) {
+        @for (item of cartState()?.items; track item) {
           <div class="product-item">
             <span class="product-name">{{ item.product.name }}@if (item.variant_display_name) {
               <span style="font-size: 0.85em; opacity: 0.7;"> - {{ item.variant_display_name }}</span>
@@ -30,7 +30,7 @@
             }
           </div>
         }
-        @if (!cartState?.items?.length) {
+        @if (!cartState()?.items?.length) {
           <div class="empty-cart">
             El carrito está vacío
           </div>
@@ -41,24 +41,24 @@
       <div class="summary-details">
         <div class="summary-row">
           <span>Productos</span>
-          <span class="summary-value">{{ cartState?.summary?.itemCount || 0 }}</span>
+          <span class="summary-value">{{ cartState()?.summary?.itemCount || 0 }}</span>
         </div>
         <div class="summary-row">
           <span>Cantidad</span>
-          <span class="summary-value">{{ cartState?.summary?.totalItems || 0 }}</span>
+          <span class="summary-value">{{ cartState()?.summary?.totalItems || 0 }}</span>
         </div>
         <div class="summary-row">
           <span>Subtotal</span>
-          <span class="summary-value">{{ cartState?.summary?.subtotal || 0 | currency }}</span>
+          <span class="summary-value">{{ cartState()?.summary?.subtotal || 0 | currency }}</span>
         </div>
         <div class="summary-row">
           <span>Impuestos</span>
-          <span class="summary-value">{{ cartState?.summary?.taxAmount || 0 | currency }}</span>
+          <span class="summary-value">{{ cartState()?.summary?.taxAmount || 0 | currency }}</span>
         </div>
-        @if ((cartState?.summary?.discountAmount ?? 0) > 0) {
+        @if ((cartState()?.summary?.discountAmount ?? 0) > 0) {
           <div class="summary-row">
             <span>Descuento</span>
-            <span class="summary-value discount">-{{ cartState?.summary?.discountAmount | currency }}</span>
+            <span class="summary-value discount">-{{ cartState()?.summary?.discountAmount | currency }}</span>
           </div>
         }
       </div>
@@ -66,7 +66,7 @@
       <!-- Total -->
       <div class="total-section">
         <p class="total-label">Total a Pagar</p>
-        <p class="total-amount">{{ cartState?.summary?.total || 0 | currency }}</p>
+        <p class="total-amount">{{ cartState()?.summary?.total || 0 | currency }}</p>
       </div>
     </section>
 
@@ -118,7 +118,7 @@
         @if (paymentState.paymentForm === 'credito') {
           <div class="tab-content">
             <div class="credit-config">
-              @if (!cartState?.customer) {
+              @if (!cartState()?.customer) {
                 <div class="credit-warning">
                   <app-icon name="alert-triangle" [size]="18"></app-icon>
                   <span>Se requiere un cliente para ventas a crédito</span>
@@ -319,7 +319,7 @@
                 <div class="quick-amounts">
                   <button type="button" (click)="setHalfAmount()" class="quick-btn">
                     <span>1/2 Pago</span>
-                    <span class="quick-value">{{ (cartState?.summary?.total || 0) / 2 | currency }}</span>
+                    <span class="quick-value">{{ (cartState()?.summary?.total || 0) / 2 | currency }}</span>
                   </button>
                   <button type="button" (click)="setFullAmount()" class="quick-btn primary">
                     <span>Total</span>
@@ -355,20 +355,20 @@
               }
               @if (!walletLoading && walletInfo) {
                 <div class="wallet-balance-display"
-                  [style.background]="walletInfo.available >= (cartState?.summary?.total || 0) ? 'rgba(var(--color-success-rgb), 0.1)' : 'rgba(var(--color-error-rgb), 0.1)'"
-                  [style.border]="walletInfo.available >= (cartState?.summary?.total || 0) ? '2px solid rgba(var(--color-success-rgb), 0.3)' : '2px solid rgba(var(--color-error-rgb), 0.3)'"
+                  [style.background]="walletInfo.available >= (cartState()?.summary?.total || 0) ? 'rgba(var(--color-success-rgb), 0.1)' : 'rgba(var(--color-error-rgb), 0.1)'"
+                  [style.border]="walletInfo.available >= (cartState()?.summary?.total || 0) ? '2px solid rgba(var(--color-success-rgb), 0.3)' : '2px solid rgba(var(--color-error-rgb), 0.3)'"
                   style="display: flex; justify-content: space-between; align-items: center; padding: 12px; border-radius: 10px;">
                   <span style="font-weight: 600; color: var(--color-text-primary);">Saldo disponible:</span>
                   <span style="font-size: 18px; font-weight: 700;"
-                    [style.color]="walletInfo.available >= (cartState?.summary?.total || 0) ? 'var(--color-success)' : 'var(--color-error)'">
+                    [style.color]="walletInfo.available >= (cartState()?.summary?.total || 0) ? 'var(--color-success)' : 'var(--color-error)'">
                     {{ walletInfo.available | currency }}
                   </span>
                 </div>
               }
-              @if (!walletLoading && walletInfo && walletInfo.available < (cartState?.summary?.total || 0)) {
+              @if (!walletLoading && walletInfo && walletInfo.available < (cartState()?.summary?.total || 0)) {
                 <p
                   style="font-size: 12px; color: var(--color-error); margin: 8px 0 0 0;">
-                  Saldo insuficiente para cubrir el total de {{ cartState?.summary?.total | currency }}
+                  Saldo insuficiente para cubrir el total de {{ cartState()?.summary?.total | currency }}
                 </p>
               }
               @if (!walletLoading && !walletInfo) {
@@ -569,13 +569,13 @@
           <app-icon name="user" [size]="20"></app-icon>
           <div class="sale-type-info">
             <span class="sale-type-name">Con Cliente</span>
-            <span class="sale-type-desc">{{ cartState?.customer ? customerDisplayName : 'Seleccionar cliente' }}</span>
+            <span class="sale-type-desc">{{ cartState()?.customer ? customerDisplayName : 'Seleccionar cliente' }}</span>
           </div>
         </button>
       </div>
 
       <!-- Selected Customer Display -->
-      @if (!paymentState.isAnonymousSale && cartState?.customer) {
+      @if (!paymentState.isAnonymousSale && cartState()?.customer) {
         <div class="selected-customer">
           <div class="customer-avatar">
             <app-icon name="user-check" [size]="16"></app-icon>
@@ -591,7 +591,7 @@
       }
 
       <!-- Select Customer Button -->
-      @if (!paymentState.isAnonymousSale && !cartState?.customer && !showCustomerSelector) {
+      @if (!paymentState.isAnonymousSale && !cartState()?.customer && !showCustomerSelector) {
         <button
           type="button"
           class="select-customer-btn"

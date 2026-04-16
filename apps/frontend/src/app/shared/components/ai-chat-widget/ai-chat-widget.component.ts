@@ -3,13 +3,14 @@ import {
   signal,
   ElementRef,
   OnInit,
-  OnDestroy,
+  DestroyRef,
   ChangeDetectionStrategy,
+  inject,
   viewChild
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
-import { Subscription } from 'rxjs';
 import { AIChatFacade } from '../../../core/store/ai-chat/ai-chat.facade';
 import { IconComponent } from '../icon/icon.component';
 
@@ -409,7 +410,7 @@ import { IconComponent } from '../icon/icon.component';
     }
   `],
 })
-export class AIChatWidgetComponent implements OnInit, OnDestroy {
+export class AIChatWidgetComponent implements OnInit {
   readonly messagesContainer = viewChild.required<ElementRef>('messagesContainer');
 
   isOpen = signal(false);
@@ -423,29 +424,39 @@ export class AIChatWidgetComponent implements OnInit, OnDestroy {
   isStreaming = signal(false);
   isSending = signal(false);
 
-  private subscriptions: Subscription[] = [];
-
-  constructor(private readonly chatFacade: AIChatFacade) {}
+  private readonly chatFacade = inject(AIChatFacade);
+  private readonly destroyRef = inject(DestroyRef);
 
   ngOnInit(): void {
-    this.subscriptions.push(
-      this.chatFacade.conversations$.subscribe((c) => this.conversations.set(c)),
-      this.chatFacade.messages$.subscribe((m) => {
+    this.chatFacade.conversations$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((c) => this.conversations.set(c));
+
+    this.chatFacade.messages$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((m) => {
         this.messages.set(m);
         this.scrollToBottom();
-      }),
-      this.chatFacade.activeConversationId$.subscribe((id) => this.activeConversationId.set(id)),
-      this.chatFacade.streamingContent$.subscribe((s) => {
+      });
+
+    this.chatFacade.activeConversationId$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((id) => this.activeConversationId.set(id));
+
+    this.chatFacade.streamingContent$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((s) => {
         this.streamingContent.set(s);
         this.scrollToBottom();
-      }),
-      this.chatFacade.isStreaming$.subscribe((s) => this.isStreaming.set(s)),
-      this.chatFacade.isSending$.subscribe((s) => this.isSending.set(s)),
-    );
-  }
+      });
 
-  ngOnDestroy(): void {
-    this.subscriptions.forEach((s) => s.unsubscribe());
+    this.chatFacade.isStreaming$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((s) => this.isStreaming.set(s));
+
+    this.chatFacade.isSending$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((s) => this.isSending.set(s));
   }
 
   toggleChat(): void {
@@ -479,13 +490,13 @@ export class AIChatWidgetComponent implements OnInit, OnDestroy {
     if (!conversationId) {
       this.chatFacade.createConversation();
       // Wait for conversation to be created, then send
-      const sub = this.chatFacade.activeConversationId$.subscribe((id) => {
-        if (id) {
-          this.chatFacade.sendMessage(id, content);
-          sub.unsubscribe();
-        }
-      });
-      this.subscriptions.push(sub);
+      this.chatFacade.activeConversationId$
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe((id) => {
+          if (id) {
+            this.chatFacade.sendMessage(id, content);
+          }
+        });
     } else {
       this.chatFacade.sendMessage(conversationId, content);
     }

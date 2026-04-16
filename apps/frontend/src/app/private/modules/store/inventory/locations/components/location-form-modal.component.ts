@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, OnChanges, SimpleChanges, OnInit } from '@angular/core';
+import { Component, input, output, effect } from '@angular/core';
 
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 
@@ -32,11 +32,11 @@ import { CountryService, Country, Department, City } from '../../../../../../ser
 ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'md'"
-      [title]="location ? 'Editar Ubicación' : 'Nueva Ubicación'"
+      [title]="location() ? 'Editar Ubicación' : 'Nueva Ubicación'"
       subtitle="Configura los detalles de la ubicación de inventario"
       >
       <form [formGroup]="form" (ngSubmit)="onSubmit()">
@@ -199,24 +199,24 @@ import { CountryService, Country, Department, City } from '../../../../../../ser
         <app-button
           variant="primary"
           type="button"
-          [loading]="isSubmitting"
-          [disabled]="form.invalid || isSubmitting"
+          [loading]="isSubmitting()"
+          [disabled]="form.invalid || isSubmitting()"
           (clicked)="onSubmit()"
           >
-          {{ location ? 'Guardar Cambios' : 'Crear Ubicación' }}
+          {{ location() ? 'Guardar Cambios' : 'Crear Ubicación' }}
         </app-button>
       </div>
     </app-modal>
     `,
 })
-export class LocationFormModalComponent implements OnInit, OnChanges {
-  @Input() isOpen = false;
-  @Input() location: InventoryLocation | null = null;
-  @Input() isSubmitting = false;
+export class LocationFormModalComponent {
+  readonly isOpen = input(false);
+  readonly location = input<InventoryLocation | null>(null);
+  readonly isSubmitting = input(false);
 
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() cancel = new EventEmitter<void>();
-  @Output() save = new EventEmitter<CreateLocationDto | UpdateLocationDto>();
+  readonly isOpenChange = output<boolean>();
+  readonly cancel = output<void>();
+  readonly save = output<CreateLocationDto | UpdateLocationDto>();
 
   typeOptions = [
     { value: 'warehouse', label: 'Almacén / Bodega' },
@@ -237,20 +237,18 @@ export class LocationFormModalComponent implements OnInit, OnChanges {
     private countryService: CountryService
   ) {
     this.form = this.createForm();
-  }
-
-  ngOnInit(): void {
     this.countries = this.countryService.getCountries();
     this.setupAddressListeners();
-  }
-
-  ngOnChanges(changes: SimpleChanges): void {
-    if (changes['location'] && this.location) {
-      this.patchForm(this.location);
-    } else if (changes['isOpen'] && this.isOpen && !this.location) {
-      this.form.reset({ is_active: true, type: 'warehouse' });
-      this.showAddress = false;
-    }
+    effect(() => {
+      const loc = this.location();
+      const isOpen = this.isOpen();
+      if (loc) {
+        this.patchForm(loc);
+      } else if (isOpen && !loc) {
+        this.form.reset({ is_active: true, type: 'warehouse' });
+        this.showAddress = false;
+      }
+    });
   }
 
   private createForm(): FormGroup {
@@ -410,11 +408,6 @@ export class LocationFormModalComponent implements OnInit, OnChanges {
   }
 
   onCancel(): void {
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
     this.cancel.emit();
   }
 

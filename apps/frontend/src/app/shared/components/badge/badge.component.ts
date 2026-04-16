@@ -1,5 +1,5 @@
 import { Component, input } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { NgClass, NgStyle } from '@angular/common';
 
 export type BadgeVariant =
   | 'success'
@@ -26,7 +26,7 @@ const OUTLINE_COLORS: Record<string, { text: string; bg: string; border: string 
 @Component({
   selector: 'app-badge',
   standalone: true,
-  imports: [CommonModule],
+  imports: [NgClass, NgStyle],
   template: `
     <span
       class="inline-flex items-center font-medium"

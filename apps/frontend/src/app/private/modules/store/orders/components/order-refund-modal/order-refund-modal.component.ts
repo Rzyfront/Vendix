@@ -1,5 +1,6 @@
 import {
   Component,
+  DestroyRef,
   computed,
   effect,
   inject,
@@ -7,7 +8,7 @@ import {
   output,
   signal,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { NgClass } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ModalComponent } from '../../../../../../shared/components';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
@@ -27,7 +28,7 @@ import {
 } from '../../interfaces/order.interface';
 import { StoreOrdersService } from '../../services/store-orders.service';
 import { InventoryService } from '../../../inventory/services/inventory.service';
-import { takeUntil, Subject } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 interface RefundItemState {
   orderItem: OrderItem;
@@ -43,7 +44,7 @@ interface RefundItemState {
   selector: 'app-order-refund-modal',
   standalone: true,
   imports: [
-    CommonModule,
+    NgClass,
     FormsModule,
     ModalComponent,
     ButtonComponent,
@@ -419,7 +420,7 @@ export class OrderRefundModalComponent {
   // ── Services ────────────────────────────────────────────────
   private ordersService = inject(StoreOrdersService);
   private inventoryService = inject(InventoryService);
-  private destroy$ = new Subject<void>();
+  private destroyRef = inject(DestroyRef);
 
   // ── State ───────────────────────────────────────────────────
   currentStep = signal(0);
@@ -501,7 +502,7 @@ export class OrderRefundModalComponent {
 
     this.ordersService
       .getOrderRefunds(orderId)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (refunds) => {
           const refundedMap = new Map<number, number>();
@@ -546,7 +547,7 @@ export class OrderRefundModalComponent {
   private loadLocations(): void {
     this.inventoryService
       .getLocations({ is_active: true })
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           const data = res.data || res;
@@ -655,7 +656,7 @@ export class OrderRefundModalComponent {
     this.isLoadingPreview.set(true);
     this.ordersService
       .previewRefund(orderId.toString(), this.buildDto())
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (result) => {
           this.preview.set(result);
@@ -674,7 +675,7 @@ export class OrderRefundModalComponent {
     this.isProcessing.set(true);
     this.ordersService
       .createRefund(orderId.toString(), this.buildDto())
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.isProcessing.set(false);
@@ -705,8 +706,4 @@ export class OrderRefundModalComponent {
     this.isProcessing.set(false);
   }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
 }

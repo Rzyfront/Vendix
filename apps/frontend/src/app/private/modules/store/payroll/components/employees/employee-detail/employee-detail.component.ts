@@ -1,5 +1,5 @@
-import { Component, OnChanges, SimpleChanges, Output, EventEmitter, Input, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input, output, inject, effect, DestroyRef } from '@angular/core';
+import { AsyncPipe, DatePipe } from '@angular/common';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
@@ -20,7 +20,8 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
   selector: 'vendix-employee-detail',
   standalone: true,
   imports: [
-    CommonModule,
+    AsyncPipe,
+    DatePipe,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
@@ -29,7 +30,7 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onClose()"
       title="Detalle de Empleado"
@@ -37,26 +38,26 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
       >
       <div class="p-4">
         <!-- Status Badge -->
-        @if (employee) {
+        @if (employee()) {
           <div class="mb-4 flex items-center gap-2">
             <span class="text-sm text-text-secondary">Estado:</span>
-            <span [class]="getStatusBadgeClass(employee.status)" class="px-2 py-0.5 rounded-full text-xs font-medium">
-              {{ getStatusLabel(employee.status) }}
+            <span [class]="getStatusBadgeClass(employee()!.status)" class="px-2 py-0.5 rounded-full text-xs font-medium">
+              {{ getStatusLabel(employee()!.status) }}
             </span>
-            @if (employee.employee_code) {
+            @if (employee()!.employee_code) {
               <span class="ml-auto text-sm text-text-secondary">
-                Codigo: {{ employee.employee_code }}
+                Codigo: {{ employee()!.employee_code }}
               </span>
             }
           </div>
         }
     
         <!-- Linked user info -->
-        @if (employee?.user) {
+        @if (employee()?.user) {
           <div class="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
             <div class="flex items-center gap-2">
               <span class="text-sm font-medium text-blue-800">Usuario vinculado:</span>
-              <span class="text-sm text-blue-700">{{ employee?.user?.first_name }} {{ employee?.user?.last_name }} ({{ employee?.user?.email }})</span>
+              <span class="text-sm text-blue-700">{{ employee()?.user?.first_name }} {{ employee()?.user?.last_name }} ({{ employee()?.user?.email }})</span>
             </div>
           </div>
         }
@@ -223,7 +224,7 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
         </form>
     
         <!-- Terminate Action -->
-        @if (employee && employee.status === 'active') {
+        @if (employee() && employee()!.status === 'active') {
           <div class="mt-5 pt-4 border-t border-border space-y-2">
             <span class="text-xs font-medium text-text-secondary uppercase tracking-wide">Acciones</span>
             <div class="flex justify-end">
@@ -240,10 +241,10 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
         }
     
         <!-- Termination info -->
-        @if (employee?.termination_date) {
+        @if (employee()?.termination_date) {
           <div class="mt-4 p-3 bg-red-50 rounded-lg border border-red-200">
             <p class="text-sm text-red-800">
-              <strong>Fecha de terminacion:</strong> {{ employee?.termination_date | date:'dd/MM/yyyy' }}
+              <strong>Fecha de terminacion:</strong> {{ employee()?.termination_date | date:'dd/MM/yyyy' }}
             </p>
           </div>
         }
@@ -259,7 +260,7 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
             Cerrar
           </app-button>
     
-          @if (employee?.status !== 'terminated') {
+          @if (employee()?.status !== 'terminated') {
             <app-button
               variant="primary"
               size="sm"
@@ -274,10 +275,10 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
     </app-modal>
     `
 })
-export class EmployeeDetailComponent implements OnChanges {
-  @Input() isOpen = false;
-  @Input() employee: Employee | null = null;
-  @Output() isOpenChange = new EventEmitter<boolean>();
+export class EmployeeDetailComponent {
+  readonly isOpen = input<boolean>(false);
+  readonly employee = input<Employee | null>(null);
+  readonly isOpenChange = output<boolean>();
 
   private payrollService = inject(PayrollService);
 
@@ -353,17 +354,18 @@ export class EmployeeDetailComponent implements OnChanges {
     this.employeeForm.get('user_id')!.valueChanges.subscribe((value) => {
       this.onUserSelected(value);
     });
-  }
 
-  ngOnChanges(changes: SimpleChanges) {
-    if (changes['employee'] && this.employee) {
-      this.patchForm(this.employee);
-      if (this.employee.status === 'terminated') {
-        this.employeeForm.disable();
-      } else {
-        this.employeeForm.enable();
+    effect(() => {
+      const emp = this.employee();
+      if (emp) {
+        this.patchForm(emp);
+        if (emp.status === 'terminated') {
+          this.employeeForm.disable();
+        } else {
+          this.employeeForm.enable();
+        }
       }
-    }
+    });
   }
 
   private patchForm(employee: Employee) {
@@ -397,7 +399,8 @@ export class EmployeeDetailComponent implements OnChanges {
   }
 
   onSubmit() {
-    if (this.employeeForm.invalid || !this.employee || this.employee.status === 'terminated') {
+    const emp = this.employee();
+    if (this.employeeForm.invalid || !emp || emp.status === 'terminated') {
       this.employeeForm.markAllAsTouched();
       return;
     }
@@ -405,7 +408,7 @@ export class EmployeeDetailComponent implements OnChanges {
     const formValue = this.employeeForm.value;
 
     this.store.dispatch(updateEmployee({
-      id: this.employee.id,
+      id: emp.id,
       employee: {
         first_name: formValue.first_name,
         last_name: formValue.last_name,
@@ -458,8 +461,9 @@ export class EmployeeDetailComponent implements OnChanges {
   }
 
   onTerminate(): void {
-    if (this.employee) {
-      this.store.dispatch(terminateEmployee({ id: this.employee.id }));
+    const emp = this.employee();
+    if (emp) {
+      this.store.dispatch(terminateEmployee({ id: emp.id }));
       this.onClose();
     }
   }

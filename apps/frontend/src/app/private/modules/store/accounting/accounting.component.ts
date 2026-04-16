@@ -1,8 +1,6 @@
-import { Component, OnInit, OnDestroy, inject } from '@angular/core';
+import { Component, inject } from '@angular/core';
 import { RouterModule } from '@angular/router';
 import { Store } from '@ngrx/store';
-import { Subject } from 'rxjs';
-import { takeUntil } from 'rxjs/operators';
 
 import {
   loadAccounts,
@@ -19,17 +17,11 @@ import {
     </div>
   `,
 })
-export class AccountingComponent implements OnInit, OnDestroy {
+export class AccountingComponent {
   private store = inject(Store);
-  private destroy$ = new Subject<void>();
 
-  ngOnInit(): void {
+  constructor() {
     this.store.dispatch(loadAccounts());
     this.store.dispatch(loadFiscalPeriods());
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
   }
 }

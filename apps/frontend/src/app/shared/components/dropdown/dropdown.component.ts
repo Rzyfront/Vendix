@@ -2,7 +2,6 @@ import {
   Component,
   ElementRef,
   HostListener,
-  Input,
   TemplateRef,
   output,
   viewChild
@@ -37,7 +36,7 @@ import {
     `,
 })
 export class DropdownComponent {
-  @Input() open = false;
+  open = false;
   readonly isOpenChange = output<boolean>();
   readonly rootRef = viewChild.required<ElementRef<HTMLElement>>('root');
 

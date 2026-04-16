@@ -1,6 +1,5 @@
 import {
   Component,
-  ChangeDetectionStrategy,
   input,
   model,
 } from '@angular/core';
@@ -11,7 +10,6 @@ import { IconComponent } from '../icon/icon.component';
   selector: 'app-expandable-card',
   standalone: true,
   imports: [IconComponent],
-  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div
       class="expandable-card"

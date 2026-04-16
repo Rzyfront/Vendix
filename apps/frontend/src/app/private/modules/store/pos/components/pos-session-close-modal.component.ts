@@ -1,12 +1,12 @@
 import {
   Component,
-  EventEmitter,
-  Input,
-  Output,
-  OnChanges,
-  SimpleChanges,
+  input,
+  output,
+  effect,
+  untracked,
+  inject,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { DatePipe } from '@angular/common';
 import {
   FormBuilder,
   FormGroup,
@@ -31,7 +31,7 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
   selector: 'app-pos-session-close-modal',
   standalone: true,
   imports: [
-    CommonModule,
+    DatePipe,
     ReactiveFormsModule,
     ButtonComponent,
     ModalComponent,
@@ -41,7 +41,7 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'md'"
@@ -57,8 +57,8 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
         <div>
           <h2 class="text-lg font-semibold text-text-primary">Cerrar Caja</h2>
           <p class="text-sm text-text-secondary">
-            {{ session?.register?.name || 'Caja' }} — Abierta
-            {{ session?.opened_at | date : 'shortTime' }}
+            {{ session()?.register?.name || 'Caja' }} — Abierta
+            {{ session()?.opened_at | date : 'shortTime' }}
           </p>
         </div>
       </div>
@@ -66,7 +66,7 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
       <!-- Body -->
       <div class="space-y-5">
         <!-- Session summary cards -->
-        @if (session) {
+        @if (session()) {
           <div class="grid grid-cols-2 gap-3">
             <div
               class="bg-primary/5 border border-primary/20 p-3 rounded-xl text-center"
@@ -77,7 +77,7 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
                 Monto Apertura
               </p>
               <p class="text-xl font-bold text-text-primary">
-                {{ session.opening_amount | currency:0 }}
+                {{ session()!.opening_amount | currency:0 }}
               </p>
             </div>
             <div
@@ -89,8 +89,8 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
                 Cajero
               </p>
               <p class="text-xl font-bold text-text-primary">
-                {{ session.opened_by_user?.first_name }}
-                {{ session.opened_by_user?.last_name }}
+                {{ session()!.opened_by_user?.first_name }}
+                {{ session()!.opened_by_user?.last_name }}
               </p>
             </div>
           </div>
@@ -231,11 +231,11 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
     </app-modal>
   `,
 })
-export class PosSessionCloseModalComponent implements OnChanges {
-  @Input() isOpen = false;
-  @Input() session: CashRegisterSession | null = null;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() sessionClosed = new EventEmitter<any>();
+export class PosSessionCloseModalComponent {
+  readonly isOpen = input<boolean>(false);
+  readonly session = input<CashRegisterSession | null>(null);
+  readonly isOpenChange = output<boolean>();
+  readonly sessionClosed = output<any>();
 
   submitting = false;
   difference: number | null = null;
@@ -255,28 +255,30 @@ export class PosSessionCloseModalComponent implements OnChanges {
 
   form: FormGroup;
 
-  constructor(
-    private fb: FormBuilder,
-    private cashRegisterService: PosCashRegisterService,
-    private toastService: ToastService,
-  ) {
+  private fb = inject(FormBuilder);
+  private cashRegisterService = inject(PosCashRegisterService);
+  private toastService = inject(ToastService);
+
+  constructor() {
     this.form = this.fb.group({
       actual_closing_amount: [0, [Validators.required, Validators.min(0)]],
       closing_notes: [''],
     });
-  }
 
-  ngOnChanges(changes: SimpleChanges) {
-    if (changes['isOpen'] && this.isOpen) {
-      this.difference = null;
-      this.movementsSummary = null;
-      this.form.reset({ actual_closing_amount: 0, closing_notes: '' });
-      this.loadMovementsSummary();
-    }
+    effect(() => {
+      if (this.isOpen()) {
+        untracked(() => {
+          this.difference = null;
+          this.movementsSummary = null;
+          this.form.reset({ actual_closing_amount: 0, closing_notes: '' });
+          this.loadMovementsSummary();
+        });
+      }
+    });
   }
 
   private loadMovementsSummary(): void {
-    if (!this.session) return;
+    if (!this.session()) return;
 
     const methodLabels: Record<string, string> = {
       cash: 'Efectivo',
@@ -288,7 +290,7 @@ export class PosSessionCloseModalComponent implements OnChanges {
       paypal: 'PayPal',
     };
 
-    this.cashRegisterService.getMovements(this.session.id).subscribe({
+    this.cashRegisterService.getMovements(this.session()!.id).subscribe({
       next: (movements) => {
         const opening = movements
           .filter((m) => m.type === 'opening_balance')
@@ -368,13 +370,13 @@ export class PosSessionCloseModalComponent implements OnChanges {
   }
 
   onClose() {
-    if (!this.form.valid || !this.session) return;
+    if (!this.form.valid || !this.session()) return;
     this.submitting = true;
 
     const { actual_closing_amount, closing_notes } = this.form.value;
 
     this.cashRegisterService
-      .closeSession(this.session.id, actual_closing_amount, closing_notes)
+      .closeSession(this.session()!.id, actual_closing_amount, closing_notes)
       .subscribe({
         next: (closedSession) => {
           this.submitting = false;

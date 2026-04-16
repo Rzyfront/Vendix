@@ -1,14 +1,14 @@
 import {
   Component,
-  OnInit,
-  OnDestroy,
   NO_ERRORS_SCHEMA,
-  Output,
-  Input,
-  EventEmitter,
+  input,
+  output,
+  inject,
+  effect,
+  signal,
+  DestroyRef,
 } from '@angular/core';
 import { Subject, debounceTime, distinctUntilChanged, takeUntil } from 'rxjs';
-import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
 
@@ -46,7 +46,6 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
   selector: 'app-pos-product-selection',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     IconComponent,
     ButtonComponent,
@@ -79,7 +78,7 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
           <app-options-dropdown
             [filters]="filterConfigs"
             [filterValues]="filterValues"
-            [isLoading]="loading"
+            [isLoading]="loading()"
             title="Filtros"
             triggerLabel="Filtros"
             (filterChange)="onOptionsFilterChange($event)"
@@ -88,17 +87,17 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
           ></app-options-dropdown>
     
           <!-- Botón cliente / Cola -->
-          @if (queueEnabled && queueCount > 0) {
+          @if (queueEnabled() && queueCount() > 0) {
             <button
               class="relative flex items-center justify-center w-10 sm:w-11 h-10 sm:h-11 rounded-[10px] bg-accent/10 hover:bg-accent/20 transition-colors border border-accent/30 shrink-0"
               (click)="openQueueModal.emit()"
-              title="Cola de clientes ({{ queueCount }})"
+              title="Cola de clientes ({{ queueCount() }})"
               >
               <app-icon name="users" [size]="18" class="text-accent"></app-icon>
               <span
                 class="absolute -top-1.5 -right-1.5 min-w-[20px] h-5 flex items-center justify-center rounded-full bg-accent text-white text-xs font-bold px-1"
                 >
-                {{ queueCount }}
+                {{ queueCount() }}
               </span>
             </button>
           } @else {
@@ -107,13 +106,13 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
               size="md"
               customClasses="w-10 sm:w-11 !px-0 bg-surface !rounded-[10px] shrink-0"
               (clicked)="openCustomerModal.emit()"
-              [title]="selectedCustomer ? selectedCustomer.name : 'Agregar cliente'"
+              [title]="selectedCustomer() ? selectedCustomer().name : 'Agregar cliente'"
               >
               <app-icon
                 slot="icon"
-                [name]="selectedCustomer ? 'user-check' : 'user-plus'"
+                [name]="selectedCustomer() ? 'user-check' : 'user-plus'"
                 [size]="18"
-                [class]="selectedCustomer ? 'text-primary' : ''"
+                [class]="selectedCustomer() ? 'text-primary' : ''"
               ></app-icon>
             </app-button>
           }
@@ -123,7 +122,7 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
       <!-- Products Content -->
       <div class="flex-1 overflow-y-auto min-h-0 p-3 lg:p-6 relative z-0">
         <!-- Loading State -->
-        @if (loading) {
+        @if (loading()) {
           <div class="p-8 text-center">
             <div
               class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
@@ -133,7 +132,7 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
         }
     
         <!-- Empty State -->
-        @if (!loading && filteredProducts.length === 0) {
+        @if (!loading() && filteredProducts().length === 0) {
           <div
             class="flex flex-col items-center justify-center h-64 text-center p-8"
             >
@@ -166,12 +165,12 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
         }
     
         <!-- Modern Compact Products Grid -->
-        @if (!loading && filteredProducts.length > 0) {
+        @if (!loading() && filteredProducts().length > 0) {
           <div
             class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-2 sm:gap-3"
             >
             <!-- Modern Product Card (iOS-style) -->
-            @for (product of filteredProducts; track trackByProductId($index, product)) {
+            @for (product of filteredProducts(); track trackByProductId($index, product)) {
               <div
                 (click)="onAddToCart(product)"
                 class="group relative bg-surface border border-border rounded-card shadow-sm hover:shadow-lg transition-all duration-200 cursor-pointer overflow-hidden product-card"
@@ -417,12 +416,12 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
     `,
   ],
 })
-export class PosProductSelectionComponent implements OnInit, OnDestroy {
-  loading = false;
+export class PosProductSelectionComponent {
+  readonly loading = signal(false);
   searchQuery = '';
   selectedCategory: any = null;
   selectedBrand: any = null;
-  filteredProducts: any[] = [];
+  readonly filteredProducts = signal<any[]>([]);
   categories: any[] = [];
   brands: any[] = [];
   addingToCart = new Set<string>();
@@ -457,49 +456,46 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
   // Current filter values
   filterValues: FilterValues = {};
 
-  @Input() set refreshTrigger(value: number) {
-    if (value > 0) this.loadProducts();
-  }
-  @Input() selectedCustomer: any = null;
-  @Input() queueEnabled = false;
-  @Input() queueCount = 0;
+  readonly refreshTrigger = input<number>(0);
+  readonly selectedCustomer = input<any>(null);
+  readonly queueEnabled = input<boolean>(false);
+  readonly queueCount = input<number>(0);
 
-  @Output() productSelected = new EventEmitter<any>();
-  @Output() productAddedToCart = new EventEmitter<{
-    product: any;
-    quantity: number;
-  }>();
-  @Output() bookingRequired = new EventEmitter<any>();
-  @Output() openCustomerModal = new EventEmitter<void>();
-  @Output() openQueueModal = new EventEmitter<void>();
+  readonly productSelected = output<any>();
+  readonly productAddedToCart = output<{ product: any; quantity: number }>();
+  readonly bookingRequired = output<any>();
+  readonly openCustomerModal = output<void>();
+  readonly openQueueModal = output<void>();
 
   private destroy$ = new Subject<void>();
   private searchSubject$ = new Subject<string>();
+  private productService = inject(PosProductService);
+  private cartService = inject(PosCartService);
+  private toastService = inject(ToastService);
+  private dialogService = inject(DialogService);
+  private router = inject(Router);
+  private store = inject(Store);
+  private currencyService = inject(CurrencyFormatService);
+  private scaleService = inject(PosScaleService);
 
-  constructor(
-    private productService: PosProductService,
-    private cartService: PosCartService,
-    private toastService: ToastService,
-    private dialogService: DialogService,
-    private router: Router,
-    private store: Store,
-    private currencyService: CurrencyFormatService,
-    private scaleService: PosScaleService,
-  ) { }
+  constructor() {
+    inject(DestroyRef).onDestroy(() => {
+      this.destroy$.next();
+      this.destroy$.complete();
+    });
 
-  ngOnInit(): void {
     this.checkAuthState();
     this.loadScaleSettings();
     this.initializeCategories();
     this.initializeBrands();
     this.setupSearchSubscription();
-
     this.loadProducts();
-  }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
+    effect(() => {
+      if (this.refreshTrigger() > 0) {
+        this.loadProducts();
+      }
+    });
   }
 
   private initializeCategories(): void {
@@ -601,12 +597,12 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
   }
 
   loadProducts(): void {
-    this.loading = true;
+    this.loading.set(true);
     this.filterProducts();
   }
 
   private filterProducts(): void {
-    this.loading = true;
+    this.loading.set(true);
     const filters: any = {
       state: 'active',
       pos_optimized: true,
@@ -634,11 +630,11 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
             result.products || [],
           );
 
-          this.filteredProducts = uniqueProducts;
-          this.loading = false;
+          this.filteredProducts.set(uniqueProducts);
+          this.loading.set(false);
         },
         error: (error: any) => {
-          this.loading = false;
+          this.loading.set(false);
           this.toastService.error('Error al cargar productos');
         },
       });

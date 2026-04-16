@@ -1,5 +1,5 @@
-import { Component, OnInit, OnDestroy, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject, DestroyRef } from '@angular/core';
+import { AsyncPipe } from '@angular/common';
 import { Store } from '@ngrx/store';
 import { Actions, ofType } from '@ngrx/effects';
 import { Observable, Subject } from 'rxjs';
@@ -28,7 +28,7 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
   selector: 'vendix-payroll-runs-page',
   standalone: true,
   imports: [
-    CommonModule,
+    AsyncPipe,
     PayrollStatsComponent,
     PayrollRunListComponent,
     PayrollRunCreateComponent,
@@ -59,10 +59,11 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
     </div>
   `,
 })
-export class PayrollRunsPageComponent implements OnInit, OnDestroy {
+export class PayrollRunsPageComponent {
   private store = inject(Store);
   private actions$ = inject(Actions);
   private currencyService = inject(CurrencyFormatService);
+  private destroyRef = inject(DestroyRef);
   private destroy$ = new Subject<void>();
 
   payrollRuns$: Observable<PayrollRun[]> = this.store.select(selectPayrollRuns);
@@ -73,6 +74,10 @@ export class PayrollRunsPageComponent implements OnInit, OnDestroy {
   selectedPayrollRun: PayrollRun | null = null;
 
   constructor() {
+    this.currencyService.loadCurrency();
+    this.store.dispatch(loadPayrollRuns());
+    this.store.dispatch(loadPayrollRunStats());
+
     this.store.select(selectCurrentPayrollRun).pipe(
       takeUntil(this.destroy$),
       filter((run): run is PayrollRun => run !== null),
@@ -82,24 +87,17 @@ export class PayrollRunsPageComponent implements OnInit, OnDestroy {
       }
     });
 
-    // Close detail modal after cancel succeeds (the detail component no longer closes it immediately)
     this.actions$.pipe(
       ofType(cancelPayrollRunSuccess),
       takeUntil(this.destroy$),
     ).subscribe(() => {
       this.isPayrollRunDetailModalOpen = false;
     });
-  }
 
-  ngOnInit(): void {
-    this.currencyService.loadCurrency();
-    this.store.dispatch(loadPayrollRuns());
-    this.store.dispatch(loadPayrollRunStats());
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
+    this.destroyRef.onDestroy(() => {
+      this.destroy$.next();
+      this.destroy$.complete();
+    });
   }
 
   openPayrollRunCreateModal(): void {

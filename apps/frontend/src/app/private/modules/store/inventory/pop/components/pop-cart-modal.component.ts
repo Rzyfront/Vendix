@@ -1,11 +1,8 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
-  ChangeDetectionStrategy,
-  OnChanges,
-  SimpleChanges,
+  input,
+  output,
+  effect,
   inject,
 } from '@angular/core';
 
@@ -25,18 +22,17 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
     TooltipComponent,
     QuantityControlComponent
 ],
-  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <!-- Overlay -->
     <div
       class="modal-overlay"
-      [class.open]="isOpen"
+      [class.open]="isOpen()"
       (click)="onOverlayClick($event)"
       >
       <!-- Modal Content -->
       <div
         class="modal-content"
-        [class.open]="isOpen"
+        [class.open]="isOpen()"
         (click)="$event.stopPropagation()"
         >
         <!-- Header -->
@@ -46,21 +42,21 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
           </button>
           <h2 class="modal-title">
             Orden de Compra
-            <span class="item-count">({{ cartState?.items?.length || 0 }})</span>
+            <span class="item-count">({{ cartState()?.items?.length || 0 }})</span>
           </h2>
           <button
             class="clear-btn"
             (click)="onClearCart()"
-            [disabled]="!cartState?.items?.length"
+            [disabled]="!cartState()?.items?.length"
             >
             Vaciar
           </button>
         </div>
     
         <!-- Context Info (Supplier + Location) -->
-        <div class="context-section" [class.context-warning]="!supplierName || !locationName">
+        <div class="context-section" [class.context-warning]="!supplierName() || !locationName()">
           <!-- Missing Config Alert -->
-          @if (!supplierName || !locationName) {
+          @if (!supplierName() || !locationName()) {
             <div class="config-alert">
               <div class="alert-content">
                 <app-icon name="alert-circle" [size]="18"></app-icon>
@@ -74,15 +70,15 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
           }
     
           <!-- Normal context display -->
-          @if (supplierName && locationName) {
+          @if (supplierName() && locationName()) {
             <div class="context-items">
               <div class="context-item">
                 <app-icon name="truck" [size]="16"></app-icon>
-                <span>{{ supplierName }}</span>
+                <span>{{ supplierName() }}</span>
               </div>
               <div class="context-item">
                 <app-icon name="warehouse" [size]="16"></app-icon>
-                <span>{{ locationName }}</span>
+                <span>{{ locationName() }}</span>
               </div>
             </div>
           }
@@ -91,7 +87,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
         <!-- Items Container -->
         <div class="items-container">
           <!-- Empty State -->
-          @if (!cartState?.items?.length) {
+          @if (!cartState()?.items?.length) {
             <div class="empty-state">
               <div class="empty-icon">
                 <app-icon name="shopping-bag" [size]="40"></app-icon>
@@ -102,9 +98,9 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
           }
     
           <!-- Cart Items -->
-          @if (cartState?.items?.length) {
+          @if (cartState()?.items?.length) {
             <div class="items-list">
-              @for (item of cartState?.items; track trackByItemId($index, item)) {
+              @for (item of cartState()?.items; track trackByItemId($index, item)) {
                 <div
                   class="cart-item"
                   >
@@ -194,20 +190,20 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
         </div>
     
         <!-- Summary Section -->
-        @if (cartState?.items?.length) {
+        @if (cartState()?.items?.length) {
           <div class="summary-section">
             <div class="summary-row">
               <span>Subtotal</span>
-              <span>{{ formatCurrency(cartState?.summary?.subtotal || 0) }}</span>
+              <span>{{ formatCurrency(cartState()?.summary?.subtotal || 0) }}</span>
             </div>
             <div class="summary-row">
               <span>Impuestos</span>
-              <span>{{ formatCurrency(cartState?.summary?.tax_amount || 0) }}</span>
+              <span>{{ formatCurrency(cartState()?.summary?.tax_amount || 0) }}</span>
             </div>
             <div class="summary-row total">
               <span>Total Estimado</span>
               <span class="total-amount">{{
-                formatCurrency(cartState?.summary?.total || 0)
+                formatCurrency(cartState()?.summary?.total || 0)
               }}</span>
             </div>
           </div>
@@ -219,7 +215,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
             <button
               class="action-btn draft-btn"
               (click)="saveDraft.emit()"
-              [disabled]="!cartState?.items?.length"
+              [disabled]="!cartState()?.items?.length"
               >
               <app-icon name="save" [size]="18"></app-icon>
               <span>Borrador</span>
@@ -227,7 +223,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
             <button
               class="action-btn create-btn"
               (click)="createOrder.emit()"
-              [disabled]="!cartState?.items?.length"
+              [disabled]="!cartState()?.items?.length"
               >
               <app-icon name="file-plus" [size]="18"></app-icon>
               <span>Crear orden</span>
@@ -236,12 +232,12 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
           <button
             class="action-btn receive-btn"
             (click)="createAndReceive.emit()"
-            [disabled]="!cartState?.items?.length || isProcessing"
+            [disabled]="!cartState()?.items?.length || isProcessing()"
             >
-            @if (!isProcessing) {
+            @if (!isProcessing()) {
               <app-icon name="package-check" [size]="18"></app-icon>
             }
-            <span>{{ isProcessing ? 'Procesando...' : 'Crear + Recibir' }}</span>
+            <span>{{ isProcessing() ? 'Procesando...' : 'Crear + Recibir' }}</span>
           </button>
         </div>
       </div>
@@ -777,65 +773,44 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
     `,
   ],
 })
-export class PopCartModalComponent implements OnChanges {
+export class PopCartModalComponent {
   private currencyService = inject(CurrencyFormatService);
-  @Input() isOpen: boolean = false;
-  @Input() cartState: PopCartState | null = null;
-  @Input() supplierName: string = '';
-  @Input() locationName: string = '';
-  @Input() isProcessing: boolean = false;
+  readonly isOpen = input(false);
+  readonly cartState = input<PopCartState | null>(null);
+  readonly supplierName = input('');
+  readonly locationName = input('');
+  readonly isProcessing = input(false);
 
   hoveredRemoveTooltip: string | null = null;
 
-  @Output() closed = new EventEmitter<void>();
-  @Output() itemQuantityChanged = new EventEmitter<{
-    itemId: string;
-    quantity: number;
-  }>();
-  @Output() itemCostChanged = new EventEmitter<{
-    itemId: string;
-    cost: number;
-  }>();
-  @Output() itemRemoved = new EventEmitter<string>();
-  @Output() clearCart = new EventEmitter<void>();
-  @Output() configureLot = new EventEmitter<PopCartItem>();
-  @Output() saveDraft = new EventEmitter<void>();
-  @Output() createOrder = new EventEmitter<void>();
-  @Output() createAndReceive = new EventEmitter<void>();
-  @Output() configure = new EventEmitter<void>();
+  readonly closed = output<void>();
+  readonly itemQuantityChanged = output<{ itemId: string; quantity: number }>();
+  readonly itemCostChanged = output<{ itemId: string; cost: number }>();
+  readonly itemRemoved = output<string>();
+  readonly clearCart = output<void>();
+  readonly configureLot = output<PopCartItem>();
+  readonly saveDraft = output<void>();
+  readonly createOrder = output<void>();
+  readonly createAndReceive = output<void>();
+  readonly configure = output<void>();
 
-  onConfigureClick(): void {
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    this.configure.emit();
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    this.closed.emit();
-  }
-
-  ngOnChanges(changes: SimpleChanges): void {
-    if (changes['isOpen']) {
-      if (this.isOpen) {
+  constructor() {
+    effect(() => {
+      if (this.isOpen()) {
         document.body.style.overflow = 'hidden';
       } else {
         document.body.style.overflow = '';
       }
-    }
+    });
+  }
+
+  onConfigureClick(): void {
+    this.configure.emit();
+    this.closed.emit();
   }
 
   onOverlayClick(event: MouseEvent): void {
     if (event.target === event.currentTarget) {
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
       this.closed.emit();
     }
   }
@@ -855,11 +830,6 @@ export class PopCartModalComponent implements OnChanges {
   }
 
   onClearCart(): void {
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
     this.clearCart.emit();
   }
 

@@ -1,12 +1,10 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
+  input,
+  output,
   signal,
   computed,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { switchMap, catchError } from 'rxjs';
 import { of } from 'rxjs';
@@ -32,7 +30,6 @@ import {
   selector: 'app-invoice-scanner-modal',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ModalComponent,
     ButtonComponent,
@@ -45,7 +42,7 @@ import {
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="onOpenChange($event)"
       (cancel)="onCancel()"
       size="xl"
@@ -443,9 +440,9 @@ import {
   ],
 })
 export class InvoiceScannerModalComponent {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() confirmed = new EventEmitter<{
+  readonly isOpen = input(false);
+  readonly isOpenChange = output<boolean>();
+  readonly confirmed = output<{
     scanResult: InvoiceScanResult;
     matchResult: InvoiceMatchResult;
     editedItems: MatchedLineItem[];

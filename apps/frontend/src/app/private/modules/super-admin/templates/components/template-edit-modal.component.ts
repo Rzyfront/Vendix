@@ -8,7 +8,10 @@ import {
   ButtonComponent,
   IconComponent,
 } from '../../../../../shared/components/index';
-import { TemplateListItem, UpdateTemplateDto } from '../interfaces/template.interface';
+import {
+  TemplateListItem,
+  UpdateTemplateDto,
+} from '../interfaces/template.interface';
 
 @Component({
   selector: 'app-template-edit-modal',
@@ -18,8 +21,8 @@ import { TemplateListItem, UpdateTemplateDto } from '../interfaces/template.inte
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
-    IconComponent
-],
+    IconComponent,
+  ],
   template: `
     <app-modal
       [isOpen]="isOpen()"
@@ -27,22 +30,32 @@ import { TemplateListItem, UpdateTemplateDto } from '../interfaces/template.inte
       (cancel)="onCancel()"
       [size]="'lg'"
       title="Edit Template"
-      [subtitle]="template?.template_name"
-      >
-      @if (template) {
+      [subtitle]="template()?.template_name"
+    >
+      @if (template()) {
         <div class="space-y-6">
           <!-- Warning banner for system templates -->
           <div class="warning-banner">
             <div class="flex items-start gap-3">
-              <app-icon name="alert-triangle" [size]="20" class="text-warning flex-shrink-0"></app-icon>
+              <app-icon
+                name="alert-triangle"
+                [size]="20"
+                class="text-warning flex-shrink-0"
+              ></app-icon>
               <div>
                 <h4 class="font-semibold text-warning">
-                  {{ template.is_system ? 'System Template' : 'Custom Template' }}
+                  {{
+                    template()?.is_system
+                      ? 'System Template'
+                      : 'Custom Template'
+                  }}
                 </h4>
                 <p class="text-sm text-text-secondary mt-1">
-                  {{ template.is_system
-                  ? 'You are modifying a system template. Changes will affect all organizations using this template. This action will be logged for audit purposes.'
-                  : 'You can modify all fields of this custom template.' }}
+                  {{
+                    template()?.is_system
+                      ? 'You are modifying a system template. Changes will affect all organizations using this template. This action will be logged for audit purposes.'
+                      : 'You can modify all fields of this custom template.'
+                  }}
                 </p>
               </div>
             </div>
@@ -58,7 +71,7 @@ import { TemplateListItem, UpdateTemplateDto } from '../interfaces/template.inte
                 formControlName="template_name"
                 class="w-full px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary"
                 placeholder="Enter template name"
-                />
+              />
               <p class="text-xs text-text-secondary">
                 Must be unique across all templates
               </p>
@@ -71,7 +84,7 @@ import { TemplateListItem, UpdateTemplateDto } from '../interfaces/template.inte
               <select
                 formControlName="configuration_type"
                 class="w-full px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary"
-                >
+              >
                 <option value="domain">Domain</option>
                 <option value="store_settings">Store Settings</option>
                 <option value="ecommerce">E-commerce</option>
@@ -119,15 +132,18 @@ import { TemplateListItem, UpdateTemplateDto } from '../interfaces/template.inte
                 id="edit_is_active"
                 formControlName="is_active"
                 class="w-4 h-4 text-primary border-border rounded focus:ring-primary"
-                />
-              <label for="edit_is_active" class="text-sm font-medium text-text-primary">
+              />
+              <label
+                for="edit_is_active"
+                class="text-sm font-medium text-text-primary"
+              >
                 Active
               </label>
             </div>
           </form>
         </div>
       }
-    
+
       <div slot="footer" class="flex justify-between items-center">
         <div class="text-sm text-text-secondary">
           <app-icon name="shield" [size]="12"></app-icon>
@@ -142,18 +158,18 @@ import { TemplateListItem, UpdateTemplateDto } from '../interfaces/template.inte
             (clicked)="onSubmit()"
             [disabled]="isJsonInvalid || isSubmitting()"
             [loading]="isSubmitting()"
-            >
+          >
             Update Template
           </app-button>
         </div>
       </div>
     </app-modal>
-    `,
+  `,
 })
 export class TemplateEditModalComponent {
   readonly isOpen = input(false);
   readonly isSubmitting = input(false);
-  @Input() template?: TemplateListItem;
+  readonly template = input<TemplateListItem | undefined>(undefined);
 
   readonly isOpenChange = output<boolean>();
   readonly submit = output<UpdateTemplateDto>();
@@ -181,13 +197,14 @@ export class TemplateEditModalComponent {
   }
 
   ngOnChanges(changes: SimpleChanges): void {
-    if (changes['template'] && this.template) {
+    if (changes['template'] && this.template()) {
+      const tmpl = this.template();
       this.templateForm.patchValue({
-        template_name: this.template.template_name,
-        configuration_type: this.template.configuration_type,
-        description: this.template.description || '',
-        template_data: JSON.stringify(this.template.template_data, null, 2),
-        is_active: this.template.is_active,
+        template_name: tmpl?.template_name,
+        configuration_type: tmpl?.configuration_type,
+        description: tmpl?.description || '',
+        template_data: JSON.stringify(tmpl?.template_data, null, 2),
+        is_active: tmpl?.is_active,
       });
     }
   }

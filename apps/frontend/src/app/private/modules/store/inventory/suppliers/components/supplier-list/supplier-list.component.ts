@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
+import { Component, input, output } from '@angular/core';
 
 import { FormsModule } from '@angular/forms';
 
@@ -40,24 +40,21 @@ import { Supplier } from '../../../interfaces';
   templateUrl: './supplier-list.component.html',
 })
 export class SupplierListComponent {
-  @Input() suppliers: Supplier[] = [];
-  @Input() isLoading = false;
-  @Input() totalItems = 0;
-  @Input() currentPage = 1;
-  @Input() totalPages = 1;
-  @Input() limit = 10;
+  readonly suppliers = input<Supplier[]>([]);
+  readonly isLoading = input(false);
+  readonly totalItems = input(0);
+  readonly currentPage = input(1);
+  readonly totalPages = input(1);
+  readonly limit = input(10);
 
-  @Output() refresh = new EventEmitter<void>();
-  @Output() search = new EventEmitter<string>();
-  @Output() filter = new EventEmitter<FilterValues>();
-  @Output() create = new EventEmitter<void>();
-  @Output() edit = new EventEmitter<Supplier>();
-  @Output() delete = new EventEmitter<Supplier>();
-  @Output() sort = new EventEmitter<{
-    column: string;
-    direction: 'asc' | 'desc' | null;
-  }>();
-  @Output() pageChange = new EventEmitter<number>();
+  readonly refresh = output<void>();
+  readonly search = output<string>();
+  readonly filter = output<FilterValues>();
+  readonly create = output<void>();
+  readonly edit = output<Supplier>();
+  readonly delete = output<Supplier>();
+  readonly sort = output<{ column: string; direction: 'asc' | 'desc' | null }>();
+  readonly pageChange = output<number>();
 
   searchTerm = '';
   selectedStatus = '';
@@ -175,19 +172,9 @@ export class SupplierListComponent {
   onActionClick(action: string): void {
     switch (action) {
       case 'create':
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
         this.create.emit();
         break;
       case 'refresh':
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
         this.refresh.emit();
         break;
     }

@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, signal } from '@angular/core';
 
 import { SuperAdminDashboardService } from './services/super-admin-dashboard.service';
 import { Subject } from 'rxjs';
@@ -42,7 +42,7 @@ interface ChartData {
     <div style="background-color: var(--color-background);">
       <!-- Stats Cards -->
       <div class="stats-container">
-        @for (stat of statsData; track stat) {
+        @for (stat of statsData(); track stat) {
           <app-stats
             [title]="stat.title"
             [value]="stat.value"
@@ -167,11 +167,11 @@ interface ChartData {
               </div>
     
               <!-- Bars -->
-              @if (chartData.datasets.length > 0) {
+              @if (chartData().datasets.length > 0) {
                 <div
                   class="absolute inset-0 flex items-end justify-between gap-3 px-4"
                   >
-                  @for (bar of chartData.datasets[0].data; track bar; let i = $index) {
+                  @for (bar of chartData().datasets[0].data; track $index; let i = $index) {
                     <div
                       class="flex-1 rounded-t-lg min-h-4 transition-all duration-500 hover:shadow-lg relative group cursor-pointer"
                       style="background: linear-gradient(to top, rgba(126, 215, 165, 0.6) 0%, rgba(126, 215, 165, 0.3) 100%);"
@@ -184,7 +184,7 @@ interface ChartData {
                         >
                         <div class="font-semibold">{{ bar }}</div>
                         <div style="color: var(--color-text-muted);">
-                          {{ chartData.labels[i] }}
+                          {{ chartData().labels[i] }}
                         </div>
                         <div
                           class="absolute bottom-0 left-1/2 transform -translate-x-1/2 translate-y-1/2 rotate-45 w-2 h-2"
@@ -217,7 +217,7 @@ interface ChartData {
     
             <!-- X-axis Labels -->
             <div class="flex justify-between mt-6 px-4">
-              @for (label of chartData.labels; track label) {
+              @for (label of chartData().labels; track label) {
                 <span
                   class="text-xs font-medium px-3 py-1.5 rounded-md transition-colors cursor-pointer"
                   style="color: var(--color-text-secondary); background: rgba(126, 215, 165, 0.08);"
@@ -367,7 +367,7 @@ interface ChartData {
               </button>
             </div>
             <div class="p-6">
-              @for (activity of recentActivities.slice(0, 4); track activity) {
+              @for (activity of recentActivities().slice(0, 4); track activity) {
                 <div
                   class="flex gap-4 py-4 transition-colors -mx-2 px-2 rounded-lg"
                   style="border-bottom: 1px solid var(--color-border);"
@@ -428,7 +428,7 @@ interface ChartData {
               </button>
             </div>
             <div class="p-6">
-              @for (org of topOrganizations.slice(0, 5); track org; let i = $index) {
+              @for (org of topOrganizations().slice(0, 5); track org; let i = $index) {
                 <div
                   class="flex items-center gap-4 py-4 transition-colors -mx-2 px-2 rounded-lg"
                   style="border-bottom: 1px solid var(--color-border);"
@@ -489,15 +489,15 @@ interface ChartData {
 })
 export class DashboardComponent implements OnInit, OnDestroy {
   private destroy$ = new Subject<void>();
-  isLoading = false;
+  readonly isLoading = signal(false);
 
-  statsData: StatCard[] = [];
-  chartData: ChartData = {
+  readonly statsData = signal<StatCard[]>([]);
+  readonly chartData = signal<ChartData>({
     labels: [],
     datasets: [],
-  };
-  recentActivities: ActivityItem[] = [];
-  topOrganizations: any[] = [];
+  });
+  readonly recentActivities = signal<ActivityItem[]>([]);
+  readonly topOrganizations = signal<any[]>([]);
 
   constructor(private superAdminDashboardService: SuperAdminDashboardService) { }
 
@@ -511,7 +511,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   private loadDashboardData(): void {
-    this.isLoading = true;
+    this.isLoading.set(true);
 
     this.superAdminDashboardService
       .getDashboardStats()
@@ -522,17 +522,17 @@ export class DashboardComponent implements OnInit, OnDestroy {
           this.updateChartData(data);
           this.updateRecentActivities(data);
           this.updateTopOrganizations(data);
-          this.isLoading = false;
+          this.isLoading.set(false);
         },
         error: (error) => {
           console.error('Error loading dashboard data:', error);
-          this.isLoading = false;
+          this.isLoading.set(false);
         },
       });
   }
 
   private updateStatsData(data: any): void {
-    this.statsData = [
+    this.statsData.set([
       {
         title: 'Total de Organizaciones',
         value: data.totalOrganizations?.toLocaleString() || '0',
@@ -565,12 +565,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
         iconBgColor: 'bg-purple-100',
         iconColor: 'text-purple-600',
       },
-    ];
+    ]);
   }
 
   private updateChartData(data: any): void {
     if (data.weeklyData) {
-      this.chartData = {
+      this.chartData.set({
         labels: data.weeklyData.map((item: any) => item.week),
         datasets: [
           {
@@ -580,12 +580,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
             backgroundColor: '#3b82f6',
           },
         ],
-      };
+      });
     }
   }
 
   private updateRecentActivities(data: any): void {
-    this.recentActivities =
+    this.recentActivities.set(
       data.recentActivities?.map((activity: any) => ({
         id: activity.id,
         type: activity.type,
@@ -594,11 +594,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
         timestamp: this.formatTimestamp(activity.timestamp),
         icon: this.getActivityIcon(activity.type),
         color: this.getActivityColor(activity.type),
-      })) || [];
+      })) || [],
+    );
   }
 
   private updateTopOrganizations(data: any): void {
-    this.topOrganizations = data.topOrganizations || [];
+    this.topOrganizations.set(data.topOrganizations || []);
   }
 
   private formatTimestamp(timestamp: Date | string): string {
@@ -650,7 +651,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   getBarHeight(bar: number): number {
-    const maxValue = Math.max(...this.chartData.datasets[0].data);
+    const maxValue = Math.max(...this.chartData().datasets[0].data);
+    if (!maxValue) return 0;
     return (bar / maxValue) * 100;
   }
 }

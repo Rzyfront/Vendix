@@ -1,16 +1,15 @@
 import {
   Component,
-  OnInit,
-  OnDestroy,
-  ChangeDetectionStrategy,
+  DestroyRef,
   inject,
   signal,
   computed,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
-import { Subject, takeUntil, finalize, forkJoin } from 'rxjs';
+import { finalize, forkJoin } from 'rxjs';
 import { ReservationsService } from '../../services/reservations.service';
 import { ServiceProvider } from '../../interfaces/reservation.interface';
 import {
@@ -54,9 +53,7 @@ interface BookableService {
 @Component({
   selector: 'app-schedule-management',
   standalone: true,
-  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
-    CommonModule,
     FormsModule,
     IconComponent,
     StickyHeaderComponent,
@@ -72,15 +69,16 @@ interface BookableService {
     EmptyStateComponent,
     WeeklyScheduleEditorComponent,
     ExceptionsManagerComponent,
+    DecimalPipe,
   ],
   templateUrl: './schedule-management.component.html',
   styleUrls: ['./schedule-management.component.scss'],
 })
-export class ScheduleManagementComponent implements OnInit, OnDestroy {
+export class ScheduleManagementComponent {
   private reservationsService = inject(ReservationsService);
   private toastService = inject(ToastService);
   private router = inject(Router);
-  private destroy$ = new Subject<void>();
+  private destroyRef = inject(DestroyRef);
 
   // Detail modal
   isDetailModalOpen = signal(false);
@@ -244,13 +242,8 @@ export class ScheduleManagementComponent implements OnInit, OnDestroy {
     },
   ];
 
-  ngOnInit(): void {
+  constructor() {
     this.loadProviders();
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
   }
 
   goBack(): void {
@@ -272,7 +265,7 @@ export class ScheduleManagementComponent implements OnInit, OnDestroy {
       this.reservationsService.getBookableServices(),
     ])
       .pipe(
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
         finalize(() => this.loading.set(false)),
       )
       .subscribe({
@@ -292,7 +285,7 @@ export class ScheduleManagementComponent implements OnInit, OnDestroy {
     this.reservationsService
       .getProvider(provider.id)
       .pipe(
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
         finalize(() => this.loading.set(false)),
       )
       .subscribe({
@@ -312,7 +305,7 @@ export class ScheduleManagementComponent implements OnInit, OnDestroy {
     this.selectedEmployeeId.set(null);
     this.reservationsService
       .getAvailableEmployees()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (employees) => this.availableEmployees.set(employees),
         error: () => this.toastService.error('Error al cargar empleados disponibles'),
@@ -340,7 +333,7 @@ export class ScheduleManagementComponent implements OnInit, OnDestroy {
     this.reservationsService
       .createProvider({ employee_id: employeeId, display_name: displayName })
       .pipe(
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
         finalize(() => this.addingProvider.set(false)),
       )
       .subscribe({
@@ -358,7 +351,7 @@ export class ScheduleManagementComponent implements OnInit, OnDestroy {
   toggleActive(provider: ServiceProvider): void {
     this.reservationsService
       .updateProvider(provider.id, { is_active: !provider.is_active })
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (updated) => {
           if (this.selectedProvider()?.id === updated.id) {
@@ -384,11 +377,11 @@ export class ScheduleManagementComponent implements OnInit, OnDestroy {
       ? this.reservationsService.assignServiceToProvider(provider.id, productId)
       : this.reservationsService.removeServiceFromProvider(provider.id, productId);
 
-    obs$.pipe(takeUntil(this.destroy$)).subscribe({
+    obs$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.reservationsService
           .getProvider(provider.id)
-          .pipe(takeUntil(this.destroy$))
+          .pipe(takeUntilDestroyed(this.destroyRef))
           .subscribe({
             next: (full) => {
               this.selectedProvider.set(full);
@@ -418,7 +411,7 @@ export class ScheduleManagementComponent implements OnInit, OnDestroy {
     this.reservationsService
       .updateProvider(provider.id, { bio: this.bioValue() })
       .pipe(
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
         finalize(() => this.savingBio.set(false)),
       )
       .subscribe({

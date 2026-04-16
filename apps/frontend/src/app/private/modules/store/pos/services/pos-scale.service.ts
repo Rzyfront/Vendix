@@ -143,10 +143,10 @@ export class PosScaleService implements OnDestroy {
         environmentInjector: this.injector,
       });
 
-      componentRef.instance.title = data.title;
-      componentRef.instance.message = data.message;
-      componentRef.instance.weightUnit = data.weightUnit;
-      componentRef.instance.allowManualFallback = data.allowManualFallback;
+      componentRef.setInput('title', data.title);
+      componentRef.setInput('message', data.message);
+      componentRef.setInput('weightUnit', data.weightUnit);
+      componentRef.setInput('allowManualFallback', data.allowManualFallback);
 
       const destroy = () => {
         this.appRef.detachView(componentRef.hostView);

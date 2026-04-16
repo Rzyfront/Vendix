@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, inject } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
 
 import {
   FormsModule,
@@ -76,7 +76,7 @@ interface StatItem {
     <div class="space-y-4">
       <!-- Stats Cards -->
       <div class="stats-container">
-        @for (item of statsItems; track item) {
+        @for (item of statsItems(); track item) {
           <app-stats
             [title]="item.title"
             [value]="item.value"
@@ -97,7 +97,7 @@ interface StatItem {
             >
             <div class="flex-1 min-w-0">
               <h2 class="text-lg font-semibold text-text-primary">
-                Todas las tiendas ({{ stores.length }})
+                Todas las tiendas ({{ stores().length }})
               </h2>
             </div>
     
@@ -143,7 +143,7 @@ interface StatItem {
                   variant="outline"
                   size="sm"
                   (clicked)="refreshStores()"
-                  [disabled]="isLoading"
+                  [disabled]="isLoading()"
                   title="Actualizar"
                   >
                   <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
@@ -163,7 +163,7 @@ interface StatItem {
         </div>
     
         <!-- Loading State -->
-        @if (isLoading) {
+        @if (isLoading()) {
           <div class="p-8 text-center">
             <div
               class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
@@ -173,7 +173,7 @@ interface StatItem {
         }
     
         <!-- Empty State -->
-        @if (!isLoading && stores.length === 0) {
+        @if (!isLoading() && stores().length === 0) {
           <app-empty-state
             icon="store"
             [title]="getEmptyStateTitle()"
@@ -189,14 +189,14 @@ interface StatItem {
         }
     
         <!-- Stores Table -->
-        @if (!isLoading && stores.length > 0) {
+        @if (!isLoading() && stores().length > 0) {
           <div class="p-6">
             <app-responsive-data-view
-              [data]="stores"
+              [data]="stores()"
               [columns]="tableColumns"
               [cardConfig]="cardConfig"
               [actions]="tableActions"
-              [loading]="isLoading"
+              [loading]="isLoading()"
               emptyMessage="No hay tiendas registradas"
               emptyIcon="store"
               (sort)="onTableSort($event)"
@@ -251,8 +251,9 @@ interface StatItem {
 })
 export class StoresComponent implements OnInit, OnDestroy {
   private currencyService = inject(CurrencyFormatService);
-  stores: StoreListItem[] = [];
-  isLoading = false;
+  readonly stores = signal<StoreListItem[]>([]);
+  readonly isLoading = signal(false);
+  readonly statsItems = signal<StatItem[]>([]);
   searchTerm = '';
   selectedState = '';
   selectedStoreType = '';
@@ -502,7 +503,7 @@ export class StoresComponent implements OnInit, OnDestroy {
   }
 
   loadStores(): void {
-    this.isLoading = true;
+    this.isLoading.set(true);
 
     const query = {
       ...(this.searchTerm && { search: this.searchTerm }),
@@ -522,7 +523,7 @@ export class StoresComponent implements OnInit, OnDestroy {
     this.storesService.getStores(query).subscribe({
       next: (response) => {
         if (response.success && response.data) {
-          this.stores = response.data.map((store: any) => ({
+          this.stores.set(response.data.map((store: any) => ({
             id: store.id,
             name: store.name,
             slug: store.slug,
@@ -542,20 +543,18 @@ export class StoresComponent implements OnInit, OnDestroy {
             },
             addresses: store.addresses || [],
             _count: store._count || { products: 0, orders: 0, store_users: 0 },
-          }));
+          })));
         } else {
-          this.stores = [];
+          this.stores.set([]);
         }
-        this.isLoading = false;
+        this.isLoading.set(false);
       },
       error: (error) => {
         console.error('Error loading stores:', error);
-        this.isLoading = false;
+        this.isLoading.set(false);
       },
     });
   }
-
-  statsItems: StatItem[] = [];
 
   loadStats(): void {
     this.storesService
@@ -565,7 +564,7 @@ export class StoresComponent implements OnInit, OnDestroy {
         next: (response: any) => {
           const data = response.data || {};
 
-          this.statsItems = [
+          this.statsItems.set([
             {
               title: 'Total Tiendas',
               value: data.total_stores || 0,
@@ -598,7 +597,7 @@ export class StoresComponent implements OnInit, OnDestroy {
               iconBgColor: 'bg-blue-100',
               iconColor: 'text-blue-600'
             }
-          ];
+          ]);
         },
         error: (error) => {
           console.error('Error loading stats:', error);
@@ -728,7 +727,11 @@ export class StoresComponent implements OnInit, OnDestroy {
         .pipe(takeUntil(this.destroy$))
         .subscribe({
           next: () => {
-            store.is_active = !store.is_active;
+            this.stores.update((list) =>
+              list.map((s) =>
+                s.id === store.id ? { ...s, is_active: !s.is_active } : s,
+              ),
+            );
             this.loadStats();
             this.toastService.success(
               `Tienda ${action === 'deactivate' ? 'desactivada' : 'activada'} exitosamente`,
@@ -762,9 +765,9 @@ export class StoresComponent implements OnInit, OnDestroy {
       .subscribe({
         next: (response) => {
           if (response.success) {
-            this.stores = this.stores.filter(
+            this.stores.update((list) => list.filter(
               (s) => s.id !== this.selectedStoreForDelete!.id,
-            );
+            ));
             this.loadStats();
             this.toastService.success('Tienda eliminada exitosamente');
             this.isDeleteModalOpen = false;
@@ -791,13 +794,12 @@ export class StoresComponent implements OnInit, OnDestroy {
     // Settings were saved successfully in the modal
     // Update only the current store in the list instead of reloading all stores
     if (this.selectedStoreForSettings && event?.storeName) {
-      const storeIndex = this.stores.findIndex(s => s.id === this.selectedStoreForSettings!.id);
-      if (storeIndex !== -1) {
-        // Update the store name in the list
-        this.stores[storeIndex].name = event.storeName;
-        // Update the selected store reference
-        this.selectedStoreForSettings.name = event.storeName;
-      }
+      const id = this.selectedStoreForSettings.id;
+      const name = event.storeName;
+      this.stores.update((list) =>
+        list.map((s) => (s.id === id ? { ...s, name } : s)),
+      );
+      this.selectedStoreForSettings.name = name;
     }
     // Don't reload all stores - the modal handles reloading its own settings
   }

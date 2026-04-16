@@ -1,4 +1,11 @@
-import { Component, EventEmitter, Input, Output, ViewChild, ElementRef } from '@angular/core';
+import {
+  Component,
+  input,
+  output,
+  model,
+  ViewChild,
+  ElementRef,
+} from '@angular/core';
 
 import {
   ModalComponent,
@@ -8,7 +15,12 @@ import {
   TextareaComponent,
   IconComponent,
 } from '../../../../../../../shared/components';
-import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
+import {
+  FormBuilder,
+  FormGroup,
+  Validators,
+  ReactiveFormsModule,
+} from '@angular/forms';
 import { CreateTicketRequest, TicketPriority } from '../../models/ticket.model';
 
 @Component({
@@ -21,11 +33,11 @@ import { CreateTicketRequest, TicketPriority } from '../../models/ticket.model';
     InputComponent,
     SelectorComponent,
     TextareaComponent,
-    IconComponent
-],
+    IconComponent,
+  ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
@@ -80,7 +92,8 @@ import { CreateTicketRequest, TicketPriority } from '../../models/ticket.model';
             Imagen (opcional)
           </label>
           <p class="text-xs text-text-secondary mb-3">
-            Puedes adjuntar una captura de pantalla para ayudarnos a entender mejor el problema.
+            Puedes adjuntar una captura de pantalla para ayudarnos a entender
+            mejor el problema.
           </p>
 
           <!-- Upload area - only show if no image selected -->
@@ -92,7 +105,7 @@ import { CreateTicketRequest, TicketPriority } from '../../models/ticket.model';
               (drop)="onDrop($event)"
               (click)="triggerFileSelect()"
               [class.border-primary]="isDragging"
-              [class.bg-primary\/5]="isDragging"
+              [class.bg-primary/5]="isDragging"
             >
               <input
                 type="file"
@@ -100,9 +113,14 @@ import { CreateTicketRequest, TicketPriority } from '../../models/ticket.model';
                 (change)="onFileSelected($event)"
                 class="hidden"
                 #fileInput
-              >
+              />
               <div class="flex flex-col items-center justify-center">
-                <app-icon name="upload-cloud" [size]="32" class="text-gray-400 mb-2" [class.text-primary]="isDragging"></app-icon>
+                <app-icon
+                  name="upload-cloud"
+                  [size]="32"
+                  class="text-gray-400 mb-2"
+                  [class.text-primary]="isDragging"
+                ></app-icon>
                 <p class="text-sm font-medium text-gray-700">
                   Arrastra una imagen aquí
                 </p>
@@ -117,7 +135,10 @@ import { CreateTicketRequest, TicketPriority } from '../../models/ticket.model';
           @if (selectedImages.length > 0) {
             <div class="mt-3">
               <div class="relative group inline-block">
-                <img [src]="selectedImages[0].preview" class="w-32 h-32 object-cover rounded-lg border border-border">
+                <img
+                  [src]="selectedImages[0].preview"
+                  class="w-32 h-32 object-cover rounded-lg border border-border"
+                />
                 <button
                   type="button"
                   (click)="removeImage(0)"
@@ -136,22 +157,22 @@ import { CreateTicketRequest, TicketPriority } from '../../models/ticket.model';
         <app-button variant="ghost" (clicked)="onCancel()">Cancelar</app-button>
         <app-button
           variant="primary"
-          [disabled]="form.invalid || loading"
-          [loading]="loading"
+          [disabled]="form.invalid || loading()"
+          [loading]="loading()"
           (clicked)="onSubmit()"
         >
           Crear Ticket
         </app-button>
       </div>
     </app-modal>
-  `
+  `,
 })
 export class CreateTicketModalComponent {
-  @Input() isOpen = false;
-  @Input() loading = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() closed = new EventEmitter<void>();
-  @Output() save = new EventEmitter<CreateTicketRequest & { attachments?: Array<any> }>();
+  readonly isOpen = model<boolean>(false);
+  readonly loading = model<boolean>(false);
+  readonly isOpenChange = output<boolean>();
+  readonly closed = output<void>();
+  readonly save = output<CreateTicketRequest & { attachments?: Array<any> }>();
 
   form: FormGroup;
 
@@ -177,7 +198,14 @@ export class CreateTicketModalComponent {
 
   constructor(private fb: FormBuilder) {
     this.form = this.fb.group({
-      title: ['', [Validators.required, Validators.minLength(3), Validators.maxLength(255)]],
+      title: [
+        '',
+        [
+          Validators.required,
+          Validators.minLength(3),
+          Validators.maxLength(255),
+        ],
+      ],
       description: ['', [Validators.required, Validators.minLength(10)]],
       category: ['QUESTION'],
       priority: ['P3'],
@@ -207,7 +235,7 @@ export class CreateTicketModalComponent {
       };
 
       if (this.selectedImages.length > 0) {
-        request.attachments = this.selectedImages.map(img => ({
+        request.attachments = this.selectedImages.map((img) => ({
           base64_data: img.base64,
           file_name: img.file.name,
           mime_type: img.file.type,
@@ -229,11 +257,13 @@ export class CreateTicketModalComponent {
         reader.onload = (e) => {
           const base64 = (e.target as FileReader).result as string;
           // Replace any existing image with the new one
-          this.selectedImages = [{
-            file,
-            preview: base64,
-            base64: base64.split(',')[1], // Remove data:image/...;base64, prefix
-          }];
+          this.selectedImages = [
+            {
+              file,
+              preview: base64,
+              base64: base64.split(',')[1], // Remove data:image/...;base64, prefix
+            },
+          ];
         };
         reader.readAsDataURL(file);
       }
@@ -276,11 +306,13 @@ export class CreateTicketModalComponent {
         const reader = new FileReader();
         reader.onload = (e) => {
           const base64 = (e.target as FileReader).result as string;
-          this.selectedImages = [{
-            file,
-            preview: base64,
-            base64: base64.split(',')[1],
-          }];
+          this.selectedImages = [
+            {
+              file,
+              preview: base64,
+              base64: base64.split(',')[1],
+            },
+          ];
         };
         reader.readAsDataURL(file);
       }
@@ -291,8 +323,10 @@ export class CreateTicketModalComponent {
     const control = this.form.get(field);
     if (control?.touched && control?.errors) {
       if (control.errors['required']) return 'Este campo es requerido';
-      if (control.errors['minlength']) return `Mínimo ${control.errors['minlength'].requiredLength} caracteres`;
-      if (control.errors['maxlength']) return `Máximo ${control.errors['maxlength'].requiredLength} caracteres`;
+      if (control.errors['minlength'])
+        return `Mínimo ${control.errors['minlength'].requiredLength} caracteres`;
+      if (control.errors['maxlength'])
+        return `Máximo ${control.errors['maxlength'].requiredLength} caracteres`;
     }
     return '';
   }

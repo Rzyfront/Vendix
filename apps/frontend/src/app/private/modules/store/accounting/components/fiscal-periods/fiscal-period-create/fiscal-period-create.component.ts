@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, inject } from '@angular/core';
+import { Component, input, output, inject } from '@angular/core';
 
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { Store } from '@ngrx/store';
@@ -22,7 +22,7 @@ import {
 ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onClose()"
       title="Nuevo Periodo Fiscal"
@@ -75,8 +75,8 @@ import {
   `,
 })
 export class FiscalPeriodCreateComponent {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
+  readonly isOpen = input(false);
+  readonly isOpenChange = output<boolean>();
 
   private fb = inject(FormBuilder);
   private store = inject(Store);

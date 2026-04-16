@@ -1,4 +1,4 @@
-import { Component, Input, OnInit, OnDestroy } from '@angular/core';
+import { Component, input, computed, OnInit, OnDestroy } from '@angular/core';
 
 import { RouterModule } from '@angular/router';
 
@@ -10,7 +10,11 @@ import { RouterModule } from '@angular/router';
   styleUrls: ['./image-carousel.component.scss'],
 })
 export class ImageCarouselComponent implements OnInit, OnDestroy {
-  @Input() slides: any[] = [];
+  readonly slides = input<any[]>([]);
+  readonly effectiveSlides = computed(() => {
+    const s = this.slides();
+    return s && s.length > 0 ? s : this.defaultSlides;
+  });
 
   defaultSlides = [
     {
@@ -28,59 +32,22 @@ export class ImageCarouselComponent implements OnInit, OnDestroy {
       subtitle:
         'Une tus tiendas físicas, online y móviles en una sola plataforma inteligente y sincronizada.',
       buttonText: 'Explorar Plataforma',
-      secondaryButtonText: 'Casos de Éxito',
+      buttonLink: '/auth/register',
+      secondaryButtonText: 'Ver Demo',
     },
     {
       image: '/assets/images/carrusel/3.webp',
-      message: 'POS Inteligente con IA',
+      message: 'Gestión Financiera Inteligente',
       subtitle:
-        'Sistema de punto de venta que aprende de tus clientes y optimiza cada transacción.',
-      buttonText: 'Probar POS',
-      secondaryButtonText: 'Hablar con Experto',
-    },
-    {
-      image: '/assets/images/carrusel/4.webp',
-      message: 'E-commerce Ultra-Personalizado',
-      subtitle:
-        'Tiendas online que se adaptan a cada cliente con recomendaciones IA y experiencias únicas.',
-      buttonText: 'Crear Tienda',
-      secondaryButtonText: 'Ver Plantillas',
-    },
-    {
-      image: '/assets/images/carrusel/5.webp',
-      message: 'Inventario Predictivo',
-      subtitle:
-        'Anticipa la demanda, evita faltantes y maximiza tu rentabilidad con análisis predictivo.',
-      buttonText: 'Conocer IA',
-      secondaryButtonText: 'Ver Reportes',
-    },
-    {
-      image: '/assets/images/carrusel/6.webp',
-      message: 'Análisis en Tiempo Real',
-      subtitle:
-        'Dashboard inteligente con métricas clave y alertas automáticas para decisiones instantáneas.',
-      buttonText: 'Ver Dashboard',
-      secondaryButtonText: 'Precios',
-    },
-    {
-      image: '/assets/images/carrusel/7.webp',
-      message: 'Escala sin Compromisos',
-      subtitle:
-        'Desde una pequeña tienda hasta un imperio retail, nuestra IA crece contigo.',
-      buttonText: 'Registrarse Gratis',
-      secondaryButtonText: 'Roadmap',
+        'Controla tu flujo de caja, genera reportes automáticos y toma decisiones basadas en datos.',
+      buttonText: 'Comenzar Prueba',
+      buttonLink: '/auth/register',
+      secondaryButtonText: 'Ver Demo',
     },
   ];
 
   currentSlide = 0;
   autoplayInterval: any;
-
-  constructor() {
-    // Si no se proporcionan slides, usar las por defecto
-    if (!this.slides || this.slides.length === 0) {
-      this.slides = this.defaultSlides;
-    }
-  }
 
   ngOnInit() {
     this.startAutoplay();
@@ -96,13 +63,14 @@ export class ImageCarouselComponent implements OnInit, OnDestroy {
   }
 
   nextSlide() {
-    this.currentSlide = (this.currentSlide + 1) % this.slides.length;
+    this.currentSlide = (this.currentSlide + 1) % this.effectiveSlides().length;
     this.updateSlideVisibility();
   }
 
   prevSlide() {
     this.currentSlide =
-      (this.currentSlide - 1 + this.slides.length) % this.slides.length;
+      (this.currentSlide - 1 + this.effectiveSlides().length) %
+      this.effectiveSlides().length;
     this.updateSlideVisibility();
   }
 

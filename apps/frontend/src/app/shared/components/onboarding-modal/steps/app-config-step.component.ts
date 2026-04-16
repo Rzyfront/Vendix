@@ -1,9 +1,9 @@
 import {
   Component,
+  input,
+  output,
   ChangeDetectionStrategy,
   OnInit,
-  input,
-  output
 } from '@angular/core';
 
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
@@ -712,7 +712,7 @@ import { ButtonComponent, IconComponent } from '../../index';
   `,
 })
 export class AppConfigStepComponent implements OnInit {
-  readonly formGroup = input<any>();
+  readonly formGroup = input<any>(null);
   readonly nextStep = output<void>();
   readonly skipStep = output<void>();
   readonly previousStep = output<void>();
@@ -723,16 +723,16 @@ export class AppConfigStepComponent implements OnInit {
   tertiaryColor: string = '#f59e0b';
 
   ngOnInit(): void {
-    const formGroup = this.formGroup();
-    if (formGroup) {
-      if (formGroup.get('primary_color')?.value) {
-        this.primaryColor = formGroup.get('primary_color').value;
+    const fg = this.formGroup();
+    if (fg) {
+      if (fg.get('primary_color')?.value) {
+        this.primaryColor = fg.get('primary_color').value;
       }
-      if (formGroup.get('secondary_color')?.value) {
-        this.secondaryColor = formGroup.get('secondary_color').value;
+      if (fg.get('secondary_color')?.value) {
+        this.secondaryColor = fg.get('secondary_color').value;
       }
-      if (formGroup.get('accent_color')?.value) {
-        this.tertiaryColor = formGroup.get('accent_color').value;
+      if (fg.get('accent_color')?.value) {
+        this.tertiaryColor = fg.get('accent_color').value;
       }
     }
   }
@@ -800,16 +800,16 @@ export class AppConfigStepComponent implements OnInit {
   }
 
   private updateFormColors(): void {
-    const formGroup = this.formGroup();
-    if (formGroup) {
-      if (formGroup.get('primary_color')) {
-        formGroup.get('primary_color').setValue(this.primaryColor);
+    const fg = this.formGroup();
+    if (fg) {
+      if (fg.get('primary_color')) {
+        fg.get('primary_color').setValue(this.primaryColor);
       }
-      if (formGroup.get('secondary_color')) {
-        formGroup.get('secondary_color').setValue(this.secondaryColor);
+      if (fg.get('secondary_color')) {
+        fg.get('secondary_color').setValue(this.secondaryColor);
       }
-      if (formGroup.get('accent_color')) {
-        formGroup.get('accent_color').setValue(this.tertiaryColor);
+      if (fg.get('accent_color')) {
+        fg.get('accent_color').setValue(this.tertiaryColor);
       }
     }
   }

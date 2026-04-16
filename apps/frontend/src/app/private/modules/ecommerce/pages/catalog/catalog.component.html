@@ -3,10 +3,10 @@
     <div class="catalog-header">
         <div class="catalog-header-row">
             <h2 class="catalog-title">
-                @if (search_term) {
-                {{ search_term }}: {{ total_products }} Resultados
+                @if (search_term()) {
+                {{ search_term() }}: {{ total_products() }} Resultados
                 } @else {
-                Productos ({{ total_products }})
+                Productos ({{ total_products() }})
                 }
             </h2>
 
@@ -41,11 +41,11 @@
             <div class="filter-section">
                 <label>Categorías</label>
                 <ul class="filter-options-list">
-                    <li [class.active]="!selected_category_id" (click)="onCategorySelect(null)">
+                    <li [class.active]="!selected_category_id()" (click)="onCategorySelect(null)">
                         Todas las categorías
                     </li>
-                    @for (cat of categories; track cat.id) {
-                    <li [class.active]="selected_category_id === cat.id" (click)="onCategorySelect(cat.id)">
+                    @for (cat of categories(); track cat.id) {
+                    <li [class.active]="selected_category_id() === cat.id" (click)="onCategorySelect(cat.id)">
                         {{ cat.name }}
                     </li>
                     }
@@ -56,11 +56,11 @@
             <div class="filter-section">
                 <label>Marcas</label>
                 <ul class="filter-options-list">
-                    <li [class.active]="!selected_brand_id" (click)="onBrandSelect(null)">
+                    <li [class.active]="!selected_brand_id()" (click)="onBrandSelect(null)">
                         Todas las marcas
                     </li>
-                    @for (brand of brands; track brand.id) {
-                    <li [class.active]="selected_brand_id === brand.id" (click)="onBrandSelect(brand.id)">
+                    @for (brand of brands(); track brand.id) {
+                    <li [class.active]="selected_brand_id() === brand.id" (click)="onBrandSelect(brand.id)">
                         {{ brand.name }}
                     </li>
                     }
@@ -86,7 +86,7 @@
         <!-- Products Grid -->
         <main class="catalog-main">
             <!-- Loading -->
-            @if (is_loading) {
+            @if (is_loading()) {
             <div class="loading-grid">
                 @for (i of [1,2,3,4,5,6,7,8]; track i) {
                 <div class="skeleton-card">
@@ -98,9 +98,9 @@
             </div>
             } @else {
             <!-- Products -->
-            @if (products.length > 0) {
+            @if (products().length > 0) {
             <div class="products-grid">
-                @for (product of products; track product.id) {
+                @for (product of products(); track product.id) {
                 <app-product-card [product]="product" [in_wishlist]="isInWishlist(product.id)" (add_to_cart)="onAddToCart($event)"
                     (toggle_wishlist)="onToggleWishlist($event)" (quick_view)="onQuickView($event)" (share)="onShare($event)" />
                 }
@@ -116,9 +116,9 @@
 
             <!-- Pagination -->
             <app-pagination
-              [currentPage]="current_page"
-              [totalPages]="total_pages"
-              [total]="total_products"
+              [currentPage]="current_page()"
+              [totalPages]="total_pages()"
+              [total]="total_products()"
               [limit]="limit"
               (pageChange)="goToPage($event)"
             />
@@ -133,8 +133,8 @@
 }
 
 <!-- Product Quick View Modal -->
-<app-product-quick-view-modal [isOpen]="quickViewOpen" [productSlug]="selectedProductSlug"
-    (closed)="quickViewOpen = false" (addedToCart)="onModalAddedToCart($event)" />
+<app-product-quick-view-modal [isOpen]="quickViewOpen()" [productSlug]="selectedProductSlug()"
+    (closed)="quickViewOpen.set(false)" (addedToCart)="onModalAddedToCart($event)" />
 
 <!-- Share Modal -->
-<app-share-modal [isOpen]="shareModalOpen" [product]="shareProduct" (closed)="onShareModalClosed()" />
+<app-share-modal [isOpen]="shareModalOpen()" [product]="shareProduct()" (closed)="onShareModalClosed()" />

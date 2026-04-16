@@ -1,11 +1,4 @@
-import {
-  Component,
-  Input,
-  Output,
-  EventEmitter,
-  inject,
-  OnInit,
-} from '@angular/core';
+import { Component, input, output, inject } from '@angular/core';
 
 import {
   FormsModule,
@@ -40,7 +33,7 @@ import { SuppliersService } from '../../services/suppliers.service';
 ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onClose()"
       size="md"
@@ -136,11 +129,11 @@ import { SuppliersService } from '../../services/suppliers.service';
   `,
   styleUrls: ['./pop-supplier-quick-create.component.scss'],
 })
-export class PopSupplierQuickCreateComponent implements OnInit {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() close = new EventEmitter<void>();
-  @Output() supplierCreated = new EventEmitter<number>();
+export class PopSupplierQuickCreateComponent {
+  readonly isOpen = input(false);
+  readonly isOpenChange = output<boolean>();
+  readonly close = output<void>();
+  readonly supplierCreated = output<number>();
 
   private fb = inject(FormBuilder);
   private suppliersService = inject(SuppliersService);
@@ -149,7 +142,7 @@ export class PopSupplierQuickCreateComponent implements OnInit {
   supplierForm!: FormGroup;
   isLoading = false;
 
-  ngOnInit(): void {
+  constructor() {
     this.initForm();
   }
 
@@ -197,11 +190,6 @@ export class PopSupplierQuickCreateComponent implements OnInit {
           this.supplierCreated.emit(response.data.id);
           this.resetForm();
           this.isOpenChange.emit(false);
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
           this.close.emit();
         } else {
           this.toastService.error(
@@ -235,11 +223,6 @@ export class PopSupplierQuickCreateComponent implements OnInit {
   onClose(): void {
     this.resetForm();
     this.isOpenChange.emit(false);
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
     this.close.emit();
   }
 

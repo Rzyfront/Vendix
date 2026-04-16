@@ -1,5 +1,5 @@
-import { Component, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject } from '@angular/core';
+import { AsyncPipe } from '@angular/common';
 import { Router, ActivatedRoute } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
@@ -28,7 +28,7 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
   selector: 'vendix-invoicing',
   standalone: true,
   imports: [
-    CommonModule,
+    AsyncPipe,
     InvoiceStatsComponent,
     InvoiceListComponent,
     InvoiceCreateComponent,
@@ -114,7 +114,7 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
     </div>
   `,
 })
-export class InvoicingComponent implements OnInit {
+export class InvoicingComponent {
   private currencyService = inject(CurrencyFormatService);
   private router = inject(Router);
   private route = inject(ActivatedRoute);
@@ -133,9 +133,6 @@ export class InvoicingComponent implements OnInit {
   constructor(private store: Store) {
     this.invoices$ = this.store.select(selectInvoices);
     this.loading$ = this.store.select(selectInvoicesLoading);
-  }
-
-  ngOnInit(): void {
     this.currencyService.loadCurrency();
     this.store.dispatch(loadInvoices());
     this.store.dispatch(loadInvoiceStats());

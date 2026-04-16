@@ -1,9 +1,7 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
-  ChangeDetectionStrategy,
+  input,
+  output,
   inject,
 } from '@angular/core';
 
@@ -15,7 +13,6 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
   selector: 'app-pos-mobile-footer',
   standalone: true,
   imports: [IconComponent],
-  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="pos-mobile-footer">
       <!-- Row 1: Cart Summary + View Detail Button -->
@@ -23,46 +20,46 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
         <div class="cart-summary">
           <div class="cart-icon-wrapper">
             <app-icon name="shopping-cart" [size]="20"></app-icon>
-            @if (itemCount > 0) {
+            @if (itemCount() > 0) {
               <span class="cart-badge">
-                {{ itemCount > 99 ? '99+' : itemCount }}
+                {{ itemCount() > 99 ? '99+' : itemCount() }}
               </span>
             }
           </div>
           <div class="cart-totals">
             <span class="total-label">Total</span>
             <span class="total-amount">{{
-              formatCurrency(cartSummary?.total || 0)
+              formatCurrency(cartSummary()?.total || 0)
             }}</span>
           </div>
         </div>
-    
+
         <button
           class="view-detail-btn"
           (click)="viewCart.emit()"
-          [disabled]="itemCount === 0"
+          [disabled]="itemCount() === 0"
           >
           <span>Ver detalle</span>
           <app-icon name="chevron-up" [size]="16"></app-icon>
         </button>
       </div>
-    
-      @if (isQuotationMode) {
+
+      @if (isQuotationMode()) {
         <!-- Quotation mode: single button -->
         <button
           class="action-btn checkout-btn checkout-btn-full"
           (click)="quote.emit()"
-          [disabled]="itemCount === 0"
+          [disabled]="itemCount() === 0"
           >
           <app-icon name="file-text" [size]="18"></app-icon>
           <span>Crear Cotización</span>
         </button>
-      } @else if (isLayawayMode) {
+      } @else if (isLayawayMode()) {
         <!-- Layaway mode: single button -->
         <button
           class="action-btn checkout-btn checkout-btn-full"
           (click)="layaway.emit()"
-          [disabled]="itemCount === 0"
+          [disabled]="itemCount() === 0"
           >
           <app-icon name="calendar" [size]="18"></app-icon>
           <span>Crear Plan Separé</span>
@@ -73,7 +70,7 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
           <button
             class="action-btn save-btn"
             (click)="saveDraft.emit()"
-            [disabled]="itemCount === 0"
+            [disabled]="itemCount() === 0"
             >
             <app-icon name="save" [size]="16"></app-icon>
             <span>Guardar</span>
@@ -81,7 +78,7 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
           <button
             class="action-btn shipping-btn"
             (click)="shipping.emit()"
-            [disabled]="itemCount === 0"
+            [disabled]="itemCount() === 0"
             >
             <app-icon name="truck" [size]="16"></app-icon>
             <span>Envío</span>
@@ -91,7 +88,7 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
         <button
           class="action-btn checkout-btn checkout-btn-full"
           (click)="checkout.emit()"
-          [disabled]="itemCount === 0"
+          [disabled]="itemCount() === 0"
           >
           <app-icon name="credit-card" [size]="18"></app-icon>
           <span>Cobrar</span>
@@ -332,18 +329,18 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 export class PosMobileFooterComponent {
   private currencyService = inject(CurrencyFormatService);
 
-  @Input() cartSummary: CartSummary | null = null;
-  @Input() itemCount: number = 0;
-  @Input() isTablet: boolean = false;
-  @Input() isQuotationMode: boolean = false;
-  @Input() isLayawayMode: boolean = false;
+  readonly cartSummary = input<CartSummary | null>(null);
+  readonly itemCount = input<number>(0);
+  readonly isTablet = input<boolean>(false);
+  readonly isQuotationMode = input<boolean>(false);
+  readonly isLayawayMode = input<boolean>(false);
 
-  @Output() viewCart = new EventEmitter<void>();
-  @Output() saveDraft = new EventEmitter<void>();
-  @Output() shipping = new EventEmitter<void>();
-  @Output() checkout = new EventEmitter<void>();
-  @Output() quote = new EventEmitter<void>();
-  @Output() layaway = new EventEmitter<void>();
+  readonly viewCart = output<void>();
+  readonly saveDraft = output<void>();
+  readonly shipping = output<void>();
+  readonly checkout = output<void>();
+  readonly quote = output<void>();
+  readonly layaway = output<void>();
 
   formatCurrency(amount: number): string {
     return this.currencyService.format(amount);

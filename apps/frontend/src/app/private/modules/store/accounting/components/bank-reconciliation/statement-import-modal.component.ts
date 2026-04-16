@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, inject, signal, computed, ViewChild } from '@angular/core';
+import { Component, input, output, inject, signal, computed, ViewChild } from '@angular/core';
 
 import { FormsModule } from '@angular/forms';
 import {
@@ -28,7 +28,7 @@ import { BankAccount, ColumnMappingConfig } from '../../interfaces/accounting.in
 ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
@@ -262,10 +262,10 @@ import { BankAccount, ColumnMappingConfig } from '../../interfaces/accounting.in
   `,
 })
 export class StatementImportModalComponent {
-  @Input() isOpen = false;
-  @Input() bankAccounts: BankAccount[] = [];
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() importComplete = new EventEmitter<void>();
+  readonly isOpen = input(false);
+  readonly bankAccounts = input<BankAccount[]>([]);
+  readonly isOpenChange = output<boolean>();
+  readonly importComplete = output<void>();
 
   @ViewChild('dropzone') dropzoneRef!: FileUploadDropzoneComponent;
 
@@ -313,7 +313,7 @@ export class StatementImportModalComponent {
   ];
 
   bankAccountOptions = computed(() =>
-    this.bankAccounts
+    this.bankAccounts()
       .filter((a) => a.status === 'active')
       .map((a) => ({
         value: a.id,
@@ -461,11 +461,6 @@ export class StatementImportModalComponent {
         this.importResult.set(res.data);
         if (res.data.errors?.length === 0) {
           this.toastService.success(`${res.data.imported} transacciones importadas`);
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
           this.importComplete.emit();
         } else {
           this.toastService.warning('Importacion completada con advertencias');

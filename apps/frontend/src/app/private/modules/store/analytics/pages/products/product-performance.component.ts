@@ -3,6 +3,7 @@ import { CommonModule } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { Observable, Subject, combineLatest, takeUntil } from 'rxjs';
+import { toSignal } from '@angular/core/rxjs-interop';
 
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
@@ -82,6 +83,12 @@ export class ProductPerformanceComponent implements OnInit, OnDestroy {
   granularity$: Observable<string> = this.store.select(
     ProductsSelectors.selectGranularity,
   );
+
+  readonly summary = toSignal(this.summary$, { initialValue: null });
+  readonly loading = toSignal(this.loading$, { initialValue: false });
+  readonly loadingTopSellers = toSignal(this.loadingTopSellers$, { initialValue: false });
+  readonly loadingTrends = toSignal(this.loadingTrends$, { initialValue: false });
+  readonly exporting = toSignal(this.exporting$, { initialValue: false });
 
   // Chart options
   topSellersChartOptions: EChartsOption = {};

@@ -1,4 +1,4 @@
-import { Component, OnInit } from '@angular/core';
+import { Component, OnInit, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
@@ -14,7 +14,7 @@ import { environment } from '../../../../../environments/environment';
       <div class="w-full max-w-md">
 
         <!-- Loading State -->
-        @if (loading) {
+        @if (loading()) {
           <div class="bg-white rounded-2xl shadow-lg p-8 text-center">
             <div class="animate-spin w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full mx-auto mb-4"></div>
             <p class="text-gray-500 text-sm">Cargando información...</p>
@@ -22,20 +22,20 @@ import { environment } from '../../../../../environments/environment';
         }
 
         <!-- Error State -->
-        @if (error && !loading) {
+        @if (error() && !loading()) {
           <div class="bg-white rounded-2xl shadow-lg p-8 text-center">
             <div class="w-16 h-16 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <svg class="w-8 h-8 text-red-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
               </svg>
             </div>
-            <h2 class="text-xl font-bold text-gray-800 mb-2">{{ errorTitle }}</h2>
-            <p class="text-gray-500 text-sm">{{ errorMessage }}</p>
+            <h2 class="text-xl font-bold text-gray-800 mb-2">{{ errorTitle() }}</h2>
+            <p class="text-gray-500 text-sm">{{ errorMessage() }}</p>
           </div>
         }
 
         <!-- Success State -->
-        @if (submitted && !loading && !error) {
+        @if (submitted() && !loading() && !error()) {
           <div class="bg-white rounded-2xl shadow-lg p-8 text-center">
             <div class="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4">
               <svg class="w-8 h-8 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -58,25 +58,25 @@ import { environment } from '../../../../../environments/environment';
         }
 
         <!-- Form State -->
-        @if (!submitted && !loading && !error) {
+        @if (!submitted() && !loading() && !error()) {
           <div class="bg-white rounded-2xl shadow-lg overflow-hidden">
             <!-- Header with store info -->
             <div class="bg-gradient-to-r from-blue-600 to-blue-700 px-6 py-5 text-white">
-              @if (storeName) {
-                <h1 class="text-lg font-bold">{{ storeName }}</h1>
+              @if (storeName()) {
+                <h1 class="text-lg font-bold">{{ storeName() }}</h1>
               }
               <p class="text-blue-100 text-sm mt-1">Solicitud de factura electrónica</p>
             </div>
 
             <!-- Order Summary -->
-            @if (orderInfo) {
+            @if (orderInfo(); as info) {
               <div class="px-6 py-4 bg-gray-50 border-b border-gray-200">
                 <p class="text-xs text-gray-500 uppercase tracking-wider mb-1">Resumen de compra</p>
                 <div class="flex justify-between items-center">
-                  <span class="text-sm text-gray-700">Orden #{{ orderInfo.order_number }}</span>
-                  <span class="text-sm font-bold text-gray-800">{{ orderInfo.grand_total | currency:'COP':'symbol-narrow':'1.0-0' }}</span>
+                  <span class="text-sm text-gray-700">Orden #{{ info.order_number }}</span>
+                  <span class="text-sm font-bold text-gray-800">{{ info.grand_total | currency:'COP':'symbol-narrow':'1.0-0' }}</span>
                 </div>
-                <p class="text-xs text-gray-400 mt-1">{{ orderInfo.created_at | date:'dd/MM/yyyy HH:mm' }}</p>
+                <p class="text-xs text-gray-400 mt-1">{{ info.created_at | date:'dd/MM/yyyy HH:mm' }}</p>
               </div>
             }
 
@@ -160,11 +160,11 @@ import { environment } from '../../../../../environments/environment';
 
               <button
                 type="submit"
-                [disabled]="submitting || !isFormValid()"
+                [disabled]="submitting() || !isFormValid()"
                 class="w-full py-3 px-4 rounded-xl text-white font-semibold text-sm transition-all"
-                [class]="submitting || !isFormValid() ? 'bg-gray-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 active:scale-[0.98] shadow-lg shadow-blue-200'"
+                [class]="submitting() || !isFormValid() ? 'bg-gray-300 cursor-not-allowed' : 'bg-blue-600 hover:bg-blue-700 active:scale-[0.98] shadow-lg shadow-blue-200'"
               >
-                @if (submitting) {
+                @if (submitting()) {
                   <span class="flex items-center justify-center gap-2">
                     <span class="animate-spin w-4 h-4 border-2 border-white border-t-transparent rounded-full"></span>
                     Enviando...
@@ -188,15 +188,15 @@ export class InvoiceDataComponent implements OnInit {
   private readonly apiUrl = `${environment.apiUrl}/ecommerce/invoice-data`;
 
   token = '';
-  loading = true;
-  error = false;
-  errorTitle = '';
-  errorMessage = '';
-  submitted = false;
-  submitting = false;
+  readonly loading = signal(true);
+  readonly error = signal(false);
+  readonly errorTitle = signal('');
+  readonly errorMessage = signal('');
+  readonly submitted = signal(false);
+  readonly submitting = signal(false);
 
-  storeName = '';
-  orderInfo: any = null;
+  readonly storeName = signal('');
+  readonly orderInfo = signal<any>(null);
 
   form = {
     first_name: '',
@@ -222,13 +222,13 @@ export class InvoiceDataComponent implements OnInit {
   }
 
   private loadRequestInfo(): void {
-    this.loading = true;
+    this.loading.set(true);
     this.http.get<any>(`${this.apiUrl}/${this.token}`).subscribe({
       next: (response) => {
         const data = response.data || response;
-        this.storeName = data.store?.name || '';
-        this.orderInfo = data.order || null;
-        this.loading = false;
+        this.storeName.set(data.store?.name || '');
+        this.orderInfo.set(data.order || null);
+        this.loading.set(false);
       },
       error: (err) => {
         const errorCode = err.error?.message || err.error?.error || '';
@@ -250,16 +250,16 @@ export class InvoiceDataComponent implements OnInit {
   }
 
   onSubmit(): void {
-    if (!this.isFormValid() || this.submitting) return;
+    if (!this.isFormValid() || this.submitting()) return;
 
-    this.submitting = true;
+    this.submitting.set(true);
     this.http.post<any>(`${this.apiUrl}/${this.token}/submit`, this.form).subscribe({
       next: () => {
-        this.submitted = true;
-        this.submitting = false;
+        this.submitted.set(true);
+        this.submitting.set(false);
       },
       error: (err) => {
-        this.submitting = false;
+        this.submitting.set(false);
         const errorCode = err.error?.message || '';
         if (errorCode.includes('NOT_PENDING')) {
           this.showError('Ya enviado', 'Los datos de facturación ya fueron enviados para esta compra.');
@@ -273,9 +273,9 @@ export class InvoiceDataComponent implements OnInit {
   }
 
   private showError(title: string, message: string): void {
-    this.error = true;
-    this.errorTitle = title;
-    this.errorMessage = message;
-    this.loading = false;
+    this.error.set(true);
+    this.errorTitle.set(title);
+    this.errorMessage.set(message);
+    this.loading.set(false);
   }
 }

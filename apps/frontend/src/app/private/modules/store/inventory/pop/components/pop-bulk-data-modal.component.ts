@@ -1,5 +1,5 @@
-import { Component, EventEmitter, Input, Output, inject, OnChanges, SimpleChanges, OnDestroy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input, output, inject, effect, DestroyRef } from '@angular/core';
+import { NgClass, CurrencyPipe } from '@angular/common';
 import * as XLSX from 'xlsx';
 import { ProductsService } from '../../../products/services/products.service';
 import {
@@ -45,10 +45,10 @@ interface AnalysisResult {
 @Component({
   selector: 'app-pop-bulk-data-modal',
   standalone: true,
-  imports: [CommonModule, ModalComponent, ButtonComponent, IconComponent, StepsLineComponent, SpinnerComponent],
+  imports: [NgClass, CurrencyPipe, ModalComponent, ButtonComponent, IconComponent, StepsLineComponent, SpinnerComponent],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
@@ -480,11 +480,11 @@ interface AnalysisResult {
     `,
   ],
 })
-export class PopBulkDataModalComponent implements OnChanges, OnDestroy {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() close = new EventEmitter<void>();
-  @Output() dataLoaded = new EventEmitter<any[]>();
+export class PopBulkDataModalComponent {
+  readonly isOpen = input(false);
+  readonly isOpenChange = output<boolean>();
+  readonly close = output<void>();
+  readonly dataLoaded = output<any[]>();
 
   private static readonly INTRO_CACHE_KEY = 'vendix_bulk_pop_intro_dismissed';
   private static readonly INTRO_DURATION = 20000;
@@ -528,18 +528,15 @@ export class PopBulkDataModalComponent implements OnChanges, OnDestroy {
     return this.analysisResult.items.filter(i => i.status !== 'error').length;
   }
 
-  // Lifecycle
-  ngOnChanges(changes: SimpleChanges) {
-    if (changes['isOpen'] && this.isOpen) {
-      this.onModalOpen();
-    }
-    if (changes['isOpen'] && !this.isOpen) {
-      this.clearIntroTimer();
-    }
-  }
-
-  ngOnDestroy() {
-    this.clearIntroTimer();
+  constructor() {
+    inject(DestroyRef).onDestroy(() => this.clearIntroTimer());
+    effect(() => {
+      if (this.isOpen()) {
+        this.onModalOpen();
+      } else {
+        this.clearIntroTimer();
+      }
+    });
   }
 
   // Intro logic
@@ -596,11 +593,6 @@ export class PopBulkDataModalComponent implements OnChanges, OnDestroy {
   }
 
   onCancel() {
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
     this.close.emit();
     this.isOpenChange.emit(false);
     this.resetState();

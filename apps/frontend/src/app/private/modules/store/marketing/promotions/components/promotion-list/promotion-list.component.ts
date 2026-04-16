@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, inject } from '@angular/core';
+import { Component, input, output, inject } from '@angular/core';
 
 import { FormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
@@ -52,9 +52,9 @@ import { selectPromotionsMeta } from '../../state/selectors/promotions.selectors
                      md:text-lg md:font-semibold md:text-text-primary"
             >
             Promociones
-            @if (meta) {
+            @if (meta()) {
               <span class="text-text-secondary font-normal">
-                ({{ meta.total }})
+                ({{ meta()!.total }})
               </span>
             }
           </h2>
@@ -68,12 +68,12 @@ import { selectPromotionsMeta } from '../../state/selectors/promotions.selectors
               [debounceTime]="300"
               (search)="onSearch($event)"
             ></app-inputsearch>
-    
+
             <app-button
               variant="outline"
               size="md"
               customClasses="w-10 sm:w-11 !px-0 bg-surface shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none !rounded-[10px] shrink-0"
-              (clicked)="create.emit()"
+              (clicked)="create.emit(undefined)"
               title="Nueva Promocion"
               >
               <app-icon slot="icon" name="plus" [size]="18"></app-icon>
@@ -84,7 +84,7 @@ import { selectPromotionsMeta } from '../../state/selectors/promotions.selectors
               [filters]="filterConfigs"
               [filterValues]="filterValues"
               [actions]="dropdownActions"
-              [isLoading]="loading"
+              [isLoading]="loading()"
               (filterChange)="onFilterChange($event)"
               (clearAllFilters)="onClearFilters()"
               (actionClick)="onActionClick($event)"
@@ -94,7 +94,7 @@ import { selectPromotionsMeta } from '../../state/selectors/promotions.selectors
       </div>
     
       <!-- Loading State -->
-      @if (loading) {
+      @if (loading()) {
         <div class="p-4 md:p-6 text-center">
           <div
             class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
@@ -104,7 +104,7 @@ import { selectPromotionsMeta } from '../../state/selectors/promotions.selectors
       }
     
       <!-- Empty State -->
-      @if (!loading && promotions.length === 0) {
+      @if (!loading() && promotions().length === 0) {
         <div
           class="p-12 text-center text-gray-500"
           >
@@ -118,7 +118,7 @@ import { selectPromotionsMeta } from '../../state/selectors/promotions.selectors
           </h3>
           <p class="mt-1">Comienza creando una nueva promocion.</p>
           <div class="mt-6 flex justify-center">
-            <app-button variant="primary" (clicked)="create.emit()">
+            <app-button variant="primary" (clicked)="create.emit(undefined)">
               <app-icon slot="icon" name="plus" [size]="16"></app-icon>
               Nueva Promocion
             </app-button>
@@ -127,16 +127,16 @@ import { selectPromotionsMeta } from '../../state/selectors/promotions.selectors
       }
     
       <!-- Data View -->
-      @if (!loading && promotions.length > 0) {
+      @if (!loading() && promotions().length > 0) {
         <div
           class="px-2 pb-2 pt-3 md:p-4"
           >
           <app-responsive-data-view
-            [data]="promotions"
+            [data]="promotions()"
             [columns]="columns"
             [cardConfig]="cardConfig"
             [actions]="tableActions"
-            [loading]="loading"
+            [loading]="loading()"
             [hoverable]="true"
             [striped]="true"
             emptyMessage="No hay promociones"
@@ -145,13 +145,13 @@ import { selectPromotionsMeta } from '../../state/selectors/promotions.selectors
             (rowClick)="edit.emit($event)"
           ></app-responsive-data-view>
           <!-- Pagination -->
-          @if (meta && meta.total > 0) {
+          @if (meta() && meta()!.total > 0) {
             <div class="mt-4 flex justify-center">
               <app-pagination
-                [currentPage]="meta.page"
-                [totalPages]="meta.total_pages"
-                [total]="meta.total"
-                [limit]="meta.limit"
+                [currentPage]="meta()!.page"
+                [totalPages]="meta()!.total_pages"
+                [total]="meta()!.total"
+                [limit]="meta()!.limit"
                 (pageChange)="pageChange.emit($event)"
               ></app-pagination>
             </div>
@@ -170,19 +170,19 @@ import { selectPromotionsMeta } from '../../state/selectors/promotions.selectors
   ],
 })
 export class PromotionListComponent {
-  @Input() promotions: Promotion[] = [];
-  @Input() loading = false;
-  @Input() meta: any = null;
+  readonly promotions = input<Promotion[]>([]);
+  readonly loading = input<boolean>(false);
+  readonly meta = input<any>(null);
 
-  @Output() create = new EventEmitter<void>();
-  @Output() edit = new EventEmitter<Promotion>();
-  @Output() activate = new EventEmitter<number>();
-  @Output() pause = new EventEmitter<number>();
-  @Output() cancel = new EventEmitter<number>();
-  @Output() delete = new EventEmitter<number>();
-  @Output() pageChange = new EventEmitter<number>();
-  @Output() searchChange = new EventEmitter<string>();
-  @Output() filterChange = new EventEmitter<Record<string, string>>();
+  readonly create = output<void>();
+  readonly edit = output<Promotion>();
+  readonly activate = output<number>();
+  readonly pause = output<number>();
+  readonly cancel = output<number>();
+  readonly delete = output<number>();
+  readonly pageChange = output<number>();
+  readonly searchChange = output<string>();
+  readonly filterChange = output<Record<string, string>>();
 
   private currency_service = inject(CurrencyFormatService);
 
@@ -423,12 +423,7 @@ export class PromotionListComponent {
 
   onActionClick(action: string): void {
     if (action === 'create') {
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      this.create.emit();
+      this.create.emit(undefined);
     }
   }
 }

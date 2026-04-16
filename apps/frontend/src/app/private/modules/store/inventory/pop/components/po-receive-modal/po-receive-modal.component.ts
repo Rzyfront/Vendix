@@ -5,7 +5,6 @@ import {
   output,
   signal,
   computed,
-  ChangeDetectionStrategy,
 } from '@angular/core';
 
 import { FormsModule } from '@angular/forms';
@@ -30,7 +29,6 @@ interface ReceiveLineItem {
   selector: 'app-po-receive-modal',
   standalone: true,
   imports: [FormsModule, ModalComponent, ButtonComponent, IconComponent],
-  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <app-modal
       [isOpen]="isOpen()"

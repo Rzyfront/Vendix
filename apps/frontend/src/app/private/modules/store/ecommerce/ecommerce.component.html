@@ -1,6 +1,6 @@
 <div class="w-full max-w-[1600px] mx-auto min-h-screen">
   <!-- Loading State -->
-  @if (isLoading) {
+  @if (isLoading()) {
     <div class="flex flex-col items-center justify-center py-20 gap-4">
       <div
         class="loader-2 animate-spin text-6xl text-[var(--color-primary)]"
@@ -12,7 +12,7 @@
   }
 
   <!-- Main Content -->
-  @if (!isLoading) {
+  @if (!isLoading()) {
     <form [formGroup]="settingsForm" (ngSubmit)="onSubmit()" class="space-y-4">
       <app-sticky-header
         [title]="
@@ -435,14 +435,16 @@
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <app-input
                         label="Título del Slide"
-                        [value]="sliderImages[activeImageIndex].title || ''"
+                        [ngModel]="sliderImages[activeImageIndex].title || ''"
+                        [ngModelOptions]="{ standalone: true }"
                         (inputChange)="onTitleInputChange($event)"
                         placeholder="Ej: Nueva Colección 2024"
                         customWrapperClass="!mt-0"
                       ></app-input>
                       <app-input
                         label="Párrafo Descriptivo (Leyenda)"
-                        [value]="sliderImages[activeImageIndex].caption || ''"
+                        [ngModel]="sliderImages[activeImageIndex].caption || ''"
+                        [ngModelOptions]="{ standalone: true }"
                         (inputChange)="onCaptionInputChange($event)"
                         placeholder="Ej: Descubre nuestras ofertas exclusivas..."
                         customWrapperClass="!mt-0"

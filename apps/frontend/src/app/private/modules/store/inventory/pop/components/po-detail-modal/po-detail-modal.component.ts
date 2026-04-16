@@ -6,9 +6,8 @@ import {
   signal,
   computed,
   effect,
-  ChangeDetectionStrategy,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { DatePipe } from '@angular/common';
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
@@ -32,7 +31,7 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
   selector: 'app-po-detail-modal',
   standalone: true,
   imports: [
-    CommonModule,
+    DatePipe,
     ModalComponent,
     ButtonComponent,
     IconComponent,
@@ -41,7 +40,6 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
     PoPaymentModalComponent,
     PoTimelineComponent,
   ],
-  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <app-modal
       [isOpen]="isOpen()"

@@ -1,16 +1,19 @@
 import {
   Component,
-  Input,
   ChangeDetectionStrategy,
   OnInit,
-  OnDestroy,
-  output
+  input,
+  output,
+  signal,
+  inject,
+  DestroyRef,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { IconComponent } from '../../index';
 import { OnboardingWizardService } from '../../../../core/services/onboarding-wizard.service';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
-import { Subject, takeUntil, interval } from 'rxjs';
+import { interval } from 'rxjs';
 
 @Component({
   selector: 'app-email-verification-step',
@@ -366,7 +369,7 @@ import { Subject, takeUntil, interval } from 'rxjs';
           <h2 class="email-title">Verifica tu correo electrónico</h2>
           <p class="email-subtitle">Enviamos un enlace de verificación a:</p>
           <div class="email-badge">
-            <span class="email-address">{{ userEmail }}</span>
+            <span class="email-address">{{ resolvedEmail }}</span>
           </div>
         </div>
 
@@ -471,18 +474,23 @@ import { Subject, takeUntil, interval } from 'rxjs';
     </div>
   `,
 })
-export class EmailVerificationStepComponent implements OnInit, OnDestroy {
-  @Input() userEmail: string = '';
+export class EmailVerificationStepComponent implements OnInit {
+  // --- Inputs / Outputs ---
+  readonly userEmail = input<string>('');
   readonly nextStep = output<void>();
   readonly skipStep = output<void>();
   readonly previousStep = output<void>();
 
-  private destroy$ = new Subject<void>();
+  // --- Services ---
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly wizardService = inject(OnboardingWizardService);
+  private readonly authFacade = inject(AuthFacade);
+
   private pollingSubscription: any = null;
   private maxPollingAttempts = 60; // Max 5 minutes (60 * 5s)
   private currentPollingAttempt = 0;
 
-  // State (public for parent component access)
+  // State (public for parent component access — isEmailVerified leído por viewChild del padre)
   isEmailVerified = false;
   isCheckingStatus = true;
   isResendingEmail = false;
@@ -494,11 +502,6 @@ export class EmailVerificationStepComponent implements OnInit, OnDestroy {
   primaryColor = '#7ed7a5';
   secondaryColor = '#2f6f4e';
 
-  constructor(
-    private wizardService: OnboardingWizardService,
-    private authFacade: AuthFacade,
-  ) {}
-
   ngOnInit(): void {
     this.loadUserEmail();
     this.checkEmailVerification();
@@ -506,16 +509,10 @@ export class EmailVerificationStepComponent implements OnInit, OnDestroy {
 
     // Set up resend cooldown timer
     interval(1000) // Update cooldown every second
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => {
         this.updateResendCooldown();
       });
-  }
-
-  ngOnDestroy(): void {
-    this.stopPolling();
-    this.destroy$.next();
-    this.destroy$.complete();
   }
 
   private startPolling(): void {
@@ -527,7 +524,7 @@ export class EmailVerificationStepComponent implements OnInit, OnDestroy {
 
     // Poll every 5 seconds with a maximum limit
     this.pollingSubscription = interval(5000)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => {
         this.currentPollingAttempt++;
 
@@ -556,12 +553,19 @@ export class EmailVerificationStepComponent implements OnInit, OnDestroy {
 
   private loadUserEmail(): void {
     this.authFacade.user$
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((user: any) => {
+        // userEmail is an input() signal — we read it as fallback, but auth takes priority
+        // Since input() is readonly, we store email in a local mutable field only when the auth overrides
         if (user?.email) {
-          this.userEmail = user.email;
+          (this as any)._resolvedEmail = user.email;
         }
       });
+  }
+
+  /** Resolved email: from auth facade override or from input() */
+  get resolvedEmail(): string {
+    return (this as any)._resolvedEmail || this.userEmail();
   }
 
   private checkEmailVerification(): void {
@@ -575,7 +579,6 @@ export class EmailVerificationStepComponent implements OnInit, OnDestroy {
           this.stopPolling(); // Stop polling once verified
           // Auto-advance to next step
           setTimeout(() => {
-            // TODO: The 'emit' function requires a mandatory void argument
             this.nextStep.emit();
           }, 500);
         } else {
@@ -602,7 +605,6 @@ export class EmailVerificationStepComponent implements OnInit, OnDestroy {
           this.stopPolling(); // Stop polling once verified
           // Auto-advance to next step
           setTimeout(() => {
-            // TODO: The 'emit' function requires a mandatory void argument
             this.nextStep.emit();
           }, 500);
         } else {

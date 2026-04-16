@@ -1,6 +1,6 @@
 <div class="pb-6">
   <!-- Stats Cards -->
-  @if (loading$ | async) {
+  @if (loading()) {
     <div class="stats-container">
       @for (i of [1, 2, 3, 4]; track i) {
         <div
@@ -17,7 +17,7 @@
     >
       <app-stats
         title="Total Clientes"
-        [value]="(summary$ | async)?.total_customers || 0"
+        [value]="summary()?.total_customers || 0"
         smallText="Registrados en la tienda"
         iconName="users"
         iconBgColor="bg-blue-100"
@@ -26,7 +26,7 @@
 
       <app-stats
         title="Clientes Activos"
-        [value]="(summary$ | async)?.active_customers || 0"
+        [value]="summary()?.active_customers || 0"
         smallText="Con órdenes en el período"
         iconName="user-check"
         iconBgColor="bg-emerald-100"
@@ -35,8 +35,8 @@
 
       <app-stats
         title="Nuevos Este Período"
-        [value]="(summary$ | async)?.new_customers || 0"
-        [smallText]="getGrowthText((summary$ | async)?.new_customers_growth)"
+        [value]="summary()?.new_customers || 0"
+        [smallText]="getGrowthText(summary()?.new_customers_growth)"
         iconName="user-plus"
         iconBgColor="bg-purple-100"
         iconColor="text-purple-600"
@@ -44,8 +44,8 @@
 
       <app-stats
         title="Gasto Promedio"
-        [value]="(summary$ | async)?.average_spend | currency"
-        [smallText]="getGrowthText((summary$ | async)?.average_spend_growth)"
+        [value]="summary()?.average_spend | currency"
+        [smallText]="getGrowthText(summary()?.average_spend_growth)"
         iconName="dollar-sign"
         iconBgColor="bg-amber-100"
         iconColor="text-amber-600"
@@ -74,7 +74,7 @@
       <div class="flex items-center gap-2 flex-shrink-0">
         <vendix-export-button
           class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-          [loading]="(exporting$ | async) ?? false"
+          [loading]="exporting()"
           (export)="exportReport()"
         ></vendix-export-button>
 
@@ -109,7 +109,7 @@
         >
       </div>
       <div class="p-4">
-        @if (loadingTrends$ | async) {
+        @if (loadingTrends()) {
           <div class="h-64 flex items-center justify-center">
             <div
               class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
@@ -147,7 +147,7 @@
         >
       </div>
       <div class="p-4">
-        @if (loadingTrends$ | async) {
+        @if (loadingTrends()) {
           <div class="h-64 flex items-center justify-center">
             <div
               class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"

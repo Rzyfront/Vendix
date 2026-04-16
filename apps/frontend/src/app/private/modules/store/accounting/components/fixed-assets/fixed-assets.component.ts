@@ -1,5 +1,5 @@
-import { Component, OnInit, OnDestroy, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, OnDestroy, inject, signal, computed } from '@angular/core';
+import { CurrencyPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
@@ -34,7 +34,6 @@ interface AssetStats {
   selector: 'vendix-fixed-assets',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     FixedAssetCreateModalComponent,
     FixedAssetDetailModalComponent,
@@ -45,6 +44,7 @@ interface AssetStats {
     StatsComponent,
     InputsearchComponent,
     SelectorComponent,
+    CurrencyPipe,
   ],
   template: `
     <div class="w-full">
@@ -54,7 +54,7 @@ interface AssetStats {
       >
         <app-stats
           title="Total Activos"
-          [value]="stats.total"
+          [value]="stats().total"
           iconName="package"
           iconBgColor="bg-blue-100"
           iconColor="text-blue-600"
@@ -62,7 +62,7 @@ interface AssetStats {
         ></app-stats>
         <app-stats
           title="Activos"
-          [value]="stats.active"
+          [value]="stats().active"
           iconName="check-circle"
           iconBgColor="bg-emerald-100"
           iconColor="text-emerald-600"
@@ -70,7 +70,7 @@ interface AssetStats {
         ></app-stats>
         <app-stats
           title="Totalmente Depreciados"
-          [value]="stats.fully_depreciated"
+          [value]="stats().fully_depreciated"
           iconName="alert-circle"
           iconBgColor="bg-amber-100"
           iconColor="text-amber-600"
@@ -78,7 +78,7 @@ interface AssetStats {
         ></app-stats>
         <app-stats
           title="Valor en Libros"
-          [value]="formatted_book_value"
+          [value]="formatted_book_value()"
           iconName="dollar-sign"
           iconBgColor="bg-purple-100"
           iconColor="text-purple-600"
@@ -100,7 +100,7 @@ interface AssetStats {
               class="text-[13px] font-bold text-gray-600 tracking-wide
                        md:text-lg md:font-semibold md:text-text-primary"
             >
-              Activos Fijos ({{ filtered_assets.length }})
+              Activos Fijos ({{ filtered_assets().length }})
             </h2>
             <div class="flex items-center gap-2 w-full md:w-auto">
               <app-inputsearch
@@ -155,7 +155,7 @@ interface AssetStats {
 
         <!-- Data Content -->
         <div class="relative p-2 md:p-4">
-          @if (is_loading) {
+          @if (is_loading()) {
             <div
               class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
             >
@@ -180,7 +180,7 @@ interface AssetStats {
             <div class="col-span-1 text-right">Acciones</div>
           </div>
 
-          @if (filtered_assets.length === 0 && !is_loading) {
+          @if (filtered_assets().length === 0 && !is_loading()) {
             <div
               class="flex flex-col items-center justify-center py-16 text-gray-400"
             >
@@ -196,7 +196,7 @@ interface AssetStats {
             </div>
           } @else {
             <div class="divide-y divide-border">
-              @for (asset of filtered_assets; track asset.id) {
+              @for (asset of filtered_assets(); track asset.id) {
                 <!-- Mobile Card -->
                 <div
                   class="md:hidden p-3 mx-2 my-1 bg-surface rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.07)]"
@@ -384,7 +384,7 @@ interface AssetStats {
       <vendix-fixed-asset-create-modal
         [(isOpen)]="is_create_modal_open"
         [editAsset]="selected_asset_for_edit"
-        [categories]="categories"
+        [categories]="categories()"
         (saved)="onAssetSaved()"
       ></vendix-fixed-asset-create-modal>
 
@@ -398,34 +398,34 @@ interface AssetStats {
       <!-- Categories Modal -->
       <vendix-fixed-asset-categories-modal
         [(isOpen)]="is_categories_modal_open"
-        [categories]="categories"
+        [categories]="categories()"
         (categoriesChanged)="loadCategories()"
       ></vendix-fixed-asset-categories-modal>
     </div>
   `,
 })
-export class FixedAssetsComponent implements OnInit, OnDestroy {
+export class FixedAssetsComponent implements OnDestroy {
   private destroy$ = new Subject<void>();
   private accounting_service = inject(AccountingService);
   private currencyService = inject(CurrencyFormatService);
 
   // Data
-  assets: FixedAsset[] = [];
-  filtered_assets: FixedAsset[] = [];
-  categories: FixedAssetCategory[] = [];
-  is_loading = false;
+  readonly assets = signal<FixedAsset[]>([]);
+  readonly filtered_assets = signal<FixedAsset[]>([]);
+  readonly categories = signal<FixedAssetCategory[]>([]);
+  readonly is_loading = signal(false);
 
   // Stats
-  stats: AssetStats = {
+  readonly stats = signal<AssetStats>({
     total: 0,
     active: 0,
     fully_depreciated: 0,
     total_book_value: 0,
-  };
+  });
 
-  get formatted_book_value(): string {
-    return this.currencyService.format(this.stats.total_book_value || 0);
-  }
+  readonly formatted_book_value = computed(() =>
+    this.currencyService.format(this.stats().total_book_value || 0),
+  );
 
   // Filters
   search_term = '';
@@ -469,7 +469,7 @@ export class FixedAssetsComponent implements OnInit, OnDestroy {
     { value: 12, label: 'Diciembre' },
   ];
 
-  ngOnInit(): void {
+  constructor() {
     const current_year = new Date().getFullYear();
     this.available_years = [current_year - 1, current_year, current_year + 1];
     this.loadAssets();
@@ -482,7 +482,7 @@ export class FixedAssetsComponent implements OnInit, OnDestroy {
   }
 
   loadAssets(): void {
-    this.is_loading = true;
+    this.is_loading.set(true);
     const query: Record<string, any> = {};
     if (this.filter_status) query['status'] = this.filter_status;
 
@@ -491,13 +491,13 @@ export class FixedAssetsComponent implements OnInit, OnDestroy {
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (response) => {
-          this.assets = response.data;
+          this.assets.set(response.data);
           this.computeStats();
           this.applyFilters();
-          this.is_loading = false;
+          this.is_loading.set(false);
         },
         error: () => {
-          this.is_loading = false;
+          this.is_loading.set(false);
         },
       });
   }
@@ -508,27 +508,23 @@ export class FixedAssetsComponent implements OnInit, OnDestroy {
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (response) => {
-          this.categories = response.data;
+          this.categories.set(response.data);
         },
       });
   }
 
   private computeStats(): void {
-    this.stats = {
-      total: this.assets.length,
-      active: this.assets.filter((a) => a.status === 'active').length,
-      fully_depreciated: this.assets.filter(
-        (a) => a.status === 'fully_depreciated',
-      ).length,
-      total_book_value: this.assets.reduce(
-        (sum, a) => sum + (a.book_value ?? 0),
-        0,
-      ),
-    };
+    const assets = this.assets();
+    this.stats.set({
+      total: assets.length,
+      active: assets.filter((a) => a.status === 'active').length,
+      fully_depreciated: assets.filter((a) => a.status === 'fully_depreciated').length,
+      total_book_value: assets.reduce((sum, a) => sum + (a.book_value ?? 0), 0),
+    });
   }
 
   private applyFilters(): void {
-    let result = [...this.assets];
+    let result = [...this.assets()];
 
     if (this.search_term) {
       const term = this.search_term.toLowerCase();
@@ -544,7 +540,7 @@ export class FixedAssetsComponent implements OnInit, OnDestroy {
       result = result.filter((a) => a.status === this.filter_status);
     }
 
-    this.filtered_assets = result;
+    this.filtered_assets.set(result);
   }
 
   onSearch(term: string): void {

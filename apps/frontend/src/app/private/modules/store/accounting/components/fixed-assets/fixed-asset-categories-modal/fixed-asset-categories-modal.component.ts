@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, inject } from '@angular/core';
+import { Component, input, output, inject } from '@angular/core';
 
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 
@@ -26,7 +26,7 @@ import {
 ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onClose()"
       title="Categorias de Activos Fijos"
@@ -35,14 +35,14 @@ import {
       <div class="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
 
         <!-- Category List -->
-        @if (categories.length === 0 && !show_form) {
+        @if (categories().length === 0 && !show_form) {
           <div class="flex flex-col items-center justify-center py-8 text-gray-400">
             <app-icon name="tag" [size]="40"></app-icon>
             <p class="mt-3 text-sm">No hay categorias creadas</p>
           </div>
         } @else {
           <div class="divide-y divide-border">
-            @for (cat of categories; track cat.id) {
+            @for (cat of categories(); track cat.id) {
               <div class="flex items-center justify-between py-3 px-2 hover:bg-gray-50 rounded-lg">
                 <div class="min-w-0 flex-1">
                   <div class="flex items-center gap-2">
@@ -144,10 +144,10 @@ import {
   `,
 })
 export class FixedAssetCategoriesModalComponent {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Input() categories: FixedAssetCategory[] = [];
-  @Output() categoriesChanged = new EventEmitter<void>();
+  readonly isOpen = input(false);
+  readonly isOpenChange = output<boolean>();
+  readonly categories = input<FixedAssetCategory[]>([]);
+  readonly categoriesChanged = output<void>();
 
   private fb = inject(FormBuilder);
   private accounting_service = inject(AccountingService);
@@ -221,11 +221,6 @@ export class FixedAssetCategoriesModalComponent {
         this.is_submitting = false;
         this.show_form = false;
         this.editing_category = null;
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
         this.categoriesChanged.emit();
       },
       error: () => {
@@ -241,11 +236,6 @@ export class FixedAssetCategoriesModalComponent {
     this.accounting_service.deleteFixedAssetCategory(cat.id).subscribe({
       next: () => {
         this.toast_service.show({ variant: 'success', description: 'Categoria eliminada' });
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
         this.categoriesChanged.emit();
       },
       error: () => {

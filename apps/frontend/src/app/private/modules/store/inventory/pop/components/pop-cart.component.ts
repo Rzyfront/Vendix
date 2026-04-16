@@ -1,15 +1,12 @@
 import {
   Component,
-  OnInit,
-  OnDestroy,
-  ChangeDetectionStrategy,
-  Output,
-  EventEmitter,
+  output,
   inject,
+  DestroyRef,
 } from '@angular/core';
-import { CommonModule, DecimalPipe } from '@angular/common';
-import { Observable, Subject } from 'rxjs';
-import { takeUntil } from 'rxjs/operators';
+import { AsyncPipe, DecimalPipe } from '@angular/common';
+import { Observable } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   PopCartService,
   PopCartState,
@@ -30,8 +27,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 @Component({
   selector: 'app-pop-cart',
   standalone: true,
-  imports: [CommonModule, DecimalPipe, ButtonComponent, IconComponent, TooltipComponent, InputComponent, FormsModule, QuantityControlComponent],
-  changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [AsyncPipe, DecimalPipe, ButtonComponent, IconComponent, TooltipComponent, InputComponent, FormsModule, QuantityControlComponent],
   template: `
     <div
       class="h-full flex flex-col bg-surface rounded-md shadow-card border border-border"
@@ -325,46 +321,34 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
     `,
   ],
 })
-export class PopCartComponent implements OnInit, OnDestroy {
+export class PopCartComponent {
   private currencyService = inject(CurrencyFormatService);
-  private destroy$ = new Subject<void>();
+  private cartService = inject(PopCartService);
+  private toastService = inject(ToastService);
+  private dialogService = inject(DialogService);
+  private destroyRef = inject(DestroyRef);
   private disabledActionsTooltipTimeout: ReturnType<typeof setTimeout> | null = null;
 
-  cartState$: Observable<PopCartState>;
-  isEmpty$: Observable<boolean>;
-  summary$: Observable<PopCartSummary>;
-  loading$: Observable<boolean>;
+  readonly cartState$: Observable<PopCartState> = this.cartService.cartState$;
+  readonly isEmpty$: Observable<boolean> = this.cartService.isEmpty$;
+  readonly summary$: Observable<PopCartSummary> = this.cartService.summary$;
+  readonly loading$: Observable<boolean> = this.cartService.loading$;
   hoveredRemoveTooltip: string | null = null;
   disabledActionsTooltipVisible = false;
 
-  @Output() saveDraft = new EventEmitter<void>();
-  @Output() submitOrder = new EventEmitter<void>();
-  @Output() requestLotConfig = new EventEmitter<any>();
-  @Output() requestItemConfig = new EventEmitter<PopCartItem>();
+  readonly saveDraft = output<void>();
+  readonly submitOrder = output<void>();
+  readonly createAndReceive = output<void>();
+  readonly requestLotConfig = output<any>();
+  readonly requestItemConfig = output<PopCartItem>();
 
-  constructor(
-    private cartService: PopCartService,
-    private toastService: ToastService,
-    private dialogService: DialogService,
-  ) {
-    this.cartState$ = this.cartService.cartState$;
-    this.isEmpty$ = this.cartService.isEmpty$;
-    this.summary$ = this.cartService.summary$;
-    this.loading$ = this.cartService.loading$;
-  }
-
-  ngOnInit(): void {
-    // Asegurar que la moneda esté cargada
+  constructor() {
     this.currencyService.loadCurrency();
-  }
-
-  ngOnDestroy(): void {
-    if (this.disabledActionsTooltipTimeout) {
-      clearTimeout(this.disabledActionsTooltipTimeout);
-      this.disabledActionsTooltipTimeout = null;
-    }
-    this.destroy$.next();
-    this.destroy$.complete();
+    this.destroyRef.onDestroy(() => {
+      if (this.disabledActionsTooltipTimeout) {
+        clearTimeout(this.disabledActionsTooltipTimeout);
+      }
+    });
   }
 
   trackByItemId(_index: number, item: PopCartItem): string {
@@ -379,7 +363,7 @@ export class PopCartComponent implements OnInit, OnDestroy {
 
     this.cartService
       .updateCartItem({ itemId, quantity })
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => { },
         error: (error) => {
@@ -394,7 +378,7 @@ export class PopCartComponent implements OnInit, OnDestroy {
     if (cost < 0) return;
 
     this.cartService.updateCartItem({ itemId, unit_cost: Number(cost) })
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => { },
         error: (error) => {
@@ -406,7 +390,7 @@ export class PopCartComponent implements OnInit, OnDestroy {
   removeFromCart(itemId: string): void {
     this.cartService
       .removeFromCart(itemId)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.success('Producto eliminado de la orden');
@@ -431,7 +415,7 @@ export class PopCartComponent implements OnInit, OnDestroy {
     if (confirm) {
       this.cartService
         .clearCart()
-        .pipe(takeUntil(this.destroy$))
+        .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: () => {
             this.toastService.info('Orden vaciada');
@@ -444,31 +428,14 @@ export class PopCartComponent implements OnInit, OnDestroy {
   }
 
   onSaveDraft(): void {
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
     this.saveDraft.emit();
   }
 
-  @Output() createAndReceive = new EventEmitter<void>();
-
   onSubmitOrder(): void {
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
     this.submitOrder.emit();
   }
 
   onCreateAndReceive(): void {
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
     this.createAndReceive.emit();
   }
 

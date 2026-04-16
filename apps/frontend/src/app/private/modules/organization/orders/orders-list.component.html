@@ -1,6 +1,6 @@
 <div class="space-y-2 md:space-y-4">
   <!-- Stats Cards -->
-  <app-order-stats [stats]="stats"></app-order-stats>
+  <app-order-stats [stats]="stats()"></app-order-stats>
 
   <!-- Orders List -->
   <div
@@ -34,7 +34,7 @@
         >
           <div class="flex-1 min-w-0">
             <h2 class="text-lg font-semibold text-text-primary">
-              Orders ({{ orders.length }})
+              Orders ({{ orders().length }})
             </h2>
           </div>
 
@@ -117,7 +117,7 @@
       </div>
 
       <!-- Loading State -->
-      @if (isLoading) {
+      @if (isLoading()) {
         <div class="p-2 md:p-6 text-center">
           <div
             class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
@@ -127,7 +127,7 @@
       }
 
       <!-- Empty State -->
-      @if (!isLoading && orders.length === 0) {
+      @if (!isLoading() && orders().length === 0) {
         <div class="p-2 md:p-6 text-center">
           <app-icon
             name="shopping-cart"
@@ -162,14 +162,14 @@
       }
 
       <!-- Orders Table -->
-      @if (!isLoading && orders.length > 0) {
+      @if (!isLoading() && orders().length > 0) {
         <div class="p-2 md:p-4 overflow-x-auto">
           <app-responsive-data-view
-            [data]="orders"
+            [data]="orders()"
             [columns]="tableColumns"
             [actions]="tableActions"
             [cardConfig]="cardConfig"
-            [loading]="isLoading"
+            [loading]="isLoading()"
             [sortable]="true"
             [hoverable]="true"
             [striped]="true"

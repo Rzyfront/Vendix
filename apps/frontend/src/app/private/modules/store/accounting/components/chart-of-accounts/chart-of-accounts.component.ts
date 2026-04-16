@@ -1,5 +1,5 @@
-import { Component, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject } from '@angular/core';
+import { AsyncPipe, NgTemplateOutlet } from '@angular/common';
 import { Store } from '@ngrx/store';
 import { Observable, map, combineLatest, BehaviorSubject } from 'rxjs';
 
@@ -29,7 +29,8 @@ interface AccountStats {
   selector: 'vendix-chart-of-accounts',
   standalone: true,
   imports: [
-    CommonModule,
+    AsyncPipe,
+    NgTemplateOutlet,
     AccountCreateComponent,
     ButtonComponent,
     CardComponent,
@@ -357,7 +358,7 @@ interface AccountStats {
     </ng-template>
   `,
 })
-export class ChartOfAccountsComponent implements OnInit {
+export class ChartOfAccountsComponent {
   private store = inject(Store);
 
   accounts$: Observable<ChartAccount[]> = this.store.select(selectAccounts);
@@ -399,9 +400,7 @@ export class ChartOfAccountsComponent implements OnInit {
   selected_account: ChartAccount | null = null;
   expanded_ids = new Set<number>();
 
-  ngOnInit(): void {
-    // Accounts already loaded by parent AccountingComponent
-  }
+  // Accounts already loaded by parent AccountingComponent
 
   onSearch(term: string): void {
     this.searchTerm = term;

@@ -1,11 +1,10 @@
 import {
   Component,
-  EventEmitter,
-  Output,
-  OnInit,
-  OnDestroy,
+  output,
+  inject,
+  DestroyRef,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { AsyncPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import {
   Subject,
@@ -25,7 +24,7 @@ import {
 @Component({
   selector: 'app-pos-product-search',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [AsyncPipe, FormsModule],
   template: `
     <div class="product-search-container">
       <div class="search-header">
@@ -454,9 +453,9 @@ import {
     `,
   ],
 })
-export class PosProductSearchComponent implements OnInit, OnDestroy {
-  @Output() search = new EventEmitter<SearchFilters>();
-  @Output() productSelected = new EventEmitter<Product>();
+export class PosProductSearchComponent {
+  readonly search = output<SearchFilters>();
+  readonly productSelected = output<Product>();
 
   searchQuery: string = '';
   showFilters: boolean = false;
@@ -479,10 +478,14 @@ export class PosProductSearchComponent implements OnInit, OnDestroy {
 
   private searchSubject = new Subject<string>();
   private destroy$ = new Subject<void>();
+  private productService = inject(PosProductService);
 
-  constructor(private productService: PosProductService) {}
+  constructor() {
+    inject(DestroyRef).onDestroy(() => {
+      this.destroy$.next();
+      this.destroy$.complete();
+    });
 
-  ngOnInit(): void {
     this.categories$ = this.productService.getCategories();
     this.brands$ = this.productService.getBrands();
     this.suggestions$ = this.productService.getSearchHistory();
@@ -493,11 +496,6 @@ export class PosProductSearchComponent implements OnInit, OnDestroy {
         this.filters.query = query;
         this.performSearch();
       });
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
   }
 
   onSearchInput(event: Event): void {

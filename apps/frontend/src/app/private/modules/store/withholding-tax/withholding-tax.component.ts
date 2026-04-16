@@ -1,5 +1,5 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
-
+import { Component, DestroyRef, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { WithholdingTaxService } from './services/withholding-tax.service';
 import { WithholdingConcept, WithholdingStats } from './interfaces/withholding.interface';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
@@ -66,24 +66,29 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency/currenc
     </div>
   `,
 })
-export class WithholdingTaxComponent implements OnInit {
+export class WithholdingTaxComponent {
   private service = inject(WithholdingTaxService);
   private currencyService = inject(CurrencyFormatService);
+  private destroyRef = inject(DestroyRef);
 
   concepts = signal<WithholdingConcept[]>([]);
   stats = signal<WithholdingStats | null>(null);
 
-  ngOnInit() {
+  constructor() {
     this.loadData();
   }
 
   loadData() {
-    this.service.getConcepts().subscribe((res: any) => {
-      this.concepts.set(res.data || []);
-    });
-    this.service.getStats().subscribe((res: any) => {
-      this.stats.set(res.data || null);
-    });
+    this.service.getConcepts()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((res: any) => {
+        this.concepts.set(res.data || []);
+      });
+    this.service.getStats()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((res: any) => {
+        this.stats.set(res.data || null);
+      });
   }
 
   formatCurrency(value: number): string {

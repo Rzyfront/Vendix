@@ -1,12 +1,13 @@
 import {
   Component,
-  EventEmitter,
-  Input,
-  Output,
-  OnChanges,
-  SimpleChanges,
+  input,
+  output,
+  effect,
+  untracked,
+  inject,
+  signal,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { DatePipe } from '@angular/common';
 import {
   ButtonComponent,
   ModalComponent,
@@ -23,10 +24,10 @@ import {
 @Component({
   selector: 'app-pos-session-detail-modal',
   standalone: true,
-  imports: [CommonModule, ButtonComponent, ModalComponent, IconComponent, CurrencyPipe],
+  imports: [DatePipe, ButtonComponent, ModalComponent, IconComponent, CurrencyPipe],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onClose()"
       [size]="'lg'"
@@ -39,15 +40,15 @@ import {
         </div>
         <div>
           <h2 class="text-lg font-semibold text-text-primary">
-            {{ session?.register?.name || 'Caja' }}
+            {{ session()?.register?.name || 'Caja' }}
           </h2>
           <p class="text-sm text-text-secondary">
-            Sesion #{{ session?.id }}
-            @if (session?.status === 'closed') {
+            Sesion #{{ session()?.id }}
+            @if (session()?.status === 'closed') {
               · <span class="text-green-600 font-medium">Cerrada</span>
-            } @else if (session?.status === 'open') {
+            } @else if (session()?.status === 'open') {
               · <span class="text-blue-600 font-medium">Abierta</span>
-            } @else if (session?.status === 'suspended') {
+            } @else if (session()?.status === 'suspended') {
               · <span class="text-amber-600 font-medium">Suspendida</span>
             }
           </p>
@@ -60,21 +61,21 @@ import {
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-x-6 gap-y-2 text-sm session-header-details">
           <div>
             <span class="text-text-secondary">Cajero:</span>
-            <span class="font-medium text-text-primary ml-1">{{ session?.opened_by_user?.first_name }} {{ session?.opened_by_user?.last_name }}</span>
+            <span class="font-medium text-text-primary ml-1">{{ session()?.opened_by_user?.first_name }} {{ session()?.opened_by_user?.last_name }}</span>
           </div>
           <div>
             <span class="text-text-secondary">Apertura:</span>
-            <span class="font-medium text-text-primary ml-1">{{ session?.opened_at | date : 'short' }}</span>
+            <span class="font-medium text-text-primary ml-1">{{ session()?.opened_at | date : 'short' }}</span>
           </div>
           <div>
             <span class="text-text-secondary">Cierre:</span>
-            <span class="font-medium text-text-primary ml-1">{{ session?.closed_at ? (session?.closed_at | date : 'short') : '—' }}</span>
+            <span class="font-medium text-text-primary ml-1">{{ session()?.closed_at ? (session()?.closed_at | date : 'short') : '—' }}</span>
           </div>
           <div>
             <span class="text-text-secondary">Diferencia:</span>
-            @if (session?.difference != null) {
+            @if (session()?.difference != null) {
               <span class="font-bold ml-1" [class]="getDifferenceClass()">
-                {{ getDifferencePrefix() }}{{ session?.difference | currency:0 }}
+                {{ getDifferencePrefix() }}{{ session()?.difference | currency:0 }}
               </span>
             } @else {
               <span class="text-text-secondary ml-1">—</span>
@@ -93,7 +94,7 @@ import {
               Apertura
             </p>
             <p class="text-lg font-bold text-text-primary">
-              {{ session?.opening_amount | currency:0 }}
+              {{ session()?.opening_amount | currency:0 }}
             </p>
           </div>
           <div
@@ -105,7 +106,7 @@ import {
               Ventas
             </p>
             <p class="text-lg font-bold text-green-700">
-              {{ totalSales | currency:0 }}
+              {{ totalSales() | currency:0 }}
             </p>
           </div>
           <div
@@ -117,7 +118,7 @@ import {
               Reembolsos
             </p>
             <p class="text-lg font-bold text-red-700">
-              {{ totalRefunds | currency:0 }}
+              {{ totalRefunds() | currency:0 }}
             </p>
           </div>
           <div
@@ -129,7 +130,7 @@ import {
               Movimientos
             </p>
             <p class="text-lg font-bold text-blue-700">
-              {{ movements.length }}
+              {{ movements().length }}
             </p>
           </div>
         </div>
@@ -140,8 +141,8 @@ import {
             <app-icon name="sparkles" [size]="16"></app-icon>
             <span class="text-sm font-medium">Resumen IA</span>
           </div>
-          @if (session?.ai_summary) {
-            <div class="ai-saved-summary-content" [innerHTML]="renderedAiSummary"></div>
+          @if (session()?.ai_summary) {
+            <div class="ai-saved-summary-content" [innerHTML]="renderedAiSummary()"></div>
           } @else {
             <div class="ai-no-summary">
               <p class="text-sm text-text-secondary">No se genero resumen IA para esta sesion</p>
@@ -150,12 +151,12 @@ import {
         </div>
 
         <!-- Movements List -->
-        @if (loading) {
+        @if (loading()) {
           <div class="flex items-center justify-center py-8 text-text-secondary">
             <app-icon name="loader" [size]="20" class="animate-spin mr-2"></app-icon>
             Cargando movimientos...
           </div>
-        } @else if (movements.length === 0) {
+        } @else if (movements().length === 0) {
           <div
             class="flex flex-col items-center justify-center py-8 text-text-secondary"
           >
@@ -167,7 +168,7 @@ import {
             <div
               class="max-h-[360px] overflow-y-auto divide-y divide-border"
             >
-              @for (mov of movements; track mov.id) {
+              @for (mov of movements(); track mov.id) {
                 <div
                   class="flex items-center gap-3 px-4 py-3 hover:bg-surface-alt/50 transition-colors"
                 >
@@ -262,52 +263,57 @@ import {
     }
   `],
 })
-export class PosSessionDetailModalComponent implements OnChanges {
-  @Input() isOpen = false;
-  @Input() session: CashRegisterSession | null = null;
-  @Output() isOpenChange = new EventEmitter<boolean>();
+export class PosSessionDetailModalComponent {
+  readonly isOpen = input<boolean>(false);
+  readonly session = input<CashRegisterSession | null>(null);
+  readonly isOpenChange = output<boolean>();
 
-  movements: CashRegisterMovement[] = [];
-  loading = false;
-  renderedAiSummary = '';
+  readonly movements = signal<CashRegisterMovement[]>([]);
+  readonly loading = signal(false);
+  readonly renderedAiSummary = signal('');
 
-  totalSales = 0;
-  totalRefunds = 0;
+  readonly totalSales = signal(0);
+  readonly totalRefunds = signal(0);
 
-  constructor(private cashRegisterService: PosCashRegisterService) {}
+  private cashRegisterService = inject(PosCashRegisterService);
 
-  ngOnChanges(changes: SimpleChanges) {
-    if (changes['isOpen'] && this.isOpen && this.session) {
-      this.renderedAiSummary = markdownToHtml(this.session?.ai_summary || '');
-      this.loadMovements();
-    }
+  constructor() {
+    effect(() => {
+      if (this.isOpen() && this.session()) {
+        untracked(() => {
+          this.renderedAiSummary.set(markdownToHtml(this.session()?.ai_summary || ''));
+          this.loadMovements();
+        });
+      }
+    });
   }
 
   private loadMovements(): void {
-    if (!this.session) return;
-    this.loading = true;
+    if (!this.session()) return;
+    this.loading.set(true);
 
-    this.cashRegisterService.getMovements(this.session.id).subscribe({
+    this.cashRegisterService.getMovements(this.session()!.id).subscribe({
       next: (movements) => {
-        this.movements = movements;
+        this.movements.set(movements);
         this.calculateTotals();
-        this.loading = false;
+        this.loading.set(false);
       },
       error: () => {
-        this.movements = [];
-        this.loading = false;
+        this.movements.set([]);
+        this.loading.set(false);
       },
     });
   }
 
   private calculateTotals(): void {
-    this.totalSales = this.movements
+    const movs = this.movements();
+    this.totalSales.set(movs
       .filter((m) => m.type === 'sale')
-      .reduce((sum, m) => sum + Number(m.amount), 0);
+      .reduce((sum, m) => sum + Number(m.amount), 0));
 
-    this.totalRefunds = this.movements
+    this.totalRefunds.set(movs
       .filter((m) => m.type === 'refund')
-      .reduce((sum, m) => sum + Number(m.amount), 0);
+      .reduce((sum, m) => sum + Number(m.amount), 0));
   }
 
   getMovementIcon(type: string): string {
@@ -351,14 +357,14 @@ export class PosSessionDetailModalComponent implements OnChanges {
   }
 
   getDifferenceClass(): string {
-    const diff = Number(this.session?.difference || 0);
+    const diff = Number(this.session()?.difference || 0);
     if (diff === 0) return 'text-green-600';
     if (diff > 0) return 'text-blue-600';
     return 'text-red-600';
   }
 
   getDifferencePrefix(): string {
-    const diff = Number(this.session?.difference || 0);
+    const diff = Number(this.session()?.difference || 0);
     if (diff > 0) return '+';
     if (diff < 0) return '';
     return '';

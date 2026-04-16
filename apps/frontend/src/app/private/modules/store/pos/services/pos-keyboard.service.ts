@@ -1,4 +1,4 @@
-import { Injectable, ElementRef, NgZone, OnDestroy } from '@angular/core';
+import { Injectable, ElementRef, OnDestroy } from '@angular/core';
 import { Subject, fromEvent } from 'rxjs';
 import { filter, map, takeUntil, tap } from 'rxjs/operators';
 
@@ -26,7 +26,7 @@ export class PosKeyboardService implements OnDestroy {
   private destroy$ = new Subject<void>();
   private isEnabled: boolean = true;
 
-  constructor(private ngZone: NgZone) {}
+  constructor() {}
 
   registerShortcut(shortcut: KeyboardShortcut): void {
     const key = this.generateKey(shortcut);
@@ -56,29 +56,27 @@ export class PosKeyboardService implements OnDestroy {
   enableShortcuts(element?: ElementRef): void {
     this.isEnabled = true;
 
-    this.ngZone.runOutsideAngular(() => {
-      const target = element?.nativeElement || document;
+    const target = element?.nativeElement || document;
 
-      fromEvent<KeyboardEvent>(target, 'keydown')
-        .pipe(
-          filter(() => this.isEnabled),
-          map((event: KeyboardEvent) => ({
-            event,
-            shortcut: this.findMatchingShortcut(event),
-          })),
-          filter(({ shortcut }) => !!shortcut && shortcut.enabled !== false),
-          tap(({ event }) => {
-            event.preventDefault();
-            event.stopPropagation();
-          }),
-          takeUntil(this.destroy$),
-        )
-        .subscribe(({ shortcut }) => {
-          if (shortcut) {
-            this.ngZone.run(() => shortcut.action());
-          }
-        });
-    });
+    fromEvent<KeyboardEvent>(target, 'keydown')
+      .pipe(
+        filter(() => this.isEnabled),
+        map((event: KeyboardEvent) => ({
+          event,
+          shortcut: this.findMatchingShortcut(event),
+        })),
+        filter(({ shortcut }) => !!shortcut && shortcut.enabled !== false),
+        tap(({ event }) => {
+          event.preventDefault();
+          event.stopPropagation();
+        }),
+        takeUntil(this.destroy$),
+      )
+      .subscribe(({ shortcut }) => {
+        if (shortcut) {
+          shortcut.action();
+        }
+      });
   }
 
   disableShortcuts(): void {

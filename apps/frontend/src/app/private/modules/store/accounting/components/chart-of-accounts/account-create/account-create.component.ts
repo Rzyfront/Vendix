@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, OnChanges, SimpleChanges, inject } from '@angular/core';
+import { Component, input, output, effect, inject } from '@angular/core';
 
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { Store } from '@ngrx/store';
@@ -24,10 +24,10 @@ import {
 ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onClose()"
-      [title]="editAccount ? 'Editar Cuenta' : 'Nueva Cuenta'"
+      [title]="editAccount() ? 'Editar Cuenta' : 'Nueva Cuenta'"
       size="md"
     >
       <div class="p-4 space-y-4">
@@ -38,7 +38,7 @@ import {
               formControlName="code"
               [control]="form.get('code')"
               [required]="true"
-              [disabled]="!!editAccount"
+              [disabled]="!!editAccount()"
               placeholder="Ej: 1101"
             ></app-input>
 
@@ -100,18 +100,18 @@ import {
             [disabled]="form.invalid || is_submitting"
             [loading]="is_submitting"
           >
-            {{ editAccount ? 'Actualizar' : 'Crear' }}
+            {{ editAccount() ? 'Actualizar' : 'Crear' }}
           </app-button>
         </div>
       </div>
     </app-modal>
   `,
 })
-export class AccountCreateComponent implements OnChanges {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Input() editAccount: ChartAccount | null = null;
-  @Input() accounts: ChartAccount[] = [];
+export class AccountCreateComponent {
+  readonly isOpen = input(false);
+  readonly isOpenChange = output<boolean>();
+  readonly editAccount = input<ChartAccount | null>(null);
+  readonly accounts = input<ChartAccount[]>([]);
 
   private fb = inject(FormBuilder);
   private store = inject(Store);
@@ -133,7 +133,7 @@ export class AccountCreateComponent implements OnChanges {
 
   get parent_account_options() {
     const options = [{ value: null as any, label: 'Ninguno (Cuenta Raíz)' }];
-    this.flattenForSelect(this.accounts, options, 0);
+    this.flattenForSelect(this.accounts(), options, 0);
     return options;
   }
 
@@ -147,28 +147,31 @@ export class AccountCreateComponent implements OnChanges {
     accepts_entries: [true],
   });
 
-  ngOnChanges(changes: SimpleChanges): void {
-    if (changes['editAccount'] && this.editAccount) {
-      this.form.patchValue({
-        code: this.editAccount.code,
-        name: this.editAccount.name,
-        account_type: this.editAccount.account_type,
-        nature: this.editAccount.nature,
-        parent_id: this.editAccount.parent_id || null,
-        is_active: this.editAccount.is_active,
-        accepts_entries: this.editAccount.accepts_entries,
-      });
-    } else if (changes['editAccount'] && !this.editAccount) {
-      this.form.reset({
-        code: '',
-        name: '',
-        account_type: 'asset',
-        nature: 'debit',
-        parent_id: null,
-        is_active: true,
-        accepts_entries: true,
-      });
-    }
+  constructor() {
+    effect(() => {
+      const ea = this.editAccount();
+      if (ea) {
+        this.form.patchValue({
+          code: ea.code,
+          name: ea.name,
+          account_type: ea.account_type,
+          nature: ea.nature,
+          parent_id: ea.parent_id || null,
+          is_active: ea.is_active,
+          accepts_entries: ea.accepts_entries,
+        });
+      } else if (ea === null) {
+        this.form.reset({
+          code: '',
+          name: '',
+          account_type: 'asset',
+          nature: 'debit',
+          parent_id: null,
+          is_active: true,
+          accepts_entries: true,
+        });
+      }
+    });
   }
 
   onSubmit(): void {
@@ -177,7 +180,7 @@ export class AccountCreateComponent implements OnChanges {
     this.is_submitting = true;
     const values = this.form.getRawValue();
 
-    if (this.editAccount) {
+    if (this.editAccount()) {
       const dto: UpdateAccountDto = {
         name: values.name!,
         account_type: values.account_type as any,
@@ -186,7 +189,7 @@ export class AccountCreateComponent implements OnChanges {
         is_active: values.is_active!,
         accepts_entries: values.accepts_entries!,
       };
-      this.store.dispatch(updateAccount({ id: this.editAccount.id, account: dto }));
+      this.store.dispatch(updateAccount({ id: this.editAccount()!.id, account: dto }));
     } else {
       const dto: CreateAccountDto = {
         code: values.code!,
@@ -206,7 +209,6 @@ export class AccountCreateComponent implements OnChanges {
 
   onClose(): void {
     this.isOpenChange.emit(false);
-    this.editAccount = null;
     this.form.reset({
       code: '',
       name: '',

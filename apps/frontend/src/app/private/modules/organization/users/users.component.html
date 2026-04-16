@@ -1,7 +1,7 @@
 <div class="space-y-2 md:space-y-2 md:space-y-4">
   <!-- Stats Cards -->
   <div class="stats-container">
-    @for (item of statsItems; track item) {
+    @for (item of statsItems(); track item) {
       <app-stats
         [title]="item.title"
         [value]="item.value"
@@ -23,7 +23,7 @@
       <!-- Título y contador -->
       <div class="flex-1 min-w-0">
         <h2 class="text-lg font-semibold text-text-primary">
-          Usuarios ({{ users.length }})
+          Usuarios ({{ users().length }})
         </h2>
       </div>
 
@@ -45,7 +45,7 @@
         <select
           formControlName="state"
           class="px-3 py-2 border border-border rounded-button bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary text-sm min-w-[140px]"
-          [disabled]="isLoading"
+          [disabled]="isLoading()"
         >
           @for (state of userStates; track state) {
             <option [value]="state.value">
@@ -60,7 +60,7 @@
             variant="outline"
             size="sm"
             (clicked)="refreshUsers()"
-            [disabled]="isLoading"
+            [disabled]="isLoading()"
             title="Actualizar"
           >
             <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
@@ -78,7 +78,7 @@
       </div>
     </div>
     <!-- Loading State -->
-    @if (isLoading) {
+    @if (isLoading()) {
       <div class="p-2 md:p-6 text-center">
         <div
           class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
@@ -88,7 +88,7 @@
     }
 
     <!-- Empty State -->
-    @if (!isLoading && users.length === 0) {
+    @if (!isLoading() && users().length === 0) {
       <app-empty-state
         icon="users"
         [title]="getEmptyStateTitle()"
@@ -100,13 +100,13 @@
     }
 
     <!-- Responsive Data View -->
-    @if (users.length > 0) {
+    @if (users().length > 0) {
       <app-responsive-data-view
-        [data]="users"
+        [data]="users()"
         [columns]="tableColumns"
         [actions]="tableActions"
         [cardConfig]="cardConfig"
-        [loading]="isLoading"
+        [loading]="isLoading()"
         (sort)="onSortChange($event.column, $event.direction)"
       >
       </app-responsive-data-view>

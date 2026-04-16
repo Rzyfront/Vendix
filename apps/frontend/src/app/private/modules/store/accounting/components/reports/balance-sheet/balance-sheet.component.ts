@@ -1,5 +1,5 @@
-import { Component, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject } from '@angular/core';
+import { DecimalPipe, AsyncPipe } from '@angular/common';
 import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
 
@@ -24,7 +24,8 @@ import {
   selector: 'vendix-balance-sheet',
   standalone: true,
   imports: [
-    CommonModule,
+    DecimalPipe,
+    AsyncPipe,
     ButtonComponent,
     CardComponent,
     IconComponent,
@@ -260,7 +261,7 @@ import {
     </div>
   `,
 })
-export class BalanceSheetComponent implements OnInit {
+export class BalanceSheetComponent {
   private store = inject(Store);
 
   report$: Observable<BalanceSheetReport | null> =
@@ -271,7 +272,7 @@ export class BalanceSheetComponent implements OnInit {
   period_options: { value: any; label: string }[] = [];
   selected_period_id: number | null = null;
 
-  ngOnInit(): void {
+  constructor() {
     this.periods$.subscribe((periods) => {
       this.period_options = periods.map((p) => ({
         value: p.id,

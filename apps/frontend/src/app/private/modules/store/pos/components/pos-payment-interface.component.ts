@@ -1,14 +1,10 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
-  OnInit,
-  OnDestroy,
-  OnChanges,
-  SimpleChanges,
-  ChangeDetectorRef,
+  input,
+  output,
   inject,
+  effect,
+  DestroyRef,
 } from '@angular/core';
 import {
   FormBuilder,
@@ -18,7 +14,6 @@ import {
   ReactiveFormsModule,
   FormsModule,
 } from '@angular/forms';
-import { CommonModule } from '@angular/common';
 import { Subject, Subscription, takeUntil, debounceTime } from 'rxjs';
 import { Router } from '@angular/router';
 import { Store } from '@ngrx/store';
@@ -69,7 +64,6 @@ interface PaymentState {
   selector: 'app-pos-payment-interface',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     FormsModule,
     ModalComponent,
@@ -1390,17 +1384,15 @@ interface PaymentState {
     `,
   ],
 })
-export class PosPaymentInterfaceComponent
-  implements OnInit, OnDestroy, OnChanges
-{
-  @Input() isOpen = false;
-  @Input() cartState: CartState | null = null;
-  @Output() closed = new EventEmitter<void>();
-  @Output() paymentCompleted = new EventEmitter<any>();
-  @Output() requestCustomer = new EventEmitter<void>();
-  @Output() requestRegisterConfig = new EventEmitter<void>();
-  @Output() draftSaved = new EventEmitter<any>();
-  @Output() customerSelected = new EventEmitter<PosCustomer>();
+export class PosPaymentInterfaceComponent {
+  readonly isOpen = input<boolean>(false);
+  readonly cartState = input<CartState | null>(null);
+  readonly closed = output<void>();
+  readonly paymentCompleted = output<any>();
+  readonly requestCustomer = output<void>();
+  readonly requestRegisterConfig = output<void>();
+  readonly draftSaved = output<any>();
+  readonly customerSelected = output<PosCustomer>();
 
   paymentMethods: PaymentMethod[] = [];
   paymentForm: FormGroup;
@@ -1544,55 +1536,52 @@ export class PosPaymentInterfaceComponent
   }
 
   get customerDisplayName(): string {
-    if (!this.cartState?.customer) {
+    if (!this.cartState()?.customer) {
       return 'Seleccionar cliente';
     }
-    const firstName = this.cartState.customer.first_name || '';
-    const lastName = this.cartState.customer.last_name || '';
+    const firstName = this.cartState()!.customer?.first_name || '';
+    const lastName = this.cartState()!.customer?.last_name || '';
     return `${firstName} ${lastName}`.trim() || 'Cliente sin nombre';
   }
 
   get customerEmail(): string {
-    return this.cartState?.customer?.email || '';
+    return this.cartState()?.customer?.email || '';
   }
 
-  constructor(
-    private fb: FormBuilder,
-    private paymentService: PosPaymentService,
-    private customerService: PosCustomerService,
-    private toastService: ToastService,
-    private router: Router,
-    private store: Store,
-    private cdr: ChangeDetectorRef,
-    private currencyService: CurrencyFormatService,
-    private walletService: PosWalletService,
-  ) {
+  private fb = inject(FormBuilder);
+  private paymentService = inject(PosPaymentService);
+  private customerService = inject(PosCustomerService);
+  private toastService = inject(ToastService);
+  private router = inject(Router);
+  private store = inject(Store);
+  private currencyService = inject(CurrencyFormatService);
+  private walletService = inject(PosWalletService);
+
+  constructor() {
     this.paymentForm = this.createPaymentForm();
     this.customerForm = this.createCustomerForm();
     // Exponer el símbolo de moneda para usar en el template
     this.currencySymbol = this.currencyService.currencySymbol;
-  }
 
-  ngOnInit(): void {
+    inject(DestroyRef).onDestroy(() => {
+      this.destroy$.next();
+      this.destroy$.complete();
+      this.wompiPollingSubscription?.unsubscribe();
+    });
+
     this.loadPaymentMethods();
     this.setupFormListeners();
     this.loadStoreSettings();
     // Asegurar que la moneda esté cargada para la interfaz de pago
     this.currencyService.loadCurrency();
     this.setDefaultCreditFirstDate();
-  }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-    this.wompiPollingSubscription?.unsubscribe();
-  }
-
-  ngOnChanges(changes: SimpleChanges): void {
-    // When modal opens, sync anonymous sale state with current settings
-    if (changes['isOpen'] && changes['isOpen'].currentValue === true) {
-      this.syncAnonymousSaleState();
-    }
+    effect(() => {
+      // When modal opens, sync anonymous sale state with current settings
+      if (this.isOpen() === true) {
+        this.syncAnonymousSaleState();
+      }
+    });
   }
 
   private syncAnonymousSaleState(): void {
@@ -1603,7 +1592,6 @@ export class PosPaymentInterfaceComponent
       // Use the default setting from store settings
       this.paymentState.isAnonymousSale = this.anonymousSalesAsDefault;
     }
-    this.cdr.markForCheck();
   }
 
   // Track if settings have been loaded at least once
@@ -1739,8 +1727,6 @@ export class PosPaymentInterfaceComponent
             // Otherwise, preserve current user selection
           }
 
-          // Trigger change detection to update UI
-          this.cdr.markForCheck();
         }
       });
   }
@@ -1757,20 +1743,15 @@ export class PosPaymentInterfaceComponent
 
     // Wallet requires customer selection
     if (method.type === 'wallet') {
-      if (!this.cartState?.customer) {
+      if (!this.cartState()?.customer) {
         this.toastService.info('Seleccione un cliente para pagar con Wallet');
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
         this.requestCustomer.emit();
         return;
       }
       // Load wallet balance
       this.walletLoading = true;
       this.walletInfo = null;
-      this.walletService.getCustomerWallet(this.cartState.customer.id).subscribe({
+      this.walletService.getCustomerWallet(this.cartState()!.customer!.id).subscribe({
         next: (wallet) => {
           this.walletInfo = wallet;
           this.walletLoading = false;
@@ -1796,7 +1777,7 @@ export class PosPaymentInterfaceComponent
     this.paymentState.change = 0;
 
     if (method.type === 'cash') {
-      this.cashReceivedControl.setValue(this.cartState?.summary?.total || 0);
+      this.cashReceivedControl.setValue(this.cartState()?.summary?.total || 0);
     }
   }
 
@@ -1821,12 +1802,12 @@ export class PosPaymentInterfaceComponent
   }
 
   setFullAmount(): void {
-    const total = this.cartState?.summary?.total || 0;
+    const total = this.cartState()?.summary?.total || 0;
     this.setCashAmount(total);
   }
 
   setHalfAmount(): void {
-    const total = this.cartState?.summary?.total || 0;
+    const total = this.cartState()?.summary?.total || 0;
     this.setCashAmount(total / 2);
   }
 
@@ -1855,7 +1836,7 @@ export class PosPaymentInterfaceComponent
 
   calculateChange(): void {
     if (this.paymentState.selectedMethod?.type === 'cash') {
-      const total = this.cartState?.summary?.total || 0;
+      const total = this.cartState()?.summary?.total || 0;
       const received = this.paymentState.cashReceived || 0;
       this.paymentState.change = Math.max(0, received - total);
     }
@@ -1879,7 +1860,7 @@ export class PosPaymentInterfaceComponent
 
     // Modo crédito: requiere cliente y saldo válido (cuotas solo para tipo 'installments')
     if (this.paymentState.paymentForm === 'credito') {
-      const baseValid = !!this.cartState?.customer && this.creditRemainingBalance > 0;
+      const baseValid = !!this.cartState()?.customer && this.creditRemainingBalance > 0;
       if (this.creditType === 'installments') {
         return baseValid && this.creditNumInstallments > 0;
       }
@@ -1891,18 +1872,18 @@ export class PosPaymentInterfaceComponent
 
     // Wallet validation
     if (this.paymentState.selectedMethod.type === 'wallet') {
-      if (!this.cartState?.customer) return false;
+      if (!this.cartState()?.customer) return false;
       if (!this.walletInfo) return false;
-      const total = this.cartState?.summary?.total || 0;
+      const total = this.cartState()?.summary?.total || 0;
       return this.walletInfo.available >= total;
     }
 
-    if (!this.paymentState.isAnonymousSale && !this.cartState?.customer) {
+    if (!this.paymentState.isAnonymousSale && !this.cartState()?.customer) {
       return false;
     }
 
     if (this.paymentState.selectedMethod.type === 'cash') {
-      const total = this.cartState?.summary?.total || 0;
+      const total = this.cartState()?.summary?.total || 0;
       return this.paymentState.cashReceived >= total;
     }
 
@@ -1920,7 +1901,7 @@ export class PosPaymentInterfaceComponent
   }
 
   processPayment(): void {
-    if (!this.canProcessPayment() || !this.cartState) return;
+    if (!this.canProcessPayment() || !this.cartState()) return;
 
     // Flujo crédito
     if (this.paymentState.paymentForm === 'credito') {
@@ -1931,13 +1912,8 @@ export class PosPaymentInterfaceComponent
     // Flujo contado (lógica existente)
     if (!this.paymentState.selectedMethod) return;
 
-    if (!this.paymentState.isAnonymousSale && !this.cartState.customer) {
+    if (!this.paymentState.isAnonymousSale && !this.cartState()!.customer) {
       this.toastService.info('Seleccione un cliente para continuar');
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
       this.requestCustomer.emit();
       this.onModalClosed();
       return;
@@ -1952,11 +1928,6 @@ export class PosPaymentInterfaceComponent
 
     if (!register_id) {
       this.toastService.info('Configure la caja para continuar');
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
       this.requestRegisterConfig.emit();
       this.onModalClosed();
       return;
@@ -1980,7 +1951,7 @@ export class PosPaymentInterfaceComponent
 
     const payment_request: any = {
       orderId: 'ORDER_' + Date.now(),
-      amount: this.cartState.summary.total,
+      amount: this.cartState()!.summary.total,
       paymentMethod: this.paymentState.selectedMethod,
       cashReceived: this.paymentState.cashReceived,
       reference: this.paymentState.reference,
@@ -2001,7 +1972,7 @@ export class PosPaymentInterfaceComponent
     }
 
     this.paymentService
-      .processSaleWithPayment(this.cartState, payment_request, 'current_user')
+      .processSaleWithPayment(this.cartState()!, payment_request, 'current_user')
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (response) => {
@@ -2050,7 +2021,7 @@ export class PosPaymentInterfaceComponent
   }
 
   private processCreditSaleWithTerms(): void {
-    if (!this.cartState || !this.cartState.customer) {
+    if (!this.cartState || !this.cartState()!.customer) {
       this.toastService.info('Seleccione un cliente para continuar');
       return;
     }
@@ -2063,11 +2034,6 @@ export class PosPaymentInterfaceComponent
 
     if (!register_id) {
       this.toastService.info('Configure la caja para continuar');
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
       this.requestRegisterConfig.emit();
       this.onModalClosed();
       return;
@@ -2102,7 +2068,7 @@ export class PosPaymentInterfaceComponent
     };
 
     this.paymentService
-      .processCreditSaleWithTerms(this.cartState, creditConfig, 'current_user', this.creditType)
+      .processCreditSaleWithTerms(this.cartState()!, creditConfig, 'current_user', this.creditType)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (response) => {
@@ -2135,16 +2101,11 @@ export class PosPaymentInterfaceComponent
   }
 
   processCreditSale(): void {
-    if (!this.cartState || this.paymentState.isProcessing) return;
+    if (!this.cartState() || this.paymentState.isProcessing) return;
 
     // Credit sales always require a customer (cannot be anonymous)
-    if (!this.cartState.customer) {
+    if (!this.cartState()!.customer) {
       this.toastService.info('Seleccione un cliente para continuar');
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
       this.requestCustomer.emit();
       this.onModalClosed();
       return;
@@ -2160,11 +2121,6 @@ export class PosPaymentInterfaceComponent
 
     if (!register_id) {
       this.toastService.info('Configure la caja para continuar');
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
       this.requestRegisterConfig.emit();
       this.onModalClosed();
       return;
@@ -2193,7 +2149,7 @@ export class PosPaymentInterfaceComponent
     this.paymentState.isProcessing = true;
 
     this.paymentService
-      .processCreditSale(this.cartState, 'current_user')
+      .processCreditSale(this.cartState()!, 'current_user')
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (response) => {
@@ -2230,9 +2186,9 @@ export class PosPaymentInterfaceComponent
   }
 
   saveAsDraft(): void {
-    if (!this.cartState) return;
+    if (!this.cartState()) return;
 
-    if (!this.cartState.customer) {
+    if (!this.cartState()!.customer) {
       this.toastService.show({
         variant: 'error',
         title: 'Cliente Requerido',
@@ -2244,7 +2200,7 @@ export class PosPaymentInterfaceComponent
     this.paymentState.isProcessing = true;
 
     this.paymentService
-      .saveDraft(this.cartState, 'current_user')
+      .saveDraft(this.cartState()!, 'current_user')
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (response) => {
@@ -2300,11 +2256,6 @@ export class PosPaymentInterfaceComponent
     this.creditInterestType = 'simple';
     this.setDefaultCreditFirstDate();
     this.updateCreditCalculations();
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
     this.closed.emit();
   }
 
@@ -2317,7 +2268,7 @@ export class PosPaymentInterfaceComponent
       this.showCreateCustomerForm = false;
     } else {
       // When switching to customer sale, show customer selector if no customer selected
-      if (!this.cartState?.customer) {
+      if (!this.cartState()?.customer) {
         this.showCustomerSelector = true;
       }
     }
@@ -2330,7 +2281,7 @@ export class PosPaymentInterfaceComponent
     if (form === 'credito') {
       // Crédito requiere cliente — deshabilitar venta anónima
       this.paymentState.isAnonymousSale = false;
-      if (!this.cartState?.customer) {
+      if (!this.cartState()?.customer) {
         this.showCustomerSelector = true;
       }
       this.updateCreditCalculations();
@@ -2338,7 +2289,7 @@ export class PosPaymentInterfaceComponent
   }
 
   private getCreditRemainingBalance(): number {
-    const total = this.cartState?.summary?.total || 0;
+    const total = this.cartState()?.summary?.total || 0;
     return Math.max(0, total - (this.creditInitialPayment || 0));
   }
 
@@ -2396,7 +2347,7 @@ export class PosPaymentInterfaceComponent
   }
 
   updateCreditCalculations(): void {
-    const total = this.cartState?.summary?.total || 0;
+    const total = this.cartState()?.summary?.total || 0;
     const initialPayment = this.creditInitialPayment || 0;
     const amountToFinance = Math.max(0, total - initialPayment);
     this.creditRemainingBalance = amountToFinance;
@@ -2566,7 +2517,7 @@ export class PosPaymentInterfaceComponent
   // Getter for insufficient amount
   get isCashAmountInsufficient(): boolean {
     if (this.paymentState.selectedMethod?.type === 'cash') {
-      const total = this.cartState?.summary?.total || 0;
+      const total = this.cartState()?.summary?.total || 0;
       const received = this.paymentState.cashReceived || 0;
       return received < total;
     }
@@ -2575,7 +2526,7 @@ export class PosPaymentInterfaceComponent
 
   get missingAmount(): number {
     if (this.isCashAmountInsufficient) {
-      const total = this.cartState?.summary?.total || 0;
+      const total = this.cartState()?.summary?.total || 0;
       const received = this.paymentState.cashReceived || 0;
       return total - received;
     }

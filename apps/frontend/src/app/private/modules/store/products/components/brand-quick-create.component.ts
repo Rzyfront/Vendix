@@ -1,11 +1,11 @@
-import { Component, EventEmitter, Input, Output } from '@angular/core';
-
+import { Component, input, output, model, inject, signal, DestroyRef } from '@angular/core';
 import {
   FormBuilder,
   FormGroup,
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   ModalComponent,
   ButtonComponent,
@@ -24,13 +24,13 @@ import { Brand } from '../interfaces';
     ModalComponent,
     ButtonComponent,
     InputComponent,
-    TextareaComponent
-],
+    TextareaComponent,
+  ],
   template: `
     <app-modal
       [size]="'md'"
       [title]="'Crear Nueva Marca'"
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (closed)="onCancel()"
     >
       <form [formGroup]="brandForm" class="space-y-4">
@@ -59,14 +59,14 @@ import { Brand } from '../interfaces';
         <app-button
           variant="outline"
           (clicked)="onCancel()"
-          [disabled]="isSubmitting"
+          [disabled]="isSubmitting()"
         >
           Cancelar
         </app-button>
         <app-button
           variant="primary"
           (clicked)="onSubmit()"
-          [loading]="isSubmitting"
+          [loading]="isSubmitting()"
           [disabled]="brandForm.invalid"
         >
           Crear Marca
@@ -76,19 +76,20 @@ import { Brand } from '../interfaces';
   `,
 })
 export class BrandQuickCreateComponent {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() created = new EventEmitter<Brand>();
-  @Output() cancel = new EventEmitter<void>();
+  private fb = inject(FormBuilder);
+  private brandsService = inject(BrandsService);
+  private toastService = inject(ToastService);
+  private destroyRef = inject(DestroyRef);
+
+  readonly isOpen = model<boolean>(false);
+  readonly created = output<Brand>();
+  readonly cancel = output<void>();
+
+  readonly isSubmitting = signal(false);
 
   brandForm: FormGroup;
-  isSubmitting = false;
 
-  constructor(
-    private fb: FormBuilder,
-    private brandsService: BrandsService,
-    private toastService: ToastService,
-  ) {
+  constructor() {
     this.brandForm = this.fb.group({
       name: [
         '',
@@ -104,35 +105,32 @@ export class BrandQuickCreateComponent {
 
   onCancel() {
     this.brandForm.reset();
-    this.isOpenChange.emit(false);
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
+    this.isOpen.set(false);
     this.cancel.emit();
   }
 
   onSubmit() {
     if (this.brandForm.invalid) return;
 
-    this.isSubmitting = true;
+    this.isSubmitting.set(true);
     const brandData = this.brandForm.value;
 
-    this.brandsService.createBrand(brandData).subscribe({
-      next: (brand) => {
-        this.toastService.success('Marca creada exitosamente');
-        this.created.emit(brand);
-        this.isSubmitting = false;
-        this.brandForm.reset();
-        this.isOpenChange.emit(false);
-      },
-      error: (error) => {
-        console.error('Error creating brand:', error);
-        this.toastService.error('Error al crear la marca');
-        this.isSubmitting = false;
-      },
-    });
+    this.brandsService.createBrand(brandData)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (brand) => {
+          this.toastService.success('Marca creada exitosamente');
+          this.created.emit(brand);
+          this.isSubmitting.set(false);
+          this.brandForm.reset();
+          this.isOpen.set(false);
+        },
+        error: (error) => {
+          console.error('Error creating brand:', error);
+          this.toastService.error('Error al crear la marca');
+          this.isSubmitting.set(false);
+        },
+      });
   }
 
   getErrorMessage(fieldName: string): string {

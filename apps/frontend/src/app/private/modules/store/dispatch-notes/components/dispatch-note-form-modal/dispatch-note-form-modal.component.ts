@@ -1,14 +1,12 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
-  OnInit,
-  OnChanges,
-  SimpleChanges,
+  effect,
   inject,
+  input,
+  output,
+  signal,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { DecimalPipe } from '@angular/common';
 import { ReactiveFormsModule, FormBuilder, FormGroup, FormArray, Validators } from '@angular/forms';
 import {
   ButtonComponent,
@@ -27,7 +25,7 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
   selector: 'app-dispatch-note-form-modal',
   standalone: true,
   imports: [
-    CommonModule,
+    DecimalPipe,
     ReactiveFormsModule,
     ButtonComponent,
     IconComponent,
@@ -36,32 +34,32 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
   ],
   templateUrl: './dispatch-note-form-modal.component.html',
 })
-export class DispatchNoteFormModalComponent implements OnInit, OnChanges {
+export class DispatchNoteFormModalComponent {
   private fb = inject(FormBuilder);
 
-  @Input() dispatch_note: DispatchNote | null = null;
-  @Input() is_open = false;
+  readonly dispatch_note = input<DispatchNote | null>(null);
+  readonly is_open = input<boolean>(false);
 
-  @Output() save = new EventEmitter<CreateDispatchNoteDto>();
-  @Output() closed = new EventEmitter<void>();
+  readonly save = output<CreateDispatchNoteDto>();
+  readonly closed = output<void>();
 
   form!: FormGroup;
-  is_edit_mode = false;
+  readonly is_edit_mode = signal(false);
 
-  ngOnInit(): void {
+  constructor() {
     this.initForm();
-  }
-
-  ngOnChanges(changes: SimpleChanges): void {
-    if (changes['is_open'] && this.is_open) {
-      this.initForm();
-      if (this.dispatch_note) {
-        this.is_edit_mode = true;
-        this.patchForm(this.dispatch_note);
-      } else {
-        this.is_edit_mode = false;
+    effect(() => {
+      if (this.is_open()) {
+        this.initForm();
+        const dn = this.dispatch_note();
+        if (dn) {
+          this.is_edit_mode.set(true);
+          this.patchForm(dn);
+        } else {
+          this.is_edit_mode.set(false);
+        }
       }
-    }
+    });
   }
 
   private initForm(): void {
@@ -200,11 +198,6 @@ export class DispatchNoteFormModalComponent implements OnInit, OnChanges {
   }
 
   handleClose(): void {
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    this.closed.emit();
+    this.closed.emit(undefined);
   }
 }

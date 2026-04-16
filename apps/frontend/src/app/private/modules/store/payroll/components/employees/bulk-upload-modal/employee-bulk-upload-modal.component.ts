@@ -1,5 +1,5 @@
-import { Component, EventEmitter, Input, Output, inject, OnChanges, SimpleChanges, OnDestroy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input, output, inject, effect, DestroyRef } from '@angular/core';
+import { CurrencyPipe, NgClass } from '@angular/common';
 import { PayrollService } from '../../../services/payroll.service';
 import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
 import {
@@ -21,10 +21,10 @@ import {
 @Component({
   selector: 'app-employee-bulk-upload-modal',
   standalone: true,
-  imports: [CommonModule, ModalComponent, ButtonComponent, IconComponent, StepsLineComponent, SpinnerComponent],
+  imports: [CurrencyPipe, NgClass, ModalComponent, ButtonComponent, IconComponent, StepsLineComponent, SpinnerComponent],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
@@ -531,10 +531,10 @@ import {
     `,
   ],
 })
-export class EmployeeBulkUploadModalComponent implements OnChanges, OnDestroy {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() uploadComplete = new EventEmitter<void>();
+export class EmployeeBulkUploadModalComponent {
+  readonly isOpen = input<boolean>(false);
+  readonly isOpenChange = output<boolean>();
+  readonly uploadComplete = output<void>();
 
   private static readonly INTRO_CACHE_KEY = 'vendix_bulk_employee_intro_dismissed';
   private static readonly INTRO_DURATION = 20000;
@@ -574,6 +574,7 @@ export class EmployeeBulkUploadModalComponent implements OnChanges, OnDestroy {
 
   private payrollService = inject(PayrollService);
   private toastService = inject(ToastService);
+  private destroyRef = inject(DestroyRef);
 
   // Computed properties
   get canProceed(): boolean {
@@ -587,17 +588,18 @@ export class EmployeeBulkUploadModalComponent implements OnChanges, OnDestroy {
   }
 
   // Lifecycle
-  ngOnChanges(changes: SimpleChanges) {
-    if (changes['isOpen'] && this.isOpen) {
-      this.onModalOpen();
-    }
-    if (changes['isOpen'] && !this.isOpen) {
-      this.clearIntroTimer();
-    }
-  }
+  constructor() {
+    effect(() => {
+      if (this.isOpen()) {
+        this.onModalOpen();
+      } else {
+        this.clearIntroTimer();
+      }
+    });
 
-  ngOnDestroy() {
-    this.clearIntroTimer();
+    this.destroyRef.onDestroy(() => {
+      this.clearIntroTimer();
+    });
   }
 
   // Intro logic
@@ -659,11 +661,6 @@ export class EmployeeBulkUploadModalComponent implements OnChanges, OnDestroy {
       this.payrollService.cancelBulkEmployeeSession(this.sessionId).subscribe();
     }
     if ((this.uploadResults?.successful ?? 0) > 0) {
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
       this.uploadComplete.emit();
     }
     this.isOpenChange.emit(false);

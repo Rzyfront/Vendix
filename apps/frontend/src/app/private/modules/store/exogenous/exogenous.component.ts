@@ -1,5 +1,6 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, DestroyRef, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ExogenousService } from './services/exogenous.service';
 import { ExogenousReport, ExogenousStats } from './interfaces/exogenous.interface';
@@ -9,7 +10,7 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency/currenc
 @Component({
   selector: 'app-exogenous',
   standalone: true,
-  imports: [CommonModule, FormsModule, StatsComponent],
+  imports: [DatePipe, FormsModule, StatsComponent],
   template: `
     <div class="w-full">
       <!-- Stats -->
@@ -98,9 +99,10 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency/currenc
     </div>
   `,
 })
-export class ExogenousComponent implements OnInit {
+export class ExogenousComponent {
   private service = inject(ExogenousService);
   private currencyService = inject(CurrencyFormatService);
+  private destroyRef = inject(DestroyRef);
 
   reports = signal<ExogenousReport[]>([]);
   stats = signal<ExogenousStats | null>(null);
@@ -108,36 +110,44 @@ export class ExogenousComponent implements OnInit {
   selectedYear = new Date().getFullYear();
   selectedFormat = '1007';
 
-  ngOnInit() {
+  constructor() {
     this.loadData();
   }
 
   loadData() {
-    this.service.getReports().subscribe((res: any) => {
-      this.reports.set(res.data || []);
-    });
-    this.service.getStats(this.selectedYear).subscribe((res: any) => {
-      this.stats.set(res.data || null);
-    });
+    this.service.getReports()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((res: any) => {
+        this.reports.set(res.data || []);
+      });
+    this.service.getStats(this.selectedYear)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((res: any) => {
+        this.stats.set(res.data || null);
+      });
   }
 
   generate() {
     this.generating.set(true);
-    this.service.generateReport({ fiscal_year: this.selectedYear, format_code: this.selectedFormat }).subscribe({
-      next: () => { this.generating.set(false); this.loadData(); },
-      error: () => { this.generating.set(false); },
-    });
+    this.service.generateReport({ fiscal_year: this.selectedYear, format_code: this.selectedFormat })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => { this.generating.set(false); this.loadData(); },
+        error: () => { this.generating.set(false); },
+      });
   }
 
   validate() {
-    this.service.validateYear(this.selectedYear).subscribe((res: any) => {
-      const data = res.data;
-      if (data.is_complete) {
-        alert('Datos completos. No se encontraron errores.');
-      } else {
-        alert(`Se encontraron ${data.error_count} errores de completitud. Revise los NITs faltantes.`);
-      }
-    });
+    this.service.validateYear(this.selectedYear)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((res: any) => {
+        const data = res.data;
+        if (data.is_complete) {
+          alert('Datos completos. No se encontraron errores.');
+        } else {
+          alert(`Se encontraron ${data.error_count} errores de completitud. Revise los NITs faltantes.`);
+        }
+      });
   }
 
   getStatusLabel(status: string): string {

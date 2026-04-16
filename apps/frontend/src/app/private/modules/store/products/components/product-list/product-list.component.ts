@@ -1,13 +1,10 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
-  OnChanges,
-  SimpleChanges,
+  input,
+  output,
   inject,
+  effect,
 } from '@angular/core';
-
 import { RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 
@@ -54,32 +51,29 @@ import './product-list.component.css';
     ButtonComponent,
     IconComponent,
     PaginationComponent,
-    CardComponent
-],
+    CardComponent,
+  ],
   templateUrl: './product-list.component.html',
 })
-export class ProductListComponent implements OnChanges {
+export class ProductListComponent {
   private currencyService = inject(CurrencyFormatService);
 
-  @Input() products: Product[] = [];
-  @Input() isLoading = false;
-  @Input() categories: ProductCategory[] = [];
-  @Input() brands: Brand[] = [];
+  readonly products = input<Product[]>([]);
+  readonly isLoading = input(false);
+  readonly categories = input<ProductCategory[]>([]);
+  readonly brands = input<Brand[]>([]);
+  readonly paginationData = input({ page: 1, limit: 10, total: 0, totalPages: 0 });
 
-  @Output() refresh = new EventEmitter<void>();
-  @Output() search = new EventEmitter<string>();
-  @Output() filter = new EventEmitter<Partial<ProductQueryDto>>();
-  @Output() create = new EventEmitter<void>();
-  @Output() edit = new EventEmitter<Product>();
-  @Output() delete = new EventEmitter<Product>();
-  @Output() bulkUpload = new EventEmitter<void>();
-  @Output() bulkImageUpload = new EventEmitter<void>();
-  @Output() sort = new EventEmitter<{
-    column: string;
-    direction: 'asc' | 'desc' | null;
-  }>();
-  @Input() paginationData = { page: 1, limit: 10, total: 0, totalPages: 0 };
-  @Output() pageChange = new EventEmitter<number>();
+  readonly refresh = output<void>();
+  readonly search = output<string>();
+  readonly filter = output<Partial<ProductQueryDto>>();
+  readonly create = output<void>();
+  readonly edit = output<Product>();
+  readonly delete = output<Product>();
+  readonly bulkUpload = output<void>();
+  readonly bulkImageUpload = output<void>();
+  readonly sort = output<{ column: string; direction: 'asc' | 'desc' | null }>();
+  readonly pageChange = output<number>();
 
   searchTerm = '';
   selectedState = '';
@@ -297,13 +291,19 @@ export class ProductListComponent implements OnChanges {
     ],
   };
 
-  ngOnChanges(changes: SimpleChanges): void {
-    if (changes['categories'] || changes['brands']) {
+  constructor() {
+    effect(() => {
+      // Re-run whenever categories or brands input signals change
+      this.categories();
+      this.brands();
       this.updateFilterOptions();
-    }
+    });
   }
 
   private updateFilterOptions(): void {
+    const cats = this.categories();
+    const brnds = this.brands();
+
     // Update category options
     const categoryFilter = this.filterConfigs.find(
       (f) => f.key === 'category_id',
@@ -311,14 +311,14 @@ export class ProductListComponent implements OnChanges {
     if (categoryFilter) {
       categoryFilter.options = [
         { value: '', label: 'Todas las Categorías' },
-        ...this.categories.map((cat) => ({
+        ...cats.map((cat) => ({
           value: cat.id.toString(),
           label: cat.name,
         })),
       ];
-      categoryFilter.disabled = this.categories.length === 0;
+      categoryFilter.disabled = cats.length === 0;
       categoryFilter.helpText =
-        this.categories.length === 0
+        cats.length === 0
           ? 'No hay categorías disponibles'
           : undefined;
     }
@@ -328,14 +328,14 @@ export class ProductListComponent implements OnChanges {
     if (brandFilter) {
       brandFilter.options = [
         { value: '', label: 'Todas las Marcas' },
-        ...this.brands.map((brand) => ({
+        ...brnds.map((brand) => ({
           value: brand.id.toString(),
           label: brand.name,
         })),
       ];
-      brandFilter.disabled = this.brands.length === 0;
+      brandFilter.disabled = brnds.length === 0;
       brandFilter.helpText =
-        this.brands.length === 0 ? 'No hay marcas disponibles' : undefined;
+        brnds.length === 0 ? 'No hay marcas disponibles' : undefined;
     }
 
     // Force re-render by creating new array reference
@@ -387,27 +387,12 @@ export class ProductListComponent implements OnChanges {
   onActionClick(action: string): void {
     switch (action) {
       case 'create':
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
         this.create.emit();
         break;
       case 'bulk-upload':
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
         this.bulkUpload.emit();
         break;
       case 'bulk-image-upload':
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
         this.bulkImageUpload.emit();
         break;
     }

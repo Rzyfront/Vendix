@@ -1,5 +1,5 @@
-import { Component, Output, EventEmitter, OnInit } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, output, inject } from '@angular/core';
+import { DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 
 // Import shared components
@@ -11,7 +11,7 @@ import { DashboardData, DashboardFilters } from '../models/dashboard.model';
 @Component({
   selector: 'app-pos-dashboard',
   standalone: true,
-  imports: [CommonModule, FormsModule, StatsComponent],
+  imports: [DecimalPipe, FormsModule, StatsComponent],
   template: `
     <div class="pos-dashboard-container">
       <div class="dashboard-header">
@@ -542,8 +542,8 @@ import { DashboardData, DashboardFilters } from '../models/dashboard.model';
     `,
   ],
 })
-export class PosDashboardComponent implements OnInit {
-  @Output() dataExported = new EventEmitter<{ format: string; data: Blob }>();
+export class PosDashboardComponent {
+  readonly dataExported = output<{ format: string; data: Blob }>();
 
   dashboardData: DashboardData | null = null;
   loading: boolean = false;
@@ -551,9 +551,9 @@ export class PosDashboardComponent implements OnInit {
     dateRange: 'today',
   };
 
-  constructor(private dashboardService: PosDashboardService) {}
+  private dashboardService = inject(PosDashboardService);
 
-  ngOnInit(): void {
+  constructor() {
     this.loadDashboardData();
   }
 

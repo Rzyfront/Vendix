@@ -1,4 +1,13 @@
-import { Component, Input, inject, computed, signal, input, output } from '@angular/core';
+import {
+  Component,
+  model,
+  input,
+  output,
+  inject,
+  computed,
+  signal,
+  effect,
+} from '@angular/core';
 
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { marked } from 'marked';
@@ -14,14 +23,17 @@ import { IconComponent } from '../../../../shared/components/icon/icon.component
   styleUrl: './legal-preview-modal.component.scss',
 })
 export class LegalPreviewModalComponent {
-  @Input() isOpen = false;
+  readonly isOpen = model<boolean>(false);
   readonly title = input('');
-  @Input() version = '';
+  readonly version = input('');
 
-  // Use a signal to make the content reactive for the computed value
   private contentSignal = signal('');
-  @Input() set content(value: string) {
-    this.contentSignal.set(value || '');
+  readonly content = input('');
+
+  constructor() {
+    effect(() => {
+      this.contentSignal.set(this.content() || '');
+    });
   }
 
   readonly isOpenChange = output<boolean>();

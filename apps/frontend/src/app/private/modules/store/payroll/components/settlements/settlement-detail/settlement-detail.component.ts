@@ -1,5 +1,5 @@
-import { Component, input, output, signal, OnDestroy, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input, output, signal, DestroyRef, inject } from '@angular/core';
+import { DatePipe } from '@angular/common';
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 
@@ -17,7 +17,7 @@ import type { StepsLineItem } from '../../../../../../../shared/components';
   selector: 'app-settlement-detail',
   standalone: true,
   imports: [
-    CommonModule,
+    DatePipe,
     ModalComponent,
     ButtonComponent,
     IconComponent,
@@ -280,7 +280,7 @@ import type { StepsLineItem } from '../../../../../../../shared/components';
     </app-modal>
     `,
 })
-export class SettlementDetailComponent implements OnDestroy {
+export class SettlementDetailComponent {
   readonly isOpen = input(false);
   readonly settlement = input<PayrollSettlement | null>(null);
   readonly isOpenChange = output<boolean>();
@@ -289,6 +289,7 @@ export class SettlementDetailComponent implements OnDestroy {
   private payrollService = inject(PayrollService);
   private toastService = inject(ToastService);
   private currencyService = inject(CurrencyFormatService);
+  private destroyRef = inject(DestroyRef);
   private destroy$ = new Subject<void>();
 
   actionLoading = signal(false);
@@ -309,9 +310,11 @@ export class SettlementDetailComponent implements OnDestroy {
     return map[status || 'draft'] ?? 0;
   }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
+  constructor() {
+    this.destroyRef.onDestroy(() => {
+      this.destroy$.next();
+      this.destroy$.complete();
+    });
   }
 
   formatNumber(value: number): string {

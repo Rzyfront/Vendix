@@ -1,5 +1,5 @@
-import { Component, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject } from '@angular/core';
+import { AsyncPipe, DatePipe, DecimalPipe } from '@angular/common';
 import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
 
@@ -24,7 +24,9 @@ import {
   selector: 'vendix-general-ledger',
   standalone: true,
   imports: [
-    CommonModule,
+    AsyncPipe,
+    DatePipe,
+    DecimalPipe,
     ButtonComponent,
     CardComponent,
     IconComponent,
@@ -233,7 +235,7 @@ import {
     </div>
   `,
 })
-export class GeneralLedgerComponent implements OnInit {
+export class GeneralLedgerComponent {
   private store = inject(Store);
 
   report$: Observable<GeneralLedgerReport | null> =
@@ -245,7 +247,7 @@ export class GeneralLedgerComponent implements OnInit {
   selected_period_id: number | null = null;
   expanded_account_ids = new Set<number>();
 
-  ngOnInit(): void {
+  constructor() {
     this.periods$.subscribe((periods) => {
       this.period_options = periods.map((p) => ({
         value: p.id,

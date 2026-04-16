@@ -1,4 +1,4 @@
-import { Component, Input, output } from '@angular/core';
+import { Component, model, input, output } from '@angular/core';
 
 import { ModalComponent } from '../modal/modal.component';
 import { ButtonComponent } from '../button/button.component';
@@ -11,30 +11,27 @@ import { ButtonComponent } from '../button/button.component';
   styleUrl: './confirmation-modal.component.scss',
 })
 export class ConfirmationModalComponent {
-  @Input() title = 'Confirmación';
-  @Input() message = '¿Estás seguro?';
-  @Input() confirmText = 'Aceptar';
-  @Input() cancelText = 'Cancelar';
-  @Input() confirmVariant: 'primary' | 'danger' = 'primary';
-  @Input() size: 'sm' | 'md' | 'lg' = 'sm';
-  @Input() showCloseButton = true;
-  @Input() customClasses = '';
+  readonly title = input('Confirmación');
+  readonly message = input('¿Estás seguro?');
+  readonly confirmText = input('Aceptar');
+  readonly cancelText = input('Cancelar');
+  readonly confirmVariant = input<'primary' | 'danger'>('primary');
+  readonly size = input<'sm' | 'md' | 'lg'>('sm');
+  readonly showCloseButton = input(true);
+  readonly customClasses = input('');
 
   readonly confirm = output<void>();
   readonly cancel = output<void>();
-  readonly isOpenChange = output<boolean>();
 
-  @Input() isOpen = true;
+  readonly isOpen = model(true);
 
   onConfirm(): void {
-    // TODO: The 'emit' function requires a mandatory void argument
     this.confirm.emit();
-    this.isOpenChange.emit(false);
+    this.isOpen.set(false);
   }
 
   onCancel(): void {
-    // TODO: The 'emit' function requires a mandatory void argument
     this.cancel.emit();
-    this.isOpenChange.emit(false);
+    this.isOpen.set(false);
   }
 }

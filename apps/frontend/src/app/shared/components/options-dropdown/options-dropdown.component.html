@@ -6,7 +6,7 @@
       type="button"
       class="options-dropdown-trigger actions-trigger"
       (click)="toggleActionsDropdown()"
-      [attr.aria-expanded]="isActionsOpen"
+      [attr.aria-expanded]="isActionsOpen()"
       [attr.aria-haspopup]="true"
       >
       <app-icon name="zap" [size]="16"></app-icon>
@@ -22,17 +22,17 @@
       type="button"
       class="options-dropdown-trigger filters-trigger"
       (click)="toggleFiltersDropdown()"
-      [attr.aria-expanded]="isFiltersOpen"
+      [attr.aria-expanded]="isFiltersOpen()"
       [attr.aria-haspopup]="true"
       >
       <app-icon name="filter" [size]="16"></app-icon>
       <span class="trigger-label-text">Filtros</span>
-      @if (activeFiltersCount > 0) {
+      @if (activeFiltersCount() > 0) {
         <span
           class="filter-count-badge"
-          [attr.aria-label]="activeFiltersCount + ' filtros activos'"
+          [attr.aria-label]="activeFiltersCount() + ' filtros activos'"
           >
-          {{ activeFiltersCount }}
+          {{ activeFiltersCount() }}
         </span>
       }
       <app-icon name="chevron-down" [size]="14" class="chevron-icon"></app-icon>
@@ -40,7 +40,7 @@
   }
 
   <!-- Actions Dropdown Content -->
-  @if (isActionsOpen && hasActions) {
+  @if (isActionsOpen() && hasActions) {
     <div
       class="options-dropdown-content actions-dropdown"
       [class.mobile-fixed]="isMobileOrTablet"
@@ -68,7 +68,7 @@
   }
 
   <!-- Filters Dropdown Content -->
-  @if (isFiltersOpen && hasFilters) {
+  @if (isFiltersOpen() && hasFilters) {
     <div
       class="options-dropdown-content filters-dropdown"
       [class.mobile-fixed]="isMobileOrTablet"
@@ -76,7 +76,7 @@
       >
       <div class="dropdown-header">
         <h3 class="dropdown-title">Filtros</h3>
-        @if (activeFiltersCount > 0) {
+        @if (activeFiltersCount() > 0) {
           <button
             class="clear-all-btn"
             (click)="onClearAllFilters()"

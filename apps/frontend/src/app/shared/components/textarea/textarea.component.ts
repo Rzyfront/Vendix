@@ -1,6 +1,5 @@
 import {
   Component,
-  Input,
   forwardRef,
   input,
   output
@@ -27,12 +26,12 @@ import { FormStyleVariant } from '../../types/form.types';
   template: `
     <div [class]="'w-full ' + customWrapperClass()">
       <!-- Label -->
-      @if (label) {
+      @if (label()) {
         <label
           [for]="textareaId"
           [class]="labelClasses"
           >
-          {{ label }}
+          {{ label() }}
           @if (required()) {
             <span class="text-[var(--color-destructive)] ml-1"
               >*</span
@@ -59,11 +58,11 @@ import { FormStyleVariant } from '../../types/form.types';
         </div>
     
         <!-- Helper text -->
-        @if (helperText && !getValidationError()) {
+        @if (helperText() && !getValidationError()) {
           <p
             class="mt-2 text-sm text-[var(--color-text-secondary)]"
             >
-            {{ helperText }}
+            {{ helperText() }}
           </p>
         }
     
@@ -89,14 +88,14 @@ import { FormStyleVariant } from '../../types/form.types';
   `],
 })
 export class TextareaComponent implements ControlValueAccessor {
-  @Input() label?: string;
+  readonly label = input<string | undefined>(undefined);
   readonly placeholder = input('');
   readonly rows = input(3);
-  @Input() disabled = false;
+  disabled = false;
   readonly readonly = input(false);
   readonly required = input(false);
   readonly error = input<string>();
-  @Input() helperText?: string;
+  readonly helperText = input<string | undefined>(undefined);
   readonly control = input<AbstractControl | null>();
   readonly styleVariant = input<FormStyleVariant>('modern');
   readonly customStyle = input('');

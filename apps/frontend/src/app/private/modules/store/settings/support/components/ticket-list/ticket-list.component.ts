@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output, OnInit } from '@angular/core';
+import { Component, input, output, OnInit, computed } from '@angular/core';
 
 import {
   ResponsiveDataViewComponent,
@@ -32,23 +32,23 @@ import {
     IconComponent,
     ButtonComponent,
     PaginationComponent,
-    CardComponent
-],
+    CardComponent,
+  ],
   template: `
     <app-card [responsive]="true" [padding]="false">
       <!-- Search Section (sticky on mobile) -->
       <div
         class="sticky top-[99px] bg-background px-2 py-1.5 -mt-[5px] md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
-        >
+      >
         <div
           class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
-          >
+        >
           <h2
             class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary"
-            >
-            Todos los Tickets ({{ totalItems }})
+          >
+            Todos los Tickets ({{ totalItems() }})
           </h2>
-    
+
           <div class="flex items-center gap-2 w-full md:w-auto">
             <app-inputsearch
               class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
@@ -56,13 +56,13 @@ import {
               placeholder="Buscar tickets..."
               (search)="onSearch($event)"
             ></app-inputsearch>
-    
+
             <app-options-dropdown
               class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
               [filters]="filterConfigs"
               [filterValues]="filterValues"
               [actions]="dropdownActions"
-              [isLoading]="loading"
+              [isLoading]="loading()"
               (filterChange)="onFilterChange($event)"
               (clearAllFilters)="onClearFilters()"
               (actionClick)="onActionClick($event)"
@@ -70,9 +70,9 @@ import {
           </div>
         </div>
       </div>
-    
+
       <!-- Loading State -->
-      @if (loading) {
+      @if (loading()) {
         <div class="p-4 md:p-6 text-center">
           <div
             class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
@@ -80,12 +80,10 @@ import {
           <p class="mt-2 text-text-secondary">Cargando tickets...</p>
         </div>
       }
-    
+
       <!-- Empty State -->
-      @if (!loading && tickets.length === 0) {
-        <div
-          class="p-12 text-center text-gray-500"
-          >
+      @if (!loading() && tickets().length === 0) {
+        <div class="p-12 text-center text-gray-500">
           <app-icon
             name="ticket"
             [size]="48"
@@ -103,15 +101,15 @@ import {
           </div>
         </div>
       }
-    
+
       <!-- Responsive Data View -->
-      @if (!loading && tickets.length > 0) {
+      @if (!loading() && tickets().length > 0) {
         <div class="px-2 pb-2 pt-1 md:p-4">
           <app-responsive-data-view
-            [data]="tickets"
+            [data]="tickets()"
             [columns]="columns"
             [cardConfig]="cardConfig"
-            [loading]="loading"
+            [loading]="loading()"
             [hoverable]="true"
             [striped]="true"
             [emptyMessage]="'No se encontraron tickets'"
@@ -120,13 +118,13 @@ import {
             (rowClick)="onRowClick($event)"
           ></app-responsive-data-view>
           <!-- Pagination -->
-          @if (totalPages > 1) {
+          @if (totalPages() > 1) {
             <div class="mt-4 border-t border-border pt-4">
               <app-pagination
-                [currentPage]="page"
-                [total]="totalItems"
-                [limit]="limit"
-                [totalPages]="totalPages"
+                [currentPage]="page()"
+                [total]="totalItems()"
+                [limit]="limit()"
+                [totalPages]="totalPages()"
                 infoStyle="none"
                 (pageChange)="onPageChange($event)"
               ></app-pagination>
@@ -135,24 +133,24 @@ import {
         </div>
       }
     </app-card>
-    `,
+  `,
 })
 export class TicketListComponent implements OnInit {
-  @Input() tickets: Ticket[] = [];
-  @Input() loading = false;
-  @Input() totalItems = 0;
-  @Input() page = 1;
-  @Input() limit = 10;
+  readonly tickets = input<Ticket[]>([]);
+  readonly loading = input<boolean>(false);
+  readonly totalItems = input<number>(0);
+  readonly page = input<number>(1);
+  readonly limit = input<number>(10);
 
-  get totalPages(): number {
-    return Math.ceil(this.totalItems / this.limit);
-  }
+  readonly totalPages = computed(() =>
+    Math.ceil(this.totalItems() / this.limit()),
+  );
 
-  @Output() search = new EventEmitter<string>();
-  @Output() filter = new EventEmitter<FilterValues>();
-  @Output() create = new EventEmitter<void>();
-  @Output() viewDetail = new EventEmitter<Ticket>();
-  @Output() pageChange = new EventEmitter<number>();
+  readonly search = output<string>();
+  readonly filter = output<FilterValues>();
+  readonly create = output<void>();
+  readonly viewDetail = output<Ticket>();
+  readonly pageChange = output<number>();
 
   filterConfigs: FilterConfig[] = [
     {

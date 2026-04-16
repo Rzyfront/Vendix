@@ -1,5 +1,4 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
-
+import { Component, input, output } from '@angular/core';
 
 import {
   ResponsiveDataViewComponent,
@@ -26,29 +25,29 @@ import { StoreRole } from '../interfaces/store-role.interface';
     OptionsDropdownComponent,
     IconComponent,
     ButtonComponent,
-    CardComponent
-],
+    CardComponent,
+  ],
   template: `
     <app-card [responsive]="true" [padding]="false">
       <!-- Search Section: sticky below stats on mobile -->
       <div
         class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
                   md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
-        >
+      >
         <div
           class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
-          >
+        >
           <!-- Title -->
           <h2
             class="text-[13px] font-bold text-gray-600 tracking-wide
                      md:text-lg md:font-semibold md:text-text-primary"
-            >
+          >
             Roles
             <span class="text-text-secondary font-normal">
-              ({{ totalCount }})
+              ({{ totalCount() }})
             </span>
           </h2>
-    
+
           <!-- Search + Actions Row -->
           <div class="flex items-center gap-2 w-full md:w-auto">
             <app-inputsearch
@@ -58,23 +57,23 @@ import { StoreRole } from '../interfaces/store-role.interface';
               [debounceTime]="300"
               (search)="onSearch($event)"
             ></app-inputsearch>
-    
+
             <app-button
               variant="outline"
               size="md"
               customClasses="w-10 sm:w-11 !px-0 bg-surface shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none !rounded-[10px] shrink-0"
               (clicked)="create.emit()"
               title="Nuevo Rol"
-              >
+            >
               <app-icon slot="icon" name="plus" [size]="18"></app-icon>
             </app-button>
-    
+
             <app-options-dropdown
               class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
               [filters]="filterConfigs"
               [filterValues]="filterValues"
               [actions]="dropdownActions"
-              [isLoading]="loading"
+              [isLoading]="loading()"
               (filterChange)="onFilterChange($event)"
               (clearAllFilters)="onClearFilters()"
               (actionClick)="onActionClick($event)"
@@ -82,9 +81,9 @@ import { StoreRole } from '../interfaces/store-role.interface';
           </div>
         </div>
       </div>
-    
+
       <!-- Loading State -->
-      @if (loading) {
+      @if (loading()) {
         <div class="p-4 md:p-6 text-center">
           <div
             class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
@@ -92,12 +91,10 @@ import { StoreRole } from '../interfaces/store-role.interface';
           <p class="mt-2 text-text-secondary">Cargando roles...</p>
         </div>
       }
-    
+
       <!-- Empty State -->
-      @if (!loading && roles.length === 0) {
-        <div
-          class="p-12 text-center text-gray-500"
-          >
+      @if (!loading() && roles().length === 0) {
+        <div class="p-12 text-center text-gray-500">
           <app-icon
             name="shield"
             [size]="48"
@@ -115,16 +112,16 @@ import { StoreRole } from '../interfaces/store-role.interface';
           </div>
         </div>
       }
-    
+
       <!-- Data View -->
-      @if (!loading && roles.length > 0) {
+      @if (!loading() && roles().length > 0) {
         <div class="px-2 pb-2 pt-3 md:p-4">
           <app-responsive-data-view
-            [data]="roles"
+            [data]="roles()"
             [columns]="columns"
             [cardConfig]="cardConfig"
             [actions]="tableActions"
-            [loading]="loading"
+            [loading]="loading()"
             [hoverable]="true"
             [striped]="true"
             emptyMessage="No hay roles"
@@ -135,7 +132,7 @@ import { StoreRole } from '../interfaces/store-role.interface';
         </div>
       }
     </app-card>
-    `,
+  `,
   styles: [
     `
       :host {
@@ -146,17 +143,17 @@ import { StoreRole } from '../interfaces/store-role.interface';
   ],
 })
 export class StoreRolesListComponent {
-  @Input() roles: StoreRole[] = [];
-  @Input() loading = false;
-  @Input() totalCount = 0;
+  readonly roles = input<StoreRole[]>([]);
+  readonly loading = input<boolean>(false);
+  readonly totalCount = input<number>(0);
 
-  @Output() create = new EventEmitter<void>();
-  @Output() edit = new EventEmitter<StoreRole>();
-  @Output() managePermissions = new EventEmitter<StoreRole>();
-  @Output() delete = new EventEmitter<StoreRole>();
-  @Output() searchChange = new EventEmitter<string>();
-  @Output() filterChange = new EventEmitter<Record<string, string>>();
-  @Output() sort = new EventEmitter<{
+  readonly create = output<void>();
+  readonly edit = output<StoreRole>();
+  readonly managePermissions = output<StoreRole>();
+  readonly delete = output<StoreRole>();
+  readonly searchChange = output<string>();
+  readonly filterChange = output<Record<string, string>>();
+  readonly sort = output<{
     column: string;
     direction: 'asc' | 'desc' | null;
   }>();

@@ -1,10 +1,10 @@
 import {
   Component,
+  input,
+  output,
   ChangeDetectionStrategy,
   OnInit,
-  ChangeDetectorRef,
-  input,
-  output
+  inject,
 } from '@angular/core';
 
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
@@ -559,29 +559,26 @@ import {
   `,
 })
 export class UserSetupStepComponent implements OnInit {
-  readonly formGroup = input<any>();
+  readonly formGroup = input<any>(null);
   readonly nextStep = output<void>();
   readonly skipStep = output<void>();
   readonly previousStep = output<void>();
+
+  private readonly countryService = inject(CountryService);
 
   countries: Country[] = [];
   departments: Department[] = [];
   cities: City[] = [];
 
-  constructor(
-    private countryService: CountryService,
-    private cdr: ChangeDetectorRef,
-  ) { }
-
   ngOnInit(): void {
     this.countries = this.countryService.getCountries();
 
-    const formGroup = this.formGroup();
-    if (!formGroup) return;
+    const fg = this.formGroup();
+    if (!fg) return;
 
-    const countryControl = formGroup.get('country_code');
-    const depControl = formGroup.get('state_province');
-    const cityControl = formGroup.get('city');
+    const countryControl = fg.get('country_code');
+    const depControl = fg.get('state_province');
+    const cityControl = fg.get('city');
 
     // Cargar departamentos al cambiar país
     countryControl.valueChanges.subscribe((code: string) => {
@@ -592,7 +589,6 @@ export class UserSetupStepComponent implements OnInit {
         this.cities = [];
         depControl.setValue('');
         cityControl.setValue('');
-        this.cdr.markForCheck();
       }
     });
 
@@ -603,7 +599,6 @@ export class UserSetupStepComponent implements OnInit {
       } else {
         this.cities = [];
         cityControl.setValue('');
-        this.cdr.markForCheck();
       }
     });
 
@@ -619,12 +614,10 @@ export class UserSetupStepComponent implements OnInit {
 
   async loadDepartments(): Promise<void> {
     this.departments = await this.countryService.getDepartments();
-    this.cdr.markForCheck();
   }
 
   async loadCities(departmentId: number): Promise<void> {
     this.cities = await this.countryService.getCitiesByDepartment(departmentId);
-    this.cdr.markForCheck();
   }
 
   get countryOptions() {

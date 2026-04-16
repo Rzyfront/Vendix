@@ -1,15 +1,12 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
-  OnInit,
-  OnDestroy,
-  OnChanges,
-  SimpleChanges,
-  ChangeDetectorRef,
+  input,
+  output,
   ViewChild,
   ElementRef,
+  inject,
+  effect,
+  DestroyRef,
 } from '@angular/core';
 import {
   FormBuilder,
@@ -19,7 +16,6 @@ import {
   ReactiveFormsModule,
   FormsModule,
 } from '@angular/forms';
-import { CommonModule } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Router } from '@angular/router';
 import { Subject, takeUntil, debounceTime } from 'rxjs';
@@ -56,7 +52,6 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
   selector: 'app-pos-shipping-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     FormsModule,
     ModalComponent,
@@ -854,12 +849,12 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
     `,
   ],
 })
-export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
-  @Input() isOpen = false;
-  @Input() cartState: CartState | null = null;
-  @Output() closed = new EventEmitter<void>();
-  @Output() shippingCompleted = new EventEmitter<any>();
-  @Output() customerSelected = new EventEmitter<PosCustomer>();
+export class PosShippingModalComponent {
+  readonly isOpen = input<boolean>(false);
+  readonly cartState = input<CartState | null>(null);
+  readonly closed = output<void>();
+  readonly shippingCompleted = output<any>();
+  readonly customerSelected = output<PosCustomer>();
 
   // Section refs for scroll-to-validation
   @ViewChild('shippingMethodSection') shippingMethodSection!: ElementRef;
@@ -984,14 +979,14 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
   }
 
   get customerDisplayName(): string {
-    if (!this.cartState?.customer) return 'Seleccionar cliente';
-    const firstName = this.cartState.customer.first_name || '';
-    const lastName = this.cartState.customer.last_name || '';
+    if (!this.cartState()?.customer) return 'Seleccionar cliente';
+    const firstName = this.cartState()!.customer?.first_name || '';
+    const lastName = this.cartState()!.customer?.last_name || '';
     return `${firstName} ${lastName}`.trim() || 'Cliente sin nombre';
   }
 
   get totalWithShipping(): number {
-    return (this.cartState?.summary?.total || 0) + this.shippingCost;
+    return (this.cartState()?.summary?.total || 0) + this.shippingCost;
   }
 
   get isCashInsufficient(): boolean {
@@ -1007,19 +1002,18 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
     return this.cities.map(c => ({ value: c.id, label: c.name }));
   }
 
-  constructor(
-    private fb: FormBuilder,
-    private http: HttpClient,
-    private paymentService: PosPaymentService,
-    private shippingService: PosShippingService,
-    private customerService: PosCustomerService,
-    private toastService: ToastService,
-    private cdr: ChangeDetectorRef,
-    private currencyService: CurrencyFormatService,
-    private countryService: CountryService,
-    private store: Store,
-    private router: Router,
-  ) {
+  private fb = inject(FormBuilder);
+  private http = inject(HttpClient);
+  private paymentService = inject(PosPaymentService);
+  private shippingService = inject(PosShippingService);
+  private customerService = inject(PosCustomerService);
+  private toastService = inject(ToastService);
+  private currencyService = inject(CurrencyFormatService);
+  private countryService = inject(CountryService);
+  private store = inject(Store);
+  private router = inject(Router);
+
+  constructor() {
     this.addressForm = this.fb.group({
       address_line1: ['', Validators.required],
       city: ['', Validators.required],
@@ -1037,9 +1031,15 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
       reference: [''],
     });
     this.currencySymbol = this.currencyService.currencySymbol;
-  }
 
-  ngOnInit(): void {
+    inject(DestroyRef).onDestroy(() => {
+      this.destroy$.next();
+      this.destroy$.complete();
+      if (this.validationWarningTimeout) {
+        clearTimeout(this.validationWarningTimeout);
+      }
+    });
+
     this.loadShippingMethods();
     this.loadPaymentMethods();
     this.setupFormListeners();
@@ -1047,20 +1047,12 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
     this.loadDepartments();
     this.loadStoreSettings();
     this.setDefaultCreditFirstDate();
-  }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-    if (this.validationWarningTimeout) {
-      clearTimeout(this.validationWarningTimeout);
-    }
-  }
-
-  ngOnChanges(changes: SimpleChanges): void {
-    if (changes['isOpen'] && changes['isOpen'].currentValue === true) {
-      this.resetState();
-    }
+    effect(() => {
+      if (this.isOpen() === true) {
+        this.resetState();
+      }
+    });
   }
 
   private resetState(): void {
@@ -1101,7 +1093,6 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
     this.addressForm.reset();
     this.paymentForm.reset();
     this.customerForm.reset();
-    this.cdr.markForCheck();
   }
 
   private loadShippingMethods(): void {
@@ -1110,7 +1101,6 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
       .pipe(takeUntil(this.destroy$))
       .subscribe((methods) => {
         this.shippingMethods = methods;
-        this.cdr.markForCheck();
       });
   }
 
@@ -1120,7 +1110,6 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
       .pipe(takeUntil(this.destroy$))
       .subscribe((methods) => {
         this.paymentMethods = methods;
-        this.cdr.markForCheck();
       });
   }
 
@@ -1159,7 +1148,6 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
     } else {
       this.calculateShippingCost();
     }
-    this.cdr.markForCheck();
   }
 
   getShippingIcon(type: string): string {
@@ -1174,15 +1162,14 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
   }
 
   private calculateShippingCost(): void {
-    if (!this.selectedShippingMethod || !this.cartState?.items?.length) return;
+    if (!this.selectedShippingMethod || !this.cartState()?.items?.length) return;
 
     const address = this.addressForm.value;
     if (this.selectedShippingMethod.type !== 'pickup' && !address.city) return;
 
     this.isCalculatingShipping = true;
-    this.cdr.markForCheck();
 
-    const items = this.cartState.items.map((item) => ({
+    const items = this.cartState()!.items.map((item) => ({
       product_id: parseInt(item.product.id),
       quantity: item.quantity,
       price: item.totalPrice,
@@ -1218,14 +1205,12 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
             this.manualCostOverride = true;
             this.shippingCost = 0;
           }
-          this.cdr.markForCheck();
         },
         error: () => {
           this.isCalculatingShipping = false;
           this.calculatedShippingCost = null;
           this.manualCostOverride = true;
           this.shippingCost = 0;
-          this.cdr.markForCheck();
         },
       });
   }
@@ -1245,7 +1230,6 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
 
   private async loadDepartments(): Promise<void> {
     this.departments = await this.countryService.getDepartments();
-    this.cdr.markForCheck();
   }
 
   async onDepartmentChange(departmentId: number): Promise<void> {
@@ -1260,7 +1244,6 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
 
     if (departmentId) {
       this.cities = await this.countryService.getCitiesByDepartment(departmentId);
-      this.cdr.markForCheck();
     }
   }
 
@@ -1412,7 +1395,6 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
           next: (response) => {
             this.customerSearchResults = response.data || [];
             this.isSearchingCustomer = false;
-            this.cdr.markForCheck();
           },
           error: () => {
             this.customerSearchResults = [];
@@ -1469,8 +1451,6 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
         }
       }
 
-      this.cdr.markForCheck();
-
       // Trigger shipping calculation if method is selected
       if (this.selectedShippingMethod && !this.manualCostOverride) {
         this.calculateShippingCost();
@@ -1525,8 +1505,8 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
 
   canConfirm(): boolean {
     if (!this.selectedShippingMethod) return false;
-    if (!this.cartState?.customer) return false;
-    if (!this.cartState?.items?.length) return false;
+    if (!this.cartState()?.customer) return false;
+    if (!this.cartState()?.items?.length) return false;
 
     // Address required for non-pickup
     if (this.selectedShippingMethod.type !== 'pickup') {
@@ -1559,7 +1539,7 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
       }
     }
 
-    if (!this.cartState?.customer) {
+    if (!this.cartState()?.customer) {
       return { section: 'customer', message: 'Selecciona un cliente' };
     }
 
@@ -1598,8 +1578,6 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
         this.paymentMethodCollapsed = false;
       }
 
-      this.cdr.markForCheck();
-
       // Scroll to the relevant section
       const sectionRef = this.getSectionRef(section);
       if (sectionRef) {
@@ -1609,7 +1587,6 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
       this.validationWarningTimeout = setTimeout(() => {
         this.validationWarningSection = null;
         this.validationWarningMessage = '';
-        this.cdr.markForCheck();
       }, 3000);
     }, 0);
   }
@@ -1635,7 +1612,7 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
       return;
     }
 
-    if (!this.cartState || !this.selectedShippingMethod) return;
+    if (!this.cartState() || !this.selectedShippingMethod) return;
 
     this.isProcessing = true;
 
@@ -1649,7 +1626,7 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
       state_province: address.state_province || '',
       country_code: 'CO',
       recipient_name: this.customerDisplayName,
-      recipient_phone: this.cartState.customer?.phone || '',
+      recipient_phone: this.cartState()!.customer?.phone || '',
     };
 
     let paymentRequest: PaymentRequest | null = null;
@@ -1676,7 +1653,7 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
     } : undefined;
 
     // If customer has no saved address and we have a new address, create it first
-    if (!this.selectedCustomerAddressId && address.address_line1 && address.city && this.cartState.customer) {
+    if (!this.selectedCustomerAddressId && address.address_line1 && address.city && this.cartState()!.customer) {
       this.createAddressThenProcessOrder(address, shippingAddress, deliveryType, paymentRequest, creditConfig);
     } else {
       this.processOrder(shippingAddress, deliveryType, paymentRequest, this.selectedCustomerAddressId, creditConfig);
@@ -1690,7 +1667,7 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
     paymentRequest: PaymentRequest | null,
     creditConfig?: any,
   ): void {
-    const customer = this.cartState!.customer!;
+    const customer = this.cartState()!.customer!;
     const defaultCountryCode = this.countryService.getDefaultCountry();
 
     this.http.post<any>(`${environment.apiUrl}/store/addresses`, {
@@ -1724,7 +1701,7 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
 
     this.paymentService
       .processShippingSale(
-        this.cartState!,
+        this.cartState()!,
         {
           shippingMethodId: this.selectedShippingMethod!.id,
           shippingCost: this.shippingCost,
@@ -1758,7 +1735,6 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
               description: response.message || 'Error al procesar el envío',
             });
           }
-          this.cdr.markForCheck();
         },
         error: (error) => {
           this.isProcessing = false;
@@ -1767,18 +1743,12 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
             title: 'Error',
             description: error.message || 'Error al procesar el envío',
           });
-          this.cdr.markForCheck();
         },
       });
   }
 
   onModalClosed(): void {
     this.resetState();
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
     this.closed.emit();
   }
 }

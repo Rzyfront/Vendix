@@ -1,17 +1,17 @@
 import {
   Component,
+  DestroyRef,
   input,
   signal,
   effect,
-  OnDestroy,
-  ChangeDetectionStrategy,
+  inject,
 } from '@angular/core';
-import { Observable, Subscription } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { Observable } from 'rxjs';
 
 @Component({
   selector: 'app-ai-text-stream',
   standalone: true,
-  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <span class="ai-streamed-text">{{ displayText() }}</span>
     @if (isStreaming()) {
@@ -51,46 +51,34 @@ import { Observable, Subscription } from 'rxjs';
     `,
   ],
 })
-export class AITextStreamComponent implements OnDestroy {
+export class AITextStreamComponent {
   stream$ = input<Observable<string> | null>(null);
 
   displayText = signal('');
   isStreaming = signal(false);
 
-  private subscription: Subscription | null = null;
+  private readonly destroyRef = inject(DestroyRef);
 
   constructor() {
     effect(() => {
       const stream = this.stream$();
-      this.cleanup();
 
-      if (stream) {
-        this.displayText.set('');
-        this.isStreaming.set(true);
+      if (!stream) return;
 
-        this.subscription = stream.subscribe({
-          next: (text) => {
-            this.displayText.update((current) => current + text);
-          },
-          complete: () => {
-            this.isStreaming.set(false);
-          },
-          error: () => {
-            this.isStreaming.set(false);
-          },
-        });
-      }
+      this.displayText.set('');
+      this.isStreaming.set(true);
+
+      stream.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+        next: (text) => {
+          this.displayText.update((current) => current + text);
+        },
+        complete: () => {
+          this.isStreaming.set(false);
+        },
+        error: () => {
+          this.isStreaming.set(false);
+        },
+      });
     });
-  }
-
-  ngOnDestroy(): void {
-    this.cleanup();
-  }
-
-  private cleanup(): void {
-    if (this.subscription) {
-      this.subscription.unsubscribe();
-      this.subscription = null;
-    }
   }
 }

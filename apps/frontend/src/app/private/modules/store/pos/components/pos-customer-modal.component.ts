@@ -1,11 +1,11 @@
 import {
   Component,
-  EventEmitter,
-  Input,
-  Output,
-  OnInit,
-  OnChanges,
-  OnDestroy,
+  input,
+  output,
+  inject,
+  effect,
+  DestroyRef,
+  signal,
 } from '@angular/core';
 import {
   FormsModule,
@@ -50,7 +50,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
 ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'md'"
@@ -72,7 +72,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
         <div>
           <h2 class="text-lg font-semibold text-[var(--color-text-primary)]">
             {{
-            customer
+            customer()
             ? 'Editar Cliente'
             : currentStep === 'search'
             ? 'Buscar Cliente'
@@ -83,7 +83,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
           </h2>
           <p class="text-sm text-[var(--color-text-secondary)]">
             {{
-            customer
+            customer()
             ? 'Edita la información del cliente seleccionado'
             : currentStep === 'search'
             ? 'Busca un cliente existente o crea uno nuevo'
@@ -116,7 +116,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
       </div>
     
       <!-- Tab Navigation -->
-      @if (!customer) {
+      @if (!customer()) {
         <div class="flex border-b border-[var(--color-border)]">
           <button
             (click)="switchToSearchMode()"
@@ -138,7 +138,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
             >
             Crear
           </button>
-          @if (queueEnabled) {
+          @if (queueEnabled()) {
             <button
               (click)="switchToQueueMode()"
               class="flex-1 px-4 py-3 text-sm font-medium transition-colors relative"
@@ -148,9 +148,9 @@ import { StoreContextService } from '../../../../../core/services/store-context.
               [class.text-[var(--color-text-secondary)]]="currentStep !== 'queue'"
               >
               Cola
-              @if (queueEntries.length > 0) {
+              @if (queueEntries().length > 0) {
                 <span class="ml-1 inline-flex items-center justify-center w-5 h-5 text-xs font-bold text-white bg-[var(--color-primary)] rounded-full">
-                  {{ queueEntries.length }}
+                  {{ queueEntries().length }}
                 </span>
               }
             </button>
@@ -183,7 +183,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                   variant="primary"
                   size="md"
                   (clicked)="onDocumentLookup()"
-                  [loading]="lookupLoading"
+                  [loading]="lookupLoading()"
                   [disabled]="!documentLookupQuery || documentLookupQuery.length < 5"
                   >
                   <app-icon name="search" [size]="16" slot="icon"></app-icon>
@@ -191,26 +191,26 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                 </app-button>
               </div>
               <!-- Lookup Result: Found -->
-              @if (lookupPerformed && lookupResult) {
+              @if (lookupPerformed() && lookupResult(); as lr) {
                 <div class="mt-3 p-3 bg-[var(--color-surface)] rounded-lg border border-[var(--color-border)]">
                   <div class="flex items-center justify-between">
                     <div>
                       <p class="font-medium text-[var(--color-text-primary)]">
-                        {{ lookupResult.first_name }} {{ lookupResult.last_name }}
+                        {{ lr.first_name }} {{ lr.last_name }}
                       </p>
-                      <p class="text-sm text-[var(--color-text-secondary)]">{{ lookupResult.email }}</p>
+                      <p class="text-sm text-[var(--color-text-secondary)]">{{ lr.email }}</p>
                       <p class="text-xs text-[var(--color-text-muted)]">
-                        {{ lookupResult.document_type || 'Doc' }}: {{ lookupResult.document_number }}
+                        {{ lr.document_type || 'Doc' }}: {{ lr.document_number }}
                       </p>
                     </div>
-                    <app-button variant="primary" size="sm" (clicked)="selectCustomer(lookupResult!)">
+                    <app-button variant="primary" size="sm" (clicked)="selectCustomer(lr)">
                       Seleccionar
                     </app-button>
                   </div>
                 </div>
               }
               <!-- Lookup Result: Not Found -->
-              @if (lookupPerformed && !lookupResult && !lookupLoading) {
+              @if (lookupPerformed() && !lookupResult() && !lookupLoading()) {
                 <div class="mt-3 text-center">
                   <p class="text-sm text-[var(--color-text-secondary)] mb-2">
                     No se encontró cliente con este documento
@@ -237,13 +237,13 @@ import { StoreContextService } from '../../../../../core/services/store-context.
               [debounceTime]="300"
             ></app-inputsearch>
             <!-- Search Results -->
-            @if (searchResults.length > 0) {
+            @if (searchResults().length > 0) {
               <div class="space-y-2">
                 <h3 class="text-sm font-medium text-[var(--color-text-secondary)]">
                   Resultados de búsqueda:
                 </h3>
                 <div class="max-h-48 overflow-y-auto space-y-2">
-                  @for (customer of searchResults; track customer) {
+                  @for (customer of searchResults(); track customer) {
                     <div
                       (click)="selectCustomer(customer)"
                       class="p-3 border border-[var(--color-border)] rounded-lg cursor-pointer hover:border-[var(--color-primary)] hover:bg-[var(--color-primary-light)] transition-colors"
@@ -276,7 +276,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
               </div>
             }
             <!-- No Results -->
-            @if (searchPerformed && searchResults.length === 0) {
+            @if (searchPerformed() && searchResults().length === 0) {
               <div
                 class="text-center py-8"
                 >
@@ -300,7 +300,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
               </div>
             }
             <!-- Quick Create Option -->
-            @if (!searchPerformed) {
+            @if (!searchPerformed()) {
               <div
                 class="text-center py-4 border-t border-[var(--color-border)]"
                 >
@@ -323,7 +323,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
         <!-- Create Step -->
         @if (currentStep === 'create') {
           <div class="space-y-4">
-            @if (customer) {
+            @if (customer()) {
               <div class="flex items-center gap-2 mb-4">
                 <app-button
                   variant="ghost"
@@ -410,20 +410,20 @@ import { StoreContextService } from '../../../../../core/services/store-context.
         <!-- Queue Step -->
         @if (currentStep === 'queue') {
           <div class="space-y-4">
-            @if (queueLoading) {
+            @if (queueLoading()) {
               <div class="flex justify-center py-8">
                 <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-[var(--color-primary)]"></div>
               </div>
             }
-            @if (!queueLoading && queueEntries.length === 0) {
+            @if (!queueLoading() && queueEntries().length === 0) {
               <div class="text-center py-8">
                 <app-icon name="users" [size]="48" color="var(--color-text-muted)" class="mx-auto mb-4"></app-icon>
                 <p class="text-[var(--color-text-secondary)] mb-4">No hay clientes en la cola</p>
-                @if (queueQrData) {
+                @if (queueQrData(); as qr) {
                   <div class="mt-4">
                     <p class="text-sm text-[var(--color-text-muted)] mb-2">Comparte este QR para que los clientes se registren:</p>
-                    <img [src]="queueQrData.qr_data_url" alt="QR Cola" class="mx-auto w-40 h-40">
-                    <p class="text-xs text-[var(--color-text-muted)] mt-2">{{ queueQrData.url }}</p>
+                    <img [src]="qr.qr_data_url" alt="QR Cola" class="mx-auto w-40 h-40">
+                    <p class="text-xs text-[var(--color-text-muted)] mt-2">{{ qr.url }}</p>
                     <app-button variant="outline" size="sm" (clicked)="printQueueQr()" class="mt-3">
                       <app-icon name="printer" [size]="14" slot="icon"></app-icon>
                       Imprimir QR
@@ -432,9 +432,9 @@ import { StoreContextService } from '../../../../../core/services/store-context.
                 }
               </div>
             }
-            @if (!queueLoading && queueEntries.length > 0) {
+            @if (!queueLoading() && queueEntries().length > 0) {
               <div class="space-y-2 max-h-64 overflow-y-auto">
-                @for (entry of queueEntries; track entry; let i = $index) {
+                @for (entry of queueEntries(); track entry; let i = $index) {
                   <div
                     class="p-3 border border-[var(--color-border)] rounded-lg transition-colors"
                     [class.bg-yellow-50]="entry.status === 'selected'"
@@ -485,12 +485,12 @@ import { StoreContextService } from '../../../../../core/services/store-context.
               </div>
             }
             <!-- QR Code section when queue has entries -->
-            @if (!queueLoading && queueEntries.length > 0 && queueQrData) {
+            @if (!queueLoading() && queueEntries().length > 0 && queueQrData(); as qr2) {
               <div class="pt-4 border-t border-[var(--color-border)]">
                 <details class="text-center">
                   <summary class="text-sm text-[var(--color-text-muted)] cursor-pointer">Mostrar QR de registro</summary>
-                  <img [src]="queueQrData.qr_data_url" alt="QR Cola" class="mx-auto w-32 h-32 mt-2">
-                  <p class="text-xs text-[var(--color-text-muted)] mt-1">{{ queueQrData.url }}</p>
+                  <img [src]="qr2.qr_data_url" alt="QR Cola" class="mx-auto w-32 h-32 mt-2">
+                  <p class="text-xs text-[var(--color-text-muted)] mt-1">{{ qr2.url }}</p>
                   <app-button variant="outline" size="sm" (clicked)="printQueueQr()" class="mt-2">
                     <app-icon name="printer" [size]="14" slot="icon"></app-icon>
                     Imprimir QR
@@ -514,8 +514,8 @@ import { StoreContextService } from '../../../../../core/services/store-context.
             variant="primary"
             size="md"
             (clicked)="onSave()"
-            [loading]="loading"
-            [disabled]="!customerForm.valid || loading"
+            [loading]="loading()"
+            [disabled]="!customerForm.valid || loading()"
             >
             <app-icon name="save" [size]="16" slot="icon"></app-icon>
             Crear Cliente
@@ -525,27 +525,27 @@ import { StoreContextService } from '../../../../../core/services/store-context.
     </app-modal>
     `,
 })
-export class PosCustomerModalComponent implements OnInit, OnDestroy, OnChanges {
-  @Input() isOpen = false;
-  @Input() customer: PosCustomer | null = null;
-  @Input() openInQueueMode = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() closed = new EventEmitter<void>();
-  @Output() customerSelected = new EventEmitter<PosCustomer>();
-  @Output() customerCreated = new EventEmitter<PosCustomer>();
-  @Output() customerUpdated = new EventEmitter<PosCustomer>();
+export class PosCustomerModalComponent {
+  readonly isOpen = input<boolean>(false);
+  readonly customer = input<PosCustomer | null>(null);
+  readonly openInQueueMode = input<boolean>(false);
+  readonly queueEnabled = input<boolean>(false);
+  readonly isOpenChange = output<boolean>();
+  readonly closed = output<void>();
+  readonly customerSelected = output<PosCustomer>();
+  readonly customerCreated = output<PosCustomer>();
+  readonly customerUpdated = output<PosCustomer>();
 
   customerForm: FormGroup;
-  loading = false;
+  readonly loading = signal(false);
   currentStep: 'search' | 'create' | 'queue' = 'search';
-  searchResults: PosCustomer[] = [];
-  searchPerformed = false;
+  readonly searchResults = signal<PosCustomer[]>([]);
+  readonly searchPerformed = signal(false);
 
   // Queue
-  @Input() queueEnabled = false;
-  queueEntries: QueueEntry[] = [];
-  queueLoading = false;
-  queueQrData: { qr_data_url: string; url: string } | null = null;
+  readonly queueEntries = signal<QueueEntry[]>([]);
+  readonly queueLoading = signal(false);
+  readonly queueQrData = signal<{ qr_data_url: string; url: string } | null>(null);
 
   documentTypeOptions = [
     { value: 'CC', label: 'Cédula de Ciudadanía' },
@@ -557,43 +557,42 @@ export class PosCustomerModalComponent implements OnInit, OnDestroy, OnChanges {
 
   // Document lookup
   documentLookupQuery = '';
-  lookupResult: PosCustomer | null = null;
-  lookupPerformed = false;
-  lookupLoading = false;
+  readonly lookupResult = signal<PosCustomer | null>(null);
+  readonly lookupPerformed = signal(false);
+  readonly lookupLoading = signal(false);
 
   private destroy$ = new Subject<void>();
   private searchSubject$ = new Subject<string>();
+  private dialogService = inject(DialogService);
+  private fb = inject(FormBuilder);
+  private customerService = inject(PosCustomerService);
+  private storeContextService = inject(StoreContextService);
+  private queueService = inject(PosQueueService);
 
-  constructor(
-    private dialogService: DialogService,
-    private fb: FormBuilder,
-    private customerService: PosCustomerService,
-    private storeContextService: StoreContextService,
-    private queueService: PosQueueService,
-  ) {
+  constructor() {
     this.customerForm = this.createCustomerForm();
-  }
 
-  ngOnInit(): void {
+    inject(DestroyRef).onDestroy(() => {
+      this.destroy$.next();
+      this.destroy$.complete();
+    });
+
     this.setupFormListeners();
     this.setupSearchSubscription();
 
     // If customer is provided, populate form for editing
-    if (this.customer) {
-      this.populateFormForEdit();
-      this.currentStep = 'create';
-    }
-  }
+    effect(() => {
+      if (this.customer()) {
+        this.populateFormForEdit();
+        this.currentStep = 'create';
+      }
+    });
 
-  ngOnChanges(): void {
-    if (this.openInQueueMode && this.queueEnabled && this.isOpen) {
-      this.switchToQueueMode();
-    }
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
+    effect(() => {
+      if (this.openInQueueMode() && this.queueEnabled() && this.isOpen()) {
+        this.switchToQueueMode();
+      }
+    });
   }
 
   private createCustomerForm(): FormGroup {
@@ -631,8 +630,8 @@ export class PosCustomerModalComponent implements OnInit, OnDestroy, OnChanges {
         if (query.trim()) {
           this.performSearch(query);
         } else {
-          this.searchResults = [];
-          this.searchPerformed = false;
+          this.searchResults.set([]);
+          this.searchPerformed.set(false);
         }
       });
   }
@@ -642,20 +641,20 @@ export class PosCustomerModalComponent implements OnInit, OnDestroy, OnChanges {
   }
 
   private performSearch(query: string): void {
-    this.loading = true;
+    this.loading.set(true);
     this.customerService
       .searchCustomers({ query: query, limit: 10 })
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (response) => {
-          this.searchResults = response.data || [];
-          this.searchPerformed = true;
-          this.loading = false;
+          this.searchResults.set(response.data || []);
+          this.searchPerformed.set(true);
+          this.loading.set(false);
         },
         error: (error) => {
-          this.loading = false;
-          this.searchResults = [];
-          this.searchPerformed = true;
+          this.loading.set(false);
+          this.searchResults.set([]);
+          this.searchPerformed.set(true);
         },
       });
   }
@@ -672,23 +671,23 @@ export class PosCustomerModalComponent implements OnInit, OnDestroy, OnChanges {
   onDocumentLookup(): void {
     if (!this.documentLookupQuery || this.documentLookupQuery.length < 5) return;
 
-    this.lookupLoading = true;
-    this.lookupPerformed = false;
-    this.lookupResult = null;
+    this.lookupLoading.set(true);
+    this.lookupPerformed.set(false);
+    this.lookupResult.set(null);
 
     this.customerService
       .lookupByDocument(this.documentLookupQuery.trim())
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (result) => {
-          this.lookupResult = result;
-          this.lookupPerformed = true;
-          this.lookupLoading = false;
+          this.lookupResult.set(result);
+          this.lookupPerformed.set(true);
+          this.lookupLoading.set(false);
         },
         error: () => {
-          this.lookupResult = null;
-          this.lookupPerformed = true;
-          this.lookupLoading = false;
+          this.lookupResult.set(null);
+          this.lookupPerformed.set(true);
+          this.lookupLoading.set(false);
         },
       });
   }
@@ -701,14 +700,14 @@ export class PosCustomerModalComponent implements OnInit, OnDestroy, OnChanges {
   }
 
   private populateFormForEdit(): void {
-    if (this.customer) {
+    if (this.customer()) {
       this.customerForm.patchValue({
-        email: this.customer.email,
-        firstName: this.customer.first_name,
-        lastName: this.customer.last_name,
-        phone: this.customer.phone || '',
-        documentType: this.customer.document_type || '',
-        documentNumber: this.customer.document_number || '',
+        email: this.customer()!.email,
+        firstName: this.customer()!.first_name,
+        lastName: this.customer()!.last_name,
+        phone: this.customer()!.phone || '',
+        documentType: this.customer()!.document_type || '',
+        documentNumber: this.customer()!.document_number || '',
       });
     }
   }
@@ -716,11 +715,11 @@ export class PosCustomerModalComponent implements OnInit, OnDestroy, OnChanges {
   switchToSearchMode(): void {
     this.currentStep = 'search';
     this.customerForm.reset();
-    this.searchResults = [];
-    this.searchPerformed = false;
+    this.searchResults.set([]);
+    this.searchPerformed.set(false);
     this.documentLookupQuery = '';
-    this.lookupResult = null;
-    this.lookupPerformed = false;
+    this.lookupResult.set(null);
+    this.lookupPerformed.set(false);
   }
 
   getFieldError(fieldName: string): string | undefined {
@@ -758,7 +757,7 @@ export class PosCustomerModalComponent implements OnInit, OnDestroy, OnChanges {
       return;
     }
 
-    this.loading = true;
+    this.loading.set(true);
 
     const formData = this.customerForm.value;
     const customerData: CreatePosCustomerRequest = {
@@ -770,19 +769,19 @@ export class PosCustomerModalComponent implements OnInit, OnDestroy, OnChanges {
       document_number: formData.documentNumber,
     };
 
-    if (this.customer) {
+    if (this.customer()) {
       // Update existing customer
       this.customerService
-        .updateCustomer(this.customer.id, customerData)
+        .updateCustomer(this.customer()!.id, customerData)
         .pipe(takeUntil(this.destroy$))
         .subscribe({
           next: (updatedCustomer) => {
-            this.loading = false;
+            this.loading.set(false);
             this.customerUpdated.emit(updatedCustomer);
             this.onModalClosed();
           },
           error: (error) => {
-            this.loading = false;
+            this.loading.set(false);
           },
         });
     } else {
@@ -792,12 +791,12 @@ export class PosCustomerModalComponent implements OnInit, OnDestroy, OnChanges {
         .pipe(takeUntil(this.destroy$))
         .subscribe({
           next: (newCustomer) => {
-            this.loading = false;
+            this.loading.set(false);
             this.customerCreated.emit(newCustomer);
             this.onModalClosed();
           },
           error: (error) => {
-            this.loading = false;
+            this.loading.set(false);
           },
         });
     }
@@ -820,21 +819,21 @@ export class PosCustomerModalComponent implements OnInit, OnDestroy, OnChanges {
   }
 
   private loadQueueData(): void {
-    this.queueLoading = true;
+    this.queueLoading.set(true);
     this.queueService.loadQueue().pipe(takeUntil(this.destroy$)).subscribe({
       next: (entries) => {
-        this.queueEntries = entries;
-        this.queueLoading = false;
+        this.queueEntries.set(entries);
+        this.queueLoading.set(false);
       },
       error: () => {
-        this.queueEntries = [];
-        this.queueLoading = false;
+        this.queueEntries.set([]);
+        this.queueLoading.set(false);
       },
     });
 
-    if (!this.queueQrData) {
+    if (!this.queueQrData()) {
       this.queueService.getQrCode().pipe(takeUntil(this.destroy$)).subscribe({
-        next: (data) => this.queueQrData = data,
+        next: (data) => this.queueQrData.set(data),
         error: () => {},
       });
     }
@@ -873,7 +872,8 @@ export class PosCustomerModalComponent implements OnInit, OnDestroy, OnChanges {
   }
 
   printQueueQr(): void {
-    if (!this.queueQrData) return;
+    const queueQrData = this.queueQrData();
+    if (!queueQrData) return;
     const win = window.open('', '_blank', 'width=400,height=500');
     if (!win) return;
     win.document.write(`
@@ -891,8 +891,8 @@ export class PosCustomerModalComponent implements OnInit, OnDestroy, OnChanges {
       </head>
       <body>
         <h2>Registro en Cola Virtual</h2>
-        <img src="${this.queueQrData.qr_data_url}" alt="QR Cola">
-        <p>${this.queueQrData.url}</p>
+        <img src="${queueQrData.qr_data_url}" alt="QR Cola">
+        <p>${queueQrData.url}</p>
         <script>window.onload = function() { window.print(); window.close(); }<\/script>
       </body>
       </html>
@@ -905,18 +905,13 @@ export class PosCustomerModalComponent implements OnInit, OnDestroy, OnChanges {
   onModalClosed(): void {
     this.customerForm.reset();
     this.currentStep = 'search';
-    this.searchResults = [];
-    this.searchPerformed = false;
+    this.searchResults.set([]);
+    this.searchPerformed.set(false);
     this.documentLookupQuery = '';
-    this.lookupResult = null;
-    this.lookupPerformed = false;
-    this.queueEntries = [];
-    this.queueQrData = null;
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
+    this.lookupResult.set(null);
+    this.lookupPerformed.set(false);
+    this.queueEntries.set([]);
+    this.queueQrData.set(null);
     this.closed.emit();
   }
 }

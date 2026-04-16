@@ -1,6 +1,5 @@
 import {
   Component,
-  OnInit,
   ViewChild,
   inject,
   signal,
@@ -8,7 +7,6 @@ import {
   DestroyRef,
   afterNextRender,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
@@ -32,7 +30,6 @@ import { map, distinctUntilChanged, skip } from 'rxjs/operators';
   selector: 'app-store-admin-layout',
   standalone: true,
   imports: [
-    CommonModule,
     RouterModule,
     SidebarComponent,
     HeaderComponent,
@@ -126,7 +123,7 @@ import { map, distinctUntilChanged, skip } from 'rxjs/operators';
   `,
   styleUrls: ['./store-admin-layout.component.scss'],
 })
-export class StoreAdminLayoutComponent implements OnInit {
+export class StoreAdminLayoutComponent {
   @ViewChild('sidebarRef') sidebarRef!: SidebarComponent;
 
   private authFacade = inject(AuthFacade);
@@ -576,9 +573,7 @@ export class StoreAdminLayoutComponent implements OnInit {
         this.needsOnboarding.set(false); // Temporalmente deshabilitado hasta desarrollar workflow
         this.updateOnboardingModal();
       });
-  }
 
-  ngOnInit(): void {
     this.checkOnboardingWithRoleValidation();
     this.checkAndStartPosTour();
   }

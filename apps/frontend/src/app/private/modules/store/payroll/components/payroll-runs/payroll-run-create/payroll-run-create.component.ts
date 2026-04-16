@@ -1,4 +1,4 @@
-import { Component, Output, EventEmitter, Input, inject } from '@angular/core';
+import { Component, output, input, inject } from '@angular/core';
 
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
@@ -23,7 +23,7 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
 ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onClose()"
       title="Nueva Nomina"
@@ -89,8 +89,8 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
   `
 })
 export class PayrollRunCreateComponent {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
+  readonly isOpen = input<boolean>(false);
+  readonly isOpenChange = output<boolean>();
 
   payrollRunForm: FormGroup;
   loading$: Observable<boolean>;

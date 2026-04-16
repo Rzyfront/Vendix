@@ -1,12 +1,9 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
-  ChangeDetectionStrategy,
-  OnChanges,
-  SimpleChanges,
+  input,
+  output,
   inject,
+  effect,
 } from '@angular/core';
 
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
@@ -21,18 +18,17 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
     IconComponent,
     QuantityControlComponent
 ],
-  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <!-- Overlay -->
     <div
       class="modal-overlay"
-      [class.open]="isOpen"
+      [class.open]="isOpen()"
       (click)="onOverlayClick($event)"
       >
       <!-- Modal Content -->
       <div
         class="modal-content"
-        [class.open]="isOpen"
+        [class.open]="isOpen()"
         (click)="$event.stopPropagation()"
         >
         <!-- Header -->
@@ -42,12 +38,12 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
           </button>
           <h2 class="modal-title">
             Carrito
-            <span class="item-count">({{ cartState?.items?.length || 0 }})</span>
+            <span class="item-count">({{ cartState()?.items?.length || 0 }})</span>
           </h2>
           <button
             class="clear-btn"
             (click)="onClearCart()"
-            [disabled]="!cartState?.items?.length"
+            [disabled]="!cartState()?.items?.length"
             >
             Vaciar
           </button>
@@ -56,7 +52,7 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
         <!-- Items List -->
         <div class="items-container">
           <!-- Empty State -->
-          @if (!cartState?.items?.length) {
+          @if (!cartState()?.items?.length) {
             <div class="empty-state">
               <div class="empty-icon">
                 <app-icon name="shopping-cart" [size]="40"></app-icon>
@@ -67,9 +63,9 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
           }
     
           <!-- Cart Items -->
-          @if (cartState?.items?.length) {
+          @if (cartState()?.items?.length) {
             <div class="items-list">
-              @for (item of cartState?.items; track trackByItemId($index, item)) {
+              @for (item of cartState()?.items; track trackByItemId($index, item)) {
                 <div
                   class="cart-item"
                   >
@@ -145,20 +141,20 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
         </div>
     
         <!-- Summary Section -->
-        @if (cartState?.items?.length) {
+        @if (cartState()?.items?.length) {
           <div class="summary-section">
             <div class="summary-row">
               <span>Subtotal</span>
-              <span>{{ formatCurrency(cartState?.summary?.subtotal || 0) }}</span>
+              <span>{{ formatCurrency(cartState()?.summary?.subtotal || 0) }}</span>
             </div>
             <div class="summary-row">
               <span>Impuestos</span>
-              <span>{{ formatCurrency(cartState?.summary?.taxAmount || 0) }}</span>
+              <span>{{ formatCurrency(cartState()?.summary?.taxAmount || 0) }}</span>
             </div>
             <div class="summary-row total">
               <span>Total</span>
               <span class="total-amount">{{
-                formatCurrency(cartState?.summary?.total || 0)
+                formatCurrency(cartState()?.summary?.total || 0)
               }}</span>
             </div>
           </div>
@@ -170,7 +166,7 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
             <button
               class="action-btn save-btn"
               (click)="saveDraft.emit()"
-              [disabled]="!cartState?.items?.length"
+              [disabled]="!cartState()?.items?.length"
               >
               <app-icon name="save" [size]="18"></app-icon>
               <span>Guardar</span>
@@ -178,7 +174,7 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
             <button
               class="action-btn shipping-btn"
               (click)="shipping.emit()"
-              [disabled]="!cartState?.items?.length"
+              [disabled]="!cartState()?.items?.length"
               >
               <app-icon name="truck" [size]="18"></app-icon>
               <span>Envío</span>
@@ -187,7 +183,7 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
           <button
             class="action-btn checkout-btn"
             (click)="checkout.emit()"
-            [disabled]="!cartState?.items?.length"
+            [disabled]="!cartState()?.items?.length"
             >
             <app-icon name="credit-card" [size]="18"></app-icon>
             <span>Finalizar Venta</span>
@@ -610,42 +606,33 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
     `,
   ],
 })
-export class PosCartModalComponent implements OnChanges {
+export class PosCartModalComponent {
   private currencyService = inject(CurrencyFormatService);
 
-  @Input() isOpen: boolean = false;
-  @Input() cartState: CartState | null = null;
+  readonly isOpen = input<boolean>(false);
+  readonly cartState = input<CartState | null>(null);
 
-  @Output() closed = new EventEmitter<void>();
-  @Output() itemQuantityChanged = new EventEmitter<{
-    itemId: string;
-    quantity: number;
-  }>();
-  @Output() itemRemoved = new EventEmitter<string>();
-  @Output() clearCart = new EventEmitter<void>();
-  @Output() saveDraft = new EventEmitter<void>();
-  @Output() shipping = new EventEmitter<void>();
-  @Output() checkout = new EventEmitter<void>();
+  readonly closed = output<void>();
+  readonly itemQuantityChanged = output<{ itemId: string; quantity: number }>();
+  readonly itemRemoved = output<string>();
+  readonly clearCart = output<void>();
+  readonly saveDraft = output<void>();
+  readonly shipping = output<void>();
+  readonly checkout = output<void>();
 
-  ngOnChanges(changes: SimpleChanges): void {
-    if (changes['isOpen']) {
-      if (this.isOpen) {
+  constructor() {
+    effect(() => {
+      if (this.isOpen()) {
         document.body.style.overflow = 'hidden';
-        // Asegurar que la moneda esté cargada cuando el modal se abre
         this.currencyService.loadCurrency();
       } else {
         document.body.style.overflow = '';
       }
-    }
+    });
   }
 
   onOverlayClick(event: MouseEvent): void {
     if (event.target === event.currentTarget) {
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
       this.closed.emit();
     }
   }
@@ -659,11 +646,6 @@ export class PosCartModalComponent implements OnChanges {
   }
 
   onClearCart(): void {
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
     this.clearCart.emit();
   }
 

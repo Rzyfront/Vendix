@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, OnDestroy } from '@angular/core';
+import { Component, OnInit, inject, OnDestroy, signal } from '@angular/core';
 import { ConfigFacade } from '../../../../core/store/config';
 
 import { RouterModule, Router, ActivatedRoute } from '@angular/router';
@@ -67,7 +67,7 @@ import { IconComponent } from '../../../../shared/components';
           <div class="space-y-8">
             <!-- Error message display -->
             <div class="flex flex-col items-center justify-center py-8">
-              @if (isLoading) {
+              @if (isLoading()) {
                 <app-spinner
                   size="lg"
                   color="text-primary"
@@ -76,7 +76,7 @@ import { IconComponent } from '../../../../shared/components';
                 ></app-spinner>
               }
     
-              @if (!isLoading && verificationStatus === 'success') {
+              @if (!isLoading() && verificationStatus() === 'success') {
                 <div class="text-center">
                   <div
                     class="mx-auto flex items-center justify-center h-12 w-12 rounded-full bg-[rgba(126, 215, 165, 0.1)]"
@@ -114,7 +114,7 @@ import { IconComponent } from '../../../../shared/components';
                 </div>
               }
     
-              @if (!isLoading && verificationStatus === 'error') {
+              @if (!isLoading() && verificationStatus() === 'error') {
                 <div
                   class="text-center"
                   >
@@ -147,12 +147,12 @@ import { IconComponent } from '../../../../shared/components';
                   <div class="mt-6">
                     <app-button
                       (clicked)="resendVerificationEmail()"
-                      [loading]="resendLoading"
+                      [loading]="resendLoading()"
                       variant="primary"
                       >
                       Reenviar email de verificación
                       <ng-container slot="icon">
-                        @if (resendLoading) {
+                        @if (resendLoading()) {
                           <app-spinner
                             size="sm"
                             color="text-white"
@@ -172,10 +172,10 @@ import { IconComponent } from '../../../../shared/components';
   styleUrls: [],
 })
 export class EmailVerificationComponent implements OnInit, OnDestroy {
-  verificationStatus: 'pending' | 'success' | 'error' = 'pending';
-  isLoading = true;
+  readonly verificationStatus = signal<'pending' | 'success' | 'error'>('pending');
+  readonly isLoading = signal(true);
   error: string | null = null;
-  resendLoading = false;
+  readonly resendLoading = signal(false);
   token: string | null = null;
   logoUrl: string = '';
 
@@ -210,8 +210,8 @@ export class EmailVerificationComponent implements OnInit, OnDestroy {
       this.verifyEmail();
     } else {
       // If no token is provided, show an error
-      this.isLoading = false;
-      this.verificationStatus = 'error';
+      this.isLoading.set(false);
+      this.verificationStatus.set('error');
       this.error = 'No se proporcionó un token de verificación válido.';
     }
   }
@@ -222,7 +222,7 @@ export class EmailVerificationComponent implements OnInit, OnDestroy {
     this.authFacade.loading$
       .pipe(takeUntil(this.destroy$))
       .subscribe((isLoading) => {
-        this.isLoading = isLoading;
+        this.isLoading.set(isLoading);
       });
 
     this.authFacade.error$.pipe(takeUntil(this.destroy$)).subscribe((error) => {
@@ -231,14 +231,14 @@ export class EmailVerificationComponent implements OnInit, OnDestroy {
         const errorMessage =
           typeof error === 'string' ? error : extractApiErrorMessage(error);
         this.error = errorMessage;
-        this.verificationStatus = 'error';
-        this.isLoading = false;
+        this.verificationStatus.set('error');
+        this.isLoading.set(false);
 
         this.toast.error(errorMessage, 'Error de verificación');
       } else {
         // Success case - email verified
-        this.verificationStatus = 'success';
-        this.isLoading = false;
+        this.verificationStatus.set('success');
+        this.isLoading.set(false);
 
         this.toast.success(
           'Tu email ha sido verificado exitosamente.',
@@ -249,9 +249,9 @@ export class EmailVerificationComponent implements OnInit, OnDestroy {
   }
 
   get verificationMessage(): string {
-    if (this.isLoading) {
+    if (this.isLoading()) {
       return 'Verificando tu email...';
-    } else if (this.verificationStatus === 'success') {
+    } else if (this.verificationStatus() === 'success') {
       return 'Tu cuenta ha sido verificada correctamente.';
     } else {
       return 'Completando proceso de verificación de email.';
@@ -270,13 +270,13 @@ export class EmailVerificationComponent implements OnInit, OnDestroy {
       return;
     }
 
-    this.resendLoading = true;
+    this.resendLoading.set(true);
     this.authFacade.resendVerification(email);
 
     this.authFacade.loading$
       .pipe(takeUntil(this.destroy$))
       .subscribe((isLoading) => {
-        this.resendLoading = isLoading;
+        this.resendLoading.set(isLoading);
       });
 
     this.authFacade.error$.pipe(takeUntil(this.destroy$)).subscribe((error) => {

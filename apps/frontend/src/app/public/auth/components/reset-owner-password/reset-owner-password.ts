@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, inject } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
 
 import { RouterModule, Router, ActivatedRoute } from '@angular/router';
 import {
@@ -168,13 +168,13 @@ export function passwordStrengthValidator(
               type="submit"
               variant="primary"
               size="md"
-              [disabled]="!resetPasswordForm.valid || isLoading"
-              [loading]="isLoading"
+              [disabled]="!resetPasswordForm.valid || isLoading()"
+              [loading]="isLoading()"
               [fullWidth]="true"
               [showTextWhileLoading]="true"
               class="mt-4 w-full"
               >
-              @if (isLoading) {
+              @if (isLoading()) {
                 Restableciendo contraseña...
               } @else {
                 Restablecer Contraseña
@@ -201,7 +201,7 @@ export function passwordStrengthValidator(
 })
 export class ResetOwnerPasswordComponent implements OnInit, OnDestroy {
   resetPasswordForm: FormGroup;
-  isLoading = false;
+  readonly isLoading = signal(false);
   token: string | null = null;
   error: string | null = null;
 
@@ -269,7 +269,7 @@ export class ResetOwnerPasswordComponent implements OnInit, OnDestroy {
       // Subscribe to loading state
       const loadingSubscription = this.authFacade.loading$.subscribe(
         (isLoading) => {
-          this.isLoading = isLoading;
+          this.isLoading.set(isLoading);
         },
       );
 

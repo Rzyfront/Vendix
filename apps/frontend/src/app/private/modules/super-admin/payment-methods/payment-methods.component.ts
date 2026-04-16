@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, inject } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
 
 import { debounceTime, distinctUntilChanged, Subject, takeUntil } from 'rxjs';
 import {

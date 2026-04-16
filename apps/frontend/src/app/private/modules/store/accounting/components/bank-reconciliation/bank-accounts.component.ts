@@ -1,5 +1,5 @@
-import { Component, OnInit, inject, signal, computed } from '@angular/core';
-import { CommonModule, CurrencyPipe } from '@angular/common';
+import { Component, inject, signal, computed } from '@angular/core';
+import { CurrencyPipe } from '@angular/common';
 import { Router } from '@angular/router';
 import {
   ButtonComponent,
@@ -19,7 +19,6 @@ import { StatementImportModalComponent } from './statement-import-modal.componen
   selector: 'vendix-bank-accounts',
   standalone: true,
   imports: [
-    CommonModule,
     ButtonComponent,
     IconComponent,
     StatsComponent,
@@ -325,7 +324,7 @@ import { StatementImportModalComponent } from './statement-import-modal.componen
     </div>
   `,
 })
-export class BankAccountsComponent implements OnInit {
+export class BankAccountsComponent {
   private reconciliationService = inject(BankReconciliationService);
   private dialogService = inject(DialogService);
   private toastService = inject(ToastService);
@@ -362,7 +361,7 @@ export class BankAccountsComponent implements OnInit {
     };
   });
 
-  ngOnInit(): void {
+  constructor() {
     this.loadAccounts();
   }
 

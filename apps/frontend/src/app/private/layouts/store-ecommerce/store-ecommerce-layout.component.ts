@@ -1,16 +1,14 @@
 import {
   Component,
-  OnInit,
   inject,
-  ChangeDetectorRef,
   HostListener,
   DestroyRef,
 } from '@angular/core';
 import { Title } from '@angular/platform-browser';
-import { CommonModule } from '@angular/common';
+import { CurrencyPipe } from '@angular/common';
 import { RouterModule, Router } from '@angular/router';
 import { map } from 'rxjs/operators';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { AuthFacade } from '../../../core/store';
 import { TenantFacade } from '../../../core/store';
 import { CartService } from '../../modules/ecommerce/services/cart.service';
@@ -70,7 +68,6 @@ interface FooterSettings {
   selector: 'app-store-ecommerce-layout',
   standalone: true,
   imports: [
-    CommonModule,
     RouterModule,
     SearchAutocompleteComponent,
     IconComponent,
@@ -79,11 +76,12 @@ interface FooterSettings {
     InfoModalComponent,
     FaqModalComponent,
     ButtonComponent,
+    CurrencyPipe,
   ],
   templateUrl: './store-ecommerce-layout.component.html',
   styleUrls: ['./store-ecommerce-layout.component.scss'],
 })
-export class StoreEcommerceLayoutComponent implements OnInit {
+export class StoreEcommerceLayoutComponent {
   store_name = 'Tienda';
   store_logo: string | null = null;
   show_user_menu = false;
@@ -115,22 +113,25 @@ export class StoreEcommerceLayoutComponent implements OnInit {
   private wishlist_service = inject(WishlistService);
   private store_ui_service = inject(StoreUiService);
   private router = inject(Router);
-  private cdr = inject(ChangeDetectorRef);
   private destroy_ref = inject(DestroyRef);
   private title_service = inject(Title); // Inject Title service
 
   // Expose observables for AsyncPipe (after injection)
   is_authenticated$ = this.auth_facade.isAuthenticated$;
+  readonly is_authenticated = toSignal(this.is_authenticated$, { initialValue: false });
   user_name$ = this.auth_facade.user$.pipe(
     map((user) => (user ? `${user.first_name} ${user.last_name}`.trim() : '')),
   );
+  readonly user_name = toSignal(this.user_name$, { initialValue: '' });
   cart_badge$ = this.cart_service.cart$.pipe(
     map((cart) => {
       const count = cart?.item_count || 0;
       return { show: count > 0, count };
     }),
   );
+  readonly cart_badge = toSignal(this.cart_badge$, { initialValue: { show: false, count: 0 } });
   cart$ = this.cart_service.cart$;
+  readonly cart = toSignal(this.cart$, { initialValue: null as any });
   show_cart_dropdown = false;
 
   // Wishlist badge observable
@@ -140,6 +141,7 @@ export class StoreEcommerceLayoutComponent implements OnInit {
       count: wishlist?.item_count || 0,
     })),
   );
+  readonly wishlist_badge = toSignal(this.wishlist_badge$, { initialValue: { show: false, count: 0 } });
 
   // Cart animation and tooltip state
   is_animating = false;
@@ -154,35 +156,27 @@ export class StoreEcommerceLayoutComponent implements OnInit {
   private wishlist_animation_timeout: any;
   private wishlist_tooltip_timeout: any;
 
-  ngOnInit(): void {
+  constructor() {
     // Get store info from domain resolution reactively
     this.domain_service.domainConfig$
       .pipe(takeUntilDestroyed(this.destroy_ref))
       .subscribe((domainConfig: any) => {
         if (!domainConfig) return;
 
-        // La configuración está estructurada en customConfig.ecommerce y customConfig.branding
         const customConfig = domainConfig.customConfig || {};
         const ecommerceConfig = customConfig.ecommerce || {};
         const tenantConfig =
           this.domain_service.getCurrentTenantConfig() || ({} as any);
 
-        // Resolver nombre de la tienda
         this.store_name =
           domainConfig.store_slug ||
           this.domain_service.getCurrentStore()?.name ||
           'Tienda';
 
-        // Update Browser Tab Title
         if (this.store_name && this.store_name !== 'Tienda') {
           this.title_service.setTitle(this.store_name);
         }
 
-        // Resolver Logo con prioridad:
-        // 1. store_logo_url (logo de la tienda, firmado desde el backend)
-        // 2. customConfig.ecommerce.inicio.logo_url (configuración específica del ecommerce)
-        // 3. customConfig.branding.logo_url (configuración de branding)
-        // 4. tenantConfig.branding.logo_url (standardizer backend)
         const storeLogo = domainConfig.store_logo_url;
         const inicioLogo = ecommerceConfig.inicio?.logo_url;
         const brandingLogo =
@@ -193,7 +187,6 @@ export class StoreEcommerceLayoutComponent implements OnInit {
         this.store_logo =
           storeLogo || inicioLogo || brandingLogo || tenantLogo || null;
 
-        // Load footer settings from ecommerce config
         if (ecommerceConfig.footer) {
           this.footer_settings = ecommerceConfig.footer;
         }
@@ -205,7 +198,6 @@ export class StoreEcommerceLayoutComponent implements OnInit {
       .subscribe((mode) => {
         this.auth_modal_mode = mode;
         this.is_auth_modal_open = true;
-        this.cdr.detectChanges();
       });
 
     // Subscribe to cart item added events
@@ -229,25 +221,22 @@ export class StoreEcommerceLayoutComponent implements OnInit {
     this.show_added_tooltip = false;
     clearTimeout(this.animation_timeout);
     clearTimeout(this.tooltip_timeout);
-    this.cdr.detectChanges(); // Force update to reset classes
+    // Force update to reset classes (zoneless: signals trigger CD automatically)
 
     // Trigger animation
     requestAnimationFrame(() => {
       this.is_animating = true;
       this.show_added_tooltip = true;
-      this.cdr.detectChanges();
-
+  
       // Stop shaking after 500ms
       this.animation_timeout = setTimeout(() => {
         this.is_animating = false;
-        this.cdr.detectChanges();
-      }, 500);
+          }, 500);
 
       // Hide tooltip after 3000ms
       this.tooltip_timeout = setTimeout(() => {
         this.show_added_tooltip = false;
-        this.cdr.detectChanges();
-      }, 3000);
+          }, 3000);
     });
   }
 
@@ -257,25 +246,21 @@ export class StoreEcommerceLayoutComponent implements OnInit {
     this.show_wishlist_added_tooltip = false;
     clearTimeout(this.wishlist_animation_timeout);
     clearTimeout(this.wishlist_tooltip_timeout);
-    this.cdr.detectChanges();
 
     // Trigger animation
     requestAnimationFrame(() => {
       this.is_wishlist_animating = true;
       this.show_wishlist_added_tooltip = true;
-      this.cdr.detectChanges();
-
+  
       // Stop shaking after 500ms
       this.wishlist_animation_timeout = setTimeout(() => {
         this.is_wishlist_animating = false;
-        this.cdr.detectChanges();
-      }, 500);
+          }, 500);
 
       // Hide tooltip after 3000ms
       this.wishlist_tooltip_timeout = setTimeout(() => {
         this.show_wishlist_added_tooltip = false;
-        this.cdr.detectChanges();
-      }, 3000);
+          }, 3000);
     });
   }
 
@@ -291,8 +276,7 @@ export class StoreEcommerceLayoutComponent implements OnInit {
   onCartLeave(): void {
     this.close_timer = setTimeout(() => {
       this.show_cart_dropdown = false;
-      this.cdr.detectChanges();
-    }, 300);
+      }, 300);
   }
 
   toggleMobileMenu(): void {
@@ -327,14 +311,12 @@ export class StoreEcommerceLayoutComponent implements OnInit {
     this.auth_modal_mode = 'login';
     this.is_auth_modal_open = true;
     this.show_user_menu = false;
-    this.cdr.detectChanges();
   }
 
   register(): void {
     this.auth_modal_mode = 'register';
     this.is_auth_modal_open = true;
     this.show_user_menu = false;
-    this.cdr.detectChanges();
   }
 
   // Close user menu when clicking outside (same pattern as admin layouts)

@@ -1,5 +1,5 @@
-import { Component, Input, inject, OnInit } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input, inject } from '@angular/core';
+import { AsyncPipe } from '@angular/common';
 import { Store } from '@ngrx/store';
 import { Observable, map } from 'rxjs';
 import {
@@ -13,10 +13,10 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 @Component({
   selector: 'vendix-payroll-stats',
   standalone: true,
-  imports: [CommonModule, StatsComponent],
+  imports: [AsyncPipe, StatsComponent],
   styleUrls: ['./payroll-stats.component.scss'],
   template: `
-@switch (view) {
+@switch (view()) {
   <!-- Employee Stats -->
   @case ('employees') {
     <app-stats
@@ -90,13 +90,13 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 }
 `
 })
-export class PayrollStatsComponent implements OnInit {
-  @Input() view: 'employees' | 'payroll-runs' = 'employees';
+export class PayrollStatsComponent {
+  readonly view = input<'employees' | 'payroll-runs'>('employees');
 
   private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
 
-  ngOnInit(): void {
+  constructor() {
     this.currencyService.loadCurrency();
   }
 

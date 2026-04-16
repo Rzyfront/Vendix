@@ -22,8 +22,8 @@
     <div class="stat-content">
       <p class="stat-title">{{ title() }}</p>
       <h3 class="stat-value">{{ value() }}</h3>
-      @if (smallText) {
-        <p class="stat-small">{{ smallText }}</p>
+      @if (smallText()) {
+        <p class="stat-small">{{ smallText() }}</p>
       }
     </div>
   </div>

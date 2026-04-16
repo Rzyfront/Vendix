@@ -1,11 +1,11 @@
-import { Component, computed, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject } from '@angular/core';
+import { NgClass } from '@angular/common';
 import { ToastService } from './toast.service';
 
 @Component({
   selector: 'app-toast-container',
   standalone: true,
-  imports: [CommonModule],
+  imports: [NgClass],
   template: `
     <div
       class="fixed top-4 right-4 z-[10000] flex flex-col gap-3 w-80 max-w-[90vw]"

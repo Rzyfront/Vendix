@@ -2,7 +2,6 @@ import {
   Component,
   OnInit,
   inject,
-  ChangeDetectorRef,
   input,
   output
 } from '@angular/core';
@@ -228,7 +227,6 @@ export class ShippingZoneModalComponent implements OnInit {
   private fb = inject(FormBuilder);
   private shippingService = inject(ShippingService);
   private countryService: CountryService = inject(CountryService);
-  private cdr = inject(ChangeDetectorRef);
 
   form: FormGroup;
   isSubmitting = false;
@@ -297,7 +295,6 @@ export class ShippingZoneModalComponent implements OnInit {
         console.error('Error loading departments', e);
       } finally {
         this.loadingRegions = false;
-        this.cdr.markForCheck();
       }
     } else {
       this.departments = [];

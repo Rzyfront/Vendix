@@ -1,4 +1,4 @@
-import { Component, ChangeDetectionStrategy, input, output } from '@angular/core';
+import { Component, input, output } from '@angular/core';
 
 import { TimeRange } from '../../interfaces';
 
@@ -6,7 +6,6 @@ import { TimeRange } from '../../interfaces';
   selector: 'app-time-range-selector',
   standalone: true,
   imports: [],
-  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="inline-flex rounded-lg overflow-hidden" style="border: 1px solid var(--color-border);">
       @for (option of options; track trackByValue($index, option)) {

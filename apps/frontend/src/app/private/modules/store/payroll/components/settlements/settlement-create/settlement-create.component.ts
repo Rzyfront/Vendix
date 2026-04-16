@@ -1,4 +1,4 @@
-import { Component, input, output, OnInit, OnDestroy, inject } from '@angular/core';
+import { Component, input, output, DestroyRef, inject } from '@angular/core';
 
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { Subject } from 'rxjs';
@@ -98,7 +98,7 @@ import { SelectorComponent, SelectorOption } from '../../../../../../../shared/c
     </app-modal>
   `,
 })
-export class SettlementCreateComponent implements OnInit, OnDestroy {
+export class SettlementCreateComponent {
   isOpen = input(false);
   isOpenChange = output<boolean>();
   created = output<void>();
@@ -106,6 +106,7 @@ export class SettlementCreateComponent implements OnInit, OnDestroy {
   private fb = inject(FormBuilder);
   private payrollService = inject(PayrollService);
   private toastService = inject(ToastService);
+  private destroyRef = inject(DestroyRef);
   private destroy$ = new Subject<void>();
 
   submitting = false;
@@ -129,13 +130,13 @@ export class SettlementCreateComponent implements OnInit, OnDestroy {
     notes: [''],
   });
 
-  ngOnInit(): void {
+  constructor() {
     this.loadEmployees();
-  }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
+    this.destroyRef.onDestroy(() => {
+      this.destroy$.next();
+      this.destroy$.complete();
+    });
   }
 
   private loadEmployees(): void {

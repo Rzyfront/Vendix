@@ -1,4 +1,4 @@
-import { Component, input, output, computed, signal, ChangeDetectionStrategy, OnInit, OnDestroy } from '@angular/core';
+import { Component, input, output, computed, signal, DestroyRef, inject } from '@angular/core';
 
 import { IconComponent } from '../../../../../../../shared/components';
 import { Booking, BookingStatus } from '../../../interfaces/reservation.interface';
@@ -9,9 +9,10 @@ import { Booking, BookingStatus } from '../../../interfaces/reservation.interfac
   imports: [IconComponent],
   templateUrl: './calendar-day-view.component.html',
   styleUrls: ['./calendar-day-view.component.scss'],
-  changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class CalendarDayViewComponent implements OnInit, OnDestroy {
+export class CalendarDayViewComponent {
+  private readonly destroyRef = inject(DestroyRef);
+
   readonly bookings = input.required<Booking[]>();
   readonly currentDate = input.required<Date>();
 
@@ -24,9 +25,15 @@ export class CalendarDayViewComponent implements OnInit, OnDestroy {
   private readonly TOTAL_MINUTES = this.DAY_END - this.DAY_START;
 
   private currentTimeSignal = signal(new Date());
-  private timerInterval: ReturnType<typeof setInterval> | null = null;
 
   readonly timeSlots: string[] = this.generateTimeSlots();
+
+  constructor() {
+    const interval = setInterval(() => {
+      this.currentTimeSignal.set(new Date());
+    }, 60_000);
+    this.destroyRef.onDestroy(() => clearInterval(interval));
+  }
 
   readonly statusLabels: Record<string, string> = {
     pending: 'Pendiente',
@@ -63,18 +70,6 @@ export class CalendarDayViewComponent implements OnInit, OnDestroy {
     ];
     return `${days[d.getDay()]} ${d.getDate()} de ${months[d.getMonth()]}`;
   });
-
-  ngOnInit(): void {
-    this.timerInterval = setInterval(() => {
-      this.currentTimeSignal.set(new Date());
-    }, 60_000);
-  }
-
-  ngOnDestroy(): void {
-    if (this.timerInterval) {
-      clearInterval(this.timerInterval);
-    }
-  }
 
   getBlockTop(booking: Booking): number {
     const startMinutes = this.parseTimeToMinutes(booking.start_time);

@@ -1,4 +1,4 @@
-import { Component, Input, inject, input } from '@angular/core';
+import { Component, inject, input } from '@angular/core';
 
 import { ConfigFacade } from '../../../../core/store/config';
 import { IconComponent } from '../../icon/icon.component'; // Ensure IconComponent is imported
@@ -19,15 +19,15 @@ import { IconComponent } from '../../icon/icon.component'; // Ensure IconCompone
           <div class="flex items-center justify-between h-16">
             <!-- Logo / Brand Name -->
             <div class="flex items-center gap-3">
-              @if (logoUrl) {
+              @if (logoUrl()) {
                 <img
-                  [src]="logoUrl"
+                  [src]="logoUrl()"
                   [alt]="brandName()"
                   class="h-8 w-auto object-contain"
                   />
               }
               <!-- If no logo, show brand name or fallback icon like Vendix -->
-              @if (!logoUrl) {
+              @if (!logoUrl()) {
                 <div
                   class="w-10 h-10 bg-[var(--color-primary)] rounded-xl flex items-center justify-center"
                   >
@@ -35,7 +35,7 @@ import { IconComponent } from '../../icon/icon.component'; // Ensure IconCompone
                   <app-icon name="cart" [size]="24" color="white"></app-icon>
                 </div>
               }
-              @if (!logoUrl) {
+              @if (!logoUrl()) {
                 <span
                   class="text-xl font-semibold text-[var(--color-text-primary)]"
                   >
@@ -89,7 +89,7 @@ import { IconComponent } from '../../icon/icon.component'; // Ensure IconCompone
 })
 export class LandingLayoutComponent {
   readonly brandName = input<string>('Store');
-  @Input() logoUrl?: string;
+  readonly logoUrl = input<string | undefined>(undefined);
 
   private configFacade = inject(ConfigFacade);
 

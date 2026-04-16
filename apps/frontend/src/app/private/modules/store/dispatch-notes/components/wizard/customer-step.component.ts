@@ -1,13 +1,10 @@
 import {
   Component,
-  ChangeDetectionStrategy,
+  DestroyRef,
   signal,
   inject,
-  OnInit,
-  OnDestroy,
 } from '@angular/core';
-
-import { Subject, takeUntil } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   InputsearchComponent,
@@ -23,9 +20,8 @@ import { DispatchNoteWizardService, WizardCustomer } from '../../services/dispat
   imports: [
     InputsearchComponent,
     IconComponent,
-    ButtonComponent
-],
-  changeDetection: ChangeDetectionStrategy.OnPush,
+    ButtonComponent,
+  ],
   template: `
     <div class="space-y-2">
       <!-- Selected customer card -->
@@ -182,24 +178,15 @@ import { DispatchNoteWizardService, WizardCustomer } from '../../services/dispat
     </div>
   `,
 })
-export class CustomerStepComponent implements OnInit, OnDestroy {
+export class CustomerStepComponent {
   readonly wizardService = inject(DispatchNoteWizardService);
 
   private readonly customerService = inject(PosCustomerService);
-  private readonly destroy$ = new Subject<void>();
+  private readonly destroyRef = inject(DestroyRef);
 
   readonly searchResults = signal<WizardCustomer[]>([]);
   readonly loading = signal(false);
   readonly searchPerformed = signal(false);
-
-  ngOnInit(): void {
-    // Initialization — no additional setup needed
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
 
   onSearch(query: string): void {
     if (!query || !query.trim()) {
@@ -211,7 +198,7 @@ export class CustomerStepComponent implements OnInit, OnDestroy {
     this.loading.set(true);
     this.customerService
       .searchCustomers({ query: query.trim(), limit: 10 })
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           const mapped: WizardCustomer[] = (response.data || []).map((c: any) => ({

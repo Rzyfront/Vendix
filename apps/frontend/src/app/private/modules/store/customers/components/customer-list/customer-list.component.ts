@@ -1,12 +1,9 @@
 import {
   Component,
-  EventEmitter,
-  Input,
-  Output,
   inject,
-  OnInit,
+  input,
+  output,
 } from '@angular/core';
-
 import { FormsModule } from '@angular/forms';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import {
@@ -37,8 +34,8 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
     IconComponent,
     ButtonComponent,
     FormsModule,
-    PaginationComponent
-],
+    PaginationComponent,
+  ],
   template: `
     <!-- Customer List Container - Mobile First -->
     <app-card [responsive]="true" [padding]="false">
@@ -53,7 +50,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
           <h2
             class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary"
           >
-            Todos los Clientes ({{ totalItems }})
+            Todos los Clientes ({{ totalItems() }})
           </h2>
 
           <!-- Search + Options -->
@@ -80,7 +77,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
               [filters]="filterConfigs"
               [filterValues]="filterValues"
               [actions]="dropdownActions"
-              [isLoading]="loading"
+              [isLoading]="loading()"
               (filterChange)="onFilterChange($event)"
               (clearAllFilters)="onClearFilters()"
               (actionClick)="onActionClick($event)"
@@ -90,7 +87,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
       </div>
 
       <!-- Loading State -->
-      @if (loading) {
+      @if (loading()) {
         <div class="p-6 text-center">
           <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
           <p class="mt-2 text-sm text-text-secondary">Cargando clientes...</p>
@@ -98,7 +95,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
       }
 
       <!-- Empty State -->
-      @if (!loading && customers.length === 0) {
+      @if (!loading() && customers().length === 0) {
         <div class="p-12 text-center text-gray-500">
           <app-icon name="users" [size]="48" class="mx-auto mb-4 text-gray-300"></app-icon>
           <h3 class="text-lg font-medium text-gray-900">No se encontraron clientes</h3>
@@ -113,14 +110,14 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
       }
 
       <!-- Data Table + Pagination -->
-      @if (!loading && customers.length > 0) {
+      @if (!loading() && customers().length > 0) {
         <div class="px-2 pb-2 pt-1 md:p-4">
           <app-responsive-data-view
-            [data]="customers"
+            [data]="customers()"
             [columns]="columns"
             [cardConfig]="cardConfig"
             [actions]="actions"
-            [loading]="loading"
+            [loading]="loading()"
             [hoverable]="true"
             [striped]="true"
             [emptyMessage]="'No se encontraron clientes'"
@@ -128,12 +125,12 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
             tableSize="md"
           ></app-responsive-data-view>
 
-          @if (totalItems > 0) {
+          @if (totalItems() > 0) {
             <div class="mt-4 border-t border-border pt-4">
               <app-pagination
-                [currentPage]="page"
-                [total]="totalItems"
-                [limit]="limit"
+                [currentPage]="page()"
+                [total]="totalItems()"
+                [limit]="limit()"
                 [totalPages]="totalPages"
                 infoStyle="none"
                 (pageChange)="onPageChangeAction($event)"
@@ -145,32 +142,32 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
     </app-card>
   `,
 })
-export class CustomerListComponent implements OnInit {
+export class CustomerListComponent {
   private currencyService = inject(CurrencyFormatService);
 
-  @Input() customers: Customer[] = [];
-  @Input() loading = false;
-  @Input() totalItems = 0;
-  @Input() page = 1;
-  @Input() limit = 10;
+  readonly customers = input<Customer[]>([]);
+  readonly loading = input(false);
+  readonly totalItems = input(0);
+  readonly page = input(1);
+  readonly limit = input(10);
+
+  readonly search = output<string>();
+  readonly filter = output<FilterValues>();
+  readonly create = output<void>();
+  readonly edit = output<Customer>();
+  readonly delete = output<Customer>();
+  readonly viewDetail = output<Customer>();
+  readonly bulkUpload = output<void>();
+  readonly pageChange = output<number>();
 
   get totalPages(): number {
-    return Math.ceil(this.totalItems / this.limit);
+    return Math.ceil(this.totalItems() / this.limit());
   }
 
-  ngOnInit(): void {
+  constructor() {
     // Asegurar que la moneda esté cargada
     this.currencyService.loadCurrency();
   }
-
-  @Output() search = new EventEmitter<string>();
-  @Output() filter = new EventEmitter<FilterValues>();
-  @Output() create = new EventEmitter<void>();
-  @Output() edit = new EventEmitter<Customer>();
-  @Output() delete = new EventEmitter<Customer>();
-  @Output() viewDetail = new EventEmitter<Customer>();
-  @Output() bulkUpload = new EventEmitter<void>();
-  @Output() pageChange = new EventEmitter<number>();
 
   // Filter configuration for the options dropdown
   filterConfigs: FilterConfig[] = [
@@ -283,19 +280,9 @@ export class CustomerListComponent implements OnInit {
   onActionClick(action: string): void {
     switch (action) {
       case 'create':
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
         this.create.emit();
         break;
       case 'bulk-upload':
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
         this.bulkUpload.emit();
         break;
     }

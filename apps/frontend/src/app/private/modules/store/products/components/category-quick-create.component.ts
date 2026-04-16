@@ -1,11 +1,11 @@
-import { Component, EventEmitter, Input, Output } from '@angular/core';
-
+import { Component, input, output, model, inject, signal, DestroyRef } from '@angular/core';
 import {
   FormBuilder,
   FormGroup,
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   ModalComponent,
   ButtonComponent,
@@ -24,13 +24,13 @@ import { ProductCategory } from '../interfaces';
     ModalComponent,
     ButtonComponent,
     InputComponent,
-    TextareaComponent
-],
+    TextareaComponent,
+  ],
   template: `
     <app-modal
       [size]="'md'"
       [title]="'Crear Nueva Categoría'"
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (closed)="onCancel()"
     >
       <form [formGroup]="categoryForm" class="space-y-4">
@@ -59,14 +59,14 @@ import { ProductCategory } from '../interfaces';
         <app-button
           variant="outline"
           (clicked)="onCancel()"
-          [disabled]="isSubmitting"
+          [disabled]="isSubmitting()"
         >
           Cancelar
         </app-button>
         <app-button
           variant="primary"
           (clicked)="onSubmit()"
-          [loading]="isSubmitting"
+          [loading]="isSubmitting()"
           [disabled]="categoryForm.invalid"
         >
           Crear Categoría
@@ -76,19 +76,20 @@ import { ProductCategory } from '../interfaces';
   `,
 })
 export class CategoryQuickCreateComponent {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() created = new EventEmitter<ProductCategory>();
-  @Output() cancel = new EventEmitter<void>();
+  private fb = inject(FormBuilder);
+  private categoriesService = inject(CategoriesService);
+  private toastService = inject(ToastService);
+  private destroyRef = inject(DestroyRef);
+
+  readonly isOpen = model<boolean>(false);
+  readonly created = output<ProductCategory>();
+  readonly cancel = output<void>();
+
+  readonly isSubmitting = signal(false);
 
   categoryForm: FormGroup;
-  isSubmitting = false;
 
-  constructor(
-    private fb: FormBuilder,
-    private categoriesService: CategoriesService,
-    private toastService: ToastService,
-  ) {
+  constructor() {
     this.categoryForm = this.fb.group({
       name: [
         '',
@@ -104,37 +105,34 @@ export class CategoryQuickCreateComponent {
 
   onCancel() {
     this.categoryForm.reset();
-    this.isOpenChange.emit(false);
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
+    this.isOpen.set(false);
     this.cancel.emit();
   }
 
   onSubmit() {
     if (this.categoryForm.invalid) return;
 
-    this.isSubmitting = true;
+    this.isSubmitting.set(true);
     const categoryData = this.categoryForm.value;
 
     // Generate a simple slug from name if not provided (backend usually handles this, but just in case)
     // For now, we send just name and description as per service signature
-    this.categoriesService.createCategory(categoryData).subscribe({
-      next: (category) => {
-        this.toastService.success('Categoría creada exitosamente');
-        this.created.emit(category);
-        this.isSubmitting = false;
-        this.categoryForm.reset();
-        this.isOpenChange.emit(false);
-      },
-      error: (error) => {
-        console.error('Error creating category:', error);
-        this.toastService.error('Error al crear la categoría');
-        this.isSubmitting = false;
-      },
-    });
+    this.categoriesService.createCategory(categoryData)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (category) => {
+          this.toastService.success('Categoría creada exitosamente');
+          this.created.emit(category);
+          this.isSubmitting.set(false);
+          this.categoryForm.reset();
+          this.isOpen.set(false);
+        },
+        error: (error) => {
+          console.error('Error creating category:', error);
+          this.toastService.error('Error al crear la categoría');
+          this.isSubmitting.set(false);
+        },
+      });
   }
 
   getErrorMessage(fieldName: string): string {

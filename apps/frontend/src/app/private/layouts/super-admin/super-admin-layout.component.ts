@@ -1,12 +1,10 @@
 import {
   Component,
-  OnInit,
   ViewChild,
   inject,
   signal,
   DestroyRef,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { RouterModule, Router, NavigationEnd } from '@angular/router';
 import {
   SidebarComponent,
@@ -22,7 +20,7 @@ import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 @Component({
   selector: 'app-super-admin-layout',
   standalone: true,
-  imports: [CommonModule, RouterModule, SidebarComponent, HeaderComponent],
+  imports: [RouterModule, SidebarComponent, HeaderComponent],
   template: `
     <div class="flex">
       <!-- Sidebar -->
@@ -65,7 +63,7 @@ import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
   `,
   styleUrls: ['./super-admin-layout.component.scss'],
 })
-export class SuperAdminLayoutComponent implements OnInit {
+export class SuperAdminLayoutComponent {
   @ViewChild('sidebarRef') sidebarRef!: SidebarComponent;
 
   private readonly destroyRef = inject(DestroyRef);
@@ -286,7 +284,7 @@ export class SuperAdminLayoutComponent implements OnInit {
     ];
   }
 
-  ngOnInit(): void {
+  constructor() {
     // Dynamic breadcrumb based on route
     this.updateBreadcrumb(this.router.url);
     this.router.events

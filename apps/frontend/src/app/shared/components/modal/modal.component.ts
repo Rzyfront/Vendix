@@ -1,7 +1,6 @@
 import {
   Component,
-  OnInit,
-  OnDestroy,
+  DestroyRef,
   ElementRef,
   PLATFORM_ID,
   Inject,
@@ -11,6 +10,7 @@ import {
   viewChild,
   computed,
   effect,
+  inject,
 } from '@angular/core';
 import { isPlatformBrowser } from '@angular/common';
 
@@ -27,7 +27,7 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl';
       <div
         class="fixed inset-0 z-[9999] flex items-center justify-center p-4"
         (dblclick)="onWrapperClick($event)"
-        >
+      >
         <!-- Backdrop overlay con blur y oscuridad mejorada -->
         <div
           class="absolute inset-0 backdrop-blur-md bg-black/40 transition-all duration-300 ease-out"
@@ -43,30 +43,30 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl';
           [class.scale-95]="!isOpen()"
           [class.opacity-100]="isOpen()"
           [class.opacity-0]="!isOpen()"
-          >
+        >
           <!-- Modal content con diseño mejorado -->
           <div
             class="bg-[var(--color-surface)] rounded-[var(--radius-lg)] shadow-xl overflow-hidden flex flex-col max-h-[90vh] border border-[var(--color-border)] backdrop-blur-sm"
-            >
+          >
             <!-- Header con gradiente sutil -->
             @if (hasHeader()) {
               <div
                 class="px-4 py-3 md:px-5 md:py-4 border-b border-[var(--color-border)] flex items-center justify-between flex-shrink-0 bg-gradient-to-b from-[var(--color-surface)] to-[var(--color-surface)]/95"
-                >
+              >
                 <div class="flex items-center gap-3 overflow-hidden flex-1">
                   <ng-content select="[slot=header]"></ng-content>
                   <div class="min-w-0 flex-1">
                     @if (title()) {
                       <h3
                         class="text-[var(--fs-xl)] font-[var(--fw-semibold)] text-[var(--color-text-primary)] truncate"
-                        >
+                      >
                         {{ title() }}
                       </h3>
                     }
                     @if (subtitle()) {
                       <p
                         class="text-[var(--fs-sm)] text-[var(--color-text-secondary)] mt-0.5 truncate"
-                        >
+                      >
                         {{ subtitle() }}
                       </p>
                     }
@@ -84,19 +84,19 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl';
                     [class.z-10]="overlayCloseButton()"
                     (click)="close()"
                     aria-label="Cerrar modal"
-                    >
+                  >
                     <svg
                       class="h-5 w-5"
                       fill="none"
                       viewBox="0 0 24 24"
                       stroke="currentColor"
                       stroke-width="2"
-                      >
+                    >
                       <path
                         stroke-linecap="round"
                         stroke-linejoin="round"
                         d="M6 18L18 6M6 6l12 12"
-                        />
+                      />
                     </svg>
                   </button>
                 }
@@ -106,14 +106,14 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl';
             <div
               class="px-4 py-3 md:px-5 md:py-4 overflow-y-auto overflow-x-auto flex-1 bg-[var(--color-surface)]"
               style="scroll-behavior: smooth;"
-              >
+            >
               <ng-content></ng-content>
             </div>
             <!-- Footer con diseño mejorado -->
             @if (hasFooter()) {
               <div
                 class="px-4 py-3 md:px-5 md:py-3 border-t border-[var(--color-border)] bg-gradient-to-t from-[var(--color-background)]/50 to-[var(--color-surface)] flex-shrink-0"
-                >
+              >
                 <ng-content select="[slot=footer]"></ng-content>
               </div>
             }
@@ -121,10 +121,11 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl';
         </div>
       </div>
     }
-    `,
+  `,
 })
-export class ModalComponent implements OnInit, OnDestroy {
+export class ModalComponent {
   private isBrowser: boolean;
+  private destroyRef = inject(DestroyRef);
 
   readonly modalContainer = viewChild<ElementRef>('modalContainer');
 
@@ -168,7 +169,7 @@ export class ModalComponent implements OnInit, OnDestroy {
 
   readonly hasHeader = computed(() => !!(this.title() || this.subtitle()));
 
-  readonly hasFooter = computed(() => true); // Siempre mostramos el footer para permitir botones
+  readonly hasFooter = computed(() => true);
 
   constructor(@Inject(PLATFORM_ID) platformId: object) {
     this.isBrowser = isPlatformBrowser(platformId);
@@ -179,9 +180,7 @@ export class ModalComponent implements OnInit, OnDestroy {
         document.body.style.overflow = open ? 'hidden' : '';
       }
     });
-  }
 
-  ngOnInit(): void {
     if (this.isBrowser && this.closeOnEscape()) {
       this.escapeListener = (event: KeyboardEvent) => {
         if (event.key === 'Escape' && this.isOpen()) {
@@ -190,19 +189,17 @@ export class ModalComponent implements OnInit, OnDestroy {
       };
       document.addEventListener('keydown', this.escapeListener);
     }
-  }
 
-  ngOnDestroy(): void {
-    if (this.isBrowser) {
-      if (this.escapeListener) {
-        document.removeEventListener('keydown', this.escapeListener);
+    this.destroyRef.onDestroy(() => {
+      if (this.isBrowser) {
+        if (this.escapeListener) {
+          document.removeEventListener('keydown', this.escapeListener);
+        }
+        if (this.isOpen()) {
+          document.body.style.overflow = '';
+        }
       }
-
-      // Restore body scroll when component is destroyed
-      if (this.isOpen()) {
-        document.body.style.overflow = '';
-      }
-    }
+    });
   }
 
   open(): void {

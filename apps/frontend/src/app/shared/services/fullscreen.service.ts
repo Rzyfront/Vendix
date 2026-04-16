@@ -1,6 +1,5 @@
 import {
   Injectable,
-  NgZone,
   OnDestroy,
   PLATFORM_ID,
   Inject,
@@ -19,7 +18,6 @@ export class FullscreenService implements OnDestroy {
   private isBrowser: boolean;
 
   constructor(
-    private ngZone: NgZone,
     @Inject(PLATFORM_ID) platformId: object,
   ) {
     this.isBrowser = isPlatformBrowser(platformId);
@@ -58,9 +56,7 @@ export class FullscreenService implements OnDestroy {
       const requestFullscreen = this.getRequestFullscreenMethod(targetElement);
 
       if (requestFullscreen) {
-        await this.ngZone.runOutsideAngular(() => {
-          return (requestFullscreen as any).call(targetElement);
-        });
+        await (requestFullscreen as any).call(targetElement);
 
         this.fullscreenElement = targetElement;
         this.isFullscreen$.next(true);
@@ -82,9 +78,7 @@ export class FullscreenService implements OnDestroy {
       const exitFullscreen = this.getExitFullscreenMethod();
 
       if (exitFullscreen) {
-        await this.ngZone.runOutsideAngular(() => {
-          return (exitFullscreen as any).call(document);
-        });
+        await (exitFullscreen as any).call(document);
 
         this.fullscreenElement = null;
         this.isFullscreen$.next(false);
@@ -146,26 +140,18 @@ export class FullscreenService implements OnDestroy {
     ];
 
     events.forEach((eventName) => {
-      const cleanup = this.ngZone.runOutsideAngular(() => {
-        return fromEvent(document, eventName).subscribe(() => {
-          this.ngZone.run(() => {
-            this.updateFullscreenState();
-          });
-        });
+      const cleanup = fromEvent(document, eventName).subscribe(() => {
+        this.updateFullscreenState();
       });
 
       this.eventListeners.push(() => cleanup.unsubscribe());
     });
 
     // Detectar cambios con Visibility API para mayor robustez
-    const visibilityCleanup = this.ngZone.runOutsideAngular(() => {
-      return fromEvent(document, 'visibilitychange').subscribe(() => {
-        this.ngZone.run(() => {
-          if (document.visibilityState === 'visible') {
-            this.updateFullscreenState();
-          }
-        });
-      });
+    const visibilityCleanup = fromEvent(document, 'visibilitychange').subscribe(() => {
+      if (document.visibilityState === 'visible') {
+        this.updateFullscreenState();
+      }
     });
 
     this.eventListeners.push(() => visibilityCleanup.unsubscribe());

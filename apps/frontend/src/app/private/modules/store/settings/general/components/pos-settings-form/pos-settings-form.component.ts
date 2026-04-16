@@ -1,11 +1,4 @@
-import {
-  Component,
-  Input,
-  Output,
-  EventEmitter,
-  OnInit,
-  OnChanges,
-} from '@angular/core';
+import { Component, OnInit, OnChanges, input, output } from '@angular/core';
 
 import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
@@ -27,8 +20,8 @@ import { ToastService } from '../../../../../../../shared/components/toast/toast
   styleUrls: ['./pos-settings-form.component.scss'],
 })
 export class PosSettingsForm implements OnInit, OnChanges {
-  @Input() settings!: PosSettings;
-  @Output() settingsChange = new EventEmitter<PosSettings>();
+  readonly settings = input.required<PosSettings>();
+  readonly settingsChange = output<PosSettings>();
 
   constructor(
     private scaleService: PosScaleService,
@@ -251,11 +244,12 @@ export class PosSettingsForm implements OnInit, OnChanges {
   }
 
   patchForm() {
-    if (this.settings) {
+    const currentSettings = this.settings();
+    if (currentSettings) {
       this.form.patchValue({
-        ...this.settings,
+        ...currentSettings,
         business_hours:
-          this.settings.business_hours || this.getDefaultBusinessHours(),
+          currentSettings.business_hours || this.getDefaultBusinessHours(),
       });
     }
   }

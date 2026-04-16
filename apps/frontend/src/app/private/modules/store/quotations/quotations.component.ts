@@ -1,7 +1,6 @@
-import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
-
+import { Component, DestroyRef, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
-import { Subject, takeUntil } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
 import { ToastService } from '../../../../shared/components/toast/toast.service';
 import { DialogService } from '../../../../shared/components/dialog/dialog.service';
@@ -18,8 +17,8 @@ import {
   standalone: true,
   imports: [
     StatsComponent,
-    QuotationListComponent
-],
+    QuotationListComponent,
+  ],
   template: `
     <div class="w-full">
       <!-- Stats: Sticky on mobile, static on desktop -->
@@ -86,11 +85,12 @@ import {
     </div>
   `,
 })
-export class QuotationsComponent implements OnInit, OnDestroy {
+export class QuotationsComponent {
   private quotationsService = inject(QuotationsService);
   private router = inject(Router);
   private toastService = inject(ToastService);
   private dialogService = inject(DialogService);
+  private destroyRef = inject(DestroyRef);
 
   stats = signal<QuotationStats>({
     total: 0, pending: 0, conversion_rate: 0, average_value: 0,
@@ -103,16 +103,9 @@ export class QuotationsComponent implements OnInit, OnDestroy {
   searchTerm = '';
   statusFilter = '';
 
-  private destroy$ = new Subject<void>();
-
-  ngOnInit(): void {
+  constructor() {
     this.loadStats();
     this.loadQuotations();
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
   }
 
   formatCurrency(value: number): string {
@@ -124,7 +117,7 @@ export class QuotationsComponent implements OnInit, OnDestroy {
   loadStats(): void {
     this.statsLoading.set(true);
     this.quotationsService.getQuotationStats()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (s) => { this.stats.set(s); this.statsLoading.set(false); },
         error: () => { this.toastService.error('Error al cargar estadísticas'); this.statsLoading.set(false); },
@@ -141,7 +134,7 @@ export class QuotationsComponent implements OnInit, OnDestroy {
     };
 
     this.quotationsService.getQuotations(query)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           this.quotations.set(response.data);
@@ -170,7 +163,7 @@ export class QuotationsComponent implements OnInit, OnDestroy {
 
   onSend(q: Quotation): void {
     this.quotationsService.sendQuotation(q.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => { this.toastService.success('Cotización enviada'); this.refresh(); },
         error: () => this.toastService.error('Error al enviar cotización'),
@@ -179,7 +172,7 @@ export class QuotationsComponent implements OnInit, OnDestroy {
 
   onAccept(q: Quotation): void {
     this.quotationsService.acceptQuotation(q.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => { this.toastService.success('Cotización aceptada'); this.refresh(); },
         error: () => this.toastService.error('Error al aceptar cotización'),
@@ -188,7 +181,7 @@ export class QuotationsComponent implements OnInit, OnDestroy {
 
   onReject(q: Quotation): void {
     this.quotationsService.rejectQuotation(q.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => { this.toastService.success('Cotización rechazada'); this.refresh(); },
         error: () => this.toastService.error('Error al rechazar cotización'),
@@ -206,7 +199,7 @@ export class QuotationsComponent implements OnInit, OnDestroy {
     if (!confirmed) return;
 
     this.quotationsService.cancelQuotation(q.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => { this.toastService.success('Cotización cancelada'); this.refresh(); },
         error: () => this.toastService.error('Error al cancelar cotización'),
@@ -223,7 +216,7 @@ export class QuotationsComponent implements OnInit, OnDestroy {
     if (!confirmed) return;
 
     this.quotationsService.convertToOrder(q.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => { this.toastService.success('Cotización convertida a orden'); this.refresh(); },
         error: () => this.toastService.error('Error al convertir cotización'),
@@ -232,7 +225,7 @@ export class QuotationsComponent implements OnInit, OnDestroy {
 
   onDuplicate(q: Quotation): void {
     this.quotationsService.duplicateQuotation(q.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => { this.toastService.success('Cotización duplicada'); this.refresh(); },
         error: () => this.toastService.error('Error al duplicar cotización'),
@@ -250,7 +243,7 @@ export class QuotationsComponent implements OnInit, OnDestroy {
     if (!confirmed) return;
 
     this.quotationsService.deleteQuotation(q.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => { this.toastService.success('Cotización eliminada'); this.refresh(); },
         error: () => this.toastService.error('Error al eliminar cotización'),

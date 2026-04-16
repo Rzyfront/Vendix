@@ -1,16 +1,16 @@
 import {
   Component,
-  OnDestroy,
-  ChangeDetectionStrategy,
+  DestroyRef,
   inject,
   input,
   signal,
   effect,
   untracked,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
-import { Subject, takeUntil, finalize } from 'rxjs';
+import { finalize } from 'rxjs';
 import { ReservationsService } from '../../../services/reservations.service';
 import { ProviderException } from '../../../interfaces/reservation.interface';
 import {
@@ -28,16 +28,15 @@ import {
 @Component({
   selector: 'app-exceptions-manager',
   standalone: true,
-  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [FormsModule, IconComponent, SpinnerComponent, ButtonComponent, InputComponent, ToggleComponent, BadgeComponent, EmptyStateComponent],
   templateUrl: './exceptions-manager.component.html',
   styleUrls: ['./exceptions-manager.component.scss'],
 })
-export class ExceptionsManagerComponent implements OnDestroy {
+export class ExceptionsManagerComponent {
   private reservationsService = inject(ReservationsService);
   private toastService = inject(ToastService);
   private dialogService = inject(DialogService);
-  private destroy$ = new Subject<void>();
+  private destroyRef = inject(DestroyRef);
 
   readonly providerId = input.required<number>();
 
@@ -62,17 +61,12 @@ export class ExceptionsManagerComponent implements OnDestroy {
     });
   }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
   private loadExceptions(providerId: number): void {
     this.loading.set(true);
     this.reservationsService
       .getProviderExceptions(providerId)
       .pipe(
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
         finalize(() => this.loading.set(false)),
       )
       .subscribe({
@@ -112,7 +106,7 @@ export class ExceptionsManagerComponent implements OnDestroy {
     this.reservationsService
       .createProviderException(this.providerId(), dto)
       .pipe(
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
         finalize(() => this.saving.set(false)),
       )
       .subscribe({
@@ -138,7 +132,7 @@ export class ExceptionsManagerComponent implements OnDestroy {
         if (confirmed) {
           this.reservationsService
             .deleteProviderException(this.providerId(), exceptionId)
-            .pipe(takeUntil(this.destroy$))
+            .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe({
               next: () => {
                 this.toastService.success('Excepcion eliminada');

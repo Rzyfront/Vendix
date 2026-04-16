@@ -1,5 +1,4 @@
-import { Component, Input } from '@angular/core';
-
+import { Component, input } from '@angular/core';
 import { Product } from '../../interfaces';
 
 @Component({
@@ -22,5 +21,5 @@ import { Product } from '../../interfaces';
   ],
 })
 export class ProductDetailsComponent {
-  @Input() product?: Product;
+  readonly product = input<Product>();
 }

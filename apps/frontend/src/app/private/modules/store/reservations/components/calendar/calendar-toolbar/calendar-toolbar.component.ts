@@ -1,4 +1,4 @@
-import { Component, input, output, computed, ChangeDetectionStrategy } from '@angular/core';
+import { Component, input, output, computed } from '@angular/core';
 
 import { ButtonComponent, IconComponent } from '../../../../../../../shared/components';
 import { CalendarViewMode } from '../../../interfaces/reservation.interface';
@@ -9,7 +9,6 @@ import { CalendarViewMode } from '../../../interfaces/reservation.interface';
   imports: [ButtonComponent, IconComponent],
   templateUrl: './calendar-toolbar.component.html',
   styleUrls: ['./calendar-toolbar.component.scss'],
-  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class CalendarToolbarComponent {
   readonly viewMode = input.required<CalendarViewMode>();

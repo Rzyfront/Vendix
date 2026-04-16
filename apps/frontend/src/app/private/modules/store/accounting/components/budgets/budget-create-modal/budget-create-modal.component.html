@@ -1,5 +1,5 @@
 <app-modal
-  [isOpen]="isOpen"
+  [isOpen]="isOpen()"
   (isOpenChange)="isOpenChange.emit($event)"
   (cancel)="onClose()"
   title="Nuevo Presupuesto"

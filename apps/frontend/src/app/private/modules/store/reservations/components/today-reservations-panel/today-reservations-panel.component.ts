@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, computed, input, output } from '@angular/core';
+import { Component, computed, input, output } from '@angular/core';
 
 
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
@@ -17,7 +17,6 @@ const SPANISH_MONTHS = [
   imports: [CardComponent, BadgeComponent, EmptyStateComponent, IconComponent, TooltipComponent],
   templateUrl: './today-reservations-panel.component.html',
   styleUrls: ['./today-reservations-panel.component.scss'],
-  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class TodayReservationsPanelComponent {
   bookings = input<Booking[]>([]);

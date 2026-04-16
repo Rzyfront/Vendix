@@ -1,4 +1,4 @@
-import { Component, input, output, computed, signal, ChangeDetectionStrategy, OnInit, OnDestroy } from '@angular/core';
+import { Component, input, output, computed, signal, DestroyRef, inject } from '@angular/core';
 
 import { Booking } from '../../../interfaces/reservation.interface';
 
@@ -15,9 +15,10 @@ interface WeekDay {
   imports: [],
   templateUrl: './calendar-week-view.component.html',
   styleUrls: ['./calendar-week-view.component.scss'],
-  changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class CalendarWeekViewComponent implements OnInit, OnDestroy {
+export class CalendarWeekViewComponent {
+  private readonly destroyRef = inject(DestroyRef);
+
   readonly bookingsByDate = input.required<Record<string, Booking[]>>();
   readonly currentDate = input.required<Date>();
 
@@ -30,9 +31,15 @@ export class CalendarWeekViewComponent implements OnInit, OnDestroy {
   private readonly TOTAL_MINUTES = this.DAY_END - this.DAY_START; // 900 min
 
   private currentTimeSignal = signal(new Date());
-  private timerInterval: ReturnType<typeof setInterval> | null = null;
 
   readonly timeSlots: string[] = this.generateTimeSlots();
+
+  constructor() {
+    const interval = setInterval(() => {
+      this.currentTimeSignal.set(new Date());
+    }, 60_000);
+    this.destroyRef.onDestroy(() => clearInterval(interval));
+  }
 
   readonly dayNames = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
 
@@ -69,18 +76,6 @@ export class CalendarWeekViewComponent implements OnInit, OnDestroy {
     if (minutes < this.DAY_START || minutes > this.DAY_END) return -1;
     return ((minutes - this.DAY_START) / this.TOTAL_MINUTES) * 100;
   });
-
-  ngOnInit(): void {
-    this.timerInterval = setInterval(() => {
-      this.currentTimeSignal.set(new Date());
-    }, 60_000);
-  }
-
-  ngOnDestroy(): void {
-    if (this.timerInterval) {
-      clearInterval(this.timerInterval);
-    }
-  }
 
   getBookingsForDate(dateStr: string): Booking[] {
     return this.bookingsByDate()[dateStr] || [];

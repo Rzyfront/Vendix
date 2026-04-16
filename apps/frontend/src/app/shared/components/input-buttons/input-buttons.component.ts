@@ -1,4 +1,4 @@
-import { Component, Input, forwardRef, input, output } from '@angular/core';
+import { Component, forwardRef, input, output } from '@angular/core';
 
 import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
 import { FormStyleVariant } from '../../types/form.types';
@@ -22,29 +22,23 @@ export interface InputButtonOption {
   template: `
     <div [class]="'w-full ' + customWrapperClass()">
       <!-- Label -->
-      @if (label) {
-        <label
-          [class]="labelClasses"
-          class="label-with-tooltip"
-          >
-          <span>{{ label }}</span>
-          @if (tooltipText) {
-            <span
-              class="help-icon"
-              [attr.data-tooltip]="tooltipText"
-              >
+      @if (label()) {
+        <label [class]="labelClasses" class="label-with-tooltip">
+          <span>{{ label() }}</span>
+          @if (tooltipText()) {
+            <span class="help-icon" [attr.data-tooltip]="tooltipText()">
               <svg
                 class="h-4 w-4"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
                 stroke-width="2"
-                >
+              >
                 <path
                   stroke-linecap="round"
                   stroke-linejoin="round"
                   d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
+                />
               </svg>
             </span>
           }
@@ -53,29 +47,29 @@ export interface InputButtonOption {
           }
         </label>
       }
-    
+
       <!-- Buttons container -->
       <div [class]="containerClasses + ' ' + customContainerClass()">
         @for (option of options(); track option) {
           <button
             type="button"
-            [disabled]="disabled"
+            [disabled]="isDisabled()"
             (click)="selectOption(option.value)"
             [class]="getButtonClasses(option.value)"
-            >
+          >
             {{ option.label }}
           </button>
         }
       </div>
-    
+
       <!-- Helper text -->
-      @if (helperText) {
+      @if (helperText()) {
         <p class="mt-2 text-sm text-[var(--color-text-secondary)]">
-          {{ helperText }}
+          {{ helperText() }}
         </p>
       }
     </div>
-    `,
+  `,
   styles: [
     `
       :host {
@@ -138,12 +132,13 @@ export interface InputButtonOption {
   ],
 })
 export class InputButtonsComponent implements ControlValueAccessor {
-  @Input() label?: string;
+  readonly label = input<string>('');
   readonly options = input<InputButtonOption[]>([]);
-  @Input() disabled = false;
+  readonly disabled = input<boolean>(false);
+  private disabledState = false;
+  readonly helperText = input<string>('');
+  readonly tooltipText = input<string>('');
   readonly required = input(false);
-  @Input() helperText?: string;
-  @Input() tooltipText?: string;
   readonly styleVariant = input<FormStyleVariant>('modern');
   readonly customWrapperClass = input('');
   readonly customContainerClass = input('');
@@ -168,11 +163,15 @@ export class InputButtonsComponent implements ControlValueAccessor {
   }
 
   setDisabledState(isDisabled: boolean): void {
-    this.disabled = isDisabled;
+    this.disabledState = isDisabled;
+  }
+
+  isDisabled(): boolean {
+    return this.disabled() || this.disabledState;
   }
 
   selectOption(optionValue: string): void {
-    if (this.disabled) return;
+    if (this.isDisabled()) return;
     this.value = optionValue;
     this.onChange(optionValue);
     this.onTouched();

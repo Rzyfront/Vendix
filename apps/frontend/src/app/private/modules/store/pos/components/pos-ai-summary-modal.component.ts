@@ -6,8 +6,7 @@ import {
   computed,
   effect,
   untracked,
-  OnDestroy,
-  ChangeDetectionStrategy,
+  DestroyRef,
   inject,
   ViewChild,
   ElementRef,
@@ -29,7 +28,6 @@ import {
 @Component({
   selector: 'app-pos-ai-summary-modal',
   standalone: true,
-  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
     ModalComponent,
     ButtonComponent,
@@ -258,7 +256,7 @@ import {
     `,
   ],
 })
-export class PosAISummaryModalComponent implements OnDestroy, AfterViewChecked {
+export class PosAISummaryModalComponent implements AfterViewChecked {
   @ViewChild('scrollContainer') private scrollContainer?: ElementRef<HTMLElement>;
   private shouldAutoScroll = false;
   readonly isOpen = input<boolean>(false);
@@ -272,6 +270,7 @@ export class PosAISummaryModalComponent implements OnDestroy, AfterViewChecked {
 
   private subscription: Subscription | null = null;
   private readonly cashRegisterService = inject(PosCashRegisterService);
+  private readonly destroyRef = inject(DestroyRef);
 
   constructor() {
     effect(() => {
@@ -281,6 +280,8 @@ export class PosAISummaryModalComponent implements OnDestroy, AfterViewChecked {
         untracked(() => this.startStream(sid));
       }
     });
+
+    this.destroyRef.onDestroy(() => this.cleanup());
   }
 
   ngAfterViewChecked(): void {
@@ -289,10 +290,6 @@ export class PosAISummaryModalComponent implements OnDestroy, AfterViewChecked {
       el.scrollTop = el.scrollHeight;
       this.shouldAutoScroll = false;
     }
-  }
-
-  ngOnDestroy(): void {
-    this.cleanup();
   }
 
   retry(): void {

@@ -11,6 +11,18 @@ metadata:
 Vendix completó la migración a Angular 20 Zoneless + Signals en sus 529 componentes.
 Este skill documenta los patrones adoptados y los antipatrones a evitar.
 
+**Auditoría automatizada** (ejecutar en CI para garantizar 0 regresiones):
+
+```bash
+# Todos deben devolver 0
+grep -rln "@Input(\|@Output(" apps/frontend/src/app --include="*.ts" | wc -l
+grep -rln "EventEmitter" apps/frontend/src/app --include="*.ts" | wc -l
+grep -rln "NgZone" apps/frontend/src/app --include="*.ts" | grep -v app.config.ts | wc -l
+grep -rln "markForCheck\|detectChanges" apps/frontend/src/app --include="*.ts" | wc -l
+grep -rlE "\| async" apps/frontend/src/app --include="*.html" | wc -l
+grep -rlE "\*ngIf|\*ngFor" apps/frontend/src/app --include="*.html" --include="*.ts" | wc -l
+```
+
 ---
 
 ## 1. Setup Zoneless (`app.config.ts`)

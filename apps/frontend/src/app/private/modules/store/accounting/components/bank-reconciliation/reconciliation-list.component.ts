@@ -1,5 +1,5 @@
-import { Component, OnInit, inject, signal, computed } from '@angular/core';
-import { CommonModule, CurrencyPipe, DatePipe } from '@angular/common';
+import { Component, inject, signal, computed } from '@angular/core';
+import { CurrencyPipe, DatePipe } from '@angular/common';
 import { Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import {
@@ -25,7 +25,6 @@ import {
   selector: 'vendix-reconciliation-list',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ButtonComponent,
     CardComponent,
@@ -330,7 +329,7 @@ import {
     </div>
   `,
 })
-export class ReconciliationListComponent implements OnInit {
+export class ReconciliationListComponent {
   private reconciliationService = inject(BankReconciliationService);
   private dialogService = inject(DialogService);
   private toastService = inject(ToastService);
@@ -382,7 +381,7 @@ export class ReconciliationListComponent implements OnInit {
       })),
   );
 
-  ngOnInit(): void {
+  constructor() {
     this.loadData();
   }
 

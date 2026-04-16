@@ -1,8 +1,9 @@
-import { Component, inject, signal, OnInit, OnDestroy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject, signal, DestroyRef } from '@angular/core';
+import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Subject } from 'rxjs';
-import { takeUntil, take, debounceTime, distinctUntilChanged, switchMap } from 'rxjs/operators';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { debounceTime, distinctUntilChanged, switchMap } from 'rxjs/operators';
 
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
 import { ButtonComponent } from '../../../../shared/components/button/button.component';
@@ -24,13 +25,13 @@ type TabKey = 'consents' | 'exports' | 'anonymization';
   selector: 'app-habeas-data',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     StatsComponent,
     ButtonComponent,
     IconComponent,
     ToggleComponent,
-  ],
+    DatePipe
+],
   template: `
     <div class="w-full">
       <!-- Stats -->
@@ -224,7 +225,7 @@ type TabKey = 'consents' | 'exports' | 'anonymization';
                 <label class="block text-sm font-medium text-text-primary mb-1">Buscar usuario</label>
                 <input
                   type="text"
-                  [(ngModel)]="searchQuery"
+                  [ngModel]="searchQuery()"
                   (ngModelChange)="onSearchQueryChange($event)"
                   placeholder="Nombre, email o documento..."
                 class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm
@@ -266,7 +267,7 @@ type TabKey = 'consents' | 'exports' | 'anonymization';
                   }
                 </div>
               }
-              @if (!searchLoading() && searchQuery.length >= 2 && searchResults().length === 0) {
+              @if (!searchLoading() && searchQuery().length >= 2 && searchResults().length === 0) {
                 <div
                   class="py-6 flex flex-col items-center rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600 mb-6">
                   <app-icon name="search" [size]="24" class="text-gray-400 mb-2"></app-icon>
@@ -282,7 +283,8 @@ type TabKey = 'consents' | 'exports' | 'anonymization';
                   <div class="mb-3">
                     <label class="block text-sm font-medium text-red-700 dark:text-red-400 mb-1">Motivo (obligatorio)</label>
                     <textarea
-                      [(ngModel)]="anonReason"
+                      [ngModel]="anonReason()"
+                      (ngModelChange)="anonReason.set($event)"
                       rows="2"
                   class="w-full rounded-lg border border-red-300 dark:border-red-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm
                          text-text-primary placeholder-text-secondary focus:border-red-500
@@ -293,7 +295,8 @@ type TabKey = 'consents' | 'exports' | 'anonymization';
                   <div class="flex items-center gap-2 mb-3">
                     <input
                       type="checkbox"
-                      [(ngModel)]="anonConfirm1"
+                      [ngModel]="anonConfirm1()"
+                      (ngModelChange)="anonConfirm1.set($event)"
                       id="anonConfirm1"
                       class="rounded border-red-300 text-red-600 focus:ring-red-500"
                       />
@@ -304,7 +307,8 @@ type TabKey = 'consents' | 'exports' | 'anonymization';
                   <div class="flex items-center gap-2 mb-4">
                     <input
                       type="checkbox"
-                      [(ngModel)]="anonConfirm2"
+                      [ngModel]="anonConfirm2()"
+                      (ngModelChange)="anonConfirm2.set($event)"
                       id="anonConfirm2"
                       class="rounded border-red-300 text-red-600 focus:ring-red-500"
                       />
@@ -324,7 +328,7 @@ type TabKey = 'consents' | 'exports' | 'anonymization';
                       variant="danger"
                       size="sm"
                       (clicked)="onRequestAnonymization()"
-                      [disabled]="!anonConfirm1 || !anonConfirm2 || !anonReason.trim() || anonLoading()"
+                      [disabled]="!anonConfirm1() || !anonConfirm2() || !anonReason().trim() || anonLoading()"
                       [loading]="anonLoading()"
                       >
                       <app-icon name="user-x" [size]="14" slot="icon"></app-icon>
@@ -341,11 +345,11 @@ type TabKey = 'consents' | 'exports' | 'anonymization';
     </div>
     `,
 })
-export class HabeasDataComponent implements OnInit, OnDestroy {
+export class HabeasDataComponent {
   private habeasDataService = inject(HabeasDataService);
   private authFacade = inject(AuthFacade);
   private toastService = inject(ToastService);
-  private destroy$ = new Subject<void>();
+  private destroyRef = inject(DestroyRef);
   private searchSubject$ = new Subject<string>();
 
   private userId = 0;
@@ -366,13 +370,13 @@ export class HabeasDataComponent implements OnInit, OnDestroy {
   exports = signal<ExportRequest[]>([]);
 
   // Anonymization
-  searchQuery = '';
+  searchQuery = signal('');
   searchLoading = signal(false);
   searchResults = signal<SearchUser[]>([]);
   selectedUserForAnon = signal<SearchUser | null>(null);
-  anonReason = '';
-  anonConfirm1 = false;
-  anonConfirm2 = false;
+  anonReason = signal('');
+  anonConfirm1 = signal(false);
+  anonConfirm2 = signal(false);
   anonLoading = signal(false);
 
   tabs: { key: TabKey; label: string }[] = [
@@ -388,19 +392,17 @@ export class HabeasDataComponent implements OnInit, OnDestroy {
     { key: 'profiling', label: 'Perfilamiento', description: 'Creacion de perfiles de consumo y preferencias' },
   ];
 
-  ngOnInit(): void {
-    this.authFacade.userId$.pipe(take(1)).subscribe((id) => {
-      this.userId = id || 0;
-      this.loadStats();
-      this.loadConsents();
-      this.loadExports();
-    });
+  constructor() {
+    this.userId = this.authFacade.userId() || 0;
+    this.loadStats();
+    this.loadConsents();
+    this.loadExports();
 
     // Debounced search
     this.searchSubject$.pipe(
       debounceTime(400),
       distinctUntilChanged(),
-      takeUntil(this.destroy$),
+      takeUntilDestroyed(this.destroyRef),
     ).subscribe((query) => {
       if (query.length < 2) {
         this.searchResults.set([]);
@@ -411,17 +413,12 @@ export class HabeasDataComponent implements OnInit, OnDestroy {
     });
   }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
   // ─── Data Loading ───
 
   private loadStats(): void {
     this.statsLoading.set(true);
     this.habeasDataService.getStats()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.stats.set(res.data);
@@ -435,7 +432,7 @@ export class HabeasDataComponent implements OnInit, OnDestroy {
     if (!this.userId) return;
     this.consentsLoading.set(true);
     this.habeasDataService.getUserConsents(this.userId)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.consents.set(res.data || []);
@@ -448,7 +445,7 @@ export class HabeasDataComponent implements OnInit, OnDestroy {
   private loadExports(): void {
     this.exportsLoading.set(true);
     this.habeasDataService.getMyExports()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.exports.set(res.data || []);
@@ -469,7 +466,7 @@ export class HabeasDataComponent implements OnInit, OnDestroy {
     if (!this.userId) return;
     this.consentSaving.set(true);
     this.habeasDataService.updateConsents(this.userId, [{ consent_type: type, granted }])
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           const updated = this.consents().map((c) =>
@@ -500,7 +497,7 @@ export class HabeasDataComponent implements OnInit, OnDestroy {
     if (!this.userId) return;
     this.exportRequesting.set(true);
     this.habeasDataService.requestExport(this.userId)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.exportRequesting.set(false);
@@ -517,7 +514,7 @@ export class HabeasDataComponent implements OnInit, OnDestroy {
 
   onDownloadExport(requestId: number): void {
     this.habeasDataService.getExportDownloadUrl(requestId)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           const url = res.data?.download_url;
@@ -574,6 +571,7 @@ export class HabeasDataComponent implements OnInit, OnDestroy {
   // ─── Anonymization ───
 
   onSearchQueryChange(query: string): void {
+    this.searchQuery.set(query);
     if (query.length >= 2) {
       this.searchLoading.set(true);
     }
@@ -582,7 +580,7 @@ export class HabeasDataComponent implements OnInit, OnDestroy {
 
   private performSearch(query: string): void {
     this.habeasDataService.searchUsers(query)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.searchResults.set(res.data || []);
@@ -597,33 +595,33 @@ export class HabeasDataComponent implements OnInit, OnDestroy {
 
   onSelectUserForAnon(user: SearchUser): void {
     this.selectedUserForAnon.set(user);
-    this.anonReason = '';
-    this.anonConfirm1 = false;
-    this.anonConfirm2 = false;
+    this.anonReason.set('');
+    this.anonConfirm1.set(false);
+    this.anonConfirm2.set(false);
   }
 
   onCancelAnon(): void {
     this.selectedUserForAnon.set(null);
-    this.anonReason = '';
-    this.anonConfirm1 = false;
-    this.anonConfirm2 = false;
+    this.anonReason.set('');
+    this.anonConfirm1.set(false);
+    this.anonConfirm2.set(false);
   }
 
   onRequestAnonymization(): void {
     const user = this.selectedUserForAnon();
-    if (!user || !this.anonReason.trim() || !this.anonConfirm1 || !this.anonConfirm2) return;
+    if (!user || !this.anonReason().trim() || !this.anonConfirm1() || !this.anonConfirm2()) return;
 
     this.anonLoading.set(true);
 
     // Step 1: Create request
-    this.habeasDataService.requestAnonymization(user.id, this.anonReason.trim())
+    this.habeasDataService.requestAnonymization(user.id, this.anonReason().trim())
       .pipe(
         switchMap((res) => {
           const requestId = res.data?.request_id;
           // Step 2: Confirm immediately (double confirmation done via UI)
           return this.habeasDataService.confirmAnonymization(requestId);
         }),
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
       )
       .subscribe({
         next: () => {
@@ -631,7 +629,7 @@ export class HabeasDataComponent implements OnInit, OnDestroy {
           this.toastService.show({ variant: 'success', description: 'Usuario anonimizado exitosamente' });
           this.onCancelAnon();
           this.searchResults.set([]);
-          this.searchQuery = '';
+          this.searchQuery.set('');
           this.loadStats();
         },
         error: () => {

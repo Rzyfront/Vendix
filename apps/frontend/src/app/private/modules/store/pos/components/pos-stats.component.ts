@@ -1,4 +1,4 @@
-import { Component, Input, inject } from '@angular/core';
+import { Component, input, inject } from '@angular/core';
 
 
 // Import shared components
@@ -16,7 +16,7 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
       <!-- Productos en Carrito -->
       <app-stats
         title="Productos"
-        [value]="cartState?.items?.length || 0"
+        [value]="cartState()?.items?.length || 0"
         smallText="En carrito"
         iconName="package"
         iconBgColor="bg-primary/10"
@@ -56,13 +56,13 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
   `,
 })
 export class PosStatsComponent {
-  @Input() cartState: CartState | null = null;
+  readonly cartState = input<CartState | null>(null);
 
   private currencyService = inject(CurrencyFormatService);
 
   getTotalQuantity(): number {
     return (
-      this.cartState?.items?.reduce(
+      this.cartState()?.items?.reduce(
         (total, item) => total + item.quantity,
         0,
       ) || 0
@@ -70,11 +70,11 @@ export class PosStatsComponent {
   }
 
   getSubtotal(): number {
-    return this.cartState?.summary?.subtotal || 0;
+    return this.cartState()?.summary?.subtotal || 0;
   }
 
   getTotalAmount(): number {
-    return this.cartState?.summary?.total || 0;
+    return this.cartState()?.summary?.total || 0;
   }
 
   formatCurrency(value: number): string {

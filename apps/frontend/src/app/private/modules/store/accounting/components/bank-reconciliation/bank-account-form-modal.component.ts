@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter, inject, signal, effect, OnInit } from '@angular/core';
+import { Component, inject, signal, effect, input, output } from '@angular/core';
 
 import { FormsModule } from '@angular/forms';
 import {
@@ -27,11 +27,11 @@ import { BankAccount, ChartAccount } from '../../interfaces/accounting.interface
 ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'md'"
-      [title]="editAccount ? 'Editar Cuenta Bancaria' : 'Nueva Cuenta Bancaria'"
+      [title]="editAccount() ? 'Editar Cuenta Bancaria' : 'Nueva Cuenta Bancaria'"
     >
       <div class="space-y-4">
         <!-- Name -->
@@ -93,17 +93,17 @@ import { BankAccount, ChartAccount } from '../../interfaces/accounting.interface
         <app-button variant="outline" (clicked)="onCancel()">Cancelar</app-button>
         <app-button variant="primary" (clicked)="onSave()" [disabled]="saving()">
           <app-icon name="save" [size]="16" slot="icon"></app-icon>
-          {{ editAccount ? 'Guardar Cambios' : 'Crear Cuenta' }}
+          {{ editAccount() ? 'Guardar Cambios' : 'Crear Cuenta' }}
         </app-button>
       </div>
     </app-modal>
   `,
 })
-export class BankAccountFormModalComponent implements OnInit {
-  @Input() isOpen = false;
-  @Input() editAccount: BankAccount | null = null;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() saved = new EventEmitter<void>();
+export class BankAccountFormModalComponent {
+  readonly isOpen = input(false);
+  readonly editAccount = input<BankAccount | null>(null);
+  readonly isOpenChange = output<boolean>();
+  readonly saved = output<void>();
 
   private reconciliationService = inject(BankReconciliationService);
   private accountingService = inject(AccountingService);
@@ -133,23 +133,21 @@ export class BankAccountFormModalComponent implements OnInit {
     effect(() => {
       // This runs when isOpen changes through Angular's change detection
     });
-  }
-
-  ngOnInit(): void {
     this.loadChartAccounts();
   }
 
   ngOnChanges(): void {
-    if (this.isOpen) {
-      if (this.editAccount) {
+    if (this.isOpen()) {
+      const acct = this.editAccount();
+      if (acct) {
         this.form = {
-          name: this.editAccount.name || '',
-          bank_name: this.editAccount.bank_name || '',
-          bank_code: this.editAccount.bank_code || '',
-          account_number: this.editAccount.account_number || '',
-          currency: this.editAccount.currency || 'COP',
-          opening_balance: this.editAccount.opening_balance || 0,
-          chart_account_id: this.editAccount.chart_account_id || null,
+          name: acct.name || '',
+          bank_name: acct.bank_name || '',
+          bank_code: acct.bank_code || '',
+          account_number: acct.account_number || '',
+          currency: acct.currency || 'COP',
+          opening_balance: acct.opening_balance || 0,
+          chart_account_id: acct.chart_account_id || null,
         };
       } else {
         this.resetForm();
@@ -196,21 +194,16 @@ export class BankAccountFormModalComponent implements OnInit {
     if (!dto['chart_account_id']) delete dto['chart_account_id'];
     if (!dto['bank_code']) delete dto['bank_code'];
 
-    const request$ = this.editAccount
-      ? this.reconciliationService.updateBankAccount(this.editAccount.id, dto)
+    const request$ = this.editAccount()
+      ? this.reconciliationService.updateBankAccount(this.editAccount()!.id, dto)
       : this.reconciliationService.createBankAccount(dto);
 
     request$.subscribe({
       next: () => {
         this.toastService.success(
-          this.editAccount ? 'Cuenta actualizada' : 'Cuenta creada exitosamente',
+          this.editAccount() ? 'Cuenta actualizada' : 'Cuenta creada exitosamente',
         );
         this.saving.set(false);
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
         this.saved.emit();
       },
       error: () => {
@@ -222,7 +215,6 @@ export class BankAccountFormModalComponent implements OnInit {
 
   onCancel(): void {
     this.isOpenChange.emit(false);
-    this.resetForm();
   }
 
   private resetForm(): void {

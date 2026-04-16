@@ -6,7 +6,6 @@ import {
   signal,
   computed,
   effect,
-  ChangeDetectionStrategy,
 } from '@angular/core';
 
 import { FormsModule } from '@angular/forms';
@@ -25,7 +24,6 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
     ModalComponent,
     ButtonComponent
 ],
-  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <app-modal
       [isOpen]="isOpen()"

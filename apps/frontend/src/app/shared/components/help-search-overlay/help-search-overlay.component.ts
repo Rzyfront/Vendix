@@ -1,9 +1,9 @@
 import {
   Component,
+  DestroyRef,
   ElementRef,
   HostListener,
   inject,
-  OnDestroy,
   viewChild
 } from '@angular/core';
 
@@ -302,9 +302,10 @@ import { HelpArticle } from '../../../private/modules/store/help/models/help-art
     }
   `],
 })
-export class HelpSearchOverlayComponent implements OnDestroy {
+export class HelpSearchOverlayComponent {
   private helpCenterService = inject(HelpCenterService);
   private router = inject(Router);
+  private destroyRef = inject(DestroyRef);
   private destroy$ = new Subject<void>();
   private searchSubject$ = new Subject<string>();
 
@@ -332,6 +333,11 @@ export class HelpSearchOverlayComponent implements OnDestroy {
           this.hasSearched = false;
         }
       });
+
+    this.destroyRef.onDestroy(() => {
+      this.destroy$.next();
+      this.destroy$.complete();
+    });
   }
 
   @HostListener('document:keydown', ['$event'])
@@ -420,8 +426,4 @@ export class HelpSearchOverlayComponent implements OnDestroy {
       });
   }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
 }

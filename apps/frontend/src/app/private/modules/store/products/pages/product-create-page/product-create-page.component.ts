@@ -1,13 +1,11 @@
 import {
   Component,
-  OnInit,
   computed,
   signal,
   inject,
-  ChangeDetectorRef,
 } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { CommonModule } from '@angular/common';
+import { DatePipe, DecimalPipe, KeyValuePipe } from '@angular/common';
 import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { map } from 'rxjs/operators';
 import { RouterModule, ActivatedRoute, Router, Params } from '@angular/router';
@@ -96,7 +94,6 @@ interface GeneratedVariant {
   selector: 'app-product-create-page',
   standalone: true,
   imports: [
-    CommonModule,
     RouterModule,
     ReactiveFormsModule,
     FormsModule,
@@ -117,6 +114,9 @@ interface GeneratedVariant {
     CurrencyPipe,
     BadgeComponent,
     TooltipComponent,
+    DatePipe,
+    DecimalPipe,
+    KeyValuePipe,
   ],
   templateUrl: './product-create-page.component.html',
   styles: [
@@ -327,7 +327,7 @@ interface GeneratedVariant {
     `,
   ],
 })
-export class ProductCreatePageComponent implements OnInit {
+export class ProductCreatePageComponent {
   private fb = inject(FormBuilder);
   private productsService = inject(ProductsService);
   private categoriesService = inject(CategoriesService);
@@ -339,7 +339,6 @@ export class ProductCreatePageComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private dialogService = inject(DialogService);
   private currencyService = inject(CurrencyFormatService);
-  private cdr = inject(ChangeDetectorRef);
   private promotionsService = inject(PromotionsService);
   private reservationsService = inject(ReservationsService);
   private http = inject(HttpClient);
@@ -451,7 +450,6 @@ export class ProductCreatePageComponent implements OnInit {
         preconsultation_template_id: null,
       });
     }
-    this.cdr.detectChanges();
   }
 
   // Variants State
@@ -506,9 +504,7 @@ export class ProductCreatePageComponent implements OnInit {
     this.productForm.statusChanges
       .pipe(takeUntilDestroyed())
       .subscribe(() => this.formUpdateTrigger.update((v) => v + 1));
-  }
 
-  ngOnInit(): void {
     // Asegurar que la moneda esté cargada
     this.currencyService.loadCurrency();
     this.loadCategoriesAndBrands();
@@ -1498,7 +1494,6 @@ export class ProductCreatePageComponent implements OnInit {
       // Show loading feedback
       this.isLoadingImages = true;
       this.loadingProgress = 0;
-      this.cdr.detectChanges();
 
       // Process images sequentially to avoid race conditions
       this.processImagesSequentially(filesToProcess, 0).then(() => {
@@ -1507,7 +1502,6 @@ export class ProductCreatePageComponent implements OnInit {
         if (this.imageUrls.length === 1) {
           this.activeImageIndex = 0;
         }
-        this.cdr.detectChanges();
         this.toastService.success(
           `${filesToProcess.length} imagen(es) cargada(s) correctamente`,
         );
@@ -1537,7 +1531,6 @@ export class ProductCreatePageComponent implements OnInit {
 
         // Update progress
         this.loadingProgress = Math.round(((index + 1) / files.length) * 100);
-        this.cdr.detectChanges();
 
         // Process next image
         this.processImagesSequentially(files, index + 1).then(resolve);
@@ -1998,7 +1991,6 @@ export class ProductCreatePageComponent implements OnInit {
           this.productForm
             .get('state')
             ?.setValue(previousState, { emitEvent: false });
-          this.cdr.detectChanges();
         }
       });
   }

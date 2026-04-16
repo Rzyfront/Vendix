@@ -1,4 +1,4 @@
-import { Component, EventEmitter, Input, Output, inject, ViewChild, TemplateRef, AfterViewInit } from '@angular/core';
+import { Component, inject, viewChild, input, output, effect, TemplateRef } from '@angular/core';
 
 import { FormsModule } from '@angular/forms';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
@@ -42,30 +42,30 @@ import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
   templateUrl: './reservation-list.component.html',
   styleUrls: ['./reservation-list.component.scss'],
 })
-export class ReservationListComponent implements AfterViewInit {
+export class ReservationListComponent {
   private printService = inject(ReservationPrintService);
 
-  @ViewChild('serviceTemplate') serviceTemplate!: TemplateRef<any>;
+  readonly serviceTemplate = viewChild<TemplateRef<any>>('serviceTemplate');
 
-  @Input() bookings: Booking[] = [];
-  @Input() loading = false;
-  @Input() totalItems = 0;
-  @Input() page = 1;
-  @Input() limit = 10;
+  readonly bookings = input<Booking[]>([]);
+  readonly loading = input(false);
+  readonly totalItems = input(0);
+  readonly page = input(1);
+  readonly limit = input(10);
 
-  @Output() search = new EventEmitter<string>();
-  @Output() pageChange = new EventEmitter<number>();
-  @Output() statusFilter = new EventEmitter<BookingStatus | ''>();
-  @Output() create = new EventEmitter<void>();
-  @Output() confirm = new EventEmitter<Booking>();
-  @Output() cancel = new EventEmitter<Booking>();
-  @Output() complete = new EventEmitter<Booking>();
-  @Output() noShow = new EventEmitter<Booking>();
-  @Output() reschedule = new EventEmitter<Booking>();
-  @Output() attendConsultation = new EventEmitter<Booking>();
+  readonly search = output<string>();
+  readonly pageChange = output<number>();
+  readonly statusFilter = output<BookingStatus | ''>();
+  readonly create = output<void>();
+  readonly confirm = output<Booking>();
+  readonly cancel = output<Booking>();
+  readonly complete = output<Booking>();
+  readonly noShow = output<Booking>();
+  readonly reschedule = output<Booking>();
+  readonly attendConsultation = output<Booking>();
 
   get totalPages(): number {
-    return Math.ceil(this.totalItems / this.limit);
+    return Math.ceil(this.totalItems() / this.limit());
   }
 
   // Filter configuration
@@ -272,13 +272,14 @@ export class ReservationListComponent implements AfterViewInit {
     },
   ];
 
-  ngAfterViewInit(): void {
-    if (this.serviceTemplate) {
-      const productCol = this.columns.find((col) => col.key === 'product');
-      if (productCol) {
-        productCol.template = this.serviceTemplate;
+  constructor() {
+    effect(() => {
+      const tpl = this.serviceTemplate();
+      if (tpl) {
+        const productCol = this.columns.find((col) => col.key === 'product');
+        if (productCol) productCol.template = tpl;
       }
-    }
+    });
   }
 
   onSearch(query: string): void {
@@ -303,11 +304,6 @@ export class ReservationListComponent implements AfterViewInit {
 
   onActionClick(action: string): void {
     if (action === 'create') {
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
-      // TODO: The 'emit' function requires a mandatory void argument
       this.create.emit();
     }
   }

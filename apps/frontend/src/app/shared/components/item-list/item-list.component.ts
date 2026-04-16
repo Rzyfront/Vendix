@@ -1,5 +1,5 @@
-import { Component, Input, input, output } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input, output } from '@angular/core';
+import { NgClass, NgStyle } from '@angular/common';
 import { IconComponent } from '../icon/icon.component';
 import {
   ItemListCardConfig,
@@ -10,14 +10,14 @@ import {
 @Component({
   selector: 'app-item-list',
   standalone: true,
-  imports: [CommonModule, IconComponent],
+  imports: [NgClass, NgStyle, IconComponent],
   templateUrl: './item-list.component.html',
   styleUrl: './item-list.component.scss',
 })
 export class ItemListComponent {
-  @Input() data: any[] = [];
-  @Input() cardConfig!: ItemListCardConfig;
-  @Input() actions?: TableAction[];
+  readonly data = input<any[]>([]);
+  readonly cardConfig = input.required<ItemListCardConfig>();
+  readonly actions = input<TableAction[]>();
   readonly loading = input(false);
   readonly emptyMessage = input('No hay datos disponibles');
   readonly emptyIcon = input('inbox');
@@ -27,114 +27,92 @@ export class ItemListComponent {
   readonly actionClick = output<{
     action: TableAction;
     item: any;
-}>();
+  }>();
 
   activeMenuIndex: number | null = null;
 
-  /**
-   * Get nested value from object using dot notation
-   */
   getNestedValue(obj: any, path: string): any {
     if (!path || !obj) return obj;
-
     const keys = path.split('.');
     let current = obj;
-
     for (const key of keys) {
       if (current === null || current === undefined) {
         return undefined;
       }
       current = current[key];
     }
-
     return current;
   }
 
-  /**
-   * Get the title for a card item
-   */
   getTitle(item: any): string {
-    if (this.cardConfig.titleTransform) {
-      return this.cardConfig.titleTransform(item);
+    const config = this.cardConfig();
+    if (config.titleTransform) {
+      return config.titleTransform(item);
     }
-    return this.getNestedValue(item, this.cardConfig.titleKey) || '';
-  }
-
-  /**
-   * Get the subtitle for a card item
-   */
-  getSubtitle(item: any): string {
-    if (this.cardConfig.subtitleTransform) {
-      return this.cardConfig.subtitleTransform(item);
-    }
-    if (this.cardConfig.subtitleKey) {
-      return this.getNestedValue(item, this.cardConfig.subtitleKey) || '';
+    const key = config.titleKey;
+    if (key) {
+      return this.getNestedValue(item, key) || '';
     }
     return '';
   }
 
-  /**
-   * Check if avatar should be displayed
-   * Avatar is optional - only shown if avatarKey or avatarFallbackIcon is configured
-   */
+  getSubtitle(item: any): string {
+    const config = this.cardConfig();
+    if (config.subtitleTransform) {
+      return config.subtitleTransform(item);
+    }
+    const key = config.subtitleKey;
+    if (key) {
+      return this.getNestedValue(item, key) || '';
+    }
+    return '';
+  }
+
   showAvatar(): boolean {
-    return !!(this.cardConfig.avatarKey || this.cardConfig.avatarFallbackIcon);
+    const config = this.cardConfig();
+    return !!(config.avatarKey || config.avatarFallbackIcon);
   }
 
-  /**
-   * Get avatar URL for a card item
-   */
   getAvatarUrl(item: any): string | null {
-    if (this.cardConfig.avatarKey) {
-      return this.getNestedValue(item, this.cardConfig.avatarKey) || null;
+    const key = this.cardConfig().avatarKey;
+    if (key) {
+      return this.getNestedValue(item, key) || null;
     }
     return null;
   }
 
-  /**
-   * Get badge value for a card item
-   */
   getBadgeValue(item: any): any {
-    if (this.cardConfig.badgeKey) {
-      return this.getNestedValue(item, this.cardConfig.badgeKey);
+    const key = this.cardConfig().badgeKey;
+    if (key) {
+      return this.getNestedValue(item, key);
     }
     return null;
   }
 
-  /**
-   * Get formatted badge text
-   */
   getBadgeText(item: any): string {
     const value = this.getBadgeValue(item);
     if (value === null || value === undefined) return '';
-
-    if (this.cardConfig.badgeTransform) {
-      return this.cardConfig.badgeTransform(value);
+    const transform = this.cardConfig().badgeTransform;
+    if (transform) {
+      return transform(value);
     }
     return String(value);
   }
 
-  /**
-   * Get badge CSS classes based on configuration
-   */
   getBadgeClasses(item: any): string {
     const value = this.getBadgeValue(item);
-    if (!this.cardConfig.badgeConfig) {
+    const config = this.cardConfig();
+    const badgeConfig = config.badgeConfig;
+    if (!badgeConfig) {
       return 'status-badge status-badge-default status-badge-sm';
     }
-
     const baseClass = 'status-badge';
-    const sizeClass = `status-badge-${this.cardConfig.badgeConfig.size || 'sm'}`;
-
-    if (this.cardConfig.badgeConfig.type === 'status') {
+    const sizeClass = `status-badge-${badgeConfig.size || 'sm'}`;
+    if (badgeConfig.type === 'status') {
       let statusValue = String(value)?.toLowerCase() || 'default';
-
-      // Handle boolean values
       if (typeof value === 'boolean') {
         statusValue = value ? 'active' : 'inactive';
       }
-
-      // Map common status variations
       const statusMap: Record<string, string> = {
         active: 'active',
         inactive: 'inactive',
@@ -147,71 +125,51 @@ export class ItemListComponent {
         error: 'error',
         warning: 'warning',
       };
-
       const colorClass = `status-${statusMap[statusValue] || 'default'}`;
       return `${baseClass} ${colorClass} ${sizeClass}`;
     }
-
     return `${baseClass} ${sizeClass}`;
   }
 
-  /**
-   * Get inline styles for custom badges (hex colors)
-   */
   getBadgeStyle(item: any): { [key: string]: string } {
-    if (this.cardConfig.badgeConfig?.type === 'custom' && this.cardConfig.badgeConfig.colorMap) {
-      const value = this.getBadgeValue(item);
-      const strValue = String(value);
-
-      // Check for direct match or boolean match (like getBadgeClasses)
-      let lookupValue = strValue;
-      if (typeof value === 'boolean') {
-        lookupValue = value ? 'active' : 'inactive';
+    const config = this.cardConfig();
+    const badgeConfig = config.badgeConfig;
+    if (!badgeConfig?.colorMap) {
+      return {};
+    }
+    const value = this.getBadgeValue(item);
+    const strValue = String(value);
+    let lookupValue = strValue;
+    if (typeof value === 'boolean') {
+      lookupValue = value ? 'active' : 'inactive';
+    }
+    let color = badgeConfig.colorMap[lookupValue];
+    if (!color) {
+      color = badgeConfig.colorMap[lookupValue.toLowerCase()];
+    }
+    if (color) {
+      let bg = color;
+      if (color.startsWith('#') && color.length === 7) {
+        bg = `${color}26`;
       }
-
-      // Try exact match first, then lowercase
-      let color = this.cardConfig.badgeConfig.colorMap[lookupValue];
-      if (!color) {
-        color = this.cardConfig.badgeConfig.colorMap[lookupValue.toLowerCase()];
-      }
-
-      if (color) {
-        // Assume hex color. Create a tint for background.
-        // If it's not hex, this might fail, but config usually has hex.
-        // We simulate Tailwind's bg-opacity-10 by a simple hex manipulation if possible,
-        // or just use the color as text and a default light bg if we can't parse.
-        // Simple hex opacity: add '26' for ~15% opacity
-        let bg = color;
-        if (color.startsWith('#') && color.length === 7) {
-          bg = `${color}26`;
-        }
-
-        return {
-          'background-color': bg,
-          'color': color,
-          'border': `1px solid ${color}40`
-        };
-      }
+      return {
+        'background-color': bg,
+        color: color,
+        border: `1px solid ${color}40`,
+      };
     }
     return {};
   }
 
-  /**
-   * Get detail field value
-   */
   getDetailValue(item: any, field: any): string {
     const value = this.getNestedValue(item, field.key);
     if (value === null || value === undefined) return '-';
-
     if (field.transform) {
       return field.transform(value, item);
     }
     return String(value);
   }
 
-  /**
-   * Get dynamic info icon for detail field
-   */
   getInfoIcon(item: any, field: any): string | undefined {
     if (field.infoIconTransform) {
       const value = this.getNestedValue(item, field.key);
@@ -220,9 +178,6 @@ export class ItemListComponent {
     return field.infoIcon;
   }
 
-  /**
-   * Get dynamic info icon variant (color) for detail field
-   */
   getInfoIconVariant(item: any, field: any): string | undefined {
     if (field.infoIconVariantTransform) {
       const value = this.getNestedValue(item, field.key);
@@ -231,84 +186,56 @@ export class ItemListComponent {
     return field.infoIconVariant;
   }
 
-  /**
-   * Get footer value for a card item
-   */
   getFooterValue(item: any): string {
-    if (!this.cardConfig.footerKey) return '';
-
-    const value = this.getNestedValue(item, this.cardConfig.footerKey);
+    const config = this.cardConfig();
+    const footerKey = config.footerKey;
+    if (!footerKey) return '';
+    const value = this.getNestedValue(item, footerKey);
     if (value === null || value === undefined) return '-';
-
-    if (this.cardConfig.footerTransform) {
-      return this.cardConfig.footerTransform(value, item);
+    const transform = config.footerTransform;
+    if (transform) {
+      return transform(value, item);
     }
     return String(value);
   }
 
-  /**
-   * Handle item click
-   */
   onItemClick(item: any): void {
     this.itemClick.emit(item);
   }
 
-  /**
-   * Toggle actions menu
-   */
   toggleMenu(index: number, event: Event): void {
     event.stopPropagation();
     this.activeMenuIndex = this.activeMenuIndex === index ? null : index;
   }
 
-  /**
-   * Close menu when clicking outside
-   */
   closeMenu(): void {
     this.activeMenuIndex = null;
   }
 
-  /**
-   * Execute an action
-   */
   executeAction(action: TableAction, item: any, event: Event): void {
     event.stopPropagation();
     this.activeMenuIndex = null;
-
     if (action.disabled?.(item)) {
       return;
     }
-
     action.action(item);
     this.actionClick.emit({ action, item });
   }
 
-  /**
-   * Check if action is visible
-   */
   isActionVisible(action: TableAction, item: any): boolean {
     return action.show ? action.show(item) : true;
   }
 
-  /**
-   * Check if action is disabled
-   */
   isActionDisabled(action: TableAction, item: any): boolean {
     return action.disabled ? action.disabled(item) : false;
   }
 
-  /**
-   * Get action label
-   */
   getActionLabel(action: TableAction, item: any): string {
     return typeof action.label === 'function'
       ? action.label(item)
       : action.label;
   }
 
-  /**
-   * Get action tooltip (falls back to label)
-   */
   getActionTooltip(action: TableAction, item: any): string {
     if (action.tooltip) {
       return typeof action.tooltip === 'function'
@@ -318,42 +245,34 @@ export class ItemListComponent {
     return this.getActionLabel(action, item);
   }
 
-  /**
-   * Get action icon
-   */
   getActionIcon(action: TableAction, item: any): string {
     const icon =
       typeof action.icon === 'function' ? action.icon(item) : action.icon;
     return icon || '';
   }
 
-  /**
-   * Get resolved action variant class
-   */
   getActionVariant(action: TableAction, item: any): string {
-    const variant = typeof action.variant === 'function' ? action.variant(item) : (action.variant || 'ghost');
+    const variant =
+      typeof action.variant === 'function'
+        ? action.variant(item)
+        : action.variant || 'ghost';
     return `action-${variant}`;
   }
 
-  /**
-   * Get resolved menu item variant class
-   */
   getMenuItemVariant(action: TableAction, item: any): string {
-    const variant = typeof action.variant === 'function' ? action.variant(item) : (action.variant || 'ghost');
+    const variant =
+      typeof action.variant === 'function'
+        ? action.variant(item)
+        : action.variant || 'ghost';
     return `menu-item-${variant}`;
   }
 
-  /**
-   * Get visible actions for an item (excluding menu actions)
-   */
   getVisibleActions(item: any): TableAction[] {
-    if (!this.actions) return [];
-    return this.actions.filter((action) => this.isActionVisible(action, item));
+    const acts = this.actions();
+    if (!acts) return [];
+    return acts.filter((action) => this.isActionVisible(action, item));
   }
 
-  /**
-   * Get size-specific classes
-   */
   getSizeClasses(): string {
     const sizeMap = {
       sm: 'item-list-sm',

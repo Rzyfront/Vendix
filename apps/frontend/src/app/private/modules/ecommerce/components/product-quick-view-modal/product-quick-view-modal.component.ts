@@ -1,15 +1,15 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
-  OnChanges,
-  SimpleChanges,
   inject,
   DestroyRef,
+  input,
+  output,
+  effect,
+  signal,
+  computed,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { Router, RouterModule } from '@angular/router';
+import { CurrencyPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
@@ -25,7 +25,6 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
   selector: 'app-product-quick-view-modal',
   standalone: true,
   imports: [
-    CommonModule,
     RouterModule,
     FormsModule,
     ModalComponent,
@@ -34,80 +33,81 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
     ButtonComponent,
     QuantityControlComponent,
     ShareModalComponent,
+    CurrencyPipe,
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (closed)="onClose()"
       size="md"
-      [title]="product?.name || 'Vista Rápida'"
+      [title]="product()?.name || 'Vista Rápida'"
       [overlayCloseButton]="true"
     >
       <!-- Loading State -->
-      @if (isLoading) {
+      @if (isLoading()) {
         <div class="quick-view-loading">
           <app-spinner size="lg" text="Cargando producto..." [center]="true"></app-spinner>
         </div>
       }
 
       <!-- Product Content -->
-      @if (!isLoading && product) {
+      @if (!isLoading() && product(); as prod) {
         <div class="quick-view-content">
           <!-- Image Section -->
           <div class="quick-view-image-col">
             <div class="quick-view-image">
-              @if (displayImageUrl) {
-                <img [src]="displayImageUrl" [alt]="product.name" />
+              @if (displayImageUrl()) {
+                <img [src]="displayImageUrl()" [alt]="prod.name" />
               } @else {
                 <div class="no-image">
                   <app-icon name="image" [size]="48" />
                 </div>
               }
-              @if (product.is_on_sale && !selectedVariant?.price_override) {
+              @if (prod.is_on_sale && !selectedVariant()?.price_override) {
                 <span class="sale-badge">Oferta</span>
               }
             </div>
             <!-- Description below image -->
-            @if (product.description) {
-              <p class="product-description">{{ truncatedDescription }}</p>
+            @if (prod.description) {
+              <p class="product-description">{{ truncatedDescription() }}</p>
             }
           </div>
 
           <!-- Info Section -->
           <div class="quick-view-info">
             <!-- Brand -->
-            @if (product.brand) {
-              <span class="product-brand">{{ product.brand.name }}</span>
+            @if (prod.brand) {
+              <span class="product-brand">{{ prod.brand.name }}</span>
             }
 
             <!-- Rating -->
-            @if (product.avg_rating) {
+            @if (prod.avg_rating) {
               <div class="product-rating">
                 <span class="stars">
                   @for (star of [1,2,3,4,5]; track star) {
                     <app-icon
-                      [name]="star <= product.avg_rating ? 'star' : 'star'"
+                      [name]="star <= prod.avg_rating ? 'star' : 'star'"
                       [size]="14"
-                      [class]="star <= product.avg_rating ? 'text-warning fill-warning' : 'text-gray-300'"
+                      [class]="star <= prod.avg_rating ? 'text-warning fill-warning' : 'text-gray-300'"
                     />
                   }
                 </span>
-                <span class="rating-count">({{ product.review_count }} reseñas)</span>
+                <span class="rating-count">({{ prod.review_count }} reseñas)</span>
               </div>
             }
 
             <!-- Price -->
             <div class="product-price">
-              <span class="current-price">{{ displayPrice | currency }}</span>
-              @if (product.is_on_sale && !selectedVariant?.price_override) {
+              <span class="current-price">{{ displayPrice() | currency }}</span>
+              @if (prod.is_on_sale && !selectedVariant()?.price_override) {
                 <span class="original-price">
-                  {{ product.base_price | currency }}
+                  {{ prod.base_price | currency }}
                 </span>
               }
             </div>
 
             <!-- Variant Selector -->
-            @if (product.variants && product.variants.length > 0) {
+            @if (prod.variants && prod.variants.length > 0) {
               <div class="variant-selector">
                 <div class="variant-header">
                   <label class="variant-label">Variante:</label>
@@ -116,12 +116,12 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
                   </span>
                 </div>
                 <div class="variant-chips">
-                  @for (variant of product.variants; track variant.id) {
+                  @for (variant of prod.variants; track variant.id) {
                     <button
                       class="variant-chip"
-                      [class.selected]="selectedVariant?.id === variant.id"
-                      [class.out-of-stock]="!isOnDemand && variant.stock_quantity === 0"
-                      [disabled]="!isOnDemand && variant.stock_quantity === 0"
+                      [class.selected]="selectedVariant()?.id === variant.id"
+                      [class.out-of-stock]="!isOnDemand() && variant.stock_quantity === 0"
+                      [disabled]="!isOnDemand() && variant.stock_quantity === 0"
                       (click)="selectVariant(variant)"
                     >
                       {{ getVariantLabel(variant) }}
@@ -132,9 +132,9 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
             }
 
             <!-- Categories Mini Badges -->
-            @if (product.categories && product.categories.length > 0) {
+            @if (prod.categories && prod.categories.length > 0) {
               <div class="category-badges">
-                @for (cat of product.categories; track cat.id) {
+                @for (cat of prod.categories; track cat.id) {
                   <span class="cat-badge">{{ cat.name }}</span>
                 }
               </div>
@@ -142,17 +142,17 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
 
             <!-- Stock Status -->
             <div class="stock-status">
-              @if (isOnDemand) {
+              @if (isOnDemand()) {
                 <span class="on-demand">
                   <app-icon name="package" [size]="14" /> Disponible bajo pedido
                 </span>
-              } @else if (displayStock === 0) {
+              } @else if (displayStock() === 0) {
                 <span class="out-of-stock">
                   <app-icon name="circle-x" [size]="14" /> Agotado
                 </span>
-              } @else if (displayStock !== null && displayStock <= 5) {
+              } @else if (displayStock() !== null && displayStock()! <= 5) {
                 <span class="low-stock">
-                  <app-icon name="alert-triangle" [size]="14" /> ¡Solo quedan {{ displayStock }}!
+                  <app-icon name="alert-triangle" [size]="14" /> ¡Solo quedan {{ displayStock() }}!
                 </span>
               } @else {
                 <span class="in-stock">
@@ -165,11 +165,11 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
             <div class="quantity-selector">
               <label>Cantidad:</label>
               <app-quantity-control
-                [value]="quantity"
+                [value]="quantity()"
                 [min]="1"
-                [max]="isOnDemand ? 999 : (displayStock || 99)"
+                [max]="isOnDemand() ? 999 : (displayStock() || 99)"
                 [size]="'sm'"
-                (valueChange)="quantity = $event"
+                (valueChange)="quantity.set($event)"
               />
             </div>
 
@@ -179,7 +179,7 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
                 variant="secondary"
                 size="sm"
                 [fullWidth]="true"
-                [disabled]="(!isOnDemand && displayStock === 0) || (hasVariants && !selectedVariant)"
+                [disabled]="(!isOnDemand() && displayStock() === 0) || (hasVariants() && !selectedVariant())"
                 (clicked)="onAddToCart()"
               >
                 <app-icon slot="icon" name="shopping-cart" [size]="18" />
@@ -200,15 +200,15 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
               variant="primary"
               size="md"
               [fullWidth]="true"
-              [disabled]="(!isOnDemand && displayStock === 0) || (hasVariants && !selectedVariant)"
+              [disabled]="(!isOnDemand() && displayStock() === 0) || (hasVariants() && !selectedVariant())"
               (clicked)="onBuyNow()"
             >
-              <app-icon slot="icon" [name]="product.requires_booking && product.product_type === 'service' ? 'calendar-check' : 'shopping-bag'" [size]="18" />
-              {{ product.requires_booking && product.product_type === 'service' ? 'Agendar ahora' : 'Comprar ahora' }}
+              <app-icon slot="icon" [name]="prod.requires_booking && prod.product_type === 'service' ? 'calendar-check' : 'shopping-bag'" [size]="18" />
+              {{ prod.requires_booking && prod.product_type === 'service' ? 'Agendar ahora' : 'Comprar ahora' }}
             </app-button>
 
             <!-- View Full Details Link -->
-            <a class="view-details-link" [routerLink]="['/catalog', product.slug]" (click)="onClose()">
+            <a class="view-details-link" [routerLink]="['/catalog', prod.slug]" (click)="onClose()">
               Ver todos los detalles
               <app-icon name="chevron-right" [size]="14" />
             </a>
@@ -217,7 +217,7 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
       }
 
       <!-- Error State -->
-      @if (!isLoading && !product && hasError) {
+      @if (!isLoading() && !product() && hasError()) {
         <div class="quick-view-error">
           <app-icon name="alert-circle" [size]="48" class="text-error" />
           <p>No se pudo cargar el producto</p>
@@ -230,8 +230,8 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
 
     <!-- Share Modal -->
     <app-share-modal
-      [isOpen]="shareModalOpen"
-      [product]="productForShare"
+      [isOpen]="shareModalOpen()"
+      [product]="productForShare()"
       (closed)="onShareModalClosed()"
     />
   `,
@@ -560,91 +560,95 @@ import { ShareModalComponent } from '../share-modal/share-modal.component';
     }
   `],
 })
-export class ProductQuickViewModalComponent implements OnChanges {
-  @Input() isOpen = false;
-  @Input() productSlug: string | null = null;
-  @Output() closed = new EventEmitter<void>();
-  @Output() addedToCart = new EventEmitter<ProductDetail>();
+export class ProductQuickViewModalComponent {
+  readonly isOpen = input<boolean>(false);
+  readonly productSlug = input<string | null>(null);
+  readonly closed = output<void>();
+  readonly addedToCart = output<ProductDetail>();
 
-  product: ProductDetail | null = null;
-  selectedVariant: ProductVariantDetail | null = null;
-  isLoading = false;
-  hasError = false;
-  quantity = 1;
-  shareModalOpen = false;
+  readonly product = signal<ProductDetail | null>(null);
+  readonly selectedVariant = signal<ProductVariantDetail | null>(null);
+  readonly isLoading = signal(false);
+  readonly hasError = signal(false);
+  readonly quantity = signal(1);
+  readonly shareModalOpen = signal(false);
+
+  readonly hasVariants = computed(() => {
+    const p = this.product();
+    return !!p?.variants && p.variants.length > 0;
+  });
+
+  readonly displayPrice = computed(() => {
+    const v = this.selectedVariant();
+    if (v) return v.final_price;
+    return this.product()?.final_price || 0;
+  });
+
+  readonly displayStock = computed<number | null>(() => {
+    const v = this.selectedVariant();
+    if (v) return v.stock_quantity;
+    return this.product()?.stock_quantity ?? null;
+  });
+
+  readonly isOnDemand = computed(
+    () => this.product()?.track_inventory === false,
+  );
+
+  readonly displayImageUrl = computed<string | null>(() => {
+    const v = this.selectedVariant();
+    if (v?.image_url) return v.image_url;
+    const p = this.product();
+    if (!p) return null;
+    const mainImage = p.images?.find((img) => img.is_main);
+    if (mainImage) return mainImage.image_url;
+    if (p.images?.length) return p.images[0].image_url;
+    return p.image_url;
+  });
+
+  readonly truncatedDescription = computed(() => {
+    const p = this.product();
+    if (!p?.description) return '';
+    const maxLength = 150;
+    if (p.description.length <= maxLength) return p.description;
+    return p.description.substring(0, maxLength) + '...';
+  });
+
+  readonly productForShare = computed<EcommerceProduct | null>(() => {
+    const p = this.product();
+    if (!p) return null;
+    return {
+      id: p.id,
+      name: p.name,
+      slug: p.slug,
+      description: p.description,
+      base_price: p.base_price,
+      final_price: p.final_price,
+      is_on_sale: p.is_on_sale,
+      image_url: this.displayImageUrl(),
+      stock_quantity: p.stock_quantity,
+      brand: p.brand,
+      categories: p.categories,
+    } as EcommerceProduct;
+  });
 
   private destroyRef = inject(DestroyRef);
   private catalogService = inject(CatalogService);
   private cartService = inject(CartService);
   private router = inject(Router);
 
-  ngOnChanges(changes: SimpleChanges): void {
-    if (changes['isOpen'] && this.isOpen && this.productSlug) {
-      this.loadProduct();
-    }
-    if (changes['productSlug'] && this.isOpen && this.productSlug) {
-      this.loadProduct();
-    }
-  }
-
-  get hasVariants(): boolean {
-    return !!this.product?.variants && this.product.variants.length > 0;
-  }
-
-  get displayPrice(): number {
-    if (this.selectedVariant) return this.selectedVariant.final_price;
-    return this.product?.final_price || 0;
-  }
-
-  get displayStock(): number | null {
-    if (this.selectedVariant) return this.selectedVariant.stock_quantity;
-    return this.product?.stock_quantity ?? null;
-  }
-
-  /** True when the product does not track inventory (bajo pedido / made-to-order) */
-  get isOnDemand(): boolean {
-    return this.product?.track_inventory === false;
-  }
-
-  get displayImageUrl(): string | null {
-    if (this.selectedVariant?.image_url) return this.selectedVariant.image_url;
-    if (!this.product) return null;
-    const mainImage = this.product.images?.find((img) => img.is_main);
-    if (mainImage) return mainImage.image_url;
-    if (this.product.images?.length) return this.product.images[0].image_url;
-    return this.product.image_url;
-  }
-
-  get truncatedDescription(): string {
-    if (!this.product?.description) return '';
-    const maxLength = 150;
-    if (this.product.description.length <= maxLength) {
-      return this.product.description;
-    }
-    return this.product.description.substring(0, maxLength) + '...';
-  }
-
-  // Convert ProductDetail to EcommerceProduct for ShareModal
-  get productForShare(): EcommerceProduct | null {
-    if (!this.product) return null;
-    return {
-      id: this.product.id,
-      name: this.product.name,
-      slug: this.product.slug,
-      description: this.product.description,
-      base_price: this.product.base_price,
-      final_price: this.product.final_price,
-      is_on_sale: this.product.is_on_sale,
-      image_url: this.displayImageUrl,
-      stock_quantity: this.product.stock_quantity,
-      brand: this.product.brand,
-      categories: this.product.categories,
-    } as EcommerceProduct;
+  constructor() {
+    effect(() => {
+      if (this.isOpen() && this.productSlug()) {
+        this.loadProduct();
+      }
+    });
   }
 
   selectVariant(variant: ProductVariantDetail): void {
-    this.selectedVariant = this.selectedVariant?.id === variant.id ? null : variant;
-    this.quantity = 1;
+    this.selectedVariant.set(
+      this.selectedVariant()?.id === variant.id ? null : variant,
+    );
+    this.quantity.set(1);
   }
 
   getVariantLabel(variant: ProductVariantDetail): string {
@@ -656,77 +660,84 @@ export class ProductQuickViewModalComponent implements OnChanges {
   }
 
   loadProduct(): void {
-    if (!this.productSlug) return;
+    if (!this.productSlug()) return;
 
-    this.isLoading = true;
-    this.hasError = false;
-    this.product = null;
-    this.selectedVariant = null;
-    this.quantity = 1;
+    this.isLoading.set(true);
+    this.hasError.set(false);
+    this.product.set(null);
+    this.selectedVariant.set(null);
+    this.quantity.set(1);
 
     this.catalogService
-      .getProductBySlug(this.productSlug)
+      .getProductBySlug(this.productSlug()!)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           if (response.success) {
-            this.product = response.data;
+            const prod = response.data;
+            this.product.set(prod);
             // Auto-select first available variant
-            if (this.product.variants?.length > 0) {
-              if (this.isOnDemand) {
-                this.selectedVariant = this.product.variants[0];
+            if (prod.variants?.length > 0) {
+              if (prod.track_inventory === false) {
+                this.selectedVariant.set(prod.variants[0]);
               } else {
-                const firstAvailable = this.product.variants.find(v => v.stock_quantity > 0);
-                this.selectedVariant = firstAvailable || this.product.variants[0];
+                const firstAvailable = prod.variants.find(
+                  (v) => v.stock_quantity > 0,
+                );
+                this.selectedVariant.set(firstAvailable || prod.variants[0]);
               }
             }
           } else {
-            this.hasError = true;
+            this.hasError.set(true);
           }
-          this.isLoading = false;
+          this.isLoading.set(false);
         },
         error: () => {
-          this.hasError = true;
-          this.isLoading = false;
+          this.hasError.set(true);
+          this.isLoading.set(false);
         },
       });
   }
 
   onAddToCart(): void {
-    if (!this.product) return;
+    const product = this.product();
+    if (!product) return;
     // Guard: bookable services go to booking page
-    if (this.product.requires_booking && this.product.product_type === 'service') {
-      const productId = this.product.id;
+    if (product.requires_booking && product.product_type === 'service') {
+      const productId = product.id;
       this.onClose();
       this.router.navigate(['/book', productId]);
       return;
     }
-    const variantId = this.selectedVariant?.id;
-    const variantInfo = this.selectedVariant
-      ? { name: this.selectedVariant.name, sku: this.selectedVariant.sku, price: this.selectedVariant.final_price }
+    const sv = this.selectedVariant();
+    const variantId = sv?.id;
+    const variantInfo = sv
+      ? { name: sv.name, sku: sv.sku, price: sv.final_price }
       : undefined;
-    const result = this.cartService.addToCart(this.product.id, this.quantity, variantId, variantInfo);
+    const result = this.cartService.addToCart(product.id, this.quantity(), variantId, variantInfo);
     if (result) {
       result.subscribe();
     }
-    this.addedToCart.emit(this.product);
+    this.addedToCart.emit(product);
     this.onClose();
   }
 
   onBuyNow(): void {
-    if (!this.product) return;
+    const product = this.product();
+    if (!product) return;
     // Guard: bookable services go to booking page
-    if (this.product.requires_booking && this.product.product_type === 'service') {
-      const productId = this.product.id;
+    if (product.requires_booking && product.product_type === 'service') {
+      const productId = product.id;
       this.onClose();
       this.router.navigate(['/book', productId]);
       return;
     }
-    const variantId = this.selectedVariant?.id;
-    const variantInfo = this.selectedVariant
-      ? { name: this.selectedVariant.name, sku: this.selectedVariant.sku, price: this.selectedVariant.final_price }
+    const sv = this.selectedVariant();
+    const variantId = sv?.id;
+    const variantInfo = sv
+      ? { name: sv.name, sku: sv.sku, price: sv.final_price }
       : undefined;
-    const result = this.cartService.addToCart(this.product.id, this.quantity, variantId, variantInfo);
+    const result = this.cartService.addToCart(product.id, this.quantity(), variantId, variantInfo);
     if (result) {
       result.subscribe({
         next: () => {
@@ -745,26 +756,20 @@ export class ProductQuickViewModalComponent implements OnChanges {
   }
 
   onShareClick(): void {
-    if (!this.product) return;
-    this.shareModalOpen = true;
+    if (!this.product()) return;
+    this.shareModalOpen.set(true);
   }
 
   onShareModalClosed(): void {
-    this.shareModalOpen = false;
+    this.shareModalOpen.set(false);
   }
 
   onClose(): void {
-    this.isOpen = false;
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
     this.closed.emit();
     // Reset state
-    this.product = null;
-    this.selectedVariant = null;
-    this.hasError = false;
-    this.quantity = 1;
+    this.product.set(null);
+    this.selectedVariant.set(null);
+    this.hasError.set(false);
+    this.quantity.set(1);
   }
 }

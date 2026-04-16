@@ -1,15 +1,14 @@
 /** REBUILD TRIGGER 2 **/
 import {
   Component,
+  output,
   OnInit,
   ChangeDetectionStrategy,
-  ChangeDetectorRef,
   inject,
   signal,
   computed,
+  viewChild,
   ElementRef,
-  output,
-  viewChild
 } from '@angular/core';
 
 import { FormsModule } from '@angular/forms';
@@ -503,7 +502,7 @@ interface DocumentStatus extends LegalDocument {
         </div>
     
         <!-- Loading State -->
-        @if (loading) {
+        @if (loading()) {
           <div class="loading-state">
             <app-icon name="loader-2" [spin]="true" size="32"></app-icon>
             <p class="loading-text">Cargando documentos...</p>
@@ -511,7 +510,7 @@ interface DocumentStatus extends LegalDocument {
         }
     
         <!-- Empty State -->
-        @if (!loading && documents.length === 0) {
+        @if (!loading() && documents.length === 0) {
           <div class="empty-state">
             <p class="empty-text">No hay documentos pendientes por aceptar.</p>
             <app-button variant="primary" (clicked)="onComplete()">
@@ -521,7 +520,7 @@ interface DocumentStatus extends LegalDocument {
         }
     
         <!-- Documents Layout -->
-        @if (!loading && documents.length > 0) {
+        @if (!loading() && documents.length > 0) {
           <div
             class="terms-layout"
             >
@@ -616,11 +615,10 @@ export class TermsStepComponent implements OnInit {
 
   private legalService = inject(LegalService);
   private toastService = inject(ToastService);
-  readonly cdr = inject(ChangeDetectorRef);
   private sanitizer = inject(DomSanitizer);
 
-  loading = true;
-  submitting = false;
+  readonly loading = signal(true);
+  readonly submitting = signal(false);
   documents: DocumentStatus[] = [];
 
   // Selected document for viewing
@@ -652,13 +650,12 @@ export class TermsStepComponent implements OnInit {
   }
 
   loadPendingTerms() {
-    this.loading = true;
+    this.loading.set(true);
     this.legalService
       .getPendingTerms()
       .pipe(
         finalize(() => {
-          this.loading = false;
-          this.cdr.markForCheck();
+          this.loading.set(false);
         }),
       )
       .subscribe({
@@ -671,48 +668,42 @@ export class TermsStepComponent implements OnInit {
 
           // If no documents are pending, automatically proceed
           if (this.documents.length === 0) {
-            // TODO: The 'emit' function requires a mandatory void argument
             this.completed.emit();
           } else {
             // Auto-select first document
             this.selectDocument(this.documents[0]);
           }
-          this.cdr.markForCheck();
         },
         error: (err) => {
           console.error('Error loading terms', err);
           this.toastService.error(
             'Error al cargar los términos y condiciones. Por favor intenta nuevamente.',
           );
-          this.cdr.markForCheck();
         },
       });
   }
 
   selectDocument(doc: DocumentStatus) {
     this.selectedDoc.set(doc);
-    this.cdr.markForCheck();
 
     // Scroll to document viewer after a brief delay to allow rendering
     setTimeout(() => {
       this.documentViewer()?.nativeElement?.scrollIntoView({
         behavior: 'smooth',
-        block: 'start'
+        block: 'start',
       });
     }, 100);
   }
 
   toggleAcceptance(doc: DocumentStatus) {
     doc.accepted = !doc.accepted;
-    this.cdr.markForCheck();
+    // Mutating array items doesn't trigger signal tracking — reassign to force update
+    this.documents = [...this.documents];
   }
 
   acceptAllAndSubmit() {
     // Mark all documents as accepted
-    this.documents.forEach((doc) => {
-      doc.accepted = true;
-    });
-    this.cdr.markForCheck();
+    this.documents = this.documents.map((doc) => ({ ...doc, accepted: true }));
 
     // Submit all acceptances
     this.submitAcceptances();
@@ -721,53 +712,53 @@ export class TermsStepComponent implements OnInit {
   submitAcceptances() {
     if (!this.allAccepted) return;
 
-    this.submitting = true;
-    this.cdr.markForCheck();
+    this.submitting.set(true);
 
     const pendingDocs = this.documents.filter((d) => !d.loading);
 
-    const acceptanceRequests = pendingDocs.map((doc) => {
-      doc.loading = true;
-      this.cdr.markForCheck();
-      return this.legalService
+    // Mark all as loading
+    this.documents = this.documents.map((d) =>
+      pendingDocs.find((p) => p.id === d.id) ? { ...d, loading: true } : d,
+    );
+
+    const acceptanceRequests = pendingDocs.map((doc) =>
+      this.legalService
         .acceptDocument(doc.id, 'onboarding')
         .toPromise()
         .then(() => {
-          doc.loading = false;
-          this.cdr.markForCheck();
+          this.documents = this.documents.map((d) =>
+            d.id === doc.id ? { ...d, loading: false } : d,
+          );
           return { success: true, id: doc.id };
         })
         .catch((err) => {
-          doc.loading = false;
-          this.cdr.markForCheck();
+          this.documents = this.documents.map((d) =>
+            d.id === doc.id ? { ...d, loading: false } : d,
+          );
           return { success: false, id: doc.id, error: err };
-        });
-    });
+        }),
+    );
 
     Promise.all(acceptanceRequests).then((results) => {
       const failures = results.filter((r) => !r.success);
 
       if (failures.length === 0) {
         this.toastService.success('Documentos aceptados correctamente');
-        // TODO: The 'emit' function requires a mandatory void argument
         this.completed.emit();
       } else {
-        this.submitting = false;
+        this.submitting.set(false);
         this.toastService.error(
           'Hubo un error al aceptar algunos documentos. Por favor intenta nuevamente.',
         );
       }
-      this.cdr.markForCheck();
     });
   }
 
   onComplete() {
-    // TODO: The 'emit' function requires a mandatory void argument
     this.completed.emit();
   }
 
   onBack() {
-    // TODO: The 'emit' function requires a mandatory void argument
     this.back.emit();
   }
 }

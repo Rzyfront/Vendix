@@ -41,7 +41,8 @@ import {
             [size]="'sm'"
             type="text"
             [placeholder]="placeholder()"
-            [value]="value()"
+            [ngModel]="value()"
+            [ngModelOptions]="{ standalone: true }"
             (inputChange)="valueChange.emit($event)"
           />
         }
@@ -50,7 +51,8 @@ import {
             [size]="'sm'"
             type="number"
             [placeholder]="placeholder()"
-            [value]="value()"
+            [ngModel]="value()"
+            [ngModelOptions]="{ standalone: true }"
             [min]="field().options?.min"
             [max]="field().options?.max"
             (inputChange)="valueChange.emit($event)"
@@ -60,7 +62,8 @@ import {
           <app-input
             [size]="'sm'"
             type="date"
-            [value]="value()"
+            [ngModel]="value()"
+            [ngModelOptions]="{ standalone: true }"
             (inputChange)="valueChange.emit($event)"
           />
         }
@@ -69,7 +72,8 @@ import {
             [size]="'sm'"
             type="email"
             [placeholder]="placeholder()"
-            [value]="value()"
+            [ngModel]="value()"
+            [ngModelOptions]="{ standalone: true }"
             (inputChange)="valueChange.emit($event)"
           />
         }
@@ -78,7 +82,8 @@ import {
             [size]="'sm'"
             type="tel"
             [placeholder]="placeholder()"
-            [value]="value()"
+            [ngModel]="value()"
+            [ngModelOptions]="{ standalone: true }"
             (inputChange)="valueChange.emit($event)"
           />
         }
@@ -87,7 +92,8 @@ import {
             [size]="'sm'"
             type="url"
             [placeholder]="placeholder()"
-            [value]="value()"
+            [ngModel]="value()"
+            [ngModelOptions]="{ standalone: true }"
             (inputChange)="valueChange.emit($event)"
           />
         }

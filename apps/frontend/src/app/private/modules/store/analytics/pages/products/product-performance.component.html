@@ -1,6 +1,6 @@
 <div>
   <!-- Stats Cards -->
-  @if (loading$ | async) {
+  @if (loading()) {
     <div class="stats-container">
       @for (i of [1, 2, 3, 4]; track i) {
         <div
@@ -17,8 +17,8 @@
     >
       <app-stats
         title="Ingresos Productos"
-        [value]="(summary$ | async)?.total_revenue | currency"
-        [smallText]="getGrowthText((summary$ | async)?.revenue_growth)"
+        [value]="summary()?.total_revenue | currency"
+        [smallText]="getGrowthText(summary()?.revenue_growth)"
         iconName="dollar-sign"
         iconBgColor="bg-green-100"
         iconColor="text-green-600"
@@ -26,8 +26,8 @@
 
       <app-stats
         title="Unidades Vendidas"
-        [value]="(summary$ | async)?.total_units_sold || 0"
-        [smallText]="getGrowthText((summary$ | async)?.units_growth)"
+        [value]="summary()?.total_units_sold || 0"
+        [smallText]="getGrowthText(summary()?.units_growth)"
         iconName="package"
         iconBgColor="bg-blue-100"
         iconColor="text-blue-600"
@@ -35,9 +35,9 @@
 
       <app-stats
         title="Productos Activos"
-        [value]="(summary$ | async)?.active_products || 0"
+        [value]="summary()?.active_products || 0"
         [smallText]="
-          'de ' + ((summary$ | async)?.total_products || 0) + ' totales'
+          'de ' + (summary()?.total_products || 0) + ' totales'
         "
         iconName="box"
         iconBgColor="bg-purple-100"
@@ -46,7 +46,7 @@
 
       <app-stats
         title="Ingreso Promedio"
-        [value]="(summary$ | async)?.avg_revenue_per_product | currency"
+        [value]="summary()?.avg_revenue_per_product | currency"
         smallText="por producto activo"
         iconName="bar-chart-2"
         iconBgColor="bg-orange-100"
@@ -76,7 +76,7 @@
       <div class="flex items-center gap-2 flex-shrink-0">
         <vendix-export-button
           class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-          [loading]="(exporting$ | async) ?? false"
+          [loading]="exporting()"
           (export)="exportReport()"
         ></vendix-export-button>
 
@@ -111,7 +111,7 @@
         >
       </div>
       <div class="p-4">
-        @if (loadingTrends$ | async) {
+        @if (loadingTrends()) {
           <div class="h-64 flex items-center justify-center">
             <div
               class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
@@ -156,7 +156,7 @@
         >
       </div>
       <div class="p-4">
-        @if (loadingTopSellers$ | async) {
+        @if (loadingTopSellers()) {
           <div class="h-64 flex items-center justify-center">
             <div
               class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"

@@ -1,13 +1,10 @@
 import {
   Component,
-  Input,
   inject,
-  OnInit,
-  OnDestroy,
-  OnChanges,
-  SimpleChanges,
-  NgZone,
+  DestroyRef,
+  effect,
   input,
+  model,
   output
 } from '@angular/core';
 
@@ -29,7 +26,7 @@ interface SpotlightPosition {
   imports: [ButtonComponent],
   template: `
     <!-- Spotlight Overlay -->
-    @if (isOpen && spotlight.visible && spotlight.width > 0) {
+    @if (isOpen() && spotlight.visible && spotlight.width > 0) {
       <div
         class="tour-spotlight-overlay"
         [style.top.px]="spotlight.top"
@@ -40,7 +37,7 @@ interface SpotlightPosition {
     }
     
     <!-- Tour Tooltip - Different design for mobile and desktop -->
-    @if (isOpen) {
+    @if (isOpen()) {
       <div
         class="tour-tooltip"
         [class.is-mobile]="isMobile"
@@ -527,13 +524,12 @@ interface SpotlightPosition {
     `,
   ],
 })
-export class TourModalComponent implements OnInit, OnDestroy, OnChanges {
+export class TourModalComponent {
   private tourService = inject(TourService);
-  private ngZone = inject(NgZone);
+  private destroyRef = inject(DestroyRef);
 
-  @Input() isOpen = false;
+  readonly isOpen = model<boolean>(false);
   readonly tourConfig = input<TourConfig>(POS_TOUR_CONFIG);
-  readonly isOpenChange = output<boolean>();
   readonly completed = output<void>();
   readonly skipped = output<void>();
 
@@ -560,12 +556,31 @@ export class TourModalComponent implements OnInit, OnDestroy, OnChanges {
   private recalculateTimeout: any = null;
   private clickListener: ((e: Event) => void) | null = null;
 
-  ngOnInit(): void {
+  constructor() {
     this.checkMobile();
     this.setupResizeObserver();
     this.setupDOMObserver();
     this.setupPathListener();
     this.setupClickListener();
+
+    effect(() => {
+      const open = this.isOpen();
+      // This effect re-runs when isOpen changes via @Input binding
+      // We intentionally only use the value to trigger the effect
+      if (open) {
+        this.startTour();
+      }
+    });
+
+    this.destroyRef.onDestroy(() => {
+      this.clearSpotlight();
+      this.cleanupResizeObserver();
+      this.cleanupDOMObserver();
+      this.cleanupFunctions.forEach((fn) => fn());
+      if (this.recalculateTimeout) {
+        clearTimeout(this.recalculateTimeout);
+      }
+    });
   }
 
   private checkMobile(): void {
@@ -573,26 +588,6 @@ export class TourModalComponent implements OnInit, OnDestroy, OnChanges {
     // Auto-minimize on mobile by default
     if (this.isMobile) {
       this.isMinimized = true;
-    }
-  }
-
-  ngOnDestroy(): void {
-    this.clearSpotlight();
-    this.cleanupResizeObserver();
-    this.cleanupDOMObserver();
-    this.cleanupFunctions.forEach((fn) => fn());
-    if (this.recalculateTimeout) {
-      clearTimeout(this.recalculateTimeout);
-    }
-  }
-
-  ngOnChanges(changes: SimpleChanges): void {
-    if (
-      changes['isOpen'] &&
-      changes['isOpen'].currentValue === true &&
-      changes['isOpen'].previousValue === false
-    ) {
-      this.startTour();
     }
   }
 
@@ -636,7 +631,7 @@ export class TourModalComponent implements OnInit, OnDestroy, OnChanges {
       clearTimeout(this.recalculateTimeout);
     }
     this.recalculateTimeout = setTimeout(() => {
-      if (this.isOpen && this.currentStep?.target) {
+      if (this.isOpen() && this.currentStep?.target) {
         this.updateSpotlight(this.currentStep.target);
       }
     }, 100);
@@ -662,37 +657,32 @@ export class TourModalComponent implements OnInit, OnDestroy, OnChanges {
   }
 
   private setupPathListener(): void {
-    this.ngZone.runOutsideAngular(() => {
-      let lastPath = window.location.pathname;
-      const checkPath = () => {
-        const currentPath = window.location.pathname;
-        if (currentPath !== lastPath && this.isOpen && this.currentStep) {
-          lastPath = currentPath;
-          this.ngZone.run(() => {
-            this.validateCurrentStep();
-            setTimeout(() => {
-              if (this.currentStep?.target) {
-                this.updateSpotlight(this.currentStep.target);
-              }
-            }, 300);
-          });
-        }
-      };
+    let lastPath = window.location.pathname;
+    const checkPath = () => {
+      const currentPath = window.location.pathname;
+      if (currentPath !== lastPath && this.isOpen() && this.currentStep) {
+        lastPath = currentPath;
+        this.validateCurrentStep();
+        setTimeout(() => {
+          if (this.currentStep?.target) {
+            this.updateSpotlight(this.currentStep.target);
+          }
+        }, 300);
+      }
+    };
 
-      window.addEventListener('popstate', checkPath);
-      const interval = setInterval(checkPath, 500);
+    window.addEventListener('popstate', checkPath);
+    const interval = setInterval(checkPath, 500);
 
-      this.cleanupFunctions.push(() => {
-        window.removeEventListener('popstate', checkPath);
-        clearInterval(interval);
-      });
+    this.cleanupFunctions.push(() => {
+      window.removeEventListener('popstate', checkPath);
+      clearInterval(interval);
     });
   }
 
   private setupClickListener(): void {
-    this.ngZone.runOutsideAngular(() => {
-      this.clickListener = async (e: Event) => {
-        if (!this.isOpen || !this.currentStep || this.isProcessing) return;
+    this.clickListener = async (e: Event) => {
+        if (!this.isOpen() || !this.currentStep || this.isProcessing) return;
 
         // Skip click detection for first and last steps
         if (this.currentIndex === 0 || this.isLastStep) return;
@@ -736,30 +726,27 @@ export class TourModalComponent implements OnInit, OnDestroy, OnChanges {
           await new Promise((resolve) => setTimeout(resolve, 200));
 
           // Validate and advance if valid
-          this.ngZone.run(() => {
-            this.validateCurrentStep().then((isValid) => {
-              if (isValid) {
-                if (this.isLastStep) {
-                  this.completeTour();
-                } else {
-                  this.loadStep(this.currentIndex + 1);
-                }
+          this.validateCurrentStep().then((isValid) => {
+            if (isValid) {
+              if (this.isLastStep) {
+                this.completeTour();
+              } else {
+                this.loadStep(this.currentIndex + 1);
               }
-            });
+            }
           });
         }
-      };
+    };
 
-      // Use capture phase to catch clicks before they're handled by other components
-      document.addEventListener('click', this.clickListener, { capture: true });
+    // Use capture phase to catch clicks before they're handled by other components
+    document.addEventListener('click', this.clickListener, { capture: true });
 
-      this.cleanupFunctions.push(() => {
-        if (this.clickListener) {
-          document.removeEventListener('click', this.clickListener, {
-            capture: true,
-          });
-        }
-      });
+    this.cleanupFunctions.push(() => {
+      if (this.clickListener) {
+        document.removeEventListener('click', this.clickListener, {
+          capture: true,
+        });
+      }
     });
   }
 
@@ -1175,18 +1162,14 @@ export class TourModalComponent implements OnInit, OnDestroy, OnChanges {
   completeTour(): void {
     this.clearSpotlight();
     this.tourService.completeTour(this.tourConfig().id);
-    this.isOpen = false;
-    this.isOpenChange.emit(false);
-    // TODO: The 'emit' function requires a mandatory void argument
+    this.isOpen.set(false);
     this.completed.emit();
   }
 
   skipTour(): void {
     this.clearSpotlight();
     this.tourService.skipTour(this.tourConfig().id);
-    this.isOpen = false;
-    this.isOpenChange.emit(false);
-    // TODO: The 'emit' function requires a mandatory void argument
+    this.isOpen.set(false);
     this.skipped.emit();
   }
 
@@ -1201,8 +1184,7 @@ export class TourModalComponent implements OnInit, OnDestroy, OnChanges {
     this.centerTooltip();
 
     // Show the tooltip
-    this.isOpen = true;
-    this.isOpenChange.emit(true);
+    this.isOpen.set(true);
 
     // Wait for Angular to render, then run hooks
     await this.delay(100);

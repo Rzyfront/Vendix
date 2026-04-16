@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
+import { Component, inject, DestroyRef, signal } from '@angular/core';
 
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
@@ -87,16 +87,17 @@ import { AdvanceDetailComponent } from '../components/advances/advance-detail/ad
       <!-- Detail Modal -->
       <app-advance-detail
         [(isOpen)]="isDetailModalOpen"
-        [advance]="selectedAdvance"
+        [advanceInput]="selectedAdvance"
         (updated)="onAdvanceUpdated()"
       ></app-advance-detail>
     </div>
   `,
 })
-export class PayrollAdvancesPageComponent implements OnInit, OnDestroy {
+export class PayrollAdvancesPageComponent {
   private payrollService = inject(PayrollService);
   private currencyService = inject(CurrencyFormatService);
   private toastService = inject(ToastService);
+  private destroyRef = inject(DestroyRef);
   private destroy$ = new Subject<void>();
 
   // State
@@ -113,15 +114,15 @@ export class PayrollAdvancesPageComponent implements OnInit, OnDestroy {
   isDetailModalOpen = false;
   selectedAdvance: EmployeeAdvance | null = null;
 
-  ngOnInit(): void {
+  constructor() {
     this.currencyService.loadCurrency();
     this.loadAdvances();
     this.loadStats();
-  }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
+    this.destroyRef.onDestroy(() => {
+      this.destroy$.next();
+      this.destroy$.complete();
+    });
   }
 
   loadAdvances(): void {

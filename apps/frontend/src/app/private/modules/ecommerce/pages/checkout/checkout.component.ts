@@ -1,30 +1,69 @@
-import { Component, OnInit, OnDestroy, signal, inject, ChangeDetectorRef } from '@angular/core';
+import { Component, OnInit, OnDestroy, signal, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router } from '@angular/router';
-import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup, Validators } from '@angular/forms';
+import {
+  FormsModule,
+  ReactiveFormsModule,
+  FormBuilder,
+  FormGroup,
+  Validators,
+} from '@angular/forms';
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 import { CartService, Cart, CartItem } from '../../services/cart.service';
-import { CheckoutService, PaymentMethod, CheckoutRequest, BookingSelection, WompiWidgetConfig } from '../../services/checkout.service';
+import {
+  CheckoutService,
+  PaymentMethod,
+  CheckoutRequest,
+  BookingSelection,
+  WompiWidgetConfig,
+} from '../../services/checkout.service';
 import { WompiService } from '../../../../../shared/services/wompi.service';
 import { AccountService, Address } from '../../services/account.service';
-import { CatalogService, EcommerceProduct } from '../../services/catalog.service';
-import { CountryService, Country, Department, City } from '../../../../../services/country.service';
+import {
+  CatalogService,
+  EcommerceProduct,
+} from '../../services/catalog.service';
+import {
+  CountryService,
+  Country,
+  Department,
+  City,
+} from '../../../../../services/country.service';
 
 import { ProductCarouselComponent } from '../../components/product-carousel/product-carousel.component';
 import { ProductQuickViewModalComponent } from '../../components/product-quick-view-modal/product-quick-view-modal.component';
 import { BookingSlotPickerComponent } from '../../components/booking-slot-picker/booking-slot-picker.component';
 import { InputComponent } from '../../../../../shared/components/input/input.component';
-import { CurrencyPipe, CurrencyFormatService } from '../../../../../shared/pipes/currency';
+import {
+  CurrencyPipe,
+  CurrencyFormatService,
+} from '../../../../../shared/pipes/currency';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
-import { SelectorComponent, SelectorOption } from '../../../../../shared/components/selector/selector.component';
+import {
+  SelectorComponent,
+  SelectorOption,
+} from '../../../../../shared/components/selector/selector.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 
 @Component({
   selector: 'app-checkout',
   standalone: true,
-  imports: [CommonModule, RouterModule, FormsModule, ReactiveFormsModule, ProductCarouselComponent, ProductQuickViewModalComponent, InputComponent, CurrencyPipe, ButtonComponent, IconComponent, SelectorComponent, BookingSlotPickerComponent],
+  imports: [
+    CommonModule,
+    RouterModule,
+    FormsModule,
+    ReactiveFormsModule,
+    ProductCarouselComponent,
+    ProductQuickViewModalComponent,
+    InputComponent,
+    CurrencyPipe,
+    ButtonComponent,
+    IconComponent,
+    SelectorComponent,
+    BookingSlotPickerComponent,
+  ],
   templateUrl: './checkout.component.html',
   styleUrls: ['./checkout.component.scss'],
 })
@@ -41,13 +80,13 @@ export class CheckoutComponent implements OnInit, OnDestroy {
   address_form!: FormGroup;
   notes = '';
 
-  is_loading = true;
-  is_submitting = false;
-  error_message = '';
+  readonly is_loading = signal(true);
+  readonly is_submitting = signal(false);
+  readonly error_message = signal('');
 
   // Wompi Widget
-  isWompiPayment = false;
-  wompiWidgetLoading = false;
+  readonly isWompiPayment = signal(false);
+  readonly wompiWidgetLoading = signal(false);
 
   // Flag to prevent cart-empty redirect after successful checkout
   private orderPlaced = false;
@@ -90,7 +129,9 @@ export class CheckoutComponent implements OnInit, OnDestroy {
   get allBookingSlotsSelected(): boolean {
     if (!this.cartHasBookableServices) return true;
     const bookableItems = this.bookableItems;
-    return bookableItems.every(item => this.bookingSelections.has(item.product_id));
+    return bookableItems.every((item) =>
+      this.bookingSelections.has(item.product_id),
+    );
   }
 
   /** True when all cart items are services (no physical products) */
@@ -118,7 +159,6 @@ export class CheckoutComponent implements OnInit, OnDestroy {
   private destroy$ = new Subject<void>();
   private catalogService = inject(CatalogService);
   private countryService = inject(CountryService);
-  private cdr = inject(ChangeDetectorRef);
   private currencyService = inject(CurrencyFormatService);
   private toast = inject(ToastService);
   private wompiService = inject(WompiService);
@@ -152,9 +192,16 @@ export class CheckoutComponent implements OnInit, OnDestroy {
       if (!stored) return;
 
       const booking = JSON.parse(stored);
-      if (booking.product_id && booking.date && booking.start_time && booking.end_time) {
+      if (
+        booking.product_id &&
+        booking.date &&
+        booking.start_time &&
+        booking.end_time
+      ) {
         // Verify the product is actually in the current cart
-        const isInCart = this.cart?.items?.some(item => item.product_id === booking.product_id);
+        const isInCart = this.cart?.items?.some(
+          (item) => item.product_id === booking.product_id,
+        );
         if (!isInCart) {
           sessionStorage.removeItem('pending_booking');
           return;
@@ -186,7 +233,10 @@ export class CheckoutComponent implements OnInit, OnDestroy {
       state_province: [''],
       country_code: ['CO', Validators.required],
       postal_code: [''],
-      phone_number: ['', [Validators.required, Validators.pattern(/^[\d+#*\s()-]*$/)]],
+      phone_number: [
+        '',
+        [Validators.required, Validators.pattern(/^[\d+#*\s()-]*$/)],
+      ],
     });
   }
 
@@ -208,7 +258,6 @@ export class CheckoutComponent implements OnInit, OnDestroy {
         this.cities = [];
         depControl?.setValue('');
         cityControl?.setValue('');
-        this.cdr.markForCheck();
       }
     });
 
@@ -221,7 +270,6 @@ export class CheckoutComponent implements OnInit, OnDestroy {
       } else {
         this.cities = [];
         cityControl?.setValue('');
-        this.cdr.markForCheck();
       }
     });
 
@@ -233,18 +281,16 @@ export class CheckoutComponent implements OnInit, OnDestroy {
     this.loading_departments = true;
     this.departments = await this.countryService.getDepartments();
     this.loading_departments = false;
-    this.cdr.markForCheck();
   }
 
   private async loadCities(depId: number): Promise<void> {
     this.loading_cities = true;
     this.cities = await this.countryService.getCitiesByDepartment(depId);
     this.loading_cities = false;
-    this.cdr.markForCheck();
   }
 
   loadData(): void {
-    this.is_loading = true;
+    this.is_loading.set(true);
 
     // Load cart
     this.cart_service.cart$.pipe(takeUntil(this.destroy$)).subscribe((cart) => {
@@ -272,29 +318,36 @@ export class CheckoutComponent implements OnInit, OnDestroy {
             this.use_new_address = true;
           }
         }
-        this.is_loading = false;
+        this.is_loading.set(false);
       },
       error: () => {
-        this.is_loading = false;
+        this.is_loading.set(false);
         this.use_new_address = true;
-        this.toast.warning('No pudimos cargar tus direcciones guardadas. Puedes ingresar una nueva.', 'Aviso');
+        this.toast.warning(
+          'No pudimos cargar tus direcciones guardadas. Puedes ingresar una nueva.',
+          'Aviso',
+        );
       },
     });
   }
 
   loadRecommendations(): void {
-    this.catalogService.getProducts({ limit: 10, sort_by: 'newest', has_discount: true }).subscribe({
-      next: (response) => {
-        if (response.data.length > 0) {
-          this.recommendedProducts.set(response.data);
-        } else {
-          // Fallback if no sales
-          this.catalogService.getProducts({ limit: 10, sort_by: 'newest' }).subscribe(res => {
-            this.recommendedProducts.set(res.data);
-          });
-        }
-      }
-    });
+    this.catalogService
+      .getProducts({ limit: 10, sort_by: 'newest', has_discount: true })
+      .subscribe({
+        next: (response) => {
+          if (response.data.length > 0) {
+            this.recommendedProducts.set(response.data);
+          } else {
+            // Fallback if no sales
+            this.catalogService
+              .getProducts({ limit: 10, sort_by: 'newest' })
+              .subscribe((res) => {
+                this.recommendedProducts.set(res.data);
+              });
+          }
+        },
+      });
   }
 
   selectAddress(address_id: number): void {
@@ -311,8 +364,10 @@ export class CheckoutComponent implements OnInit, OnDestroy {
     this.selected_payment_method_id = method_id;
 
     // Check if selected method is Wompi
-    const selectedMethod = this.payment_methods.find(m => m.id === method_id);
-    this.isWompiPayment = selectedMethod?.type === 'wompi' || selectedMethod?.provider === 'wompi';
+    const selectedMethod = this.payment_methods.find((m) => m.id === method_id);
+    this.isWompiPayment.set(
+      selectedMethod?.type === 'wompi' || selectedMethod?.provider === 'wompi',
+    );
   }
 
   // Shipping
@@ -332,7 +387,9 @@ export class CheckoutComponent implements OnInit, OnDestroy {
       const address = this.mapFormToCalcAddress(this.address_form.value);
       this.fetchShipping(address);
     } else if (this.selected_address_id) {
-      const address = this.addresses.find(a => a.id === this.selected_address_id);
+      const address = this.addresses.find(
+        (a) => a.id === this.selected_address_id,
+      );
       if (address) {
         this.fetchShipping(this.mapAddressToCalc(address));
       }
@@ -347,7 +404,7 @@ export class CheckoutComponent implements OnInit, OnDestroy {
       // Convert department ID to name
       if (address.state_province) {
         const depId = Number(address.state_province);
-        const department = this.departments.find(d => d.id === depId);
+        const department = this.departments.find((d) => d.id === depId);
         if (department) {
           address.state_province = department.name;
         }
@@ -356,7 +413,7 @@ export class CheckoutComponent implements OnInit, OnDestroy {
       // Convert city ID to name
       if (address.city) {
         const cityId = Number(address.city);
-        const city = this.cities.find(c => c.id === cityId);
+        const city = this.cities.find((c) => c.id === cityId);
         if (city) {
           address.city = city.name;
         }
@@ -366,7 +423,7 @@ export class CheckoutComponent implements OnInit, OnDestroy {
   }
 
   fetchShipping(address: any) {
-    this.is_loading = true;
+    this.is_loading.set(true);
     this.cart_service.getShippingEstimates(address).subscribe({
       next: (options) => {
         this.shipping_options = options;
@@ -379,12 +436,15 @@ export class CheckoutComponent implements OnInit, OnDestroy {
           this.selected_shipping_option_id = null;
           this.shipping_cost = 0;
         }
-        this.is_loading = false;
+        this.is_loading.set(false);
       },
       error: () => {
-        this.is_loading = false;
-        this.toast.error('No pudimos cargar las opciones de envío. Intenta de nuevo.', 'Error de envío');
-      }
+        this.is_loading.set(false);
+        this.toast.error(
+          'No pudimos cargar las opciones de envío. Intenta de nuevo.',
+          'Error de envío',
+        );
+      },
     });
   }
 
@@ -408,10 +468,11 @@ export class CheckoutComponent implements OnInit, OnDestroy {
           // Reset selection if current method is no longer available
           if (this.selected_payment_method_id) {
             const stillAvailable = this.payment_methods.find(
-              (m) => m.id === this.selected_payment_method_id
+              (m) => m.id === this.selected_payment_method_id,
             );
             if (!stillAvailable) {
-              this.selected_payment_method_id = this.payment_methods[0]?.id || null;
+              this.selected_payment_method_id =
+                this.payment_methods[0]?.id || null;
             }
           } else if (this.payment_methods.length > 0) {
             this.selected_payment_method_id = this.payment_methods[0].id;
@@ -419,17 +480,25 @@ export class CheckoutComponent implements OnInit, OnDestroy {
 
           // Update Wompi flag based on current selection
           if (this.selected_payment_method_id) {
-            const selectedMethod = this.payment_methods.find(m => m.id === this.selected_payment_method_id);
-            this.isWompiPayment = selectedMethod?.type === 'wompi' || selectedMethod?.provider === 'wompi';
+            const selectedMethod = this.payment_methods.find(
+              (m) => m.id === this.selected_payment_method_id,
+            );
+            this.isWompiPayment.set(
+              selectedMethod?.type === 'wompi' ||
+                selectedMethod?.provider === 'wompi',
+            );
           } else {
-            this.isWompiPayment = false;
+            this.isWompiPayment.set(false);
           }
         }
         this.loading_payment_methods = false;
       },
       error: () => {
         this.loading_payment_methods = false;
-        this.toast.error('No pudimos cargar los métodos de pago. Intenta de nuevo.', 'Error');
+        this.toast.error(
+          'No pudimos cargar los métodos de pago. Intenta de nuevo.',
+          'Error',
+        );
       },
     });
   }
@@ -439,7 +508,7 @@ export class CheckoutComponent implements OnInit, OnDestroy {
       country_code: addr.country_code,
       state_province: addr.state_province,
       city: addr.city,
-      postal_code: addr.postal_code || undefined
+      postal_code: addr.postal_code || undefined,
     };
   }
 
@@ -460,12 +529,12 @@ export class CheckoutComponent implements OnInit, OnDestroy {
     // Address step (only for carts with physical items)
     if (this.step === 1 && !this.cartHasOnlyServices) {
       if (this.use_new_address && !this.address_form.valid) {
-        this.error_message = 'Por favor completa la dirección de envío';
+        this.error_message.set('Por favor completa la dirección de envío');
         this.address_form.markAllAsTouched();
         return;
       }
       if (!this.use_new_address && !this.selected_address_id) {
-        this.error_message = 'Por favor selecciona una dirección';
+        this.error_message.set('Por favor selecciona una dirección');
         return;
       }
 
@@ -477,7 +546,7 @@ export class CheckoutComponent implements OnInit, OnDestroy {
 
       // Load shipping before moving
       this.loadShippingOptions();
-      this.error_message = '';
+      this.error_message.set('');
       this.step++;
       return;
     }
@@ -485,10 +554,12 @@ export class CheckoutComponent implements OnInit, OnDestroy {
     // Booking step validation
     if (this.bookingStep !== null && this.step === this.bookingStep) {
       if (!this.allBookingSlotsSelected) {
-        this.error_message = 'Por favor selecciona un horario para todos los servicios';
+        this.error_message.set(
+          'Por favor selecciona un horario para todos los servicios',
+        );
         return;
       }
-      this.error_message = '';
+      this.error_message.set('');
       this.step++;
       return;
     }
@@ -496,23 +567,30 @@ export class CheckoutComponent implements OnInit, OnDestroy {
     // Payment step validation
     if (this.step === this.paymentStep) {
       if (!this.selected_payment_method_id) {
-        this.error_message = 'Por favor selecciona un método de pago';
+        this.error_message.set('Por favor selecciona un método de pago');
         return;
       }
 
       // Check shipping selection (only for physical items)
-      if (!this.cartHasOnlyServices && this.shipping_options.length > 0 && !this.selected_shipping_method_id) {
-        this.error_message = 'Por favor selecciona un método de envío';
+      if (
+        !this.cartHasOnlyServices &&
+        this.shipping_options.length > 0 &&
+        !this.selected_shipping_method_id
+      ) {
+        this.error_message.set('Por favor selecciona un método de envío');
         return;
       }
     }
 
-    this.error_message = '';
+    this.error_message.set('');
     this.step++;
   }
 
   /** Handle booking slot selection from the picker */
-  onBookingSlotSelected(productId: number, slot: { date: string; start_time: string; end_time: string }): void {
+  onBookingSlotSelected(
+    productId: number,
+    slot: { date: string; start_time: string; end_time: string },
+  ): void {
     this.bookingSelections.set(productId, {
       product_id: productId,
       date: slot.date,
@@ -531,7 +609,11 @@ export class CheckoutComponent implements OnInit, OnDestroy {
     const booking = this.bookingSelections.get(productId);
     if (!booking) return '';
     const date = new Date(booking.date + 'T12:00:00');
-    const formatted = date.toLocaleDateString('es-CO', { weekday: 'short', day: 'numeric', month: 'short' });
+    const formatted = date.toLocaleDateString('es-CO', {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+    });
     return `${formatted}, ${booking.start_time} - ${booking.end_time}`;
   }
 
@@ -539,7 +621,7 @@ export class CheckoutComponent implements OnInit, OnDestroy {
    * Saves the new address to the customer's account, then continues to the next step
    */
   private saveNewAddressAndContinue(): void {
-    this.is_loading = true;
+    this.is_loading.set(true);
 
     // Prepare address payload with converted names
     const addressPayload = this.prepareAddressPayload();
@@ -551,23 +633,27 @@ export class CheckoutComponent implements OnInit, OnDestroy {
           this.addresses.push(response.data);
           this.selected_address_id = response.data.id;
           this.use_new_address = false;
-          this.toast.success('Dirección guardada correctamente', 'Dirección guardada');
+          this.toast.success(
+            'Dirección guardada correctamente',
+            'Dirección guardada',
+          );
         }
         // Continue with shipping options
         this.loadShippingOptions();
-        this.error_message = '';
+        this.error_message.set('');
         this.step++;
-        this.is_loading = false;
-        this.cdr.markForCheck();
+        this.is_loading.set(false);
       },
       error: (err) => {
-        this.is_loading = false;
+        this.is_loading.set(false);
         // Still continue even if save fails, but notify user
-        this.toast.warning('La dirección no pudo guardarse, pero puedes continuar con tu compra', 'Aviso');
+        this.toast.warning(
+          'La dirección no pudo guardarse, pero puedes continuar con tu compra',
+          'Aviso',
+        );
         this.loadShippingOptions();
-        this.error_message = '';
+        this.error_message.set('');
         this.step++;
-        this.cdr.markForCheck();
       },
     });
   }
@@ -582,7 +668,7 @@ export class CheckoutComponent implements OnInit, OnDestroy {
     if (addressValue.country_code === 'CO') {
       if (addressValue.state_province) {
         const depId = Number(addressValue.state_province);
-        const department = this.departments.find(d => d.id === depId);
+        const department = this.departments.find((d) => d.id === depId);
         if (department) {
           addressValue.state_province = department.name;
         }
@@ -590,7 +676,7 @@ export class CheckoutComponent implements OnInit, OnDestroy {
 
       if (addressValue.city) {
         const cityId = Number(addressValue.city);
-        const city = this.cities.find(c => c.id === cityId);
+        const city = this.cities.find((c) => c.id === cityId);
         if (city) {
           addressValue.city = city.name;
         }
@@ -611,25 +697,29 @@ export class CheckoutComponent implements OnInit, OnDestroy {
 
   placeOrder(): void {
     if (!this.selected_payment_method_id) {
-      this.error_message = 'Por favor selecciona un método de pago';
+      this.error_message.set('Por favor selecciona un método de pago');
       return;
     }
 
-    this.is_submitting = true;
-    this.error_message = '';
+    this.is_submitting.set(true);
+    this.error_message.set('');
 
     const request: CheckoutRequest = {
       payment_method_id: this.selected_payment_method_id,
       notes: this.notes || undefined,
       // Only include shipping fields when cart has physical items
-      ...(!this.cartHasOnlyServices ? {
-        shipping_method_id: this.selected_shipping_method_id || undefined,
-        shipping_rate_id: this.selected_shipping_option_id || undefined,
-      } : {}),
+      ...(!this.cartHasOnlyServices
+        ? {
+            shipping_method_id: this.selected_shipping_method_id || undefined,
+            shipping_rate_id: this.selected_shipping_option_id || undefined,
+          }
+        : {}),
       // Include booking data if there are bookable services
-      ...(this.cartHasBookableServices && this.bookingSelections.size > 0 ? {
-        bookings: Array.from(this.bookingSelections.values()),
-      } : {}),
+      ...(this.cartHasBookableServices && this.bookingSelections.size > 0
+        ? {
+            bookings: Array.from(this.bookingSelections.values()),
+          }
+        : {}),
       // Always send cart items as fallback (in case backend cart is empty/not synced)
       items: this.cart?.items?.map((item: CartItem) => ({
         product_id: item.product_id,
@@ -647,7 +737,7 @@ export class CheckoutComponent implements OnInit, OnDestroy {
         // Convert department ID to name
         if (addressValue.state_province) {
           const depId = Number(addressValue.state_province);
-          const department = this.departments.find(d => d.id === depId);
+          const department = this.departments.find((d) => d.id === depId);
           if (department) {
             addressValue.state_province = department.name;
           }
@@ -656,7 +746,7 @@ export class CheckoutComponent implements OnInit, OnDestroy {
         // Convert city ID to name
         if (addressValue.city) {
           const cityId = Number(addressValue.city);
-          const city = this.cities.find(c => c.id === cityId);
+          const city = this.cities.find((c) => c.id === cityId);
           if (city) {
             addressValue.city = city.name;
           }
@@ -669,9 +759,9 @@ export class CheckoutComponent implements OnInit, OnDestroy {
     }
 
     // Wompi payment flow: create order first, then open widget
-    if (this.isWompiPayment) {
-      this.wompiWidgetLoading = true;
-      this.is_submitting = false;
+    if (this.isWompiPayment()) {
+      this.wompiWidgetLoading.set(true);
+      this.is_submitting.set(false);
 
       this.checkout_service.checkout(request).subscribe({
         next: (response) => {
@@ -680,32 +770,31 @@ export class CheckoutComponent implements OnInit, OnDestroy {
             const orderId = response.data.order_id;
             const totalAmount = (this.cart?.subtotal || 0) + this.shipping_cost;
 
-            this.checkout_service.prepareWompiPayment(
-              orderId,
-              totalAmount,
-              undefined,
-              `${window.location.origin}/account/orders/${orderId}?wompi_callback=true`,
-            ).subscribe({
-              next: (res) => {
-                this.wompiWidgetLoading = false;
-                this.cdr.markForCheck();
-                this.openWompiWidget(res.data, orderId);
-              },
-              error: (err) => {
-                this.wompiWidgetLoading = false;
-                this.cdr.markForCheck();
-                const msg = this.extractErrorMessage(err);
-                this.error_message = msg;
-                this.toast.error(msg, 'Error al preparar pago');
-              },
-            });
+            this.checkout_service
+              .prepareWompiPayment(
+                orderId,
+                totalAmount,
+                undefined,
+                `${window.location.origin}/account/orders/${orderId}?wompi_callback=true`,
+              )
+              .subscribe({
+                next: (res) => {
+                  this.wompiWidgetLoading.set(false);
+                  this.openWompiWidget(res.data, orderId);
+                },
+                error: (err) => {
+                  this.wompiWidgetLoading.set(false);
+                  const msg = this.extractErrorMessage(err);
+                  this.error_message.set(msg);
+                  this.toast.error(msg, 'Error al preparar pago');
+                },
+              });
           }
         },
         error: (err) => {
-          this.wompiWidgetLoading = false;
-          this.cdr.markForCheck();
+          this.wompiWidgetLoading.set(false);
           const msg = this.extractErrorMessage(err);
-          this.error_message = msg;
+          this.error_message.set(msg);
           this.toast.error(msg, 'Error al procesar el pedido');
         },
       });
@@ -717,22 +806,25 @@ export class CheckoutComponent implements OnInit, OnDestroy {
       next: (response) => {
         if (response.success) {
           this.orderPlaced = true;
-          this.is_submitting = false;
+          this.is_submitting.set(false);
           this.router.navigate(['/account/orders', response.data.order_id], {
             queryParams: { success: true },
           });
         }
       },
       error: (err) => {
-        this.is_submitting = false;
+        this.is_submitting.set(false);
         const msg = this.extractErrorMessage(err);
-        this.error_message = msg;
+        this.error_message.set(msg);
         this.toast.error(msg, 'Error al procesar el pedido');
       },
     });
   }
 
-  async openWompiWidget(config: WompiWidgetConfig, orderId: number): Promise<void> {
+  async openWompiWidget(
+    config: WompiWidgetConfig,
+    orderId: number,
+  ): Promise<void> {
     try {
       await this.wompiService.loadWidgetScript();
 
@@ -742,7 +834,9 @@ export class CheckoutComponent implements OnInit, OnDestroy {
         reference: config.reference,
         publicKey: config.public_key,
         signature: { integrity: config.signature_integrity },
-        redirectUrl: config.redirect_url || `${window.location.origin}/account/orders/${orderId}?wompi_callback=true`,
+        redirectUrl:
+          config.redirect_url ||
+          `${window.location.origin}/account/orders/${orderId}?wompi_callback=true`,
         customerData: {
           email: config.customer_email,
         },
@@ -752,24 +846,39 @@ export class CheckoutComponent implements OnInit, OnDestroy {
         const transaction = result?.transaction;
         if (transaction) {
           if (transaction.status === 'APPROVED') {
-            this.router.navigate(['/account/orders', orderId], { queryParams: { success: true } });
-          } else if (transaction.status === 'DECLINED' || transaction.status === 'ERROR') {
-            this.toast.error('El pago fue rechazado. Intenta con otro método de pago.', 'Pago rechazado');
+            this.router.navigate(['/account/orders', orderId], {
+              queryParams: { success: true },
+            });
+          } else if (
+            transaction.status === 'DECLINED' ||
+            transaction.status === 'ERROR'
+          ) {
+            this.toast.error(
+              'El pago fue rechazado. Intenta con otro método de pago.',
+              'Pago rechazado',
+            );
           } else {
             // PENDING — redirect to order detail for status check
-            this.router.navigate(['/account/orders', orderId], { queryParams: { wompi_callback: true } });
+            this.router.navigate(['/account/orders', orderId], {
+              queryParams: { wompi_callback: true },
+            });
           }
         } else {
           // User closed widget without paying
-          this.toast.warning('El pago fue cancelado. Tu pedido está pendiente de pago.', 'Pago cancelado');
+          this.toast.warning(
+            'El pago fue cancelado. Tu pedido está pendiente de pago.',
+            'Pago cancelado',
+          );
         }
       });
     } catch (error) {
-      this.wompiWidgetLoading = false;
-      this.is_submitting = false;
-      this.cdr.markForCheck();
+      this.wompiWidgetLoading.set(false);
+      this.is_submitting.set(false);
       console.error('Failed to open Wompi widget:', error);
-      this.toast.error('No se pudo abrir el widget de pago. Intenta de nuevo.', 'Error');
+      this.toast.error(
+        'No se pudo abrir el widget de pago. Intenta de nuevo.',
+        'Error',
+      );
     }
   }
 
@@ -797,33 +906,35 @@ export class CheckoutComponent implements OnInit, OnDestroy {
   // Helper getters for displaying selected location names in confirmation
   getSelectedCountryName(): string {
     const code = this.address_form.get('country_code')?.value;
-    const country = this.countries.find(c => c.code === code);
+    const country = this.countries.find((c) => c.code === code);
     return country?.name || code || '';
   }
 
   getSelectedDepartmentName(): string {
     const depId = Number(this.address_form.get('state_province')?.value);
-    const department = this.departments.find(d => d.id === depId);
-    return department?.name || this.address_form.get('state_province')?.value || '';
+    const department = this.departments.find((d) => d.id === depId);
+    return (
+      department?.name || this.address_form.get('state_province')?.value || ''
+    );
   }
 
   getSelectedCityName(): string {
     const cityId = Number(this.address_form.get('city')?.value);
-    const city = this.cities.find(c => c.id === cityId);
+    const city = this.cities.find((c) => c.id === cityId);
     return city?.name || this.address_form.get('city')?.value || '';
   }
 
   // Transform location data to SelectorOption format
   get countryOptions(): SelectorOption[] {
-    return this.countries.map(c => ({ value: c.code, label: c.name }));
+    return this.countries.map((c) => ({ value: c.code, label: c.name }));
   }
 
   get departmentOptions(): SelectorOption[] {
-    return this.departments.map(d => ({ value: d.id, label: d.name }));
+    return this.departments.map((d) => ({ value: d.id, label: d.name }));
   }
 
   get cityOptions(): SelectorOption[] {
-    return this.cities.map(c => ({ value: c.id, label: c.name }));
+    return this.cities.map((c) => ({ value: c.id, label: c.name }));
   }
 
   // Helper method for field validation errors

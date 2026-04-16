@@ -1,4 +1,11 @@
-import { Component, OnInit, OnDestroy, inject } from '@angular/core';
+import {
+  Component,
+  OnInit,
+  OnDestroy,
+  inject,
+  signal,
+  computed,
+} from '@angular/core';
 
 import { FormsModule } from '@angular/forms';
 import { Subject } from 'rxjs';
@@ -47,8 +54,8 @@ import type {
     ResponsiveDataViewComponent,
     OptionsDropdownComponent,
     PaginationComponent,
-    EmptyStateComponent
-],
+    EmptyStateComponent,
+  ],
   templateUrl: './payables.component.html',
 })
 export class PayablesComponent implements OnInit, OnDestroy {
@@ -59,12 +66,12 @@ export class PayablesComponent implements OnInit, OnDestroy {
   private toastService = inject(ToastService);
 
   // Data
-  payables: AccountPayable[] = [];
-  is_loading = false;
-  dashboard: CarteraDashboard | null = null;
+  readonly payables = signal<AccountPayable[]>([]);
+  readonly is_loading = signal(false);
+  readonly dashboard = signal<CarteraDashboard | null>(null);
 
   // Pagination
-  meta = { total: 0, page: 1, limit: 20, totalPages: 0 };
+  readonly meta = signal({ total: 0, page: 1, limit: 20, totalPages: 0 });
 
   // Filters
   search_term = '';
@@ -213,8 +220,7 @@ export class PayablesComponent implements OnInit, OnDestroy {
         key: 'due_date',
         label: 'Vencimiento',
         icon: 'calendar',
-        transform: (val: any) =>
-          val ? formatDateOnlyUTC(val) : '—',
+        transform: (val: any) => (val ? formatDateOnlyUTC(val) : '—'),
       },
       {
         key: 'priority',
@@ -267,18 +273,18 @@ export class PayablesComponent implements OnInit, OnDestroy {
   }
 
   loadPayables(): void {
-    this.is_loading = true;
+    this.is_loading.set(true);
     this.carteraService
       .getPayables(this.query_params)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (response) => {
-          this.payables = response.data;
-          this.meta = response.meta;
-          this.is_loading = false;
+          this.payables.set(response.data);
+          this.meta.set(response.meta);
+          this.is_loading.set(false);
         },
         error: () => {
-          this.is_loading = false;
+          this.is_loading.set(false);
         },
       });
   }
@@ -289,7 +295,7 @@ export class PayablesComponent implements OnInit, OnDestroy {
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (response) => {
-          this.dashboard = response.data;
+          this.dashboard.set(response.data);
         },
       });
   }
@@ -384,21 +390,18 @@ export class PayablesComponent implements OnInit, OnDestroy {
 
   // ── Helpers ──────────────────────────────────────────
 
-  get formatted_total_pending(): string {
-    return this.currencyService.format(this.dashboard?.total_pending || 0);
-  }
-
-  get formatted_total_overdue(): string {
-    return this.currencyService.format(this.dashboard?.total_overdue || 0);
-  }
-
-  get formatted_scheduled(): string {
-    return this.currencyService.format(this.dashboard?.due_soon || 0);
-  }
-
-  get formatted_paid_this_month(): string {
-    return this.currencyService.format(this.dashboard?.paid_this_month || 0);
-  }
+  readonly formatted_total_pending = computed(() =>
+    this.currencyService.format(this.dashboard()?.total_pending || 0),
+  );
+  readonly formatted_total_overdue = computed(() =>
+    this.currencyService.format(this.dashboard()?.total_overdue || 0),
+  );
+  readonly formatted_scheduled = computed(() =>
+    this.currencyService.format(this.dashboard()?.due_soon || 0),
+  );
+  readonly formatted_paid_this_month = computed(() =>
+    this.currencyService.format(this.dashboard()?.paid_this_month || 0),
+  );
 
   getStatusLabel(status: string): string {
     const labels: Record<string, string> = {

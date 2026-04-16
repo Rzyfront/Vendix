@@ -1,9 +1,9 @@
 import {
   Component,
-  OnInit,
-  OnDestroy,
   signal,
   HostListener,
+  inject,
+  DestroyRef,
 } from '@angular/core';
 import { Subject, takeUntil } from 'rxjs';
 
@@ -638,7 +638,7 @@ import { PosAISummaryModalComponent } from './components/pos-ai-summary-modal.co
     `,
   ],
 })
-export class PosComponent implements OnInit, OnDestroy {
+export class PosComponent {
   cartState: CartState | null = null;
   selectedCustomer: PosCustomer | null = null;
   loading: boolean = false;
@@ -765,38 +765,28 @@ export class PosComponent implements OnInit, OnDestroy {
   private storeDomainHostname: string | null = null;
 
   private destroy$ = new Subject<void>();
+  private cartService = inject(PosCartService);
+  private customerService = inject(PosCustomerService);
+  private paymentService = inject(PosPaymentService);
+  private toastService = inject(ToastService);
+  private dialogService = inject(DialogService);
+  private router = inject(Router);
+  private store = inject(Store);
+  private route = inject(ActivatedRoute);
+  private posOrderService = inject(PosOrderService);
+  private ordersService = inject(StoreOrdersService);
+  private settingsService = inject(StoreSettingsService);
+  private quotationsService = inject(QuotationsService);
+  private layawayService = inject(LayawayApiService);
+  private cashRegisterService = inject(PosCashRegisterService);
+  private queueService = inject(PosQueueService);
 
-  constructor(
-    private cartService: PosCartService,
-    private customerService: PosCustomerService,
-    private paymentService: PosPaymentService,
-    private toastService: ToastService,
-    private dialogService: DialogService,
-    private router: Router,
-    private store: Store,
-    private route: ActivatedRoute,
-    private posOrderService: PosOrderService,
-    private ordersService: StoreOrdersService,
-    private settingsService: StoreSettingsService,
-    private quotationsService: QuotationsService,
-    private layawayService: LayawayApiService,
-    private cashRegisterService: PosCashRegisterService,
-    private queueService: PosQueueService,
-  ) {}
+  constructor() {
+    inject(DestroyRef).onDestroy(() => {
+      this.destroy$.next();
+      this.destroy$.complete();
+    });
 
-  @HostListener('window:resize')
-  onResize(): void {
-    this.checkMobile();
-  }
-
-  private checkMobile(): void {
-    const width = window.innerWidth;
-    this.isMobile.set(width < 768);
-    // Tablet range: 768px - 1023px (where sidebar can be collapsed/expanded)
-    this.isTablet.set(width >= 768 && width < 1024);
-  }
-
-  ngOnInit(): void {
     this.checkMobile();
     this.setupSubscriptions();
     this.loadStoreSettings();
@@ -819,6 +809,18 @@ export class PosComponent implements OnInit, OnDestroy {
       .subscribe(() => {
         this.showSessionOpenModal = true;
       });
+  }
+
+  @HostListener('window:resize')
+  onResize(): void {
+    this.checkMobile();
+  }
+
+  private checkMobile(): void {
+    const width = window.innerWidth;
+    this.isMobile.set(width < 768);
+    // Tablet range: 768px - 1023px (where sidebar can be collapsed/expanded)
+    this.isTablet.set(width >= 768 && width < 1024);
   }
 
   /**
@@ -880,11 +882,6 @@ export class PosComponent implements OnInit, OnDestroy {
       'Horario de Atención',
       8000,
     );
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
   }
 
   private setupSubscriptions(): void {

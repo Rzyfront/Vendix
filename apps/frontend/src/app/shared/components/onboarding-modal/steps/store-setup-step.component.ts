@@ -1,10 +1,10 @@
 import {
   Component,
+  input,
+  output,
   ChangeDetectionStrategy,
   OnInit,
-  ChangeDetectorRef,
-  input,
-  output
+  inject,
 } from '@angular/core';
 
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
@@ -500,8 +500,8 @@ import { CurrencyService } from '../../../../services/currency.service';
             <div class="store-type-selector">
               <div
                 class="store-type-option"
-                [class.active]="formGroup().get('store_type')?.value === 'hybrid'"
-                (click)="formGroup().get('store_type')?.setValue('hybrid')"
+                [class.active]="formGroup()?.get('store_type')?.value === 'hybrid'"
+                (click)="formGroup()?.get('store_type')?.setValue('hybrid')"
                 >
                 <div class="store-type-icon">
                   <app-icon
@@ -517,7 +517,7 @@ import { CurrencyService } from '../../../../services/currency.service';
                   </p>
                 </div>
                 <div class="store-type-check">
-                  @if (formGroup().get('store_type')?.value === 'hybrid') {
+                  @if (formGroup()?.get('store_type')?.value === 'hybrid') {
                     <app-icon
                       name="check-circle"
                       size="22"
@@ -529,8 +529,8 @@ import { CurrencyService } from '../../../../services/currency.service';
     
               <div
                 class="store-type-option"
-                [class.active]="formGroup().get('store_type')?.value === 'online'"
-                (click)="formGroup().get('store_type')?.setValue('online')"
+                [class.active]="formGroup()?.get('store_type')?.value === 'online'"
+                (click)="formGroup()?.get('store_type')?.setValue('online')"
                 >
                 <div class="store-type-icon">
                   <app-icon
@@ -546,7 +546,7 @@ import { CurrencyService } from '../../../../services/currency.service';
                   </p>
                 </div>
                 <div class="store-type-check">
-                  @if (formGroup().get('store_type')?.value === 'online') {
+                  @if (formGroup()?.get('store_type')?.value === 'online') {
                     <app-icon
                       name="check-circle"
                       size="22"
@@ -558,8 +558,8 @@ import { CurrencyService } from '../../../../services/currency.service';
     
               <div
                 class="store-type-option"
-                [class.active]="formGroup().get('store_type')?.value === 'physical'"
-                (click)="formGroup().get('store_type')?.setValue('physical')"
+                [class.active]="formGroup()?.get('store_type')?.value === 'physical'"
+                (click)="formGroup()?.get('store_type')?.setValue('physical')"
                 >
                 <div class="store-type-icon">
                   <app-icon
@@ -575,7 +575,7 @@ import { CurrencyService } from '../../../../services/currency.service';
                   </p>
                 </div>
                 <div class="store-type-check">
-                  @if (formGroup().get('store_type')?.value === 'physical') {
+                  @if (formGroup()?.get('store_type')?.value === 'physical') {
                     <app-icon
                       name="check-circle"
                       size="22"
@@ -661,10 +661,13 @@ import { CurrencyService } from '../../../../services/currency.service';
     `,
 })
 export class StoreSetupStepComponent implements OnInit {
-  readonly formGroup = input<any>();
+  readonly formGroup = input<any>(null);
   readonly nextStep = output<void>();
   readonly skipStep = output<void>();
   readonly previousStep = output<void>();
+
+  private readonly countryService = inject(CountryService);
+  private readonly currencyService = inject(CurrencyService);
 
   countries: Country[] = [];
   timezones: Timezone[] = [];
@@ -672,23 +675,17 @@ export class StoreSetupStepComponent implements OnInit {
   cities: City[] = [];
   currencies: { value: string; label: string }[] = [];
 
-  constructor(
-    private countryService: CountryService,
-    private currencyService: CurrencyService,
-    private cdr: ChangeDetectorRef,
-  ) { }
-
   ngOnInit(): void {
     this.countries = this.countryService.getCountries();
     this.timezones = this.countryService.getTimezones();
     this.loadCurrencies();
 
-    const formGroup = this.formGroup();
-    if (!formGroup) return;
+    const fg = this.formGroup();
+    if (!fg) return;
 
-    const countryControl = formGroup.get('country_code');
-    const depControl = formGroup.get('state_province');
-    const cityControl = formGroup.get('city');
+    const countryControl = fg.get('country_code');
+    const depControl = fg.get('state_province');
+    const cityControl = fg.get('city');
 
     // Cargar departamentos al cambiar país
     countryControl.valueChanges.subscribe((code: string) => {
@@ -699,7 +696,6 @@ export class StoreSetupStepComponent implements OnInit {
         this.cities = [];
         depControl.setValue(null);
         cityControl.setValue(null);
-        this.cdr.markForCheck();
       }
     });
 
@@ -711,7 +707,6 @@ export class StoreSetupStepComponent implements OnInit {
       } else {
         this.cities = [];
         cityControl.setValue(null);
-        this.cdr.markForCheck();
       }
     });
 
@@ -731,13 +726,11 @@ export class StoreSetupStepComponent implements OnInit {
     // Si el país es Colombia, cargar departamentos
     if (countryValue === 'CO') {
       await this.loadDepartments();
-      this.cdr.markForCheck();
 
       // Si hay un departamento guardado, cargar sus ciudades
       if (depValue) {
         depControl.setValue(depValue, { emitEvent: false });
         await this.loadCities(depValue);
-        this.cdr.markForCheck();
 
         // Si hay una ciudad guardada, establecerla
         if (cityValue) {
@@ -749,12 +742,10 @@ export class StoreSetupStepComponent implements OnInit {
 
   async loadDepartments(): Promise<void> {
     this.departments = await this.countryService.getDepartments();
-    this.cdr.markForCheck();
   }
 
   async loadCities(depId: number): Promise<void> {
     this.cities = await this.countryService.getCitiesByDepartment(depId);
-    this.cdr.markForCheck();
   }
 
   private async loadCurrencies(): Promise<void> {
@@ -768,7 +759,6 @@ export class StoreSetupStepComponent implements OnInit {
         { value: 'EUR', label: 'Euro (EUR)' },
       ];
     }
-    this.cdr.markForCheck();
   }
 
   get currencyOptions() {

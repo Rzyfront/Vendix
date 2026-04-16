@@ -1,4 +1,4 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, inject, signal } from '@angular/core';
 
 import { RouterModule, Router } from '@angular/router';
 import {
@@ -103,12 +103,12 @@ import { IconComponent } from '../../../../shared/components';
               type="submit"
               variant="primary"
               size="md"
-              [disabled]="!forgotPasswordForm.valid || isLoading"
-              [loading]="isLoading"
+              [disabled]="!forgotPasswordForm.valid || isLoading()"
+              [loading]="isLoading()"
               [fullWidth]="true"
               [showTextWhileLoading]="true"
             >
-              @if (isLoading) {
+              @if (isLoading()) {
                 Enviando...
               } @else {
                 Enviar Instrucciones
@@ -133,7 +133,7 @@ import { IconComponent } from '../../../../shared/components';
 })
 export class ForgotOwnerPasswordComponent implements OnInit {
   forgotPasswordForm: FormGroup;
-  isLoading = false;
+  readonly isLoading = signal(false);
   error: string | null = null;
 
   private toast = inject(ToastService);
@@ -170,7 +170,7 @@ export class ForgotOwnerPasswordComponent implements OnInit {
 
       const loadingSubscription = this.authFacade.loading$.subscribe(
         (isLoading) => {
-          this.isLoading = isLoading;
+          this.isLoading.set(isLoading);
         },
       );
 

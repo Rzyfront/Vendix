@@ -1,9 +1,10 @@
 import {
   Component,
-  Input,
   forwardRef,
   input,
-  output
+  output,
+  signal,
+  effect,
 } from '@angular/core';
 
 import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
@@ -31,43 +32,51 @@ import { FormStyleVariant } from '../../types/form.types';
   template: `
     <button
       type="button"
-      [attr.aria-pressed]="checked"
-      [attr.aria-label]="ariaLabel() || label || 'Toggle'"
-      [disabled]="disabled"
+      [attr.aria-pressed]="isOn()"
+      [attr.aria-label]="ariaLabel() || label() || 'Toggle'"
+      [disabled]="disabled()"
       (click)="onToggle()"
       [class]="buttonClasses"
-      [class.bg-[var(--color-primary)]]="checked"
-      [class.bg-[var(--color-muted)]]="!checked"
-      >
+      [class.bg-[var(--color-primary)]]="isOn()"
+      [class.bg-[var(--color-muted)]]="!isOn()"
+    >
       <span
         class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-[var(--color-surface)] shadow ring-0 transition duration-200 ease-in-out"
-        [class.translate-x-5]="checked"
-        [class.translate-x-0]="!checked"
+        [class.translate-x-5]="isOn()"
+        [class.translate-x-0]="!isOn()"
       ></span>
     </button>
-    @if (label) {
-      <span
-        [class]="labelClasses"
-        >{{ label }}</span
-        >
-      }
-    `,
+    @if (label()) {
+      <span [class]="labelClasses">{{ label() }}</span>
+    }
+  `,
 })
 export class ToggleComponent implements ControlValueAccessor {
-  @Input() checked = false;
-  @Input() disabled = false;
-  @Input() label?: string;
+  readonly checked = input(false);
+  readonly disabled = input(false);
+  private isDisabledFromForm = false;
+  readonly label = input<string | undefined>(undefined);
   readonly ariaLabel = input<string>();
   readonly styleVariant = input<FormStyleVariant>('modern');
 
+  readonly isOn = signal(false);
   readonly toggled = output<boolean>();
   readonly changed = output<boolean>();
 
   private onChange: (value: boolean) => void = () => {};
   private onTouched: () => void = () => {};
 
+  constructor() {
+    effect(
+      () => {
+        this.isOn.set(this.checked());
+      },
+      { allowSignalWrites: true },
+    );
+  }
+
   writeValue(value: boolean): void {
-    this.checked = !!value;
+    this.isOn.set(!!value);
   }
 
   registerOnChange(fn: (value: boolean) => void): void {
@@ -78,16 +87,16 @@ export class ToggleComponent implements ControlValueAccessor {
     this.onTouched = fn;
   }
 
-  setDisabledState(disabled: boolean): void {
-    this.disabled = disabled;
+  setDisabledState(isDisabled: boolean): void {
+    this.isDisabledFromForm = isDisabled;
   }
 
   onToggle(): void {
-    if (this.disabled) return;
-    this.checked = !this.checked;
-    this.onChange(this.checked);
-    this.toggled.emit(this.checked);
-    this.changed.emit(this.checked);
+    if (this.disabled() || this.isDisabledFromForm) return;
+    this.isOn.update((v) => !v);
+    this.onChange(this.isOn());
+    this.toggled.emit(this.isOn());
+    this.changed.emit(this.isOn());
     this.onTouched();
   }
 
@@ -138,10 +147,8 @@ export class ToggleComponent implements ControlValueAccessor {
       ].join(' ');
     }
 
-    return [
-      ...baseClasses,
-      'text-sm',
-      'text-[var(--color-text-primary)]',
-    ].join(' ');
+    return [...baseClasses, 'text-sm', 'text-[var(--color-text-primary)]'].join(
+      ' ',
+    );
   }
 }

@@ -43,41 +43,69 @@ export class DialogService {
     private appRef: ApplicationRef,
   ) {}
 
+  private setSignalValue(instance: any, key: string, value: any): void {
+    const prop = instance[key];
+    if (prop && typeof prop === 'function') {
+      const signal = prop as any;
+      if (typeof signal.set === 'function') {
+        signal.set(value);
+      } else if (typeof signal.update === 'function') {
+        signal.update(() => value);
+      }
+    }
+  }
+
   confirm(data: ConfirmData, config: DialogConfig = {}): Promise<boolean> {
     return new Promise<boolean>((resolve) => {
       const componentRef = createComponent(ConfirmationModalComponent, {
         environmentInjector: this.injector,
       });
-
-      componentRef.instance.title = data.title;
-      componentRef.instance.message = data.message;
+      this.setSignalValue(componentRef.instance, 'title', data.title);
+      this.setSignalValue(componentRef.instance, 'message', data.message);
       if (data.confirmText)
-        componentRef.instance.confirmText = data.confirmText;
-      if (data.cancelText) componentRef.instance.cancelText = data.cancelText;
+        this.setSignalValue(
+          componentRef.instance,
+          'confirmText',
+          data.confirmText,
+        );
+      if (data.cancelText)
+        this.setSignalValue(
+          componentRef.instance,
+          'cancelText',
+          data.cancelText,
+        );
       if (data.confirmVariant)
-        componentRef.instance.confirmVariant = data.confirmVariant;
-
-      // Apply config
-      if (config.size) componentRef.instance.size = config.size;
+        this.setSignalValue(
+          componentRef.instance,
+          'confirmVariant',
+          data.confirmVariant,
+        );
+      if (config.size)
+        this.setSignalValue(componentRef.instance, 'size', config.size);
       if (config.showCloseButton !== undefined)
-        componentRef.instance.showCloseButton = config.showCloseButton;
+        this.setSignalValue(
+          componentRef.instance,
+          'showCloseButton',
+          config.showCloseButton,
+        );
       if (config.customClasses)
-        componentRef.instance.customClasses = config.customClasses;
-
+        this.setSignalValue(
+          componentRef.instance,
+          'customClasses',
+          config.customClasses,
+        );
       const sub = componentRef.instance.confirm.subscribe(() => {
         resolve(true);
         sub.unsubscribe();
         this.appRef.detachView(componentRef.hostView);
         componentRef.destroy();
       });
-
       const subCancel = componentRef.instance.cancel.subscribe(() => {
         resolve(false);
         subCancel.unsubscribe();
         this.appRef.detachView(componentRef.hostView);
         componentRef.destroy();
       });
-
       this.appRef.attachView(componentRef.hostView);
       const domElem = (componentRef.hostView as any)
         .rootNodes[0] as HTMLElement;
@@ -93,37 +121,58 @@ export class DialogService {
       const componentRef = createComponent(PromptModalComponent, {
         environmentInjector: this.injector,
       });
-
-      componentRef.instance.title = data.title;
-      componentRef.instance.message = data.message;
-      componentRef.instance.placeholder = data.placeholder || '';
-      componentRef.instance.defaultValue = data.defaultValue || '';
+      this.setSignalValue(componentRef.instance, 'title', data.title);
+      this.setSignalValue(componentRef.instance, 'message', data.message);
+      this.setSignalValue(
+        componentRef.instance,
+        'placeholder',
+        data.placeholder || '',
+      );
+      this.setSignalValue(
+        componentRef.instance,
+        'defaultValue',
+        data.defaultValue || '',
+      );
       if (data.confirmText)
-        componentRef.instance.confirmText = data.confirmText;
-      if (data.cancelText) componentRef.instance.cancelText = data.cancelText;
-      if (data.inputType) componentRef.instance.inputType = data.inputType;
-
-      // Apply config
-      if (config.size) componentRef.instance.size = config.size;
+        this.setSignalValue(
+          componentRef.instance,
+          'confirmText',
+          data.confirmText,
+        );
+      if (data.cancelText)
+        this.setSignalValue(
+          componentRef.instance,
+          'cancelText',
+          data.cancelText,
+        );
+      if (data.inputType)
+        this.setSignalValue(componentRef.instance, 'inputType', data.inputType);
+      if (config.size)
+        this.setSignalValue(componentRef.instance, 'size', config.size);
       if (config.showCloseButton !== undefined)
-        componentRef.instance.showCloseButton = config.showCloseButton;
+        this.setSignalValue(
+          componentRef.instance,
+          'showCloseButton',
+          config.showCloseButton,
+        );
       if (config.customClasses)
-        componentRef.instance.customClasses = config.customClasses;
-
+        this.setSignalValue(
+          componentRef.instance,
+          'customClasses',
+          config.customClasses,
+        );
       const sub = componentRef.instance.confirm.subscribe((value: string) => {
         resolve(value);
         sub.unsubscribe();
         this.appRef.detachView(componentRef.hostView);
         componentRef.destroy();
       });
-
       const subCancel = componentRef.instance.cancel.subscribe(() => {
         resolve(undefined);
         subCancel.unsubscribe();
         this.appRef.detachView(componentRef.hostView);
         componentRef.destroy();
       });
-
       this.appRef.attachView(componentRef.hostView);
       const domElem = (componentRef.hostView as any)
         .rootNodes[0] as HTMLElement;

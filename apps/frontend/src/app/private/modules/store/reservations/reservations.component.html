@@ -47,8 +47,8 @@
             <button
               type="button"
               class="toggle-btn"
-              [class.active]="activeView === 'calendar'"
-              (click)="activeView = 'calendar'"
+              [class.active]="activeView() === 'calendar'"
+              (click)="activeView.set('calendar')"
             >
               <app-icon name="calendar" [size]="14"></app-icon>
               <span class="hidden sm:inline">Calendario</span>
@@ -58,8 +58,8 @@
             <button
               type="button"
               class="toggle-btn"
-              [class.active]="activeView === 'list'"
-              (click)="activeView = 'list'"
+              [class.active]="activeView() === 'list'"
+              (click)="activeView.set('list')"
             >
               <app-icon name="list" [size]="14"></app-icon>
               <span class="hidden sm:inline">Lista</span>
@@ -94,7 +94,7 @@
   <div class="stats-container">
     <app-stats
       title="Reservas de Hoy"
-      [value]="stats?.today_count || 0"
+      [value]="stats()?.today_count || 0"
       smallText="Reservas programadas hoy"
       iconName="calendar"
       iconBgColor="bg-blue-100"
@@ -103,7 +103,7 @@
 
     <app-stats
       title="Pendientes"
-      [value]="stats?.pending_count || 0"
+      [value]="stats()?.pending_count || 0"
       smallText="Esperando confirmacion"
       iconName="clock"
       iconBgColor="bg-amber-100"
@@ -112,7 +112,7 @@
 
     <app-stats
       title="Confirmadas"
-      [value]="stats?.confirmed_count || 0"
+      [value]="stats()?.confirmed_count || 0"
       smallText="Listas para atender"
       iconName="check-circle"
       iconBgColor="bg-emerald-100"
@@ -121,7 +121,7 @@
 
     <app-stats
       title="Tasa de Cancelacion"
-      [value]="formatRate(stats?.cancellation_rate || 0)"
+      [value]="formatRate(stats()?.cancellation_rate || 0)"
       smallText="Cancelaciones recientes"
       iconName="x-circle"
       iconBgColor="bg-red-100"
@@ -133,12 +133,12 @@
   <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6">
     <!-- Left: Calendar or List -->
     <div
-      [class]="activeView === 'calendar' ? 'lg:col-span-8' : 'lg:col-span-12'"
+      [class]="activeView() === 'calendar' ? 'lg:col-span-8' : 'lg:col-span-12'"
     >
-      @if (activeView === "calendar") {
+      @if (activeView() === "calendar") {
         <app-card shadow="sm" customClasses="overflow-hidden">
           <app-calendar-container
-            [refreshTrigger]="calendarRefreshTrigger"
+            [refreshTrigger]="calendarRefreshTrigger()"
             (slotClicked)="onSlotClicked($event)"
             (bookingClicked)="onBookingClicked($event)"
             (bookingDropped)="onBookingDropped($event)"
@@ -188,13 +188,13 @@
         </app-card>
       }
 
-      @if (activeView === "list") {
+      @if (activeView() === "list") {
         <app-reservation-list
-          [bookings]="bookings"
-          [loading]="loading"
-          [totalItems]="totalItems"
-          [page]="page"
-          [limit]="limit"
+          [bookings]="bookings()"
+          [loading]="loading()"
+          [totalItems]="totalItems()"
+          [page]="page()"
+          [limit]="limit()"
           (search)="onSearch($event)"
           (pageChange)="onPageChange($event)"
           (statusFilter)="onStatusFilterChange($event)"
@@ -210,7 +210,7 @@
     </div>
 
     <!-- Right: Sidebar (4 cols) — only in calendar mode -->
-    @if (activeView === "calendar") {
+    @if (activeView() === "calendar") {
       <div class="lg:col-span-4 flex flex-col gap-4">
         <app-today-reservations-panel
           [bookings]="todayBookings()"
@@ -228,37 +228,37 @@
     }
   </div>
 
-  @defer (when isFormModalOpen) {
+  @defer (when isFormModalOpen()) {
     <app-reservation-form-modal
-      [isOpen]="isFormModalOpen"
+      [isOpen]="isFormModalOpen()"
       (closed)="onFormModalClose()"
       (created)="onReservationCreated()"
     ></app-reservation-form-modal>
   }
 
-  @defer (when isTapToBookModalOpen) {
+  @defer (when isTapToBookModalOpen()) {
     <app-quick-book-from-slot-modal
-      [isOpen]="isTapToBookModalOpen"
-      [prefilledDate]="tapToBookDate"
-      [prefilledTime]="tapToBookTime"
-      (closed)="isTapToBookModalOpen = false"
+      [isOpen]="isTapToBookModalOpen()"
+      [prefilledDate]="tapToBookDate()"
+      [prefilledTime]="tapToBookTime()"
+      (closed)="isTapToBookModalOpen.set(false)"
       (created)="onTapToBookCreated()"
     />
   }
 
-  @defer (when isRescheduleModalOpen) {
+  @defer (when isRescheduleModalOpen()) {
     <app-reschedule-modal
-      [isOpen]="isRescheduleModalOpen"
-      [booking]="bookingToReschedule"
-      (closed)="isRescheduleModalOpen = false"
+      [isOpen]="isRescheduleModalOpen()"
+      [booking]="bookingToReschedule()"
+      (closed)="isRescheduleModalOpen.set(false)"
       (rescheduled)="onRescheduleCompleted()"
     />
   }
 
-  @defer (when isDetailModalOpen) {
+  @defer (when isDetailModalOpen()) {
     <app-booking-detail-modal
-      [isOpen]="isDetailModalOpen"
-      [booking]="selectedBooking"
+      [isOpen]="isDetailModalOpen()"
+      [booking]="selectedBooking()"
       (closed)="onDetailModalClose()"
       (confirmed)="onConfirm($event)"
       (cancelled)="onCancel($event)"

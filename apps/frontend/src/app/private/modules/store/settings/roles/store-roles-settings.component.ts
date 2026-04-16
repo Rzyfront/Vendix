@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, inject } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
 
 import { Subject, takeUntil } from 'rxjs';
 import { StoreRole, StoreRoleStats } from './interfaces/store-role.interface';
@@ -35,50 +35,50 @@ import {
       >
         <app-stats
           title="Total Roles"
-          [value]="roleStats?.total_roles ?? 0"
+          [value]="roleStats()?.total_roles ?? 0"
           smallText="en la tienda"
           iconName="shield"
           iconBgColor="bg-primary/10"
           iconColor="text-primary"
-          [loading]="statsLoading"
+          [loading]="statsLoading()"
         ></app-stats>
 
         <app-stats
           title="Sistema"
-          [value]="roleStats?.system_roles ?? 0"
+          [value]="roleStats()?.system_roles ?? 0"
           smallText="roles del sistema"
           iconName="lock"
           iconBgColor="bg-blue-100"
           iconColor="text-blue-600"
-          [loading]="statsLoading"
+          [loading]="statsLoading()"
         ></app-stats>
 
         <app-stats
           title="Personalizados"
-          [value]="roleStats?.custom_roles ?? 0"
+          [value]="roleStats()?.custom_roles ?? 0"
           smallText="roles personalizados"
           iconName="edit"
           iconBgColor="bg-green-100"
           iconColor="text-green-600"
-          [loading]="statsLoading"
+          [loading]="statsLoading()"
         ></app-stats>
 
         <app-stats
           title="Permisos Store"
-          [value]="roleStats?.total_store_permissions ?? 0"
+          [value]="roleStats()?.total_store_permissions ?? 0"
           smallText="permisos disponibles"
           iconName="key"
           iconBgColor="bg-yellow-100"
           iconColor="text-yellow-600"
-          [loading]="statsLoading"
+          [loading]="statsLoading()"
         ></app-stats>
       </div>
 
       <!-- List -->
       <app-store-roles-list
-        [roles]="filteredRoles"
-        [loading]="isLoading"
-        [totalCount]="roles.length"
+        [roles]="filteredRoles()"
+        [loading]="isLoading()"
+        [totalCount]="roles().length"
         (create)="openCreateModal()"
         (edit)="openEditModal($event)"
         (managePermissions)="openPermissionsModal($event)"
@@ -120,11 +120,11 @@ export class StoreRolesSettingsComponent implements OnInit, OnDestroy {
   private destroy$ = new Subject<void>();
 
   // State
-  roles: StoreRole[] = [];
-  filteredRoles: StoreRole[] = [];
-  roleStats: StoreRoleStats | null = null;
-  isLoading = false;
-  statsLoading = false;
+  readonly roles = signal<StoreRole[]>([]);
+  readonly filteredRoles = signal<StoreRole[]>([]);
+  readonly roleStats = signal<StoreRoleStats | null>(null);
+  readonly isLoading = signal(false);
+  readonly statsLoading = signal(false);
 
   // Filters
   searchTerm = '';
@@ -148,40 +148,40 @@ export class StoreRolesSettingsComponent implements OnInit, OnDestroy {
   }
 
   loadRoles(): void {
-    this.isLoading = true;
+    this.isLoading.set(true);
 
     this.storeRolesService
       .getRoles()
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (response) => {
-          this.roles = response.data || [];
+          this.roles.set(response.data || []);
           this.applyFilters();
         },
         error: (error) => {
           console.error('Error loading store roles:', error);
-          this.roles = [];
-          this.filteredRoles = [];
+          this.roles.set([]);
+          this.filteredRoles.set([]);
         },
       })
       .add(() => {
-        this.isLoading = false;
+        this.isLoading.set(false);
       });
   }
 
   loadStats(): void {
-    this.statsLoading = true;
+    this.statsLoading.set(true);
     this.storeRolesService
       .getStats()
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (stats) => {
-          this.roleStats = stats;
-          this.statsLoading = false;
+          this.roleStats.set(stats);
+          this.statsLoading.set(false);
         },
         error: (err) => {
           console.error('Error loading store role stats', err);
-          this.statsLoading = false;
+          this.statsLoading.set(false);
         },
       });
   }
@@ -205,17 +205,17 @@ export class StoreRolesSettingsComponent implements OnInit, OnDestroy {
     direction: 'asc' | 'desc' | null;
   }): void {
     if (!event.direction) return;
-    this.filteredRoles = [...this.filteredRoles].sort((a: any, b: any) => {
+    this.filteredRoles.set([...this.filteredRoles()].sort((a: any, b: any) => {
       const valA = a[event.column];
       const valB = b[event.column];
       if (valA < valB) return event.direction === 'asc' ? -1 : 1;
       if (valA > valB) return event.direction === 'asc' ? 1 : -1;
       return 0;
-    });
+    }));
   }
 
   private applyFilters(): void {
-    let filtered = [...this.roles];
+    let filtered = [...this.roles()];
 
     if (this.typeFilter === 'system') {
       filtered = filtered.filter((r) => r.system_role);
@@ -232,7 +232,7 @@ export class StoreRolesSettingsComponent implements OnInit, OnDestroy {
       );
     }
 
-    this.filteredRoles = filtered;
+    this.filteredRoles.set(filtered);
   }
 
   // ── Modals ───────────────────────────────────────────────────────────

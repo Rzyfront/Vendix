@@ -1,17 +1,9 @@
-import { Component, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject, signal } from '@angular/core';
 import { Store } from '@ngrx/store';
-import { Observable } from 'rxjs';
+import { toSignal } from '@angular/core/rxjs-interop';
 
-import {
-  loadExpenses,
-  loadExpensesSummary,
-  loadExpenseCategories,
-} from './state/actions/expenses.actions';
-import {
-  selectExpenses,
-  selectExpensesLoading,
-} from './state/selectors/expenses.selectors';
+import { loadExpenses, loadExpensesSummary, loadExpenseCategories } from './state/actions/expenses.actions';
+import { selectExpenses, selectExpensesLoading } from './state/selectors/expenses.selectors';
 import { Expense } from './interfaces/expense.interface';
 
 import { ExpensesStatsComponent } from './components/expenses-stats/expenses-stats.component';
@@ -25,7 +17,6 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
   selector: 'vendix-expenses',
   standalone: true,
   imports: [
-    CommonModule,
     ExpensesStatsComponent,
     ExpensesListComponent,
     ExpenseCreateComponent,
@@ -35,61 +26,55 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
   template: `
     <div class="w-full">
       <!-- Stats: Sticky on mobile, static on desktop -->
-      <div
-        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
-      >
+      <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
         <vendix-expenses-stats></vendix-expenses-stats>
       </div>
 
       <!-- Expenses List -->
       <app-expenses-list
-        [expenses]="(expenses$ | async) || []"
-        [loading]="(loading$ | async) || false"
+        [expenses]="expenses() || []"
+        [loading]="loading() || false"
         (create)="openCreateModal()"
         (edit)="editExpense($event)"
         (categories)="openCategoriesModal()"
         (refresh)="refreshExpenses()"
       ></app-expenses-list>
 
-      @defer (when isCreateModalOpen) {
-        <vendix-expense-create
-          [(isOpen)]="isCreateModalOpen"
-        ></vendix-expense-create>
-      }
+      <!-- Create Expense Modal -->
+      <vendix-expense-create
+        [isOpen]="isCreateModalOpen()"
+        (isOpenChange)="isCreateModalOpen.set($event)"
+      ></vendix-expense-create>
 
-      @defer (when isEditModalOpen) {
-        <vendix-expense-edit
-          [(isOpen)]="isEditModalOpen"
-          [expense]="selectedExpense"
-        ></vendix-expense-edit>
-      }
+      <!-- Edit Expense Modal -->
+      <vendix-expense-edit
+        [isOpen]="isEditModalOpen()"
+        (isOpenChange)="isEditModalOpen.set($event)"
+        [expense]="selectedExpense()"
+      ></vendix-expense-edit>
 
-      @defer (when isCategoriesModalOpen) {
-        <vendix-expense-categories
-          [(isOpen)]="isCategoriesModalOpen"
-        ></vendix-expense-categories>
-      }
+      <!-- Categories Modal -->
+      <vendix-expense-categories
+        [isOpen]="isCategoriesModalOpen()"
+        (isOpenChange)="isCategoriesModalOpen.set($event)"
+      ></vendix-expense-categories>
     </div>
   `,
 })
-export class ExpensesComponent implements OnInit {
+export class ExpensesComponent {
   private currencyService = inject(CurrencyFormatService);
+  private store = inject(Store);
 
-  expenses$: Observable<Expense[]>;
-  loading$: Observable<boolean>;
+  readonly expenses = toSignal(this.store.select(selectExpenses), { initialValue: [] });
+  readonly loading = toSignal(this.store.select(selectExpensesLoading), { initialValue: false });
 
   // Modal states
-  isCreateModalOpen = false;
-  isEditModalOpen = false;
-  isCategoriesModalOpen = false;
-  selectedExpense: Expense | null = null;
+  readonly isCreateModalOpen = signal(false);
+  readonly isEditModalOpen = signal(false);
+  readonly isCategoriesModalOpen = signal(false);
+  readonly selectedExpense = signal<Expense | null>(null);
 
-  constructor(private store: Store) {
-    this.expenses$ = this.store.select(selectExpenses);
-    this.loading$ = this.store.select(selectExpensesLoading);
-  }
-
-  ngOnInit(): void {
+  constructor() {
     this.currencyService.loadCurrency();
     this.store.dispatch(loadExpenses());
     this.store.dispatch(loadExpensesSummary());
@@ -98,16 +83,16 @@ export class ExpensesComponent implements OnInit {
 
   // Modal handlers
   openCreateModal(): void {
-    this.isCreateModalOpen = true;
+    this.isCreateModalOpen.set(true);
   }
 
   openCategoriesModal(): void {
-    this.isCategoriesModalOpen = true;
+    this.isCategoriesModalOpen.set(true);
   }
 
   editExpense(expense: Expense): void {
-    this.selectedExpense = expense;
-    this.isEditModalOpen = true;
+    this.selectedExpense.set(expense);
+    this.isEditModalOpen.set(true);
   }
 
   refreshExpenses(): void {

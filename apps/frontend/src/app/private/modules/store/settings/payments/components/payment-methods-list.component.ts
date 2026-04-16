@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
+import { Component, input, output } from '@angular/core';
 
 import { StorePaymentMethod } from '../interfaces/payment-methods.interface';
 import {
@@ -16,11 +16,11 @@ import {
   imports: [ResponsiveDataViewComponent],
   template: `
     <app-responsive-data-view
-      [data]="payment_methods"
+      [data]="payment_methods()"
       [columns]="table_columns"
       [cardConfig]="card_config"
       [actions]="table_actions"
-      [loading]="is_loading"
+      [loading]="is_loading()"
       emptyMessage="No payment methods configured"
       emptyIcon="credit-card"
     >
@@ -36,13 +36,13 @@ import {
   ],
 })
 export class PaymentMethodsListComponent {
-  @Input() payment_methods: StorePaymentMethod[] = [];
-  @Input() is_loading = false;
+  readonly payment_methods = input<StorePaymentMethod[]>([]);
+  readonly is_loading = input<boolean>(false);
 
-  @Output() edit = new EventEmitter<StorePaymentMethod>();
-  @Output() toggle = new EventEmitter<StorePaymentMethod>();
-  @Output() delete = new EventEmitter<StorePaymentMethod>();
-  @Output() reorder = new EventEmitter<string[]>();
+  readonly edit = output<StorePaymentMethod>();
+  readonly toggle = output<StorePaymentMethod>();
+  readonly delete = output<StorePaymentMethod>();
+  readonly reorder = output<string[]>();
 
   card_config: ItemListCardConfig = {
     titleKey: 'system_payment_method.display_name',

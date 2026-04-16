@@ -1,8 +1,9 @@
-import { Component, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject } from '@angular/core';
+import { NgClass } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
+import { toSignal } from '@angular/core/rxjs-interop';
 
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { environment } from '../../../../../../../environments/environment';
@@ -314,16 +315,16 @@ const GROUP_FLOW_MAP: Record<string, string> = {
   selector: 'vendix-account-mappings',
   standalone: true,
   imports: [
-    CommonModule,
     ButtonComponent,
     CardComponent,
     IconComponent,
     EmptyStateComponent,
+    NgClass,
   ],
   templateUrl: './account-mappings.component.html',
   styleUrls: ['./account-mappings.component.scss'],
 })
-export class AccountMappingsComponent implements OnInit {
+export class AccountMappingsComponent {
   private store = inject(Store);
   private http = inject(HttpClient);
   private toast = inject(ToastService);
@@ -334,6 +335,7 @@ export class AccountMappingsComponent implements OnInit {
   loading$: Observable<boolean> = this.store.select(
     selectAccountMappingsLoading,
   );
+  readonly loading = toSignal(this.loading$, { initialValue: false });
   leaf_accounts$: Observable<ChartAccount[]> =
     this.store.select(selectLeafAccounts);
 
@@ -345,7 +347,7 @@ export class AccountMappingsComponent implements OnInit {
   flow_toggles: Record<string, boolean> = {};
   flows_loaded = false;
 
-  ngOnInit(): void {
+  constructor() {
     this.store.dispatch(loadAccountMappings({}));
     this.store.dispatch(loadAccounts());
 

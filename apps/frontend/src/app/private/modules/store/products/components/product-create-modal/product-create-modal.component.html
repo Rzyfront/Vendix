@@ -1,6 +1,6 @@
 <app-modal
-  [isOpen]="isOpen"
-  (isOpenChange)="isOpenChange.emit($event)"
+  [isOpen]="isOpen()"
+  (isOpenChange)="isOpen.set($event)"
   (cancel)="onCancel()"
   [size]="'md'"
   [title]="isEditMode ? 'Editar Producto' : 'Nuevo Producto'"
@@ -72,7 +72,7 @@
           <div class="flex gap-2 items-end">
             <app-selector class="flex-1" label="Categoría" [options]="categoryOptions" formControlName="category_id"
             placeholder="Seleccionar"></app-selector>
-            <button type="button" (click)="isCategoryCreateOpen = true"
+            <button type="button" (click)="isCategoryCreateOpen.set(true)"
               class="p-2 text-gray-500 hover:bg-gray-100 border border-gray-300 bg-white mb-0.5"
               style="border-radius: var(--radius-sm);">
               <app-icon name="plus" size="20"></app-icon>
@@ -85,7 +85,7 @@
           <div class="flex gap-2 items-end">
             <app-selector class="flex-1" label="Marca" [options]="brandOptions"
             formControlName="brand_id" placeholder="Seleccionar"></app-selector>
-            <button type="button" (click)="isBrandCreateOpen = true"
+            <button type="button" (click)="isBrandCreateOpen.set(true)"
               class="p-2 text-gray-500 hover:bg-gray-100 border border-gray-300 bg-white mb-0.5"
               style="border-radius: var(--radius-sm);">
               <app-icon name="plus" size="20"></app-icon>
@@ -102,7 +102,7 @@
             [options]="taxCategoryOptions" formControlName="tax_category_ids"
             placeholder="Seleccionar impuestos...">
           </app-multi-selector>
-          <button type="button" (click)="isTaxCategoryCreateOpen = true"
+          <button type="button" (click)="isTaxCategoryCreateOpen.set(true)"
             class="p-2 text-gray-500 hover:bg-gray-100 border border-gray-300 bg-white mb-0.5"
             style="border-radius: var(--radius-sm);">
             <app-icon name="plus" size="20"></app-icon>
@@ -131,12 +131,12 @@
   <!-- Footer -->
   <div slot="footer" class="max-w-full">
     <div class="flex items-center justify-end gap-2 md:gap-3 p-2 md:px-4 md:py-3 bg-gray-50 rounded-b-xl">
-      <app-button variant="outline" (clicked)="onCancel()" [disabled]="isSubmitting"
+      <app-button variant="outline" (clicked)="onCancel()" [disabled]="isSubmitting()"
         customClasses="!rounded-xl flex-1 sm:flex-none font-bold">
         Cancelar
       </app-button>
 
-      <app-button variant="primary" (clicked)="onSubmit()" [loading]="isSubmitting" [disabled]="isSubmitting"
+      <app-button variant="primary" (clicked)="onSubmit()" [loading]="isSubmitting()" [disabled]="isSubmitting()"
         customClasses="!rounded-xl flex-1 sm:flex-none font-bold shadow-md shadow-primary-200 active:scale-95 transition-all">
         {{ isEditMode ? 'Guardar Cambios' : 'Crear Producto' }}
       </app-button>
@@ -145,19 +145,19 @@
 </app-modal>
 
 <!-- Quick Create Modals -->
-<app-category-quick-create [isOpen]="isCategoryCreateOpen" (isOpenChange)="isCategoryCreateOpen = $event"
-(created)="onCategoryCreated($event)" (cancel)="isCategoryCreateOpen = false"></app-category-quick-create>
+<app-category-quick-create [isOpen]="isCategoryCreateOpen()" (isOpenChange)="isCategoryCreateOpen.set($event)"
+(created)="onCategoryCreated($event)" (cancel)="isCategoryCreateOpen.set(false)"></app-category-quick-create>
 
 <app-brand-quick-create
-  [isOpen]="isBrandCreateOpen"
-  (isOpenChange)="isBrandCreateOpen = $event"
+  [isOpen]="isBrandCreateOpen()"
+  (isOpenChange)="isBrandCreateOpen.set($event)"
   (created)="onBrandCreated($event)"
-  (cancel)="isBrandCreateOpen = false"
+  (cancel)="isBrandCreateOpen.set(false)"
 ></app-brand-quick-create>
 
 <app-tax-quick-create
-  [isOpen]="isTaxCategoryCreateOpen"
-  (isOpenChange)="isTaxCategoryCreateOpen = $event"
+  [isOpen]="isTaxCategoryCreateOpen()"
+  (isOpenChange)="isTaxCategoryCreateOpen.set($event)"
   (created)="onTaxCategoryCreated($event)"
-  (cancel)="isTaxCategoryCreateOpen = false">
+  (cancel)="isTaxCategoryCreateOpen.set(false)">
 </app-tax-quick-create>

@@ -1,5 +1,5 @@
 import { Component, input } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { NgClass } from '@angular/common';
 import { IconComponent } from '../icon/icon.component';
 
 export type AlertBannerVariant = 'warning' | 'info' | 'danger' | 'success';
@@ -7,7 +7,7 @@ export type AlertBannerVariant = 'warning' | 'info' | 'danger' | 'success';
 @Component({
   selector: 'app-alert-banner',
   standalone: true,
-  imports: [CommonModule, IconComponent],
+  imports: [NgClass, IconComponent],
   template: `
     <div
       class="rounded-xl p-3 flex items-center gap-3 border"

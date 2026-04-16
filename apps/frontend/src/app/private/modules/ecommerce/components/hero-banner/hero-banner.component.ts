@@ -1,4 +1,4 @@
-import { Component, Input, OnInit, OnDestroy, inject } from '@angular/core';
+import { Component, inject, input, DestroyRef } from '@angular/core';
 
 import { RouterModule, Router } from '@angular/router';
 import { TenantFacade } from '../../../../../../app/core/store';
@@ -27,25 +27,23 @@ export interface SliderPhoto {
   templateUrl: './hero-banner.component.html',
   styleUrls: ['./hero-banner.component.scss'],
 })
-export class HeroBannerComponent implements OnInit, OnDestroy {
-  @Input() banner: Partial<HeroBannerConfig> = {};
-  @Input() slides: SliderPhoto[] = [];
-  @Input() class = '';
+export class HeroBannerComponent {
+  readonly banner = input<Partial<HeroBannerConfig>>({});
+  readonly slides = input<SliderPhoto[]>([]);
+  readonly class = input<string>('');
 
   current_slide_index = 0;
   private auto_play_interval: any;
 
   private domain_service = inject(TenantFacade);
   private router = inject(Router);
+  private destroyRef = inject(DestroyRef);
 
-  ngOnInit(): void {
-    if (this.slides.length > 1) {
+  constructor() {
+    if (this.slides().length > 1) {
       this.startAutoPlay();
     }
-  }
-
-  ngOnDestroy(): void {
-    this.stopAutoPlay();
+    this.destroyRef.onDestroy(() => this.stopAutoPlay());
   }
 
   private startAutoPlay(): void {
@@ -73,26 +71,27 @@ export class HeroBannerComponent implements OnInit, OnDestroy {
 
   get banner_config(): HeroBannerConfig {
     const tenantConfig = this.domain_service.getCurrentTenantConfig();
-    const current_slide = this.slides[this.current_slide_index];
+    const current_slide = this.slides()[this.current_slide_index];
+    const bannerVal = this.banner();
 
     return {
       title:
         current_slide?.title ||
-        this.banner.title ||
+        bannerVal.title ||
         'Bienvenido a nuestra tienda',
       subtitle:
         current_slide?.caption ||
-        this.banner.subtitle ||
+        bannerVal.subtitle ||
         'Encuentra los mejores productos al mejor precio',
-      image_url: current_slide?.url || this.banner.image_url || undefined,
+      image_url: current_slide?.url || bannerVal.image_url || undefined,
       background_color:
-        this.banner.background_color ||
+        bannerVal.background_color ||
         tenantConfig?.branding?.colors?.primary ||
         'var(--color-primary)',
-      text_color: this.banner.text_color || '#ffffff',
-      cta_text: this.banner.cta_text || 'Ver productos',
-      cta_link: this.banner.cta_link || '/catalog',
-      show_overlay: this.banner.show_overlay ?? true,
+      text_color: bannerVal.text_color || '#ffffff',
+      cta_text: bannerVal.cta_text || 'Ver productos',
+      cta_link: bannerVal.cta_link || '/catalog',
+      show_overlay: bannerVal.show_overlay ?? true,
     };
   }
 
