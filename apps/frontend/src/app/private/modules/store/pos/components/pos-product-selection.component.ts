@@ -948,6 +948,7 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
           defaultValue: '1.0',
           confirmText: 'Agregar',
           cancelText: 'Cancelar',
+          inputType: 'number',
         },
         { size: 'sm' },
       );

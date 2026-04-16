@@ -66,9 +66,7 @@ export class CustomerHistoryService {
         product: { select: { id: true, name: true } },
         provider: { select: { id: true, display_name: true } },
         data_collection_submissions: {
-          include: {
-            responses: { include: { field: true } },
-          },
+          select: { id: true, status: true, ai_prediagnosis: true },
           take: 1,
           orderBy: { created_at: 'desc' as const },
         },

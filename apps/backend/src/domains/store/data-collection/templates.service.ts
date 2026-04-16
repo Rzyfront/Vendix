@@ -227,6 +227,39 @@ export class TemplatesService {
     return this.findOne(templateId);
   }
 
+  async deleteTemplate(templateId: number) {
+    const existing = await this.prisma.data_collection_templates.findUnique({ where: { id: templateId } });
+    if (!existing) throw new VendixHttpException(ErrorCodes.DCOL_FIND_001);
+
+    // Check if template is in use by any submission
+    const submissionCount = await this.prisma.data_collection_submissions.count({
+      where: { template_id: templateId },
+    });
+    if (submissionCount > 0) {
+      throw new VendixHttpException(ErrorCodes.DCOL_DELETE_001);
+    }
+
+    // Delete in order: items → child_sections → sections → tabs → product assignments → template
+    await this.prisma.data_collection_items.deleteMany({
+      where: { section: { template_id: templateId } },
+    });
+    await this.prisma.data_collection_sections.deleteMany({
+      where: { template_id: templateId },
+    });
+    await this.prisma.data_collection_tabs.deleteMany({
+      where: { template_id: templateId },
+    });
+    await this.prisma.data_collection_template_products.deleteMany({
+      where: { template_id: templateId },
+    });
+    await this.prisma.data_collection_templates.delete({
+      where: { id: templateId },
+    });
+
+    this.logger.log(`Deleted template id=${templateId}`);
+    return { deleted: true };
+  }
+
   // --- Private helpers ---
 
   private async createSections(

@@ -137,11 +137,6 @@ export const APP_MODULES: { [key: string]: AppModule[]; ORG_ADMIN: AppModule[]; 
           description: 'Gesti\u00f3n de reservas y agendamiento de servicios',
         },
         {
-          key: 'orders_consultations',
-          label: 'Consultas',
-          description: 'Atenci\u00f3n de consultas m\u00e9dicas y est\u00e9ticas',
-        },
-        {
           key: 'orders_dispatch_notes',
           label: 'Remisiones',
           description: 'Notas de despacho / remisiones',

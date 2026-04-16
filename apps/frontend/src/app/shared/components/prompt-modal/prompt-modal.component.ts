@@ -27,6 +27,7 @@ export class PromptModalComponent {
   @Output() cancel = new EventEmitter<void>();
   @Output() isOpenChange = new EventEmitter<boolean>();
 
+  @Input() inputType: 'text' | 'number' = 'text';
   @Input() isOpen = true;
   inputValue = '';
 

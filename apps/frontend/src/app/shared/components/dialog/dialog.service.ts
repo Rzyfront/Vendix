@@ -33,6 +33,7 @@ export interface PromptData {
   defaultValue?: string;
   confirmText?: string;
   cancelText?: string;
+  inputType?: 'text' | 'number';
 }
 
 @Injectable({ providedIn: 'root' })
@@ -100,6 +101,7 @@ export class DialogService {
       if (data.confirmText)
         componentRef.instance.confirmText = data.confirmText;
       if (data.cancelText) componentRef.instance.cancelText = data.cancelText;
+      if (data.inputType) componentRef.instance.inputType = data.inputType;
 
       // Apply config
       if (config.size) componentRef.instance.size = config.size;

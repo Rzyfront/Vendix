@@ -11,6 +11,18 @@ import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { IconPickerComponent } from '../../../../../../shared/components/icon-picker/icon-picker.component';
+import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
+import { InputComponent } from '../../../../../../shared/components/input/input.component';
+import { TextareaComponent } from '../../../../../../shared/components/textarea/textarea.component';
+import { SelectorComponent } from '../../../../../../shared/components/selector/selector.component';
+import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
+import { EmptyStateComponent } from '../../../../../../shared/components/empty-state/empty-state.component';
+import { SettingToggleComponent } from '../../../../../../shared/components/setting-toggle/setting-toggle.component';
+import { ToggleComponent } from '../../../../../../shared/components/toggle/toggle.component';
+import {
+  ScrollableTabsComponent,
+  ScrollableTab,
+} from '../../../../../../shared/components/scrollable-tabs/scrollable-tabs.component';
 import { MetadataField } from '../../interfaces/metadata-field.interface';
 import { DataCollectionTemplate } from '../../interfaces/data-collection-template.interface';
 
@@ -42,356 +54,235 @@ interface TabForm {
 @Component({
   selector: 'app-template-modal',
   standalone: true,
-  imports: [CommonModule, FormsModule, IconComponent, IconPickerComponent],
+  imports: [
+    CommonModule,
+    FormsModule,
+    IconComponent,
+    IconPickerComponent,
+    ModalComponent,
+    InputComponent,
+    TextareaComponent,
+    SelectorComponent,
+    ButtonComponent,
+    EmptyStateComponent,
+    SettingToggleComponent,
+    ToggleComponent,
+    ScrollableTabsComponent,
+  ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div
-      class="fixed inset-0 z-50 flex items-center justify-center p-4"
-      style="background: rgba(0,0,0,0.5)"
-      (click)="close.emit()"
+    <app-modal
+      [isOpen]="true"
+      (isOpenChange)="$event === false && close.emit()"
+      [title]="template() ? 'Editar Plantilla' : 'Nueva Plantilla'"
+      size="lg"
     >
-      <div
-        class="w-full max-w-2xl rounded-xl shadow-xl"
-        style="background: var(--color-surface)"
-        (click)="$event.stopPropagation()"
-      >
-        <!-- Header -->
-        <div
-          class="flex items-center justify-between px-6 py-4"
-          style="border-bottom: 1px solid var(--color-border)"
-        >
-          <h3 class="font-bold text-base" style="color: var(--color-text)">
-            {{ template() ? 'Editar Plantilla' : 'Nueva Plantilla' }}
-          </h3>
-          <div class="flex items-center gap-2">
-            @if (template(); as t) {
-              <button
-                class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium"
-                style="color: var(--color-primary); border: 1px solid var(--color-primary)"
-                (click)="openAdvancedEditor(t.id)"
-              >
-                <app-icon name="settings-2" [size]="14"></app-icon>
-                Editor Avanzado
-              </button>
-            }
-            <button
-              class="p-1 rounded-lg"
-              style="color: var(--color-text-muted)"
-              (click)="close.emit()"
-            >
-              <app-icon name="x" [size]="18"></app-icon>
-            </button>
-          </div>
+      <!-- Acción contextual: Editor Avanzado en el header del modal -->
+      @if (template(); as t) {
+        <div slot="header-end">
+          <app-button variant="outline" size="sm" (clicked)="openAdvancedEditor(t.id)">
+            <app-icon name="settings-2" [size]="14" slot="icon"></app-icon>
+            Editor Avanzado
+          </app-button>
         </div>
+      }
 
-        <!-- Body -->
-        <div class="px-6 py-4 space-y-4 max-h-[70vh] overflow-y-auto">
-          <!-- Name + Icon -->
-          <div>
-            <label
-              class="block text-sm font-medium mb-1"
-              style="color: var(--color-text)"
-              >Nombre *</label
-            >
-            <div class="flex items-center gap-2">
-              <app-icon-picker
-                [value]="formData.icon"
-                (valueChange)="formData.icon = $event"
-                placeholder="Icono plantilla"
-              />
-              <input
-                type="text"
-                class="flex-1 px-3 py-2 border rounded-lg text-sm"
-                style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text)"
-                [(ngModel)]="formData.name"
-                placeholder="Ej: Ficha de cliente"
-              />
-            </div>
-          </div>
+      <!-- Name + Icon -->
+      <div class="flex items-center gap-2 mb-4">
+        <app-icon-picker
+          [value]="formData.icon"
+          (valueChange)="formData.icon = $event"
+          placeholder="Icono"
+        />
+        <app-input
+          label="Nombre"
+          [(ngModel)]="formData.name"
+          [required]="true"
+          placeholder="Ej: Ficha de cliente"
+          class="flex-1"
+        />
+      </div>
 
-          <!-- Description -->
-          <div>
-            <label
-              class="block text-sm font-medium mb-1"
-              style="color: var(--color-text)"
-              >Descripcion</label
-            >
-            <textarea
-              class="w-full px-3 py-2 border rounded-lg text-sm resize-none"
-              rows="2"
-              style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text)"
-              [(ngModel)]="formData.description"
-              placeholder="Descripcion opcional de la plantilla"
-            ></textarea>
-          </div>
+      <!-- Description -->
+      <div class="mb-4">
+        <app-textarea
+          label="Descripcion"
+          [(ngModel)]="formData.description"
+          [rows]="2"
+          placeholder="Descripcion opcional de la plantilla"
+        />
+      </div>
 
-          <!-- Entity Type + Status -->
-          <div class="grid grid-cols-2 gap-4">
-            <div>
-              <label
-                class="block text-sm font-medium mb-1"
-                style="color: var(--color-text)"
-                >Tipo de Entidad *</label
-              >
-              <select
-                class="w-full px-3 py-2 border rounded-lg text-sm"
-                style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text)"
-                [(ngModel)]="formData.entity_type"
-              >
-                <option value="customer">Cliente</option>
-                <option value="booking">Reserva</option>
-                <option value="order">Orden</option>
-              </select>
-            </div>
-            <div>
-              <label
-                class="block text-sm font-medium mb-1"
-                style="color: var(--color-text)"
-                >Estado *</label
-              >
-              <select
-                class="w-full px-3 py-2 border rounded-lg text-sm"
-                style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text)"
-                [(ngModel)]="formData.status"
-              >
-                <option value="active">Activo</option>
-                <option value="inactive">Inactivo</option>
-                <option value="archived">Archivado</option>
-              </select>
-            </div>
-          </div>
+      <!-- Entity Type + Status -->
+      <div class="grid grid-cols-2 gap-4 mb-4">
+        <app-selector
+          label="Tipo de Entidad"
+          [(ngModel)]="formData.entity_type"
+          [options]="entityTypeOptions"
+          [required]="true"
+        />
+        <app-selector
+          label="Estado"
+          [(ngModel)]="formData.status"
+          [options]="statusOptions"
+          [required]="true"
+        />
+      </div>
 
-          <!-- Is Default -->
-          <div class="flex items-center">
-            <label class="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                class="w-4 h-4 rounded"
-                [(ngModel)]="formData.is_default"
-              />
-              <span class="text-sm" style="color: var(--color-text)"
-                >Plantilla por defecto</span
-              >
-            </label>
-          </div>
+      <!-- Is Default -->
+      <div class="mb-3">
+        <app-setting-toggle
+          label="Plantilla por defecto"
+          [(ngModel)]="formData.is_default"
+        />
+      </div>
 
-          <!-- Use Tabs Toggle -->
-          <div class="flex items-center">
-            <label class="flex items-center gap-2 cursor-pointer">
-              <input
-                type="checkbox"
-                class="w-4 h-4 rounded"
-                [(ngModel)]="formData.use_tabs"
-              />
-              <span class="text-sm" style="color: var(--color-text)"
-                >Organizar con pestanas</span
-              >
-            </label>
-          </div>
+      <!-- Use Tabs Toggle -->
+      <div class="mb-4">
+        <app-setting-toggle
+          label="Organizar con pestanas"
+          [(ngModel)]="formData.use_tabs"
+        />
+      </div>
 
-          <!-- Productos Vinculados -->
-          @if (availableProducts().length > 0) {
-            <div>
-              <label
-                class="block text-sm font-medium mb-1"
-                style="color: var(--color-text)"
-                >Productos Vinculados</label
-              >
-              <p class="text-xs mb-2" style="color: var(--color-text-muted)">
-                Los servicios vinculados generaran formularios automaticamente
-                al reservar
-              </p>
+      <!-- Productos Vinculados -->
+      @if (availableProducts().length > 0) {
+        <div class="mb-4">
+          <label
+            class="block text-sm font-medium mb-1"
+            style="color: var(--color-text)"
+            >Productos Vinculados</label
+          >
+          <p class="text-xs mb-2" style="color: var(--color-text-muted)">
+            Los servicios vinculados generaran formularios automaticamente
+            al reservar
+          </p>
 
-              @if (selectedProductIds.length > 0) {
-                <div class="flex flex-wrap gap-2 mb-2">
-                  @for (pid of selectedProductIds; track pid) {
-                    <div
-                      class="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs"
-                      style="background: var(--color-surface-secondary); color: var(--color-text)"
-                    >
-                      <span class="font-medium">{{ getProductName(pid) }}</span>
-                      <button
-                        class="p-0.5 rounded-full"
-                        style="color: var(--color-text-muted)"
-                        (click)="removeProduct(pid)"
-                      >
-                        <app-icon name="x" [size]="12"></app-icon>
-                      </button>
-                    </div>
-                  }
+          @if (selectedProductIds.length > 0) {
+            <div class="flex flex-wrap gap-2 mb-2">
+              @for (pid of selectedProductIds; track pid) {
+                <div
+                  class="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs"
+                  style="background: var(--color-surface-secondary); color: var(--color-text)"
+                >
+                  <span class="font-medium">{{ getProductName(pid) }}</span>
+                  <app-button variant="ghost" size="xsm" (clicked)="removeProduct(pid)">
+                    <app-icon name="x" [size]="12" slot="icon"></app-icon>
+                  </app-button>
                 </div>
               }
-
-              <select
-                class="w-full px-2 py-1.5 border rounded-lg text-xs"
-                style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text)"
-                (change)="onProductSelect($event)"
-              >
-                <option value="">+ Vincular producto...</option>
-                @for (product of getUnselectedProducts(); track product.id) {
-                  <option [value]="product.id">{{ product.name }}</option>
-                }
-              </select>
             </div>
           }
 
-          <!-- Divider + Sections/Tabs -->
-          <div style="border-top: 1px solid var(--color-border)" class="pt-4">
-            <!-- Tab bar (when use_tabs is enabled) -->
-            @if (formData.use_tabs) {
-              <div class="mb-3">
-                <div
-                  class="flex items-center gap-1 overflow-x-auto pb-2"
-                  style="border-bottom: 1px solid var(--color-border)"
-                >
-                  @for (tab of formData.tabs; track $index; let ti = $index) {
-                    <div
-                      class="flex items-center gap-1 px-3 py-1.5 cursor-pointer text-sm whitespace-nowrap shrink-0 rounded-t-lg"
-                      [style.border-bottom]="
-                        activeTabIndex === ti
-                          ? '2px solid var(--color-primary)'
-                          : '2px solid transparent'
-                      "
-                      [style.color]="
-                        activeTabIndex === ti
-                          ? 'var(--color-primary)'
-                          : 'var(--color-text-muted)'
-                      "
-                      (click)="activeTabIndex = ti"
-                    >
-                      <input
-                        type="text"
-                        class="bg-transparent border-none outline-none text-sm font-medium w-24"
-                        [style.color]="
-                          activeTabIndex === ti
-                            ? 'var(--color-primary)'
-                            : 'var(--color-text-muted)'
-                        "
-                        [(ngModel)]="tab.title"
-                        placeholder="Pestana..."
-                        (click)="$event.stopPropagation(); activeTabIndex = ti"
-                      />
-                      <button
-                        class="p-0.5 rounded-full shrink-0"
-                        style="color: var(--color-text-muted)"
-                        (click)="$event.stopPropagation(); removeTab(ti)"
-                      >
-                        <app-icon name="x" [size]="12"></app-icon>
-                      </button>
-                    </div>
-                  }
-                  <button
-                    class="flex items-center gap-1 px-2 py-1.5 text-xs font-medium shrink-0 rounded-lg"
-                    style="color: var(--color-primary)"
-                    (click)="addTab()"
-                  >
-                    <app-icon name="plus" [size]="14"></app-icon>
-                    Pestana
-                  </button>
-                </div>
+          <app-selector
+            [options]="getUnselectedProductOptions()"
+            placeholder="+ Vincular producto..."
+            (valueChange)="onProductSelectByValue($event)"
+          />
+        </div>
+      }
 
-                <!-- Tab icon picker -->
-                @if (formData.tabs[activeTabIndex]) {
-                  <div class="flex items-center gap-2 mt-2">
-                    <label
-                      class="text-xs shrink-0"
-                      style="color: var(--color-text-muted)"
-                      >Icono:</label
-                    >
-                    <app-icon-picker
-                      [value]="formData.tabs[activeTabIndex].icon"
-                      (valueChange)="formData.tabs[activeTabIndex].icon = $event"
-                      placeholder="Icono tab"
-                    />
-                  </div>
-                }
+      <!-- Divider + Sections/Tabs -->
+      <div style="border-top: 1px solid var(--color-border)" class="pt-4">
+        <!-- Tab bar (when use_tabs is enabled) -->
+        @if (formData.use_tabs) {
+          <div class="mb-3">
+            <app-scrollable-tabs
+              [tabs]="getTabsForScrollable()"
+              [activeTab]="getActiveTabId()"
+              size="sm"
+              (tabChange)="onScrollableTabChange($event)"
+            />
+            <!-- Tab icon picker + nombre + acciones para el tab activo -->
+            @if (formData.tabs[activeTabIndex]) {
+              <div class="flex items-center gap-2 mt-2">
+                <span class="text-xs shrink-0" style="color: var(--color-text-muted)">Icono:</span>
+                <app-icon-picker
+                  [value]="formData.tabs[activeTabIndex].icon"
+                  (valueChange)="formData.tabs[activeTabIndex].icon = $event"
+                  placeholder="Icono tab"
+                />
+                <app-input
+                  [(ngModel)]="formData.tabs[activeTabIndex].title"
+                  placeholder="Nombre de la pestana..."
+                  class="flex-1"
+                />
+                <app-button variant="ghost" size="sm" (clicked)="addTab()">
+                  <app-icon name="plus" [size]="14" slot="icon"></app-icon>
+                  Nueva Pestana
+                </app-button>
+                <app-button variant="ghost" size="sm" (clicked)="removeTab(activeTabIndex)">
+                  <app-icon name="trash-2" [size]="14" slot="icon"></app-icon>
+                </app-button>
               </div>
-            }
-
-            <!-- Section header -->
-            <div class="flex items-center justify-between mb-3">
-              <h4
-                class="text-sm font-semibold"
-                style="color: var(--color-text)"
-              >
-                {{
-                  formData.use_tabs && formData.tabs.length
-                    ? 'Secciones de pestana'
-                    : 'Secciones'
-                }}
-              </h4>
-              <button
-                class="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium"
-                style="color: var(--color-primary); border: 1px solid var(--color-primary)"
-                (click)="addSection()"
-              >
-                <app-icon name="plus" [size]="14"></app-icon>
-                Agregar Seccion
-              </button>
-            </div>
-
-            <!-- Empty state -->
-            @if (activeSections.length === 0) {
-              <div
-                class="text-center py-6 border rounded-lg border-dashed"
-                style="border-color: var(--color-border)"
-              >
-                <app-icon
-                  name="layers"
-                  [size]="24"
-                  color="var(--color-text-muted)"
-                ></app-icon>
-                <p class="text-xs mt-1" style="color: var(--color-text-muted)">
-                  {{
-                    formData.use_tabs && !formData.tabs.length
-                      ? 'Agrega una pestana primero.'
-                      : 'No hay secciones. Agrega una para organizar los campos.'
-                  }}
-                </p>
+            } @else {
+              <div class="flex justify-end mt-2">
+                <app-button variant="ghost" size="sm" (clicked)="addTab()">
+                  <app-icon name="plus" [size]="14" slot="icon"></app-icon>
+                  Nueva Pestana
+                </app-button>
               </div>
-            }
-
-            <!-- Section cards -->
-            @for (section of activeSections; track $index; let si = $index) {
-              <ng-container
-                *ngTemplateOutlet="
-                  sectionCard;
-                  context: {
-                    $implicit: section,
-                    si: si,
-                    isChild: false,
-                    parentIndex: -1,
-                  }
-                "
-              ></ng-container>
             }
           </div>
+        }
+
+        <!-- Section header -->
+        <div class="flex items-center justify-between mb-3">
+          <h4
+            class="text-sm font-semibold"
+            style="color: var(--color-text)"
+          >
+            {{
+              formData.use_tabs && formData.tabs.length
+                ? 'Secciones de pestana'
+                : 'Secciones'
+            }}
+          </h4>
+          @if (activeSections.length > 0) {
+            <app-button variant="outline" size="sm" (clicked)="addSection()">
+              <app-icon name="plus" [size]="14" slot="icon"></app-icon>
+              Agregar Seccion
+            </app-button>
+          }
         </div>
 
-        <!-- Footer -->
-        <div
-          class="flex justify-end gap-2 px-6 py-4"
-          style="border-top: 1px solid var(--color-border)"
-        >
-          <button
-            class="px-4 py-2 rounded-lg text-sm font-medium"
-            style="color: var(--color-text); border: 1px solid var(--color-border)"
-            (click)="close.emit()"
-          >
-            Cancelar
-          </button>
-          <button
-            class="px-4 py-2 rounded-lg text-sm font-medium text-white"
-            style="background: var(--color-primary)"
-            [disabled]="!formData.name"
-            [style.opacity]="!formData.name ? '0.5' : '1'"
-            (click)="onSave()"
-          >
-            {{ template() ? 'Guardar' : 'Crear' }}
-          </button>
-        </div>
+        <!-- Empty state -->
+        @if (activeSections.length === 0) {
+          <app-empty-state
+            icon="layers"
+            [title]="formData.use_tabs && !formData.tabs.length ? 'Agrega una pestana primero' : 'No hay secciones'"
+            [description]="formData.use_tabs && !formData.tabs.length ? 'Crea una pestana para comenzar a agregar secciones.' : 'Agrega secciones para organizar los campos del formulario.'"
+            [showActionButton]="!formData.use_tabs || formData.tabs.length > 0"
+            actionButtonText="Agregar Seccion"
+            actionButtonIcon="plus"
+            (actionClick)="addSection()"
+          />
+        }
+
+        <!-- Section cards -->
+        @for (section of activeSections; track $index; let si = $index) {
+          <ng-container
+            *ngTemplateOutlet="
+              sectionCard;
+              context: {
+                $implicit: section,
+                si: si,
+                isChild: false,
+                parentIndex: -1,
+              }
+            "
+          ></ng-container>
+        }
       </div>
-    </div>
+
+      <!-- Footer -->
+      <div slot="footer" class="flex items-center justify-end gap-3">
+        <app-button variant="outline" (clicked)="close.emit()">Cancelar</app-button>
+        <app-button variant="primary" (clicked)="onSave()" [disabled]="!formData.name">
+          {{ template() ? 'Guardar' : 'Crear' }}
+        </app-button>
+      </div>
+    </app-modal>
 
     <!-- Section Card Template (reusable for parent & child sections) -->
     <ng-template
@@ -425,12 +316,10 @@ interface TabForm {
             [size]="14"
             color="var(--color-text-muted)"
           ></app-icon>
-          <input
-            type="text"
-            class="flex-1 px-2 py-1 border rounded text-sm"
-            style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text)"
+          <app-input
             [(ngModel)]="section.title"
             placeholder="Nombre de la seccion"
+            class="flex-1"
           />
           <app-icon-picker
             [value]="section.icon"
@@ -438,15 +327,9 @@ interface TabForm {
             placeholder="Icono"
             [alignRight]="true"
           />
-          <button
-            class="p-1 rounded-lg transition-colors"
-            style="color: #ef4444"
-            (click)="
-              isChild ? removeChildSection(parentIndex, si) : removeSection(si)
-            "
-          >
-            <app-icon name="trash-2" [size]="14"></app-icon>
-          </button>
+          <app-button variant="ghost" size="xsm" (clicked)="isChild ? removeChildSection(parentIndex, si) : removeSection(si)">
+            <app-icon name="trash-2" [size]="14" slot="icon" style="color: var(--color-error)"></app-icon>
+          </app-button>
         </div>
 
         <!-- Section Body -->
@@ -465,56 +348,24 @@ interface TabForm {
                   <span class="font-medium flex-1">{{
                     getFieldLabel(item.metadata_field_id)
                   }}</span>
-                  <label
-                    class="flex items-center gap-1 text-xs cursor-pointer"
-                    style="color: var(--color-text-muted)"
-                  >
-                    <input
-                      type="checkbox"
-                      class="w-3 h-3 rounded"
-                      [(ngModel)]="item.is_required"
-                    />
-                    Requerido
-                  </label>
-                  <label
-                    class="flex items-center gap-1 text-xs cursor-pointer"
-                    style="color: var(--color-text-muted)"
-                  >
-                    <input
-                      type="checkbox"
-                      class="w-3 h-3 rounded"
-                      [(ngModel)]="item.include_in_summary"
-                    />
-                    En resumen
-                  </label>
+                  <app-toggle [(ngModel)]="item.is_required" label="Req" />
+                  <app-toggle [(ngModel)]="item.include_in_summary" label="Resumen" />
                   <app-icon-picker
                     [value]="item.icon"
                     (valueChange)="item.icon = $event"
                     placeholder="Icono"
                     [alignRight]="true"
                   />
-                  <select
-                    class="px-1 py-0.5 border rounded text-xs w-16"
-                    style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text)"
-                    [(ngModel)]="item.width"
-                  >
-                    <option value="100">100%</option>
-                    <option value="75">75%</option>
-                    <option value="50">50%</option>
-                    <option value="33">33%</option>
-                    <option value="25">25%</option>
-                  </select>
-                  <button
-                    class="p-0.5 rounded-full transition-colors"
-                    style="color: var(--color-text-muted)"
-                    (click)="
-                      isChild
-                        ? removeFieldFromChildSection(parentIndex, si, fi)
-                        : removeFieldFromSection(si, fi)
-                    "
-                  >
-                    <app-icon name="x" [size]="12"></app-icon>
-                  </button>
+                  <div class="w-20 shrink-0">
+                    <app-selector
+                      [(ngModel)]="item.width"
+                      [options]="widthOptions"
+                      size="sm"
+                    />
+                  </div>
+                  <app-button variant="ghost" size="xsm" (clicked)="isChild ? removeFieldFromChildSection(parentIndex, si, fi) : removeFieldFromSection(si, fi)">
+                    <app-icon name="x" [size]="12" slot="icon"></app-icon>
+                  </app-button>
                 </div>
               }
             </div>
@@ -529,29 +380,11 @@ interface TabForm {
             getAvailableFieldsForSection(si, isChild, parentIndex).length > 0
           ) {
             <div>
-              <select
-                class="w-full px-2 py-1.5 border rounded-lg text-xs"
-                style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text)"
-                (change)="
-                  isChild
-                    ? onFieldSelectChild(parentIndex, si, $event)
-                    : onFieldSelect(si, $event)
-                "
-              >
-                <option value="">+ Agregar campo...</option>
-                @for (
-                  field of getAvailableFieldsForSection(
-                    si,
-                    isChild,
-                    parentIndex
-                  );
-                  track field.id
-                ) {
-                  <option [value]="field.id">
-                    {{ field.label }} ({{ field.field_type }})
-                  </option>
-                }
-              </select>
+              <app-selector
+                [options]="getFieldOptions(si, isChild, parentIndex)"
+                placeholder="+ Agregar campo..."
+                (valueChange)="onFieldSelectByValue(si, isChild, parentIndex, $event)"
+              />
             </div>
           }
 
@@ -575,14 +408,10 @@ interface TabForm {
               ></ng-container>
             }
 
-            <button
-              class="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-medium mt-1"
-              style="color: var(--color-primary)"
-              (click)="addChildSection(si)"
-            >
-              <app-icon name="plus" [size]="12"></app-icon>
+            <app-button variant="ghost" size="sm" (clicked)="addChildSection(si)">
+              <app-icon name="plus" [size]="12" slot="icon"></app-icon>
               Subseccion
-            </button>
+            </app-button>
           }
         </div>
       </div>
@@ -600,6 +429,26 @@ export class TemplateModalComponent implements OnInit {
 
   selectedProductIds: number[] = [];
   activeTabIndex = 0;
+
+  entityTypeOptions = [
+    { value: 'customer', label: 'Cliente' },
+    { value: 'booking', label: 'Reserva' },
+    { value: 'order', label: 'Orden' },
+  ];
+
+  statusOptions = [
+    { value: 'active', label: 'Activo' },
+    { value: 'inactive', label: 'Inactivo' },
+    { value: 'archived', label: 'Archivado' },
+  ];
+
+  widthOptions = [
+    { value: '100', label: '100%' },
+    { value: '75', label: '75%' },
+    { value: '50', label: '50%' },
+    { value: '33', label: '33%' },
+    { value: '25', label: '25%' },
+  ];
 
   formData: {
     name: string;
@@ -697,6 +546,24 @@ export class TemplateModalComponent implements OnInit {
     return this.formData.sections;
   }
 
+  // --- ScrollableTabs helpers ---
+
+  getTabsForScrollable(): ScrollableTab[] {
+    return this.formData.tabs.map((tab, i) => ({
+      id: String(i),
+      label: tab.title || `Pestana ${i + 1}`,
+      icon: tab.icon || undefined,
+    }));
+  }
+
+  getActiveTabId(): string {
+    return String(this.activeTabIndex);
+  }
+
+  onScrollableTabChange(tabId: string) {
+    this.activeTabIndex = Number(tabId);
+  }
+
   // --- Section Management ---
 
   addSection() {
@@ -788,22 +655,25 @@ export class TemplateModalComponent implements OnInit {
     child.items.forEach((item, i) => (item.sort_order = i));
   }
 
-  onFieldSelect(sectionIndex: number, event: Event) {
-    const select = event.target as HTMLSelectElement;
-    const fieldId = parseInt(select.value, 10);
-    if (fieldId) {
-      this.addFieldToSection(sectionIndex, fieldId);
-      select.value = '';
-    }
+  getFieldOptions(si: number, isChild: boolean, parentIndex: number) {
+    return this.getAvailableFieldsForSection(si, isChild, parentIndex).map(
+      (f) => ({
+        value: String(f.id),
+        label: f.label + ' (' + f.field_type + ')',
+      }),
+    );
   }
 
-  onFieldSelectChild(parentIndex: number, childIndex: number, event: Event) {
-    const select = event.target as HTMLSelectElement;
-    const fieldId = parseInt(select.value, 10);
-    if (fieldId) {
-      this.addFieldToChildSection(parentIndex, childIndex, fieldId);
-      select.value = '';
-    }
+  onFieldSelectByValue(
+    si: number,
+    isChild: boolean,
+    parentIndex: number,
+    value: string | number | null,
+  ) {
+    const fieldId = parseInt(String(value), 10);
+    if (!fieldId) return;
+    if (isChild) this.addFieldToChildSection(parentIndex, si, fieldId);
+    else this.addFieldToSection(si, fieldId);
   }
 
   // --- Field Helpers ---
@@ -873,13 +743,18 @@ export class TemplateModalComponent implements OnInit {
     );
   }
 
-  onProductSelect(event: Event) {
-    const select = event.target as HTMLSelectElement;
-    const productId = parseInt(select.value, 10);
-    if (productId && !this.selectedProductIds.includes(productId)) {
-      this.selectedProductIds = [...this.selectedProductIds, productId];
+  getUnselectedProductOptions() {
+    return this.getUnselectedProducts().map((p) => ({
+      value: p.id,
+      label: p.name,
+    }));
+  }
+
+  onProductSelectByValue(value: string | number | null) {
+    const productId = typeof value === 'string' ? parseInt(value, 10) : value;
+    if (productId && !this.selectedProductIds.includes(productId as number)) {
+      this.selectedProductIds = [...this.selectedProductIds, productId as number];
     }
-    select.value = '';
   }
 
   removeProduct(id: number) {
@@ -933,4 +808,3 @@ export class TemplateModalComponent implements OnInit {
     };
   }
 }
-

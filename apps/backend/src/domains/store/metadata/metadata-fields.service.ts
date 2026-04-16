@@ -57,8 +57,9 @@ export class MetadataFieldsService {
     });
   }
 
-  async listFields(entityType?: string) {
-    const where: any = { is_active: true };
+  async listFields(entityType?: string, includeInactive = false) {
+    const where: any = {};
+    if (!includeInactive) where.is_active = true;
     if (entityType) where.entity_type = entityType;
 
     return this.prisma.entity_metadata_fields.findMany({
@@ -86,12 +87,15 @@ export class MetadataFieldsService {
   async deleteField(fieldId: number) {
     const existing = await this.prisma.entity_metadata_fields.findUnique({
       where: { id: fieldId },
-      include: { values: { take: 1 } },
+      include: { template_items: { take: 1 } },
     });
     if (!existing) throw new VendixHttpException(ErrorCodes.META_FIND_001);
 
-    if (existing.values.length > 0) {
-      return this.toggleField(fieldId, false);
+    if (existing.template_items.length > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.META_DEL_001,
+        'Este campo está siendo usado en una plantilla. Elimínalo de la plantilla primero.',
+      );
     }
 
     return this.prisma.entity_metadata_fields.delete({ where: { id: fieldId } });

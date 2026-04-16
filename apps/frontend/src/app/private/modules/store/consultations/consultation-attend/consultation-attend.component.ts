@@ -69,28 +69,30 @@ import { getItemWidth, getItemWidthClass, DEFAULT_TEMPLATE_ICON, DEFAULT_SECTION
         ></app-sticky-header>
 
         <!-- Main Content: Full Width -->
-        <div>
-          <div class="space-y-8">
+        <div class="flex flex-col gap-8">
             <!-- Pre-loaded Patient Data (Preconsulta) -->
             @if (c.preconsultation_submission?.responses?.length) {
               <app-expandable-card [(expanded)]="showPreconsulta">
                 <div slot="header" class="flex items-center gap-2">
                   <app-icon
-                    name="clipboard-check"
+                    [name]="c.preconsultation_template?.icon || 'clipboard-check'"
                     [size]="16"
                     color="var(--color-primary)"
                   ></app-icon>
-                  <app-tooltip
-                    content="Datos completados por el paciente antes de la consulta"
-                    position="top"
-                    size="sm"
-                  >
+                  <div class="flex flex-col">
                     <span
                       class="text-sm font-semibold"
                       style="color: var(--color-text)"
-                      >Datos del Paciente (Preconsulta)</span
+                      >{{ c.preconsultation_template?.name || 'Datos del Paciente (Preconsulta)' }}</span
                     >
-                  </app-tooltip>
+                    @if (c.preconsultation_template?.description) {
+                      <span
+                        class="text-xs"
+                        style="color: var(--color-text-muted)"
+                        >{{ c.preconsultation_template.description }}</span
+                      >
+                    }
+                  </div>
                   <app-badge variant="info" size="xs">
                     {{ c.preconsultation_submission.responses.length }}
                     respuestas
@@ -290,28 +292,27 @@ import { getItemWidth, getItemWidthClass, DEFAULT_TEMPLATE_ICON, DEFAULT_SECTION
               c.consultation_template?.sections?.length ||
               c.consultation_template?.tabs?.length
             ) {
-              <app-card shadow="sm" [padding]="false">
-                <div
-                  slot="header"
-                  class="flex items-center gap-2 px-4 py-3"
-                  style="background: var(--color-surface-secondary)"
-                >
+              <app-card shadow="sm" [padding]="false" [showHeader]="true">
+                <div slot="header" class="flex items-center gap-2">
                   <app-icon
-                    name="stethoscope"
+                    [name]="c.consultation_template?.icon || 'stethoscope'"
                     [size]="16"
                     color="var(--color-primary)"
                   ></app-icon>
-                  <app-tooltip
-                    content="Formulario que el proveedor completo durante la consulta"
-                    position="top"
-                    size="sm"
-                  >
+                  <div class="flex flex-col">
                     <span
                       class="text-sm font-semibold"
                       style="color: var(--color-text)"
-                      >Consulta</span
+                      >{{ c.consultation_template?.name || 'Consulta' }}</span
                     >
-                  </app-tooltip>
+                    @if (c.consultation_template?.description) {
+                      <span
+                        class="text-xs"
+                        style="color: var(--color-text-muted)"
+                        >{{ c.consultation_template.description }}</span
+                      >
+                    }
+                  </div>
                 </div>
 
                 @if (consultationTabs().length) {
@@ -420,7 +421,6 @@ import { getItemWidth, getItemWidthClass, DEFAULT_TEMPLATE_ICON, DEFAULT_SECTION
                 </div>
               </app-card>
             }
-          </div>
         </div>
 
         <!-- Section template -->
@@ -440,7 +440,7 @@ import { getItemWidth, getItemWidthClass, DEFAULT_TEMPLATE_ICON, DEFAULT_SECTION
               ></app-icon>
               {{ section.title }}
             </h4>
-            <div class="flex flex-wrap gap-3">
+            <div class="flex flex-wrap" style="gap: 1.25rem">
               @for (
                 item of sortedItems(section);
                 track item.metadata_field_id
@@ -475,7 +475,7 @@ import { getItemWidth, getItemWidthClass, DEFAULT_TEMPLATE_ICON, DEFAULT_SECTION
                   ></app-icon>
                   {{ child.title }}
                 </h5>
-                <div class="flex flex-wrap gap-3">
+                <div class="flex flex-wrap" style="gap: 1.25rem">
                   @for (
                     item of sortedItems(child);
                     track item.metadata_field_id
@@ -1064,8 +1064,9 @@ export class ConsultationAttendComponent implements OnInit {
   }
 
   private initFormState(data: ConsultationContext) {
-    // Pre-populate provider response values from existing preconsultation submission
     const map = new Map<number, any>();
+
+    // First load preconsultation data (patient responses from metadata)
     if (data.preconsultation_submission?.responses) {
       for (const r of data.preconsultation_submission.responses) {
         const val =
@@ -1078,6 +1079,24 @@ export class ConsultationAttendComponent implements OnInit {
         map.set(r.field_id, val);
       }
     }
+
+    // Then overlay consultation responses (provider data from metadata)
+    // This also pre-fills shared fields between preconsulta and consulta templates
+    if (data.consultation_responses?.length) {
+      for (const r of data.consultation_responses) {
+        const val =
+          r.value_text ??
+          r.value_number ??
+          r.value_bool ??
+          r.value_date ??
+          r.value_json ??
+          '';
+        if (val !== '' && val !== null) {
+          map.set(r.field_id, val);
+        }
+      }
+    }
+
     this.responseValues.set(map);
   }
 
