@@ -17,18 +17,20 @@ import { S3PathHelper } from '@common/helpers/s3-path.helper';
 import { ImageContext } from '@common/config/image-presets';
 import { GlobalPrismaService } from '../../prisma/services/global-prisma.service';
 import { ApiTags, ApiOperation, ApiConsumes, ApiBody, ApiBearerAuth } from '@nestjs/swagger';
+import { UploadFileDto, UploadEntityType } from './dto';
 
 @ApiTags('Upload')
 @ApiBearerAuth()
 @Controller('upload')
 export class UploadController {
-    private readonly ENTITY_TO_CONTEXT: Record<string, ImageContext> = {
+    private readonly ENTITY_TO_CONTEXT: Record<UploadEntityType, ImageContext> = {
         products: ImageContext.PRODUCT,
         avatars: ImageContext.AVATAR,
         brands: ImageContext.LOGO,
         categories: ImageContext.CATEGORY,
         logos: ImageContext.LOGO,
         store_logos: ImageContext.LOGO,
+        store_favicons: ImageContext.LOGO,
         receipts: ImageContext.RECEIPT,
     };
 
@@ -51,7 +53,7 @@ export class UploadController {
                 },
                 entityType: {
                     type: 'string',
-                    enum: ['products', 'avatars', 'brands', 'categories', 'logos', 'store_logos', 'receipts'],
+                    enum: Object.values(UploadEntityType),
                     description: 'Entity type for path organization',
                 },
                 entityId: {
@@ -69,10 +71,9 @@ export class UploadController {
     @UseInterceptors(FileInterceptor('file'))
     async uploadFile(
         @UploadedFile() file: any,
-        @Body('entityType') entityType: string,
-        @Body('entityId') entityId?: string,
-        @Body('isMainImage') isMainImage?: string | boolean,
+        @Body() body: UploadFileDto,
     ) {
+        const { entityType, entityId, isMainImage } = body;
         const context = RequestContextService.getContext();
         const orgId = context?.organization_id;
         const storeId = context?.store_id;
@@ -95,42 +96,48 @@ export class UploadController {
         let path: string;
 
         switch (entityType) {
-            case 'products': {
+            case UploadEntityType.PRODUCTS: {
                 if (!storeId) throw new BadRequestException('Store context required for product uploads');
                 const store = await this.getStoreWithSlug(storeId);
                 path = this.s3PathHelper.buildProductPath(org, store);
                 break;
             }
-            case 'categories': {
+            case UploadEntityType.CATEGORIES: {
                 if (!storeId) throw new BadRequestException('Store context required for category uploads');
                 const store = await this.getStoreWithSlug(storeId);
                 path = this.s3PathHelper.buildCategoryPath(org, store);
                 break;
             }
-            case 'store_logos': {
+            case UploadEntityType.STORE_LOGOS: {
                 if (!storeId) throw new BadRequestException('Store context required for store logo uploads');
                 const store = await this.getStoreWithSlug(storeId);
                 path = this.s3PathHelper.buildStoreLogoPath(org, store);
                 break;
             }
-            case 'avatars': {
+            case UploadEntityType.STORE_FAVICONS: {
+                if (!storeId) throw new BadRequestException('Store context required for favicon uploads');
+                const store = await this.getStoreWithSlug(storeId);
+                path = this.s3PathHelper.buildFaviconPath(org, store);
+                break;
+            }
+            case UploadEntityType.AVATARS: {
                 const userId = context?.user_id;
                 if (!userId) throw new BadRequestException('User context required for avatar uploads');
                 path = this.s3PathHelper.buildAvatarPath(org, userId);
                 break;
             }
-            case 'receipts': {
+            case UploadEntityType.RECEIPTS: {
                 if (!storeId) throw new BadRequestException('Store context required for receipt uploads');
                 const store = await this.getStoreWithSlug(storeId);
                 path = this.s3PathHelper.buildReceiptPath(org, store);
                 break;
             }
-            case 'brands':
-            case 'logos':
+            case UploadEntityType.BRANDS:
+            case UploadEntityType.LOGOS:
                 path = this.s3PathHelper.buildOrgEntityPath(org, entityType);
                 break;
             default:
-                path = this.s3PathHelper.buildOrgEntityPath(org, 'others');
+                throw new BadRequestException(`Unsupported entity type: ${entityType}`);
         }
 
         if (entityId) {
@@ -142,8 +149,7 @@ export class UploadController {
 
         // Always generate thumbnails for listings-heavy entities, or if explicitly requested
         const isMain = isMainImage === 'true' ||
-            isMainImage === true ||
-            ['avatars', 'brands', 'categories', 'store_logos'].includes(entityType);
+            [UploadEntityType.AVATARS, UploadEntityType.BRANDS, UploadEntityType.CATEGORIES, UploadEntityType.STORE_LOGOS, UploadEntityType.STORE_FAVICONS].includes(entityType);
 
         if (file.mimetype.startsWith('image/')) {
             const context = this.ENTITY_TO_CONTEXT[entityType] ?? ImageContext.DEFAULT;
