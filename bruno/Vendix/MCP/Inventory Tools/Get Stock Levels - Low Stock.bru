@@ -1,0 +1,28 @@
+meta {
+  name: Get Stock Levels - Low Stock Only
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/mcp/tools/call
+  body: json {
+    "name": "get_stock_levels",
+    "arguments": {
+      "low_stock_only": true
+    }
+  }
+  headers: {
+    Authorization: Bearer {{authToken}}
+    Content-Type: application/json
+  }
+}
+
+tests {
+  test("Low stock filter returns success", function() {
+    expect(res.status).to.equal(200);
+    const parsed = JSON.parse(res.body.content[0].text);
+    expect(parsed).to.have.property('summary');
+    expect(parsed).to.have.property('data');
+  });
+}

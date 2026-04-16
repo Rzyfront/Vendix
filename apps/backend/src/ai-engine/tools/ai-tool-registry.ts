@@ -68,11 +68,11 @@ export class AIToolRegistry {
       roles: requestContext?.roles,
     };
 
-    // Check permissions
+    // Check permissions — use granular permissions if available, fall back to roles
     if (tool.requiredPermissions?.length) {
-      const userRoles = context.roles || [];
+      const userPermissions = requestContext?.permissions || context.roles || [];
       const hasPermission = tool.requiredPermissions.every((p) =>
-        userRoles.includes(p),
+        userPermissions.includes(p),
       );
       if (!hasPermission) {
         throw new VendixHttpException(

@@ -52,13 +52,13 @@ export class McpResourceProvider {
 
     if (uri.startsWith('vendix://products/')) {
       const products = await this.prisma.products.findMany({
-        where: { is_active: true },
+        where: { state: 'active' },
         select: {
           id: true,
           name: true,
           base_price: true,
           sku: true,
-          is_active: true,
+          state: true,
         },
         take: 100,
       });
@@ -76,7 +76,7 @@ export class McpResourceProvider {
 
     if (uri.startsWith('vendix://inventory/')) {
       const products = await this.prisma.products.findMany({
-        where: { is_active: true },
+        where: { state: 'active' },
         select: {
           id: true,
           name: true,

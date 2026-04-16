@@ -40,6 +40,7 @@ import { CostingService } from './shared/services/costing.service';
     StockLevelsModule,
     MovementsModule,
     SuppliersModule,
+    InventoryAdjustmentsModule,
     InventoryValidationService,
     InventoryIntegrationService,
     StockLevelManager,
