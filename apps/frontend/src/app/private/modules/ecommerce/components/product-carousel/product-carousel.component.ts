@@ -29,7 +29,7 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
           </button>
         </div>
       </div>
-
+    
       <div class="carousel-viewport" #viewport (scroll)="onScroll()">
         <div class="carousel-track">
           @for (product of products; track product.id) {
@@ -45,7 +45,9 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
                   </button>
                 </div>
                 <div class="product-info">
-                  <span class="product-brand" *ngIf="product.brand">{{ product.brand.name }}</span>
+                  @if (product.brand) {
+                    <span class="product-brand">{{ product.brand.name }}</span>
+                  }
                   <h4 class="product-name">{{ product.name }}</h4>
                   <div class="product-price">
                     <span class="current-price">{{ product.final_price | currency }}</span>
@@ -62,7 +64,7 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
         </div>
       </div>
     </div>
-  `,
+    `,
   styles: [`
     .carousel-container {
       width: 100%;

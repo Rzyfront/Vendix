@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { FormBuilder, FormGroup } from '@angular/forms';
 import { Subscription } from 'rxjs';
@@ -37,7 +37,6 @@ import './orders-list.component.css';
   selector: 'app-orders-list',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     InputsearchComponent,
@@ -45,8 +44,8 @@ import './orders-list.component.css';
     OrderStatsComponent,
     OrderCreateModalComponent,
     IconComponent,
-    ResponsiveDataViewComponent,
-  ],
+    ResponsiveDataViewComponent
+],
   templateUrl: './orders-list.component.html',
 })
 export class OrdersListComponent implements OnInit, OnDestroy {

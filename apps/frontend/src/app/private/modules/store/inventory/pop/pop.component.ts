@@ -6,7 +6,7 @@ import {
   signal,
   HostListener,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { Subscription, take } from 'rxjs';
@@ -65,7 +65,6 @@ import { CostPreviewResponse } from '../interfaces';
   selector: 'app-pop',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     PopProductSelectionComponent,
     PopCartComponent,
@@ -78,32 +77,32 @@ import { CostPreviewResponse } from '../interfaces';
     PopCartModalComponent,
     PopProductConfigModalComponent,
     PopOrderConfirmationModalComponent,
-    InvoiceScannerModalComponent,
-  ],
+    InvoiceScannerModalComponent
+],
   template: `
     <div
       class="h-full flex flex-col gap-4 overflow-hidden bg-[var(--color-background)]"
-    >
+      >
       <!-- Main Content Container with Shadow/Card styling like POS -->
       <div
         class="flex-1 flex flex-col bg-surface rounded-card shadow-card border border-border min-h-0 overflow-hidden"
-      >
+        >
         <!-- Header (Supplier, Location, Dates) -->
         <app-pop-header
           class="flex-none border-b border-border"
           (openSupplierModal)="supplierModalOpen = true"
           (openWarehouseModal)="warehouseModalOpen = true"
         ></app-pop-header>
-
+    
         <!-- Main Content Grid -->
         <div class="flex-1 p-4 sm:p-6 min-h-0 overflow-hidden">
           <div
             class="h-full flex flex-col lg:grid lg:grid-cols-3 gap-4 sm:gap-6"
-          >
+            >
             <!-- Products Area (single instance for both layouts) -->
             <div
               class="lg:col-span-2 h-full min-h-0 flex-1 pb-32 lg:pb-0 overflow-y-auto lg:overflow-hidden"
-            >
+              >
               <app-pop-product-selection
                 class="h-full block"
                 (productAddedToCart)="onProductAdded($event)"
@@ -112,7 +111,7 @@ import { CostPreviewResponse } from '../interfaces';
                 (scanInvoice)="showInvoiceScanner.set(true)"
               ></app-pop-product-selection>
             </div>
-
+    
             <!-- Cart Area (Right Side - 1 column) - Hidden on mobile -->
             <div class="hidden lg:block h-full min-h-0">
               <app-pop-cart
@@ -128,18 +127,19 @@ import { CostPreviewResponse } from '../interfaces';
         </div>
       </div>
     </div>
-
+    
     <!-- Mobile Footer -->
-    <app-pop-mobile-footer
-      *ngIf="isMobile()"
-      [cartSummary]="cartSummary"
-      [itemCount]="cartItemCount"
-      (viewOrder)="onOpenCartModal()"
-      (saveDraft)="onSaveAsDraft()"
-      (createOrder)="onSubmitOrder()"
-      (createAndReceive)="onCreateAndReceive()"
-    ></app-pop-mobile-footer>
-
+    @if (isMobile()) {
+      <app-pop-mobile-footer
+        [cartSummary]="cartSummary"
+        [itemCount]="cartItemCount"
+        (viewOrder)="onOpenCartModal()"
+        (saveDraft)="onSaveAsDraft()"
+        (createOrder)="onSubmitOrder()"
+        (createAndReceive)="onCreateAndReceive()"
+      ></app-pop-mobile-footer>
+    }
+    
     <!-- Mobile Cart Modal -->
     <app-pop-cart-modal
       [isOpen]="showCartModal && isMobile()"
@@ -158,30 +158,30 @@ import { CostPreviewResponse } from '../interfaces';
       (createAndReceive)="onCreateAndReceiveFromModal()"
       (configure)="onConfigureFromModal()"
     ></app-pop-cart-modal>
-
+    
     <!-- Modals -->
     <app-pop-prebulk-modal
       [(isOpen)]="prebulkModalOpen"
       (add)="onPrebulkAdded($event)"
     ></app-pop-prebulk-modal>
-
+    
     <app-pop-supplier-quick-create
       [(isOpen)]="supplierModalOpen"
       (supplierCreated)="onSupplierCreated($event)"
     ></app-pop-supplier-quick-create>
-
+    
     <app-pop-warehouse-quick-create
       [(isOpen)]="warehouseModalOpen"
       (warehouseCreated)="onWarehouseCreated($event)"
     ></app-pop-warehouse-quick-create>
-
+    
     <app-pop-lot-modal
       [(isOpen)]="lotModalOpen"
       [initialLotInfo]="currentLotInfo"
       (save)="onLotSave($event)"
       (skip)="onLotSkip()"
     ></app-pop-lot-modal>
-
+    
     <app-pop-order-confirmation-modal
       [isOpen]="showOrderConfirmModal"
       (isOpenChange)="showOrderConfirmModal = $event"
@@ -195,7 +195,7 @@ import { CostPreviewResponse } from '../interfaces';
       (cancelled)="showOrderConfirmModal = false"
       (navigateToSettings)="onNavigateToSettings()"
     ></app-pop-order-confirmation-modal>
-
+    
     <app-pop-product-config-modal
       [isOpen]="showConfigModal"
       [product]="configModalProduct"
@@ -210,13 +210,13 @@ import { CostPreviewResponse } from '../interfaces';
         editingCartItemId = null
       "
     ></app-pop-product-config-modal>
-
+    
     <app-invoice-scanner-modal
       [isOpen]="showInvoiceScanner()"
       (isOpenChange)="showInvoiceScanner.set($event)"
       (confirmed)="onInvoiceScanConfirmed($event)"
     ></app-invoice-scanner-modal>
-  `,
+    `,
   styles: [
     `
       :host {

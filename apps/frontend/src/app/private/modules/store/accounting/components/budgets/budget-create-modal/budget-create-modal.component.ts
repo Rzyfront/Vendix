@@ -1,5 +1,5 @@
 import { Component, inject, OnInit, OnDestroy, Input, Output, EventEmitter } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { Router } from '@angular/router';
 import { Subject, takeUntil } from 'rxjs';
@@ -20,14 +20,13 @@ import {
   selector: 'vendix-budget-create-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
     InputComponent,
     SelectorComponent,
-    TextareaComponent,
-  ],
+    TextareaComponent
+],
   templateUrl: './budget-create-modal.component.html',
   styleUrls: ['./budget-create-modal.component.scss'],
 })
@@ -91,6 +90,11 @@ export class BudgetCreateModalComponent implements OnInit, OnDestroy {
           this.is_submitting = false;
           this.form.reset({ variance_threshold: 10 });
           this.isOpenChange.emit(false);
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
           this.created.emit();
           // Navigate to editor
           if (res.data?.id) {

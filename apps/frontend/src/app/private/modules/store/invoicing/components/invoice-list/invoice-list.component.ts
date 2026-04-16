@@ -241,9 +241,19 @@ export class InvoiceListComponent {
   onActionClick(action: string): void {
     switch (action) {
       case 'create':
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
         this.create.emit();
         break;
       case 'resolutions':
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
         this.resolutions.emit();
         break;
     }

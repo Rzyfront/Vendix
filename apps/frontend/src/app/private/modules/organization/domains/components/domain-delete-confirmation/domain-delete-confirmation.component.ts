@@ -1,5 +1,5 @@
-import { Component, Input, Output, EventEmitter, OnDestroy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, OnDestroy, input, output } from '@angular/core';
+
 import {
   FormsModule,
   ReactiveFormsModule,
@@ -19,28 +19,27 @@ import { Domain } from '../../interfaces/domain.interface';
   selector: 'app-domain-delete-confirmation',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
     IconComponent,
-    InputComponent,
-  ],
+    InputComponent
+],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="onOpenChange($event)"
       (cancel)="onCancel()"
       [size]="'sm'"
       title="Eliminar Dominio"
-    >
+      >
       <div class="space-y-4">
         <!-- Warning Icon -->
         <div class="flex justify-center">
           <div
             class="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center"
-          >
+            >
             <app-icon
               name="alert-triangle"
               [size]="32"
@@ -48,7 +47,7 @@ import { Domain } from '../../interfaces/domain.interface';
             ></app-icon>
           </div>
         </div>
-
+    
         <!-- Warning Message -->
         <div class="text-center">
           <p class="text-[var(--color-text-primary)] font-medium mb-2">
@@ -57,38 +56,39 @@ import { Domain } from '../../interfaces/domain.interface';
           <p class="text-sm text-[var(--color-text-secondary)]">
             Esta acción no se puede deshacer. El dominio
             <strong class="text-[var(--color-text-primary)]">{{
-              domain?.hostname
+              domain()?.hostname
             }}</strong>
             será eliminado permanentemente.
           </p>
         </div>
-
+    
         <!-- Primary Domain Warning -->
-        <div
-          *ngIf="domain?.is_primary"
-          class="bg-yellow-50 border border-yellow-200 rounded-lg p-3"
-        >
-          <div class="flex items-start gap-2">
-            <app-icon
-              name="alert-circle"
-              [size]="16"
-              class="text-yellow-600 mt-0.5"
-            ></app-icon>
-            <p class="text-sm text-yellow-800">
-              Este es un dominio primario. Elimínarlo puede afectar el acceso a
-              tu tienda u organización.
-            </p>
+        @if (domain()?.is_primary) {
+          <div
+            class="bg-yellow-50 border border-yellow-200 rounded-lg p-3"
+            >
+            <div class="flex items-start gap-2">
+              <app-icon
+                name="alert-circle"
+                [size]="16"
+                class="text-yellow-600 mt-0.5"
+              ></app-icon>
+              <p class="text-sm text-yellow-800">
+                Este es un dominio primario. Elimínarlo puede afectar el acceso a
+                tu tienda u organización.
+              </p>
+            </div>
           </div>
-        </div>
-
+        }
+    
         <!-- Confirmation Input -->
         <div class="space-y-2">
           <label
             class="block text-sm font-medium text-[var(--color-text-primary)]"
-          >
+            >
             Escribe
             <strong class="text-[var(--color-destructive)]">{{
-              domain?.hostname
+              domain()?.hostname
             }}</strong>
             para confirmar
           </label>
@@ -97,12 +97,12 @@ import { Domain } from '../../interfaces/domain.interface';
             [placeholder]="placeholderText"
             size="md"
             [error]="showError ? 'El hostname no coincide' : ''"
-          >
+            >
             <app-icon name="globe" [size]="16" slot="prefix" />
           </app-input>
         </div>
       </div>
-
+    
       <div slot="footer" class="flex justify-end gap-3">
         <app-button variant="outline" (clicked)="onCancel()">
           Cancelar
@@ -111,13 +111,13 @@ import { Domain } from '../../interfaces/domain.interface';
           variant="danger"
           (clicked)="onConfirm()"
           [disabled]="!isHostnameValid"
-        >
+          >
           <app-icon name="trash-2" [size]="16" slot="icon"></app-icon>
           Eliminar Dominio
         </app-button>
       </div>
     </app-modal>
-  `,
+    `,
   styles: [
     `
       :host {
@@ -127,12 +127,12 @@ import { Domain } from '../../interfaces/domain.interface';
   ],
 })
 export class DomainDeleteConfirmationComponent implements OnDestroy {
-  @Input() isOpen = false;
-  @Input() domain: Domain | null = null;
+  readonly isOpen = input(false);
+  readonly domain = input<Domain | null>(null);
 
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() confirm = new EventEmitter<string>();
-  @Output() cancel = new EventEmitter<void>();
+  readonly isOpenChange = output<boolean>();
+  readonly confirm = output<string>();
+  readonly cancel = output<void>();
 
   hostnameInput = new FormControl('', {
     validators: [Validators.required],
@@ -157,14 +157,16 @@ export class DomainDeleteConfirmationComponent implements OnDestroy {
   }
 
   get placeholderText(): string {
-    return this.domain ? `Escribe '${this.domain.hostname}' para confirmar` : '';
+    const domain = this.domain();
+    return domain ? `Escribe '${domain.hostname}' para confirmar` : '';
   }
 
   get isHostnameValid(): boolean {
-    if (!this.domain || !this.hostnameInput.value) {
+    const domain = this.domain();
+    if (!domain || !this.hostnameInput.value) {
       return false;
     }
-    return this.hostnameInput.value.trim() === this.domain.hostname;
+    return this.hostnameInput.value.trim() === domain.hostname;
   }
 
   onConfirm(): void {
@@ -173,13 +175,17 @@ export class DomainDeleteConfirmationComponent implements OnDestroy {
       return;
     }
 
-    this.confirm.emit(this.domain!.hostname);
+    this.confirm.emit(this.domain()!.hostname);
     this.hostnameInput.reset();
     this.showError = false;
   }
 
   onCancel(): void {
     this.isOpenChange.emit(false);
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.cancel.emit();
     this.hostnameInput.reset();
     this.showError = false;

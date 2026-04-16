@@ -236,10 +236,20 @@ export class PopOrderConfirmationModalComponent {
   }
 
   onConfirm(): void {
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.confirmed.emit();
   }
 
   onCancel(): void {
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.cancelled.emit();
     this.isOpenChange.emit(false);
   }

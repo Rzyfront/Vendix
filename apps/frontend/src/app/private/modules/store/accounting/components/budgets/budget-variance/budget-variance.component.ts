@@ -6,7 +6,7 @@ import {
   signal,
   computed,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { ActivatedRoute, Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { Subject, takeUntil } from 'rxjs';
@@ -26,12 +26,11 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
   selector: 'vendix-budget-variance',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ButtonComponent,
     SelectorComponent,
-    IconComponent,
-  ],
+    IconComponent
+],
   templateUrl: './budget-variance.component.html',
   styleUrls: ['./budget-variance.component.scss'],
 })

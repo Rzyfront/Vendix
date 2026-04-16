@@ -1,5 +1,5 @@
 import { Component, OnInit, inject, input, output } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
 import { TenantFacade } from '../../../../../core/store/tenant/tenant.facade';
@@ -16,7 +16,7 @@ export interface AvailabilitySlot {
 @Component({
   selector: 'app-booking-slot-picker',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [FormsModule],
   templateUrl: './booking-slot-picker.component.html',
   styleUrls: ['./booking-slot-picker.component.scss'],
 })

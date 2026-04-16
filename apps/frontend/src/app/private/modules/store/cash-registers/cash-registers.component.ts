@@ -1,5 +1,12 @@
-import { Component, OnInit, OnDestroy, signal, computed, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {
+  Component,
+  OnInit,
+  OnDestroy,
+  signal,
+  computed,
+  inject,
+} from '@angular/core';
+
 import {
   FormsModule,
   FormBuilder,
@@ -39,7 +46,6 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
   selector: 'app-cash-registers',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     CardComponent,
@@ -273,96 +279,98 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
         </app-card>
       }
 
-      <!-- Register CRUD Modal -->
-      <app-modal
-        [isOpen]="show_register_modal()"
-        [title]="editing_register() ? 'Editar Caja' : 'Nueva Caja'"
-        [subtitle]="
-          editing_register()
-            ? 'Modifica los datos de la caja'
-            : 'Configura una nueva caja registradora'
-        "
-        size="md"
-        (closed)="closeRegisterModal()"
-      >
-        <div slot="header">
-          <div
-            class="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center border border-blue-100"
-          >
-            <app-icon
-              name="monitor"
-              [size]="20"
-              class="text-blue-600"
-            ></app-icon>
+      @defer (when show_register_modal()) {
+        <app-modal
+          [isOpen]="show_register_modal()"
+          [title]="editing_register() ? 'Editar Caja' : 'Nueva Caja'"
+          [subtitle]="
+            editing_register()
+              ? 'Modifica los datos de la caja'
+              : 'Configura una nueva caja registradora'
+          "
+          size="md"
+          (closed)="closeRegisterModal()"
+        >
+          <div slot="header">
+            <div
+              class="w-10 h-10 rounded-xl bg-blue-50 flex items-center justify-center border border-blue-100"
+            >
+              <app-icon
+                name="monitor"
+                [size]="20"
+                class="text-blue-600"
+              ></app-icon>
+            </div>
           </div>
-        </div>
 
-        <form [formGroup]="register_form" class="space-y-4">
-          <app-input
-            formControlName="name"
-            label="Nombre"
-            placeholder="Ej: Caja Principal"
-            type="text"
-            [size]="'md'"
-            [required]="true"
-            [error]="getFieldError('name')"
-          ></app-input>
+          <form [formGroup]="register_form" class="space-y-4">
+            <app-input
+              formControlName="name"
+              label="Nombre"
+              placeholder="Ej: Caja Principal"
+              type="text"
+              [size]="'md'"
+              [required]="true"
+              [error]="getFieldError('name')"
+            ></app-input>
 
-          <app-input
-            formControlName="code"
-            label="Código"
-            placeholder="Ej: CAJA-01"
-            type="text"
-            [size]="'md'"
-            [required]="true"
-            helperText="Identificador único para esta caja"
-            [error]="getFieldError('code')"
-          ></app-input>
+            <app-input
+              formControlName="code"
+              label="Código"
+              placeholder="Ej: CAJA-01"
+              type="text"
+              [size]="'md'"
+              [required]="true"
+              helperText="Identificador único para esta caja"
+              [error]="getFieldError('code')"
+            ></app-input>
 
-          <app-input
-            formControlName="description"
-            label="Descripción"
-            placeholder="Ej: Caja del mostrador principal"
-            type="text"
-            [size]="'md'"
-          ></app-input>
+            <app-input
+              formControlName="description"
+              label="Descripción"
+              placeholder="Ej: Caja del mostrador principal"
+              type="text"
+              [size]="'md'"
+            ></app-input>
 
-          <app-input
-            formControlName="default_opening_amount"
-            label="Monto de Apertura por Defecto"
-            placeholder="0"
-            [currency]="true"
-            [size]="'md'"
-            helperText="Monto sugerido al abrir esta caja"
-          ></app-input>
-        </form>
+            <app-input
+              formControlName="default_opening_amount"
+              label="Monto de Apertura por Defecto"
+              placeholder="0"
+              [currency]="true"
+              [size]="'md'"
+              helperText="Monto sugerido al abrir esta caja"
+            ></app-input>
+          </form>
 
-        <div slot="footer" class="flex justify-end gap-3">
-          <app-button variant="ghost" (clicked)="closeRegisterModal()">
-            Cancelar
-          </app-button>
-          <app-button
-            variant="primary"
-            size="md"
-            (clicked)="onSaveRegister()"
-            [disabled]="!register_form.valid || is_saving_register()"
-          >
-            <app-icon name="save" [size]="16" slot="icon"></app-icon>
-            @if (is_saving_register()) {
-              Guardando...
-            } @else {
-              {{ editing_register() ? 'Guardar Cambios' : 'Crear Caja' }}
-            }
-          </app-button>
-        </div>
-      </app-modal>
+          <div slot="footer" class="flex justify-end gap-3">
+            <app-button variant="ghost" (clicked)="closeRegisterModal()">
+              Cancelar
+            </app-button>
+            <app-button
+              variant="primary"
+              size="md"
+              (clicked)="onSaveRegister()"
+              [disabled]="!register_form.valid || is_saving_register()"
+            >
+              <app-icon name="save" [size]="16" slot="icon"></app-icon>
+              @if (is_saving_register()) {
+                Guardando...
+              } @else {
+                {{ editing_register() ? 'Guardar Cambios' : 'Crear Caja' }}
+              }
+            </app-button>
+          </div>
+        </app-modal>
+      }
 
-      <!-- Session Detail Modal -->
-      <app-pos-session-detail-modal
-        [isOpen]="show_detail_modal()"
-        [session]="selected_session"
-        (isOpenChange)="show_detail_modal.set($event)"
-      ></app-pos-session-detail-modal>
+      @defer (when show_detail_modal()) {
+        <app-pos-session-detail-modal
+          [isOpen]="show_detail_modal()"
+          [session]="selected_session"
+          (isOpenChange)="show_detail_modal.set($event)"
+        ></app-pos-session-detail-modal>
+      }
     </div>
   `,
   styles: [
@@ -485,9 +493,7 @@ export class CashRegistersComponent implements OnInit, OnDestroy {
       sortable: true,
       priority: 3,
       transform: (value: number) =>
-        value != null
-          ? this.currencyService.format(value)
-          : '-',
+        value != null ? this.currencyService.format(value) : '-',
     },
     {
       key: 'is_active',
@@ -533,9 +539,7 @@ export class CashRegistersComponent implements OnInit, OnDestroy {
         key: 'default_opening_amount',
         label: 'Monto Apertura',
         transform: (val: number) =>
-          val != null
-            ? this.currencyService.format(val)
-            : '-',
+          val != null ? this.currencyService.format(val) : '-',
       },
       {
         key: 'sessions',
@@ -608,9 +612,7 @@ export class CashRegistersComponent implements OnInit, OnDestroy {
       sortable: true,
       priority: 2,
       transform: (value: number) =>
-        value != null
-          ? this.currencyService.format(value)
-          : '-',
+        value != null ? this.currencyService.format(value) : '-',
     },
     {
       key: 'actual_closing_amount',
@@ -618,9 +620,7 @@ export class CashRegistersComponent implements OnInit, OnDestroy {
       sortable: true,
       priority: 3,
       transform: (value: number) =>
-        value != null
-          ? this.currencyService.format(value)
-          : '-',
+        value != null ? this.currencyService.format(value) : '-',
     },
     {
       key: 'difference',
@@ -670,9 +670,7 @@ export class CashRegistersComponent implements OnInit, OnDestroy {
         key: 'opening_amount',
         label: 'Apertura',
         transform: (val: number) =>
-          val != null
-            ? this.currencyService.format(val)
-            : '-',
+          val != null ? this.currencyService.format(val) : '-',
       },
       {
         key: 'difference',

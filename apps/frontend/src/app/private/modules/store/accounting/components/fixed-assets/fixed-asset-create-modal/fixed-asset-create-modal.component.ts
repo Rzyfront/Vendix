@@ -1,5 +1,5 @@
 import { Component, Input, Output, EventEmitter, OnChanges, SimpleChanges, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 
 import { AccountingService } from '../../../services/accounting.service';
@@ -17,14 +17,13 @@ import {
   selector: 'vendix-fixed-asset-create-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
     InputComponent,
     SelectorComponent,
-    TextareaComponent,
-  ],
+    TextareaComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen"
@@ -257,6 +256,11 @@ export class FixedAssetCreateModalComponent implements OnChanges {
           description: this.editAsset ? 'Activo actualizado correctamente' : 'Activo creado correctamente',
         });
         this.is_submitting = false;
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
         this.saved.emit();
         this.onClose();
       },

@@ -21,7 +21,7 @@ import {
           <i class="fas fa-times"></i>
         </button>
       </div>
-
+    
       <div class="printer-content">
         <div class="printer-selection">
           <label for="printer-select">Impresora:</label>
@@ -30,49 +30,50 @@ import {
             class="printer-select"
             [(ngModel)]="selectedPrinter"
             (change)="onPrinterChange()"
-          >
-            <option
-              *ngFor="let printer of printers$ | async"
-              [value]="printer.name"
             >
-              {{ printer.name }} ({{ printer.type }})
-            </option>
+            @for (printer of printers$ | async; track printer) {
+              <option
+                [value]="printer.name"
+                >
+                {{ printer.name }} ({{ printer.type }})
+              </option>
+            }
           </select>
           <button
             class="test-btn"
             (click)="testPrinter()"
             type="button"
             title="Probar impresora"
-          >
+            >
             <i class="fas fa-print"></i>
           </button>
         </div>
-
+    
         <div class="print-options">
           <h4>Opciones de Impresión</h4>
-
+    
           <div class="option-group">
             <label class="checkbox-label">
               <input
                 type="checkbox"
                 [(ngModel)]="printOptions.printReceipt"
                 (change)="onOptionsChange()"
-              />
+                />
               Imprimir ticket físico
             </label>
           </div>
-
+    
           <div class="option-group">
             <label class="checkbox-label">
               <input
                 type="checkbox"
                 [(ngModel)]="printOptions.openCashDrawer"
                 (change)="onOptionsChange()"
-              />
+                />
               Abrir caja registradora
             </label>
           </div>
-
+    
           <div class="option-group">
             <label class="checkbox-label">
               <input
@@ -80,14 +81,16 @@ import {
                 [(ngModel)]="printOptions.emailReceipt"
                 (change)="onOptionsChange()"
                 [disabled]="!hasCustomerEmail()"
-              />
+                />
               Enviar por email
-              <span *ngIf="ticketData?.customer?.email" class="customer-info">
-                ({{ ticketData.customer!.email }})
-              </span>
+              @if (ticketData?.customer?.email) {
+                <span class="customer-info">
+                  ({{ ticketData.customer!.email }})
+                </span>
+              }
             </label>
           </div>
-
+    
           <div class="option-group">
             <label class="checkbox-label">
               <input
@@ -95,14 +98,16 @@ import {
                 [(ngModel)]="printOptions.smsReceipt"
                 (change)="onOptionsChange()"
                 [disabled]="!hasCustomerPhone()"
-              />
+                />
               Enviar por SMS
-              <span *ngIf="ticketData?.customer?.phone" class="customer-info">
-                ({{ ticketData.customer!.phone }})
-              </span>
+              @if (ticketData?.customer?.phone) {
+                <span class="customer-info">
+                  ({{ ticketData.customer!.phone }})
+                </span>
+              }
             </label>
           </div>
-
+    
           <div class="option-group">
             <label for="copies-input">Copias:</label>
             <input
@@ -113,22 +118,24 @@ import {
               (change)="onOptionsChange()"
               min="1"
               max="10"
-            />
+              />
           </div>
         </div>
-
-        <div class="ticket-preview" *ngIf="showPreview">
-          <h4>Vista Previa del Ticket</h4>
-          <div class="preview-container" [innerHTML]="ticketPreview"></div>
-        </div>
+    
+        @if (showPreview) {
+          <div class="ticket-preview">
+            <h4>Vista Previa del Ticket</h4>
+            <div class="preview-container" [innerHTML]="ticketPreview"></div>
+          </div>
+        }
       </div>
-
+    
       <div class="printer-actions">
         <button
           class="btn btn-secondary"
           (click)="togglePreview()"
           type="button"
-        >
+          >
           <i class="fas fa-eye"></i>
           {{ showPreview ? 'Ocultar' : 'Mostrar' }} Vista Previa
         </button>
@@ -137,13 +144,13 @@ import {
           (click)="printOrder()"
           [disabled]="printing"
           type="button"
-        >
+          >
           <i class="fas fa-print"></i>
           {{ printing ? 'Imprimiendo...' : 'Imprimir' }}
         </button>
       </div>
     </div>
-  `,
+    `,
   styles: [
     `
       .ticket-printer-container {
@@ -531,6 +538,11 @@ export class PosTicketPrinterComponent implements OnInit {
   }
 
   closePrinter(): void {
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.printerClosed.emit();
   }
 }

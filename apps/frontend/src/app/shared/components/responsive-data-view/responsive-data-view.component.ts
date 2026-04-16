@@ -1,5 +1,5 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, Input, input, output } from '@angular/core';
+
 import { TableComponent } from '../table/table.component';
 import { ItemListComponent } from '../item-list/item-list.component';
 import { EmptyStateComponent } from '../empty-state/empty-state.component';
@@ -30,59 +30,64 @@ export type { ItemListCardConfig, ItemListSize };
 @Component({
   selector: 'app-responsive-data-view',
   standalone: true,
-  imports: [CommonModule, TableComponent, ItemListComponent, EmptyStateComponent],
+  imports: [TableComponent, ItemListComponent, EmptyStateComponent],
   template: `
     <!-- Empty State (shared between desktop and mobile) -->
-    <app-empty-state
-      *ngIf="!loading && data.length === 0"
-      [icon]="emptyIcon"
-      [title]="emptyTitle || emptyMessage"
-      [description]="emptyDescription || ''"
-      [actionButtonText]="emptyActionText || 'Crear Nuevo'"
-      [actionButtonIcon]="emptyActionIcon || 'plus'"
-      [showActionButton]="showEmptyAction"
-      [showRefreshButton]="showEmptyRefresh"
-      [showClearFilters]="showEmptyClearFilters"
-      (actionClick)="emptyActionClick.emit()"
-      (refreshClick)="emptyRefreshClick.emit()"
-      (clearFiltersClick)="emptyClearFiltersClick.emit()"
-    ></app-empty-state>
-
+    @if (!loading && data.length === 0) {
+      <app-empty-state
+        [icon]="emptyIcon()"
+        [title]="emptyTitle() || emptyMessage()"
+        [description]="emptyDescription() || ''"
+        [actionButtonText]="emptyActionText() || 'Crear Nuevo'"
+        [actionButtonIcon]="emptyActionIcon() || 'plus'"
+        [showActionButton]="showEmptyAction()"
+        [showRefreshButton]="showEmptyRefresh()"
+        [showClearFilters]="showEmptyClearFilters()"
+        (actionClick)="emptyActionClick.emit()"
+        (refreshClick)="emptyRefreshClick.emit()"
+        (clearFiltersClick)="emptyClearFiltersClick.emit()"
+      ></app-empty-state>
+    }
+    
     <!-- Desktop: Table (hidden on mobile) -->
-    <div class="hidden md:block" *ngIf="data.length > 0 || loading">
-      <app-table
-        [data]="data"
-        [columns]="columns"
-        [actions]="actions"
-        [size]="tableSize"
-        [loading]="loading"
-        [emptyMessage]="emptyMessage"
-        [showHeader]="showHeader"
-        [striped]="striped"
-        [hoverable]="hoverable"
-        [bordered]="bordered"
-        [compact]="compact"
-        [sortable]="sortable"
-        (sort)="sort.emit($event)"
-        (rowClick)="rowClick.emit($event)"
-      ></app-table>
-    </div>
-
+    @if (data.length > 0 || loading) {
+      <div class="hidden md:block">
+        <app-table
+          [data]="data"
+          [columns]="columns()"
+          [actions]="actions()"
+          [size]="tableSize()"
+          [loading]="loading"
+          [emptyMessage]="emptyMessage()"
+          [showHeader]="showHeader()"
+          [striped]="striped()"
+          [hoverable]="hoverable()"
+          [bordered]="bordered()"
+          [compact]="compact()"
+          [sortable]="sortable()"
+          (sort)="sort.emit($event)"
+          (rowClick)="rowClick.emit($event)"
+        ></app-table>
+      </div>
+    }
+    
     <!-- Mobile: Item List (hidden on desktop) -->
-    <div class="block md:hidden" *ngIf="data.length > 0 || loading">
-      <app-item-list
-        [data]="data"
-        [cardConfig]="cardConfig"
-        [actions]="actions"
-        [loading]="loading"
-        [emptyMessage]="emptyMessage"
-        [emptyIcon]="emptyIcon"
-        [size]="itemListSize"
-        (itemClick)="rowClick.emit($event)"
-        (actionClick)="actionClick.emit($event)"
-      ></app-item-list>
-    </div>
-  `,
+    @if (data.length > 0 || loading) {
+      <div class="block md:hidden">
+        <app-item-list
+          [data]="data"
+          [cardConfig]="cardConfig()"
+          [actions]="actions()"
+          [loading]="loading"
+          [emptyMessage]="emptyMessage()"
+          [emptyIcon]="emptyIcon()"
+          [size]="itemListSize()"
+          (itemClick)="rowClick.emit($event)"
+          (actionClick)="actionClick.emit($event)"
+        ></app-item-list>
+      </div>
+    }
+    `,
   styles: [`
     :host {
       display: block;
@@ -94,42 +99,45 @@ export class ResponsiveDataViewComponent {
   @Input() data: any[] = [];
 
   // Table configuration
-  @Input() columns: TableColumn[] = [];
-  @Input() tableSize: TableSize = 'md';
-  @Input() showHeader = true;
-  @Input() striped = false;
-  @Input() hoverable = true;
-  @Input() bordered = false;
-  @Input() compact = false;
-  @Input() sortable = false;
+  readonly columns = input<TableColumn[]>([]);
+  readonly tableSize = input<TableSize>('md');
+  readonly showHeader = input(true);
+  readonly striped = input(false);
+  readonly hoverable = input(true);
+  readonly bordered = input(false);
+  readonly compact = input(false);
+  readonly sortable = input(false);
 
   // Item List configuration
-  @Input() cardConfig!: ItemListCardConfig;
-  @Input() itemListSize: ItemListSize = 'md';
-  @Input() emptyIcon = 'inbox';
+  readonly cardConfig = input.required<ItemListCardConfig>();
+  readonly itemListSize = input<ItemListSize>('md');
+  readonly emptyIcon = input('inbox');
 
   // Shared configuration
-  @Input() actions?: TableAction[];
+  readonly actions = input<TableAction[]>();
   @Input() loading = false;
-  @Input() emptyMessage = 'No hay datos disponibles';
+  readonly emptyMessage = input('No hay datos disponibles');
 
   // Empty state enhanced inputs
-  @Input() emptyTitle?: string;
-  @Input() emptyDescription?: string;
-  @Input() emptyActionText?: string;
-  @Input() emptyActionIcon?: string;
-  @Input() showEmptyAction = false;
-  @Input() showEmptyClearFilters = false;
-  @Input() showEmptyRefresh = false;
+  readonly emptyTitle = input<string>();
+  readonly emptyDescription = input<string>();
+  readonly emptyActionText = input<string>();
+  readonly emptyActionIcon = input<string>();
+  readonly showEmptyAction = input(false);
+  readonly showEmptyClearFilters = input(false);
+  readonly showEmptyRefresh = input(false);
 
   // Events
-  @Output() sort = new EventEmitter<{
+  readonly sort = output<{
     column: string;
     direction: SortDirection;
-  }>();
-  @Output() rowClick = new EventEmitter<any>();
-  @Output() actionClick = new EventEmitter<{ action: TableAction; item: any }>();
-  @Output() emptyActionClick = new EventEmitter<void>();
-  @Output() emptyClearFiltersClick = new EventEmitter<void>();
-  @Output() emptyRefreshClick = new EventEmitter<void>();
+}>();
+  readonly rowClick = output<any>();
+  readonly actionClick = output<{
+    action: TableAction;
+    item: any;
+}>();
+  readonly emptyActionClick = output<void>();
+  readonly emptyClearFiltersClick = output<void>();
+  readonly emptyRefreshClick = output<void>();
 }

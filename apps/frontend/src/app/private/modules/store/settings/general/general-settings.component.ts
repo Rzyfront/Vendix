@@ -1,5 +1,5 @@
 import { Component, inject, OnInit, computed, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { StoreSettingsService } from './services/store-settings.service';
 import { StoreSettings } from '../../../../../core/models/store-settings.interface';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
@@ -23,7 +23,7 @@ import { take } from 'rxjs/operators';
   selector: 'app-general-settings',
   standalone: true,
   imports: [
-    CommonModule, LucideAngularModule,
+    LucideAngularModule,
     IconComponent,
     GeneralSettingsForm,
     InventorySettingsForm,
@@ -33,7 +33,7 @@ import { take } from 'rxjs/operators';
     AppSettingsForm,
     ScrollableTabsComponent,
     StickyHeaderComponent
-  ],
+],
   templateUrl: './general-settings.component.html',
   styleUrls: ['./general-settings.component.scss'],
 })

@@ -8,7 +8,7 @@ import {
   effect,
   untracked,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { Subject, takeUntil, finalize } from 'rxjs';
 import { ReservationsService } from '../../../services/reservations.service';
@@ -29,7 +29,7 @@ import {
   selector: 'app-exceptions-manager',
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
-  imports: [CommonModule, FormsModule, IconComponent, SpinnerComponent, ButtonComponent, InputComponent, ToggleComponent, BadgeComponent, EmptyStateComponent],
+  imports: [FormsModule, IconComponent, SpinnerComponent, ButtonComponent, InputComponent, ToggleComponent, BadgeComponent, EmptyStateComponent],
   templateUrl: './exceptions-manager.component.html',
   styleUrls: ['./exceptions-manager.component.scss'],
 })

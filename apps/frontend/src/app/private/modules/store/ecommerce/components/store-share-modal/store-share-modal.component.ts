@@ -1,12 +1,12 @@
 import { Component, Input, Output, EventEmitter, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 
 @Component({
   selector: 'app-store-share-modal',
   standalone: true,
-  imports: [CommonModule, IconComponent],
+  imports: [IconComponent],
   template: `
     @if (isOpen && storeUrl) {
       <div class="modal-backdrop" (click)="close()">
@@ -306,6 +306,11 @@ export class StoreShareModalComponent {
   close(): void {
     this.isOpen = false;
     this.showCopied = false;
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.closed.emit();
   }
 

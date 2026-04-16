@@ -1,5 +1,5 @@
 import { Component, ChangeDetectionStrategy, ChangeDetectorRef, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { timer } from 'rxjs';
 import { filter, map, catchError } from 'rxjs/operators';
@@ -14,7 +14,7 @@ import { MonitoringOverview, ServerInfo, MetricStatus } from '../../interfaces';
 @Component({
   selector: 'app-monitoring-overview-page',
   standalone: true,
-  imports: [CommonModule, StatsComponent, IconComponent, StatusIndicatorComponent],
+  imports: [StatsComponent, IconComponent, StatusIndicatorComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="space-y-6">
@@ -57,12 +57,12 @@ import { MonitoringOverview, ServerInfo, MetricStatus } from '../../interfaces';
           [loading]="loadingOverview"
         ></app-stats>
       </div>
-
+    
       <!-- Status bar -->
       <div
         class="rounded-card shadow-card p-4 flex items-center justify-between flex-wrap gap-3"
         style="background: var(--color-surface); border: 1px solid var(--color-border);"
-      >
+        >
         <div class="flex items-center gap-4">
           <app-status-indicator
             [status]="overallStatus"
@@ -77,31 +77,33 @@ import { MonitoringOverview, ServerInfo, MetricStatus } from '../../interfaces';
           Auto-refresh: 60s
         </span>
       </div>
-
+    
       <!-- Server Info Summary -->
-      <div *ngIf="serverInfo" class="rounded-card shadow-card p-6" style="background: var(--color-surface); border: 1px solid var(--color-border);">
-        <h3 class="text-sm font-semibold mb-4" style="color: var(--color-text-primary);">Informacion del Servidor</h3>
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <div class="p-3 rounded-lg text-center" style="background: var(--color-background);">
-            <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Hostname</p>
-            <p class="font-mono text-sm font-bold truncate" style="color: var(--color-text-primary);">{{ serverInfo.hostname }}</p>
-          </div>
-          <div class="p-3 rounded-lg text-center" style="background: var(--color-background);">
-            <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Platform</p>
-            <p class="font-mono text-sm font-bold" style="color: var(--color-text-primary);">{{ serverInfo.platform }} {{ serverInfo.arch }}</p>
-          </div>
-          <div class="p-3 rounded-lg text-center" style="background: var(--color-background);">
-            <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">CPUs</p>
-            <p class="font-mono text-sm font-bold" style="color: var(--color-text-primary);">{{ serverInfo.cpuCount }}</p>
-          </div>
-          <div class="p-3 rounded-lg text-center" style="background: var(--color-background);">
-            <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Node.js</p>
-            <p class="font-mono text-sm font-bold" style="color: var(--color-text-primary);">{{ serverInfo.nodeVersion }}</p>
+      @if (serverInfo) {
+        <div class="rounded-card shadow-card p-6" style="background: var(--color-surface); border: 1px solid var(--color-border);">
+          <h3 class="text-sm font-semibold mb-4" style="color: var(--color-text-primary);">Informacion del Servidor</h3>
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+            <div class="p-3 rounded-lg text-center" style="background: var(--color-background);">
+              <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Hostname</p>
+              <p class="font-mono text-sm font-bold truncate" style="color: var(--color-text-primary);">{{ serverInfo.hostname }}</p>
+            </div>
+            <div class="p-3 rounded-lg text-center" style="background: var(--color-background);">
+              <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Platform</p>
+              <p class="font-mono text-sm font-bold" style="color: var(--color-text-primary);">{{ serverInfo.platform }} {{ serverInfo.arch }}</p>
+            </div>
+            <div class="p-3 rounded-lg text-center" style="background: var(--color-background);">
+              <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">CPUs</p>
+              <p class="font-mono text-sm font-bold" style="color: var(--color-text-primary);">{{ serverInfo.cpuCount }}</p>
+            </div>
+            <div class="p-3 rounded-lg text-center" style="background: var(--color-background);">
+              <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Node.js</p>
+              <p class="font-mono text-sm font-bold" style="color: var(--color-text-primary);">{{ serverInfo.nodeVersion }}</p>
+            </div>
           </div>
         </div>
-      </div>
+      }
     </div>
-  `,
+    `,
 })
 export class MonitoringOverviewPage implements OnInit {
   private readonly monitoringService = inject(MonitoringService);

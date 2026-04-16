@@ -1,12 +1,12 @@
 import { Component, input, output, computed, signal, ChangeDetectionStrategy, OnInit, OnDestroy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { IconComponent } from '../../../../../../../shared/components';
 import { Booking, BookingStatus } from '../../../interfaces/reservation.interface';
 
 @Component({
   selector: 'app-calendar-day-view',
   standalone: true,
-  imports: [CommonModule, IconComponent],
+  imports: [IconComponent],
   templateUrl: './calendar-day-view.component.html',
   styleUrls: ['./calendar-day-view.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,

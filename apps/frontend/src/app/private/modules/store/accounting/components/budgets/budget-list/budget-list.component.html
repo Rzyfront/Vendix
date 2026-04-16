@@ -84,9 +84,10 @@
     </div>
   </app-card>
 
-  <!-- Create Modal -->
-  <vendix-budget-create-modal
-    [(isOpen)]="is_create_modal_open"
-    (created)="onBudgetCreated()"
-  ></vendix-budget-create-modal>
+  @defer (when is_create_modal_open) {
+    <vendix-budget-create-modal
+      [(isOpen)]="is_create_modal_open"
+      (created)="onBudgetCreated()"
+    ></vendix-budget-create-modal>
+  }
 </div>

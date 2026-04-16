@@ -1,5 +1,5 @@
 import { Component, Input, Output, EventEmitter, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
@@ -27,7 +27,6 @@ import { selectPromotionsMeta } from '../../state/selectors/promotions.selectors
   selector: 'app-promotion-list',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     CardComponent,
     ResponsiveDataViewComponent,
@@ -35,29 +34,31 @@ import { selectPromotionsMeta } from '../../state/selectors/promotions.selectors
     OptionsDropdownComponent,
     IconComponent,
     ButtonComponent,
-    PaginationComponent,
-  ],
+    PaginationComponent
+],
   template: `
     <app-card [responsive]="true" [padding]="false">
       <!-- Search Section: sticky below stats on mobile -->
       <div
         class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
                   md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
-      >
+        >
         <div
           class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
-        >
+          >
           <!-- Title -->
           <h2
             class="text-[13px] font-bold text-gray-600 tracking-wide
                      md:text-lg md:font-semibold md:text-text-primary"
-          >
+            >
             Promociones
-            <span *ngIf="meta" class="text-text-secondary font-normal">
-              ({{ meta.total }})
-            </span>
+            @if (meta) {
+              <span class="text-text-secondary font-normal">
+                ({{ meta.total }})
+              </span>
+            }
           </h2>
-
+    
           <!-- Search + Actions Row -->
           <div class="flex items-center gap-2 w-full md:w-auto">
             <app-inputsearch
@@ -67,17 +68,17 @@ import { selectPromotionsMeta } from '../../state/selectors/promotions.selectors
               [debounceTime]="300"
               (search)="onSearch($event)"
             ></app-inputsearch>
-
+    
             <app-button
               variant="outline"
               size="md"
               customClasses="w-10 sm:w-11 !px-0 bg-surface shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none !rounded-[10px] shrink-0"
               (clicked)="create.emit()"
               title="Nueva Promocion"
-            >
+              >
               <app-icon slot="icon" name="plus" [size]="18"></app-icon>
             </app-button>
-
+    
             <app-options-dropdown
               class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
               [filters]="filterConfigs"
@@ -91,69 +92,74 @@ import { selectPromotionsMeta } from '../../state/selectors/promotions.selectors
           </div>
         </div>
       </div>
-
+    
       <!-- Loading State -->
-      <div *ngIf="loading" class="p-4 md:p-6 text-center">
-        <div
-          class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-        ></div>
-        <p class="mt-2 text-text-secondary">Cargando promociones...</p>
-      </div>
-
+      @if (loading) {
+        <div class="p-4 md:p-6 text-center">
+          <div
+            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+          ></div>
+          <p class="mt-2 text-text-secondary">Cargando promociones...</p>
+        </div>
+      }
+    
       <!-- Empty State -->
-      <div
-        *ngIf="!loading && promotions.length === 0"
-        class="p-12 text-center text-gray-500"
-      >
-        <app-icon
-          name="tag"
-          [size]="48"
-          class="mx-auto mb-4 text-gray-300"
-        ></app-icon>
-        <h3 class="text-lg font-medium text-gray-900">
-          No se encontraron promociones
-        </h3>
-        <p class="mt-1">Comienza creando una nueva promocion.</p>
-        <div class="mt-6 flex justify-center">
-          <app-button variant="primary" (clicked)="create.emit()">
-            <app-icon slot="icon" name="plus" [size]="16"></app-icon>
-            Nueva Promocion
-          </app-button>
+      @if (!loading && promotions.length === 0) {
+        <div
+          class="p-12 text-center text-gray-500"
+          >
+          <app-icon
+            name="tag"
+            [size]="48"
+            class="mx-auto mb-4 text-gray-300"
+          ></app-icon>
+          <h3 class="text-lg font-medium text-gray-900">
+            No se encontraron promociones
+          </h3>
+          <p class="mt-1">Comienza creando una nueva promocion.</p>
+          <div class="mt-6 flex justify-center">
+            <app-button variant="primary" (clicked)="create.emit()">
+              <app-icon slot="icon" name="plus" [size]="16"></app-icon>
+              Nueva Promocion
+            </app-button>
+          </div>
         </div>
-      </div>
-
+      }
+    
       <!-- Data View -->
-      <div
-        *ngIf="!loading && promotions.length > 0"
-        class="px-2 pb-2 pt-3 md:p-4"
-      >
-        <app-responsive-data-view
-          [data]="promotions"
-          [columns]="columns"
-          [cardConfig]="cardConfig"
-          [actions]="tableActions"
-          [loading]="loading"
-          [hoverable]="true"
-          [striped]="true"
-          emptyMessage="No hay promociones"
-          emptyIcon="tag"
-          tableSize="md"
-          (rowClick)="edit.emit($event)"
-        ></app-responsive-data-view>
-
-        <!-- Pagination -->
-        <div *ngIf="meta && meta.total > 0" class="mt-4 flex justify-center">
-          <app-pagination
-            [currentPage]="meta.page"
-            [totalPages]="meta.total_pages"
-            [total]="meta.total"
-            [limit]="meta.limit"
-            (pageChange)="pageChange.emit($event)"
-          ></app-pagination>
+      @if (!loading && promotions.length > 0) {
+        <div
+          class="px-2 pb-2 pt-3 md:p-4"
+          >
+          <app-responsive-data-view
+            [data]="promotions"
+            [columns]="columns"
+            [cardConfig]="cardConfig"
+            [actions]="tableActions"
+            [loading]="loading"
+            [hoverable]="true"
+            [striped]="true"
+            emptyMessage="No hay promociones"
+            emptyIcon="tag"
+            tableSize="md"
+            (rowClick)="edit.emit($event)"
+          ></app-responsive-data-view>
+          <!-- Pagination -->
+          @if (meta && meta.total > 0) {
+            <div class="mt-4 flex justify-center">
+              <app-pagination
+                [currentPage]="meta.page"
+                [totalPages]="meta.total_pages"
+                [total]="meta.total"
+                [limit]="meta.limit"
+                (pageChange)="pageChange.emit($event)"
+              ></app-pagination>
+            </div>
+          }
         </div>
-      </div>
+      }
     </app-card>
-  `,
+    `,
   styles: [
     `
       :host {
@@ -417,6 +423,11 @@ export class PromotionListComponent {
 
   onActionClick(action: string): void {
     if (action === 'create') {
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
       this.create.emit();
     }
   }

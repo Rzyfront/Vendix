@@ -1,5 +1,5 @@
 import { Component, Input, Output, EventEmitter, inject, signal, effect, OnInit } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import {
   ModalComponent,
@@ -18,14 +18,13 @@ import { BankAccount, ChartAccount } from '../../interfaces/accounting.interface
   selector: 'vendix-bank-account-form-modal',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ModalComponent,
     ButtonComponent,
     IconComponent,
     InputComponent,
-    SelectorComponent,
-  ],
+    SelectorComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen"
@@ -207,6 +206,11 @@ export class BankAccountFormModalComponent implements OnInit {
           this.editAccount ? 'Cuenta actualizada' : 'Cuenta creada exitosamente',
         );
         this.saving.set(false);
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
         this.saved.emit();
       },
       error: () => {

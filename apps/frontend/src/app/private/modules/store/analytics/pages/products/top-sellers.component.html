@@ -44,7 +44,14 @@
           ></div>
         </div>
       } @else {
-        <app-chart [options]="topSellersChartOptions" size="large"></app-chart>
+        @defer (on viewport) {
+          <app-chart
+            [options]="topSellersChartOptions"
+            size="large"
+          ></app-chart>
+        } @placeholder {
+          <div class="h-80 bg-surface-secondary animate-pulse rounded-xl"></div>
+        }
       }
     </div>
   </app-card>

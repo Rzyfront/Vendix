@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { debounceTime, distinctUntilChanged, Subject, takeUntil } from 'rxjs';
 import {
   User,
@@ -42,7 +42,6 @@ import {
   selector: 'app-users',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     UserStatsComponent,
@@ -55,8 +54,8 @@ import {
     ButtonComponent,
     SelectorComponent,
     PaginationComponent,
-    CardComponent,
-  ],
+    CardComponent
+],
   templateUrl: './users.component.html',
   styleUrls: ['./users.component.css'],
 })

@@ -1,12 +1,12 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { IcaService } from './services/ica.service';
 import { StatsComponent } from '../../../../../shared/components/stats/stats.component';
 
 @Component({
   selector: 'app-ica-rates',
   standalone: true,
-  imports: [CommonModule, StatsComponent],
+  imports: [StatsComponent],
   template: `
     <div class="w-full">
       <!-- Stats -->

@@ -6,7 +6,7 @@ import {
   inject,
   OnInit,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   FormsModule,
   ReactiveFormsModule,
@@ -32,13 +32,12 @@ import { SuppliersService } from '../../services/suppliers.service';
   selector: 'app-pop-supplier-quick-create',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
-    InputComponent,
-  ],
+    InputComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen"
@@ -198,6 +197,11 @@ export class PopSupplierQuickCreateComponent implements OnInit {
           this.supplierCreated.emit(response.data.id);
           this.resetForm();
           this.isOpenChange.emit(false);
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
           this.close.emit();
         } else {
           this.toastService.error(
@@ -231,6 +235,11 @@ export class PopSupplierQuickCreateComponent implements OnInit {
   onClose(): void {
     this.resetForm();
     this.isOpenChange.emit(false);
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.close.emit();
   }
 

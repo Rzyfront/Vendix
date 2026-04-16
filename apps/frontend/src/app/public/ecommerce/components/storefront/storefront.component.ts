@@ -29,22 +29,25 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
       <header class="storefront-header">
         <div class="header-content">
           <div class="store-logo" (click)="navigateToHome()">
-            <img
-              *ngIf="branding?.logo"
-              [src]="branding.logo"
-              [alt]="storeName + ' Logo'"
-              class="logo-image"
-            />
-            <div *ngIf="!branding?.logo" class="logo-fallback">
-              <app-icon
-                name="shopping-bag"
-                [size]="28"
-                class="text-primary"
-              ></app-icon>
-              <h1 class="logo-text">{{ storeName }}</h1>
-            </div>
+            @if (branding?.logo) {
+              <img
+                [src]="branding.logo"
+                [alt]="storeName + ' Logo'"
+                class="logo-image"
+                />
+            }
+            @if (!branding?.logo) {
+              <div class="logo-fallback">
+                <app-icon
+                  name="shopping-bag"
+                  [size]="28"
+                  class="text-primary"
+                ></app-icon>
+                <h1 class="logo-text">{{ storeName }}</h1>
+              </div>
+            }
           </div>
-
+    
           <nav class="store-nav">
             <div class="search-bar">
               <app-inputsearch
@@ -57,35 +60,33 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
             </div>
             <div class="nav-actions">
               <!-- Authenticated User Actions -->
-              <ng-container *ngIf="isAuthenticated$ | async; else guestActions">
+              @if (isAuthenticated$ | async) {
                 <button
                   class="icon-btn"
                   (click)="navigateToFavorites()"
                   title="Favoritos"
-                >
+                  >
                   <app-icon name="heart" [size]="22"></app-icon>
-                  <span *ngIf="wishlist.length > 0" class="badge">{{
-                    wishlist.length
-                  }}</span>
+                  @if (wishlist.length > 0) {
+                    <span class="badge">{{
+                      wishlist.length
+                    }}</span>
+                  }
                 </button>
-
                 <button
                   class="icon-btn"
                   (click)="navigateToProfile()"
                   title="Mi Perfil"
-                >
+                  >
                   <app-icon name="user-circle" [size]="22"></app-icon>
                 </button>
-              </ng-container>
-
-              <!-- Guest Actions -->
-              <ng-template #guestActions>
+              } @else {
                 <div class="guest-menu">
                   <button
                     class="icon-btn"
                     (click)="navigateToLogin()"
                     title="Iniciar sesión"
-                  >
+                    >
                     <app-icon name="user" [size]="22"></app-icon>
                   </button>
                   <div class="guest-dropdown">
@@ -93,24 +94,28 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
                     <button (click)="navigateToRegister()">Registrarse</button>
                   </div>
                 </div>
-              </ng-template>
-
+              }
+    
+              <!-- Guest Actions -->
+    
               <!-- Cart is always visible -->
               <button
                 class="icon-btn cart-btn"
                 (click)="toggleCart()"
                 title="Carrito"
-              >
+                >
                 <app-icon name="shopping-cart" [size]="22"></app-icon>
-                <span *ngIf="cartItems.length > 0" class="badge badge-accent">{{
-                  cartItems.length
-                }}</span>
+                @if (cartItems.length > 0) {
+                  <span class="badge badge-accent">{{
+                    cartItems.length
+                  }}</span>
+                }
               </button>
             </div>
           </nav>
         </div>
       </header>
-
+    
       <!-- Main Content -->
       <main class="storefront-main">
         <!-- Hero Banner -->
@@ -122,28 +127,31 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
               (click)="scrollToProducts()"
               variant="primary"
               size="lg"
-            >
+              >
               Ver Productos
             </app-button>
           </div>
         </section>
-
+    
         <!-- Categories -->
-        <section *ngIf="categories.length" class="categories-section">
-          <h3>Categorías</h3>
-          <div class="categories-grid">
-            <div
-              *ngFor="let category of categories"
-              class="category-card"
-              (click)="filterByCategory(category.id)"
-              [class.active]="selectedCategory === category.id"
-            >
-              <div class="category-icon">{{ category.icon }}</div>
-              <span>{{ category.name }}</span>
+        @if (categories.length) {
+          <section class="categories-section">
+            <h3>Categorías</h3>
+            <div class="categories-grid">
+              @for (category of categories; track category) {
+                <div
+                  class="category-card"
+                  (click)="filterByCategory(category.id)"
+                  [class.active]="selectedCategory === category.id"
+                  >
+                  <div class="category-icon">{{ category.icon }}</div>
+                  <span>{{ category.name }}</span>
+                </div>
+              }
             </div>
-          </div>
-        </section>
-
+          </section>
+        }
+    
         <!-- Products Grid -->
         <section class="products-section" id="products">
           <div class="section-header">
@@ -157,92 +165,104 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
               </select>
             </div>
           </div>
-
+    
           <div class="products-grid">
-            <div *ngFor="let product of filteredProducts" class="product-card">
-              <app-card class="product-card-content">
-                <div class="product-image">
-                  <img
-                    [src]="product.image"
-                    [alt]="product.name"
-                    class="product-img"
-                  />
-                  <div *ngIf="product.onSale" class="sale-badge">Oferta</div>
-                </div>
-                <div class="product-info">
-                  <h4 class="product-name">{{ product.name }}</h4>
-                  <p class="product-description">{{ product.description }}</p>
-                  <div class="product-pricing">
-                    <span class="current-price">{{
-                      product.price | currency
-                    }}</span>
-                    <span *ngIf="product.originalPrice" class="original-price">
-                      {{ product.originalPrice | currency }}
-                    </span>
+            @for (product of filteredProducts; track product) {
+              <div class="product-card">
+                <app-card class="product-card-content">
+                  <div class="product-image">
+                    <img
+                      [src]="product.image"
+                      [alt]="product.name"
+                      class="product-img"
+                      />
+                    @if (product.onSale) {
+                      <div class="sale-badge">Oferta</div>
+                    }
                   </div>
-                  <div class="product-actions">
-                    <app-button
-                      (click)="addToCart(product)"
-                      variant="primary"
-                      size="sm"
-                      [disabled]="product.stock === 0"
-                    >
-                      {{
+                  <div class="product-info">
+                    <h4 class="product-name">{{ product.name }}</h4>
+                    <p class="product-description">{{ product.description }}</p>
+                    <div class="product-pricing">
+                      <span class="current-price">{{
+                        product.price | currency
+                      }}</span>
+                      @if (product.originalPrice) {
+                        <span class="original-price">
+                          {{ product.originalPrice | currency }}
+                        </span>
+                      }
+                    </div>
+                    <div class="product-actions">
+                      <app-button
+                        (click)="addToCart(product)"
+                        variant="primary"
+                        size="sm"
+                        [disabled]="product.stock === 0"
+                        >
+                        {{
                         product.stock > 0 ? 'Agregar al Carrito' : 'Sin Stock'
-                      }}
-                    </app-button>
-                    <button
-                      class="wishlist-btn"
-                      (click)="toggleWishlist(product)"
-                    >
-                      ♡
-                    </button>
+                        }}
+                      </app-button>
+                      <button
+                        class="wishlist-btn"
+                        (click)="toggleWishlist(product)"
+                        >
+                        ♡
+                      </button>
+                    </div>
                   </div>
-                </div>
-              </app-card>
+                </app-card>
+              </div>
+            }
+          </div>
+    
+          @if (filteredProducts.length === 0) {
+            <div class="no-products">
+              <p>No se encontraron productos que coincidan con tu búsqueda.</p>
             </div>
-          </div>
-
-          <div *ngIf="filteredProducts.length === 0" class="no-products">
-            <p>No se encontraron productos que coincidan con tu búsqueda.</p>
-          </div>
+          }
         </section>
       </main>
-
+    
       <!-- Shopping Cart Sidebar -->
-      <div *ngIf="showCart" class="cart-sidebar">
-        <div class="cart-header">
-          <h4>Tu Carrito</h4>
-          <button class="close-cart" (click)="toggleCart()">×</button>
-        </div>
-        <div class="cart-items">
-          <div *ngFor="let item of cartItems" class="cart-item">
-            <img [src]="item.image" [alt]="item.name" class="cart-item-image" />
-            <div class="cart-item-info">
-              <h5>{{ item.name }}</h5>
-              <p>
-                {{ item.price | currency }} ×
-                {{ item.quantity }}
-              </p>
-            </div>
-            <div class="cart-item-actions">
-              <button (click)="updateQuantity(item, -1)">-</button>
-              <span>{{ item.quantity }}</span>
-              <button (click)="updateQuantity(item, 1)">+</button>
-              <button class="remove-btn" (click)="removeFromCart(item)">
-                ×
-              </button>
-            </div>
+      @if (showCart) {
+        <div class="cart-sidebar">
+          <div class="cart-header">
+            <h4>Tu Carrito</h4>
+            <button class="close-cart" (click)="toggleCart()">×</button>
+          </div>
+          <div class="cart-items">
+            @for (item of cartItems; track item) {
+              <div class="cart-item">
+                <img [src]="item.image" [alt]="item.name" class="cart-item-image" />
+                <div class="cart-item-info">
+                  <h5>{{ item.name }}</h5>
+                  <p>
+                    {{ item.price | currency }} ×
+                    {{ item.quantity }}
+                  </p>
+                </div>
+                <div class="cart-item-actions">
+                  <button (click)="updateQuantity(item, -1)">-</button>
+                  <span>{{ item.quantity }}</span>
+                  <button (click)="updateQuantity(item, 1)">+</button>
+                  <button class="remove-btn" (click)="removeFromCart(item)">
+                    ×
+                  </button>
+                </div>
+              </div>
+            }
+          </div>
+          <div class="cart-footer">
+            <div class="cart-total">Total: {{ cartTotal | currency }}</div>
+            <app-button variant="primary" size="lg" (click)="proceedToCheckout()">
+              Proceder al Pago
+            </app-button>
           </div>
         </div>
-        <div class="cart-footer">
-          <div class="cart-total">Total: {{ cartTotal | currency }}</div>
-          <app-button variant="primary" size="lg" (click)="proceedToCheckout()">
-            Proceder al Pago
-          </app-button>
-        </div>
-      </div>
-
+      }
+    
       <!-- Footer -->
       <footer class="storefront-footer">
         <div class="footer-content">
@@ -261,7 +281,7 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
         </div>
       </footer>
     </div>
-  `,
+    `,
   styleUrls: ['./storefront.component.scss'],
 })
 export class StorefrontComponent implements OnInit {

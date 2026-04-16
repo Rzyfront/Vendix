@@ -155,6 +155,11 @@ export class PosScheduleModalComponent {
   }
 
   onGoToSettings(): void {
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.goToSettings.emit();
   }
 }

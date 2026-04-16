@@ -1,5 +1,5 @@
 import { Component, Input, inject, OnInit } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 
 // Import shared components
 import { StatsComponent } from '../../../../../../shared/components/index';
@@ -15,7 +15,7 @@ export interface PurchaseOrderStats {
 @Component({
   selector: 'app-purchase-order-stats',
   standalone: true,
-  imports: [CommonModule, StatsComponent],
+  imports: [StatsComponent],
   templateUrl: './purchase-order-stats.component.html',
   styleUrls: ['./purchase-order-stats.component.scss'],
 })

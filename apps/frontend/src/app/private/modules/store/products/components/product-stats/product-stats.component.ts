@@ -1,5 +1,5 @@
 import { Component, Input, inject, OnInit } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { ProductStats } from '../../interfaces/product.interface';
 import { StatsComponent } from '../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
@@ -7,7 +7,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 @Component({
   selector: 'app-product-stats',
   standalone: true,
-  imports: [CommonModule, StatsComponent],
+  imports: [StatsComponent],
   templateUrl: './product-stats.component.html',
   styleUrls: ['./product-stats.component.scss'],
 })

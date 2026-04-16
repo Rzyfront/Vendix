@@ -1,5 +1,5 @@
 import { Component, Input, Output, EventEmitter, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
@@ -29,25 +29,24 @@ const PAYMENT_TERM_LABELS = {
   selector: 'app-pop-summary',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ButtonComponent,
     TextareaComponent,
-    IconComponent,
-  ],
+    IconComponent
+],
   template: `
     <div class="bg-[var(--color-surface)] border-t border-[var(--color-border)] flex flex-col">
       <!-- Financial Summary -->
       <div class="p-4 border-b border-[var(--color-border)]">
         <h3 class="text-sm font-semibold text-[var(--color-text-secondary)] mb-3">Resumen Financiero</h3>
-
+    
         <!-- Summary Rows -->
         <div class="space-y-2">
           <div class="flex justify-between text-sm">
             <span class="text-[var(--color-text-secondary)]">Subtotal</span>
             <span class="text-[var(--color-text-primary)] font-medium">{{ formatCurrency(summary.subtotal) }}</span>
           </div>
-
+    
           <div class="flex justify-between text-sm">
             <span class="text-[var(--color-text-secondary)]">Costo Envío</span>
             <div class="flex items-center gap-2">
@@ -58,25 +57,25 @@ const PAYMENT_TERM_LABELS = {
                 (ngModelChange)="onShippingCostChange($event)"
                 [min]="0"
                 [step]="0.01"
-              />
+                />
               <span class="text-[var(--color-text-primary)] font-medium">{{ formatCurrency(shippingCost) }}</span>
             </div>
           </div>
-
+    
           <div class="flex justify-between text-sm text-[var(--color-text-secondary)]">
             <span>Impuestos</span>
             <span>{{ formatCurrency(summary.tax_amount) }}</span>
           </div>
-
+    
           <div class="h-px bg-[var(--color-border)] my-2"></div>
-
+    
           <div class="flex justify-between">
             <span class="text-[var(--color-text-primary)] font-semibold">Total</span>
             <span class="text-[var(--color-text-primary)] text-lg font-bold">{{ formatCurrency(summary.total + shippingCost) }}</span>
           </div>
         </div>
       </div>
-
+    
       <!-- Payment Terms -->
       <div class="p-4 border-b border-[var(--color-border)]">
         <label class="block text-sm font-medium text-[var(--color-text-secondary)] mb-1">
@@ -87,24 +86,27 @@ const PAYMENT_TERM_LABELS = {
             class="flex-1 px-3 py-2 border border-[var(--color-border)] rounded-md focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)] bg-[var(--color-surface)]"
             [(ngModel)]="selectedPaymentPreset"
             (change)="onPaymentPresetChange($event)"
-          >
+            >
             <option value="">Seleccionar...</option>
-            <option *ngFor="let preset of paymentTermPresets" [value]="preset.value">
-              {{ preset.label }}
-            </option>
+            @for (preset of paymentTermPresets; track preset) {
+              <option [value]="preset.value">
+                {{ preset.label }}
+              </option>
+            }
             <option value="custom">Personalizado</option>
           </select>
-          <input
-            *ngIf="selectedPaymentPreset === 'custom' || !selectedPaymentPreset"
-            type="text"
-            class="flex-1 px-3 py-2 border border-[var(--color-border)] rounded-md focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)] bg-[var(--color-surface)]"
-            [(ngModel)]="customPaymentTerms"
-            (ngModelChange)="onCustomPaymentTermsChange($event)"
-            placeholder="Especificar términos..."
-          />
+          @if (selectedPaymentPreset === 'custom' || !selectedPaymentPreset) {
+            <input
+              type="text"
+              class="flex-1 px-3 py-2 border border-[var(--color-border)] rounded-md focus:outline-none focus:ring-2 focus:ring-[var(--color-ring)] bg-[var(--color-surface)]"
+              [(ngModel)]="customPaymentTerms"
+              (ngModelChange)="onCustomPaymentTermsChange($event)"
+              placeholder="Especificar términos..."
+              />
+          }
         </div>
       </div>
-
+    
       <!-- Notes -->
       <div class="p-4 border-b border-[var(--color-border)]">
         <app-textarea
@@ -115,7 +117,7 @@ const PAYMENT_TERM_LABELS = {
           [rows]="2"
         ></app-textarea>
       </div>
-
+    
       <!-- Internal Notes -->
       <div class="p-4 border-b border-[var(--color-border)]">
         <app-textarea
@@ -126,7 +128,7 @@ const PAYMENT_TERM_LABELS = {
           [rows]="2"
         ></app-textarea>
       </div>
-
+    
       <!-- Action Buttons -->
       <div class="p-4 flex flex-col gap-2">
         <!-- Primary Actions -->
@@ -134,43 +136,43 @@ const PAYMENT_TERM_LABELS = {
           <app-button
             variant="outline"
             (clicked)="saveAsDraft.emit()"
-          >
+            >
             <app-icon name="save" class="mr-2"></app-icon>
             Guardar Borrador
           </app-button>
-
+    
           <app-button
             variant="primary"
             (clicked)="submitOrder.emit()"
             [disabled]="!canSubmit()"
-          >
+            >
             <app-icon name="send" class="mr-2"></app-icon>
             Enviar Orden
           </app-button>
         </div>
-
+    
         <!-- Secondary Actions -->
         <div class="grid grid-cols-2 gap-3">
           <app-button
             variant="ghost"
             (clicked)="printOrder.emit()"
-          >
+            >
             <app-icon name="printer" class="mr-2"></app-icon>
             Imprimir
           </app-button>
-
+    
           <app-button
             variant="ghost"
             (clicked)="clearCart.emit()"
             class="text-[var(--color-destructive)]"
-          >
+            >
             <app-icon name="trash" class="mr-2"></app-icon>
             Limpiar
           </app-button>
         </div>
       </div>
     </div>
-  `,
+    `,
   styleUrls: ['./pop-summary.component.scss'],
 })
 export class PopSummaryComponent implements OnInit {

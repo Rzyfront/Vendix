@@ -1,5 +1,5 @@
 import { Component, input, output, signal, inject, ChangeDetectionStrategy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   ModalComponent,
   ButtonComponent,
@@ -14,7 +14,7 @@ import { finalize } from 'rxjs';
 @Component({
   selector: 'app-reschedule-modal',
   standalone: true,
-  imports: [CommonModule, ModalComponent, ButtonComponent, IconComponent, SpinnerComponent],
+  imports: [ModalComponent, ButtonComponent, IconComponent, SpinnerComponent],
   templateUrl: './reschedule-modal.component.html',
   styleUrls: ['./reschedule-modal.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,

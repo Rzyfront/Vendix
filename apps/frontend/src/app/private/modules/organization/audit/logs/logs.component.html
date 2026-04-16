@@ -1,10 +1,14 @@
 <div class="flex flex-col gap-2 md:p-4 ">
   <!-- Stats Section -->
-  <div class="stats-container" *ngIf="statsItems.length > 0">
-    <app-stats *ngFor="let item of statsItems" [title]="item.title" [value]="item.value" [smallText]="item.smallText"
-      [iconName]="item.iconName" [iconBgColor]="item.iconBgColor" [iconColor]="item.iconColor">
-    </app-stats>
-  </div>
+  @if (statsItems.length > 0) {
+    <div class="stats-container">
+      @for (item of statsItems; track item) {
+        <app-stats [title]="item.title" [value]="item.value" [smallText]="item.smallText"
+          [iconName]="item.iconName" [iconBgColor]="item.iconBgColor" [iconColor]="item.iconColor">
+        </app-stats>
+      }
+    </div>
+  }
 
   <!-- Main Content -->
   <div class="bg-surface rounded-card shadow-card border border-border">
@@ -19,7 +23,9 @@
           <select formControlName="resource"
             class="w-full px-3 py-2 border border-border rounded-button bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary text-sm transition-shadow">
             <option value="">Todos los recursos</option>
-            <option *ngFor="let res of resources" [value]="res.value">{{ res.label }}</option>
+            @for (res of resources; track res) {
+              <option [value]="res.value">{{ res.label }}</option>
+            }
           </select>
         </div>
 
@@ -28,7 +34,9 @@
           <select formControlName="action"
             class="w-full px-3 py-2 border border-border rounded-button bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary text-sm transition-shadow">
             <option value="">Todas las acciones</option>
-            <option *ngFor="let act of actions" [value]="act.value">{{ act.label }}</option>
+            @for (act of actions; track act) {
+              <option [value]="act.value">{{ act.label }}</option>
+            }
           </select>
         </div>
       </div>
@@ -42,78 +50,87 @@
     </div>
 
     <!-- Pagination Footer -->
-    <div class="p-4 border-t border-gray-100 flex justify-between items-center" *ngIf="pagination.totalPages > 1">
-      <span class="text-sm text-gray-500">
-        Página {{ pagination.page }} de {{ pagination.totalPages }}
-      </span>
-      <div class="flex gap-2">
-        <button (click)="onPageChange(pagination.page - 1)" [disabled]="pagination.page === 1"
-          class="px-3 py-1 text-sm border rounded hover:bg-gray-50 disabled:opacity-50">
-          Anterior
-        </button>
-        <button (click)="onPageChange(pagination.page + 1)" [disabled]="pagination.page === pagination.totalPages"
-          class="px-3 py-1 text-sm border rounded hover:bg-gray-50 disabled:opacity-50">
-          Siguiente
-        </button>
+    @if (pagination.totalPages > 1) {
+      <div class="p-4 border-t border-gray-100 flex justify-between items-center">
+        <span class="text-sm text-gray-500">
+          Página {{ pagination.page }} de {{ pagination.totalPages }}
+        </span>
+        <div class="flex gap-2">
+          <button (click)="onPageChange(pagination.page - 1)" [disabled]="pagination.page === 1"
+            class="px-3 py-1 text-sm border rounded hover:bg-gray-50 disabled:opacity-50">
+            Anterior
+          </button>
+          <button (click)="onPageChange(pagination.page + 1)" [disabled]="pagination.page === pagination.totalPages"
+            class="px-3 py-1 text-sm border rounded hover:bg-gray-50 disabled:opacity-50">
+            Siguiente
+          </button>
+        </div>
       </div>
-    </div>
+    }
   </div>
 </div>
 
 <!-- Detail Modal -->
 <app-modal [isOpen]="showDetailModal" [title]="'Detalle de Auditoría'"
   [subtitle]="selectedLog ? 'Evento ID: ' + selectedLog.id : ''" [size]="'lg'" (closed)="closeModal()">
-  <div class="space-y-2 md:space-y-4" *ngIf="selectedLog">
-    <!-- Info Grid -->
-    <div class="grid grid-cols-2 gap-2 md:gap-4 text-sm">
-      <div>
-        <span class="block text-gray-500">Fecha</span>
-        <span class="font-medium text-gray-900">{{ selectedLog.created_at | date:'medium' }}</span>
+  @if (selectedLog) {
+    <div class="space-y-2 md:space-y-4">
+      <!-- Info Grid -->
+      <div class="grid grid-cols-2 gap-2 md:gap-4 text-sm">
+        <div>
+          <span class="block text-gray-500">Fecha</span>
+          <span class="font-medium text-gray-900">{{ selectedLog.created_at | date:'medium' }}</span>
+        </div>
+        <div>
+          <span class="block text-gray-500">Usuario</span>
+          <span class="font-medium text-gray-900">
+            {{ selectedLog.users ? (selectedLog.users.first_name + ' ' + selectedLog.users.last_name) : 'Sistema' }}
+          </span>
+        </div>
+        <div>
+          <span class="block text-gray-500">Acción</span>
+          <span class="font-medium text-gray-900">{{ selectedLog.action }}</span>
+        </div>
+        <div>
+          <span class="block text-gray-500">Recurso</span>
+          <span class="font-medium text-gray-900">{{ selectedLog.resource }}</span>
+        </div>
+        <div>
+          <span class="block text-gray-500">IP Addr</span>
+          <span class="font-medium text-gray-900">{{ selectedLog.ip_address || 'N/A' }}</span>
+        </div>
       </div>
-      <div>
-        <span class="block text-gray-500">Usuario</span>
-        <span class="font-medium text-gray-900">
-          {{ selectedLog.users ? (selectedLog.users.first_name + ' ' + selectedLog.users.last_name) : 'Sistema' }}
-        </span>
-      </div>
-      <div>
-        <span class="block text-gray-500">Acción</span>
-        <span class="font-medium text-gray-900">{{ selectedLog.action }}</span>
-      </div>
-      <div>
-        <span class="block text-gray-500">Recurso</span>
-        <span class="font-medium text-gray-900">{{ selectedLog.resource }}</span>
-      </div>
-      <div>
-        <span class="block text-gray-500">IP Addr</span>
-        <span class="font-medium text-gray-900">{{ selectedLog.ip_address || 'N/A' }}</span>
-      </div>
+      <hr class="border-gray-100" />
+      <!-- Diff View if changes -->
+      @if (hasChanges(selectedLog)) {
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-2 md:p-4">
+          @if (selectedLog.old_values) {
+            <div class="bg-red-50 p-4 rounded-lg border border-red-100">
+              <h4 class="text-xs font-semibold text-red-700 uppercase mb-2">Valor Anterior</h4>
+              <pre
+              class="text-xs text-red-800 whitespace-pre-wrap overflow-auto max-h-60">{{ formatJson(selectedLog.old_values) }}</pre>
+            </div>
+          }
+          @if (selectedLog.new_values) {
+            <div class="bg-green-50 p-4 rounded-lg border border-green-100">
+              <h4 class="text-xs font-semibold text-green-700 uppercase mb-2">Nuevo Valor</h4>
+              <pre
+              class="text-xs text-green-800 whitespace-pre-wrap overflow-auto max-h-60">{{ formatJson(selectedLog.new_values) }}</pre>
+            </div>
+          }
+        </div>
+      }
+      <!-- Metadata if no direct changes but metadata exists -->
+      @if (!hasChanges(selectedLog) && selectedLog.metadata) {
+        <div
+          class="bg-gray-50 p-4 rounded-lg border border-gray-200">
+          <h4 class="text-xs font-semibold text-gray-700 uppercase mb-2">Metadatos</h4>
+          <pre
+          class="text-xs text-gray-800 whitespace-pre-wrap overflow-auto max-h-60">{{ formatJson(selectedLog.metadata) }}</pre>
+        </div>
+      }
     </div>
-
-    <hr class="border-gray-100" />
-
-    <!-- Diff View if changes -->
-    <div *ngIf="hasChanges(selectedLog)" class="grid grid-cols-1 md:grid-cols-2 gap-2 md:p-4">
-      <div *ngIf="selectedLog.old_values" class="bg-red-50 p-4 rounded-lg border border-red-100">
-        <h4 class="text-xs font-semibold text-red-700 uppercase mb-2">Valor Anterior</h4>
-        <pre
-          class="text-xs text-red-800 whitespace-pre-wrap overflow-auto max-h-60">{{ formatJson(selectedLog.old_values) }}</pre>
-      </div>
-      <div *ngIf="selectedLog.new_values" class="bg-green-50 p-4 rounded-lg border border-green-100">
-        <h4 class="text-xs font-semibold text-green-700 uppercase mb-2">Nuevo Valor</h4>
-        <pre
-          class="text-xs text-green-800 whitespace-pre-wrap overflow-auto max-h-60">{{ formatJson(selectedLog.new_values) }}</pre>
-      </div>
-    </div>
-
-    <!-- Metadata if no direct changes but metadata exists -->
-    <div *ngIf="!hasChanges(selectedLog) && selectedLog.metadata"
-      class="bg-gray-50 p-4 rounded-lg border border-gray-200">
-      <h4 class="text-xs font-semibold text-gray-700 uppercase mb-2">Metadatos</h4>
-      <pre
-        class="text-xs text-gray-800 whitespace-pre-wrap overflow-auto max-h-60">{{ formatJson(selectedLog.metadata) }}</pre>
-    </div>
-  </div>
+  }
 
   <div slot="footer" class="flex justify-end box-border">
     <app-button variant="secondary" (clicked)="closeModal()">Cerrar</app-button>

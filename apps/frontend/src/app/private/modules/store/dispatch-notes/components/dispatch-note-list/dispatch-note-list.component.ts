@@ -6,7 +6,7 @@ import {
   OnDestroy,
   inject,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { Subject, takeUntil } from 'rxjs';
 
@@ -46,7 +46,6 @@ import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
   selector: 'app-dispatch-note-list',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ResponsiveDataViewComponent,
     InputsearchComponent,
@@ -55,8 +54,8 @@ import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
     IconComponent,
     PaginationComponent,
     EmptyStateComponent,
-    CardComponent,
-  ],
+    CardComponent
+],
   templateUrl: './dispatch-note-list.component.html',
   styleUrls: ['./dispatch-note-list.component.scss'],
 })
@@ -323,6 +322,11 @@ export class DispatchNoteListComponent implements OnInit, OnDestroy {
   onActionClick(action: string): void {
     switch (action) {
       case 'create':
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
         this.create.emit();
         break;
     }

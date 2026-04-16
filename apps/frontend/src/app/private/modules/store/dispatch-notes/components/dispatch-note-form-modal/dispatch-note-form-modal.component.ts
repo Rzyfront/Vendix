@@ -200,6 +200,11 @@ export class DispatchNoteFormModalComponent implements OnInit, OnChanges {
   }
 
   handleClose(): void {
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.closed.emit();
   }
 }

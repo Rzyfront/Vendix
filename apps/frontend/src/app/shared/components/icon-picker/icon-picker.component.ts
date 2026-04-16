@@ -2,15 +2,15 @@ import {
   Component,
   ChangeDetectionStrategy,
   Input,
-  Output,
-  EventEmitter,
   signal,
   computed,
   HostListener,
   ElementRef,
   inject,
+  input,
+  output
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { IconComponent } from '../icon/icon.component';
 import { ICON_REGISTRY, IconName } from '../icon/icons.registry';
@@ -18,7 +18,7 @@ import { ICON_REGISTRY, IconName } from '../icon/icons.registry';
 @Component({
   selector: 'app-icon-picker',
   standalone: true,
-  imports: [CommonModule, FormsModule, IconComponent],
+  imports: [FormsModule, IconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="relative inline-block">
@@ -32,11 +32,11 @@ import { ICON_REGISTRY, IconName } from '../icon/icons.registry';
         (click)="toggle()"
       >
         @if (value) {
-          <app-icon [name]="value" [size]="size === 'sm' ? 14 : 16"></app-icon>
+          <app-icon [name]="value" [size]="size() === 'sm' ? 14 : 16"></app-icon>
           <span>{{ value }}</span>
         } @else {
-          <app-icon name="image" [size]="size === 'sm' ? 14 : 16" color="var(--color-text-muted)"></app-icon>
-          <span>{{ placeholder }}</span>
+          <app-icon name="image" [size]="size() === 'sm' ? 14 : 16" color="var(--color-text-muted)"></app-icon>
+          <span>{{ placeholder() }}</span>
         }
         <app-icon name="chevron-down" [size]="12" color="var(--color-text-muted)"></app-icon>
       </button>
@@ -45,8 +45,8 @@ import { ICON_REGISTRY, IconName } from '../icon/icons.registry';
       @if (isOpen()) {
         <div
           class="absolute z-50 mt-1 rounded-lg shadow-lg overflow-hidden"
-          [class.right-0]="alignRight"
-          [class.left-0]="!alignRight"
+          [class.right-0]="alignRight()"
+          [class.left-0]="!alignRight()"
           style="background: var(--color-surface); border: 1px solid var(--color-border); width: 280px"
         >
           <!-- Search -->
@@ -108,10 +108,10 @@ export class IconPickerComponent {
   private el = inject(ElementRef);
 
   @Input() value = '';
-  @Input() placeholder = 'Icono';
-  @Input() size: 'sm' | 'md' = 'sm';
-  @Input() alignRight = false;
-  @Output() valueChange = new EventEmitter<string>();
+  readonly placeholder = input('Icono');
+  readonly size = input<'sm' | 'md'>('sm');
+  readonly alignRight = input(false);
+  readonly valueChange = output<string>();
 
   isOpen = signal(false);
   searchQuery = signal('');

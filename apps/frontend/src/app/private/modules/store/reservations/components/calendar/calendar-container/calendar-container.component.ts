@@ -1,5 +1,5 @@
 import { Component, signal, effect, inject, input, output, ChangeDetectionStrategy, untracked } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { ReservationsService } from '../../../services/reservations.service';
 import { Booking, CalendarViewMode } from '../../../interfaces/reservation.interface';
 import { ToastService, SpinnerComponent } from '../../../../../../../shared/components';
@@ -13,13 +13,12 @@ import { finalize } from 'rxjs';
   selector: 'app-calendar-container',
   standalone: true,
   imports: [
-    CommonModule,
     CalendarToolbarComponent,
     CalendarMonthViewComponent,
     CalendarWeekViewComponent,
     CalendarDayViewComponent,
-    SpinnerComponent,
-  ],
+    SpinnerComponent
+],
   templateUrl: './calendar-container.component.html',
   styleUrls: ['./calendar-container.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,

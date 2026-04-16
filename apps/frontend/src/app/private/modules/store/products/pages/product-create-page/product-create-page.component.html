@@ -357,40 +357,38 @@
             <div
               class="relative aspect-square w-full max-w-[280px] mx-auto bg-gray-50 rounded-xl border border-gray-200 overflow-hidden group"
             >
-              <ng-container *ngIf="imageUrls.length > 0; else mobileEmptyState">
+              @if (imageUrls.length > 0) {
                 <img
                   [src]="imageUrls[activeImageIndex]"
                   class="w-full h-full object-contain p-3 bg-white"
                   (error)="onImageError($event)"
                 />
-
                 <!-- Carousel Controls -->
-                <button
-                  *ngIf="imageUrls.length > 1"
-                  type="button"
-                  (click)="prevImage()"
-                  class="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 bg-white/90 hover:bg-white rounded-full shadow-md text-gray-700 z-10"
-                >
-                  <app-icon name="chevron-left" size="18"></app-icon>
-                </button>
-                <button
-                  *ngIf="imageUrls.length > 1"
-                  type="button"
-                  (click)="nextImage()"
-                  class="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-white/90 hover:bg-white rounded-full shadow-md text-gray-700 z-10"
-                >
-                  <app-icon name="chevron-right" size="18"></app-icon>
-                </button>
-
+                @if (imageUrls.length > 1) {
+                  <button
+                    type="button"
+                    (click)="prevImage()"
+                    class="absolute left-2 top-1/2 -translate-y-1/2 p-1.5 bg-white/90 hover:bg-white rounded-full shadow-md text-gray-700 z-10"
+                  >
+                    <app-icon name="chevron-left" size="18"></app-icon>
+                  </button>
+                }
+                @if (imageUrls.length > 1) {
+                  <button
+                    type="button"
+                    (click)="nextImage()"
+                    class="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-white/90 hover:bg-white rounded-full shadow-md text-gray-700 z-10"
+                  >
+                    <app-icon name="chevron-right" size="18"></app-icon>
+                  </button>
+                }
                 <!-- Badge & Delete -->
                 <div class="absolute top-2 left-2">
-                  <app-badge
-                    *ngIf="activeImageIndex === 0"
-                    variant="primary"
-                    size="xs"
-                  >
-                    Principal
-                  </app-badge>
+                  @if (activeImageIndex === 0) {
+                    <app-badge variant="primary" size="xs">
+                      Principal
+                    </app-badge>
+                  }
                 </div>
                 <button
                   type="button"
@@ -399,16 +397,13 @@
                 >
                   <app-icon name="trash-2" size="14"></app-icon>
                 </button>
-
                 <!-- Pagination -->
                 <div
                   class="absolute bottom-2 left-1/2 -translate-x-1/2 px-2 py-0.5 bg-black/40 text-white text-[10px] rounded-full"
                 >
                   {{ activeImageIndex + 1 }} / {{ imageUrls.length }}
                 </div>
-              </ng-container>
-
-              <ng-template #mobileEmptyState>
+              } @else {
                 <div
                   (click)="triggerFileUpload()"
                   class="w-full h-full flex flex-col items-center justify-center text-gray-400 p-4 text-center cursor-pointer"
@@ -425,57 +420,61 @@
                   <p class="text-sm font-medium text-gray-600">Sin imágenes</p>
                   <p class="text-xs text-gray-400">Toca para agregar</p>
                 </div>
-              </ng-template>
+              }
             </div>
 
             <!-- Horizontal Thumbnails Carousel -->
             <div class="flex gap-2 overflow-x-auto pb-2 scrollbar-none">
               <!-- Upload Button -->
-              <button
-                *ngIf="imageUrls.length < 5 && !isLoadingImages"
-                type="button"
-                (click)="triggerFileUpload()"
-                class="flex-shrink-0 w-16 h-16 bg-gray-50 rounded-xl border-2 border-dashed border-gray-300 flex flex-col items-center justify-center cursor-pointer hover:bg-white hover:border-primary-400 transition-all"
-              >
-                <app-icon
-                  name="plus"
-                  size="20"
-                  class="text-gray-400"
-                ></app-icon>
-                <span class="text-[9px] text-gray-400 mt-0.5">Subir</span>
-              </button>
+              @if (imageUrls.length < 5 && !isLoadingImages) {
+                <button
+                  type="button"
+                  (click)="triggerFileUpload()"
+                  class="flex-shrink-0 w-16 h-16 bg-gray-50 rounded-xl border-2 border-dashed border-gray-300 flex flex-col items-center justify-center cursor-pointer hover:bg-white hover:border-primary-400 transition-all"
+                >
+                  <app-icon
+                    name="plus"
+                    size="20"
+                    class="text-gray-400"
+                  ></app-icon>
+                  <span class="text-[9px] text-gray-400 mt-0.5">Subir</span>
+                </button>
+              }
 
               <!-- Loading Indicator Mobile -->
-              <div
-                *ngIf="isLoadingImages"
-                class="flex-shrink-0 w-16 h-16 bg-primary-50 rounded-xl border-2 border-dashed border-primary-300 flex flex-col items-center justify-center"
-              >
+              @if (isLoadingImages) {
                 <div
-                  class="animate-spin rounded-full h-5 w-5 border-b-2 border-primary-600"
-                ></div>
-                <span class="text-[9px] text-primary-600 mt-1"
-                  >{{ loadingProgress }}%</span
+                  class="flex-shrink-0 w-16 h-16 bg-primary-50 rounded-xl border-2 border-dashed border-primary-300 flex flex-col items-center justify-center"
                 >
-              </div>
+                  <div
+                    class="animate-spin rounded-full h-5 w-5 border-b-2 border-primary-600"
+                  ></div>
+                  <span class="text-[9px] text-primary-600 mt-1"
+                    >{{ loadingProgress }}%</span
+                  >
+                </div>
+              }
 
               <!-- Thumbnails -->
-              <div
-                *ngFor="let url of imageUrls; let i = index"
-                (click)="setActiveImage(i)"
-                [class.ring-2]="activeImageIndex === i"
-                [class.ring-primary-500]="activeImageIndex === i"
-                class="relative flex-shrink-0 w-16 h-16 bg-white rounded-xl overflow-hidden border border-gray-200 cursor-pointer shadow-sm"
-              >
-                <img
-                  [src]="url"
-                  class="w-full h-full object-cover"
-                  (error)="onImageError($event)"
-                />
+              @for (url of imageUrls; track url; let i = $index) {
                 <div
-                  *ngIf="i === 0"
-                  class="absolute top-0 left-0 w-2.5 h-2.5 bg-primary-500 rounded-br"
-                ></div>
-              </div>
+                  (click)="setActiveImage(i)"
+                  [class.ring-2]="activeImageIndex === i"
+                  [class.ring-primary-500]="activeImageIndex === i"
+                  class="relative flex-shrink-0 w-16 h-16 bg-white rounded-xl overflow-hidden border border-gray-200 cursor-pointer shadow-sm"
+                >
+                  <img
+                    [src]="url"
+                    class="w-full h-full object-cover"
+                    (error)="onImageError($event)"
+                  />
+                  @if (i === 0) {
+                    <div
+                      class="absolute top-0 left-0 w-2.5 h-2.5 bg-primary-500 rounded-br"
+                    ></div>
+                  }
+                </div>
+              }
             </div>
 
             <input
@@ -713,13 +712,27 @@
                   label="Es consulta médica/estética"
                   description="Este servicio requiere una plantilla de consulta y seguimiento del paciente"
                 ></app-setting-toggle>
-                <app-tooltip content="Activa esta opción si este servicio es una consulta médica o estética. Esto habilita el flujo completo de consulta con plantillas y preconsulta." position="top" size="sm">
-                  <app-icon name="help-circle" [size]="14" color="var(--color-text-muted)"></app-icon>
+                <app-tooltip
+                  content="Activa esta opción si este servicio es una consulta médica o estética. Esto habilita el flujo completo de consulta con plantillas y preconsulta."
+                  position="top"
+                  size="sm"
+                >
+                  <app-icon
+                    name="help-circle"
+                    [size]="14"
+                    color="var(--color-text-muted)"
+                  ></app-icon>
                 </app-tooltip>
               </div>
 
               @if (productForm.get("is_consultation")?.value) {
-                <div class="rounded-lg border p-4 space-y-3 mt-2" style="border-color: var(--color-border); background: var(--color-surface-secondary)">
+                <div
+                  class="rounded-lg border p-4 space-y-3 mt-2"
+                  style="
+                    border-color: var(--color-border);
+                    background: var(--color-surface-secondary);
+                  "
+                >
                   <!-- Consultation Template (required - provider fills during consultation) -->
                   <div class="flex items-start gap-2">
                     <app-selector
@@ -731,8 +744,17 @@
                       [required]="true"
                       helpText="Formulario que el profesional llenará durante la consulta"
                     ></app-selector>
-                    <app-tooltip content="Plantilla que el proveedor completará durante la consulta. Define las secciones y campos del formulario de atención." position="top" size="sm">
-                      <app-icon name="help-circle" [size]="14" color="var(--color-text-muted)" class="mt-1"></app-icon>
+                    <app-tooltip
+                      content="Plantilla que el proveedor completará durante la consulta. Define las secciones y campos del formulario de atención."
+                      position="top"
+                      size="sm"
+                    >
+                      <app-icon
+                        name="help-circle"
+                        [size]="14"
+                        color="var(--color-text-muted)"
+                        class="mt-1"
+                      ></app-icon>
                     </app-tooltip>
                   </div>
 
@@ -754,8 +776,17 @@
                         [required]="true"
                         helpText="Formulario que el paciente llenará antes de la cita"
                       ></app-selector>
-                      <app-tooltip content="Plantilla que el paciente completará antes de la cita. Se envía automáticamente por email al confirmar la reserva." position="top" size="sm">
-                        <app-icon name="help-circle" [size]="14" color="var(--color-text-muted)" class="mt-1"></app-icon>
+                      <app-tooltip
+                        content="Plantilla que el paciente completará antes de la cita. Se envía automáticamente por email al confirmar la reserva."
+                        position="top"
+                        size="sm"
+                      >
+                        <app-icon
+                          name="help-circle"
+                          [size]="14"
+                          color="var(--color-text-muted)"
+                          class="mt-1"
+                        ></app-icon>
                       </app-tooltip>
                     </div>
                   }
@@ -770,7 +801,6 @@
               customWrapperClass="!mt-0"
             >
             </app-textarea>
-
           </section>
         }
 
@@ -862,42 +892,39 @@
             <div
               class="relative aspect-video w-full bg-gray-50 rounded-xl border border-gray-200 overflow-hidden group"
             >
-              <ng-container *ngIf="imageUrls.length > 0; else emptyState">
+              @if (imageUrls.length > 0) {
                 <img
                   [src]="imageUrls[activeImageIndex]"
                   class="w-full h-full object-contain p-4 bg-white"
                   (error)="onImageError($event)"
                 />
-
                 <!-- Carousel Controls (Floating) -->
-                <button
-                  *ngIf="imageUrls.length > 1"
-                  type="button"
-                  (click)="prevImage()"
-                  class="absolute left-3 top-1/2 -translate-y-1/2 p-2 bg-white/90 hover:bg-white rounded-full shadow-md text-gray-700 opacity-0 group-hover:opacity-100 transition-all transform hover:scale-110 z-10"
-                >
-                  <app-icon name="chevron-left" size="20"></app-icon>
-                </button>
-                <button
-                  *ngIf="imageUrls.length > 1"
-                  type="button"
-                  (click)="nextImage()"
-                  class="absolute right-3 top-1/2 -translate-y-1/2 p-2 bg-white/90 hover:bg-white rounded-full shadow-md text-gray-700 opacity-0 group-hover:opacity-100 transition-all transform hover:scale-110 z-10"
-                >
-                  <app-icon name="chevron-right" size="20"></app-icon>
-                </button>
-
+                @if (imageUrls.length > 1) {
+                  <button
+                    type="button"
+                    (click)="prevImage()"
+                    class="absolute left-3 top-1/2 -translate-y-1/2 p-2 bg-white/90 hover:bg-white rounded-full shadow-md text-gray-700 opacity-0 group-hover:opacity-100 transition-all transform hover:scale-110 z-10"
+                  >
+                    <app-icon name="chevron-left" size="20"></app-icon>
+                  </button>
+                }
+                @if (imageUrls.length > 1) {
+                  <button
+                    type="button"
+                    (click)="nextImage()"
+                    class="absolute right-3 top-1/2 -translate-y-1/2 p-2 bg-white/90 hover:bg-white rounded-full shadow-md text-gray-700 opacity-0 group-hover:opacity-100 transition-all transform hover:scale-110 z-10"
+                  >
+                    <app-icon name="chevron-right" size="20"></app-icon>
+                  </button>
+                }
                 <!-- Status Badges -->
                 <div class="absolute top-3 left-3 flex flex-col gap-2">
-                  <app-badge
-                    *ngIf="activeImageIndex === mainImageIndex"
-                    variant="primary"
-                    size="xs"
-                  >
-                    Principal
-                  </app-badge>
+                  @if (activeImageIndex === mainImageIndex) {
+                    <app-badge variant="primary" size="xs">
+                      Principal
+                    </app-badge>
+                  }
                 </div>
-
                 <!-- Hover Actions -->
                 <div class="absolute top-3 right-3 flex gap-2">
                   <button
@@ -908,16 +935,13 @@
                     <app-icon name="trash-2" size="16"></app-icon>
                   </button>
                 </div>
-
                 <!-- Pagination Indicator -->
                 <div
                   class="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5 items-center px-3 py-1 bg-black/40 text-white text-[11px] rounded-full backdrop-blur-sm font-medium"
                 >
                   {{ activeImageIndex + 1 }} / {{ imageUrls.length }}
                 </div>
-              </ng-container>
-
-              <ng-template #emptyState>
+              } @else {
                 <div
                   class="w-full h-full flex flex-col items-center justify-center text-gray-400 p-6 text-center bg-gray-50/50"
                 >
@@ -937,111 +961,117 @@
                     Agrega hasta 5 fotos para cautivar a tus clientes
                   </p>
                 </div>
-              </ng-template>
+              }
             </div>
 
             <!-- Thumbnails Area -->
             <div class="flex gap-2.5 overflow-x-auto pb-2 scrollbar-none">
-              <div
-                *ngFor="let url of imageUrls; let i = index"
-                (click)="setActiveImage(i)"
-                [class.ring-2]="activeImageIndex === i"
-                [class.ring-primary]="activeImageIndex === i"
-                class="relative flex-none w-16 h-16 bg-white rounded-lg overflow-hidden border border-gray-200 cursor-pointer shadow-sm transition-all hover:border-primary-300"
-              >
-                <img
-                  [src]="url"
-                  class="w-full h-full object-cover"
-                  (error)="onImageError($event)"
-                />
-                <!-- Star button to mark as main -->
-                <button
-                  type="button"
-                  (click)="setMainImage(i); $event.stopPropagation()"
-                  [class]="
-                    i === mainImageIndex
-                      ? '!text-yellow-400'
-                      : 'text-gray-400 hover:text-yellow-300'
-                  "
-                  class="absolute top-0 right-0 w-6 h-6 flex items-center justify-center bg-black/40 hover:bg-black/60 rounded-bl-md transition-colors"
+              @for (url of imageUrls; track url; let i = $index) {
+                <div
+                  (click)="setActiveImage(i)"
+                  [class.ring-2]="activeImageIndex === i"
+                  [class.ring-primary]="activeImageIndex === i"
+                  class="relative flex-none w-16 h-16 bg-white rounded-lg overflow-hidden border border-gray-200 cursor-pointer shadow-sm transition-all hover:border-primary-300"
                 >
-                  <app-icon name="star" size="12"></app-icon>
-                </button>
-              </div>
+                  <img
+                    [src]="url"
+                    class="w-full h-full object-cover"
+                    (error)="onImageError($event)"
+                  />
+                  <!-- Star button to mark as main -->
+                  <button
+                    type="button"
+                    (click)="setMainImage(i); $event.stopPropagation()"
+                    [class]="
+                      i === mainImageIndex
+                        ? '!text-yellow-400'
+                        : 'text-gray-400 hover:text-yellow-300'
+                    "
+                    class="absolute top-0 right-0 w-6 h-6 flex items-center justify-center bg-black/40 hover:bg-black/60 rounded-bl-md transition-colors"
+                  >
+                    <app-icon name="star" size="12"></app-icon>
+                  </button>
+                </div>
+              }
 
               <!-- Small Plus Button (only if < 5) -->
-              <div
-                *ngIf="imageUrls.length < 5 && imageUrls.length > 0"
-                (click)="triggerFileUpload()"
-                class="flex-none w-16 h-16 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center cursor-pointer hover:bg-white hover:border-primary-400 transition-all group"
-              >
-                <app-icon
-                  name="plus"
-                  size="20"
-                  class="text-gray-400 group-hover:text-primary-500 transition-colors"
-                ></app-icon>
-              </div>
+              @if (imageUrls.length < 5 && imageUrls.length > 0) {
+                <div
+                  (click)="triggerFileUpload()"
+                  class="flex-none w-16 h-16 bg-gray-50 rounded-lg border-2 border-dashed border-gray-300 flex items-center justify-center cursor-pointer hover:bg-white hover:border-primary-400 transition-all group"
+                >
+                  <app-icon
+                    name="plus"
+                    size="20"
+                    class="text-gray-400 group-hover:text-primary-500 transition-colors"
+                  ></app-icon>
+                </div>
+              }
             </div>
 
             <!-- Drag & Drop Indicative Box -->
-            <div *ngIf="imageUrls.length < 5" class="group mt-4 relative">
-              <!-- Loading Indicator -->
-              <div
-                *ngIf="isLoadingImages"
-                class="w-full py-4 border-2 border-dashed border-primary-300 rounded-xl bg-primary-50/50 flex flex-col items-center justify-center mb-2"
-              >
+            @if (imageUrls.length < 5) {
+              <div class="group mt-4 relative">
+                <!-- Loading Indicator -->
+                @if (isLoadingImages) {
+                  <div
+                    class="w-full py-4 border-2 border-dashed border-primary-300 rounded-xl bg-primary-50/50 flex flex-col items-center justify-center mb-2"
+                  >
+                    <div
+                      class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mb-2"
+                    ></div>
+                    <p class="text-[13px] font-semibold text-primary-700">
+                      Cargando imágenes...
+                    </p>
+                    <p class="text-xs text-primary-600 mt-1">
+                      {{ loadingProgress }}%
+                    </p>
+                  </div>
+                }
                 <div
-                  class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mb-2"
-                ></div>
-                <p class="text-[13px] font-semibold text-primary-700">
-                  Cargando imágenes...
-                </p>
-                <p class="text-xs text-primary-600 mt-1">
-                  {{ loadingProgress }}%
-                </p>
-              </div>
-              <div
-                (click)="triggerFileUpload()"
-                class="w-full py-4 border-2 border-dashed border-gray-200 rounded-xl bg-gray-50/50 flex flex-col items-center justify-center cursor-pointer transition-all hover:bg-white hover:border-primary-300 hover:shadow-md"
-                [class.opacity-50]="isLoadingImages"
-                [class.pointer-events-none]="isLoadingImages"
-              >
-                <div
-                  class="p-2 bg-white rounded-full shadow-sm mb-2 group-hover:scale-110 transition-transform"
+                  (click)="triggerFileUpload()"
+                  class="w-full py-4 border-2 border-dashed border-gray-200 rounded-xl bg-gray-50/50 flex flex-col items-center justify-center cursor-pointer transition-all hover:bg-white hover:border-primary-300 hover:shadow-md"
+                  [class.opacity-50]="isLoadingImages"
+                  [class.pointer-events-none]="isLoadingImages"
                 >
-                  <app-icon
-                    name="upload-cloud"
-                    size="24"
-                    class="text-primary-500"
-                  ></app-icon>
+                  <div
+                    class="p-2 bg-white rounded-full shadow-sm mb-2 group-hover:scale-110 transition-transform"
+                  >
+                    <app-icon
+                      name="upload-cloud"
+                      size="24"
+                      class="text-primary-500"
+                    ></app-icon>
+                  </div>
+                  <p class="text-[13px] font-semibold text-gray-700">
+                    Subir imágenes
+                  </p>
+                  <input
+                    type="file"
+                    class="hidden file-input"
+                    accept="image/*"
+                    multiple
+                    (change)="onFileSelect($event)"
+                  />
                 </div>
-                <p class="text-[13px] font-semibold text-gray-700">
-                  Subir imágenes
-                </p>
-                <input
-                  type="file"
-                  class="hidden file-input"
-                  accept="image/*"
-                  multiple
-                  (change)="onFileSelect($event)"
-                />
               </div>
-            </div>
+            }
 
             <!-- Info message if list is full -->
-            <div
-              *ngIf="imageUrls.length >= 5"
-              class="p-3 bg-bg rounded-lg border border-border flex items-start gap-3"
-            >
-              <app-icon
-                name="info"
-                size="18"
-                class="text-primary-600 mt-0.5"
-              ></app-icon>
-              <p class="text-xs text-text-secondary leading-relaxed">
-                Has alcanzado el límite máximo de 5 imágenes.
-              </p>
-            </div>
+            @if (imageUrls.length >= 5) {
+              <div
+                class="p-3 bg-bg rounded-lg border border-border flex items-start gap-3"
+              >
+                <app-icon
+                  name="info"
+                  size="18"
+                  class="text-primary-600 mt-0.5"
+                ></app-icon>
+                <p class="text-xs text-text-secondary leading-relaxed">
+                  Has alcanzado el límite máximo de 5 imágenes.
+                </p>
+              </div>
+            }
           </div>
         </section>
 
@@ -1231,23 +1261,24 @@
                       >
                         {{ totalStockReserved }}
                       </span>
-                      <button
-                        *ngIf="totalStockReserved > 0"
-                        type="button"
-                        (click)="releaseReservations()"
-                        [disabled]="isReleasingReservations"
-                        class="text-[10px] font-bold text-white bg-destructive hover:bg-destructive/90 px-2.5 py-1 rounded-lg shadow-sm transition-colors disabled:opacity-50 cursor-pointer"
-                      >
-                        @if (isReleasingReservations) {
-                          <app-icon
-                            name="loader-2"
-                            size="10"
-                            class="animate-spin"
-                          ></app-icon>
-                        } @else {
-                          Liberar
-                        }
-                      </button>
+                      @if (totalStockReserved > 0) {
+                        <button
+                          type="button"
+                          (click)="releaseReservations()"
+                          [disabled]="isReleasingReservations"
+                          class="text-[10px] font-bold text-white bg-destructive hover:bg-destructive/90 px-2.5 py-1 rounded-lg shadow-sm transition-colors disabled:opacity-50 cursor-pointer"
+                        >
+                          @if (isReleasingReservations) {
+                            <app-icon
+                              name="loader-2"
+                              size="10"
+                              class="animate-spin"
+                            ></app-icon>
+                          } @else {
+                            Liberar
+                          }
+                        </button>
+                      }
                     </div>
                     <span class="block text-[9px] text-text-muted mt-0.5"
                       >En órdenes pendientes</span
@@ -1279,15 +1310,16 @@
                   Acciones Rápidas
                 </p>
                 <div class="flex flex-col gap-2">
-                  <button
-                    *ngIf="isEditMode()"
-                    type="button"
-                    (click)="openAdjustmentModal()"
-                    class="w-full text-xs font-bold text-white bg-primary-600 hover:bg-primary-700 px-3 py-2.5 rounded-lg flex items-center justify-center gap-2 transition-colors shadow-sm"
-                  >
-                    <app-icon name="sliders" size="14"></app-icon>
-                    Ajustar Inventario
-                  </button>
+                  @if (isEditMode()) {
+                    <button
+                      type="button"
+                      (click)="openAdjustmentModal()"
+                      class="w-full text-xs font-bold text-white bg-primary-600 hover:bg-primary-700 px-3 py-2.5 rounded-lg flex items-center justify-center gap-2 transition-colors shadow-sm"
+                    >
+                      <app-icon name="sliders" size="14"></app-icon>
+                      Ajustar Inventario
+                    </button>
+                  }
                   <button
                     type="button"
                     (click)="goToPurchase()"
@@ -1296,15 +1328,16 @@
                     <app-icon name="cart" size="14"></app-icon>
                     Iniciar Inventario
                   </button>
-                  <button
-                    *ngIf="isEditMode()"
-                    type="button"
-                    (click)="isStockDetailsOpen = true"
-                    class="w-full text-xs font-medium text-primary-600 hover:text-primary-700 hover:bg-primary-50 px-3 py-2 rounded-lg flex items-center justify-center gap-2 transition-colors"
-                  >
-                    <app-icon name="list" size="14"></app-icon>
-                    Ver detalle completo
-                  </button>
+                  @if (isEditMode()) {
+                    <button
+                      type="button"
+                      (click)="isStockDetailsOpen = true"
+                      class="w-full text-xs font-medium text-primary-600 hover:text-primary-700 hover:bg-primary-50 px-3 py-2 rounded-lg flex items-center justify-center gap-2 transition-colors"
+                    >
+                      <app-icon name="list" size="14"></app-icon>
+                      Ver detalle completo
+                    </button>
+                  }
                 </div>
               </div>
             </div>
@@ -1490,44 +1523,40 @@
             <app-icon name="cart" size="14"></app-icon>
             Inventario
           </button>
-          <button
-            *ngIf="isEditMode()"
-            type="button"
-            (click)="openAdjustmentModal()"
-            class="flex-1 text-xs font-bold text-white bg-primary-600 hover:bg-primary-700 px-3 py-2.5 rounded-lg flex items-center justify-center gap-2 transition-colors"
-          >
-            <app-icon name="sliders" size="14"></app-icon>
-            Ajustar
-          </button>
+          @if (isEditMode()) {
+            <button
+              type="button"
+              (click)="openAdjustmentModal()"
+              class="flex-1 text-xs font-bold text-white bg-primary-600 hover:bg-primary-700 px-3 py-2.5 rounded-lg flex items-center justify-center gap-2 transition-colors"
+            >
+              <app-icon name="sliders" size="14"></app-icon>
+              Ajustar
+            </button>
+          }
         </div>
 
-        <button
-          *ngIf="isEditMode()"
-          type="button"
-          (click)="isStockDetailsOpen = true"
-          class="w-full text-xs font-medium text-primary-600 hover:bg-primary-50 px-3 py-2 rounded-lg flex items-center justify-center gap-2 transition-colors"
-        >
-          <app-icon name="list" size="14"></app-icon>
-          Ver detalle completo
-        </button>
+        @if (isEditMode()) {
+          <button
+            type="button"
+            (click)="isStockDetailsOpen = true"
+            class="w-full text-xs font-medium text-primary-600 hover:bg-primary-50 px-3 py-2 rounded-lg flex items-center justify-center gap-2 transition-colors"
+          >
+            <app-icon name="list" size="14"></app-icon>
+            Ver detalle completo
+          </button>
+        }
       </section>
     }
 
     <!-- MOBILE: Proveedores del Servicio (visible only on mobile) -->
     @if (
-      productForm.get("requires_booking")?.value &&
-      isEditMode() &&
-      productId
+      productForm.get("requires_booking")?.value && isEditMode() && productId
     ) {
       <section
         class="lg:hidden bg-white rounded-2xl border border-gray-100 p-4 shadow-sm space-y-4"
       >
         <div class="flex items-center gap-2">
-          <app-icon
-            name="users"
-            size="20"
-            class="text-indigo-500"
-          ></app-icon>
+          <app-icon name="users" size="20" class="text-indigo-500"></app-icon>
           <h2 class="text-base font-bold text-gray-900">
             Proveedores del Servicio
           </h2>
@@ -1624,626 +1653,642 @@
     }
 
     <!-- Variants Section (Full Width) -->
-    <section
-      *ngIf="hasVariants"
-      class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm animate-fadeIn space-y-4 md:space-y-5"
-    >
-      <div class="flex items-center gap-2">
-        <app-icon name="layers" size="18" class="text-primary-600"></app-icon>
-        <div>
-          <h2 class="text-base font-bold text-gray-900">
-            Variantes
-            @if (generatedVariants.length > 0) {
-              <span
-                class="ml-2 inline-flex items-center justify-center px-2 py-0.5 text-[11px] font-bold leading-none text-white bg-primary rounded-full"
-              >
-                {{ generatedVariants.length }}
-              </span>
-            }
-          </h2>
-          <p class="text-xs text-gray-500">
-            Configura las combinaciones de tu producto
-          </p>
-        </div>
-      </div>
-
-      <!-- Variants UI -->
-      <div class="space-y-4 md:space-y-5">
-        <!-- Quick Attribute Buttons -->
-        <div class="flex flex-wrap gap-2">
-          <button
-            type="button"
-            (click)="addQuickAttribute('Color')"
-            class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-dashed border-primary/30 text-primary-600 bg-primary/5 hover:bg-primary/10 hover:border-primary/50 transition-colors"
-          >
-            <app-icon name="plus" size="12"></app-icon> Color
-          </button>
-          <button
-            type="button"
-            (click)="addQuickAttribute('Talla')"
-            class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-dashed border-primary/30 text-primary-600 bg-primary/5 hover:bg-primary/10 hover:border-primary/50 transition-colors"
-          >
-            <app-icon name="plus" size="12"></app-icon> Talla
-          </button>
-          <button
-            type="button"
-            (click)="addQuickAttribute('Material')"
-            class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-dashed border-primary/30 text-primary-600 bg-primary/5 hover:bg-primary/10 hover:border-primary/50 transition-colors"
-          >
-            <app-icon name="plus" size="12"></app-icon> Material
-          </button>
-          <button
-            type="button"
-            (click)="addAttribute()"
-            class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-dashed border-gray-300 text-gray-600 bg-gray-50 hover:bg-gray-100 hover:border-gray-400 transition-colors"
-          >
-            <app-icon name="plus" size="12"></app-icon> Personalizado
-          </button>
-        </div>
-
-        <!-- Info tooltip about attributes -->
-        <div
-          class="flex items-start gap-2 p-2.5 bg-gray-50 border border-gray-200 rounded-lg"
-        >
-          <app-icon
-            name="info"
-            size="14"
-            class="text-gray-400 mt-0.5 flex-shrink-0"
-          ></app-icon>
-          <p class="text-[11px] text-gray-500 leading-relaxed">
-            Los valores se agregan con Enter. Cada combinación de valores genera
-            automáticamente una variante con su propio precio, stock y SKU.
-          </p>
-        </div>
-
-        <!-- Attribute Manager -->
-        <div class="space-y-3 md:space-y-4">
-          <div
-            *ngFor="
-              let attr of variantAttributes;
-              let i = index;
-              trackBy: trackByIndex
-            "
-            class="p-3 md:p-4 bg-bg rounded-xl border border-border"
-          >
-            <div
-              class="flex flex-col md:flex-row md:items-start gap-3 md:gap-4"
-            >
-              <div class="w-full md:w-1/3">
-                <app-input
-                  label="Nombre del Atributo"
-                  size="sm"
-                  [(ngModel)]="attr.name"
-                  [ngModelOptions]="{ standalone: true }"
-                  placeholder="Ej. Talla, Color"
-                  (inputBlur)="onAttributeNameBlur(i)"
-                  customWrapperClass="!mt-0"
-                ></app-input>
-              </div>
-
-              <div class="flex-1">
-                <label class="block text-sm font-medium text-text-primary mb-2"
-                  >Valores (Enter para agregar)</label
+    @if (hasVariants) {
+      <section
+        class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm animate-fadeIn space-y-4 md:space-y-5"
+      >
+        <div class="flex items-center gap-2">
+          <app-icon name="layers" size="18" class="text-primary-600"></app-icon>
+          <div>
+            <h2 class="text-base font-bold text-gray-900">
+              Variantes
+              @if (generatedVariants.length > 0) {
+                <span
+                  class="ml-2 inline-flex items-center justify-center px-2 py-0.5 text-[11px] font-bold leading-none text-white bg-primary rounded-full"
                 >
-                <div
-                  class="flex flex-wrap gap-2 px-3 py-1.5 bg-surface rounded-sm border border-border min-h-[34px] focus-within:ring-2 focus-within:ring-primary/50 focus-within:border-primary transition-colors"
-                >
-                  <span
-                    *ngFor="let val of attr.values; let j = index"
-                    class="inline-flex items-center px-2 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 text-xs font-medium"
-                  >
-                    {{ val }}
-                    <button
-                      type="button"
-                      (click)="removeAttributeValue(i, j)"
-                      class="ml-1 text-primary/70 hover:text-primary"
-                    >
-                      &times;
-                    </button>
-                  </span>
-                  <input
-                    type="text"
-                    class="flex-1 border-none p-0 text-sm focus:ring-0 focus:outline-none min-w-[100px] bg-transparent text-text-primary placeholder:text-text-muted"
-                    [placeholder]="
-                      attr.values.length === 0
-                        ? 'Escribe un valor y presiona Enter (ej: Rojo, Azul)'
-                        : 'Agregar valor...'
-                    "
-                    (keydown.enter)="
-                      $event.preventDefault(); addAttributeValue(i, $event)
-                    "
-                    (blur)="addAttributeValue(i, $event)"
-                  />
-                </div>
-                @if (attr.values.length === 0) {
-                  <p
-                    class="text-[10px] text-text-muted mt-1 flex items-center gap-1"
-                  >
-                    <app-icon name="info" size="10"></app-icon>
-                    Presiona Enter para agregar cada valor
-                  </p>
-                }
-              </div>
-
-              <button
-                (click)="removeAttribute(i)"
-                class="self-end md:mt-6 text-destructive hover:text-destructive/80 p-2"
-              >
-                <app-icon name="trash-2" size="18"></app-icon>
-              </button>
-            </div>
+                  {{ generatedVariants.length }}
+                </span>
+              }
+            </h2>
+            <p class="text-xs text-gray-500">
+              Configura las combinaciones de tu producto
+            </p>
           </div>
-
-          <button
-            type="button"
-            (click)="addAttribute()"
-            class="flex items-center text-sm text-primary-600 hover:text-primary-700 font-medium"
-          >
-            <app-icon name="plus" size="16" class="mr-1"></app-icon>
-            Agregar Atributo
-          </button>
         </div>
-
-        <!-- Variant count preview -->
-        @if (
-          variantAttributes.length > 0 &&
-          previewVariantCount > 0 &&
-          generatedVariants.length > 0
-        ) {
-          <div
-            class="flex items-center gap-2 p-3 bg-primary/5 border border-primary/15 rounded-xl"
-          >
-            <app-icon
-              name="layers"
-              size="16"
-              class="text-primary-600"
-            ></app-icon>
-            <span class="text-sm font-medium text-primary-700">
-              <strong>{{ generatedVariants.length }}</strong> variante{{
-                generatedVariants.length !== 1 ? "s" : ""
-              }}
-              generada{{
-                generatedVariants.length !== 1 ? "s" : ""
-              }}
-              automáticamente
-            </span>
-          </div>
-        }
-
-        <!-- Duplicate SKU Warning -->
-        @if (hasDuplicateSkus && generatedVariants.length > 0) {
-          <div
-            class="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-xl"
-          >
-            <app-icon
-              name="alert-triangle"
-              size="16"
-              class="text-red-600"
-            ></app-icon>
-            <span class="text-sm font-medium text-red-700">
-              Hay SKUs duplicados entre las variantes. Cada variante debe tener
-              un SKU único para guardar.
-            </span>
-          </div>
-        }
-
-        <!-- Bulk Actions Bar -->
-        @if (generatedVariants.length > 0) {
-          <div
-            class="flex flex-wrap gap-2 p-3 bg-gray-50 border border-gray-200 rounded-xl"
-          >
-            <span
-              class="text-xs font-bold text-text-muted uppercase tracking-wider self-center mr-2"
-            >
-              {{ generatedVariants.length }} variantes
-            </span>
-            <app-button
-              variant="outline"
-              size="sm"
-              (clicked)="applyBasePriceToAll()"
-            >
-              <app-icon slot="icon" name="dollar-sign" [size]="14"></app-icon>
-              Aplicar precio base a todas
-            </app-button>
-            <app-button
-              variant="outline"
-              size="sm"
-              (clicked)="applyBaseCostToAll()"
-            >
-              <app-icon slot="icon" name="calculator" [size]="14"></app-icon>
-              Aplicar costo base a todas
-            </app-button>
-          </div>
-        }
-
-        <!-- Generated Variants - Mobile Cards View (Collapsible) -->
-        <div *ngIf="generatedVariants.length > 0" class="lg:hidden space-y-2">
-          <div
-            *ngFor="let variant of generatedVariants; let idx = index"
-            class="bg-gray-50 rounded-xl border border-gray-200 overflow-hidden"
-          >
-            <!-- Collapsed Header (always visible) -->
+        <!-- Variants UI -->
+        <div class="space-y-4 md:space-y-5">
+          <!-- Quick Attribute Buttons -->
+          <div class="flex flex-wrap gap-2">
             <button
               type="button"
-              (click)="toggleVariantExpand(idx)"
-              class="w-full flex items-center gap-3 p-3 text-left hover:bg-gray-100 transition-colors"
+              (click)="addQuickAttribute('Color')"
+              class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-dashed border-primary/30 text-primary-600 bg-primary/5 hover:bg-primary/10 hover:border-primary/50 transition-colors"
             >
-              <div
-                (click)="
-                  $event.stopPropagation(); triggerVariantImageUpload(idx)
-                "
-                class="relative flex-shrink-0 w-10 h-10 rounded-lg border border-gray-200 bg-white cursor-pointer group"
-              >
-                <img
-                  *ngIf="variant.image_url"
-                  [src]="variant.image_url"
-                  class="w-full h-full object-cover rounded-lg"
-                  (error)="onImageError($event)"
-                />
-                <div
-                  *ngIf="!variant.image_url"
-                  class="w-full h-full flex items-center justify-center rounded-lg"
-                >
-                  <app-icon
-                    name="package"
-                    size="14"
-                    class="text-gray-400"
-                  ></app-icon>
-                </div>
-              </div>
-              <div class="flex-1 min-w-0">
-                <div class="flex flex-wrap gap-1">
-                  <span
-                    *ngFor="let item of variant.attributes | keyvalue"
-                    class="text-xs text-gray-700 font-medium"
-                  >
-                    {{ item.key }}: {{ item.value }}
-                  </span>
-                </div>
-              </div>
-              <span
-                class="text-sm font-bold text-primary-600 whitespace-nowrap"
-              >
-                {{ getVariantPriceWithTax(variant) | currency }}
-              </span>
-              <app-icon
-                [name]="
-                  expandedVariantIndex() === idx ? 'chevron-up' : 'chevron-down'
-                "
-                size="16"
-                class="text-gray-400 flex-shrink-0"
-              ></app-icon>
+              <app-icon name="plus" size="12"></app-icon> Color
             </button>
-            <!-- Expanded Fields -->
-            @if (expandedVariantIndex() === idx) {
-              <div class="px-3 pb-3 space-y-3 border-t border-gray-200 pt-3">
-                <div class="grid grid-cols-2 gap-3">
-                  <app-input
-                    label="Costo"
-                    [currency]="true"
-                    size="sm"
-                    [(ngModel)]="variant.cost_price"
-                    [ngModelOptions]="{ standalone: true }"
-                    placeholder="0.00"
-                    (ngModelChange)="onVariantCostOrMarginChange(variant)"
-                    customWrapperClass="!mt-0"
-                    prefix="$"
-                  ></app-input>
-                  <app-input
-                    label="Margen (%)"
-                    type="number"
-                    size="sm"
-                    [(ngModel)]="variant.profit_margin"
-                    [ngModelOptions]="{ standalone: true }"
-                    placeholder="0.00"
-                    (ngModelChange)="onVariantCostOrMarginChange(variant)"
-                    customWrapperClass="!mt-0"
-                    suffix="%"
-                  ></app-input>
-                  <app-input
-                    label="Precio Venta"
-                    [currency]="true"
-                    size="sm"
-                    [(ngModel)]="variant.price"
-                    [ngModelOptions]="{ standalone: true }"
-                    placeholder="0.00"
-                    (ngModelChange)="onVariantPriceChange(variant)"
-                    customWrapperClass="!mt-0"
-                    prefix="$"
-                  ></app-input>
-                  <div class="flex flex-col justify-end">
-                    <label
-                      class="block text-xs font-medium text-text-secondary mb-1"
-                      >Precio Final</label
-                    >
-                    <div
-                      class="h-[34px] px-2 flex items-center bg-surface border border-primary-500/20 rounded-lg text-sm font-bold text-primary-600"
-                    >
-                      {{ getVariantPriceWithTax(variant) | currency }}
-                    </div>
-                  </div>
-                  @if (productForm.get("track_inventory")?.value) {
+            <button
+              type="button"
+              (click)="addQuickAttribute('Talla')"
+              class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-dashed border-primary/30 text-primary-600 bg-primary/5 hover:bg-primary/10 hover:border-primary/50 transition-colors"
+            >
+              <app-icon name="plus" size="12"></app-icon> Talla
+            </button>
+            <button
+              type="button"
+              (click)="addQuickAttribute('Material')"
+              class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-dashed border-primary/30 text-primary-600 bg-primary/5 hover:bg-primary/10 hover:border-primary/50 transition-colors"
+            >
+              <app-icon name="plus" size="12"></app-icon> Material
+            </button>
+            <button
+              type="button"
+              (click)="addAttribute()"
+              class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg border border-dashed border-gray-300 text-gray-600 bg-gray-50 hover:bg-gray-100 hover:border-gray-400 transition-colors"
+            >
+              <app-icon name="plus" size="12"></app-icon> Personalizado
+            </button>
+          </div>
+          <!-- Info tooltip about attributes -->
+          <div
+            class="flex items-start gap-2 p-2.5 bg-gray-50 border border-gray-200 rounded-lg"
+          >
+            <app-icon
+              name="info"
+              size="14"
+              class="text-gray-400 mt-0.5 flex-shrink-0"
+            ></app-icon>
+            <p class="text-[11px] text-gray-500 leading-relaxed">
+              Los valores se agregan con Enter. Cada combinación de valores
+              genera automáticamente una variante con su propio precio, stock y
+              SKU.
+            </p>
+          </div>
+          <!-- Attribute Manager -->
+          <div class="space-y-3 md:space-y-4">
+            @for (attr of variantAttributes; track $index; let i = $index) {
+              <div class="p-3 md:p-4 bg-bg rounded-xl border border-border">
+                <div
+                  class="flex flex-col md:flex-row md:items-start gap-3 md:gap-4"
+                >
+                  <div class="w-full md:w-1/3">
                     <app-input
-                      label="Stock"
-                      type="number"
+                      label="Nombre del Atributo"
                       size="sm"
-                      [(ngModel)]="variant.stock"
+                      [(ngModel)]="attr.name"
                       [ngModelOptions]="{ standalone: true }"
-                      placeholder="0"
+                      placeholder="Ej. Talla, Color"
+                      (inputBlur)="onAttributeNameBlur(i)"
                       customWrapperClass="!mt-0"
                     ></app-input>
-                  } @else {
-                    <div class="flex flex-col justify-end">
-                      <label
-                        class="block text-xs font-medium text-text-secondary mb-1"
-                        >Stock</label
+                  </div>
+                  <div class="flex-1">
+                    <label
+                      class="block text-sm font-medium text-text-primary mb-2"
+                      >Valores (Enter para agregar)</label
+                    >
+                    <div
+                      class="flex flex-wrap gap-2 px-3 py-1.5 bg-surface rounded-sm border border-border min-h-[34px] focus-within:ring-2 focus-within:ring-primary/50 focus-within:border-primary transition-colors"
+                    >
+                      @for (val of attr.values; track val; let j = $index) {
+                        <span
+                          class="inline-flex items-center px-2 py-0.5 rounded bg-primary/10 text-primary border border-primary/20 text-xs font-medium"
+                        >
+                          {{ val }}
+                          <button
+                            type="button"
+                            (click)="removeAttributeValue(i, j)"
+                            class="ml-1 text-primary/70 hover:text-primary"
+                          >
+                            &times;
+                          </button>
+                        </span>
+                      }
+                      <input
+                        type="text"
+                        class="flex-1 border-none p-0 text-sm focus:ring-0 focus:outline-none min-w-[100px] bg-transparent text-text-primary placeholder:text-text-muted"
+                        [placeholder]="
+                          attr.values.length === 0
+                            ? 'Escribe un valor y presiona Enter (ej: Rojo, Azul)'
+                            : 'Agregar valor...'
+                        "
+                        (keydown.enter)="
+                          $event.preventDefault(); addAttributeValue(i, $event)
+                        "
+                        (blur)="addAttributeValue(i, $event)"
+                      />
+                    </div>
+                    @if (attr.values.length === 0) {
+                      <p
+                        class="text-[10px] text-text-muted mt-1 flex items-center gap-1"
                       >
+                        <app-icon name="info" size="10"></app-icon>
+                        Presiona Enter para agregar cada valor
+                      </p>
+                    }
+                  </div>
+                  <button
+                    (click)="removeAttribute(i)"
+                    class="self-end md:mt-6 text-destructive hover:text-destructive/80 p-2"
+                  >
+                    <app-icon name="trash-2" size="18"></app-icon>
+                  </button>
+                </div>
+              </div>
+            }
+            <button
+              type="button"
+              (click)="addAttribute()"
+              class="flex items-center text-sm text-primary-600 hover:text-primary-700 font-medium"
+            >
+              <app-icon name="plus" size="16" class="mr-1"></app-icon>
+              Agregar Atributo
+            </button>
+          </div>
+          <!-- Variant count preview -->
+          @if (
+            variantAttributes.length > 0 &&
+            previewVariantCount > 0 &&
+            generatedVariants.length > 0
+          ) {
+            <div
+              class="flex items-center gap-2 p-3 bg-primary/5 border border-primary/15 rounded-xl"
+            >
+              <app-icon
+                name="layers"
+                size="16"
+                class="text-primary-600"
+              ></app-icon>
+              <span class="text-sm font-medium text-primary-700">
+                <strong>{{ generatedVariants.length }}</strong> variante{{
+                  generatedVariants.length !== 1 ? "s" : ""
+                }}
+                generada{{ generatedVariants.length !== 1 ? "s" : "" }}
+                automáticamente
+              </span>
+            </div>
+          }
+          <!-- Duplicate SKU Warning -->
+          @if (hasDuplicateSkus && generatedVariants.length > 0) {
+            <div
+              class="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-xl"
+            >
+              <app-icon
+                name="alert-triangle"
+                size="16"
+                class="text-red-600"
+              ></app-icon>
+              <span class="text-sm font-medium text-red-700">
+                Hay SKUs duplicados entre las variantes. Cada variante debe
+                tener un SKU único para guardar.
+              </span>
+            </div>
+          }
+          <!-- Bulk Actions Bar -->
+          @if (generatedVariants.length > 0) {
+            <div
+              class="flex flex-wrap gap-2 p-3 bg-gray-50 border border-gray-200 rounded-xl"
+            >
+              <span
+                class="text-xs font-bold text-text-muted uppercase tracking-wider self-center mr-2"
+              >
+                {{ generatedVariants.length }} variantes
+              </span>
+              <app-button
+                variant="outline"
+                size="sm"
+                (clicked)="applyBasePriceToAll()"
+              >
+                <app-icon slot="icon" name="dollar-sign" [size]="14"></app-icon>
+                Aplicar precio base a todas
+              </app-button>
+              <app-button
+                variant="outline"
+                size="sm"
+                (clicked)="applyBaseCostToAll()"
+              >
+                <app-icon slot="icon" name="calculator" [size]="14"></app-icon>
+                Aplicar costo base a todas
+              </app-button>
+            </div>
+          }
+          <!-- Generated Variants - Mobile Cards View (Collapsible) -->
+          @if (generatedVariants.length > 0) {
+            <div class="lg:hidden space-y-2">
+              @for (
+                variant of generatedVariants;
+                track variant;
+                let idx = $index
+              ) {
+                <div
+                  class="bg-gray-50 rounded-xl border border-gray-200 overflow-hidden"
+                >
+                  <!-- Collapsed Header (always visible) -->
+                  <button
+                    type="button"
+                    (click)="toggleVariantExpand(idx)"
+                    class="w-full flex items-center gap-3 p-3 text-left hover:bg-gray-100 transition-colors"
+                  >
+                    <div
+                      (click)="
+                        $event.stopPropagation(); triggerVariantImageUpload(idx)
+                      "
+                      class="relative flex-shrink-0 w-10 h-10 rounded-lg border border-gray-200 bg-white cursor-pointer group"
+                    >
+                      @if (variant.image_url) {
+                        <img
+                          [src]="variant.image_url"
+                          class="w-full h-full object-cover rounded-lg"
+                          (error)="onImageError($event)"
+                        />
+                      }
+                      @if (!variant.image_url) {
+                        <div
+                          class="w-full h-full flex items-center justify-center rounded-lg"
+                        >
+                          <app-icon
+                            name="package"
+                            size="14"
+                            class="text-gray-400"
+                          ></app-icon>
+                        </div>
+                      }
+                    </div>
+                    <div class="flex-1 min-w-0">
+                      <div class="flex flex-wrap gap-1">
+                        @for (
+                          item of variant.attributes | keyvalue;
+                          track item
+                        ) {
+                          <span class="text-xs text-gray-700 font-medium">
+                            {{ item.key }}: {{ item.value }}
+                          </span>
+                        }
+                      </div>
+                    </div>
+                    <span
+                      class="text-sm font-bold text-primary-600 whitespace-nowrap"
+                    >
+                      {{ getVariantPriceWithTax(variant) | currency }}
+                    </span>
+                    <app-icon
+                      [name]="
+                        expandedVariantIndex() === idx
+                          ? 'chevron-up'
+                          : 'chevron-down'
+                      "
+                      size="16"
+                      class="text-gray-400 flex-shrink-0"
+                    ></app-icon>
+                  </button>
+                  <!-- Expanded Fields -->
+                  @if (expandedVariantIndex() === idx) {
+                    <div
+                      class="px-3 pb-3 space-y-3 border-t border-gray-200 pt-3"
+                    >
+                      <div class="grid grid-cols-2 gap-3">
+                        <app-input
+                          label="Costo"
+                          [currency]="true"
+                          size="sm"
+                          [(ngModel)]="variant.cost_price"
+                          [ngModelOptions]="{ standalone: true }"
+                          placeholder="0.00"
+                          (ngModelChange)="onVariantCostOrMarginChange(variant)"
+                          customWrapperClass="!mt-0"
+                          prefix="$"
+                        ></app-input>
+                        <app-input
+                          label="Margen (%)"
+                          type="number"
+                          size="sm"
+                          [(ngModel)]="variant.profit_margin"
+                          [ngModelOptions]="{ standalone: true }"
+                          placeholder="0.00"
+                          (ngModelChange)="onVariantCostOrMarginChange(variant)"
+                          customWrapperClass="!mt-0"
+                          suffix="%"
+                        ></app-input>
+                        <app-input
+                          label="Precio Venta"
+                          [currency]="true"
+                          size="sm"
+                          [(ngModel)]="variant.price"
+                          [ngModelOptions]="{ standalone: true }"
+                          placeholder="0.00"
+                          (ngModelChange)="onVariantPriceChange(variant)"
+                          customWrapperClass="!mt-0"
+                          prefix="$"
+                        ></app-input>
+                        <div class="flex flex-col justify-end">
+                          <label
+                            class="block text-xs font-medium text-text-secondary mb-1"
+                            >Precio Final</label
+                          >
+                          <div
+                            class="h-[34px] px-2 flex items-center bg-surface border border-primary-500/20 rounded-lg text-sm font-bold text-primary-600"
+                          >
+                            {{ getVariantPriceWithTax(variant) | currency }}
+                          </div>
+                        </div>
+                        @if (productForm.get("track_inventory")?.value) {
+                          <app-input
+                            label="Stock"
+                            type="number"
+                            size="sm"
+                            [(ngModel)]="variant.stock"
+                            [ngModelOptions]="{ standalone: true }"
+                            placeholder="0"
+                            customWrapperClass="!mt-0"
+                          ></app-input>
+                        } @else {
+                          <div class="flex flex-col justify-end">
+                            <label
+                              class="block text-xs font-medium text-text-secondary mb-1"
+                              >Stock</label
+                            >
+                            <div
+                              class="h-[34px] px-2 flex items-center bg-blue-50 border border-blue-200 rounded-lg text-xs font-medium text-blue-600"
+                            >
+                              Disponible
+                            </div>
+                          </div>
+                        }
+                        <app-input
+                          label="SKU"
+                          type="text"
+                          size="sm"
+                          [(ngModel)]="variant.sku"
+                          [ngModelOptions]="{ standalone: true }"
+                          placeholder="SKU"
+                          customWrapperClass="!mt-0"
+                        ></app-input>
+                      </div>
                       <div
-                        class="h-[34px] px-2 flex items-center bg-blue-50 border border-blue-200 rounded-lg text-xs font-medium text-blue-600"
+                        class="flex justify-end pt-2 border-t border-gray-100"
                       >
-                        Disponible
+                        <button
+                          type="button"
+                          (click)="removeVariant(idx)"
+                          class="flex items-center gap-1 text-xs text-destructive hover:text-destructive/80 font-medium py-1"
+                        >
+                          <app-icon name="trash-2" size="14"></app-icon>
+                          Eliminar variante
+                        </button>
                       </div>
                     </div>
                   }
-                  <app-input
-                    label="SKU"
-                    type="text"
-                    size="sm"
-                    [(ngModel)]="variant.sku"
-                    [ngModelOptions]="{ standalone: true }"
-                    placeholder="SKU"
-                    customWrapperClass="!mt-0"
-                  ></app-input>
                 </div>
-                <div class="flex justify-end pt-2 border-t border-gray-100">
-                  <button
-                    type="button"
-                    (click)="removeVariant(idx)"
-                    class="flex items-center gap-1 text-xs text-destructive hover:text-destructive/80 font-medium py-1"
-                  >
-                    <app-icon name="trash-2" size="14"></app-icon>
-                    Eliminar variante
-                  </button>
-                </div>
-              </div>
-            }
-          </div>
-        </div>
-
-        <!-- Generated Variants Table - Desktop View -->
-        <div
-          *ngIf="generatedVariants.length > 0"
-          class="hidden lg:block border border-gray-200 rounded-lg overflow-hidden"
-        >
-          <table class="min-w-full divide-y divide-gray-200">
-            <thead class="bg-gray-50">
-              <tr>
-                <th
-                  class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-12"
-                >
-                  Img
-                </th>
-                <th
-                  class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                >
-                  Variante
-                </th>
-                <th
-                  class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                >
-                  Costo
-                </th>
-                <th
-                  class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                >
-                  Margen (%)
-                </th>
-                <th
-                  class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                >
-                  Precio Venta
-                </th>
-                <th
-                  class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                >
-                  P. Oferta
-                </th>
-                <th
-                  class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                >
-                  Precio Final
-                </th>
-                <th
-                  *ngIf="productForm.get('track_inventory')?.value"
-                  class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                >
-                  Stock
-                </th>
-                <th
-                  class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
-                >
-                  SKU
-                </th>
-                <th class="px-3 py-3 w-10"></th>
-              </tr>
-            </thead>
-            <tbody class="bg-white divide-y divide-gray-200">
-              <tr *ngFor="let variant of generatedVariants; let idx = index">
-                <!-- Image -->
-                <td class="px-3 py-2">
-                  <div
-                    (click)="triggerVariantImageUpload(idx)"
-                    class="relative w-12 h-12 rounded-lg border border-gray-200 bg-white cursor-pointer group"
-                  >
-                    <img
-                      *ngIf="variant.image_url"
-                      [src]="variant.image_url"
-                      class="w-full h-full object-cover rounded-lg"
-                      (error)="onImageError($event)"
-                    />
-                    <div
-                      *ngIf="!variant.image_url"
-                      class="w-full h-full flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50/80 group-hover:border-primary/40 group-hover:bg-primary/5 transition-colors"
+              }
+            </div>
+          }
+          <!-- Generated Variants Table - Desktop View -->
+          @if (generatedVariants.length > 0) {
+            <div
+              class="hidden lg:block border border-gray-200 rounded-lg overflow-hidden"
+            >
+              <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                  <tr>
+                    <th
+                      class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider w-12"
                     >
-                      <app-icon
-                        name="image-plus"
-                        size="16"
-                        class="text-gray-400 group-hover:text-primary/60 transition-colors"
-                      ></app-icon>
-                    </div>
-                    <div
-                      class="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded-lg overflow-hidden"
+                      Img
+                    </th>
+                    <th
+                      class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
                     >
-                      <app-icon
-                        name="camera"
-                        size="14"
-                        class="text-white"
-                      ></app-icon>
-                    </div>
-                    <button
-                      *ngIf="variant.image_url"
-                      type="button"
-                      (click)="
-                        $event.stopPropagation(); removeVariantImage(idx)
-                      "
-                      aria-label="Eliminar imagen"
-                      class="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-[10px] font-bold shadow-md z-10"
+                      Variante
+                    </th>
+                    <th
+                      class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
                     >
-                      &times;
-                    </button>
-                  </div>
-                </td>
-                <!-- Variant Name with structured attributes -->
-                <td class="px-3 py-3 text-sm text-gray-900 font-medium">
-                  <div class="flex flex-wrap gap-1">
-                    <span
-                      *ngFor="
-                        let item of variant.attributes | keyvalue;
-                        let last = last
-                      "
-                      class="text-xs"
+                      Costo
+                    </th>
+                    <th
+                      class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
                     >
-                      <span class="text-gray-500">{{ item.key }}:</span>
-                      <span class="font-semibold text-gray-800">{{
-                        item.value
-                      }}</span>
-                      <span *ngIf="!last" class="text-gray-300 mx-0.5">|</span>
-                    </span>
-                  </div>
-                </td>
-                <!-- Cost -->
-                <td class="px-3 py-2">
-                  <app-input
-                    [currency]="true"
-                    size="sm"
-                    [(ngModel)]="variant.cost_price"
-                    [ngModelOptions]="{ standalone: true }"
-                    placeholder="0.00"
-                    (ngModelChange)="onVariantCostOrMarginChange(variant)"
-                    customWrapperClass="!mt-0"
-                    prefix="$"
-                  ></app-input>
-                </td>
-                <!-- Margin -->
-                <td class="px-3 py-2">
-                  <app-input
-                    type="number"
-                    size="sm"
-                    [(ngModel)]="variant.profit_margin"
-                    [ngModelOptions]="{ standalone: true }"
-                    placeholder="0.00"
-                    (ngModelChange)="onVariantCostOrMarginChange(variant)"
-                    customWrapperClass="!mt-0"
-                    suffix="%"
-                  ></app-input>
-                </td>
-                <!-- Sale Price -->
-                <td class="px-3 py-2">
-                  <app-input
-                    [currency]="true"
-                    size="sm"
-                    [(ngModel)]="variant.price"
-                    [ngModelOptions]="{ standalone: true }"
-                    placeholder="0.00"
-                    (ngModelChange)="onVariantPriceChange(variant)"
-                    customWrapperClass="!mt-0"
-                    prefix="$"
-                  ></app-input>
-                </td>
-                <!-- Offer Price with toggle -->
-                <td class="px-3 py-2">
-                  <div class="flex items-center gap-1">
-                    <input
-                      type="checkbox"
-                      [(ngModel)]="variant.is_on_sale"
-                      [ngModelOptions]="{ standalone: true }"
-                      class="w-3.5 h-3.5 rounded border-gray-300 text-primary-600 focus:ring-primary-500 cursor-pointer"
-                    />
-                    @if (variant.is_on_sale) {
-                      <app-input
-                        [currency]="true"
-                        size="sm"
-                        [(ngModel)]="variant.sale_price"
-                        [ngModelOptions]="{ standalone: true }"
-                        placeholder="0.00"
-                        customWrapperClass="!mt-0"
-                        prefix="$"
-                      ></app-input>
-                    } @else {
-                      <span class="text-xs text-gray-400 px-1">—</span>
+                      Margen (%)
+                    </th>
+                    <th
+                      class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    >
+                      Precio Venta
+                    </th>
+                    <th
+                      class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    >
+                      P. Oferta
+                    </th>
+                    <th
+                      class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    >
+                      Precio Final
+                    </th>
+                    @if (productForm.get("track_inventory")?.value) {
+                      <th
+                        class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                      >
+                        Stock
+                      </th>
                     }
-                  </div>
-                </td>
-                <!-- Final Price (readonly) -->
-                <td class="px-3 py-2">
-                  <div
-                    class="h-[34px] px-2 flex items-center bg-surface border border-primary-500/20 rounded-lg text-sm font-bold text-primary-600 whitespace-nowrap"
-                  >
-                    {{ getVariantPriceWithTax(variant) | currency }}
-                  </div>
-                </td>
-                <!-- Stock -->
-                <td
-                  *ngIf="productForm.get('track_inventory')?.value"
-                  class="px-3 py-2"
-                >
-                  <app-input
-                    type="number"
-                    size="sm"
-                    [(ngModel)]="variant.stock"
-                    [ngModelOptions]="{ standalone: true }"
-                    placeholder="0"
-                    customWrapperClass="!mt-0"
-                  ></app-input>
-                </td>
-                <!-- SKU -->
-                <td class="px-3 py-2">
-                  <app-input
-                    type="text"
-                    size="sm"
-                    [(ngModel)]="variant.sku"
-                    [ngModelOptions]="{ standalone: true }"
-                    placeholder="SKU"
-                    customWrapperClass="!mt-0"
-                  ></app-input>
-                </td>
-                <!-- Delete -->
-                <td class="px-2 py-2">
-                  <button
-                    type="button"
-                    (click)="removeVariant(idx)"
-                    aria-label="Eliminar variante"
-                    class="p-1.5 text-gray-400 hover:text-destructive hover:bg-red-50 rounded-lg transition-colors"
-                  >
-                    <app-icon name="trash-2" size="16"></app-icon>
-                  </button>
-                </td>
-              </tr>
-            </tbody>
-          </table>
+                    <th
+                      class="px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider"
+                    >
+                      SKU
+                    </th>
+                    <th class="px-3 py-3 w-10"></th>
+                  </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                  @for (
+                    variant of generatedVariants;
+                    track variant;
+                    let idx = $index
+                  ) {
+                    <tr>
+                      <!-- Image -->
+                      <td class="px-3 py-2">
+                        <div
+                          (click)="triggerVariantImageUpload(idx)"
+                          class="relative w-12 h-12 rounded-lg border border-gray-200 bg-white cursor-pointer group"
+                        >
+                          @if (variant.image_url) {
+                            <img
+                              [src]="variant.image_url"
+                              class="w-full h-full object-cover rounded-lg"
+                              (error)="onImageError($event)"
+                            />
+                          }
+                          @if (!variant.image_url) {
+                            <div
+                              class="w-full h-full flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-gray-300 bg-gray-50/80 group-hover:border-primary/40 group-hover:bg-primary/5 transition-colors"
+                            >
+                              <app-icon
+                                name="image-plus"
+                                size="16"
+                                class="text-gray-400 group-hover:text-primary/60 transition-colors"
+                              ></app-icon>
+                            </div>
+                          }
+                          <div
+                            class="absolute inset-0 bg-black/30 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded-lg overflow-hidden"
+                          >
+                            <app-icon
+                              name="camera"
+                              size="14"
+                              class="text-white"
+                            ></app-icon>
+                          </div>
+                          @if (variant.image_url) {
+                            <button
+                              type="button"
+                              (click)="
+                                $event.stopPropagation();
+                                removeVariantImage(idx)
+                              "
+                              aria-label="Eliminar imagen"
+                              class="absolute -top-1.5 -right-1.5 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center text-[10px] font-bold shadow-md z-10"
+                            >
+                              &times;
+                            </button>
+                          }
+                        </div>
+                      </td>
+                      <!-- Variant Name with structured attributes -->
+                      <td class="px-3 py-3 text-sm text-gray-900 font-medium">
+                        <div class="flex flex-wrap gap-1">
+                          @for (
+                            item of variant.attributes | keyvalue;
+                            track item;
+                            let last = $last
+                          ) {
+                            <span class="text-xs">
+                              <span class="text-gray-500">{{ item.key }}:</span>
+                              <span class="font-semibold text-gray-800">{{
+                                item.value
+                              }}</span>
+                              @if (!last) {
+                                <span class="text-gray-300 mx-0.5">|</span>
+                              }
+                            </span>
+                          }
+                        </div>
+                      </td>
+                      <!-- Cost -->
+                      <td class="px-3 py-2">
+                        <app-input
+                          [currency]="true"
+                          size="sm"
+                          [(ngModel)]="variant.cost_price"
+                          [ngModelOptions]="{ standalone: true }"
+                          placeholder="0.00"
+                          (ngModelChange)="onVariantCostOrMarginChange(variant)"
+                          customWrapperClass="!mt-0"
+                          prefix="$"
+                        ></app-input>
+                      </td>
+                      <!-- Margin -->
+                      <td class="px-3 py-2">
+                        <app-input
+                          type="number"
+                          size="sm"
+                          [(ngModel)]="variant.profit_margin"
+                          [ngModelOptions]="{ standalone: true }"
+                          placeholder="0.00"
+                          (ngModelChange)="onVariantCostOrMarginChange(variant)"
+                          customWrapperClass="!mt-0"
+                          suffix="%"
+                        ></app-input>
+                      </td>
+                      <!-- Sale Price -->
+                      <td class="px-3 py-2">
+                        <app-input
+                          [currency]="true"
+                          size="sm"
+                          [(ngModel)]="variant.price"
+                          [ngModelOptions]="{ standalone: true }"
+                          placeholder="0.00"
+                          (ngModelChange)="onVariantPriceChange(variant)"
+                          customWrapperClass="!mt-0"
+                          prefix="$"
+                        ></app-input>
+                      </td>
+                      <!-- Offer Price with toggle -->
+                      <td class="px-3 py-2">
+                        <div class="flex items-center gap-1">
+                          <input
+                            type="checkbox"
+                            [(ngModel)]="variant.is_on_sale"
+                            [ngModelOptions]="{ standalone: true }"
+                            class="w-3.5 h-3.5 rounded border-gray-300 text-primary-600 focus:ring-primary-500 cursor-pointer"
+                          />
+                          @if (variant.is_on_sale) {
+                            <app-input
+                              [currency]="true"
+                              size="sm"
+                              [(ngModel)]="variant.sale_price"
+                              [ngModelOptions]="{ standalone: true }"
+                              placeholder="0.00"
+                              customWrapperClass="!mt-0"
+                              prefix="$"
+                            ></app-input>
+                          } @else {
+                            <span class="text-xs text-gray-400 px-1">—</span>
+                          }
+                        </div>
+                      </td>
+                      <!-- Final Price (readonly) -->
+                      <td class="px-3 py-2">
+                        <div
+                          class="h-[34px] px-2 flex items-center bg-surface border border-primary-500/20 rounded-lg text-sm font-bold text-primary-600 whitespace-nowrap"
+                        >
+                          {{ getVariantPriceWithTax(variant) | currency }}
+                        </div>
+                      </td>
+                      <!-- Stock -->
+                      @if (productForm.get("track_inventory")?.value) {
+                        <td class="px-3 py-2">
+                          <app-input
+                            type="number"
+                            size="sm"
+                            [(ngModel)]="variant.stock"
+                            [ngModelOptions]="{ standalone: true }"
+                            placeholder="0"
+                            customWrapperClass="!mt-0"
+                          ></app-input>
+                        </td>
+                      }
+                      <!-- SKU -->
+                      <td class="px-3 py-2">
+                        <app-input
+                          type="text"
+                          size="sm"
+                          [(ngModel)]="variant.sku"
+                          [ngModelOptions]="{ standalone: true }"
+                          placeholder="SKU"
+                          customWrapperClass="!mt-0"
+                        ></app-input>
+                      </td>
+                      <!-- Delete -->
+                      <td class="px-2 py-2">
+                        <button
+                          type="button"
+                          (click)="removeVariant(idx)"
+                          aria-label="Eliminar variante"
+                          class="p-1.5 text-gray-400 hover:text-destructive hover:bg-red-50 rounded-lg transition-colors"
+                        >
+                          <app-icon name="trash-2" size="16"></app-icon>
+                        </button>
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          }
         </div>
-      </div>
-    </section>
+      </section>
+    }
   </form>
 </div>
 
@@ -2303,23 +2348,24 @@
           <p class="text-2xl font-bold text-text-primary">
             {{ totalStockReserved }}
           </p>
-          <button
-            *ngIf="totalStockReserved > 0"
-            type="button"
-            (click)="releaseReservations()"
-            [disabled]="isReleasingReservations"
-            class="text-[10px] font-bold text-destructive hover:text-destructive/80 bg-destructive/10 hover:bg-destructive/20 px-2 py-1 rounded-lg transition-colors disabled:opacity-50"
-          >
-            @if (isReleasingReservations) {
-              <app-icon
-                name="loader-2"
-                size="12"
-                class="animate-spin"
-              ></app-icon>
-            } @else {
-              Limpiar
-            }
-          </button>
+          @if (totalStockReserved > 0) {
+            <button
+              type="button"
+              (click)="releaseReservations()"
+              [disabled]="isReleasingReservations"
+              class="text-[10px] font-bold text-destructive hover:text-destructive/80 bg-destructive/10 hover:bg-destructive/20 px-2 py-1 rounded-lg transition-colors disabled:opacity-50"
+            >
+              @if (isReleasingReservations) {
+                <app-icon
+                  name="loader-2"
+                  size="12"
+                  class="animate-spin"
+                ></app-icon>
+              } @else {
+                Limpiar
+              }
+            </button>
+          }
         </div>
       </div>
     </div>
@@ -2332,59 +2378,60 @@
       </h3>
       <!-- Mobile: Cards view -->
       <div class="lg:hidden space-y-2">
-        <div
-          *ngFor="let sl of product?.stock_levels"
-          class="p-3 bg-white rounded-lg border border-gray-200"
-          [class.bg-destructive/5]="
-            sl.quantity_available <= (sl.reorder_point || 0)
-          "
-        >
-          <div class="flex justify-between items-start mb-2">
-            <div>
-              <span class="text-sm font-semibold text-text-primary">{{
-                sl.inventory_locations.name
-              }}</span>
-              <span class="block text-[10px] text-text-secondary uppercase">{{
-                sl.inventory_locations.type
-              }}</span>
+        @for (sl of product?.stock_levels; track sl) {
+          <div
+            class="p-3 bg-white rounded-lg border border-gray-200"
+            [class.bg-destructive/5]="
+              sl.quantity_available <= (sl.reorder_point || 0)
+            "
+          >
+            <div class="flex justify-between items-start mb-2">
+              <div>
+                <span class="text-sm font-semibold text-text-primary">{{
+                  sl.inventory_locations.name
+                }}</span>
+                <span class="block text-[10px] text-text-secondary uppercase">{{
+                  sl.inventory_locations.type
+                }}</span>
+              </div>
+              <span
+                class="px-2 py-1 rounded-md text-xs font-bold"
+                [class.bg-primary-50]="
+                  sl.quantity_available > (sl.reorder_point || 0)
+                "
+                [class.text-primary-700]="
+                  sl.quantity_available > (sl.reorder_point || 0)
+                "
+                [class.bg-destructive/10]="
+                  sl.quantity_available <= (sl.reorder_point || 0)
+                "
+                [class.text-destructive]="
+                  sl.quantity_available <= (sl.reorder_point || 0)
+                "
+              >
+                {{ sl.quantity_available }} disp.
+              </span>
             </div>
-            <span
-              class="px-2 py-1 rounded-md text-xs font-bold"
-              [class.bg-primary-50]="
-                sl.quantity_available > (sl.reorder_point || 0)
-              "
-              [class.text-primary-700]="
-                sl.quantity_available > (sl.reorder_point || 0)
-              "
-              [class.bg-destructive/10]="
-                sl.quantity_available <= (sl.reorder_point || 0)
-              "
-              [class.text-destructive]="
-                sl.quantity_available <= (sl.reorder_point || 0)
-              "
-            >
-              {{ sl.quantity_available }} disp.
-            </span>
+            <div class="grid grid-cols-3 gap-2 text-xs">
+              <div>
+                <span class="text-text-muted">Físico:</span>
+                <span class="font-medium ml-1">{{ sl.quantity_on_hand }}</span>
+              </div>
+              <div>
+                <span class="text-text-muted">Reservado:</span>
+                <span class="font-medium ml-1 text-primary-600">{{
+                  sl.quantity_reserved
+                }}</span>
+              </div>
+              <div>
+                <span class="text-text-muted">Reorden:</span>
+                <span class="font-medium ml-1">{{
+                  sl.reorder_point || "-"
+                }}</span>
+              </div>
+            </div>
           </div>
-          <div class="grid grid-cols-3 gap-2 text-xs">
-            <div>
-              <span class="text-text-muted">Físico:</span>
-              <span class="font-medium ml-1">{{ sl.quantity_on_hand }}</span>
-            </div>
-            <div>
-              <span class="text-text-muted">Reservado:</span>
-              <span class="font-medium ml-1 text-primary-600">{{
-                sl.quantity_reserved
-              }}</span>
-            </div>
-            <div>
-              <span class="text-text-muted">Reorden:</span>
-              <span class="font-medium ml-1">{{
-                sl.reorder_point || "-"
-              }}</span>
-            </div>
-          </div>
-        </div>
+        }
       </div>
       <!-- Desktop: Table view -->
       <div
@@ -2420,150 +2467,91 @@
               </th>
             </tr>
           </thead>
-          <tbody class="divide-y divide-border" *ngIf="product?.stock_levels">
-            <tr
-              *ngFor="let sl of product!.stock_levels"
-              [class.bg-destructive/5]="
-                sl.quantity_available <= (sl.reorder_point || 0)
-              "
-            >
-              <td class="px-4 py-3">
-                <span class="text-sm font-semibold text-text-primary">{{
-                  sl.inventory_locations.name
-                }}</span>
-                <span class="block text-[10px] text-text-secondary uppercase">{{
-                  sl.inventory_locations.type
-                }}</span>
-              </td>
-              <td
-                class="px-4 py-3 text-center text-sm text-text-secondary font-medium"
-              >
-                {{ sl.quantity_on_hand }}
-              </td>
-              <td
-                class="px-4 py-3 text-center text-sm text-primary-600 font-medium"
-              >
-                {{ sl.quantity_reserved }}
-              </td>
-              <td class="px-4 py-3 text-center">
-                <span
-                  class="px-2 py-1 rounded-md text-xs font-bold"
-                  [class.bg-primary-50]="
-                    sl.quantity_available > (sl.reorder_point || 0)
-                  "
-                  [class.text-primary-700]="
-                    sl.quantity_available > (sl.reorder_point || 0)
-                  "
-                  [class.bg-destructive/10]="
-                    sl.quantity_available <= (sl.reorder_point || 0)
-                  "
-                  [class.text-destructive]="
+          @if (product?.stock_levels) {
+            <tbody class="divide-y divide-border">
+              @for (sl of product!.stock_levels; track sl) {
+                <tr
+                  [class.bg-destructive/5]="
                     sl.quantity_available <= (sl.reorder_point || 0)
                   "
                 >
-                  {{ sl.quantity_available }}
-                </span>
-              </td>
-              <td class="px-4 py-3 text-right text-sm text-text-secondary">
-                {{ sl.reorder_point || "-" }}
-              </td>
-            </tr>
-          </tbody>
+                  <td class="px-4 py-3">
+                    <span class="text-sm font-semibold text-text-primary">{{
+                      sl.inventory_locations.name
+                    }}</span>
+                    <span
+                      class="block text-[10px] text-text-secondary uppercase"
+                      >{{ sl.inventory_locations.type }}</span
+                    >
+                  </td>
+                  <td
+                    class="px-4 py-3 text-center text-sm text-text-secondary font-medium"
+                  >
+                    {{ sl.quantity_on_hand }}
+                  </td>
+                  <td
+                    class="px-4 py-3 text-center text-sm text-primary-600 font-medium"
+                  >
+                    {{ sl.quantity_reserved }}
+                  </td>
+                  <td class="px-4 py-3 text-center">
+                    <span
+                      class="px-2 py-1 rounded-md text-xs font-bold"
+                      [class.bg-primary-50]="
+                        sl.quantity_available > (sl.reorder_point || 0)
+                      "
+                      [class.text-primary-700]="
+                        sl.quantity_available > (sl.reorder_point || 0)
+                      "
+                      [class.bg-destructive/10]="
+                        sl.quantity_available <= (sl.reorder_point || 0)
+                      "
+                      [class.text-destructive]="
+                        sl.quantity_available <= (sl.reorder_point || 0)
+                      "
+                    >
+                      {{ sl.quantity_available }}
+                    </span>
+                  </td>
+                  <td class="px-4 py-3 text-right text-sm text-text-secondary">
+                    {{ sl.reorder_point || "-" }}
+                  </td>
+                </tr>
+              }
+            </tbody>
+          }
         </table>
       </div>
     </div>
 
     <!-- Batches Table -->
-    <div
-      *ngIf="
-        product?.inventory_batches && product!.inventory_batches!.length > 0
-      "
-    >
-      <h3 class="text-sm font-bold text-gray-900 mb-3 flex items-center gap-2">
-        <app-icon name="barcode" size="16" class="text-gray-400"></app-icon>
-        Lotes y Vencimientos
-      </h3>
-      <!-- Mobile: Cards view -->
-      <div class="lg:hidden space-y-2">
-        <div
-          *ngFor="let batch of product?.inventory_batches"
-          class="p-3 bg-white rounded-lg border border-gray-200"
+    @if (product?.inventory_batches && product!.inventory_batches!.length > 0) {
+      <div>
+        <h3
+          class="text-sm font-bold text-gray-900 mb-3 flex items-center gap-2"
         >
-          <div class="flex justify-between items-start mb-2">
-            <span
-              class="text-sm font-bold text-text-primary underline decoration-primary/30"
-              >{{ batch.batch_number }}</span
-            >
-            <span
-              class="text-sm font-semibold text-primary-700 bg-primary-50 px-2 py-0.5 rounded"
-              >{{ batch.quantity_remaining }}</span
-            >
-          </div>
-          <div class="flex justify-between text-xs">
-            <span class="text-text-secondary">{{
-              batch.inventory_locations.name
-            }}</span>
-            <span
-              [class.text-destructive]="
-                batch.expiry_date && isExpired(batch.expiry_date)
-              "
-            >
-              {{
-                batch.expiry_date
-                  ? (batch.expiry_date | date: "dd/MM/yyyy")
-                  : "N/A"
-              }}
-            </span>
-          </div>
-        </div>
-      </div>
-      <!-- Desktop: Table view -->
-      <div
-        class="hidden lg:block border border-gray-200 rounded-lg overflow-hidden bg-white"
-      >
-        <table class="min-w-full divide-y divide-gray-200">
-          <thead class="bg-bg">
-            <tr>
-              <th
-                class="px-4 py-3 text-left text-[11px] font-bold text-text-muted uppercase tracking-wider"
-              >
-                Lote #
-              </th>
-              <th
-                class="px-4 py-3 text-left text-[11px] font-bold text-text-muted uppercase tracking-wider"
-              >
-                Bodega
-              </th>
-              <th
-                class="px-4 py-3 text-center text-[11px] font-bold text-text-muted uppercase tracking-wider"
-              >
-                Remanente
-              </th>
-              <th
-                class="px-4 py-3 text-right text-[11px] font-bold text-text-muted uppercase tracking-wider"
-              >
-                Vencimiento
-              </th>
-            </tr>
-          </thead>
-          <tbody class="divide-y divide-border">
-            <tr *ngFor="let batch of product?.inventory_batches">
-              <td
-                class="px-4 py-3 text-sm font-bold text-text-primary underline decoration-primary/30"
-              >
-                {{ batch.batch_number }}
-              </td>
-              <td class="px-4 py-3 text-sm text-text-secondary">
-                {{ batch.inventory_locations.name }}
-              </td>
-              <td
-                class="px-4 py-3 text-center text-sm font-semibold text-primary-700 bg-primary-50"
-              >
-                {{ batch.quantity_remaining }}
-              </td>
-              <td class="px-4 py-3 text-right">
+          <app-icon name="barcode" size="16" class="text-gray-400"></app-icon>
+          Lotes y Vencimientos
+        </h3>
+        <!-- Mobile: Cards view -->
+        <div class="lg:hidden space-y-2">
+          @for (batch of product?.inventory_batches; track batch) {
+            <div class="p-3 bg-white rounded-lg border border-gray-200">
+              <div class="flex justify-between items-start mb-2">
                 <span
-                  class="text-sm font-medium"
+                  class="text-sm font-bold text-text-primary underline decoration-primary/30"
+                  >{{ batch.batch_number }}</span
+                >
+                <span
+                  class="text-sm font-semibold text-primary-700 bg-primary-50 px-2 py-0.5 rounded"
+                  >{{ batch.quantity_remaining }}</span
+                >
+              </div>
+              <div class="flex justify-between text-xs">
+                <span class="text-text-secondary">{{
+                  batch.inventory_locations.name
+                }}</span>
+                <span
                   [class.text-destructive]="
                     batch.expiry_date && isExpired(batch.expiry_date)
                   "
@@ -2574,12 +2562,76 @@
                       : "N/A"
                   }}
                 </span>
-              </td>
-            </tr>
-          </tbody>
-        </table>
+              </div>
+            </div>
+          }
+        </div>
+        <!-- Desktop: Table view -->
+        <div
+          class="hidden lg:block border border-gray-200 rounded-lg overflow-hidden bg-white"
+        >
+          <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-bg">
+              <tr>
+                <th
+                  class="px-4 py-3 text-left text-[11px] font-bold text-text-muted uppercase tracking-wider"
+                >
+                  Lote #
+                </th>
+                <th
+                  class="px-4 py-3 text-left text-[11px] font-bold text-text-muted uppercase tracking-wider"
+                >
+                  Bodega
+                </th>
+                <th
+                  class="px-4 py-3 text-center text-[11px] font-bold text-text-muted uppercase tracking-wider"
+                >
+                  Remanente
+                </th>
+                <th
+                  class="px-4 py-3 text-right text-[11px] font-bold text-text-muted uppercase tracking-wider"
+                >
+                  Vencimiento
+                </th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-border">
+              @for (batch of product?.inventory_batches; track batch) {
+                <tr>
+                  <td
+                    class="px-4 py-3 text-sm font-bold text-text-primary underline decoration-primary/30"
+                  >
+                    {{ batch.batch_number }}
+                  </td>
+                  <td class="px-4 py-3 text-sm text-text-secondary">
+                    {{ batch.inventory_locations.name }}
+                  </td>
+                  <td
+                    class="px-4 py-3 text-center text-sm font-semibold text-primary-700 bg-primary-50"
+                  >
+                    {{ batch.quantity_remaining }}
+                  </td>
+                  <td class="px-4 py-3 text-right">
+                    <span
+                      class="text-sm font-medium"
+                      [class.text-destructive]="
+                        batch.expiry_date && isExpired(batch.expiry_date)
+                      "
+                    >
+                      {{
+                        batch.expiry_date
+                          ? (batch.expiry_date | date: "dd/MM/yyyy")
+                          : "N/A"
+                      }}
+                    </span>
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
       </div>
-    </div>
+    }
   </div>
 
   <div class="flex justify-end pt-6 mt-6 border-t border-gray-100">

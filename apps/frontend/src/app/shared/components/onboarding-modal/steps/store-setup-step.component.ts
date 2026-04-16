@@ -1,13 +1,12 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
   ChangeDetectionStrategy,
   OnInit,
   ChangeDetectorRef,
+  input,
+  output
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { IconComponent, InputComponent, SelectorComponent } from '../../index';
 import {
@@ -23,13 +22,12 @@ import { CurrencyService } from '../../../../services/currency.service';
   selector: 'app-store-setup-step',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     IconComponent,
     InputComponent,
-    SelectorComponent,
-  ],
+    SelectorComponent
+],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [
     `
@@ -433,9 +431,9 @@ import { CurrencyService } from '../../../../services/currency.service';
             </p>
           </div>
         </div>
-
+    
         <!-- Store Form -->
-        <form class="store-form" [formGroup]="formGroup">
+        <form class="store-form" [formGroup]="formGroup()">
           <!-- Basic Information Section -->
           <div class="form-section">
             <div class="section-header">
@@ -448,7 +446,7 @@ import { CurrencyService } from '../../../../services/currency.service';
               </div>
               <h3 class="section-title">Información básica</h3>
             </div>
-
+    
             <div class="form-grid">
               <div class="form-field">
                 <app-input
@@ -460,7 +458,7 @@ import { CurrencyService } from '../../../../services/currency.service';
                   [required]="true"
                 ></app-input>
               </div>
-
+    
               <div class="form-field">
                 <app-selector
                   formControlName="timezone"
@@ -471,7 +469,7 @@ import { CurrencyService } from '../../../../services/currency.service';
                   [options]="timezoneOptions"
                 ></app-selector>
               </div>
-
+    
               <div class="form-field">
                 <app-selector
                   formControlName="currency"
@@ -485,7 +483,7 @@ import { CurrencyService } from '../../../../services/currency.service';
               </div>
             </div>
           </div>
-
+    
           <!-- Store Type Selection Section -->
           <div class="form-section">
             <div class="section-header">
@@ -498,13 +496,13 @@ import { CurrencyService } from '../../../../services/currency.service';
               </div>
               <h3 class="section-title">Tipo de tienda</h3>
             </div>
-
+    
             <div class="store-type-selector">
               <div
                 class="store-type-option"
-                [class.active]="formGroup.get('store_type')?.value === 'hybrid'"
-                (click)="formGroup.get('store_type')?.setValue('hybrid')"
-              >
+                [class.active]="formGroup().get('store_type')?.value === 'hybrid'"
+                (click)="formGroup().get('store_type')?.setValue('hybrid')"
+                >
                 <div class="store-type-icon">
                   <app-icon
                     name="refresh-cw"
@@ -519,20 +517,21 @@ import { CurrencyService } from '../../../../services/currency.service';
                   </p>
                 </div>
                 <div class="store-type-check">
-                  <app-icon
-                    *ngIf="formGroup.get('store_type')?.value === 'hybrid'"
-                    name="check-circle"
-                    size="22"
-                    class="check-icon"
-                  ></app-icon>
+                  @if (formGroup().get('store_type')?.value === 'hybrid') {
+                    <app-icon
+                      name="check-circle"
+                      size="22"
+                      class="check-icon"
+                    ></app-icon>
+                  }
                 </div>
               </div>
-
+    
               <div
                 class="store-type-option"
-                [class.active]="formGroup.get('store_type')?.value === 'online'"
-                (click)="formGroup.get('store_type')?.setValue('online')"
-              >
+                [class.active]="formGroup().get('store_type')?.value === 'online'"
+                (click)="formGroup().get('store_type')?.setValue('online')"
+                >
                 <div class="store-type-icon">
                   <app-icon
                     name="globe"
@@ -547,20 +546,21 @@ import { CurrencyService } from '../../../../services/currency.service';
                   </p>
                 </div>
                 <div class="store-type-check">
-                  <app-icon
-                    *ngIf="formGroup.get('store_type')?.value === 'online'"
-                    name="check-circle"
-                    size="22"
-                    class="check-icon"
-                  ></app-icon>
+                  @if (formGroup().get('store_type')?.value === 'online') {
+                    <app-icon
+                      name="check-circle"
+                      size="22"
+                      class="check-icon"
+                    ></app-icon>
+                  }
                 </div>
               </div>
-
+    
               <div
                 class="store-type-option"
-                [class.active]="formGroup.get('store_type')?.value === 'physical'"
-                (click)="formGroup.get('store_type')?.setValue('physical')"
-              >
+                [class.active]="formGroup().get('store_type')?.value === 'physical'"
+                (click)="formGroup().get('store_type')?.setValue('physical')"
+                >
                 <div class="store-type-icon">
                   <app-icon
                     name="building"
@@ -575,17 +575,18 @@ import { CurrencyService } from '../../../../services/currency.service';
                   </p>
                 </div>
                 <div class="store-type-check">
-                  <app-icon
-                    *ngIf="formGroup.get('store_type')?.value === 'physical'"
-                    name="check-circle"
-                    size="22"
-                    class="check-icon"
-                  ></app-icon>
+                  @if (formGroup().get('store_type')?.value === 'physical') {
+                    <app-icon
+                      name="check-circle"
+                      size="22"
+                      class="check-icon"
+                    ></app-icon>
+                  }
                 </div>
               </div>
             </div>
           </div>
-
+    
           <!-- Location Section -->
           <div class="form-section">
             <div class="section-header">
@@ -598,7 +599,7 @@ import { CurrencyService } from '../../../../services/currency.service';
               </div>
               <h3 class="section-title">Ubicación</h3>
             </div>
-
+    
             <!-- Address line - full width -->
             <div class="form-grid" style="margin-bottom: 1rem;">
               <div class="form-field full-width">
@@ -611,7 +612,7 @@ import { CurrencyService } from '../../../../services/currency.service';
                 ></app-input>
               </div>
             </div>
-
+    
             <!-- Location fields - 2 cols on mobile, 4 cols on desktop -->
             <div class="form-grid location-grid">
               <div class="form-field">
@@ -623,7 +624,7 @@ import { CurrencyService } from '../../../../services/currency.service';
                   [options]="countryOptions"
                 ></app-selector>
               </div>
-
+    
               <div class="form-field">
                 <app-selector
                   formControlName="state_province"
@@ -633,7 +634,7 @@ import { CurrencyService } from '../../../../services/currency.service';
                   [options]="departmentOptions"
                 ></app-selector>
               </div>
-
+    
               <div class="form-field">
                 <app-selector
                   formControlName="city"
@@ -643,7 +644,7 @@ import { CurrencyService } from '../../../../services/currency.service';
                   [options]="cityOptions"
                 ></app-selector>
               </div>
-
+    
               <div class="form-field">
                 <app-input
                   formControlName="postal_code"
@@ -657,13 +658,13 @@ import { CurrencyService } from '../../../../services/currency.service';
         </form>
       </div>
     </div>
-  `,
+    `,
 })
 export class StoreSetupStepComponent implements OnInit {
-  @Input() formGroup: any;
-  @Output() nextStep = new EventEmitter<void>();
-  @Output() skipStep = new EventEmitter<void>();
-  @Output() previousStep = new EventEmitter<void>();
+  readonly formGroup = input<any>();
+  readonly nextStep = output<void>();
+  readonly skipStep = output<void>();
+  readonly previousStep = output<void>();
 
   countries: Country[] = [];
   timezones: Timezone[] = [];
@@ -682,11 +683,12 @@ export class StoreSetupStepComponent implements OnInit {
     this.timezones = this.countryService.getTimezones();
     this.loadCurrencies();
 
-    if (!this.formGroup) return;
+    const formGroup = this.formGroup();
+    if (!formGroup) return;
 
-    const countryControl = this.formGroup.get('country_code');
-    const depControl = this.formGroup.get('state_province');
-    const cityControl = this.formGroup.get('city');
+    const countryControl = formGroup.get('country_code');
+    const depControl = formGroup.get('state_province');
+    const cityControl = formGroup.get('city');
 
     // Cargar departamentos al cambiar país
     countryControl.valueChanges.subscribe((code: string) => {

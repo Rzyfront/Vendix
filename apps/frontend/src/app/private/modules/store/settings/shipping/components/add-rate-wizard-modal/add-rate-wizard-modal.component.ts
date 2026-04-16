@@ -8,7 +8,7 @@ import {
   signal,
   computed,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   FormBuilder,
   ReactiveFormsModule,
@@ -38,7 +38,6 @@ import { StepsLineItem } from '../../../../../../../shared/components/steps-line
   selector: 'app-add-rate-wizard-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ModalComponent,
     StepsLineComponent,
@@ -46,8 +45,8 @@ import { StepsLineItem } from '../../../../../../../shared/components/steps-line
     IconComponent,
     InputComponent,
     SettingToggleComponent,
-    ZoneModalComponent,
-  ],
+    ZoneModalComponent
+],
   templateUrl: './add-rate-wizard-modal.component.html',
   styleUrls: ['./add-rate-wizard-modal.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,

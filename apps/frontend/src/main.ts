@@ -1,6 +1,6 @@
 import { bootstrapApplication } from '@angular/platform-browser';
 import { appConfig } from './app/app.config';
-import { App } from './app/app';
+import { AppComponent } from './app/app.component';
 
 if (typeof window !== 'undefined') {
   const CHUNK_RELOAD_ATTEMPT_KEY = 'vendix:chunk-reload-attempted';
@@ -24,7 +24,10 @@ if (typeof window !== 'undefined') {
     if (!isDynamicImportFailure(error)) return;
 
     if (sessionStorage.getItem(CHUNK_RELOAD_ATTEMPT_KEY) === '1') {
-      console.error('[ChunkLoader] Dynamic import still failing after reload.', error);
+      console.error(
+        '[ChunkLoader] Dynamic import still failing after reload.',
+        error,
+      );
       return;
     }
 
@@ -43,4 +46,6 @@ if (typeof window !== 'undefined') {
   });
 }
 
-bootstrapApplication(App, appConfig).catch((err) => console.error(err));
+bootstrapApplication(AppComponent, appConfig).catch((err) =>
+  console.error(err),
+);

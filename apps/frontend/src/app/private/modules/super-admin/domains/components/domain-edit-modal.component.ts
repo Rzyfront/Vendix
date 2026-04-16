@@ -1,11 +1,10 @@
 import {
   Component,
-  EventEmitter,
   Input,
-  Output,
   OnChanges,
+  output
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   ReactiveFormsModule,
   FormBuilder,
@@ -28,12 +27,11 @@ import {
   selector: 'app-domain-edit-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ModalComponent,
     InputComponent,
-    ButtonComponent,
-  ],
+    ButtonComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen"
@@ -161,9 +159,12 @@ export class DomainEditModalComponent implements OnChanges {
   @Input() domain: Domain | null = null;
   @Input() isOpen = false;
   @Input() isLoading = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() update = new EventEmitter<{ id: number; data: UpdateDomainDto }>();
-  @Output() cancel = new EventEmitter<void>();
+  readonly isOpenChange = output<boolean>();
+  readonly update = output<{
+    id: number;
+    data: UpdateDomainDto;
+}>();
+  readonly cancel = output<void>();
   domainForm!: FormGroup;
 
   constructor(private fb: FormBuilder) {

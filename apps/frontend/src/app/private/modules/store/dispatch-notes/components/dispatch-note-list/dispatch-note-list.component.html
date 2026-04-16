@@ -12,7 +12,7 @@
         <div class="flex items-center gap-2 w-full md:w-auto">
           <app-inputsearch class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
             size="sm" placeholder="Buscar remisiones..." [debounceTime]="1000" [ngModel]="search_term"
-            (ngModelChange)="onSearchChange($event)"></app-inputsearch>
+          (ngModelChange)="onSearchChange($event)"></app-inputsearch>
 
           <app-button variant="outline" size="md"
             customClasses="w-10 sm:w-11 !px-0 bg-surface shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none !rounded-[10px] shrink-0"
@@ -23,44 +23,48 @@
           <app-options-dropdown class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
             [filters]="filter_configs" [filterValues]="filter_values" [actions]="dropdown_actions" [isLoading]="loading"
             (filterChange)="onFilterChange($event)" (clearAllFilters)="clearFilters()"
-            (actionClick)="onActionClick($event)"></app-options-dropdown>
+          (actionClick)="onActionClick($event)"></app-options-dropdown>
         </div>
       </div>
     </div>
 
     <!-- Loading State -->
-    <div *ngIf="loading" class="p-4 md:p-6 text-center">
-      <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-      <p class="mt-2 text-text-secondary">Cargando remisiones...</p>
-    </div>
+    @if (loading) {
+      <div class="p-4 md:p-6 text-center">
+        <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        <p class="mt-2 text-text-secondary">Cargando remisiones...</p>
+      </div>
+    }
 
     <!-- Empty State -->
-    <app-empty-state
-      *ngIf="!loading && dispatch_notes.length === 0"
-      icon="file-text"
-      [title]="getEmptyStateTitle()"
-      [description]="getEmptyStateDescription()"
-      actionButtonText="Nueva Remision"
-      [showActionButton]="!hasFilters"
-      [showClearFilters]="hasFilters"
-      (actionClick)="create.emit()"
-      (clearFiltersClick)="clearFilters()"
-    ></app-empty-state>
+    @if (!loading && dispatch_notes.length === 0) {
+      <app-empty-state
+        icon="file-text"
+        [title]="getEmptyStateTitle()"
+        [description]="getEmptyStateDescription()"
+        actionButtonText="Nueva Remision"
+        [showActionButton]="!hasFilters"
+        [showClearFilters]="hasFilters"
+        (actionClick)="create.emit()"
+        (clearFiltersClick)="clearFilters()"
+      ></app-empty-state>
+    }
 
     <!-- Dispatch Notes List -->
-    <div *ngIf="!loading && dispatch_notes.length > 0" class="px-2 pb-2 pt-3 md:p-4">
-      <app-responsive-data-view [data]="dispatch_notes" [columns]="table_columns" [actions]="table_actions"
-        [cardConfig]="card_config" [loading]="loading" [sortable]="true"
+    @if (!loading && dispatch_notes.length > 0) {
+      <div class="px-2 pb-2 pt-3 md:p-4">
+        <app-responsive-data-view [data]="dispatch_notes" [columns]="table_columns" [actions]="table_actions"
+          [cardConfig]="card_config" [loading]="loading" [sortable]="true"
         (rowClick)="viewDetail.emit($event)"></app-responsive-data-view>
-
-      <!-- Pagination -->
-      <app-pagination
-        [currentPage]="filters.page || 1"
-        [totalPages]="totalPages"
-        [total]="total_items"
-        [limit]="filters.limit || 10"
-        (pageChange)="onPageChange($event)">
-      </app-pagination>
-    </div>
+        <!-- Pagination -->
+        <app-pagination
+          [currentPage]="filters.page || 1"
+          [totalPages]="totalPages"
+          [total]="total_items"
+          [limit]="filters.limit || 10"
+          (pageChange)="onPageChange($event)">
+        </app-pagination>
+      </div>
+    }
   </app-card>
 </div>

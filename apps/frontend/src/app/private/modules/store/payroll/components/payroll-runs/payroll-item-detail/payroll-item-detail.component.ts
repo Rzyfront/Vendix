@@ -8,7 +8,7 @@ import {
   inject,
   ChangeDetectionStrategy,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
@@ -26,12 +26,11 @@ interface EntryRow {
   selector: 'vendix-payroll-item-detail',
   standalone: true,
   imports: [
-    CommonModule,
     ModalComponent,
     ButtonComponent,
     IconComponent,
-    ExpandableCardComponent,
-  ],
+    ExpandableCardComponent
+],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <app-modal

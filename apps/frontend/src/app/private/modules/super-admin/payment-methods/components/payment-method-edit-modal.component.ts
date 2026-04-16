@@ -7,7 +7,7 @@ import {
   output,
   effect,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   ReactiveFormsModule,
   FormBuilder,
@@ -32,13 +32,12 @@ import { Subject, takeUntil } from 'rxjs';
   selector: 'app-payment-method-edit-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     InputComponent,
     ButtonComponent,
     ModalComponent,
-    SelectorComponent,
-  ],
+    SelectorComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen()"

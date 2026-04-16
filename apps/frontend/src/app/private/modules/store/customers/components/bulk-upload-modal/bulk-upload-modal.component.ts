@@ -1,5 +1,5 @@
 import { Component, EventEmitter, Input, Output, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import * as XLSX from 'xlsx';
 import { CustomersService } from '../../services/customers.service';
 import {
@@ -16,7 +16,7 @@ import {
 @Component({
   selector: 'app-customer-bulk-upload-modal',
   standalone: true,
-  imports: [CommonModule, ModalComponent, ButtonComponent, IconComponent, StepsLineComponent],
+  imports: [ModalComponent, ButtonComponent, IconComponent, StepsLineComponent],
   template: `
     <app-modal
       [isOpen]="isOpen"
@@ -26,245 +26,272 @@ import {
       title="Carga Masiva de Clientes"
       (closed)="onCancel()"
       subtitle="Importa múltiples clientes desde un archivo Excel"
-    >
+      >
       <!-- Steps Indicator -->
       <app-steps-line
         [steps]="steps"
         [currentStep]="currentStep"
         size="sm"
       ></app-steps-line>
-
+    
       <!-- ═══ STEP 0: Cargar Datos ═══ -->
-      <div *ngIf="currentStep === 0" class="space-y-5 mt-2">
-        <!-- Template Download -->
-        <div
-          class="border-2 border-indigo-100 hover:border-indigo-500 bg-indigo-50 rounded-lg p-4 cursor-pointer transition-all shadow-sm hover:shadow-md group"
-          (click)="downloadTemplate()"
-        >
-          <div class="flex items-center mb-2">
-            <div class="p-2 bg-indigo-100 rounded-full text-indigo-600 mr-3 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
-              <app-icon name="users" [size]="20"></app-icon>
+      @if (currentStep === 0) {
+        <div class="space-y-5 mt-2">
+          <!-- Template Download -->
+          <div
+            class="border-2 border-indigo-100 hover:border-indigo-500 bg-indigo-50 rounded-lg p-4 cursor-pointer transition-all shadow-sm hover:shadow-md group"
+            (click)="downloadTemplate()"
+            >
+            <div class="flex items-center mb-2">
+              <div class="p-2 bg-indigo-100 rounded-full text-indigo-600 mr-3 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                <app-icon name="users" [size]="20"></app-icon>
+              </div>
+              <h4 class="font-bold text-indigo-900">Plantilla de Clientes</h4>
             </div>
-            <h4 class="font-bold text-indigo-900">Plantilla de Clientes</h4>
+            <p class="text-xs text-indigo-700 mb-3 leading-relaxed">
+              Incluye: Correo (opcional), Nombre, Apellido, Documento, Tipo Documento y Teléfono.
+              Con 10 ejemplos para guiarte.
+            </p>
+            <div class="flex items-center text-xs font-bold text-indigo-600 group-hover:text-indigo-800">
+              <app-icon name="download" [size]="14" class="mr-1"></app-icon>
+              DESCARGAR EXCEL
+            </div>
           </div>
-          <p class="text-xs text-indigo-700 mb-3 leading-relaxed">
-            Incluye: Correo (opcional), Nombre, Apellido, Documento, Tipo Documento y Teléfono.
-            Con 10 ejemplos para guiarte.
-          </p>
-          <div class="flex items-center text-xs font-bold text-indigo-600 group-hover:text-indigo-800">
-            <app-icon name="download" [size]="14" class="mr-1"></app-icon>
-            DESCARGAR EXCEL
+          <!-- File Upload Zone -->
+          <div
+            class="border-2 border-dashed rounded-lg p-8 text-center transition-all cursor-pointer"
+            [class.border-blue-500]="isDragging"
+            [class.bg-blue-50]="isDragging"
+            [class.border-gray-300]="!isDragging"
+            [class.hover:border-blue-500]="!isDragging"
+            [class.hover:bg-blue-50]="!isDragging"
+            (dragover)="onDragOver($event)"
+            (dragleave)="onDragLeave($event)"
+            (drop)="onDrop($event)"
+            (click)="fileInput.click()"
+            >
+            <input
+              #fileInput
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              class="hidden"
+              (change)="onFileSelected($event)"
+              />
+            @if (!isProcessingFile) {
+              <div>
+                <app-icon
+                  name="upload-cloud"
+                  [size]="48"
+                  class="mx-auto text-gray-400 mb-4"
+                  [class.text-blue-500]="isDragging"
+                ></app-icon>
+                <p class="text-gray-900 font-medium">Arrastra tu archivo Excel (.xlsx) aquí</p>
+                <p class="text-gray-500 text-sm mt-1">o haz clic para seleccionar</p>
+                <p class="text-xs text-indigo-500 mt-2 font-medium">Máximo 1000 clientes por archivo</p>
+              </div>
+            }
+            @if (isProcessingFile) {
+              <div class="animate-pulse flex flex-col items-center">
+                <app-icon name="loader" [size]="48" class="text-primary mb-4 animate-spin"></app-icon>
+                <p class="text-sm text-gray-500">Procesando archivo...</p>
+              </div>
+            }
           </div>
+          <!-- Error Messages -->
+          @if (uploadError) {
+            <div class="bg-red-50 p-4 rounded-lg border border-red-100 text-red-700 text-sm">
+              <div class="font-medium flex items-center mb-1">
+                <app-icon name="alert-circle" [size]="16" class="mr-2"></app-icon>
+                Error en la carga
+              </div>
+              @if (isErrorMessageArray()) {
+                <div class="mt-2">
+                  <ul class="list-disc list-inside space-y-1 max-h-40 overflow-y-auto">
+                    @for (msg of uploadError; track msg) {
+                      <li>{{ msg }}</li>
+                    }
+                  </ul>
+                </div>
+              } @else {
+                <p class="mt-1">{{ uploadError }}</p>
+              }
+            </div>
+          }
         </div>
-
-        <!-- File Upload Zone -->
-        <div
-          class="border-2 border-dashed rounded-lg p-8 text-center transition-all cursor-pointer"
-          [class.border-blue-500]="isDragging"
-          [class.bg-blue-50]="isDragging"
-          [class.border-gray-300]="!isDragging"
-          [class.hover:border-blue-500]="!isDragging"
-          [class.hover:bg-blue-50]="!isDragging"
-          (dragover)="onDragOver($event)"
-          (dragleave)="onDragLeave($event)"
-          (drop)="onDrop($event)"
-          (click)="fileInput.click()"
-        >
-          <input
-            #fileInput
-            type="file"
-            accept=".xlsx,.xls,.csv"
-            class="hidden"
-            (change)="onFileSelected($event)"
-          />
-          <div *ngIf="!isProcessingFile">
-            <app-icon
-              name="upload-cloud"
-              [size]="48"
-              class="mx-auto text-gray-400 mb-4"
-              [class.text-blue-500]="isDragging"
-            ></app-icon>
-            <p class="text-gray-900 font-medium">Arrastra tu archivo Excel (.xlsx) aquí</p>
-            <p class="text-gray-500 text-sm mt-1">o haz clic para seleccionar</p>
-            <p class="text-xs text-indigo-500 mt-2 font-medium">Máximo 1000 clientes por archivo</p>
-          </div>
-          <div *ngIf="isProcessingFile" class="animate-pulse flex flex-col items-center">
-            <app-icon name="loader" [size]="48" class="text-primary mb-4 animate-spin"></app-icon>
-            <p class="text-sm text-gray-500">Procesando archivo...</p>
-          </div>
-        </div>
-
-        <!-- Error Messages -->
-        <div *ngIf="uploadError" class="bg-red-50 p-4 rounded-lg border border-red-100 text-red-700 text-sm">
-          <div class="font-medium flex items-center mb-1">
-            <app-icon name="alert-circle" [size]="16" class="mr-2"></app-icon>
-            Error en la carga
-          </div>
-          <div *ngIf="isErrorMessageArray(); else singleError" class="mt-2">
-            <ul class="list-disc list-inside space-y-1 max-h-40 overflow-y-auto">
-              <li *ngFor="let msg of uploadError">{{ msg }}</li>
-            </ul>
-          </div>
-          <ng-template #singleError>
-            <p class="mt-1">{{ uploadError }}</p>
-          </ng-template>
-        </div>
-      </div>
-
+      }
+    
       <!-- ═══ STEP 1: Verificar ═══ -->
-      <div *ngIf="currentStep === 1 && parsedData" class="space-y-4 mt-2">
-        <div class="bg-green-50 p-4 rounded-lg border border-green-100 flex items-center justify-between">
-          <div class="flex items-center">
-            <app-icon name="check-circle" [size]="24" class="text-green-500 mr-3"></app-icon>
-            <div>
-              <h4 class="text-sm font-medium text-green-900">
-                {{ parsedData.length }} clientes encontrados
-              </h4>
-            </div>
-          </div>
-          <button (click)="goToStep(0)" class="text-xs text-red-500 hover:text-red-700 font-medium">
-            Cambiar archivo
-          </button>
-        </div>
-
-        <!-- Preview Table -->
-        <div class="border rounded-md overflow-hidden">
-          <table class="min-w-full divide-y divide-gray-200 text-sm">
-            <thead class="bg-gray-50">
-              <tr>
-                <th class="px-3 py-2 text-left font-medium text-gray-500">Fila</th>
-                <th class="px-3 py-2 text-left font-medium text-gray-500">Correo</th>
-                <th class="px-3 py-2 text-left font-medium text-gray-500">Nombre</th>
-                <th class="px-3 py-2 text-left font-medium text-gray-500">Apellido</th>
-                <th class="px-3 py-2 text-left font-medium text-gray-500">Documento</th>
-                <th class="px-3 py-2 text-left font-medium text-gray-500">Teléfono</th>
-              </tr>
-            </thead>
-            <tbody class="bg-white divide-y divide-gray-200">
-              <tr *ngFor="let item of parsedData.slice(0, 5)">
-                <td class="px-3 py-2 text-gray-400 text-xs">{{ item.row_number }}</td>
-                <td class="px-3 py-2 text-gray-900 text-xs">{{ item.email || '-' }}</td>
-                <td class="px-3 py-2 text-gray-700">{{ item.first_name || '-' }}</td>
-                <td class="px-3 py-2 text-gray-700">{{ item.last_name || '-' }}</td>
-                <td class="px-3 py-2 text-gray-500 font-mono text-xs">{{ item.document_number || '-' }}</td>
-                <td class="px-3 py-2 text-gray-500 text-xs">{{ item.phone || '-' }}</td>
-              </tr>
-            </tbody>
-          </table>
-          <div *ngIf="parsedData.length > 5" class="bg-gray-50 px-3 py-2 text-xs text-gray-500 text-center">
-            ... y {{ parsedData.length - 5 }} más
-          </div>
-        </div>
-
-        <!-- Warnings -->
-        <div *ngIf="warnings.length > 0" class="bg-yellow-50 p-3 rounded-lg border border-yellow-100 text-yellow-800 text-xs">
-          <div class="font-medium flex items-center mb-1">
-            <app-icon name="alert-triangle" [size]="14" class="mr-1"></app-icon>
-            Advertencias
-          </div>
-          <ul class="list-disc list-inside space-y-0.5 max-h-32 overflow-y-auto">
-            <li *ngFor="let w of warnings">{{ w }}</li>
-          </ul>
-        </div>
-      </div>
-
-      <!-- ═══ STEP 2: Resultados ═══ -->
-      <div *ngIf="currentStep === 2" class="space-y-5 mt-2">
-        <!-- Uploading state -->
-        <div *ngIf="isUploading" class="py-12 flex flex-col items-center">
-          <app-icon name="loader" [size]="48" class="text-primary mb-4 animate-spin"></app-icon>
-          <p class="text-sm font-medium text-gray-700">Procesando {{ parsedData?.length }} clientes...</p>
-          <p class="text-xs text-gray-500 mt-1">Esto puede tomar unos segundos</p>
-        </div>
-
-        <!-- Results -->
-        <div *ngIf="!isUploading && uploadResults" class="space-y-5">
-          <div class="bg-white border rounded-lg overflow-hidden">
-            <div class="bg-gray-50 p-4 border-b flex justify-between items-center">
-              <h4 class="font-medium text-gray-900">Resumen de Carga</h4>
-              <span class="text-sm text-gray-500">
-                Procesados: {{ uploadResults.total_processed || 0 }}
-              </span>
-            </div>
-            <div class="p-4 grid grid-cols-2 gap-4">
-              <div class="bg-green-50 p-3 rounded border border-green-100">
-                <div class="text-xs text-green-600 font-medium">Exitosos</div>
-                <div class="text-2xl font-bold text-green-700">{{ uploadResults.successful || 0 }}</div>
-              </div>
-              <div class="bg-red-50 p-3 rounded border border-red-100">
-                <div class="text-xs text-red-600 font-medium">Fallidos</div>
-                <div class="text-2xl font-bold text-red-700">{{ uploadResults.failed || 0 }}</div>
+      @if (currentStep === 1 && parsedData) {
+        <div class="space-y-4 mt-2">
+          <div class="bg-green-50 p-4 rounded-lg border border-green-100 flex items-center justify-between">
+            <div class="flex items-center">
+              <app-icon name="check-circle" [size]="24" class="text-green-500 mr-3"></app-icon>
+              <div>
+                <h4 class="text-sm font-medium text-green-900">
+                  {{ parsedData.length }} clientes encontrados
+                </h4>
               </div>
             </div>
+            <button (click)="goToStep(0)" class="text-xs text-red-500 hover:text-red-700 font-medium">
+              Cambiar archivo
+            </button>
           </div>
-
-          <!-- Error Detail -->
-          <div *ngIf="uploadResults.failed > 0" class="border rounded-lg overflow-hidden">
-            <div class="bg-red-50 p-3 border-b border-red-100 text-red-800 font-medium text-sm flex items-center">
-              <app-icon name="alert-triangle" [size]="16" class="mr-2"></app-icon>
-              Detalle de Errores
-            </div>
-            <div class="max-h-60 overflow-y-auto bg-white">
-              <table class="min-w-full divide-y divide-gray-200">
-                <thead class="bg-gray-50">
+          <!-- Preview Table -->
+          <div class="border rounded-md overflow-hidden">
+            <table class="min-w-full divide-y divide-gray-200 text-sm">
+              <thead class="bg-gray-50">
+                <tr>
+                  <th class="px-3 py-2 text-left font-medium text-gray-500">Fila</th>
+                  <th class="px-3 py-2 text-left font-medium text-gray-500">Correo</th>
+                  <th class="px-3 py-2 text-left font-medium text-gray-500">Nombre</th>
+                  <th class="px-3 py-2 text-left font-medium text-gray-500">Apellido</th>
+                  <th class="px-3 py-2 text-left font-medium text-gray-500">Documento</th>
+                  <th class="px-3 py-2 text-left font-medium text-gray-500">Teléfono</th>
+                </tr>
+              </thead>
+              <tbody class="bg-white divide-y divide-gray-200">
+                @for (item of parsedData.slice(0, 5); track item) {
                   <tr>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Cliente</th>
-                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Error</th>
+                    <td class="px-3 py-2 text-gray-400 text-xs">{{ item.row_number }}</td>
+                    <td class="px-3 py-2 text-gray-900 text-xs">{{ item.email || '-' }}</td>
+                    <td class="px-3 py-2 text-gray-700">{{ item.first_name || '-' }}</td>
+                    <td class="px-3 py-2 text-gray-700">{{ item.last_name || '-' }}</td>
+                    <td class="px-3 py-2 text-gray-500 font-mono text-xs">{{ item.document_number || '-' }}</td>
+                    <td class="px-3 py-2 text-gray-500 text-xs">{{ item.phone || '-' }}</td>
                   </tr>
-                </thead>
-                <tbody class="bg-white divide-y divide-gray-200">
-                  <ng-container *ngFor="let result of uploadResults.results; let i = index">
-                    <tr *ngIf="result.status === 'error'">
-                      <td class="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">
-                        Fila {{ result.row_number || (i + 1) }}:
-                        {{ getCustomerLabel(result, i) }}
-                      </td>
-                      <td class="px-4 py-2 text-sm text-red-600">{{ result.message }}</td>
-                    </tr>
-                  </ng-container>
-                </tbody>
-              </table>
-            </div>
+                }
+              </tbody>
+            </table>
+            @if (parsedData.length > 5) {
+              <div class="bg-gray-50 px-3 py-2 text-xs text-gray-500 text-center">
+                ... y {{ parsedData.length - 5 }} más
+              </div>
+            }
           </div>
+          <!-- Warnings -->
+          @if (warnings.length > 0) {
+            <div class="bg-yellow-50 p-3 rounded-lg border border-yellow-100 text-yellow-800 text-xs">
+              <div class="font-medium flex items-center mb-1">
+                <app-icon name="alert-triangle" [size]="14" class="mr-1"></app-icon>
+                Advertencias
+              </div>
+              <ul class="list-disc list-inside space-y-0.5 max-h-32 overflow-y-auto">
+                @for (w of warnings; track w) {
+                  <li>{{ w }}</li>
+                }
+              </ul>
+            </div>
+          }
         </div>
-      </div>
-
+      }
+    
+      <!-- ═══ STEP 2: Resultados ═══ -->
+      @if (currentStep === 2) {
+        <div class="space-y-5 mt-2">
+          <!-- Uploading state -->
+          @if (isUploading) {
+            <div class="py-12 flex flex-col items-center">
+              <app-icon name="loader" [size]="48" class="text-primary mb-4 animate-spin"></app-icon>
+              <p class="text-sm font-medium text-gray-700">Procesando {{ parsedData?.length }} clientes...</p>
+              <p class="text-xs text-gray-500 mt-1">Esto puede tomar unos segundos</p>
+            </div>
+          }
+          <!-- Results -->
+          @if (!isUploading && uploadResults) {
+            <div class="space-y-5">
+              <div class="bg-white border rounded-lg overflow-hidden">
+                <div class="bg-gray-50 p-4 border-b flex justify-between items-center">
+                  <h4 class="font-medium text-gray-900">Resumen de Carga</h4>
+                  <span class="text-sm text-gray-500">
+                    Procesados: {{ uploadResults.total_processed || 0 }}
+                  </span>
+                </div>
+                <div class="p-4 grid grid-cols-2 gap-4">
+                  <div class="bg-green-50 p-3 rounded border border-green-100">
+                    <div class="text-xs text-green-600 font-medium">Exitosos</div>
+                    <div class="text-2xl font-bold text-green-700">{{ uploadResults.successful || 0 }}</div>
+                  </div>
+                  <div class="bg-red-50 p-3 rounded border border-red-100">
+                    <div class="text-xs text-red-600 font-medium">Fallidos</div>
+                    <div class="text-2xl font-bold text-red-700">{{ uploadResults.failed || 0 }}</div>
+                  </div>
+                </div>
+              </div>
+              <!-- Error Detail -->
+              @if (uploadResults.failed > 0) {
+                <div class="border rounded-lg overflow-hidden">
+                  <div class="bg-red-50 p-3 border-b border-red-100 text-red-800 font-medium text-sm flex items-center">
+                    <app-icon name="alert-triangle" [size]="16" class="mr-2"></app-icon>
+                    Detalle de Errores
+                  </div>
+                  <div class="max-h-60 overflow-y-auto bg-white">
+                    <table class="min-w-full divide-y divide-gray-200">
+                      <thead class="bg-gray-50">
+                        <tr>
+                          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Cliente</th>
+                          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Error</th>
+                        </tr>
+                      </thead>
+                      <tbody class="bg-white divide-y divide-gray-200">
+                        @for (result of uploadResults.results; track result; let i = $index) {
+                          @if (result.status === 'error') {
+                            <tr>
+                              <td class="px-4 py-2 whitespace-nowrap text-sm font-medium text-gray-900">
+                                Fila {{ result.row_number || (i + 1) }}:
+                                {{ getCustomerLabel(result, i) }}
+                              </td>
+                              <td class="px-4 py-2 text-sm text-red-600">{{ result.message }}</td>
+                            </tr>
+                          }
+                        }
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              }
+            </div>
+          }
+        </div>
+      }
+    
       <!-- Footer -->
       <div slot="footer" class="flex justify-between gap-3 pt-6 border-t border-gray-200 mt-6">
         <div>
-          <app-button
-            *ngIf="currentStep === 1"
-            variant="ghost"
-            size="sm"
-            (clicked)="goToStep(0)"
-            [disabled]="isUploading"
-          >
-            <app-icon name="arrow-left" [size]="14" slot="icon"></app-icon>
-            Atrás
-          </app-button>
+          @if (currentStep === 1) {
+            <app-button
+              variant="ghost"
+              size="sm"
+              (clicked)="goToStep(0)"
+              [disabled]="isUploading"
+              >
+              <app-icon name="arrow-left" [size]="14" slot="icon"></app-icon>
+              Atrás
+            </app-button>
+          }
         </div>
         <div class="flex gap-3">
           <app-button
             variant="outline"
             (clicked)="onCancel()"
             [disabled]="isUploading"
-          >
+            >
             {{ currentStep === 2 && uploadResults ? 'Cerrar' : 'Cancelar' }}
           </app-button>
-          <app-button
-            *ngIf="currentStep === 1 && parsedData"
-            variant="primary"
-            (clicked)="confirmUpload()"
-            [disabled]="isUploading"
-            [loading]="isUploading"
-          >
-            <app-icon name="upload" [size]="16" slot="icon"></app-icon>
-            Cargar {{ parsedData.length }} Clientes
-          </app-button>
+          @if (currentStep === 1 && parsedData) {
+            <app-button
+              variant="primary"
+              (clicked)="confirmUpload()"
+              [disabled]="isUploading"
+              [loading]="isUploading"
+              >
+              <app-icon name="upload" [size]="16" slot="icon"></app-icon>
+              Cargar {{ parsedData.length }} Clientes
+            </app-button>
+          }
         </div>
       </div>
     </app-modal>
-  `,
+    `,
   styles: [`
     :host { display: block; }
   `],
@@ -509,6 +536,11 @@ export class CustomerBulkUploadModalComponent {
           this.toastService.warning('La carga se completó con algunos errores.');
         } else {
           this.toastService.success(`${data.successful} clientes cargados exitosamente`);
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
           this.uploadComplete.emit();
         }
       },

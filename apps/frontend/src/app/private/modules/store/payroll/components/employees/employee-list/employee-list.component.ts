@@ -230,9 +230,19 @@ export class EmployeeListComponent {
   onActionClick(action: string): void {
     switch (action) {
       case 'create':
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
         this.create.emit();
         break;
       case 'bulk-upload':
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
         this.bulkUpload.emit();
         break;
     }

@@ -1,14 +1,13 @@
 import {
   Component,
-  EventEmitter,
-  Input,
   OnInit,
   OnChanges,
   SimpleChanges,
-  Output,
   inject,
+  input,
+  output
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   FormBuilder,
   FormGroup,
@@ -37,18 +36,17 @@ import { toUTCDateString } from '../../../../../../shared/utils/date.util';
   selector: 'app-legal-document-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ModalComponent,
     InputComponent,
     SelectorComponent,
     TextareaComponent,
     ButtonComponent,
-    IconComponent,
-  ],
+    IconComponent
+],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       [title]="isEditMode ? 'Editar Documento Legal' : 'Nuevo Documento Legal'"
       [subtitle]="
@@ -58,25 +56,26 @@ import { toUTCDateString } from '../../../../../../shared/utils/date.util';
       "
       (cancel)="onClose()"
       size="lg"
-    >
+      >
       <!-- Modal Body -->
       <div class="p-4 md:p-6 space-y-6">
         <form [formGroup]="form" class="space-y-6">
           <!-- Information Alert (Optional but pretty) -->
-          <div
-            *ngIf="isEditMode"
-            class="bg-blue-50 border border-blue-100 rounded-lg p-3 flex gap-3 items-start"
-          >
-            <div class="mt-0.5 text-blue-500">
-              <app-icon name="info" size="18"></app-icon>
+          @if (isEditMode) {
+            <div
+              class="bg-blue-50 border border-blue-100 rounded-lg p-3 flex gap-3 items-start"
+              >
+              <div class="mt-0.5 text-blue-500">
+                <app-icon name="info" size="18"></app-icon>
+              </div>
+              <div class="text-xs text-blue-700 leading-relaxed">
+                <strong>Modo Edición Limitado:</strong> El contenido y la versión
+                de un documento legal son inmutables por seguridad. Para cambiar
+                el texto, debes crear una nueva versión.
+              </div>
             </div>
-            <div class="text-xs text-blue-700 leading-relaxed">
-              <strong>Modo Edición Limitado:</strong> El contenido y la versión
-              de un documento legal son inmutables por seguridad. Para cambiar
-              el texto, debes crear una nueva versión.
-            </div>
-          </div>
-
+          }
+    
           <!-- Section 1: Identity & Version -->
           <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
             <app-selector
@@ -87,7 +86,7 @@ import { toUTCDateString } from '../../../../../../shared/utils/date.util';
               placeholder="Seleccionar tipo..."
               tooltipText="Clasificación legal del documento dentro del sistema"
             ></app-selector>
-
+    
             <app-input
               label="Versión"
               [formControl]="versionControl"
@@ -95,7 +94,7 @@ import { toUTCDateString } from '../../../../../../shared/utils/date.util';
               [required]="true"
               [prefixIcon]="true"
               tooltipText="Identificador único de versión. Se recomienda usar Versionado Semántico (SemVer)"
-            >
+              >
               <app-icon
                 slot="prefix-icon"
                 name="hash"
@@ -104,7 +103,7 @@ import { toUTCDateString } from '../../../../../../shared/utils/date.util';
               ></app-icon>
             </app-input>
           </div>
-
+    
           <!-- Section 2: Title (Full Width) -->
           <app-input
             label="Título del Documento"
@@ -112,7 +111,7 @@ import { toUTCDateString } from '../../../../../../shared/utils/date.util';
             placeholder="Ej. Términos y Condiciones Generales de Uso"
             [required]="true"
             [prefixIcon]="true"
-          >
+            >
             <app-icon
               slot="prefix-icon"
               name="file-text"
@@ -120,7 +119,7 @@ import { toUTCDateString } from '../../../../../../shared/utils/date.util';
               class="text-gray-400"
             ></app-icon>
           </app-input>
-
+    
           <!-- Section 3: Dates -->
           <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
             <app-input
@@ -130,7 +129,7 @@ import { toUTCDateString } from '../../../../../../shared/utils/date.util';
               [required]="true"
               [prefixIcon]="true"
               tooltipText="Fecha a partir de la cual el documento tiene validez legal"
-            >
+              >
               <app-icon
                 slot="prefix-icon"
                 name="calendar"
@@ -138,14 +137,14 @@ import { toUTCDateString } from '../../../../../../shared/utils/date.util';
                 class="text-gray-400"
               ></app-icon>
             </app-input>
-
+    
             <app-input
               label="Fecha de Expiración"
               type="date"
               [formControl]="expiryDateControl"
               [prefixIcon]="true"
               tooltipText="Opcional. Fecha en la que el documento deja de ser válido"
-            >
+              >
               <app-icon
                 slot="prefix-icon"
                 name="clock"
@@ -154,12 +153,12 @@ import { toUTCDateString } from '../../../../../../shared/utils/date.util';
               ></app-icon>
             </app-input>
           </div>
-
+    
           <!-- Section 4: Content (Source of Truth) -->
           <div class="space-y-2">
             <label
               class="text-sm font-medium text-text-primary flex items-center gap-2"
-            >
+              >
               <app-icon name="code" size="16" class="text-gray-500"></app-icon>
               Contenido (Formato Markdown)
               <span class="text-destructive">*</span>
@@ -175,16 +174,16 @@ import { toUTCDateString } from '../../../../../../shared/utils/date.util';
                   : '') + 'font-mono text-sm'
               "
             ></app-textarea>
-
+    
             <p
               class="text-[10px] text-text-secondary flex items-center gap-1.5 px-1"
-            >
+              >
               <app-icon name="external-link" size="12"></app-icon>
               El contenido se guardará como un archivo .md en el storage de
               assets.
             </p>
           </div>
-
+    
           <!-- Section 5: Internal Metadata -->
           <app-textarea
             label="Notas Internas / Descripción"
@@ -194,21 +193,21 @@ import { toUTCDateString } from '../../../../../../shared/utils/date.util';
           ></app-textarea>
         </form>
       </div>
-
+    
       <!-- Modal Footer -->
       <div slot="footer" class="w-full">
         <div
           class="flex items-center justify-end gap-3 p-4 bg-gray-50 rounded-b-xl border-t border-gray-100"
-        >
+          >
           <app-button variant="outline" (clicked)="onClose()">
             Cancelar
           </app-button>
           <app-button
             variant="primary"
             (clicked)="onSubmit()"
-            [disabled]="form.invalid || submitting"
-            [loading]="submitting"
-          >
+            [disabled]="form.invalid || submitting()"
+            [loading]="submitting()"
+            >
             <app-icon
               slot="icon"
               [name]="isEditMode ? 'save' : 'plus'"
@@ -219,17 +218,15 @@ import { toUTCDateString } from '../../../../../../shared/utils/date.util';
         </div>
       </div>
     </app-modal>
-  `,
+    `,
 })
 export class LegalDocumentModalComponent implements OnInit, OnChanges {
-  @Input() isOpen = false;
-  @Input() document?: LegalDocument;
-  @Input() submitting = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() save = new EventEmitter<
-    CreateSystemDocumentDto | UpdateSystemDocumentDto
-  >();
-  @Output() cancel = new EventEmitter<void>();
+  readonly isOpen = input(false);
+  readonly document = input<LegalDocument>();
+  readonly submitting = input(false);
+  readonly isOpenChange = output<boolean>();
+  readonly save = output<CreateSystemDocumentDto | UpdateSystemDocumentDto>();
+  readonly cancel = output<void>();
 
   private fb = inject(FormBuilder);
 
@@ -255,7 +252,7 @@ export class LegalDocumentModalComponent implements OnInit, OnChanges {
   }
 
   get isEditMode(): boolean {
-    return !!this.document;
+    return !!this.document();
   }
 
   // Typed getters for form controls
@@ -302,8 +299,9 @@ export class LegalDocumentModalComponent implements OnInit, OnChanges {
   }
 
   private updateFormState() {
-    if (this.document) {
-      this.patchForm(this.document);
+    const document = this.document();
+    if (document) {
+      this.patchForm(document);
       this.versionControl.disable();
       this.contentControl.disable();
       this.documentTypeControl.disable();
@@ -372,6 +370,11 @@ export class LegalDocumentModalComponent implements OnInit, OnChanges {
 
   onClose() {
     this.isOpenChange.emit(false);
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.cancel.emit();
   }
 

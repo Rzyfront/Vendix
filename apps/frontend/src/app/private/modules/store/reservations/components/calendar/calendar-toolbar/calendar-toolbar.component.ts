@@ -1,12 +1,12 @@
 import { Component, input, output, computed, ChangeDetectionStrategy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { ButtonComponent, IconComponent } from '../../../../../../../shared/components';
 import { CalendarViewMode } from '../../../interfaces/reservation.interface';
 
 @Component({
   selector: 'app-calendar-toolbar',
   standalone: true,
-  imports: [CommonModule, ButtonComponent, IconComponent],
+  imports: [ButtonComponent, IconComponent],
   templateUrl: './calendar-toolbar.component.html',
   styleUrls: ['./calendar-toolbar.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,

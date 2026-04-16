@@ -7,7 +7,7 @@ import {
   OnChanges,
   inject,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { ReactiveFormsModule, FormsModule, FormGroup, FormControl, Validators } from '@angular/forms';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
 import { SettingToggleComponent } from '../../../../../../../shared/components/setting-toggle/setting-toggle.component';
@@ -29,7 +29,7 @@ export interface NotificationsSettings {
 @Component({
   selector: 'app-notifications-settings-form',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, FormsModule, InputComponent, SettingToggleComponent],
+  imports: [ReactiveFormsModule, FormsModule, InputComponent, SettingToggleComponent],
   templateUrl: './notifications-settings-form.component.html',
   styleUrls: ['./notifications-settings-form.component.scss'],
 })

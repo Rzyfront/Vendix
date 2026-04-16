@@ -125,9 +125,7 @@
 
       <!-- Pagination -->
       @if (meta.totalPages > 1) {
-        <div
-          class="flex justify-center pt-3 mt-3 border-t border-border"
-        >
+        <div class="flex justify-center pt-3 mt-3 border-t border-border">
           <app-pagination
             [currentPage]="meta.page"
             [totalPages]="meta.totalPages"
@@ -141,17 +139,19 @@
   }
 </app-card>
 
-<!-- Payment Modal -->
-<vendix-payable-payment-modal
-  [(isOpen)]="is_payment_modal_open"
-  [payable]="selected_payable"
-  (saved)="onPaymentRegistered()"
-></vendix-payable-payment-modal>
+@defer (when is_payment_modal_open) {
+  <vendix-payable-payment-modal
+    [(isOpen)]="is_payment_modal_open"
+    [payable]="selected_payable"
+    (saved)="onPaymentRegistered()"
+  ></vendix-payable-payment-modal>
+}
 
-<!-- Detail Modal -->
-<vendix-payable-detail-modal
-  [(isOpen)]="is_detail_modal_open"
-  [payable]="selected_payable"
-  (paymentRequested)="openPaymentModal($event)"
-  (writeOffRequested)="confirmWriteOff($event)"
-></vendix-payable-detail-modal>
+@defer (when is_detail_modal_open) {
+  <vendix-payable-detail-modal
+    [(isOpen)]="is_detail_modal_open"
+    [payable]="selected_payable"
+    (paymentRequested)="openPaymentModal($event)"
+    (writeOffRequested)="confirmWriteOff($event)"
+  ></vendix-payable-detail-modal>
+}

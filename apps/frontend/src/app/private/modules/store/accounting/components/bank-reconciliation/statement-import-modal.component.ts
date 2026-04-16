@@ -1,5 +1,5 @@
 import { Component, Input, Output, EventEmitter, inject, signal, computed, ViewChild } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import {
   ModalComponent,
@@ -18,15 +18,14 @@ import { BankAccount, ColumnMappingConfig } from '../../interfaces/accounting.in
   selector: 'vendix-statement-import-modal',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ModalComponent,
     ButtonComponent,
     IconComponent,
     SelectorComponent,
     StepsLineComponent,
-    FileUploadDropzoneComponent,
-  ],
+    FileUploadDropzoneComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen"
@@ -462,6 +461,11 @@ export class StatementImportModalComponent {
         this.importResult.set(res.data);
         if (res.data.errors?.length === 0) {
           this.toastService.success(`${res.data.imported} transacciones importadas`);
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
           this.importComplete.emit();
         } else {
           this.toastService.warning('Importacion completada con advertencias');

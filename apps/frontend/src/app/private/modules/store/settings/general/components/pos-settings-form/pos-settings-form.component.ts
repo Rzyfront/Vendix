@@ -6,7 +6,7 @@ import {
   OnInit,
   OnChanges,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
 import { SettingToggleComponent } from '../../../../../../../shared/components/setting-toggle/setting-toggle.component';
@@ -22,7 +22,7 @@ import { ToastService } from '../../../../../../../shared/components/toast/toast
 @Component({
   selector: 'app-pos-settings-form',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, SettingToggleComponent],
+  imports: [ReactiveFormsModule, SettingToggleComponent],
   templateUrl: './pos-settings-form.component.html',
   styleUrls: ['./pos-settings-form.component.scss'],
 })

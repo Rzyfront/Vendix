@@ -1,5 +1,5 @@
 import { Component, input, output, computed } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { ShippingZone } from '../../interfaces/shipping-zones.interface';
 import {
@@ -16,13 +16,12 @@ import {
   selector: 'app-shipping-zones-list',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     InputsearchComponent,
     ResponsiveDataViewComponent,
     IconComponent,
-    ButtonComponent,
-  ],
+    ButtonComponent
+],
   template: `
     <div>
       <div

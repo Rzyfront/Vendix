@@ -1,5 +1,5 @@
 import { Component, input, output, computed, signal, ChangeDetectionStrategy, OnInit, OnDestroy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { Booking } from '../../../interfaces/reservation.interface';
 
 interface WeekDay {
@@ -12,7 +12,7 @@ interface WeekDay {
 @Component({
   selector: 'app-calendar-week-view',
   standalone: true,
-  imports: [CommonModule],
+  imports: [],
   templateUrl: './calendar-week-view.component.html',
   styleUrls: ['./calendar-week-view.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,

@@ -1,5 +1,5 @@
 import { Component, Input, Output, EventEmitter, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
 import { Invoice } from '../../interfaces/invoice.interface';
@@ -12,12 +12,11 @@ import { TextareaComponent } from '../../../../../../shared/components/textarea/
   selector: 'vendix-credit-note-create',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
-    TextareaComponent,
-  ],
+    TextareaComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen"
@@ -25,7 +24,7 @@ import { TextareaComponent } from '../../../../../../shared/components/textarea/
       (cancel)="onClose()"
       [title]="noteType === 'credit' ? 'Nueva Nota Crédito' : 'Nueva Nota Débito'"
       size="md"
-    >
+      >
       <div class="p-4">
         <!-- Note Type Selector -->
         <div class="flex gap-2 mb-4">
@@ -39,7 +38,7 @@ import { TextareaComponent } from '../../../../../../shared/components/textarea/
             [class.text-text-primary]="noteType !== 'credit'"
             [class.border-border]="noteType !== 'credit'"
             (click)="noteType = 'credit'"
-          >
+            >
             Nota Crédito
           </button>
           <button
@@ -52,20 +51,22 @@ import { TextareaComponent } from '../../../../../../shared/components/textarea/
             [class.text-text-primary]="noteType !== 'debit'"
             [class.border-border]="noteType !== 'debit'"
             (click)="noteType = 'debit'"
-          >
+            >
             Nota Débito
           </button>
         </div>
-
+    
         <!-- Source Invoice Info -->
-        <div *ngIf="sourceInvoice" class="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-100 text-sm">
-          <div class="font-medium text-blue-700 mb-1">Factura de referencia</div>
-          <div class="text-blue-600">
-            {{ sourceInvoice.invoice_number }} - {{ sourceInvoice.customer_name || 'Sin cliente' }}
-            ({{ formatAmount(sourceInvoice.total_amount) }})
+        @if (sourceInvoice) {
+          <div class="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-100 text-sm">
+            <div class="font-medium text-blue-700 mb-1">Factura de referencia</div>
+            <div class="text-blue-600">
+              {{ sourceInvoice.invoice_number }} - {{ sourceInvoice.customer_name || 'Sin cliente' }}
+              ({{ formatAmount(sourceInvoice.total_amount) }})
+            </div>
           </div>
-        </div>
-
+        }
+    
         <form [formGroup]="noteForm" (ngSubmit)="onSubmit()" class="space-y-4">
           <app-textarea
             label="Razón / Motivo"
@@ -77,7 +78,7 @@ import { TextareaComponent } from '../../../../../../shared/components/textarea/
           ></app-textarea>
         </form>
       </div>
-
+    
       <!-- Footer -->
       <div slot="footer">
         <div class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
@@ -86,7 +87,7 @@ import { TextareaComponent } from '../../../../../../shared/components/textarea/
             (clicked)="onClose()">
             Cancelar
           </app-button>
-
+    
           <app-button
             variant="primary"
             (clicked)="onSubmit()"
@@ -97,7 +98,7 @@ import { TextareaComponent } from '../../../../../../shared/components/textarea/
         </div>
       </div>
     </app-modal>
-  `
+    `
 })
 export class CreditNoteCreateComponent {
   @Input() isOpen = false;

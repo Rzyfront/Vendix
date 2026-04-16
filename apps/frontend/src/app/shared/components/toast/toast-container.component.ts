@@ -9,44 +9,45 @@ import { ToastService } from './toast.service';
   template: `
     <div
       class="fixed top-4 right-4 z-[10000] flex flex-col gap-3 w-80 max-w-[90vw]"
-    >
-      <div
-        *ngFor="let t of toasts()"
-        class="group overflow-hidden rounded-lg border shadow-lg backdrop-blur-sm toast-item"
+      >
+      @for (t of toasts(); track t) {
+        <div
+          class="group overflow-hidden rounded-lg border shadow-lg backdrop-blur-sm toast-item"
         [ngClass]="[
           variantClasses(t.variant),
           t.leaving ? 'toast-leave' : 'toast-enter',
         ]"
-        [style.--toast-duration]="t.duration + 'ms'"
-      >
-        <div class="p-4">
-          <div class="flex items-start gap-3">
-            <div class="mt-0.5">
-              <span [innerHTML]="iconFor(t.variant)"></span>
+          [style.--toast-duration]="t.duration + 'ms'"
+          >
+          <div class="p-4">
+            <div class="flex items-start gap-3">
+              <div class="mt-0.5">
+                <span [innerHTML]="iconFor(t.variant)"></span>
+              </div>
+              <div class="flex-1">
+                @if (t.title) {
+                  <p class="text-sm font-semibold">{{ t.title }}</p>
+                }
+                @if (t.description) {
+                  <p class="text-sm text-[var(--color-text-secondary)] mt-0.5">
+                    {{ t.description }}
+                  </p>
+                }
+              </div>
+              <button
+                class="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+                (click)="dismiss(t.id)"
+                aria-label="Close"
+                >
+                ×
+              </button>
             </div>
-            <div class="flex-1">
-              @if (t.title) {
-                <p class="text-sm font-semibold">{{ t.title }}</p>
-              }
-              @if (t.description) {
-                <p class="text-sm text-[var(--color-text-secondary)] mt-0.5">
-                  {{ t.description }}
-                </p>
-              }
-            </div>
-            <button
-              class="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-              (click)="dismiss(t.id)"
-              aria-label="Close"
-            >
-              ×
-            </button>
           </div>
+          <div class="h-1 toast-progress" [ngClass]="barClasses(t.variant)"></div>
         </div>
-        <div class="h-1 toast-progress" [ngClass]="barClasses(t.variant)"></div>
-      </div>
+      }
     </div>
-  `,
+    `,
 })
 export class ToastContainerComponent {
   private toast = inject(ToastService);

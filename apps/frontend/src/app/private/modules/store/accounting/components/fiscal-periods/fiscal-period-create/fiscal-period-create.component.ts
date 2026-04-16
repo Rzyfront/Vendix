@@ -1,5 +1,5 @@
 import { Component, Input, Output, EventEmitter, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { Store } from '@ngrx/store';
 
@@ -15,12 +15,11 @@ import {
   selector: 'vendix-fiscal-period-create',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
-    InputComponent,
-  ],
+    InputComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen"

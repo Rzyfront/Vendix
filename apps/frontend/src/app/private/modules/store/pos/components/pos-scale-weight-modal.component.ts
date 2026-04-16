@@ -34,59 +34,66 @@ import { ScaleConnectionStatus } from '../../../../../core/models/store-settings
       size="sm"
       [showCloseButton]="true"
       (isOpenChange)="onModalClose()"
-    >
+      >
       <div class="scale-modal-body">
         <!-- Product info -->
-        <p *ngIf="message" class="text-sm text-text-secondary mb-4 whitespace-pre-line">{{ message }}</p>
-
+        @if (message) {
+          <p class="text-sm text-text-secondary mb-4 whitespace-pre-line">{{ message }}</p>
+        }
+    
         <!-- Scale reading display -->
-        <div *ngIf="connectionStatus === 'connected'" class="scale-reading-container">
-          <div class="scale-reading-display">
-            <span class="scale-reading-value">{{ currentWeight | number:'1.3-3' }}</span>
-            <span class="scale-reading-unit">{{ weightUnit }}</span>
+        @if (connectionStatus === 'connected') {
+          <div class="scale-reading-container">
+            <div class="scale-reading-display">
+              <span class="scale-reading-value">{{ currentWeight | number:'1.3-3' }}</span>
+              <span class="scale-reading-unit">{{ weightUnit }}</span>
+            </div>
+            <div class="scale-status-indicator" [class.stable]="isStable" [class.unstable]="!isStable">
+              <app-icon [name]="isStable ? 'check-circle' : 'loader'" [size]="16"></app-icon>
+              <span>{{ isStable ? 'Lectura estable' : 'Estabilizando...' }}</span>
+            </div>
           </div>
-          <div class="scale-status-indicator" [class.stable]="isStable" [class.unstable]="!isStable">
-            <app-icon [name]="isStable ? 'check-circle' : 'loader'" [size]="16"></app-icon>
-            <span>{{ isStable ? 'Lectura estable' : 'Estabilizando...' }}</span>
-          </div>
-        </div>
-
+        }
+    
         <!-- Disconnected / error states -->
-        <div *ngIf="connectionStatus !== 'connected'" class="scale-disconnected">
-          <div class="disconnected-notice">
-            <app-icon name="alert-triangle" [size]="20" class="text-warning"></app-icon>
-            <span class="text-sm text-text-secondary">
-              {{ connectionStatus === 'connecting' ? 'Conectando báscula...' : 'Báscula desconectada' }}
-            </span>
+        @if (connectionStatus !== 'connected') {
+          <div class="scale-disconnected">
+            <div class="disconnected-notice">
+              <app-icon name="alert-triangle" [size]="20" class="text-warning"></app-icon>
+              <span class="text-sm text-text-secondary">
+                {{ connectionStatus === 'connecting' ? 'Conectando báscula...' : 'Báscula desconectada' }}
+              </span>
+            </div>
+            <!-- Manual fallback input -->
+            @if (allowManualFallback && connectionStatus !== 'connecting') {
+              <div class="manual-fallback">
+                <label class="text-xs text-text-secondary mb-1 block">Peso manual:</label>
+                <app-input
+                  [placeholder]="'Peso en ' + weightUnit"
+                  [(ngModel)]="manualWeight"
+                  (keyup.enter)="onConfirm()"
+                  type="number"
+                  step="0.001"
+                  min="0"
+                ></app-input>
+              </div>
+            }
           </div>
-
-          <!-- Manual fallback input -->
-          <div *ngIf="allowManualFallback && connectionStatus !== 'connecting'" class="manual-fallback">
-            <label class="text-xs text-text-secondary mb-1 block">Peso manual:</label>
-            <app-input
-              [placeholder]="'Peso en ' + weightUnit"
-              [(ngModel)]="manualWeight"
-              (keyup.enter)="onConfirm()"
-              type="number"
-              step="0.001"
-              min="0"
-            ></app-input>
-          </div>
-        </div>
+        }
       </div>
-
+    
       <div slot="footer" class="modal-footer flex justify-end gap-2 md:gap-4">
         <app-button variant="outline" (clicked)="onCancel()">Cancelar</app-button>
         <app-button
           variant="primary"
           (clicked)="onConfirm()"
           [disabled]="!canConfirm"
-        >
+          >
           Confirmar
         </app-button>
       </div>
     </app-modal>
-  `,
+    `,
   styles: [`
     .scale-modal-body {
       padding: 1rem 0;
@@ -233,12 +240,22 @@ export class PosScaleWeightModalComponent implements OnInit, OnDestroy {
   }
 
   onCancel(): void {
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.cancel.emit();
     this.isOpen = false;
   }
 
   onModalClose(): void {
     if (!this.isOpen) {
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
       this.cancel.emit();
     }
   }

@@ -1,5 +1,5 @@
 import { Component, OnInit, inject, DestroyRef } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { RouterModule, Router } from '@angular/router';
 import { FormsModule, ReactiveFormsModule, FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -14,7 +14,7 @@ import { SelectorComponent, SelectorOption } from '../../../../../shared/compone
 @Component({
   selector: 'app-account',
   standalone: true,
-  imports: [CommonModule, RouterModule, FormsModule, ReactiveFormsModule, AddressModalComponent, IconComponent, ButtonComponent, InputComponent, SelectorComponent],
+  imports: [RouterModule, FormsModule, ReactiveFormsModule, AddressModalComponent, IconComponent, ButtonComponent, InputComponent, SelectorComponent],
   templateUrl: './account.component.html',
   styleUrls: ['./account.component.scss'],
 })

@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { Subject, takeUntil } from 'rxjs';
 import {
   PayrollSystemDefault,
@@ -24,13 +24,12 @@ import {
   selector: 'app-payroll-defaults',
   standalone: true,
   imports: [
-    CommonModule,
     PayrollDefaultsFormComponent,
     ButtonComponent,
     ResponsiveDataViewComponent,
     EmptyStateComponent,
-    CardComponent,
-  ],
+    CardComponent
+],
   template: `
     <div class="flex flex-col gap-6">
       <!-- Main Content Card -->

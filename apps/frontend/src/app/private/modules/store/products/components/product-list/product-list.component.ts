@@ -7,7 +7,7 @@ import {
   SimpleChanges,
   inject,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 
@@ -45,7 +45,6 @@ import './product-list.component.css';
   selector: 'app-product-list',
   standalone: true,
   imports: [
-    CommonModule,
     RouterModule,
     FormsModule,
     InputsearchComponent,
@@ -55,8 +54,8 @@ import './product-list.component.css';
     ButtonComponent,
     IconComponent,
     PaginationComponent,
-    CardComponent,
-  ],
+    CardComponent
+],
   templateUrl: './product-list.component.html',
 })
 export class ProductListComponent implements OnChanges {
@@ -388,12 +387,27 @@ export class ProductListComponent implements OnChanges {
   onActionClick(action: string): void {
     switch (action) {
       case 'create':
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
         this.create.emit();
         break;
       case 'bulk-upload':
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
         this.bulkUpload.emit();
         break;
       case 'bulk-image-upload':
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
         this.bulkImageUpload.emit();
         break;
     }

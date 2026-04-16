@@ -14,12 +14,92 @@ metadata:
 
 ## 🎯 State Management Principles
 
-**Vendix uses a hybrid approach:**
+**Vendix usa un enfoque híbrido Signals + NgRx:**
 
-- **Services with BehaviorSubject** for global state
-- **Signals (Angular 20)** for local component state
-- **RxJS Observables** for asynchronous operations
-- **ToastService** for user notifications
+- **NgRx Store** para estado global compartido (auth, config, tenant, notifications, ai-chat)
+- **Facades con toSignal()** como capa de acceso — exponen tanto Observables (`$`) como Signals
+- **Signals locales** (`signal()`) para estado local de componentes
+- **RxJS Observables** para operaciones asíncronas (HTTP, efectos)
+- **ToastService** para notificaciones de usuario
+
+> **Zoneless**: Vendix usa `provideZonelessChangeDetection()`. Los signals disparan CD automáticamente. El `async pipe` aún funciona (llama `markForCheck()` internamente).
+
+---
+
+## 🔌 Facades con toSignal() — Patrón Vendix
+
+Todas las facades de Vendix exponen **signals paralelos** junto a sus Observables. Prefer signals para acceso síncrono en componentes.
+
+### Consumir una Facade en un componente
+
+```typescript
+@Component({...})
+export class MyComponent {
+  private authFacade = inject(AuthFacade);
+  private tenantFacade = inject(TenantFacade);
+
+  // ✅ PREFERIDO — leer signals directamente (síncrono, sin async pipe)
+  readonly user = this.authFacade.user;
+  readonly isAuthenticated = this.authFacade.isAuthenticated;
+  readonly currentStore = this.tenantFacade.currentStore;
+  readonly storeSettings = this.authFacade.storeSettings;
+}
+```
+
+```html
+<!-- Template — sin async pipe -->
+@if (isAuthenticated()) {
+  <p>{{ user()?.name }}</p>
+}
+
+<!-- Aún válido con Observables existentes -->
+<p>{{ authFacade.user$ | async }}</p>
+```
+
+### ❌ Antipatrón take(1).subscribe() síncrono
+
+```typescript
+// ❌ NUNCA — take(1).subscribe() para obtener valor síncrono
+getSomething(): boolean {
+  let result = false;
+  this.store.select(selector).pipe(take(1)).subscribe(v => result = v);
+  return result; // Funciona con Zone.js, ROMPE en Zoneless
+}
+
+// ✅ CORRECTO — leer la señal del facade
+getSomething(): boolean {
+  return this.facade.mySignal(); // Síncrono, compatible con Zoneless
+}
+```
+
+### Estructura de un Facade (patrón actual)
+
+```typescript
+@Injectable({ providedIn: 'root' })
+export class ExampleFacade {
+  private store = inject(Store);
+
+  // ─── Observables (backward compatible) ───────────────────────
+  readonly items$ = this.store.select(ExampleSelectors.selectItems);
+  readonly loading$ = this.store.select(ExampleSelectors.selectLoading);
+  readonly error$ = this.store.select(ExampleSelectors.selectError);
+
+  // ─── Signal parallels (Angular 20 — Zoneless) ─────────────────
+  readonly items = toSignal(this.items$, { initialValue: [] as Item[] });
+  readonly loading = toSignal(this.loading$, { initialValue: false });
+  readonly error = toSignal(this.error$);
+
+  // ─── Actions ─────────────────────────────────────────────────
+  loadItems(): void {
+    this.store.dispatch(ExampleActions.loadItems());
+  }
+
+  // ─── Getters síncronos (usan signals) ────────────────────────
+  getItems(): Item[] {
+    return this.items();
+  }
+}
+```
 
 ---
 
@@ -449,10 +529,12 @@ import { {Entity} } from './interfaces/{module}.interface';
 export class {Module}Component implements OnInit {
   private {module}_service = inject({Module}Service);
 
-  // Using signals for local state (Angular 20)
+  // ✅ toSignal() — patrón estándar Vendix (Zoneless-compatible)
+  // Para facades NgRx: prefer leer facade.signal directamente (ver sección Facades)
+  // Para servicios BehaviorSubject locales: usar toSignal() como se muestra aquí
   isLoading = toSignal(this.{module}_service.isLoading$, { initialValue: false });
   error = toSignal(this.{module}_service.error$, { initialValue: null });
-  entities = toSignal(this.{module}_service.entities$, { initialValue: [] });
+  entities = toSignal(this.{module}_service.entities$, { initialValue: [] as {Entity}[] });
 
   ngOnInit() {
     this.{module}_service.getEntities().subscribe();
@@ -500,6 +582,16 @@ export class MyComponent {
 | `core/interceptors/auth.interceptor.ts`    | JWT injection          |
 | `core/interceptors/error.interceptor.ts`   | Global error handling  |
 | `*/services/*.service.ts`                  | Business logic and API |
+
+---
+
+## Zoneless y ChangeDetectorRef
+
+Con `provideZonelessChangeDetection()` activo:
+- Los **signals** disparan CD automáticamente — no necesitas `cdr.markForCheck()`
+- El `async pipe` llama `markForCheck()` internamente — sigue funcionando
+- `cdr.markForCheck()` sigue siendo un escape hatch válido para datos no-signal
+- **Prioridad**: migrar a signals > agregar `markForCheck()`
 
 ---
 

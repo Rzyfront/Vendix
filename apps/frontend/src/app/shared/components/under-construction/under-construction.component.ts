@@ -1,12 +1,12 @@
 import { Component, Input, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { ActivatedRoute, Router } from '@angular/router';
 import { IconComponent } from '../icon/icon.component';
 
 @Component({
   selector: 'app-under-construction',
   standalone: true,
-  imports: [CommonModule, IconComponent],
+  imports: [IconComponent],
   template: `
     <div class="flex flex-col items-center justify-center min-h-[60vh] p-8 text-center">
       <div class="w-24 h-24 mb-6 rounded-full bg-primary/10 flex items-center justify-center">

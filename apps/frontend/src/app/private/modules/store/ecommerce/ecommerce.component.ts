@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy, computed, signal, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   FormBuilder,
   FormGroup,
@@ -47,7 +47,6 @@ import type { Currency } from '../../../../shared/pipes/currency';
   selector: 'app-ecommerce',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     IconComponent,
     ButtonComponent,
@@ -57,8 +56,8 @@ import type { Currency } from '../../../../shared/pipes/currency';
     StickyHeaderComponent,
     FooterSettingsFormComponent,
     StoreShareModalComponent,
-    TourModalComponent,
-  ],
+    TourModalComponent
+],
   templateUrl: './ecommerce.component.html',
   styleUrls: ['./ecommerce.component.scss'],
 })

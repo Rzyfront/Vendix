@@ -3,8 +3,15 @@ import { CommonModule } from '@angular/common';
 import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
 
-import { loadExpenses, loadExpensesSummary, loadExpenseCategories } from './state/actions/expenses.actions';
-import { selectExpenses, selectExpensesLoading } from './state/selectors/expenses.selectors';
+import {
+  loadExpenses,
+  loadExpensesSummary,
+  loadExpenseCategories,
+} from './state/actions/expenses.actions';
+import {
+  selectExpenses,
+  selectExpensesLoading,
+} from './state/selectors/expenses.selectors';
 import { Expense } from './interfaces/expense.interface';
 
 import { ExpensesStatsComponent } from './components/expenses-stats/expenses-stats.component';
@@ -28,7 +35,9 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
   template: `
     <div class="w-full">
       <!-- Stats: Sticky on mobile, static on desktop -->
-      <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
+      <div
+        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+      >
         <vendix-expenses-stats></vendix-expenses-stats>
       </div>
 
@@ -42,21 +51,24 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
         (refresh)="refreshExpenses()"
       ></app-expenses-list>
 
-      <!-- Create Expense Modal -->
-      <vendix-expense-create
-        [(isOpen)]="isCreateModalOpen"
-      ></vendix-expense-create>
+      @defer (when isCreateModalOpen) {
+        <vendix-expense-create
+          [(isOpen)]="isCreateModalOpen"
+        ></vendix-expense-create>
+      }
 
-      <!-- Edit Expense Modal -->
-      <vendix-expense-edit
-        [(isOpen)]="isEditModalOpen"
-        [expense]="selectedExpense"
-      ></vendix-expense-edit>
+      @defer (when isEditModalOpen) {
+        <vendix-expense-edit
+          [(isOpen)]="isEditModalOpen"
+          [expense]="selectedExpense"
+        ></vendix-expense-edit>
+      }
 
-      <!-- Categories Modal -->
-      <vendix-expense-categories
-        [(isOpen)]="isCategoriesModalOpen"
-      ></vendix-expense-categories>
+      @defer (when isCategoriesModalOpen) {
+        <vendix-expense-categories
+          [(isOpen)]="isCategoriesModalOpen"
+        ></vendix-expense-categories>
+      }
     </div>
   `,
 })

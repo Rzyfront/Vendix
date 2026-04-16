@@ -1,5 +1,5 @@
 import { Component, Input, Output, EventEmitter, inject, AfterViewInit, OnDestroy, ElementRef, ViewChild } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { ProductCardComponent } from '../product-card/product-card.component';
 import { EcommerceProduct } from '../../services/catalog.service';
 import { CatalogService, CatalogQuery } from '../../services/catalog.service';
@@ -9,7 +9,7 @@ import { Subject } from 'rxjs';
 @Component({
   selector: 'app-products-scroll',
   standalone: true,
-  imports: [CommonModule, ProductCardComponent],
+  imports: [ProductCardComponent],
   templateUrl: './products-scroll.component.html',
   styleUrls: ['./products-scroll.component.scss'],
 })

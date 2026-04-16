@@ -1,5 +1,5 @@
 import { Component, Input, OnInit, OnDestroy, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { RouterModule, Router } from '@angular/router';
 import { TenantFacade } from '../../../../../../app/core/store';
 
@@ -23,7 +23,7 @@ export interface SliderPhoto {
 @Component({
   selector: 'app-hero-banner',
   standalone: true,
-  imports: [CommonModule, RouterModule],
+  imports: [RouterModule],
   templateUrl: './hero-banner.component.html',
   styleUrls: ['./hero-banner.component.scss'],
 })

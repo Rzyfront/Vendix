@@ -64,44 +64,49 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
       (cancel)="onClose()"
       title="Editar Gasto"
       size="md"
-    >
-      <!-- State Badge in header -->
-      <span
-        *ngIf="expense"
-        slot="header-end"
-        [class]="getStateBadgeClass(expense.state)"
-        class="px-2 py-0.5 rounded-full text-xs font-medium shrink-0"
       >
-        {{ getStateLabel(expense.state) }}
-      </span>
-
+      <!-- State Badge in header -->
+      @if (expense) {
+        <span
+          slot="header-end"
+          [class]="getStateBadgeClass(expense.state)"
+          class="px-2 py-0.5 rounded-full text-xs font-medium shrink-0"
+          >
+          {{ getStateLabel(expense.state) }}
+        </span>
+      }
+    
       <div class="p-4">
         <!-- Refund Info -->
-        <div
-          *ngIf="expense?.state === 'refunded'"
-          class="mb-4 p-3 bg-orange-50 rounded-lg border border-orange-200 w-full"
-        >
-          <p class="text-sm text-orange-800">
-            <strong>Reembolsado:</strong>
-            {{ expense!.refunded_at | date: 'short' }}
-          </p>
-          <p *ngIf="expense!.refunded_by_user" class="text-sm text-orange-700">
-            <strong>Por:</strong> {{ expense!.refunded_by_user.first_name }}
-            {{ expense!.refunded_by_user.last_name }}
-          </p>
-          <p
-            *ngIf="expense!.refund_reason"
-            class="text-sm text-orange-700 mt-1"
-          >
-            <strong>Motivo:</strong> {{ expense!.refund_reason }}
-          </p>
-        </div>
-
+        @if (expense?.state === 'refunded') {
+          <div
+            class="mb-4 p-3 bg-orange-50 rounded-lg border border-orange-200 w-full"
+            >
+            <p class="text-sm text-orange-800">
+              <strong>Reembolsado:</strong>
+              {{ expense!.refunded_at | date: 'short' }}
+            </p>
+            @if (expense!.refunded_by_user) {
+              <p class="text-sm text-orange-700">
+                <strong>Por:</strong> {{ expense!.refunded_by_user.first_name }}
+                {{ expense!.refunded_by_user.last_name }}
+              </p>
+            }
+            @if (expense!.refund_reason) {
+              <p
+                class="text-sm text-orange-700 mt-1"
+                >
+                <strong>Motivo:</strong> {{ expense!.refund_reason }}
+              </p>
+            }
+          </div>
+        }
+    
         <form
           [formGroup]="expenseForm"
           (ngSubmit)="onSubmit()"
           class="space-y-4"
-        >
+          >
           <!-- Description -->
           <app-input
             label="Descripción"
@@ -109,7 +114,7 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
             [control]="expenseForm.get('description')"
             [required]="true"
           ></app-input>
-
+    
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <!-- Amount -->
             <app-input
@@ -119,10 +124,10 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
               [control]="expenseForm.get('amount')"
               [required]="true"
               [prefixIcon]="true"
-            >
+              >
               <span slot="prefix-icon" class="text-text-secondary">$</span>
             </app-input>
-
+    
             <!-- Date -->
             <app-input
               label="Fecha"
@@ -132,7 +137,7 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
               [required]="true"
             ></app-input>
           </div>
-
+    
           <!-- Category -->
           <app-selector
             label="Categoría"
@@ -140,7 +145,7 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
             [options]="(categoryOptions$ | async) || []"
             placeholder="Seleccione una categoría"
           ></app-selector>
-
+    
           <!-- Notes -->
           <app-textarea
             label="Notas Adicionales"
@@ -149,207 +154,214 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
             placeholder="Detalles adicionales..."
             [rows]="3"
           ></app-textarea>
-
+    
           <!-- Receipt -->
           <div class="space-y-2">
-            <div *ngIf="expense?.receipt_url" class="flex items-center gap-2">
-              <span class="text-sm text-text-secondary">Comprobante:</span>
-              <a
-                [href]="expense!.receipt_url"
-                target="_blank"
-                class="text-sm text-primary hover:underline"
-              >
-                Ver comprobante actual
-              </a>
-            </div>
+            @if (expense?.receipt_url) {
+              <div class="flex items-center gap-2">
+                <span class="text-sm text-text-secondary">Comprobante:</span>
+                <a
+                  [href]="expense!.receipt_url"
+                  target="_blank"
+                  class="text-sm text-primary hover:underline"
+                  >
+                  Ver comprobante actual
+                </a>
+              </div>
+            }
             <!-- Upload new receipt (only for pending) -->
-            <app-file-upload-dropzone
-              *ngIf="expense?.state === 'pending'"
-              label="Subir comprobante"
-              helperText="Imagenes o PDF"
-              accept="image/*,application/pdf"
-              (fileSelected)="onFileSelected($event)"
-              (fileRemoved)="onFileRemoved()"
-            ></app-file-upload-dropzone>
+            @if (expense?.state === 'pending') {
+              <app-file-upload-dropzone
+                label="Subir comprobante"
+                helperText="Imagenes o PDF"
+                accept="image/*,application/pdf"
+                (fileSelected)="onFileSelected($event)"
+                (fileRemoved)="onFileRemoved()"
+              ></app-file-upload-dropzone>
+            }
           </div>
         </form>
-
+    
         <!-- Action buttons (state transitions) -->
-        <ng-container *ngIf="expense">
-          <div
-            *ngIf="
-              expense.state === 'pending' ||
-              expense.state === 'approved' ||
-              expense.state === 'rejected' ||
-              expense.state === 'paid'
-            "
-            class="mt-5 pt-4 border-t border-border space-y-2"
-          >
-            <span
-              class="text-xs font-medium text-text-secondary uppercase tracking-wide"
-              >Acciones</span
-            >
-
-            <!-- Pending: Approve / Reject -->
+        @if (expense) {
+          @if (
+            expense.state === 'pending' ||
+            expense.state === 'approved' ||
+            expense.state === 'rejected' ||
+            expense.state === 'paid'
+            ) {
             <div
-              *ngIf="expense.state === 'pending'"
-              class="grid grid-cols-2 gap-2"
-            >
-              <app-button
-                variant="success"
-                size="sm"
-                [fullWidth]="true"
-                (clicked)="onApprove()"
-                [loading]="(loading$ | async) || false"
+              class="mt-5 pt-4 border-t border-border space-y-2"
               >
-                Aprobar
-              </app-button>
-              <app-button
-                variant="danger"
-                size="sm"
-                [fullWidth]="true"
-                (clicked)="onReject()"
-                [loading]="(loading$ | async) || false"
-              >
-                Rechazar
-              </app-button>
-            </div>
-
-            <!-- Pending: Cancel + Delete -->
-            <div
-              *ngIf="expense.state === 'pending'"
-              class="grid grid-cols-2 gap-2"
-            >
-              <app-button
-                variant="outline-warning"
-                size="sm"
-                [fullWidth]="true"
-                (clicked)="onCancel()"
-                [loading]="(loading$ | async) || false"
-              >
-                Cancelar Gasto
-              </app-button>
-              <app-button
-                variant="outline-danger"
-                size="sm"
-                [fullWidth]="true"
-                (clicked)="onDelete()"
-                [loading]="(loading$ | async) || false"
-              >
-                Eliminar
-              </app-button>
-            </div>
-
-            <!-- Approved: Pay + Cancel -->
-            <div
-              *ngIf="expense.state === 'approved'"
-              class="grid grid-cols-2 gap-2"
-            >
-              <app-button
-                variant="success"
-                size="sm"
-                [fullWidth]="true"
-                (clicked)="onPay()"
-                [loading]="(loading$ | async) || false"
-              >
-                Marcar Pagado
-              </app-button>
-              <app-button
-                variant="outline-warning"
-                size="sm"
-                [fullWidth]="true"
-                (clicked)="onCancel()"
-                [loading]="(loading$ | async) || false"
-              >
-                Cancelar
-              </app-button>
-            </div>
-
-            <!-- Rejected: Delete only -->
-            <div *ngIf="expense.state === 'rejected'" class="flex justify-end">
-              <app-button
-                variant="outline-danger"
-                size="sm"
-                (clicked)="onDelete()"
-                [loading]="(loading$ | async) || false"
-              >
-                Eliminar
-              </app-button>
-            </div>
-
-            <!-- Paid: Refund -->
-            <div *ngIf="expense.state === 'paid'" class="flex justify-end">
-              <app-button
-                variant="outline-warning"
-                size="sm"
-                (clicked)="showRefundModal = true"
-                [loading]="(loading$ | async) || false"
-              >
-                Reembolsar
-              </app-button>
-            </div>
-
-            <!-- Refund Confirmation Modal -->
-            <div
-              *ngIf="showRefundModal"
-              class="mt-3 p-3 bg-orange-50 rounded-lg border border-orange-200"
-            >
-              <p class="text-sm text-orange-800 mb-2">
-                Confirme el motivo del reembolso:
-              </p>
-              <textarea
-                [(ngModel)]="refundReason"
-                [ngModelOptions]="{ standalone: true }"
-                class="w-full p-2 text-sm border border-orange-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-400"
-                placeholder="Ingrese el motivo del reembolso..."
-                rows="2"
-              ></textarea>
-              <div class="flex justify-end gap-2 mt-2">
-                <app-button
-                  variant="outline"
-                  size="sm"
-                  (clicked)="showRefundModal = false"
+              <span
+                class="text-xs font-medium text-text-secondary uppercase tracking-wide"
+                >Acciones</span
                 >
-                  Cancelar
-                </app-button>
-                <app-button
-                  variant="danger"
-                  size="sm"
-                  (clicked)="onRefund()"
-                  [disabled]="!refundReason.trim()"
-                  [loading]="(loading$ | async) || false"
-                >
-                  Confirmar Reembolso
-                </app-button>
+                <!-- Pending: Approve / Reject -->
+                @if (expense.state === 'pending') {
+                  <div
+                    class="grid grid-cols-2 gap-2"
+                    >
+                    <app-button
+                      variant="success"
+                      size="sm"
+                      [fullWidth]="true"
+                      (clicked)="onApprove()"
+                      [loading]="(loading$ | async) || false"
+                      >
+                      Aprobar
+                    </app-button>
+                    <app-button
+                      variant="danger"
+                      size="sm"
+                      [fullWidth]="true"
+                      (clicked)="onReject()"
+                      [loading]="(loading$ | async) || false"
+                      >
+                      Rechazar
+                    </app-button>
+                  </div>
+                }
+                <!-- Pending: Cancel + Delete -->
+                @if (expense.state === 'pending') {
+                  <div
+                    class="grid grid-cols-2 gap-2"
+                    >
+                    <app-button
+                      variant="outline-warning"
+                      size="sm"
+                      [fullWidth]="true"
+                      (clicked)="onCancel()"
+                      [loading]="(loading$ | async) || false"
+                      >
+                      Cancelar Gasto
+                    </app-button>
+                    <app-button
+                      variant="outline-danger"
+                      size="sm"
+                      [fullWidth]="true"
+                      (clicked)="onDelete()"
+                      [loading]="(loading$ | async) || false"
+                      >
+                      Eliminar
+                    </app-button>
+                  </div>
+                }
+                <!-- Approved: Pay + Cancel -->
+                @if (expense.state === 'approved') {
+                  <div
+                    class="grid grid-cols-2 gap-2"
+                    >
+                    <app-button
+                      variant="success"
+                      size="sm"
+                      [fullWidth]="true"
+                      (clicked)="onPay()"
+                      [loading]="(loading$ | async) || false"
+                      >
+                      Marcar Pagado
+                    </app-button>
+                    <app-button
+                      variant="outline-warning"
+                      size="sm"
+                      [fullWidth]="true"
+                      (clicked)="onCancel()"
+                      [loading]="(loading$ | async) || false"
+                      >
+                      Cancelar
+                    </app-button>
+                  </div>
+                }
+                <!-- Rejected: Delete only -->
+                @if (expense.state === 'rejected') {
+                  <div class="flex justify-end">
+                    <app-button
+                      variant="outline-danger"
+                      size="sm"
+                      (clicked)="onDelete()"
+                      [loading]="(loading$ | async) || false"
+                      >
+                      Eliminar
+                    </app-button>
+                  </div>
+                }
+                <!-- Paid: Refund -->
+                @if (expense.state === 'paid') {
+                  <div class="flex justify-end">
+                    <app-button
+                      variant="outline-warning"
+                      size="sm"
+                      (clicked)="showRefundModal = true"
+                      [loading]="(loading$ | async) || false"
+                      >
+                      Reembolsar
+                    </app-button>
+                  </div>
+                }
+                <!-- Refund Confirmation Modal -->
+                @if (showRefundModal) {
+                  <div
+                    class="mt-3 p-3 bg-orange-50 rounded-lg border border-orange-200"
+                    >
+                    <p class="text-sm text-orange-800 mb-2">
+                      Confirme el motivo del reembolso:
+                    </p>
+                    <textarea
+                      [(ngModel)]="refundReason"
+                      [ngModelOptions]="{ standalone: true }"
+                      class="w-full p-2 text-sm border border-orange-300 rounded focus:outline-none focus:ring-2 focus:ring-orange-400"
+                      placeholder="Ingrese el motivo del reembolso..."
+                      rows="2"
+                    ></textarea>
+                    <div class="flex justify-end gap-2 mt-2">
+                      <app-button
+                        variant="outline"
+                        size="sm"
+                        (clicked)="showRefundModal = false"
+                        >
+                        Cancelar
+                      </app-button>
+                      <app-button
+                        variant="danger"
+                        size="sm"
+                        (clicked)="onRefund()"
+                        [disabled]="!refundReason.trim()"
+                        [loading]="(loading$ | async) || false"
+                        >
+                        Confirmar Reembolso
+                      </app-button>
+                    </div>
+                  </div>
+                }
               </div>
-            </div>
-          </div>
-        </ng-container>
-      </div>
-
-      <!-- Footer: solo controles del modal -->
-      <div slot="footer">
-        <div
-          class="flex items-center justify-end gap-2 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100"
-        >
-          <app-button variant="outline" size="sm" (clicked)="onClose()">
-            Cerrar
-          </app-button>
-
-          <app-button
-            *ngIf="expense?.state === 'pending'"
-            variant="primary"
-            size="sm"
-            (clicked)="onSubmit()"
-            [disabled]="expenseForm.invalid || (loading$ | async) || false"
-            [loading]="(loading$ | async) || false"
-          >
-            Actualizar Gasto
-          </app-button>
+            }
+          }
         </div>
-      </div>
-    </app-modal>
-  `,
+    
+        <!-- Footer: solo controles del modal -->
+        <div slot="footer">
+          <div
+            class="flex items-center justify-end gap-2 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100"
+            >
+            <app-button variant="outline" size="sm" (clicked)="onClose()">
+              Cerrar
+            </app-button>
+    
+            @if (expense?.state === 'pending') {
+              <app-button
+                variant="primary"
+                size="sm"
+                (clicked)="onSubmit()"
+                [disabled]="expenseForm.invalid || (loading$ | async) || false"
+                [loading]="(loading$ | async) || false"
+                >
+                Actualizar Gasto
+              </app-button>
+            }
+          </div>
+        </div>
+      </app-modal>
+    `,
 })
 export class ExpenseEditComponent implements OnChanges {
   @Input() isOpen = false;

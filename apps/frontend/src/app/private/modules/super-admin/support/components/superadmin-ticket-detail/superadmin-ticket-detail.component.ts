@@ -34,211 +34,221 @@ import {
     StickyHeaderComponent,
   ],
   template: `
-    <div class="min-h-screen bg-background" *ngIf="!loading; else loadingTemplate">
-      <!-- Sticky Header -->
-      <app-sticky-header
-        [title]="ticket()?.title || 'Ticket'"
-        [subtitle]="ticket()?.ticket_number || ''"
-        icon="ticket"
-        [showBackButton]="true"
-        backRoute="/super-admin/support"
-        [badgeText]="headerBadgeText()"
-        [badgeColor]="headerBadgeColor()"
-        [actions]="headerActions()"
-        (actionClicked)="onHeaderAction($event)"
-      ></app-sticky-header>
-
-      <!-- Main Content -->
-      <div class="px-4 py-6 md:px-6 md:py-8 max-w-7xl mx-auto">
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <!-- Left Column - Description and Comments -->
-          <div class="lg:col-span-2 space-y-6">
-            <!-- Description Card -->
-            <div class="bg-surface rounded-lg border border-border p-6 shadow-sm">
-              <h2 class="text-lg font-semibold text-text-primary mb-4">Descripción</h2>
-              <p class="text-text-secondary whitespace-pre-wrap">{{ ticket()?.description }}</p>
-
-              <!-- Attachments -->
-              <div *ngIf="(ticket()?.attachments?.length || 0) > 0" class="mt-6">
-                <h3 class="text-sm font-semibold text-text-primary mb-3">Archivos adjuntos</h3>
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <div
-                    *ngFor="let attachment of ticket()?.attachments"
-                    class="relative aspect-square rounded-lg border border-border overflow-hidden cursor-pointer hover:border-primary transition-colors"
-                    (click)="openAttachment(attachment)"
-                  >
-                    <img
-                      *ngIf="attachment.file_type === 'IMAGE'"
-                      [src]="attachment.thumbnail_url || attachment.file_url"
-                      [alt]="attachment.file_name"
-                      class="w-full h-full object-cover"
-                    />
-                    <div
-                      *ngIf="attachment.file_type !== 'IMAGE'"
-                      class="flex items-center justify-center h-full bg-gray-100"
-                    >
-                      <app-icon name="file" [size]="32" class="text-gray-400"></app-icon>
+    @if (!loading) {
+      <div class="min-h-screen bg-background">
+        <!-- Sticky Header -->
+        <app-sticky-header
+          [title]="ticket()?.title || 'Ticket'"
+          [subtitle]="ticket()?.ticket_number || ''"
+          icon="ticket"
+          [showBackButton]="true"
+          backRoute="/super-admin/support"
+          [badgeText]="headerBadgeText()"
+          [badgeColor]="headerBadgeColor()"
+          [actions]="headerActions()"
+          (actionClicked)="onHeaderAction($event)"
+        ></app-sticky-header>
+        <!-- Main Content -->
+        <div class="px-4 py-6 md:px-6 md:py-8 max-w-7xl mx-auto">
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- Left Column - Description and Comments -->
+            <div class="lg:col-span-2 space-y-6">
+              <!-- Description Card -->
+              <div class="bg-surface rounded-lg border border-border p-6 shadow-sm">
+                <h2 class="text-lg font-semibold text-text-primary mb-4">Descripción</h2>
+                <p class="text-text-secondary whitespace-pre-wrap">{{ ticket()?.description }}</p>
+                <!-- Attachments -->
+                @if ((ticket()?.attachments?.length || 0) > 0) {
+                  <div class="mt-6">
+                    <h3 class="text-sm font-semibold text-text-primary mb-3">Archivos adjuntos</h3>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      @for (attachment of ticket()?.attachments; track attachment) {
+                        <div
+                          class="relative aspect-square rounded-lg border border-border overflow-hidden cursor-pointer hover:border-primary transition-colors"
+                          (click)="openAttachment(attachment)"
+                          >
+                          @if (attachment.file_type === 'IMAGE') {
+                            <img
+                              [src]="attachment.thumbnail_url || attachment.file_url"
+                              [alt]="attachment.file_name"
+                              class="w-full h-full object-cover"
+                              />
+                          }
+                          @if (attachment.file_type !== 'IMAGE') {
+                            <div
+                              class="flex items-center justify-center h-full bg-gray-100"
+                              >
+                              <app-icon name="file" [size]="32" class="text-gray-400"></app-icon>
+                            </div>
+                          }
+                        </div>
+                      }
                     </div>
                   </div>
+                }
+              </div>
+              <!-- Comments Timeline -->
+              <div class="bg-surface rounded-lg border border-border shadow-sm">
+                <div class="p-4 border-b border-border">
+                  <h2 class="text-lg font-semibold text-text-primary">Comentarios ({{ ticket()?.comments?.length || 0 }})</h2>
+                </div>
+                <div class="p-4 space-y-4">
+                  <!-- Comments List -->
+                  @for (comment of ticket()?.comments; track comment) {
+                    <div class="flex gap-3">
+                      <!-- Avatar -->
+                      <div class="flex-shrink-0 w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                        <span class="text-sm font-semibold text-primary">
+                          {{ comment.author?.first_name?.[0] || '?' }}{{ comment.author?.last_name?.[0] || '' }}
+                        </span>
+                      </div>
+                      <!-- Comment Content -->
+                      <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-2 mb-1">
+                          <span class="text-sm font-semibold text-text-primary">
+                            {{ comment.author?.first_name }} {{ comment.author?.last_name }}
+                          </span>
+                          @if (comment.is_internal) {
+                            <span class="px-1.5 py-0.5 bg-orange-100 text-orange-700 text-xs rounded">Interno</span>
+                          }
+                          <span class="text-xs text-text-secondary">{{ formatDate(comment.created_at) }}</span>
+                        </div>
+                        <p class="text-sm text-text-secondary whitespace-pre-wrap">{{ comment.content }}</p>
+                      </div>
+                    </div>
+                  }
+                  <!-- Empty State -->
+                  @if (!ticket()?.comments || ticket()?.comments?.length === 0) {
+                    <div class="text-center py-8">
+                      <app-icon name="message-square" [size]="48" class="text-gray-300 mx-auto mb-3"></app-icon>
+                      <p class="text-text-secondary">No hay comentarios aún</p>
+                    </div>
+                  }
                 </div>
               </div>
             </div>
-
-            <!-- Comments Timeline -->
-            <div class="bg-surface rounded-lg border border-border shadow-sm">
-              <div class="p-4 border-b border-border">
-                <h2 class="text-lg font-semibold text-text-primary">Comentarios ({{ ticket()?.comments?.length || 0 }})</h2>
-              </div>
-
-              <div class="p-4 space-y-4">
-                <!-- Comments List -->
-                <div *ngFor="let comment of ticket()?.comments" class="flex gap-3">
-                  <!-- Avatar -->
-                  <div class="flex-shrink-0 w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                    <span class="text-sm font-semibold text-primary">
-                      {{ comment.author?.first_name?.[0] || '?' }}{{ comment.author?.last_name?.[0] || '' }}
-                    </span>
+            <!-- Right Column - Info -->
+            <div class="space-y-6">
+              <!-- Details Card -->
+              <div class="bg-surface rounded-lg border border-border p-6 shadow-sm">
+                <h2 class="text-lg font-semibold text-text-primary mb-4">Detalles</h2>
+                <dl class="space-y-3 text-sm">
+                  <div class="flex justify-between">
+                    <dt class="text-text-secondary">Categoría</dt>
+                    <dd class="text-text-primary font-medium">{{ getCategoryLabel(ticket()?.category) }}</dd>
                   </div>
-
-                  <!-- Comment Content -->
-                  <div class="flex-1 min-w-0">
-                    <div class="flex items-center gap-2 mb-1">
-                      <span class="text-sm font-semibold text-text-primary">
-                        {{ comment.author?.first_name }} {{ comment.author?.last_name }}
+                  <div class="flex justify-between">
+                    <dt class="text-text-secondary">Prioridad</dt>
+                    <dd>
+                      <span [ngClass]="getPriorityBadgeClass(ticket()?.priority)" class="px-2 py-0.5 rounded text-xs font-semibold border">
+                        {{ getPriorityLabel(ticket()?.priority) }}
                       </span>
-                      <span *ngIf="comment.is_internal" class="px-1.5 py-0.5 bg-orange-100 text-orange-700 text-xs rounded">Interno</span>
-                      <span class="text-xs text-text-secondary">{{ formatDate(comment.created_at) }}</span>
-                    </div>
-                    <p class="text-sm text-text-secondary whitespace-pre-wrap">{{ comment.content }}</p>
+                    </dd>
                   </div>
-                </div>
-
-                <!-- Empty State -->
-                <div *ngIf="!ticket()?.comments || ticket()?.comments?.length === 0" class="text-center py-8">
-                  <app-icon name="message-square" [size]="48" class="text-gray-300 mx-auto mb-3"></app-icon>
-                  <p class="text-text-secondary">No hay comentarios aún</p>
-                </div>
+                  <div class="flex justify-between">
+                    <dt class="text-text-secondary">Estado</dt>
+                    <dd>
+                      <span [ngClass]="getStatusBadgeClass(ticket()?.status)" class="px-2 py-0.5 rounded text-xs font-semibold border">
+                        {{ getStatusLabel(ticket()?.status) }}
+                      </span>
+                    </dd>
+                  </div>
+                  <div class="flex justify-between">
+                    <dt class="text-text-secondary">Creado por</dt>
+                    <dd class="text-text-primary">{{ ticket()?.created_by?.first_name }} {{ ticket()?.created_by?.last_name }}</dd>
+                  </div>
+                  <div class="flex justify-between">
+                    <dt class="text-text-secondary">Asignado a</dt>
+                    <dd class="text-text-primary">
+                      {{ ticket()?.assigned_to?.first_name }} {{ ticket()?.assigned_to?.last_name || 'Sin asignar' }}
+                    </dd>
+                  </div>
+                  @if (ticket()?.sla_deadline) {
+                    <div class="flex justify-between">
+                      <dt class="text-text-secondary">SLA</dt>
+                      <dd [class.text-red-600]="isOverdue()" class="text-text-primary">
+                        {{ formatDate(ticket()?.sla_deadline) }}
+                        @if (isOverdue()) {
+                          <span class="ml-1">(Vencido)</span>
+                        }
+                      </dd>
+                    </div>
+                  }
+                </dl>
+              </div>
+              <!-- Need More Help -->
+              <div class="bg-gradient-to-br from-primary/10 to-primary/5 rounded-lg border border-primary/20 p-6">
+                <h3 class="font-semibold text-text-primary mb-2">¿Necesitas más ayuda?</h3>
+                <p class="text-sm text-text-secondary mb-4">
+                  Si tienes más preguntas o necesitas asistencia adicional, no dudes en contactar a soporte.
+                </p>
+                <app-button variant="outline" size="sm">
+                  <app-icon name="help-circle" [size]="16" slot="icon"></app-icon>
+                  Contactar Soporte
+                </app-button>
               </div>
             </div>
           </div>
-
-          <!-- Right Column - Info -->
-          <div class="space-y-6">
-            <!-- Details Card -->
-            <div class="bg-surface rounded-lg border border-border p-6 shadow-sm">
-              <h2 class="text-lg font-semibold text-text-primary mb-4">Detalles</h2>
-              <dl class="space-y-3 text-sm">
-                <div class="flex justify-between">
-                  <dt class="text-text-secondary">Categoría</dt>
-                  <dd class="text-text-primary font-medium">{{ getCategoryLabel(ticket()?.category) }}</dd>
-                </div>
-                <div class="flex justify-between">
-                  <dt class="text-text-secondary">Prioridad</dt>
-                  <dd>
-                    <span [ngClass]="getPriorityBadgeClass(ticket()?.priority)" class="px-2 py-0.5 rounded text-xs font-semibold border">
-                      {{ getPriorityLabel(ticket()?.priority) }}
-                    </span>
-                  </dd>
-                </div>
-                <div class="flex justify-between">
-                  <dt class="text-text-secondary">Estado</dt>
-                  <dd>
-                    <span [ngClass]="getStatusBadgeClass(ticket()?.status)" class="px-2 py-0.5 rounded text-xs font-semibold border">
-                      {{ getStatusLabel(ticket()?.status) }}
-                    </span>
-                  </dd>
-                </div>
-                <div class="flex justify-between">
-                  <dt class="text-text-secondary">Creado por</dt>
-                  <dd class="text-text-primary">{{ ticket()?.created_by?.first_name }} {{ ticket()?.created_by?.last_name }}</dd>
-                </div>
-                <div class="flex justify-between">
-                  <dt class="text-text-secondary">Asignado a</dt>
-                  <dd class="text-text-primary">
-                    {{ ticket()?.assigned_to?.first_name }} {{ ticket()?.assigned_to?.last_name || 'Sin asignar' }}
-                  </dd>
-                </div>
-                <div class="flex justify-between" *ngIf="ticket()?.sla_deadline">
-                  <dt class="text-text-secondary">SLA</dt>
-                  <dd [class.text-red-600]="isOverdue()" class="text-text-primary">
-                    {{ formatDate(ticket()?.sla_deadline) }}
-                    <span *ngIf="isOverdue()" class="ml-1">(Vencido)</span>
-                  </dd>
-                </div>
-              </dl>
-            </div>
-
-            <!-- Need More Help -->
-            <div class="bg-gradient-to-br from-primary/10 to-primary/5 rounded-lg border border-primary/20 p-6">
-              <h3 class="font-semibold text-text-primary mb-2">¿Necesitas más ayuda?</h3>
-              <p class="text-sm text-text-secondary mb-4">
-                Si tienes más preguntas o necesitas asistencia adicional, no dudes en contactar a soporte.
-              </p>
-              <app-button variant="outline" size="sm">
-                <app-icon name="help-circle" [size]="16" slot="icon"></app-icon>
-                Contactar Soporte
-              </app-button>
+        </div>
+        <!-- Comment Form - Only if not closed -->
+        @if (ticket()?.status !== 'CLOSED') {
+          <div class="border-t border-border bg-gray-50 p-4 shadow-sm">
+            <form (ngSubmit)="submitComment()" [formGroup]="commentForm" class="max-w-7xl mx-auto">
+              <div class="mb-3">
+                <textarea
+                  formControlName="content"
+                  class="w-full bg-white border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-primary focus:border-transparent resize-none h-24"
+                  placeholder="Escribe un comentario..."
+                  rows="3"
+                ></textarea>
+              </div>
+              <div class="flex justify-end">
+                <app-button
+                  type="submit"
+                  variant="primary"
+                  [disabled]="!commentForm.get('content')?.value || sendingComment"
+                  [loading]="sendingComment"
+                  size="sm"
+                  >
+                  <app-icon name="send" [size]="14" slot="icon"></app-icon>
+                  Enviar
+                </app-button>
+              </div>
+            </form>
+          </div>
+        }
+        <!-- Closed Message -->
+        @if (ticket()?.status === 'CLOSED') {
+          <div class="border-t border-border bg-gray-50 p-4 shadow-sm">
+            <div class="max-w-7xl mx-auto flex items-center gap-2 text-sm text-text-secondary">
+              <app-icon name="info" [size]="16" class="text-gray-400"></app-icon>
+              <span>Este ticket está cerrado. No se pueden agregar más comentarios.</span>
             </div>
           </div>
-        </div>
+        }
       </div>
-
-      <!-- Comment Form - Only if not closed -->
-      <div *ngIf="ticket()?.status !== 'CLOSED'" class="border-t border-border bg-gray-50 p-4 shadow-sm">
-        <form (ngSubmit)="submitComment()" [formGroup]="commentForm" class="max-w-7xl mx-auto">
-          <div class="mb-3">
-            <textarea
-              formControlName="content"
-              class="w-full bg-white border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-primary focus:border-transparent resize-none h-24"
-              placeholder="Escribe un comentario..."
-              rows="3"
-            ></textarea>
-          </div>
-          <div class="flex justify-end">
-            <app-button
-              type="submit"
-              variant="primary"
-              [disabled]="!commentForm.get('content')?.value || sendingComment"
-              [loading]="sendingComment"
-              size="sm"
-            >
-              <app-icon name="send" [size]="14" slot="icon"></app-icon>
-              Enviar
-            </app-button>
-          </div>
-        </form>
-      </div>
-
-      <!-- Closed Message -->
-      <div *ngIf="ticket()?.status === 'CLOSED'" class="border-t border-border bg-gray-50 p-4 shadow-sm">
-        <div class="max-w-7xl mx-auto flex items-center gap-2 text-sm text-text-secondary">
-          <app-icon name="info" [size]="16" class="text-gray-400"></app-icon>
-          <span>Este ticket está cerrado. No se pueden agregar más comentarios.</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- Loading Template -->
-    <ng-template #loadingTemplate>
+    } @else {
       <div class="min-h-screen flex items-center justify-center">
         <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
       </div>
-    </ng-template>
-
+    }
+    
+    <!-- Loading Template -->
+    
     <!-- Status Change Modal -->
     <app-modal
       [isOpen]="showStatusModal()"
       [title]="'Cambiar Estado'"
       [subtitle]="'Selecciona el nuevo estado del ticket'"
       (cancel)="closeStatusModal()"
-    >
+      >
       <form [formGroup]="statusForm" class="space-y-4">
         <div>
           <label class="block text-sm font-semibold text-text-primary mb-2">Nuevo Estado</label>
           <select
             formControlName="status"
             class="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-primary focus:border-transparent"
-          >
+            >
             <option value="">Seleccionar...</option>
             <option [value]="TicketStatus.NEW">Nuevo</option>
             <option [value]="TicketStatus.OPEN">Abierto</option>
@@ -257,7 +267,7 @@ import {
           ></textarea>
         </div>
       </form>
-
+    
       <div slot="footer" class="flex justify-end gap-3">
         <app-button variant="ghost" (click)="closeStatusModal()" size="sm">
           Cancelar
@@ -267,18 +277,18 @@ import {
         </app-button>
       </div>
     </app-modal>
-
+    
     <!-- Close Ticket Modal -->
     <app-modal
       [isOpen]="showCloseModal()"
       [title]="'Cerrar Ticket'"
       [subtitle]="'¿Estás seguro de que deseas cerrar este ticket?'"
       (cancel)="closeCloseModal()"
-    >
+      >
       <p class="text-text-primary mb-4 text-sm">
         Una vez cerrado, el ticket será marcado como resuelto. Si necesitas ayuda adicional, puedes reabrir el ticket en cualquier momento.
       </p>
-
+    
       <form [formGroup]="closeForm" class="space-y-4">
         <div>
           <label class="block text-sm font-semibold text-text-primary mb-2">Resolución (opcional)</label>
@@ -290,7 +300,7 @@ import {
           ></textarea>
         </div>
       </form>
-
+    
       <div slot="footer" class="flex justify-end gap-3">
         <app-button variant="ghost" (click)="closeCloseModal()" size="sm">
           Cancelar
@@ -300,10 +310,10 @@ import {
         </app-button>
       </div>
     </app-modal>
-
+    
     <!-- Image Lightbox -->
     <app-image-lightbox [currentImage]="lightboxCurrentImage" [isOpen]="lightboxOpen" (close)="closeLightbox()"></app-image-lightbox>
-  `,
+    `,
   styles: [`
     :host {
       display: block;

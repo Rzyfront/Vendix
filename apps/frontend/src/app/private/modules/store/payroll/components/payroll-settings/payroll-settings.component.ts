@@ -99,27 +99,29 @@ const CURRENCY_FIELDS = new Set([
       [actions]="headerActions"
       (actionClicked)="onHeaderAction($event)"
     ></app-sticky-header>
-
+    
     <div class="w-full px-2 md:px-0 mt-4">
       <!-- Year Selector -->
       <div class="flex items-center gap-2 mb-4">
         <div
           class="flex items-center gap-1.5 bg-surface border border-border rounded-lg px-2.5 py-1.5"
-        >
+          >
           <span class="text-xs font-medium text-text-muted">Año fiscal</span>
           <select
             [ngModel]="selectedYear"
             (ngModelChange)="onYearChange($event)"
             class="text-sm font-semibold text-text-primary bg-transparent border-none focus:outline-none cursor-pointer appearance-none pr-4"
             style="background-image: url('data:image/svg+xml;charset=UTF-8,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2212%22 height=%2212%22 viewBox=%220 0 24 24%22 fill=%22none%22 stroke=%22%23999%22 stroke-width=%222%22%3E%3Cpath d=%22M6 9l6 6 6-6%22/%3E%3C/svg%3E'); background-repeat: no-repeat; background-position: right 0 center;"
-          >
-            <option *ngFor="let year of availableYears" [value]="year">
-              {{ year }}
-            </option>
+            >
+            @for (year of availableYears; track year) {
+              <option [value]="year">
+                {{ year }}
+              </option>
+            }
           </select>
         </div>
       </div>
-
+    
       <!-- Update Banner -->
       @if (available_update()) {
         <div class="mb-4 rounded-xl border border-blue-200 bg-blue-50 overflow-hidden">
@@ -150,7 +152,7 @@ const CURRENCY_FIELDS = new Set([
                 type="button"
                 (click)="toggleDiff()"
                 class="text-xs font-medium text-blue-700 hover:text-blue-900 underline underline-offset-2 transition-colors"
-              >
+                >
                 {{ show_diff() ? 'Ocultar cambios' : 'Ver cambios' }}
               </button>
               <button
@@ -158,7 +160,7 @@ const CURRENCY_FIELDS = new Set([
                 (click)="applyDefaults()"
                 [disabled]="applying_defaults"
                 class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg transition-colors"
-              >
+                >
                 @if (applying_defaults) {
                   <span class="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
                   Aplicando...
@@ -169,7 +171,7 @@ const CURRENCY_FIELDS = new Set([
               </button>
             </div>
           </div>
-
+    
           <!-- Diff Table -->
           @if (show_diff() && diffEntries().length > 0) {
             <div class="border-t border-blue-200 px-4 pb-3 md:px-5 md:pb-4 pt-3">
@@ -200,143 +202,153 @@ const CURRENCY_FIELDS = new Set([
           }
         </div>
       }
-
+    
       <!-- Loading State -->
-      <div *ngIf="loading" class="flex items-center justify-center py-12">
-        <div
-          class="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin"
-        ></div>
-        <span class="ml-3 text-sm text-text-secondary">Cargando reglas...</span>
-      </div>
-
-      <!-- Grouped Cards Grid -->
-      <div *ngIf="!loading && rules" class="payroll-grid">
-        <div
-          *ngFor="let card of cards"
-          class="payroll-card rounded-xl overflow-hidden"
-        >
-          <!-- Card Header with Icon -->
+      @if (loading) {
+        <div class="flex items-center justify-center py-12">
           <div
-            class="flex items-center gap-2.5 px-4 py-3 md:px-5 md:py-4 border-b border-border"
-          >
-            <div
-              class="w-9 h-9 rounded-[10px] flex items-center justify-center flex-shrink-0"
-              [ngClass]="[card.iconBgClass, card.iconTextClass]"
-            >
-              <app-icon [name]="card.icon" [size]="18" />
-            </div>
-            <h3 class="text-sm font-semibold text-text-primary">
-              {{ card.title }}
-            </h3>
-          </div>
-
-          <!-- Card Body: Subsections -->
-          <div class="p-3 md:p-4">
-            <ng-container *ngFor="let sub of card.subsections; let last = last">
-              <h4
-                class="text-[10px] font-semibold text-text-muted uppercase tracking-wider mb-2"
-              >
-                {{ sub.title }}
-              </h4>
-              <div class="grid grid-cols-2 md:grid-cols-3 gap-2.5 md:gap-3">
-                <div *ngFor="let field of sub.fields" class="relative">
-                  <label
-                    class="block text-[11px] font-medium text-text-secondary mb-1 leading-tight"
-                  >
-                    {{ field.label }}
-                    <span
-                      *ngIf="isModified(field.key)"
-                      class="ml-1 inline-block w-1.5 h-1.5 bg-primary rounded-full align-middle"
-                      title="Modificado"
-                    ></span>
-                  </label>
-                  <div class="relative">
-                    <ng-container *ngIf="field.type === 'currency'">
-                      <span
-                        class="absolute left-2.5 top-1/2 -translate-y-1/2 text-[10px] text-text-muted font-medium"
-                        >$</span
-                      >
-                      <input
-                        type="number"
-                        [ngModel]="getFieldValue(field.key)"
-                        (ngModelChange)="onFieldChange(field.key, $event)"
-                        [disabled]="field.readonly"
-                        class="w-full pl-6 pr-2 py-1.5 text-xs border border-border rounded-md bg-background text-text-primary focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/40 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                        step="100"
-                      />
-                    </ng-container>
-                    <ng-container *ngIf="field.type === 'percent'">
-                      <input
-                        type="number"
-                        [ngModel]="getPercentValue(field.key)"
-                        (ngModelChange)="onPercentChange(field.key, $event)"
-                        [disabled]="field.readonly"
-                        class="w-full pl-2.5 pr-6 py-1.5 text-xs border border-border rounded-md bg-background text-text-primary focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/40 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                        step="0.01"
-                      />
-                      <span
-                        class="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-text-muted font-medium"
-                        >%</span
-                      >
-                    </ng-container>
-                    <ng-container *ngIf="field.type === 'number'">
-                      <input
-                        type="number"
-                        [ngModel]="getFieldValue(field.key)"
-                        (ngModelChange)="onFieldChange(field.key, $event)"
-                        [disabled]="field.readonly"
-                        class="w-full px-2.5 py-1.5 text-xs border border-border rounded-md bg-background text-text-primary focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/40 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                        step="1"
-                      />
-                    </ng-container>
-                  </div>
-                </div>
-              </div>
-              <hr
-                *ngIf="!last || card.includeArl"
-                class="border-t border-border/60 my-3 md:my-4"
-              />
-            </ng-container>
-
-            <!-- ARL Rates (only in Seguridad Social card) -->
-            <ng-container *ngIf="card.includeArl">
-              <h4
-                class="text-[10px] font-semibold text-text-muted uppercase tracking-wider mb-2"
-              >
-                Tarifas ARL por Nivel de Riesgo
-              </h4>
-              <div class="grid grid-cols-3 sm:grid-cols-5 gap-2.5">
-                <div *ngFor="let level of [1, 2, 3, 4, 5]" class="relative">
-                  <label
-                    class="block text-[11px] font-medium text-text-secondary mb-1"
-                  >
-                    Nivel {{ level }}
-                    <span
-                      *ngIf="isArlModified(level)"
-                      class="ml-1 inline-block w-1.5 h-1.5 bg-primary rounded-full align-middle"
-                    ></span>
-                  </label>
-                  <div class="relative">
-                    <input
-                      type="number"
-                      [ngModel]="getArlPercent(level)"
-                      (ngModelChange)="onArlChange(level, $event)"
-                      class="w-full pl-2.5 pr-6 py-1.5 text-xs border border-border rounded-md bg-background text-text-primary focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/40 transition-colors"
-                      step="0.001"
-                    />
-                    <span
-                      class="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-text-muted font-medium"
-                      >%</span
-                    >
-                  </div>
-                </div>
-              </div>
-            </ng-container>
-          </div>
+            class="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin"
+          ></div>
+          <span class="ml-3 text-sm text-text-secondary">Cargando reglas...</span>
         </div>
-      </div>
-    </div>
-  `,
+      }
+    
+      <!-- Grouped Cards Grid -->
+      @if (!loading && rules) {
+        <div class="payroll-grid">
+          @for (card of cards; track card) {
+            <div
+              class="payroll-card rounded-xl overflow-hidden"
+              >
+              <!-- Card Header with Icon -->
+              <div
+                class="flex items-center gap-2.5 px-4 py-3 md:px-5 md:py-4 border-b border-border"
+                >
+                <div
+                  class="w-9 h-9 rounded-[10px] flex items-center justify-center flex-shrink-0"
+                  [ngClass]="[card.iconBgClass, card.iconTextClass]"
+                  >
+                  <app-icon [name]="card.icon" [size]="18" />
+                </div>
+                <h3 class="text-sm font-semibold text-text-primary">
+                  {{ card.title }}
+                </h3>
+              </div>
+              <!-- Card Body: Subsections -->
+              <div class="p-3 md:p-4">
+                @for (sub of card.subsections; track sub; let last = $last) {
+                  <h4
+                    class="text-[10px] font-semibold text-text-muted uppercase tracking-wider mb-2"
+                    >
+                    {{ sub.title }}
+                  </h4>
+                  <div class="grid grid-cols-2 md:grid-cols-3 gap-2.5 md:gap-3">
+                    @for (field of sub.fields; track field) {
+                      <div class="relative">
+                        <label
+                          class="block text-[11px] font-medium text-text-secondary mb-1 leading-tight"
+                          >
+                          {{ field.label }}
+                          @if (isModified(field.key)) {
+                            <span
+                              class="ml-1 inline-block w-1.5 h-1.5 bg-primary rounded-full align-middle"
+                              title="Modificado"
+                            ></span>
+                          }
+                        </label>
+                        <div class="relative">
+                          @if (field.type === 'currency') {
+                            <span
+                              class="absolute left-2.5 top-1/2 -translate-y-1/2 text-[10px] text-text-muted font-medium"
+                              >$</span
+                              >
+                              <input
+                                type="number"
+                                [ngModel]="getFieldValue(field.key)"
+                                (ngModelChange)="onFieldChange(field.key, $event)"
+                                [disabled]="field.readonly"
+                                class="w-full pl-6 pr-2 py-1.5 text-xs border border-border rounded-md bg-background text-text-primary focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/40 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                step="100"
+                                />
+                            }
+                            @if (field.type === 'percent') {
+                              <input
+                                type="number"
+                                [ngModel]="getPercentValue(field.key)"
+                                (ngModelChange)="onPercentChange(field.key, $event)"
+                                [disabled]="field.readonly"
+                                class="w-full pl-2.5 pr-6 py-1.5 text-xs border border-border rounded-md bg-background text-text-primary focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/40 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                step="0.01"
+                                />
+                              <span
+                                class="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-text-muted font-medium"
+                                >%</span
+                                >
+                              }
+                              @if (field.type === 'number') {
+                                <input
+                                  type="number"
+                                  [ngModel]="getFieldValue(field.key)"
+                                  (ngModelChange)="onFieldChange(field.key, $event)"
+                                  [disabled]="field.readonly"
+                                  class="w-full px-2.5 py-1.5 text-xs border border-border rounded-md bg-background text-text-primary focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/40 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                                  step="1"
+                                  />
+                              }
+                            </div>
+                          </div>
+                        }
+                      </div>
+                      @if (!last || card.includeArl) {
+                        <hr
+                          class="border-t border-border/60 my-3 md:my-4"
+                          />
+                      }
+                    }
+                    <!-- ARL Rates (only in Seguridad Social card) -->
+                    @if (card.includeArl) {
+                      <h4
+                        class="text-[10px] font-semibold text-text-muted uppercase tracking-wider mb-2"
+                        >
+                        Tarifas ARL por Nivel de Riesgo
+                      </h4>
+                      <div class="grid grid-cols-3 sm:grid-cols-5 gap-2.5">
+                        @for (level of [1, 2, 3, 4, 5]; track level) {
+                          <div class="relative">
+                            <label
+                              class="block text-[11px] font-medium text-text-secondary mb-1"
+                              >
+                              Nivel {{ level }}
+                              @if (isArlModified(level)) {
+                                <span
+                                  class="ml-1 inline-block w-1.5 h-1.5 bg-primary rounded-full align-middle"
+                                ></span>
+                              }
+                            </label>
+                            <div class="relative">
+                              <input
+                                type="number"
+                                [ngModel]="getArlPercent(level)"
+                                (ngModelChange)="onArlChange(level, $event)"
+                                class="w-full pl-2.5 pr-6 py-1.5 text-xs border border-border rounded-md bg-background text-text-primary focus:outline-none focus:ring-1 focus:ring-primary/40 focus:border-primary/40 transition-colors"
+                                step="0.001"
+                                />
+                              <span
+                                class="absolute right-2.5 top-1/2 -translate-y-1/2 text-[10px] text-text-muted font-medium"
+                                >%</span
+                                >
+                              </div>
+                            </div>
+                          }
+                        </div>
+                      }
+                    </div>
+                  </div>
+                }
+              </div>
+            }
+          </div>
+    `,
   styles: [
     `
       :host {

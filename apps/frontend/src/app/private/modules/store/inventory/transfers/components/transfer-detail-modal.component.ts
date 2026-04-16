@@ -321,6 +321,11 @@ export class TransferDetailModalComponent implements OnChanges {
 
   onClose(): void {
     this.isCompleting = false;
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.closed.emit();
   }
 

@@ -4,9 +4,9 @@ import {
   HostListener,
   inject,
   OnDestroy,
-  ViewChild,
+  viewChild
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { Subject, takeUntil, debounceTime, distinctUntilChanged } from 'rxjs';
@@ -19,24 +19,24 @@ import { HelpArticle } from '../../../private/modules/store/help/models/help-art
 @Component({
   selector: 'app-help-search-overlay',
   standalone: true,
-  imports: [CommonModule, FormsModule, IconComponent, SpinnerComponent],
+  imports: [FormsModule, IconComponent, SpinnerComponent],
   template: `
     <!-- Trigger Button -->
     <button
       class="search-trigger"
       (click)="open($event)"
       aria-label="Buscar en Centro de Ayuda"
-    >
+      >
       <app-icon name="search" [size]="18"></app-icon>
     </button>
-
+    
     <!-- Overlay -->
     <dialog
       #dialogRef
       class="overlay"
       (click)="onBackdropClick($event)"
       (cancel)="close()"
-    >
+      >
       <div class="spotlight" (click)="$event.stopPropagation()">
         <!-- Search Input -->
         <div class="spotlight-input-wrap">
@@ -49,55 +49,65 @@ import { HelpArticle } from '../../../private/modules/store/help/models/help-art
             [(ngModel)]="query"
             (ngModelChange)="onQueryChange($event)"
             autocomplete="off"
-          />
-          <kbd class="spotlight-kbd" *ngIf="!query">ESC</kbd>
-          <button
-            *ngIf="query"
-            class="spotlight-clear"
-            (click)="clearQuery()"
-          >
-            <app-icon name="x" [size]="16"></app-icon>
-          </button>
+            />
+          @if (!query) {
+            <kbd class="spotlight-kbd">ESC</kbd>
+          }
+          @if (query) {
+            <button
+              class="spotlight-clear"
+              (click)="clearQuery()"
+              >
+              <app-icon name="x" [size]="16"></app-icon>
+            </button>
+          }
         </div>
-
+    
         <!-- Results -->
-        <div class="spotlight-results" *ngIf="query.length >= 2">
-          <!-- Loading -->
-          <div class="spotlight-loading" *ngIf="isSearching">
-            <app-spinner size="sm"></app-spinner>
-            <span>Buscando...</span>
+        @if (query.length >= 2) {
+          <div class="spotlight-results">
+            <!-- Loading -->
+            @if (isSearching) {
+              <div class="spotlight-loading">
+                <app-spinner size="sm"></app-spinner>
+                <span>Buscando...</span>
+              </div>
+            }
+            <!-- Results List -->
+            @for (article of results; track article; let i = $index) {
+              <div
+                class="spotlight-result"
+                [class.active]="i === activeIndex"
+                (click)="selectResult(article)"
+                (mouseenter)="activeIndex = i"
+                >
+                <div class="result-content">
+                  <span class="result-title">{{ article.title }}</span>
+                  <span class="result-summary">{{ article.summary }}</span>
+                </div>
+                <span class="result-category">{{ article.category.name }}</span>
+              </div>
+            }
+            <!-- Empty -->
+            @if (!isSearching && results.length === 0 && hasSearched) {
+              <div class="spotlight-empty">
+                <app-icon name="search" [size]="24" class="empty-icon"></app-icon>
+                <span>No se encontraron artículos</span>
+              </div>
+            }
           </div>
-
-          <!-- Results List -->
-          <div
-            *ngFor="let article of results; let i = index"
-            class="spotlight-result"
-            [class.active]="i === activeIndex"
-            (click)="selectResult(article)"
-            (mouseenter)="activeIndex = i"
-          >
-            <div class="result-content">
-              <span class="result-title">{{ article.title }}</span>
-              <span class="result-summary">{{ article.summary }}</span>
-            </div>
-            <span class="result-category">{{ article.category.name }}</span>
-          </div>
-
-          <!-- Empty -->
-          <div class="spotlight-empty" *ngIf="!isSearching && results.length === 0 && hasSearched">
-            <app-icon name="search" [size]="24" class="empty-icon"></app-icon>
-            <span>No se encontraron artículos</span>
-          </div>
-        </div>
-
+        }
+    
         <!-- Hint -->
-        <div class="spotlight-hint" *ngIf="query.length < 2">
-          <app-icon name="help-circle" [size]="16"></app-icon>
-          <span>Escribe al menos 2 caracteres para buscar</span>
-        </div>
+        @if (query.length < 2) {
+          <div class="spotlight-hint">
+            <app-icon name="help-circle" [size]="16"></app-icon>
+            <span>Escribe al menos 2 caracteres para buscar</span>
+          </div>
+        }
       </div>
     </dialog>
-  `,
+    `,
   styles: [`
     .search-trigger {
       display: flex;
@@ -298,7 +308,7 @@ export class HelpSearchOverlayComponent implements OnDestroy {
   private destroy$ = new Subject<void>();
   private searchSubject$ = new Subject<string>();
 
-  @ViewChild('dialogRef') dialogRef!: ElementRef<HTMLDialogElement>;
+  readonly dialogRef = viewChild.required<ElementRef<HTMLDialogElement>>('dialogRef');
 
   isOpen = false;
   query = '';
@@ -351,17 +361,18 @@ export class HelpSearchOverlayComponent implements OnDestroy {
 
   open(event: Event): void {
     event.stopPropagation();
-    this.dialogRef.nativeElement.showModal();
+    this.dialogRef().nativeElement.showModal();
     this.isOpen = true;
     setTimeout(() => {
-      const input = this.dialogRef.nativeElement.querySelector('.spotlight-input') as HTMLInputElement;
+      const input = this.dialogRef().nativeElement.querySelector('.spotlight-input') as HTMLInputElement;
       input?.focus();
     }, 50);
   }
 
   close(): void {
-    if (this.dialogRef.nativeElement.open) {
-      this.dialogRef.nativeElement.close();
+    const dialogRef = this.dialogRef();
+    if (dialogRef.nativeElement.open) {
+      dialogRef.nativeElement.close();
     }
     this.isOpen = false;
     this.query = '';
@@ -371,7 +382,7 @@ export class HelpSearchOverlayComponent implements OnDestroy {
   }
 
   onBackdropClick(event: Event): void {
-    if (event.target === this.dialogRef.nativeElement) {
+    if (event.target === this.dialogRef().nativeElement) {
       this.close();
     }
   }

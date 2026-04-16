@@ -1,5 +1,5 @@
 import { Component, Input, Output, EventEmitter, OnInit } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
@@ -16,12 +16,11 @@ import { PopCartService, PopCartItemLotInfo } from '../services/pop-cart.service
   selector: 'app-pop-lot-modal',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ModalComponent,
     ButtonComponent,
-    InputComponent,
-  ],
+    InputComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen"
@@ -138,6 +137,11 @@ export class PopLotModalComponent {
       });
     } else {
       // If empty, treat as skip
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
       this.skip.emit();
     }
     this.resetForm();
@@ -145,17 +149,32 @@ export class PopLotModalComponent {
   }
 
   onSkip(): void {
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.skip.emit();
     this.resetForm();
     this.isOpenChange.emit(false);
   }
 
   onClose(): void {
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.close.emit();
     this.resetForm();
   }
 
   onCancel(): void {
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.close.emit();
     this.resetForm();
     this.isOpenChange.emit(false);

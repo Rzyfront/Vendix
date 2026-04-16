@@ -1,5 +1,5 @@
 import { Component, Input, Output, EventEmitter, signal, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { Subject, takeUntil } from 'rxjs';
 
@@ -38,14 +38,13 @@ interface BulkUploadResult {
   selector: 'app-bulk-adjustment-modal',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ModalComponent,
     ButtonComponent,
     SelectorComponent,
     TextareaComponent,
-    IconComponent,
-  ],
+    IconComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen"
@@ -415,6 +414,11 @@ export class BulkAdjustmentModalComponent {
             );
           }
 
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
           this.completed.emit();
         },
         error: (err) => {

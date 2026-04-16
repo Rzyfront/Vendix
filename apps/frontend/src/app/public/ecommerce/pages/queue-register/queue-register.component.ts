@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   FormBuilder,
   FormGroup,
@@ -21,119 +21,122 @@ import { TenantFacade } from '../../../../core/store';
   selector: 'app-queue-register',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ButtonComponent,
     InputComponent,
     SelectorComponent,
-    IconComponent,
-  ],
+    IconComponent
+],
   template: `
     <div class="min-h-screen bg-[var(--color-background)] flex items-center justify-center p-4">
       <div class="w-full max-w-md">
         <!-- Registration Form -->
-        <div *ngIf="!registered" class="bg-[var(--color-surface)] rounded-2xl shadow-lg p-6 space-y-6">
-          <div class="text-center">
-            <div class="w-16 h-16 rounded-full bg-[var(--color-primary-light)] flex items-center justify-center mx-auto mb-4">
-              <app-icon name="users" [size]="32" color="var(--color-primary)"></app-icon>
+        @if (!registered) {
+          <div class="bg-[var(--color-surface)] rounded-2xl shadow-lg p-6 space-y-6">
+            <div class="text-center">
+              <div class="w-16 h-16 rounded-full bg-[var(--color-primary-light)] flex items-center justify-center mx-auto mb-4">
+                <app-icon name="users" [size]="32" color="var(--color-primary)"></app-icon>
+              </div>
+              <h1 class="text-xl font-bold text-[var(--color-text-primary)]">Registro en Cola</h1>
+              <p class="text-sm text-[var(--color-text-secondary)] mt-1">
+                Regístrese para ser atendido más rápido
+              </p>
             </div>
-            <h1 class="text-xl font-bold text-[var(--color-text-primary)]">Registro en Cola</h1>
-            <p class="text-sm text-[var(--color-text-secondary)] mt-1">
-              Regístrese para ser atendido más rápido
-            </p>
+            <form [formGroup]="form" (ngSubmit)="onSubmit()" class="space-y-4">
+              <div class="grid grid-cols-2 gap-3">
+                <app-input
+                  formControlName="first_name"
+                  label="Nombre *"
+                  placeholder="Juan"
+                  type="text"
+                  [size]="'md'"
+                ></app-input>
+                <app-input
+                  formControlName="last_name"
+                  label="Apellido *"
+                  placeholder="Pérez"
+                  type="text"
+                  [size]="'md'"
+                ></app-input>
+              </div>
+              <div class="grid grid-cols-2 gap-3">
+                <app-selector
+                  formControlName="document_type"
+                  label="Tipo Doc. *"
+                  [options]="documentTypeOptions"
+                  [size]="'md'"
+                  [placeholder]="'Seleccionar'"
+                ></app-selector>
+                <app-input
+                  formControlName="document_number"
+                  label="Número *"
+                  placeholder="12345678"
+                  type="text"
+                  [size]="'md'"
+                ></app-input>
+              </div>
+              <app-input
+                formControlName="email"
+                label="Email (opcional)"
+                placeholder="correo@ejemplo.com"
+                type="email"
+                [size]="'md'"
+              ></app-input>
+              <app-input
+                formControlName="phone"
+                label="Teléfono (opcional)"
+                placeholder="+57 300 123 4567"
+                type="tel"
+                [size]="'md'"
+              ></app-input>
+              <app-button
+                variant="primary"
+                size="lg"
+                type="submit"
+                [loading]="submitting"
+                [disabled]="!form.valid || submitting"
+                [fullWidth]="true"
+                >
+                Registrarme en la Cola
+              </app-button>
+            </form>
+            @if (errorMessage) {
+              <p class="text-sm text-red-500 text-center">
+                {{ errorMessage }}
+              </p>
+            }
           </div>
-
-          <form [formGroup]="form" (ngSubmit)="onSubmit()" class="space-y-4">
-            <div class="grid grid-cols-2 gap-3">
-              <app-input
-                formControlName="first_name"
-                label="Nombre *"
-                placeholder="Juan"
-                type="text"
-                [size]="'md'"
-              ></app-input>
-              <app-input
-                formControlName="last_name"
-                label="Apellido *"
-                placeholder="Pérez"
-                type="text"
-                [size]="'md'"
-              ></app-input>
-            </div>
-
-            <div class="grid grid-cols-2 gap-3">
-              <app-selector
-                formControlName="document_type"
-                label="Tipo Doc. *"
-                [options]="documentTypeOptions"
-                [size]="'md'"
-                [placeholder]="'Seleccionar'"
-              ></app-selector>
-              <app-input
-                formControlName="document_number"
-                label="Número *"
-                placeholder="12345678"
-                type="text"
-                [size]="'md'"
-              ></app-input>
-            </div>
-
-            <app-input
-              formControlName="email"
-              label="Email (opcional)"
-              placeholder="correo@ejemplo.com"
-              type="email"
-              [size]="'md'"
-            ></app-input>
-
-            <app-input
-              formControlName="phone"
-              label="Teléfono (opcional)"
-              placeholder="+57 300 123 4567"
-              type="tel"
-              [size]="'md'"
-            ></app-input>
-
-            <app-button
-              variant="primary"
-              size="lg"
-              type="submit"
-              [loading]="submitting"
-              [disabled]="!form.valid || submitting"
-              [fullWidth]="true"
-            >
-              Registrarme en la Cola
-            </app-button>
-          </form>
-
-          <p *ngIf="errorMessage" class="text-sm text-red-500 text-center">
-            {{ errorMessage }}
-          </p>
-        </div>
-
+        }
+    
         <!-- Success State -->
-        <div *ngIf="registered" class="bg-[var(--color-surface)] rounded-2xl shadow-lg p-6 text-center space-y-4">
-          <div class="w-20 h-20 rounded-full bg-green-100 flex items-center justify-center mx-auto">
-            <app-icon name="check" [size]="40" color="#16a34a"></app-icon>
+        @if (registered) {
+          <div class="bg-[var(--color-surface)] rounded-2xl shadow-lg p-6 text-center space-y-4">
+            <div class="w-20 h-20 rounded-full bg-green-100 flex items-center justify-center mx-auto">
+              <app-icon name="check" [size]="40" color="#16a34a"></app-icon>
+            </div>
+            <h2 class="text-xl font-bold text-[var(--color-text-primary)]">¡Registrado!</h2>
+            <div class="bg-[var(--color-primary-light)] rounded-xl p-4">
+              <p class="text-sm text-[var(--color-text-secondary)]">Su posición en la cola</p>
+              <p class="text-4xl font-bold text-[var(--color-primary)] mt-1">#{{ currentPosition }}</p>
+            </div>
+            <p class="text-sm text-[var(--color-text-secondary)]">
+              {{ registeredName }}, el cajero le llamará pronto. No cierre esta página para ver actualizaciones.
+            </p>
+            @if (queueStatus === 'selected') {
+              <div class="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mt-4">
+                <p class="text-yellow-800 font-medium">¡Es su turno! Acérquese a la caja.</p>
+              </div>
+            }
+            @if (queueStatus === 'consumed') {
+              <div class="bg-green-50 border border-green-200 rounded-xl p-4 mt-4">
+                <p class="text-green-800 font-medium">Su compra ha sido procesada. ¡Gracias!</p>
+              </div>
+            }
           </div>
-          <h2 class="text-xl font-bold text-[var(--color-text-primary)]">¡Registrado!</h2>
-          <div class="bg-[var(--color-primary-light)] rounded-xl p-4">
-            <p class="text-sm text-[var(--color-text-secondary)]">Su posición en la cola</p>
-            <p class="text-4xl font-bold text-[var(--color-primary)] mt-1">#{{ currentPosition }}</p>
-          </div>
-          <p class="text-sm text-[var(--color-text-secondary)]">
-            {{ registeredName }}, el cajero le llamará pronto. No cierre esta página para ver actualizaciones.
-          </p>
-          <div *ngIf="queueStatus === 'selected'" class="bg-yellow-50 border border-yellow-200 rounded-xl p-4 mt-4">
-            <p class="text-yellow-800 font-medium">¡Es su turno! Acérquese a la caja.</p>
-          </div>
-          <div *ngIf="queueStatus === 'consumed'" class="bg-green-50 border border-green-200 rounded-xl p-4 mt-4">
-            <p class="text-green-800 font-medium">Su compra ha sido procesada. ¡Gracias!</p>
-          </div>
-        </div>
+        }
       </div>
     </div>
-  `,
+    `,
 })
 export class QueueRegisterComponent implements OnInit, OnDestroy {
   form: FormGroup;

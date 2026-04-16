@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { Router } from '@angular/router';
 import { Subject, takeUntil } from 'rxjs';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
@@ -17,10 +17,9 @@ import {
   selector: 'app-quotations',
   standalone: true,
   imports: [
-    CommonModule,
     StatsComponent,
-    QuotationListComponent,
-  ],
+    QuotationListComponent
+],
   template: `
     <div class="w-full">
       <!-- Stats: Sticky on mobile, static on desktop -->

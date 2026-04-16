@@ -1,14 +1,14 @@
 import {
   Component,
   Input,
-  Output,
-  EventEmitter,
   inject,
   OnInit,
   OnDestroy,
   OnChanges,
   SimpleChanges,
   ChangeDetectorRef,
+  input,
+  output
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule } from '@angular/forms';
@@ -60,13 +60,13 @@ import { OrganizationStoreSettingsService } from '../../services/organization-st
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="onOpenChange($event)"
       (cancel)="onCancel()"
       [size]="'xl'"
       title="Configuración de Tienda"
       [subtitle]="storeName"
-    >
+      >
       <!-- Status Header -->
       <div class="flex items-center justify-between mb-6 pb-4 border-b border-border">
         <div class="flex items-center gap-3">
@@ -87,20 +87,20 @@ import { OrganizationStoreSettingsService } from '../../services/organization-st
             </span>
           }
         </div>
-
+    
         <div class="flex items-center gap-2">
           <app-button
             variant="outline-danger"
             size="sm"
             (clicked)="resetToDefaults()"
             [disabled]="isLoading || isSaving"
-          >
+            >
             <app-icon name="rotate-ccw" size="16" class="mr-2"></app-icon>
             Restablecer
           </app-button>
         </div>
       </div>
-
+    
       @if (isLoading) {
         <!-- Loading State -->
         <div class="text-center py-16">
@@ -111,24 +111,25 @@ import { OrganizationStoreSettingsService } from '../../services/organization-st
         <!-- Tabs Navigation -->
         <div class="mb-6">
           <nav class="flex gap-2 bg-surface rounded-xl p-1.5 border border-border" role="tablist">
-            <button
-              *ngFor="let tab of tabs"
-              (click)="switchTab(tab.id)"
+            @for (tab of tabs; track tab) {
+              <button
+                (click)="switchTab(tab.id)"
               [class]="
                 activeTabId === tab.id
                   ? 'bg-[var(--color-primary)] text-white shadow-sm'
                   : 'text-text-secondary hover:text-[var(--color-primary)] hover:bg-[var(--color-primary)]/10'
               "
-              class="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 min-w-[120px] justify-center"
-              [attr.aria-selected]="activeTabId === tab.id"
-              role="tab"
-            >
-              <app-icon [name]="tab.icon" color="currentColor" size="16"></app-icon>
-              <span>{{ tab.label }}</span>
-            </button>
+                class="flex items-center gap-2 px-4 py-2.5 rounded-lg text-sm font-medium transition-all duration-200 min-w-[120px] justify-center"
+                [attr.aria-selected]="activeTabId === tab.id"
+                role="tab"
+                >
+                <app-icon [name]="tab.icon" color="currentColor" size="16"></app-icon>
+                <span>{{ tab.label }}</span>
+              </button>
+            }
           </nav>
         </div>
-
+    
         <!-- Tab Content -->
         <div class="min-h-[500px] max-h-[75vh] overflow-y-auto pr-2">
           @switch (activeTabId) {
@@ -144,11 +145,11 @@ import { OrganizationStoreSettingsService } from '../../services/organization-st
                   <app-general-settings-form
                     [settings]="settings.general"
                     (settingsChange)="onSectionChange('general', $event)"
-                  />
+                    />
                 </div>
               </div>
             }
-
+    
             @case ('branding') {
               <div class="animate-fade-in">
                 <div class="bg-surface rounded-xl border border-border p-6">
@@ -161,11 +162,11 @@ import { OrganizationStoreSettingsService } from '../../services/organization-st
                   <app-app-settings-form
                     [settings]="settings.app"
                     (settingsChange)="onSectionChange('app', $event)"
-                  />
+                    />
                 </div>
               </div>
             }
-
+    
             @case ('inventory') {
               <div class="animate-fade-in">
                 <div class="bg-surface rounded-xl border border-border p-6">
@@ -178,11 +179,11 @@ import { OrganizationStoreSettingsService } from '../../services/organization-st
                   <app-inventory-settings-form
                     [settings]="settings.inventory"
                     (settingsChange)="onSectionChange('inventory', $event)"
-                  />
+                    />
                 </div>
               </div>
             }
-
+    
             @case ('notifications') {
               <div class="animate-fade-in">
                 <div class="bg-surface rounded-xl border border-border p-6">
@@ -195,11 +196,11 @@ import { OrganizationStoreSettingsService } from '../../services/organization-st
                   <app-notifications-settings-form
                     [settings]="settings.notifications"
                     (settingsChange)="onSectionChange('notifications', $event)"
-                  />
+                    />
                 </div>
               </div>
             }
-
+    
             @case ('pos') {
               <div class="animate-fade-in">
                 <div class="bg-surface rounded-xl border border-border p-6">
@@ -212,11 +213,11 @@ import { OrganizationStoreSettingsService } from '../../services/organization-st
                   <app-pos-settings-form
                     [settings]="settings.pos"
                     (settingsChange)="onSectionChange('pos', $event)"
-                  />
+                    />
                 </div>
               </div>
             }
-
+    
             @case ('receipts') {
               <div class="animate-fade-in">
                 <div class="bg-surface rounded-xl border border-border p-6">
@@ -229,14 +230,14 @@ import { OrganizationStoreSettingsService } from '../../services/organization-st
                   <app-receipts-settings-form
                     [settings]="settings.receipts"
                     (settingsChange)="onSectionChange('receipts', $event)"
-                  />
+                    />
                 </div>
               </div>
             }
           }
         </div>
       }
-
+    
       <!-- Footer with actions -->
       <div slot="footer" class="flex justify-between items-center pt-4 border-t border-border">
         <div class="text-sm text-text-secondary">
@@ -246,13 +247,13 @@ import { OrganizationStoreSettingsService } from '../../services/organization-st
             <span>Todos los cambios están guardados</span>
           }
         </div>
-
+    
         <div class="flex justify-end gap-3">
           <app-button
             (clicked)="onCancel()"
             variant="outline"
             [disabled]="isSaving"
-          >
+            >
             Cancelar
           </app-button>
           <app-button
@@ -260,14 +261,14 @@ import { OrganizationStoreSettingsService } from '../../services/organization-st
             [disabled]="!hasUnsavedChanges || isLoading"
             [loading]="isSaving"
             variant="primary"
-          >
+            >
             <app-icon name="save" size="16" class="mr-2"></app-icon>
             Guardar Cambios
           </app-button>
         </div>
       </div>
     </app-modal>
-  `,
+    `,
   styles: [
     `
       :host {
@@ -316,11 +317,11 @@ import { OrganizationStoreSettingsService } from '../../services/organization-st
 })
 export class StoreConfigurationModalComponent implements OnInit, OnDestroy, OnChanges {
   private currencyFormatService = inject(CurrencyFormatService);
-  @Input() isOpen: boolean = false;
-  @Input() storeId: number | null = null;
+  readonly isOpen = input<boolean>(false);
+  readonly storeId = input<number | null>(null);
   @Input() storeName: string = '';
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() settingsSaved = new EventEmitter<SettingsSavedEvent>();
+  readonly isOpenChange = output<boolean>();
+  readonly settingsSaved = output<SettingsSavedEvent>();
 
   private settings_service = inject(OrganizationStoreSettingsService);
   private toast_service = inject(ToastService);
@@ -417,22 +418,23 @@ export class StoreConfigurationModalComponent implements OnInit, OnDestroy, OnCh
   };
 
   ngOnInit(): void {
-    if (this.isOpen && this.storeId) {
+    if (this.isOpen() && this.storeId()) {
       this.loadSettings();
     }
   }
 
   ngOnChanges(changes: SimpleChanges): void {
-    if (changes['isOpen'] && changes['isOpen'].currentValue && this.storeId) {
+    if (changes['isOpen'] && changes['isOpen'].currentValue && this.storeId()) {
       this.loadSettings();
     }
   }
 
   loadSettings(): void {
-    if (!this.storeId) return;
+    const storeId = this.storeId();
+    if (!storeId) return;
 
     this.isLoading = true;
-    this.settings_service.getStoreSettings(this.storeId).pipe(
+    this.settings_service.getStoreSettings(storeId).pipe(
       takeUntil(this.destroy$$)
     ).subscribe({
       next: (response: ApiResponse<StoreSettings>) => {
@@ -472,10 +474,11 @@ export class StoreConfigurationModalComponent implements OnInit, OnDestroy, OnCh
   }
 
   async saveAllSettings(): Promise<void> {
-    if (!this.storeId) return;
+    const storeId = this.storeId();
+    if (!storeId) return;
 
     this.isSaving = true;
-    this.settings_service.saveSettingsNow(this.storeId, this.settings).pipe(
+    this.settings_service.saveSettingsNow(storeId, this.settings).pipe(
       takeUntil(this.destroy$$)
     ).subscribe({
       next: (response: ApiResponse<StoreSettings>) => {
@@ -541,7 +544,8 @@ export class StoreConfigurationModalComponent implements OnInit, OnDestroy, OnCh
   }
 
   async resetToDefaults(): Promise<void> {
-    if (!this.storeId) return;
+    const storeId = this.storeId();
+    if (!storeId) return;
 
     const confirmed = await this.dialog_service.confirm(
       {
@@ -556,7 +560,7 @@ export class StoreConfigurationModalComponent implements OnInit, OnDestroy, OnCh
 
     if (confirmed) {
       this.isLoading = true;
-      this.settings_service.resetToDefault(this.storeId).pipe(
+      this.settings_service.resetToDefault(storeId).pipe(
         takeUntil(this.destroy$$)
       ).subscribe({
         next: (response: ApiResponse<StoreSettings>) => {

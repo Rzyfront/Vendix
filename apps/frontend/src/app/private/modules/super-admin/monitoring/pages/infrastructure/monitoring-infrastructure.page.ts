@@ -1,5 +1,5 @@
 import { Component, ChangeDetectionStrategy, ChangeDetectorRef, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { timer } from 'rxjs';
 import { filter, map, catchError } from 'rxjs/operators';
@@ -13,7 +13,7 @@ import { Ec2MetricsResponse, RdsMetricsResponse, TimeRange } from '../../interfa
 @Component({
   selector: 'app-monitoring-infrastructure-page',
   standalone: true,
-  imports: [CommonModule, IconComponent, MetricChartComponent, TimeRangeSelectorComponent],
+  imports: [IconComponent, MetricChartComponent, TimeRangeSelectorComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <!-- EC2 Metrics Section -->

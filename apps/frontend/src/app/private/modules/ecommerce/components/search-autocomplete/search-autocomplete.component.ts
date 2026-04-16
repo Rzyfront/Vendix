@@ -5,7 +5,7 @@ import {
   inject,
   OnDestroy,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { RouterModule, Router } from '@angular/router';
 import { Subject, debounceTime, switchMap, takeUntil } from 'rxjs';
 import { EcommerceProduct } from '../../services/catalog.service';
@@ -15,7 +15,7 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
 @Component({
   selector: 'app-search-autocomplete',
   standalone: true,
-  imports: [CommonModule, RouterModule, IconComponent],
+  imports: [RouterModule, IconComponent],
   templateUrl: './search-autocomplete.component.html',
   styleUrls: ['./search-autocomplete.component.scss'],
 })

@@ -8,7 +8,7 @@ import {
   inject,
   ViewChild,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 
 import {
@@ -40,7 +40,6 @@ interface TransferItem {
   selector: 'app-transfer-create-modal',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ModalComponent,
     ButtonComponent,
@@ -49,8 +48,8 @@ interface TransferItem {
     TextareaComponent,
     IconComponent,
     StepsLineComponent,
-    InputsearchComponent,
-  ],
+    InputsearchComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen"
@@ -564,6 +563,11 @@ export class TransferCreateModalComponent implements OnChanges {
 
   onCancel(): void {
     this.resetModal();
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.cancel.emit();
   }
 

@@ -1,4 +1,4 @@
-import { Component, Input } from '@angular/core';
+import { Component, input } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { IconComponent } from '../icon/icon.component';
 
@@ -14,7 +14,7 @@ export type AlertBannerVariant = 'warning' | 'info' | 'danger' | 'success';
       [ngClass]="variantClasses"
     >
       <app-icon
-        [name]="icon"
+        [name]="icon()"
         size="18"
         [ngClass]="iconClasses"
         class="flex-shrink-0"
@@ -26,8 +26,8 @@ export type AlertBannerVariant = 'warning' | 'info' | 'danger' | 'success';
   `,
 })
 export class AlertBannerComponent {
-  @Input() variant: AlertBannerVariant = 'info';
-  @Input() icon = 'info';
+  readonly variant = input<AlertBannerVariant>('info');
+  readonly icon = input('info');
 
   get variantClasses(): string {
     const map: Record<AlertBannerVariant, string> = {
@@ -36,7 +36,7 @@ export class AlertBannerComponent {
       danger: 'bg-red-50 border-red-200',
       success: 'bg-green-50 border-green-200',
     };
-    return map[this.variant];
+    return map[this.variant()];
   }
 
   get iconClasses(): string {
@@ -46,7 +46,7 @@ export class AlertBannerComponent {
       danger: 'text-red-600',
       success: 'text-green-600',
     };
-    return map[this.variant];
+    return map[this.variant()];
   }
 
   get textClasses(): string {
@@ -56,6 +56,6 @@ export class AlertBannerComponent {
       danger: 'text-red-800',
       success: 'text-green-800',
     };
-    return map[this.variant];
+    return map[this.variant()];
   }
 }

@@ -6,7 +6,7 @@ import {
   OnInit,
   OnDestroy,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   ReactiveFormsModule,
   FormBuilder,
@@ -27,12 +27,11 @@ import { DispatchNoteWizardService } from '../../services/dispatch-note-wizard.s
   selector: 'app-dispatch-wizard-details-step',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     InputComponent,
     TextareaComponent,
-    SelectorComponent,
-  ],
+    SelectorComponent
+],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <form [formGroup]="form" class="space-y-3">

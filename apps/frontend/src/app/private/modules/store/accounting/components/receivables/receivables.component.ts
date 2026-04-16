@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
@@ -37,7 +37,6 @@ import type {
   selector: 'vendix-receivables',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReceivablePaymentModalComponent,
     ReceivableDetailModalComponent,
@@ -47,8 +46,8 @@ import type {
     ResponsiveDataViewComponent,
     OptionsDropdownComponent,
     PaginationComponent,
-    EmptyStateComponent,
-  ],
+    EmptyStateComponent
+],
   templateUrl: './receivables.component.html',
 })
 export class ReceivablesComponent implements OnInit, OnDestroy {

@@ -6,7 +6,7 @@ import {
   OnInit,
   OnChanges,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
 import { ToggleComponent } from '../../../../../../../shared/components/toggle/toggle.component';
@@ -26,7 +26,7 @@ import { LucideAngularModule } from 'lucide-angular';
 @Component({
   selector: 'app-inventory-settings-form',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, InputComponent, SelectorComponent],
+  imports: [ReactiveFormsModule, InputComponent, SelectorComponent],
   templateUrl: './inventory-settings-form.component.html',
   styleUrls: ['./inventory-settings-form.component.scss'],
 })

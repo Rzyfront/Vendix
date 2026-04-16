@@ -1,5 +1,5 @@
 import { Component, OnInit, inject, signal, computed } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { Router, RouterModule } from '@angular/router';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
 import { HelpCenterAdminService } from './services/help-center-admin.service';
@@ -36,7 +36,6 @@ import { CardComponent } from '../../../../shared/components';
   selector: 'app-help-center-admin',
   standalone: true,
   imports: [
-    CommonModule,
     RouterModule,
     ReactiveFormsModule,
     CategoriesTabComponent,
@@ -46,8 +45,8 @@ import { CardComponent } from '../../../../shared/components';
     InputsearchComponent,
     ResponsiveDataViewComponent,
     ConfirmationModalComponent,
-    CardComponent,
-  ],
+    CardComponent
+],
   template: `
     <!-- Standard Module Layout -->
     <div class="flex flex-col gap-4 p-6">
@@ -60,7 +59,7 @@ import { CardComponent } from '../../../../shared/components';
           iconBgColor="bg-gray-100"
           iconColor="text-gray-600"
         ></app-stats>
-
+    
         <app-stats
           title="Publicados"
           [value]="stats()?.published || 0"
@@ -68,7 +67,7 @@ import { CardComponent } from '../../../../shared/components';
           iconBgColor="bg-green-100"
           iconColor="text-green-600"
         ></app-stats>
-
+    
         <app-stats
           title="Borradores"
           [value]="stats()?.draft || 0"
@@ -76,7 +75,7 @@ import { CardComponent } from '../../../../shared/components';
           iconBgColor="bg-yellow-100"
           iconColor="text-yellow-600"
         ></app-stats>
-
+    
         <app-stats
           title="Vistas Totales"
           [value]="stats()?.total_views || 0"
@@ -85,7 +84,7 @@ import { CardComponent } from '../../../../shared/components';
           iconColor="text-purple-600"
         ></app-stats>
       </div>
-
+    
       <!-- Main Content Card -->
       <app-card [padding]="false" overflow="hidden">
         <!-- Tabs -->
@@ -95,119 +94,119 @@ import { CardComponent } from '../../../../shared/components';
             [class.text-primary]="activeTab() === 'articles'"
             [class.text-text-secondary]="activeTab() !== 'articles'"
             (click)="activeTab.set('articles')"
-          >
+            >
             Artículos
-            <span
-              *ngIf="activeTab() === 'articles'"
-              class="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-t-full"
-            ></span>
+            @if (activeTab() === 'articles') {
+              <span
+                class="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-t-full"
+              ></span>
+            }
           </button>
           <button
             class="px-4 py-2.5 text-sm font-medium transition-colors relative"
             [class.text-primary]="activeTab() === 'categories'"
             [class.text-text-secondary]="activeTab() !== 'categories'"
             (click)="activeTab.set('categories')"
-          >
+            >
             Categorías
-            <span
-              *ngIf="activeTab() === 'categories'"
-              class="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-t-full"
-            ></span>
+            @if (activeTab() === 'categories') {
+              <span
+                class="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-t-full"
+              ></span>
+            }
           </button>
         </div>
-
+    
         <!-- Articles Tab -->
-        <div *ngIf="activeTab() === 'articles'">
-          <!-- Header -->
-          <div
-            class="p-4 md:px-6 md:py-4 border-b border-[var(--color-border)] flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between"
-          >
-            <div class="flex-1 min-w-0">
-              <h3 class="text-lg font-semibold text-text-primary">
-                Artículos de Ayuda
-              </h3>
-              <p class="hidden sm:block text-xs text-text-secondary mt-0.5">
-                Gestiona el contenido del centro de ayuda.
-              </p>
-            </div>
-
+        @if (activeTab() === 'articles') {
+          <div>
+            <!-- Header -->
             <div
-              class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto"
-            >
-              <div class="w-full sm:w-60">
-                <app-inputsearch
-                  placeholder="Buscar artículos..."
-                  [debounceTime]="300"
-                  (searchChange)="onSearch($event)"
-                  size="sm"
-                  fullWidth="true"
-                ></app-inputsearch>
+              class="p-4 md:px-6 md:py-4 border-b border-[var(--color-border)] flex flex-col sm:flex-row gap-4 items-start sm:items-center justify-between"
+              >
+              <div class="flex-1 min-w-0">
+                <h3 class="text-lg font-semibold text-text-primary">
+                  Artículos de Ayuda
+                </h3>
+                <p class="hidden sm:block text-xs text-text-secondary mt-0.5">
+                  Gestiona el contenido del centro de ayuda.
+                </p>
               </div>
-
-              <div class="w-full sm:w-40">
-                <app-selector
-                  placeholder="Estado"
-                  [options]="statusFilterOptions"
-                  [formControl]="statusFilterControl"
-                  size="sm"
-                  variant="outline"
-                ></app-selector>
-              </div>
-
-              <div class="w-full sm:w-40">
-                <app-selector
-                  placeholder="Tipo"
-                  [options]="typeFilterOptions"
-                  [formControl]="typeFilterControl"
-                  size="sm"
-                  variant="outline"
-                ></app-selector>
-              </div>
-
-              <div class="flex gap-2 items-center sm:ml-auto">
-                <app-button
-                  variant="primary"
-                  size="sm"
-                  iconName="plus"
-                  (clicked)="navigateToCreate()"
-                >
-                  <span class="hidden sm:inline">Nuevo artículo</span>
-                </app-button>
-              </div>
-            </div>
-          </div>
-
-          <!-- Table Container -->
-          <div class="relative min-h-[400px] p-2 md:p-4">
-            <div
-              *ngIf="loading()"
-              class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
-            >
               <div
-                class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-              ></div>
+                class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto"
+                >
+                <div class="w-full sm:w-60">
+                  <app-inputsearch
+                    placeholder="Buscar artículos..."
+                    [debounceTime]="300"
+                    (searchChange)="onSearch($event)"
+                    size="sm"
+                    fullWidth="true"
+                  ></app-inputsearch>
+                </div>
+                <div class="w-full sm:w-40">
+                  <app-selector
+                    placeholder="Estado"
+                    [options]="statusFilterOptions"
+                    [formControl]="statusFilterControl"
+                    size="sm"
+                    variant="outline"
+                  ></app-selector>
+                </div>
+                <div class="w-full sm:w-40">
+                  <app-selector
+                    placeholder="Tipo"
+                    [options]="typeFilterOptions"
+                    [formControl]="typeFilterControl"
+                    size="sm"
+                    variant="outline"
+                  ></app-selector>
+                </div>
+                <div class="flex gap-2 items-center sm:ml-auto">
+                  <app-button
+                    variant="primary"
+                    size="sm"
+                    iconName="plus"
+                    (clicked)="navigateToCreate()"
+                    >
+                    <span class="hidden sm:inline">Nuevo artículo</span>
+                  </app-button>
+                </div>
+              </div>
             </div>
-
-            <app-responsive-data-view
-              [data]="articles()"
-              [columns]="columns"
-              [cardConfig]="cardConfig"
-              [actions]="actions"
-              [loading]="loading()"
-              emptyMessage="No se encontraron artículos"
-              emptyIcon="file-text"
-            >
-            </app-responsive-data-view>
+            <!-- Table Container -->
+            <div class="relative min-h-[400px] p-2 md:p-4">
+              @if (loading()) {
+                <div
+                  class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
+                  >
+                  <div
+                    class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+                  ></div>
+                </div>
+              }
+              <app-responsive-data-view
+                [data]="articles()"
+                [columns]="columns"
+                [cardConfig]="cardConfig"
+                [actions]="actions"
+                [loading]="loading()"
+                emptyMessage="No se encontraron artículos"
+                emptyIcon="file-text"
+                >
+              </app-responsive-data-view>
+            </div>
           </div>
-        </div>
-
+        }
+    
         <!-- Categories Tab -->
-        <app-categories-tab
-          *ngIf="activeTab() === 'categories'"
-        ></app-categories-tab>
+        @if (activeTab() === 'categories') {
+          <app-categories-tab
+          ></app-categories-tab>
+        }
       </app-card>
     </div>
-
+    
     <!-- Delete Confirmation Modal -->
     <app-confirmation-modal
       [(isOpen)]="isDeleteConfirmOpen"
@@ -218,7 +217,7 @@ import { CardComponent } from '../../../../shared/components';
       (confirm)="onConfirmDelete()"
       (cancel)="isDeleteConfirmOpen = false"
     ></app-confirmation-modal>
-  `,
+    `,
 })
 export class HelpCenterAdminComponent implements OnInit {
   private service = inject(HelpCenterAdminService);

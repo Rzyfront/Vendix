@@ -1,5 +1,5 @@
 import { Component, Input, Output, EventEmitter } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 
 // Shared Components
@@ -27,7 +27,6 @@ import { Supplier } from '../../../interfaces';
   selector: 'app-supplier-list',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ButtonComponent,
     InputsearchComponent,
@@ -36,8 +35,8 @@ import { Supplier } from '../../../interfaces';
     ResponsiveDataViewComponent,
     PaginationComponent,
     EmptyStateComponent,
-    CardComponent,
-  ],
+    CardComponent
+],
   templateUrl: './supplier-list.component.html',
 })
 export class SupplierListComponent {
@@ -176,9 +175,19 @@ export class SupplierListComponent {
   onActionClick(action: string): void {
     switch (action) {
       case 'create':
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
         this.create.emit();
         break;
       case 'refresh':
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
         this.refresh.emit();
         break;
     }

@@ -1,5 +1,5 @@
-import { Component, EventEmitter, Input, Output } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, Input, input, output } from '@angular/core';
+
 import { IconComponent } from '../../../../../shared/components';
 
 export interface FaqItem {
@@ -10,9 +10,9 @@ export interface FaqItem {
 @Component({
   selector: 'app-faq-modal',
   standalone: true,
-  imports: [CommonModule, IconComponent],
+  imports: [IconComponent],
   template: `
-    @if (isOpen) {
+    @if (isOpen()) {
     <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
       <!-- Backdrop -->
       <div
@@ -92,9 +92,9 @@ export interface FaqItem {
   `,
 })
 export class FaqModalComponent {
-  @Input() isOpen = false;
+  readonly isOpen = input(false);
   @Input() items: FaqItem[] = [];
-  @Output() closed = new EventEmitter<void>();
+  readonly closed = output<void>();
 
   expandedIndex: number | null = 0; // First item expanded by default
 
@@ -103,6 +103,9 @@ export class FaqModalComponent {
   }
 
   close(): void {
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.closed.emit();
   }
 }

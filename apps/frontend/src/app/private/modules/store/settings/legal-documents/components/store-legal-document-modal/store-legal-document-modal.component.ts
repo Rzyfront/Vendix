@@ -8,7 +8,7 @@ import {
   Output,
   inject,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   FormBuilder,
   FormGroup,
@@ -36,15 +36,14 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
   selector: 'app-store-legal-document-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ModalComponent,
     InputComponent,
     SelectorComponent,
     TextareaComponent,
     ButtonComponent,
-    IconComponent,
-  ],
+    IconComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen"
@@ -57,22 +56,23 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
       "
       (cancel)="onClose()"
       size="lg"
-    >
+      >
       <div class="p-4 md:p-6 space-y-6">
         <form [formGroup]="form" class="space-y-6">
-          <div
-            *ngIf="isEditMode"
-            class="bg-blue-50 border border-blue-100 rounded-lg p-3 flex gap-3 items-start"
-          >
-            <div class="mt-0.5 text-blue-500">
-              <app-icon name="info" size="18"></app-icon>
+          @if (isEditMode) {
+            <div
+              class="bg-blue-50 border border-blue-100 rounded-lg p-3 flex gap-3 items-start"
+              >
+              <div class="mt-0.5 text-blue-500">
+                <app-icon name="info" size="18"></app-icon>
+              </div>
+              <div class="text-xs text-blue-700 leading-relaxed">
+                <strong>Modo Edición Limitado:</strong> El contenido y la versión
+                de un documento legal son inmutables. Para cambiar el texto, debes crear una nueva versión.
+              </div>
             </div>
-            <div class="text-xs text-blue-700 leading-relaxed">
-              <strong>Modo Edición Limitado:</strong> El contenido y la versión
-              de un documento legal son inmutables. Para cambiar el texto, debes crear una nueva versión.
-            </div>
-          </div>
-
+          }
+    
           <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
             <app-selector
               label="Tipo de Documento"
@@ -81,14 +81,14 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
               [required]="true"
               placeholder="Seleccionar tipo..."
             ></app-selector>
-
+    
             <app-input
               label="Versión"
               [formControl]="versionControl"
               placeholder="Ej. 1.0.0"
               [required]="true"
               [prefixIcon]="true"
-            >
+              >
               <app-icon
                 slot="prefix-icon"
                 name="hash"
@@ -97,14 +97,14 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
               ></app-icon>
             </app-input>
           </div>
-
+    
           <app-input
             label="Título del Documento"
             [formControl]="titleControl"
             placeholder="Ej. Términos y Condiciones de Mi Tienda"
             [required]="true"
             [prefixIcon]="true"
-          >
+            >
             <app-icon
               slot="prefix-icon"
               name="file-text"
@@ -112,7 +112,7 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
               class="text-gray-400"
             ></app-icon>
           </app-input>
-
+    
           <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
             <app-input
               label="Fecha de Efectividad"
@@ -120,7 +120,7 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
               [formControl]="effectiveDateControl"
               [required]="true"
               [prefixIcon]="true"
-            >
+              >
               <app-icon
                 slot="prefix-icon"
                 name="calendar"
@@ -128,13 +128,13 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
                 class="text-gray-400"
               ></app-icon>
             </app-input>
-
+    
             <app-input
               label="Fecha de Expiración"
               type="date"
               [formControl]="expiryDateControl"
               [prefixIcon]="true"
-            >
+              >
               <app-icon
                 slot="prefix-icon"
                 name="clock"
@@ -143,7 +143,7 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
               ></app-icon>
             </app-input>
           </div>
-
+    
           <div class="space-y-2">
             <label class="text-sm font-medium text-text-primary flex items-center gap-2">
               <app-icon name="code" size="16" class="text-gray-500"></app-icon>
@@ -158,7 +158,7 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
               [customClass]="(isEditMode ? 'bg-gray-50 cursor-not-allowed text-gray-500 ' : '') + 'font-mono text-sm'"
             ></app-textarea>
           </div>
-
+    
           <app-textarea
             label="Descripción Interna"
             [formControl]="descriptionControl"
@@ -167,7 +167,7 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
           ></app-textarea>
         </form>
       </div>
-
+    
       <div slot="footer" class="w-full">
         <div class="flex items-center justify-end gap-3 p-4 bg-gray-50 rounded-b-xl border-t border-gray-100">
           <app-button variant="outline" (clicked)="onClose()">
@@ -178,13 +178,13 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
             (clicked)="onSubmit()"
             [disabled]="form.invalid || isSubmitting"
             [loading]="isSubmitting"
-          >
+            >
             {{ isEditMode ? 'Guardar Cambios' : 'Publicar' }}
           </app-button>
         </div>
       </div>
     </app-modal>
-  `,
+    `,
 })
 export class StoreLegalDocumentModalComponent implements OnInit, OnChanges {
   @Input() isOpen = false;
@@ -303,6 +303,11 @@ export class StoreLegalDocumentModalComponent implements OnInit, OnChanges {
 
   onClose() {
     this.isOpenChange.emit(false);
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.cancel.emit();
   }
 

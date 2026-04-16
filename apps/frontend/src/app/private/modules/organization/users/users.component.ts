@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { debounceTime, distinctUntilChanged, Subject, takeUntil } from 'rxjs';
 import {
   User,
@@ -51,7 +51,6 @@ interface StatItem {
   selector: 'app-users',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     UserCreateModalComponent,
@@ -62,8 +61,8 @@ interface StatItem {
     InputsearchComponent,
     StatsComponent,
     IconComponent,
-    ButtonComponent,
-  ],
+    ButtonComponent
+],
   templateUrl: './users.component.html',
   styleUrls: ['./users.component.css'],
 })

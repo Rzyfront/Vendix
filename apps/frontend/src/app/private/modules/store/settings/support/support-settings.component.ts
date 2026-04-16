@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { Subject, takeUntil, finalize } from 'rxjs';
 import { TicketListComponent, CreateTicketModalComponent } from './components';
 import { StatsComponent } from '../../../../../shared/components/stats/stats.component';
@@ -16,16 +16,13 @@ import { FilterValues } from '../../../../../shared/components/options-dropdown/
 @Component({
   selector: 'app-support-settings',
   standalone: true,
-  imports: [
-    CommonModule,
-    StatsComponent,
-    TicketListComponent,
-    CreateTicketModalComponent,
-  ],
+  imports: [StatsComponent, TicketListComponent, CreateTicketModalComponent],
   template: `
     <div class="w-full">
       <!-- Stats Grid -->
-      <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
+      <div
+        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+      >
         <app-stats
           title="Total Tickets"
           [value]="stats?.total || 0"
@@ -77,14 +74,13 @@ import { FilterValues } from '../../../../../shared/components/options-dropdown/
         (viewDetail)="openTicketDetail($event)"
       ></app-ticket-list>
 
-      <!-- Create Modal -->
-      <app-create-ticket-modal
-        [isOpen]="isCreateModalOpen"
-        [loading]="actionLoading"
-        (isOpenChange)="isCreateModalOpen = $event"
-        (closed)="closeCreateModal()"
-        (save)="onCreateTicket($event)"
-      ></app-create-ticket-modal>
+      @defer (when isCreateModalOpen) {
+        <app-create-ticket-modal
+          [isOpen]="isCreateModalOpen"
+          (isOpenChange)="isCreateModalOpen = $event"
+          (closed)="closeCreateModal()"
+        ></app-create-ticket-modal>
+      }
     </div>
   `,
 })
@@ -138,7 +134,10 @@ export class SupportSettingsComponent implements OnInit, OnDestroy {
             overdue: statsData?.overdue || 0,
             avg_resolution_time: statsData?.avg_resolution_time || 0,
             // Computed fields
-            open_tickets: (byStatus.NEW || 0) + (byStatus.OPEN || 0) + (byStatus.IN_PROGRESS || 0),
+            open_tickets:
+              (byStatus.NEW || 0) +
+              (byStatus.OPEN || 0) +
+              (byStatus.IN_PROGRESS || 0),
             resolved: (byStatus.RESOLVED || 0) + (byStatus.CLOSED || 0),
             pending: byStatus.WAITING_RESPONSE || 0,
             my_tickets: 0,
@@ -215,7 +214,9 @@ export class SupportSettingsComponent implements OnInit, OnDestroy {
       )
       .subscribe({
         next: () => {
-          this.toastService.success('¡Ticket creado exitosamente! Te responderemos pronto.');
+          this.toastService.success(
+            '¡Ticket creado exitosamente! Te responderemos pronto.',
+          );
           this.closeCreateModal();
           this.loadTickets();
           this.loadStats();

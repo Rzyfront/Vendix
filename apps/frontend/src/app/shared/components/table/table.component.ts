@@ -1,11 +1,11 @@
 import {
   Component,
   Input,
-  Output,
-  EventEmitter,
   TemplateRef,
   ContentChild,
   AfterContentInit,
+  input,
+  output
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { IconComponent } from '../icon/icon.component';
@@ -55,24 +55,25 @@ export type SortDirection = 'asc' | 'desc' | null;
 })
 export class TableComponent implements AfterContentInit {
   @Input() data: any[] = [];
-  @Input() columns: TableColumn[] = [];
+  readonly columns = input<TableColumn[]>([]);
   @Input() actions?: TableAction[];
-  @Input() size: TableSize = 'md';
-  @Input() loading = false;
-  @Input() emptyMessage = 'No hay datos disponibles';
-  @Input() showHeader = true;
-  @Input() striped = false;
-  @Input() hoverable = true;
-  @Input() bordered = false;
-  @Input() compact = false;
-  @Input() sortable = false;
-  @Input() customClasses = '';
+  readonly size = input<TableSize>('md');
+  readonly loading = input(false);
+  readonly emptyMessage = input('No hay datos disponibles');
+  readonly showHeader = input(true);
+  readonly striped = input(false);
+  readonly hoverable = input(true);
+  readonly bordered = input(false);
+  readonly compact = input(false);
+  readonly sortable = input(false);
+  readonly customClasses = input('');
+  readonly clickableRows = input<boolean>(false);
 
-  @Output() sort = new EventEmitter<{
+  readonly sort = output<{
     column: string;
     direction: SortDirection;
-  }>();
-  @Output() rowClick = new EventEmitter<any>();
+}>();
+  readonly rowClick = output<any>();
 
   @ContentChild('actionsTemplate') actionsTemplate?: TemplateRef<any>;
 
@@ -81,7 +82,7 @@ export class TableComponent implements AfterContentInit {
 
   ngAfterContentInit(): void {
     // Validar que las columnas tengan las propiedades necesarias
-    this.columns.forEach((col) => {
+    this.columns().forEach((col) => {
       if (!col.key || !col.label) {
         // Columna inválida: cada columna debe tener key y label
       }
@@ -89,7 +90,7 @@ export class TableComponent implements AfterContentInit {
   }
 
   onSort(column: TableColumn): void {
-    if (!this.sortable || !column.sortable) {
+    if (!this.sortable() || !column.sortable) {
       return;
     }
 
@@ -180,14 +181,15 @@ export class TableComponent implements AfterContentInit {
       lg: ['text-base'],
     };
 
-    const classes = [...baseClasses, ...sizeClasses[this.size]];
+    const classes = [...baseClasses, ...sizeClasses[this.size()]];
 
-    if (this.bordered) {
+    if (this.bordered()) {
       classes.push('border', 'border-border');
     }
 
-    if (this.customClasses) {
-      classes.push(this.customClasses);
+    const customClasses = this.customClasses();
+    if (customClasses) {
+      classes.push(customClasses);
     }
 
     return classes.join(' ');
@@ -208,7 +210,7 @@ export class TableComponent implements AfterContentInit {
       lg: ['px-6', 'py-4'],
     };
 
-    return [...baseClasses, ...sizeClasses[this.size]].join(' ');
+    return [...baseClasses, ...sizeClasses[this.size()]].join(' ');
   }
 
   getRowClasses(index: number): string {
@@ -225,15 +227,15 @@ export class TableComponent implements AfterContentInit {
       lg: ['px-6', 'py-4'],
     };
 
-    if (this.striped && index % 2 !== 0) {
+    if (this.striped() && index % 2 !== 0) {
       baseClasses.push('bg-muted/10');
     }
 
-    if (this.hoverable) {
+    if (this.hoverable()) {
       baseClasses.push('hover:bg-muted/20');
     }
 
-    return [...baseClasses, ...sizeClasses[this.size]].join(' ');
+    return [...baseClasses, ...sizeClasses[this.size()]].join(' ');
   }
 
   getCellClasses(column: TableColumn): string {
@@ -262,8 +264,8 @@ export class TableComponent implements AfterContentInit {
     const classes: string[] = [];
 
     // Find index of column to determine implicity priority
-    const index = this.columns.indexOf(column);
-    const totalColumns = this.columns.length;
+    const index = this.columns().indexOf(column);
+    const totalColumns = this.columns().length;
 
     // Explicit priority Logic
     if (column.priority !== undefined) {

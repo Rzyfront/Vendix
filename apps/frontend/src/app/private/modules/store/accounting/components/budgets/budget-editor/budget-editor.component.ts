@@ -7,7 +7,7 @@ import {
   computed,
   ChangeDetectionStrategy,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { ActivatedRoute, Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { Subject, takeUntil } from 'rxjs';
@@ -47,12 +47,11 @@ interface EditorLine {
   selector: 'vendix-budget-editor',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ButtonComponent,
     SelectorComponent,
-    IconComponent,
-  ],
+    IconComponent
+],
   templateUrl: './budget-editor.component.html',
   styleUrls: ['./budget-editor.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,

@@ -6,7 +6,7 @@ import {
   OnDestroy,
   inject,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   ReactiveFormsModule,
   FormBuilder,
@@ -26,12 +26,11 @@ import { Subject, takeUntil } from 'rxjs';
   selector: 'app-user-create-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     InputComponent,
     ButtonComponent,
-    ModalComponent,
-  ],
+    ModalComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen()"

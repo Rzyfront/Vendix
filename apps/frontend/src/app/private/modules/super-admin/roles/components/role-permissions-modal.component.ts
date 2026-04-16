@@ -8,7 +8,7 @@ import {
   SimpleChanges,
   inject,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   FormsModule,
   ReactiveFormsModule,
@@ -33,15 +33,14 @@ import {
   selector: 'app-role-permissions-modal',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     ModalComponent,
     IconComponent,
     InputsearchComponent,
     ButtonComponent,
-    SelectorComponent,
-  ],
+    SelectorComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen()"
@@ -51,12 +50,12 @@ import {
       size="lg"
       [showCloseButton]="true"
       (closed)="onCancel()"
-    >
+      >
       <div class="space-y-6">
         <!-- Search and filter permissions -->
         <div
           class="flex flex-col lg:flex-row gap-4 items-start lg:items-center"
-        >
+          >
           <div class="flex-1 min-w-0">
             <app-inputsearch
               placeholder="Buscar permisos..."
@@ -81,7 +80,7 @@ import {
               size="sm"
               (clicked)="selectAllPermissions()"
               [disabled]="isLoading"
-            >
+              >
               Seleccionar todos
             </app-button>
             <app-button
@@ -89,119 +88,123 @@ import {
               size="sm"
               (clicked)="deselectAllPermissions()"
               [disabled]="isLoading"
-            >
+              >
               Deseleccionar todos
             </app-button>
           </div>
         </div>
-
+    
         <!-- Loading state -->
-        <div *ngIf="isLoading" class="flex justify-center py-8">
-          <div
-            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-          ></div>
-        </div>
-
+        @if (isLoading) {
+          <div class="flex justify-center py-8">
+            <div
+              class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            ></div>
+          </div>
+        }
+    
         <!-- Permissions table -->
-        <div *ngIf="!isLoading" class="permissions-table-container">
-          <div class="overflow-x-auto">
-            <table class="min-w-full divide-y divide-border">
-              <thead class="bg-muted/20">
-                <tr>
-                  <th class="px-4 py-3 text-left">
-                    <input
-                      type="checkbox"
-                      class="permission-checkbox"
-                      [checked]="allPermissionsSelected"
-                      [indeterminate]="somePermissionsSelected"
-                      (change)="toggleAllPermissions($event)"
-                    />
-                  </th>
-                  <th
-                    class="px-4 py-3 text-left text-xs font-medium text-text-primary uppercase tracking-wider"
-                  >
-                    Nombre
-                  </th>
-                  <th
-                    class="px-4 py-3 text-left text-xs font-medium text-text-primary uppercase tracking-wider"
-                  >
-                    Descripción
-                  </th>
-                  <th
-                    class="px-4 py-3 text-left text-xs font-medium text-text-primary uppercase tracking-wider"
-                  >
-                    Ruta
-                  </th>
-                  <th
-                    class="px-4 py-3 text-left text-xs font-medium text-text-primary uppercase tracking-wider"
-                  >
-                    Método
-                  </th>
-                  <th
-                    class="px-4 py-3 text-left text-xs font-medium text-text-primary uppercase tracking-wider"
-                  >
-                    Estado
-                  </th>
-                </tr>
-              </thead>
-              <tbody class="bg-surface divide-y divide-border">
-                <tr
-                  *ngFor="
-                    let permission of filteredPermissions;
-                    trackBy: trackByPermissionId
-                  "
-                  class="hover:bg-muted/10 transition-colors"
-                >
-                  <td class="px-4 py-3">
-                    <input
-                      type="checkbox"
-                      class="permission-checkbox"
-                      [checked]="isPermissionSelected(permission.id)"
-                      (change)="togglePermission(permission.id, $event)"
-                    />
-                  </td>
-                  <td class="px-4 py-3 text-sm font-medium text-text-primary">
-                    {{ permission.name }}
-                  </td>
-                  <td class="px-4 py-3 text-sm text-text-secondary">
-                    {{ permission.description }}
-                  </td>
-                  <td class="px-4 py-3 text-sm text-text-secondary font-mono">
-                    {{ permission.path }}
-                  </td>
-                  <td class="px-4 py-3">
-                    <span
+        @if (!isLoading) {
+          <div class="permissions-table-container">
+            <div class="overflow-x-auto">
+              <table class="min-w-full divide-y divide-border">
+                <thead class="bg-muted/20">
+                  <tr>
+                    <th class="px-4 py-3 text-left">
+                      <input
+                        type="checkbox"
+                        class="permission-checkbox"
+                        [checked]="allPermissionsSelected"
+                        [indeterminate]="somePermissionsSelected"
+                        (change)="toggleAllPermissions($event)"
+                        />
+                    </th>
+                    <th
+                      class="px-4 py-3 text-left text-xs font-medium text-text-primary uppercase tracking-wider"
+                      >
+                      Nombre
+                    </th>
+                    <th
+                      class="px-4 py-3 text-left text-xs font-medium text-text-primary uppercase tracking-wider"
+                      >
+                      Descripción
+                    </th>
+                    <th
+                      class="px-4 py-3 text-left text-xs font-medium text-text-primary uppercase tracking-wider"
+                      >
+                      Ruta
+                    </th>
+                    <th
+                      class="px-4 py-3 text-left text-xs font-medium text-text-primary uppercase tracking-wider"
+                      >
+                      Método
+                    </th>
+                    <th
+                      class="px-4 py-3 text-left text-xs font-medium text-text-primary uppercase tracking-wider"
+                      >
+                      Estado
+                    </th>
+                  </tr>
+                </thead>
+                <tbody class="bg-surface divide-y divide-border">
+                  @for (
+                    permission of filteredPermissions; track trackByPermissionId($index,
+                    permission)) {
+                    <tr
+                      class="hover:bg-muted/10 transition-colors"
+                      >
+                      <td class="px-4 py-3">
+                        <input
+                          type="checkbox"
+                          class="permission-checkbox"
+                          [checked]="isPermissionSelected(permission.id)"
+                          (change)="togglePermission(permission.id, $event)"
+                          />
+                      </td>
+                      <td class="px-4 py-3 text-sm font-medium text-text-primary">
+                        {{ permission.name }}
+                      </td>
+                      <td class="px-4 py-3 text-sm text-text-secondary">
+                        {{ permission.description }}
+                      </td>
+                      <td class="px-4 py-3 text-sm text-text-secondary font-mono">
+                        {{ permission.path }}
+                      </td>
+                      <td class="px-4 py-3">
+                        <span
                       class="method-badge method-{{
                         permission.method.toLowerCase()
                       }}"
-                    >
-                      {{ permission.method }}
-                    </span>
-                  </td>
-                  <td class="px-4 py-3">
-                    <span class="status-badge status-{{ permission.status }}">
-                      {{ getStatusLabel(permission.status) }}
-                    </span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+                          >
+                          {{ permission.method }}
+                        </span>
+                      </td>
+                      <td class="px-4 py-3">
+                        <span class="status-badge status-{{ permission.status }}">
+                          {{ getStatusLabel(permission.status) }}
+                        </span>
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+            <!-- Empty state -->
+            @if (filteredPermissions.length === 0) {
+              <div
+                class="text-center py-8"
+                >
+                <app-icon
+                  name="search"
+                  size="48"
+                  class="mx-auto text-text-muted mb-4"
+                ></app-icon>
+                <p class="text-text-secondary">No se encontraron permisos</p>
+              </div>
+            }
           </div>
-
-          <!-- Empty state -->
-          <div
-            *ngIf="filteredPermissions.length === 0"
-            class="text-center py-8"
-          >
-            <app-icon
-              name="search"
-              size="48"
-              class="mx-auto text-text-muted mb-4"
-            ></app-icon>
-            <p class="text-text-secondary">No se encontraron permisos</p>
-          </div>
-        </div>
-
+        }
+    
         <!-- Selected permissions summary -->
         <div class="selected-summary">
           <p class="text-sm text-text-secondary">
@@ -212,13 +215,13 @@ import {
           </p>
         </div>
       </div>
-
+    
       <div slot="footer" class="modal-footer">
         <app-button
           variant="outline"
           (clicked)="onCancel()"
           [disabled]="isSubmitting()"
-        >
+          >
           Cancelar
         </app-button>
         <app-button
@@ -226,12 +229,14 @@ import {
           (clicked)="onSave()"
           [disabled]="isSubmitting() || selectedPermissions.length === 0"
           [loading]="isSubmitting()"
-        >
-          <span *ngIf="!isSubmitting()">Guardar Cambios</span>
+          >
+          @if (!isSubmitting()) {
+            <span>Guardar Cambios</span>
+          }
         </app-button>
       </div>
     </app-modal>
-  `,
+    `,
   styleUrls: ['./role-permissions-modal.component.scss'],
 })
 export class RolePermissionsModalComponent

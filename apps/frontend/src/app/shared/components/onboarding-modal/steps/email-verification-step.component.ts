@@ -1,13 +1,12 @@
 import {
   Component,
   Input,
-  Output,
-  EventEmitter,
   ChangeDetectionStrategy,
   OnInit,
   OnDestroy,
+  output
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { IconComponent } from '../../index';
 import { OnboardingWizardService } from '../../../../core/services/onboarding-wizard.service';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
@@ -16,7 +15,7 @@ import { Subject, takeUntil, interval } from 'rxjs';
 @Component({
   selector: 'app-email-verification-step',
   standalone: true,
-  imports: [CommonModule, IconComponent],
+  imports: [IconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [
     `
@@ -474,9 +473,9 @@ import { Subject, takeUntil, interval } from 'rxjs';
 })
 export class EmailVerificationStepComponent implements OnInit, OnDestroy {
   @Input() userEmail: string = '';
-  @Output() nextStep = new EventEmitter<void>();
-  @Output() skipStep = new EventEmitter<void>();
-  @Output() previousStep = new EventEmitter<void>();
+  readonly nextStep = output<void>();
+  readonly skipStep = output<void>();
+  readonly previousStep = output<void>();
 
   private destroy$ = new Subject<void>();
   private pollingSubscription: any = null;
@@ -576,6 +575,7 @@ export class EmailVerificationStepComponent implements OnInit, OnDestroy {
           this.stopPolling(); // Stop polling once verified
           // Auto-advance to next step
           setTimeout(() => {
+            // TODO: The 'emit' function requires a mandatory void argument
             this.nextStep.emit();
           }, 500);
         } else {
@@ -602,6 +602,7 @@ export class EmailVerificationStepComponent implements OnInit, OnDestroy {
           this.stopPolling(); // Stop polling once verified
           // Auto-advance to next step
           setTimeout(() => {
+            // TODO: The 'emit' function requires a mandatory void argument
             this.nextStep.emit();
           }, 500);
         } else {

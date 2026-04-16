@@ -6,7 +6,7 @@ import {
   ChangeDetectionStrategy,
   inject,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { CartSummary } from '../models/cart.model';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
@@ -14,7 +14,7 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 @Component({
   selector: 'app-pos-mobile-footer',
   standalone: true,
-  imports: [CommonModule, IconComponent],
+  imports: [IconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="pos-mobile-footer">
@@ -23,9 +23,11 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
         <div class="cart-summary">
           <div class="cart-icon-wrapper">
             <app-icon name="shopping-cart" [size]="20"></app-icon>
-            <span *ngIf="itemCount > 0" class="cart-badge">
-              {{ itemCount > 99 ? '99+' : itemCount }}
-            </span>
+            @if (itemCount > 0) {
+              <span class="cart-badge">
+                {{ itemCount > 99 ? '99+' : itemCount }}
+              </span>
+            }
           </div>
           <div class="cart-totals">
             <span class="total-label">Total</span>
@@ -34,24 +36,24 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
             }}</span>
           </div>
         </div>
-
+    
         <button
           class="view-detail-btn"
           (click)="viewCart.emit()"
           [disabled]="itemCount === 0"
-        >
+          >
           <span>Ver detalle</span>
           <app-icon name="chevron-up" [size]="16"></app-icon>
         </button>
       </div>
-
+    
       @if (isQuotationMode) {
         <!-- Quotation mode: single button -->
         <button
           class="action-btn checkout-btn checkout-btn-full"
           (click)="quote.emit()"
           [disabled]="itemCount === 0"
-        >
+          >
           <app-icon name="file-text" [size]="18"></app-icon>
           <span>Crear Cotización</span>
         </button>
@@ -61,7 +63,7 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
           class="action-btn checkout-btn checkout-btn-full"
           (click)="layaway.emit()"
           [disabled]="itemCount === 0"
-        >
+          >
           <app-icon name="calendar" [size]="18"></app-icon>
           <span>Crear Plan Separé</span>
         </button>
@@ -72,7 +74,7 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
             class="action-btn save-btn"
             (click)="saveDraft.emit()"
             [disabled]="itemCount === 0"
-          >
+            >
             <app-icon name="save" [size]="16"></app-icon>
             <span>Guardar</span>
           </button>
@@ -80,7 +82,7 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
             class="action-btn shipping-btn"
             (click)="shipping.emit()"
             [disabled]="itemCount === 0"
-          >
+            >
             <app-icon name="truck" [size]="16"></app-icon>
             <span>Envío</span>
           </button>
@@ -90,13 +92,13 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
           class="action-btn checkout-btn checkout-btn-full"
           (click)="checkout.emit()"
           [disabled]="itemCount === 0"
-        >
+          >
           <app-icon name="credit-card" [size]="18"></app-icon>
           <span>Cobrar</span>
         </button>
       }
     </div>
-  `,
+    `,
   styles: [
     `
       :host {

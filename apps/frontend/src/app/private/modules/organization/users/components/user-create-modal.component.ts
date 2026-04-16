@@ -1,13 +1,12 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
   OnInit,
   OnDestroy,
   inject,
+  input,
+  output
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   ReactiveFormsModule,
   FormBuilder,
@@ -28,15 +27,14 @@ import { Subject, takeUntil } from 'rxjs';
   selector: 'app-user-create-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     InputComponent,
     ButtonComponent,
-    ModalComponent,
-  ],
+    ModalComponent
+],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
@@ -147,9 +145,9 @@ import { Subject, takeUntil } from 'rxjs';
   ],
 })
 export class UserCreateModalComponent implements OnInit, OnDestroy {
-  @Input() isOpen: boolean = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() onUserCreated = new EventEmitter<void>();
+  readonly isOpen = input<boolean>(false);
+  readonly isOpenChange = output<boolean>();
+  readonly onUserCreated = output<void>();
 
   userForm: FormGroup;
   isCreating: boolean = false;
@@ -214,6 +212,10 @@ export class UserCreateModalComponent implements OnInit, OnDestroy {
       .subscribe({
         next: () => {
           this.isCreating = false;
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
           this.onUserCreated.emit();
           this.isOpenChange.emit(false);
           this.resetForm();

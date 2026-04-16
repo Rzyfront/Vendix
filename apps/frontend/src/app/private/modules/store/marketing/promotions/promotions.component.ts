@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { Store } from '@ngrx/store';
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
@@ -34,11 +34,10 @@ import { PromotionsService } from './services/promotions.service';
   selector: 'app-promotions',
   standalone: true,
   imports: [
-    CommonModule,
     StatsComponent,
     PromotionListComponent,
-    PromotionFormModalComponent,
-  ],
+    PromotionFormModalComponent
+],
   template: `
     <div class="w-full">
       <!-- Stats: sticky on mobile, static on desktop -->

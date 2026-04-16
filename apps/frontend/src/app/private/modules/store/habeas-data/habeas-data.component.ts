@@ -70,254 +70,276 @@ type TabKey = 'consents' | 'exports' | 'anonymization';
           ></app-stats>
         </div>
       </div>
-
+    
       <!-- Tabs -->
       <div class="mt-4 border-b border-gray-200 dark:border-gray-700">
         <nav class="flex gap-4 overflow-x-auto" aria-label="Tabs">
-          <button
-            *ngFor="let tab of tabs"
-            (click)="activeTab.set(tab.key)"
+          @for (tab of tabs; track tab) {
+            <button
+              (click)="activeTab.set(tab.key)"
             [class]="activeTab() === tab.key
               ? 'border-primary text-primary font-medium'
               : 'border-transparent text-text-secondary hover:text-text-primary hover:border-gray-300'"
-            class="whitespace-nowrap border-b-2 pb-3 px-1 text-sm transition-colors"
-          >
-            {{ tab.label }}
-          </button>
+              class="whitespace-nowrap border-b-2 pb-3 px-1 text-sm transition-colors"
+              >
+              {{ tab.label }}
+            </button>
+          }
         </nav>
       </div>
-
+    
       <!-- Tab Content -->
       <div class="mt-4">
-
+    
         <!-- ─── Consentimientos ─── -->
-        <div *ngIf="activeTab() === 'consents'">
-          <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">Consentimientos del Usuario</h2>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">
-              Gestione los tipos de tratamiento de datos autorizados.
-            </p>
-
-            <div *ngIf="consentsLoading()" class="space-y-4">
-              <div *ngFor="let i of [1,2,3,4]" class="h-16 bg-gray-100 dark:bg-gray-700 rounded-lg animate-pulse"></div>
-            </div>
-
-            <div *ngIf="!consentsLoading()" class="space-y-3">
-              <div
-                *ngFor="let consent of consentTypes"
-                class="flex items-center justify-between p-4 rounded-lg border border-gray-200 dark:border-gray-700"
-              >
-                <div>
-                  <h3 class="text-sm font-medium text-gray-900 dark:text-white">{{ consent.label }}</h3>
-                  <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ consent.description }}</p>
+        @if (activeTab() === 'consents') {
+          <div>
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">Consentimientos del Usuario</h2>
+              <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">
+                Gestione los tipos de tratamiento de datos autorizados.
+              </p>
+              @if (consentsLoading()) {
+                <div class="space-y-4">
+                  @for (i of [1,2,3,4]; track i) {
+                    <div class="h-16 bg-gray-100 dark:bg-gray-700 rounded-lg animate-pulse"></div>
+                  }
                 </div>
-                <app-toggle
-                  [checked]="getConsentValue(consent.key)"
-                  (toggled)="onConsentToggle(consent.key, $event)"
-                  [disabled]="consentSaving()"
-                ></app-toggle>
-              </div>
+              }
+              @if (!consentsLoading()) {
+                <div class="space-y-3">
+                  @for (consent of consentTypes; track consent) {
+                    <div
+                      class="flex items-center justify-between p-4 rounded-lg border border-gray-200 dark:border-gray-700"
+                      >
+                      <div>
+                        <h3 class="text-sm font-medium text-gray-900 dark:text-white">{{ consent.label }}</h3>
+                        <p class="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{{ consent.description }}</p>
+                      </div>
+                      <app-toggle
+                        [checked]="getConsentValue(consent.key)"
+                        (toggled)="onConsentToggle(consent.key, $event)"
+                        [disabled]="consentSaving()"
+                      ></app-toggle>
+                    </div>
+                  }
+                </div>
+              }
             </div>
           </div>
-        </div>
-
+        }
+    
         <!-- ─── Exportacion ─── -->
-        <div *ngIf="activeTab() === 'exports'">
-          <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-3">
-              <div>
-                <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Exportacion de Datos</h2>
-                <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                  Derecho a portabilidad de datos (1 solicitud cada 24h).
-                </p>
-              </div>
-              <app-button
-                variant="primary"
-                size="sm"
-                (clicked)="onRequestExport()"
-                [disabled]="exportRequesting()"
-                [loading]="exportRequesting()"
-              >
-                <app-icon name="download" [size]="14" slot="icon"></app-icon>
-                Solicitar Exportacion
-              </app-button>
-            </div>
-
-            <div *ngIf="exportsLoading()" class="space-y-3">
-              <div *ngFor="let i of [1,2,3]" class="h-16 bg-gray-100 dark:bg-gray-700 rounded-lg animate-pulse"></div>
-            </div>
-
-            <!-- Empty state -->
-            <div *ngIf="!exportsLoading() && exports().length === 0"
-              class="py-12 flex flex-col items-center rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600">
-              <app-icon name="download" [size]="32" class="text-gray-400 mb-3"></app-icon>
-              <p class="text-sm text-text-secondary">No hay solicitudes de exportacion</p>
-            </div>
-
-            <!-- Export list -->
-            <div *ngIf="!exportsLoading() && exports().length > 0" class="space-y-3">
-              <div
-                *ngFor="let exp of exports()"
-                class="flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-lg border border-gray-200 dark:border-gray-700 gap-3"
-              >
-                <div class="flex items-center gap-3 min-w-0">
-                  <div [class]="getExportStatusIconClass(exp.status)"
-                    class="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center">
-                    <app-icon [name]="getExportStatusIcon(exp.status)" [size]="16"></app-icon>
-                  </div>
-                  <div class="min-w-0">
-                    <span class="text-sm font-medium text-gray-900 dark:text-white block">
-                      Solicitud #{{ exp.request_id }}
-                    </span>
-                    <span class="text-xs text-gray-500 dark:text-gray-400">
-                      {{ exp.requested_at | date:'dd/MM/yyyy HH:mm' }}
-                    </span>
-                  </div>
+        @if (activeTab() === 'exports') {
+          <div>
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+              <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-6 gap-3">
+                <div>
+                  <h2 class="text-lg font-semibold text-gray-900 dark:text-white">Exportacion de Datos</h2>
+                  <p class="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                    Derecho a portabilidad de datos (1 solicitud cada 24h).
+                  </p>
                 </div>
-                <div class="flex items-center gap-2">
-                  <span [class]="getExportStatusBadgeClass(exp.status)"
-                    class="px-2 py-0.5 rounded-full text-xs font-medium">
-                    {{ getExportStatusLabel(exp.status) }}
-                  </span>
-                  <app-button
-                    *ngIf="exp.status === 'completed' && exp.has_file"
-                    variant="outline"
-                    size="xsm"
-                    (clicked)="onDownloadExport(exp.request_id)"
+                <app-button
+                  variant="primary"
+                  size="sm"
+                  (clicked)="onRequestExport()"
+                  [disabled]="exportRequesting()"
+                  [loading]="exportRequesting()"
                   >
-                    <app-icon name="download" [size]="12" slot="icon"></app-icon>
-                    Descargar
-                  </app-button>
-                </div>
+                  <app-icon name="download" [size]="14" slot="icon"></app-icon>
+                  Solicitar Exportacion
+                </app-button>
               </div>
+              @if (exportsLoading()) {
+                <div class="space-y-3">
+                  @for (i of [1,2,3]; track i) {
+                    <div class="h-16 bg-gray-100 dark:bg-gray-700 rounded-lg animate-pulse"></div>
+                  }
+                </div>
+              }
+              <!-- Empty state -->
+              @if (!exportsLoading() && exports().length === 0) {
+                <div
+                  class="py-12 flex flex-col items-center rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600">
+                  <app-icon name="download" [size]="32" class="text-gray-400 mb-3"></app-icon>
+                  <p class="text-sm text-text-secondary">No hay solicitudes de exportacion</p>
+                </div>
+              }
+              <!-- Export list -->
+              @if (!exportsLoading() && exports().length > 0) {
+                <div class="space-y-3">
+                  @for (exp of exports(); track exp) {
+                    <div
+                      class="flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-lg border border-gray-200 dark:border-gray-700 gap-3"
+                      >
+                      <div class="flex items-center gap-3 min-w-0">
+                        <div [class]="getExportStatusIconClass(exp.status)"
+                          class="flex-shrink-0 w-8 h-8 rounded-full flex items-center justify-center">
+                          <app-icon [name]="getExportStatusIcon(exp.status)" [size]="16"></app-icon>
+                        </div>
+                        <div class="min-w-0">
+                          <span class="text-sm font-medium text-gray-900 dark:text-white block">
+                            Solicitud #{{ exp.request_id }}
+                          </span>
+                          <span class="text-xs text-gray-500 dark:text-gray-400">
+                            {{ exp.requested_at | date:'dd/MM/yyyy HH:mm' }}
+                          </span>
+                        </div>
+                      </div>
+                      <div class="flex items-center gap-2">
+                        <span [class]="getExportStatusBadgeClass(exp.status)"
+                          class="px-2 py-0.5 rounded-full text-xs font-medium">
+                          {{ getExportStatusLabel(exp.status) }}
+                        </span>
+                        @if (exp.status === 'completed' && exp.has_file) {
+                          <app-button
+                            variant="outline"
+                            size="xsm"
+                            (clicked)="onDownloadExport(exp.request_id)"
+                            >
+                            <app-icon name="download" [size]="12" slot="icon"></app-icon>
+                            Descargar
+                          </app-button>
+                        }
+                      </div>
+                    </div>
+                  }
+                </div>
+              }
             </div>
           </div>
-        </div>
-
+        }
+    
         <!-- ─── Anonimizacion ─── -->
-        <div *ngIf="activeTab() === 'anonymization'">
-          <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
-            <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">Derecho al Olvido</h2>
-            <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">
-              Anonimizacion irreversible de datos personales. Esta accion NO se puede deshacer.
-            </p>
-
-            <!-- Search -->
-            <div class="mb-6">
-              <label class="block text-sm font-medium text-text-primary mb-1">Buscar usuario</label>
-              <input
-                type="text"
-                [(ngModel)]="searchQuery"
-                (ngModelChange)="onSearchQueryChange($event)"
-                placeholder="Nombre, email o documento..."
+        @if (activeTab() === 'anonymization') {
+          <div>
+            <div class="bg-white dark:bg-gray-800 rounded-lg shadow p-6">
+              <h2 class="text-lg font-semibold text-gray-900 dark:text-white mb-2">Derecho al Olvido</h2>
+              <p class="text-sm text-gray-500 dark:text-gray-400 mb-6">
+                Anonimizacion irreversible de datos personales. Esta accion NO se puede deshacer.
+              </p>
+              <!-- Search -->
+              <div class="mb-6">
+                <label class="block text-sm font-medium text-text-primary mb-1">Buscar usuario</label>
+                <input
+                  type="text"
+                  [(ngModel)]="searchQuery"
+                  (ngModelChange)="onSearchQueryChange($event)"
+                  placeholder="Nombre, email o documento..."
                 class="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm
                        text-text-primary placeholder-text-secondary focus:border-primary
                        focus:outline-none focus:ring-1 focus:ring-primary"
-              />
-            </div>
-
-            <!-- Search results -->
-            <div *ngIf="searchLoading()" class="space-y-2">
-              <div *ngFor="let i of [1,2,3]" class="h-14 bg-gray-100 dark:bg-gray-700 rounded-lg animate-pulse"></div>
-            </div>
-
-            <div *ngIf="!searchLoading() && searchResults().length > 0" class="space-y-2 mb-6">
-              <div
-                *ngFor="let user of searchResults()"
-                class="flex items-center justify-between p-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors"
-              >
-                <div>
-                  <span class="text-sm font-medium text-gray-900 dark:text-white">
-                    {{ user.first_name }} {{ user.last_name }}
-                  </span>
-                  <span class="text-xs text-gray-500 dark:text-gray-400 block">
-                    {{ user.email }} &middot; {{ user.document_type }} {{ user.document_number }}
-                  </span>
-                </div>
-                <app-button
-                  variant="outline-danger"
-                  size="xsm"
-                  (clicked)="onSelectUserForAnon(user)"
-                >
-                  <app-icon name="user-x" [size]="12" slot="icon"></app-icon>
-                  Anonimizar
-                </app-button>
+                  />
               </div>
-            </div>
-
-            <div *ngIf="!searchLoading() && searchQuery.length >= 2 && searchResults().length === 0"
-              class="py-6 flex flex-col items-center rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600 mb-6">
-              <app-icon name="search" [size]="24" class="text-gray-400 mb-2"></app-icon>
-              <p class="text-sm text-text-secondary">No se encontraron usuarios</p>
-            </div>
-
-            <!-- Anonymization confirmation -->
-            <div *ngIf="selectedUserForAnon()" class="p-4 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800">
-              <h3 class="text-sm font-bold text-red-800 dark:text-red-300 mb-3">
-                Confirmar anonimizacion de: {{ selectedUserForAnon()!.first_name }} {{ selectedUserForAnon()!.last_name }}
-              </h3>
-
-              <div class="mb-3">
-                <label class="block text-sm font-medium text-red-700 dark:text-red-400 mb-1">Motivo (obligatorio)</label>
-                <textarea
-                  [(ngModel)]="anonReason"
-                  rows="2"
+              <!-- Search results -->
+              @if (searchLoading()) {
+                <div class="space-y-2">
+                  @for (i of [1,2,3]; track i) {
+                    <div class="h-14 bg-gray-100 dark:bg-gray-700 rounded-lg animate-pulse"></div>
+                  }
+                </div>
+              }
+              @if (!searchLoading() && searchResults().length > 0) {
+                <div class="space-y-2 mb-6">
+                  @for (user of searchResults(); track user) {
+                    <div
+                      class="flex items-center justify-between p-3 rounded-lg border border-gray-200 dark:border-gray-700 hover:bg-gray-50 dark:hover:bg-gray-750 transition-colors"
+                      >
+                      <div>
+                        <span class="text-sm font-medium text-gray-900 dark:text-white">
+                          {{ user.first_name }} {{ user.last_name }}
+                        </span>
+                        <span class="text-xs text-gray-500 dark:text-gray-400 block">
+                          {{ user.email }} &middot; {{ user.document_type }} {{ user.document_number }}
+                        </span>
+                      </div>
+                      <app-button
+                        variant="outline-danger"
+                        size="xsm"
+                        (clicked)="onSelectUserForAnon(user)"
+                        >
+                        <app-icon name="user-x" [size]="12" slot="icon"></app-icon>
+                        Anonimizar
+                      </app-button>
+                    </div>
+                  }
+                </div>
+              }
+              @if (!searchLoading() && searchQuery.length >= 2 && searchResults().length === 0) {
+                <div
+                  class="py-6 flex flex-col items-center rounded-lg border-2 border-dashed border-gray-300 dark:border-gray-600 mb-6">
+                  <app-icon name="search" [size]="24" class="text-gray-400 mb-2"></app-icon>
+                  <p class="text-sm text-text-secondary">No se encontraron usuarios</p>
+                </div>
+              }
+              <!-- Anonymization confirmation -->
+              @if (selectedUserForAnon()) {
+                <div class="p-4 bg-red-50 dark:bg-red-900/20 rounded-lg border border-red-200 dark:border-red-800">
+                  <h3 class="text-sm font-bold text-red-800 dark:text-red-300 mb-3">
+                    Confirmar anonimizacion de: {{ selectedUserForAnon()!.first_name }} {{ selectedUserForAnon()!.last_name }}
+                  </h3>
+                  <div class="mb-3">
+                    <label class="block text-sm font-medium text-red-700 dark:text-red-400 mb-1">Motivo (obligatorio)</label>
+                    <textarea
+                      [(ngModel)]="anonReason"
+                      rows="2"
                   class="w-full rounded-lg border border-red-300 dark:border-red-700 bg-white dark:bg-gray-800 px-3 py-2 text-sm
                          text-text-primary placeholder-text-secondary focus:border-red-500
                          focus:outline-none focus:ring-1 focus:ring-red-500 resize-none"
-                  placeholder="Motivo de la anonimizacion..."
-                ></textarea>
-              </div>
-
-              <div class="flex items-center gap-2 mb-3">
-                <input
-                  type="checkbox"
-                  [(ngModel)]="anonConfirm1"
-                  id="anonConfirm1"
-                  class="rounded border-red-300 text-red-600 focus:ring-red-500"
-                />
-                <label for="anonConfirm1" class="text-xs text-red-700 dark:text-red-400">
-                  Entiendo que esta accion es IRREVERSIBLE
-                </label>
-              </div>
-              <div class="flex items-center gap-2 mb-4">
-                <input
-                  type="checkbox"
-                  [(ngModel)]="anonConfirm2"
-                  id="anonConfirm2"
-                  class="rounded border-red-300 text-red-600 focus:ring-red-500"
-                />
-                <label for="anonConfirm2" class="text-xs text-red-700 dark:text-red-400">
-                  Confirmo que se han agotado los plazos legales de retencion
-                </label>
-              </div>
-
-              <div class="flex gap-2">
-                <app-button
-                  variant="outline"
-                  size="sm"
-                  (clicked)="onCancelAnon()"
-                >
-                  Cancelar
-                </app-button>
-                <app-button
-                  variant="danger"
-                  size="sm"
-                  (clicked)="onRequestAnonymization()"
-                  [disabled]="!anonConfirm1 || !anonConfirm2 || !anonReason.trim() || anonLoading()"
-                  [loading]="anonLoading()"
-                >
-                  <app-icon name="user-x" [size]="14" slot="icon"></app-icon>
-                  Ejecutar Anonimizacion
-                </app-button>
-              </div>
+                      placeholder="Motivo de la anonimizacion..."
+                    ></textarea>
+                  </div>
+                  <div class="flex items-center gap-2 mb-3">
+                    <input
+                      type="checkbox"
+                      [(ngModel)]="anonConfirm1"
+                      id="anonConfirm1"
+                      class="rounded border-red-300 text-red-600 focus:ring-red-500"
+                      />
+                    <label for="anonConfirm1" class="text-xs text-red-700 dark:text-red-400">
+                      Entiendo que esta accion es IRREVERSIBLE
+                    </label>
+                  </div>
+                  <div class="flex items-center gap-2 mb-4">
+                    <input
+                      type="checkbox"
+                      [(ngModel)]="anonConfirm2"
+                      id="anonConfirm2"
+                      class="rounded border-red-300 text-red-600 focus:ring-red-500"
+                      />
+                    <label for="anonConfirm2" class="text-xs text-red-700 dark:text-red-400">
+                      Confirmo que se han agotado los plazos legales de retencion
+                    </label>
+                  </div>
+                  <div class="flex gap-2">
+                    <app-button
+                      variant="outline"
+                      size="sm"
+                      (clicked)="onCancelAnon()"
+                      >
+                      Cancelar
+                    </app-button>
+                    <app-button
+                      variant="danger"
+                      size="sm"
+                      (clicked)="onRequestAnonymization()"
+                      [disabled]="!anonConfirm1 || !anonConfirm2 || !anonReason.trim() || anonLoading()"
+                      [loading]="anonLoading()"
+                      >
+                      <app-icon name="user-x" [size]="14" slot="icon"></app-icon>
+                      Ejecutar Anonimizacion
+                    </app-button>
+                  </div>
+                </div>
+              }
             </div>
           </div>
-        </div>
-
+        }
+    
       </div>
     </div>
-  `,
+    `,
 })
 export class HabeasDataComponent implements OnInit, OnDestroy {
   private habeasDataService = inject(HabeasDataService);

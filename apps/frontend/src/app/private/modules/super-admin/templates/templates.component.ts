@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { RouterModule } from '@angular/router';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { Subscription } from 'rxjs';
@@ -44,7 +44,6 @@ import './templates.component.css';
   selector: 'app-templates',
   standalone: true,
   imports: [
-    CommonModule,
     RouterModule,
     FormsModule,
     ReactiveFormsModule,
@@ -118,65 +117,71 @@ import './templates.component.css';
         </div>
 
         <!-- Loading State -->
-        <div *ngIf="isLoading" class="p-8 text-center">
-          <div
-            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-          ></div>
-          <p class="mt-2 text-text-secondary">Loading templates...</p>
-        </div>
+        @if (isLoading) {
+          <div class="p-8 text-center">
+            <div
+              class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            ></div>
+            <p class="mt-2 text-text-secondary">Loading templates...</p>
+          </div>
+        }
 
         <!-- Empty State -->
-        <app-empty-state
-          *ngIf="!isLoading && templates.length === 0"
-          icon="file-text"
-          [title]="getEmptyStateTitle()"
-          [description]="getEmptyStateDescription()"
-          actionButtonText="Crear Template"
-          (actionClick)="openCreateTemplateModal()"
-        >
-        </app-empty-state>
+        @if (!isLoading && templates.length === 0) {
+          <app-empty-state
+            icon="file-text"
+            [title]="getEmptyStateTitle()"
+            [description]="getEmptyStateDescription()"
+            actionButtonText="Crear Template"
+            (actionClick)="openCreateTemplateModal()"
+          >
+          </app-empty-state>
+        }
 
         <!-- Templates Table -->
-        <div *ngIf="!isLoading && templates.length > 0" class="p-6">
-          <app-responsive-data-view
-            [data]="templates"
-            [columns]="tableColumns"
-            [cardConfig]="cardConfig"
-            [actions]="tableActions"
-            [loading]="isLoading"
-            emptyMessage="No hay plantillas"
-            emptyIcon="file-text"
-          >
-          </app-responsive-data-view>
-
-          <!-- Pagination -->
-          <div class="mt-6 flex justify-center">
-            <app-pagination
-              [currentPage]="pagination.page"
-              [totalPages]="pagination.totalPages"
-              [total]="pagination.total"
-              [limit]="pagination.limit"
-              infoStyle="range"
-              (pageChange)="changePage($event)"
-            />
+        @if (!isLoading && templates.length > 0) {
+          <div class="p-6">
+            <app-responsive-data-view
+              [data]="templates"
+              [columns]="tableColumns"
+              [cardConfig]="cardConfig"
+              [actions]="tableActions"
+              [loading]="isLoading"
+              emptyMessage="No hay plantillas"
+              emptyIcon="file-text"
+            >
+            </app-responsive-data-view>
+            <!-- Pagination -->
+            <div class="mt-6 flex justify-center">
+              <app-pagination
+                [currentPage]="pagination.page"
+                [totalPages]="pagination.totalPages"
+                [total]="pagination.total"
+                [limit]="pagination.limit"
+                infoStyle="range"
+                (pageChange)="changePage($event)"
+              />
+            </div>
           </div>
-        </div>
+        }
       </div>
 
-      <!-- Create Template Modal -->
-      <app-template-create-modal
-        [(isOpen)]="isCreateModalOpen"
-        [isSubmitting]="isCreatingTemplate"
-        (submit)="createTemplate($event)"
-      ></app-template-create-modal>
+      @defer (when isCreateModalOpen) {
+        <app-template-create-modal
+          [(isOpen)]="isCreateModalOpen"
+          [isSubmitting]="isCreatingTemplate"
+          (submit)="createTemplate($event)"
+        ></app-template-create-modal>
+      }
 
-      <!-- Edit Template Modal -->
-      <app-template-edit-modal
-        [(isOpen)]="isEditModalOpen"
-        [isSubmitting]="isUpdatingTemplate"
-        [template]="selectedTemplate"
-        (submit)="updateTemplate($event)"
-      ></app-template-edit-modal>
+      @defer (when isEditModalOpen) {
+        <app-template-edit-modal
+          [(isOpen)]="isEditModalOpen"
+          [isSubmitting]="isUpdatingTemplate"
+          [template]="selectedTemplate"
+          (submit)="updateTemplate($event)"
+        ></app-template-edit-modal>
+      }
     </div>
   `,
 })

@@ -4,8 +4,9 @@ import {
   HostBinding,
   ChangeDetectionStrategy,
   HostListener,
+  input
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 
 export type TooltipSize = 'sm' | 'md' | 'lg';
 export type TooltipPosition = 'top' | 'bottom' | 'left' | 'right';
@@ -21,18 +22,18 @@ export type TooltipColor =
 @Component({
   selector: 'app-tooltip',
   standalone: true,
-  imports: [CommonModule],
+  imports: [],
   template: `
     <ng-content></ng-content>
     <div
       class="tooltip-container"
-      [attr.data-position]="position"
-      [attr.data-size]="size"
-      [attr.data-color]="color"
+      [attr.data-position]="position()"
+      [attr.data-size]="size()"
+      [attr.data-color]="color()"
       [class.visible]="visible"
     >
       <div class="tooltip-content">
-        {{ content }}
+        {{ content() }}
       </div>
       <div class="tooltip-arrow"></div>
     </div>
@@ -354,12 +355,12 @@ export type TooltipColor =
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class TooltipComponent {
-  @Input() content = '';
-  @Input() size: TooltipSize = 'md';
-  @Input() position: TooltipPosition = 'top';
-  @Input() color: TooltipColor = 'default';
+  readonly content = input('');
+  readonly size = input<TooltipSize>('md');
+  readonly position = input<TooltipPosition>('top');
+  readonly color = input<TooltipColor>('default');
   @Input() visible = false;
-  @Input() delay = 200;
+  readonly delay = input(200);
 
   private showTimeout: any;
 
@@ -375,7 +376,7 @@ export class TooltipComponent {
     }
     this.showTimeout = setTimeout(() => {
       this.visible = true;
-    }, this.delay);
+    }, this.delay());
   }
 
   @HostListener('mouseleave')

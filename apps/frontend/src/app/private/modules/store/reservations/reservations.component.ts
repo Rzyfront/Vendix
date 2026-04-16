@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { Router } from '@angular/router';
 import { Subject, takeUntil, finalize } from 'rxjs';
 import { ReservationListComponent } from './components/reservation-list/reservation-list.component';
@@ -25,7 +25,6 @@ import { ToastService, DialogService, IconComponent, TooltipComponent } from '..
   selector: 'app-reservations',
   standalone: true,
   imports: [
-    CommonModule,
     StatsComponent,
     ReservationListComponent,
     ReservationFormModalComponent,
@@ -37,8 +36,8 @@ import { ToastService, DialogService, IconComponent, TooltipComponent } from '..
     QuickActionsPanelComponent,
     CardComponent,
     IconComponent,
-    TooltipComponent,
-  ],
+    TooltipComponent
+],
   templateUrl: './reservations.component.html',
   styleUrls: ['./reservations.component.scss'],
 })

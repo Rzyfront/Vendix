@@ -1,5 +1,5 @@
 import { Component, Input, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { RouterModule, Router } from '@angular/router';
 import { Category } from '../../services/catalog.service';
 import { CatalogService } from '../../services/catalog.service';
@@ -7,7 +7,7 @@ import { CatalogService } from '../../services/catalog.service';
 @Component({
   selector: 'app-categories-showcase',
   standalone: true,
-  imports: [CommonModule, RouterModule],
+  imports: [RouterModule],
   templateUrl: './categories-showcase.component.html',
   styleUrls: ['./categories-showcase.component.scss'],
 })

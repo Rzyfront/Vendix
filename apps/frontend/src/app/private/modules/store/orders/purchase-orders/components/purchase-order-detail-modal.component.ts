@@ -1,5 +1,5 @@
 import { Component, Input, Output, EventEmitter, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 
@@ -17,12 +17,11 @@ import { PurchaseOrder, PurchaseOrderItem, ReceivePurchaseOrderItemDto } from '.
   selector: 'app-purchase-order-detail-modal',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ModalComponent,
     ButtonComponent,
-    IconComponent,
-  ],
+    IconComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen"
@@ -31,120 +30,125 @@ import { PurchaseOrder, PurchaseOrderItem, ReceivePurchaseOrderItemDto } from '.
       [size]="'lg'"
       [title]="'Orden ' + (order?.order_number || '')"
       subtitle="Detalles de la orden de compra"
-    >
-      <div *ngIf="order" class="space-y-6">
-        <!-- Header Info -->
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-muted/10 rounded-lg">
-          <div>
-            <span class="text-xs text-text-secondary block">Proveedor</span>
-            <span class="font-medium">{{ order.suppliers?.name || order.supplier?.name || '-' }}</span>
-          </div>
-          <div>
-            <span class="text-xs text-text-secondary block">Fecha de Orden</span>
-            <span class="font-medium">{{ formatDate(order.order_date) }}</span>
-          </div>
-          <div>
-            <span class="text-xs text-text-secondary block">Fecha Esperada</span>
-            <span class="font-medium">{{ formatDate(order.expected_date) }}</span>
-          </div>
-          <div>
-            <span class="text-xs text-text-secondary block">Estado</span>
-            <span [class]="getStatusClasses(order.status)">{{ getStatusLabel(order.status) }}</span>
-          </div>
-        </div>
-
-        <!-- Items Table -->
-        <div>
-          <h4 class="text-sm font-semibold text-text-primary mb-3">Productos</h4>
-          <div class="border border-border rounded-lg overflow-hidden">
-            <table class="w-full text-sm">
-              <thead class="bg-muted/20">
-                <tr>
-                  <th class="px-4 py-2 text-left font-medium text-text-secondary">Producto</th>
-                  <th class="px-4 py-2 text-center font-medium text-text-secondary">Ordenado</th>
-                  <th class="px-4 py-2 text-center font-medium text-text-secondary">Recibido</th>
-                  <th class="px-4 py-2 text-right font-medium text-text-secondary">Precio</th>
-                  <th class="px-4 py-2 text-right font-medium text-text-secondary">Subtotal</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr *ngFor="let item of (order.purchase_order_items || order.items); let i = index" class="border-t border-border">
-                  <td class="px-4 py-3">{{ item.products?.name || item.product?.name || 'Producto #' + item.product_id }}</td>
-                  <td class="px-4 py-3 text-center">{{ item.quantity_ordered || item.quantity }}</td>
-                  <td class="px-4 py-3 text-center">{{ item.quantity_received || 0 }}</td>
-                  <td class="px-4 py-3 text-right">{{ formatCurrency(item.unit_cost || item.unit_price) }}</td>
-                  <td class="px-4 py-3 text-right">{{ formatCurrency((item.quantity_ordered || item.quantity) * (item.unit_cost || item.unit_price)) }}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- Totals -->
-        <div class="flex justify-end">
-          <div class="w-64 space-y-2 text-sm">
-            <div class="flex justify-between">
-              <span class="text-text-secondary">Subtotal:</span>
-              <span>{{ formatCurrency(order.subtotal_amount || 0) }}</span>
+      >
+      @if (order) {
+        <div class="space-y-6">
+          <!-- Header Info -->
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-muted/10 rounded-lg">
+            <div>
+              <span class="text-xs text-text-secondary block">Proveedor</span>
+              <span class="font-medium">{{ order.suppliers?.name || order.supplier?.name || '-' }}</span>
             </div>
-            <div class="flex justify-between">
-              <span class="text-text-secondary">Envío:</span>
-              <span>{{ formatCurrency(order.shipping_cost || 0) }}</span>
+            <div>
+              <span class="text-xs text-text-secondary block">Fecha de Orden</span>
+              <span class="font-medium">{{ formatDate(order.order_date) }}</span>
             </div>
-            <div class="flex justify-between font-semibold text-base border-t border-border pt-2">
-              <span>Total:</span>
-              <span class="text-primary">{{ formatCurrency(order.total_amount || 0) }}</span>
+            <div>
+              <span class="text-xs text-text-secondary block">Fecha Esperada</span>
+              <span class="font-medium">{{ formatDate(order.expected_date) }}</span>
+            </div>
+            <div>
+              <span class="text-xs text-text-secondary block">Estado</span>
+              <span [class]="getStatusClasses(order.status)">{{ getStatusLabel(order.status) }}</span>
             </div>
           </div>
+          <!-- Items Table -->
+          <div>
+            <h4 class="text-sm font-semibold text-text-primary mb-3">Productos</h4>
+            <div class="border border-border rounded-lg overflow-hidden">
+              <table class="w-full text-sm">
+                <thead class="bg-muted/20">
+                  <tr>
+                    <th class="px-4 py-2 text-left font-medium text-text-secondary">Producto</th>
+                    <th class="px-4 py-2 text-center font-medium text-text-secondary">Ordenado</th>
+                    <th class="px-4 py-2 text-center font-medium text-text-secondary">Recibido</th>
+                    <th class="px-4 py-2 text-right font-medium text-text-secondary">Precio</th>
+                    <th class="px-4 py-2 text-right font-medium text-text-secondary">Subtotal</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (item of (order.purchase_order_items || order.items); track item; let i = $index) {
+                    <tr class="border-t border-border">
+                      <td class="px-4 py-3">{{ item.products?.name || item.product?.name || 'Producto #' + item.product_id }}</td>
+                      <td class="px-4 py-3 text-center">{{ item.quantity_ordered || item.quantity }}</td>
+                      <td class="px-4 py-3 text-center">{{ item.quantity_received || 0 }}</td>
+                      <td class="px-4 py-3 text-right">{{ formatCurrency(item.unit_cost || item.unit_price) }}</td>
+                      <td class="px-4 py-3 text-right">{{ formatCurrency((item.quantity_ordered || item.quantity) * (item.unit_cost || item.unit_price)) }}</td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <!-- Totals -->
+          <div class="flex justify-end">
+            <div class="w-64 space-y-2 text-sm">
+              <div class="flex justify-between">
+                <span class="text-text-secondary">Subtotal:</span>
+                <span>{{ formatCurrency(order.subtotal_amount || 0) }}</span>
+              </div>
+              <div class="flex justify-between">
+                <span class="text-text-secondary">Envío:</span>
+                <span>{{ formatCurrency(order.shipping_cost || 0) }}</span>
+              </div>
+              <div class="flex justify-between font-semibold text-base border-t border-border pt-2">
+                <span>Total:</span>
+                <span class="text-primary">{{ formatCurrency(order.total_amount || 0) }}</span>
+              </div>
+            </div>
+          </div>
+          <!-- Notes -->
+          @if (order.notes) {
+            <div class="p-3 bg-muted/10 rounded-lg">
+              <span class="text-xs text-text-secondary block mb-1">Notas:</span>
+              <p class="text-sm">{{ order.notes }}</p>
+            </div>
+          }
         </div>
-
-        <!-- Notes -->
-        <div *ngIf="order.notes" class="p-3 bg-muted/10 rounded-lg">
-          <span class="text-xs text-text-secondary block mb-1">Notas:</span>
-          <p class="text-sm">{{ order.notes }}</p>
-        </div>
-
-      </div>
-
+      }
+    
       <!-- Footer Actions -->
       <div slot="footer" class="flex justify-between gap-2 w-full">
         <div>
-          <app-button
-            *ngIf="canCancel"
-            variant="danger"
-            size="xsm"
-            (clicked)="onCancelOrder()"
-          >
-            <app-icon name="x-circle" [size]="14" class="mr-1.5"></app-icon>
-            Cancelar Orden
-          </app-button>
+          @if (canCancel) {
+            <app-button
+              variant="danger"
+              size="xsm"
+              (clicked)="onCancelOrder()"
+              >
+              <app-icon name="x-circle" [size]="14" class="mr-1.5"></app-icon>
+              Cancelar Orden
+            </app-button>
+          }
         </div>
         <div class="flex gap-2">
           <app-button variant="secondary" size="xsm" (clicked)="onClose()">
             Cerrar
           </app-button>
-          <app-button
-            *ngIf="canEdit"
-            variant="outline"
-            size="xsm"
-            (clicked)="onEditOrder()"
-          >
-            <app-icon name="edit" [size]="14" class="mr-1.5"></app-icon>
-            Editar Orden
-          </app-button>
-          <app-button
-            *ngIf="canReceive"
-            variant="primary"
-            size="xsm"
-            (clicked)="startReceiving()"
-          >
-            <app-icon name="package" [size]="14" class="mr-1.5"></app-icon>
-            Recibir Todo
-          </app-button>
+          @if (canEdit) {
+            <app-button
+              variant="outline"
+              size="xsm"
+              (clicked)="onEditOrder()"
+              >
+              <app-icon name="edit" [size]="14" class="mr-1.5"></app-icon>
+              Editar Orden
+            </app-button>
+          }
+          @if (canReceive) {
+            <app-button
+              variant="primary"
+              size="xsm"
+              (clicked)="startReceiving()"
+              >
+              <app-icon name="package" [size]="14" class="mr-1.5"></app-icon>
+              Recibir Todo
+            </app-button>
+          }
         </div>
       </div>
     </app-modal>
-  `,
+    `,
 })
 export class PurchaseOrderDetailModalComponent {
   private currencyService = inject(CurrencyFormatService);
@@ -211,6 +215,11 @@ export class PurchaseOrderDetailModalComponent {
   onClose(): void {
     this.is_receiving_mode = false;
     this.receive_quantities = [];
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.close.emit();
     this.isOpenChange.emit(false);
   }
@@ -218,6 +227,11 @@ export class PurchaseOrderDetailModalComponent {
   onCancel(): void {
     this.is_receiving_mode = false;
     this.receive_quantities = [];
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.close.emit();
     this.isOpenChange.emit(false);
   }

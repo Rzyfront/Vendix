@@ -8,7 +8,7 @@ import {
   OnDestroy,
   inject,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   ReactiveFormsModule,
   FormGroup,
@@ -25,12 +25,11 @@ import { LucideAngularModule } from 'lucide-angular';
   selector: 'app-app-settings-form',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     IconComponent,
     ButtonComponent,
-    LucideAngularModule,
-  ],
+    LucideAngularModule
+],
   templateUrl: './app-settings-form.component.html',
   styleUrls: ['./app-settings-form.component.scss'],
 })

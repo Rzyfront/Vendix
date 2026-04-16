@@ -9,7 +9,7 @@ import {
   inject,
 } from '@angular/core';
 import { Subject, takeUntil, take, filter } from 'rxjs';
-import { CommonModule } from '@angular/common';
+
 
 import {
   ButtonComponent,
@@ -29,11 +29,10 @@ import * as InvoicingActions from '../../invoicing/state/actions/invoicing.actio
   selector: 'app-pos-order-confirmation',
   standalone: true,
   imports: [
-    CommonModule,
     ButtonComponent,
     ModalComponent,
-    IconComponent,
-  ],
+    IconComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen"
@@ -42,20 +41,20 @@ import * as InvoicingActions from '../../invoicing/state/actions/invoicing.actio
       title="¡Venta Completada!"
       [subtitle]="'Orden #' + orderNumber + ' procesada exitosamente'"
       (closed)="onModalClosed()"
-    >
+      >
       <div slot="header"
         class="w-10 h-10 rounded-full bg-success/10 flex items-center justify-center text-success flex-shrink-0">
         <app-icon name="check-circle" [size]="24"></app-icon>
       </div>
-
+    
       <!-- Ticket Visual Representation -->
       <div class="max-w-md mx-auto print:max-w-none">
         <div
           class="bg-surface border border-dashed border-border rounded-xl p-6 shadow-sm relative overflow-hidden receipt-container"
-        >
+          >
           <!-- Decorative edges -->
           <div class="absolute top-0 left-0 right-0 h-1 bg-primary/20"></div>
-
+    
           <div class="text-center border-b border-border pb-6 mb-6">
             <h3 class="text-xl font-bold text-text-primary tracking-tight">
               Vendix POS
@@ -64,7 +63,7 @@ import * as InvoicingActions from '../../invoicing/state/actions/invoicing.actio
               Sistema de Punto de Venta
             </p>
           </div>
-
+    
           <div class="space-y-3 mb-6 text-sm">
             <div class="flex justify-between">
               <span class="text-text-secondary">Fecha:</span>
@@ -74,73 +73,80 @@ import * as InvoicingActions from '../../invoicing/state/actions/invoicing.actio
               <span class="text-text-secondary">Cajero:</span>
               <span class="font-medium text-text-primary">{{ cashierName }}</span>
             </div>
-            <div *ngIf="customerName" class="flex justify-between">
-              <span class="text-text-secondary">Cliente:</span>
-              <span class="font-medium text-text-primary">{{ customerName }}</span>
-            </div>
+            @if (customerName) {
+              <div class="flex justify-between">
+                <span class="text-text-secondary">Cliente:</span>
+                <span class="font-medium text-text-primary">{{ customerName }}</span>
+              </div>
+            }
           </div>
-
+    
           <!-- Items Table -->
           <div class="space-y-4 mb-6">
             <div
               class="flex justify-between text-xs font-bold text-text-secondary uppercase tracking-wider pb-2 border-b border-border"
-            >
+              >
               <span>Producto</span>
               <span>Total</span>
             </div>
             <div class="space-y-3">
-              <div *ngFor="let item of orderItems" class="flex justify-between text-sm">
-                <div class="flex flex-col">
-                  <span class="font-medium text-text-primary">{{ item.name }}</span>
-                  <span class="text-xs text-text-secondary">
-                    <ng-container *ngIf="item.is_weight_product; else unitDetail">
-                      {{ item.weight }} {{ item.weight_unit }} x {{ formatCurrency(item.unitPrice) }}/{{ item.weight_unit }}
-                    </ng-container>
-                    <ng-template #unitDetail>
-                      {{ item.quantity }}x {{ formatCurrency(item.unitPrice) }}
-                    </ng-template>
-                  </span>
+              @for (item of orderItems; track item) {
+                <div class="flex justify-between text-sm">
+                  <div class="flex flex-col">
+                    <span class="font-medium text-text-primary">{{ item.name }}</span>
+                    <span class="text-xs text-text-secondary">
+                      @if (item.is_weight_product) {
+                        {{ item.weight }} {{ item.weight_unit }} x {{ formatCurrency(item.unitPrice) }}/{{ item.weight_unit }}
+                      } @else {
+                        {{ item.quantity }}x {{ formatCurrency(item.unitPrice) }}
+                      }
+                    </span>
+                  </div>
+                  <span class="font-bold text-text-primary">{{ formatCurrency(item.totalPrice) }}</span>
                 </div>
-                <span class="font-bold text-text-primary">{{ formatCurrency(item.totalPrice) }}</span>
-              </div>
+              }
             </div>
           </div>
-
+    
           <!-- Summary -->
           <div class="pt-4 border-t border-border space-y-2.5">
             <div class="flex justify-between text-sm text-text-secondary">
               <span>Subtotal:</span>
               <span>{{ formatCurrency(orderSubtotal) }}</span>
             </div>
-            <div *ngIf="hasDiscount()" class="flex justify-between text-sm text-destructive font-medium">
-              <span>Descuento:</span>
-              <span>-{{ formatCurrency(orderDiscount) }}</span>
-            </div>
+            @if (hasDiscount()) {
+              <div class="flex justify-between text-sm text-destructive font-medium">
+                <span>Descuento:</span>
+                <span>-{{ formatCurrency(orderDiscount) }}</span>
+              </div>
+            }
             <div class="flex justify-between text-sm text-text-secondary">
               <span>Impuesto:</span>
               <span>{{ formatCurrency(orderTax) }}</span>
             </div>
             <div
               class="flex justify-between items-center pt-3 mt-2 border-t-2 border-double border-border"
-            >
+              >
               <span class="text-lg font-bold text-text-primary">Total:</span>
               <span class="text-2xl font-extrabold text-primary">{{ formatCurrency(orderTotal) }}</span>
             </div>
           </div>
-
+    
           <!-- Payment Info -->
-          <div *ngIf="paymentInfo" class="mt-6 pt-4 border-t border-border bg-muted/20 -mx-6 px-6 -mb-6 pb-6 rounded-b-xl">
-            <div class="flex justify-between items-center text-sm">
-              <div class="flex items-center gap-2">
-                <app-icon name="credit-card" [size]="16" class="text-text-secondary"></app-icon>
-                <span class="font-medium text-text-secondary">{{ paymentInfo.method }}:</span>
+          @if (paymentInfo) {
+            <div class="mt-6 pt-4 border-t border-border bg-muted/20 -mx-6 px-6 -mb-6 pb-6 rounded-b-xl">
+              <div class="flex justify-between items-center text-sm">
+                <div class="flex items-center gap-2">
+                  <app-icon name="credit-card" [size]="16" class="text-text-secondary"></app-icon>
+                  <span class="font-medium text-text-secondary">{{ paymentInfo.method }}:</span>
+                </div>
+                <span class="font-bold text-text-primary">{{ formatCurrency(paymentInfo.amount) }}</span>
               </div>
-              <span class="font-bold text-text-primary">{{ formatCurrency(paymentInfo.amount) }}</span>
             </div>
-          </div>
+          }
         </div>
       </div>
-
+    
       <div slot="footer" class="flex flex-col gap-3 w-full">
         <!-- CTA Primario: full-width, prominente -->
         <app-button
@@ -148,31 +154,31 @@ import * as InvoicingActions from '../../invoicing/state/actions/invoicing.actio
           size="lg"
           [fullWidth]="true"
           (clicked)="startNewSale()"
-        >
+          >
           <app-icon name="plus" [size]="20" slot="icon"></app-icon>
           Nueva compra
         </app-button>
-
+    
         <!-- Acciones secundarias: ghost, compactos, en fila -->
         <div class="flex items-center justify-center gap-1 sm:gap-2">
           <app-button variant="ghost" size="sm" (clicked)="printReceipt()" [loading]="printing" title="Imprimir Ticket">
             <app-icon name="printer" [size]="16" slot="icon"></app-icon>
             <span class="hidden sm:inline">Imprimir</span>
           </app-button>
-
+    
           <app-button variant="ghost" size="sm" (clicked)="emailReceipt()" [disabled]="!customerEmail" [loading]="emailing" title="Enviar por Email">
             <app-icon name="mail" [size]="16" slot="icon"></app-icon>
             <span class="hidden sm:inline">Email</span>
           </app-button>
-
+    
           <app-button variant="ghost" size="sm" (clicked)="createInvoice()" [disabled]="!orderId" [loading]="creatingInvoice" title="Crear Factura">
             <app-icon name="file-text" [size]="16" slot="icon"></app-icon>
             <span class="hidden sm:inline">Factura</span>
           </app-button>
-
+    
           <!-- Separador visual entre categorías -->
           <div class="w-px h-5 bg-[var(--color-border)] mx-1"></div>
-
+    
           <app-button variant="ghost" size="sm" (clicked)="goToOrderDetail()" [disabled]="!orderId" title="Ver detalle de la orden">
             <app-icon name="external-link" [size]="16" slot="icon"></app-icon>
             <span class="hidden sm:inline">Ver detalle</span>
@@ -180,7 +186,7 @@ import * as InvoicingActions from '../../invoicing/state/actions/invoicing.actio
         </div>
       </div>
     </app-modal>
-  `,
+    `,
   styles: [
     `
       :host {
@@ -361,6 +367,11 @@ export class PosOrderConfirmationComponent implements OnInit, OnChanges, OnDestr
   }
 
   onModalClosed(): void {
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.closed.emit();
   }
 
@@ -449,6 +460,11 @@ export class PosOrderConfirmationComponent implements OnInit, OnChanges, OnDestr
   }
 
   startNewSale(): void {
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.newSale.emit();
   }
 

@@ -1,15 +1,15 @@
 import {
   Component,
-  Input,
   OnChanges,
   SimpleChanges,
-  ViewChild,
   ElementRef,
   OnDestroy,
   AfterViewInit,
   ChangeDetectionStrategy,
+  input,
+  viewChild
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { Chart, registerables } from 'chart.js';
 import 'chartjs-adapter-date-fns';
 import { TimeSeriesPoint } from '../../interfaces';
@@ -21,57 +21,63 @@ Chart.register(...registerables);
 @Component({
   selector: 'app-metric-chart',
   standalone: true,
-  imports: [CommonModule, CardComponent],
+  imports: [CardComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <app-card [padding]="false" customClasses="!p-4">
       <div class="flex items-center justify-between mb-3">
-        <span class="text-sm font-semibold" style="color: var(--color-text-primary);">{{ label }}</span>
-        <span *ngIf="latestValue !== null" class="text-xs font-mono px-2 py-0.5 rounded"
+        <span class="text-sm font-semibold" style="color: var(--color-text-primary);">{{ label() }}</span>
+        @if (latestValue !== null) {
+          <span class="text-xs font-mono px-2 py-0.5 rounded"
           style="color: var(--color-text-muted); background: var(--color-surface);">{{ formatValue(latestValue) }}</span>
+        }
       </div>
       <!-- Loading skeleton -->
-      <div *ngIf="loading" class="h-52 w-full rounded-lg animate-pulse"
+      @if (loading()) {
+        <div class="h-52 w-full rounded-lg animate-pulse"
         style="background: var(--color-border); opacity: 0.3;"></div>
+      }
       <!-- Chart canvas - always in DOM, hidden when loading -->
-      <div class="h-52 w-full" [class.hidden]="loading">
+      <div class="h-52 w-full" [class.hidden]="loading()">
         <canvas #chartCanvas></canvas>
       </div>
     </app-card>
-  `,
+    `,
 })
 export class MetricChartComponent
   implements AfterViewInit, OnChanges, OnDestroy
 {
-  @Input() label: string = '';
-  @Input() datapoints: TimeSeriesPoint[] | undefined | null;
-  @Input() unit: string = '';
-  @Input() color: string = '#7ed7a5';
-  @Input() secondaryDatapoints: TimeSeriesPoint[] | undefined | null;
-  @Input() secondaryLabel: string = '';
-  @Input() secondaryColor: string = '#ef4444';
-  @Input() tertiaryDatapoints: TimeSeriesPoint[] | undefined | null;
-  @Input() tertiaryLabel: string = '';
-  @Input() tertiaryColor: string = '#eab308';
-  @Input() loading: boolean = false;
+  readonly label = input<string>('');
+  readonly datapoints = input<TimeSeriesPoint[] | null>();
+  readonly unit = input<string>('');
+  readonly color = input<string>('#7ed7a5');
+  readonly secondaryDatapoints = input<TimeSeriesPoint[] | null>();
+  readonly secondaryLabel = input<string>('');
+  readonly secondaryColor = input<string>('#ef4444');
+  readonly tertiaryDatapoints = input<TimeSeriesPoint[] | null>();
+  readonly tertiaryLabel = input<string>('');
+  readonly tertiaryColor = input<string>('#eab308');
+  readonly loading = input<boolean>(false);
 
-  @ViewChild('chartCanvas') chartCanvas!: ElementRef<HTMLCanvasElement>;
+  readonly chartCanvas = viewChild.required<ElementRef<HTMLCanvasElement>>('chartCanvas');
 
   private chart: Chart | null = null;
   private viewReady = false;
 
   get latestValue(): number | null {
-    if (!this.datapoints || this.datapoints.length === 0) return null;
-    return this.datapoints[this.datapoints.length - 1].value;
+    const datapoints = this.datapoints();
+    if (!datapoints || datapoints.length === 0) return null;
+    return datapoints[datapoints.length - 1].value;
   }
 
   formatValue(value: number | null): string {
     if (value === null) return '--';
-    if (this.unit === '%') return `${value.toFixed(1)}%`;
-    if (this.unit === 'bytes') return formatBytes(value);
-    if (this.unit === 'ms') return `${value.toFixed(2)} ms`;
-    if (this.unit === 'ops') return `${value.toFixed(0)} ops`;
-    return `${value.toFixed(1)} ${this.unit}`;
+    const unit = this.unit();
+    if (unit === '%') return `${value.toFixed(1)}%`;
+    if (unit === 'bytes') return formatBytes(value);
+    if (unit === 'ms') return `${value.toFixed(2)} ms`;
+    if (unit === 'ops') return `${value.toFixed(0)} ops`;
+    return `${value.toFixed(1)} ${unit}`;
   }
 
   ngAfterViewInit(): void {
@@ -80,7 +86,7 @@ export class MetricChartComponent
   }
 
   ngOnChanges(changes: SimpleChanges): void {
-    if (this.viewReady && !this.loading) {
+    if (this.viewReady && !this.loading()) {
       // Use requestAnimationFrame to ensure the canvas is visible in the DOM after [class.hidden] updates
       requestAnimationFrame(() => this.createOrUpdateChart());
     }
@@ -110,8 +116,9 @@ export class MetricChartComponent
   }
 
   private createOrUpdateChart(): void {
-    if (!this.chartCanvas?.nativeElement) return;
-    const points = this.datapoints || [];
+    const chartCanvas = this.chartCanvas();
+    if (!chartCanvas?.nativeElement) return;
+    const points = this.datapoints() || [];
     if (points.length === 0) {
       if (this.chart) {
         this.chart.destroy();
@@ -124,10 +131,10 @@ export class MetricChartComponent
 
     const datasets: any[] = [
       {
-        label: this.label,
+        label: this.label(),
         data: points.map((p) => ({ x: new Date(p.timestamp), y: p.value })),
-        borderColor: this.color,
-        backgroundColor: this.color + '20',
+        borderColor: this.color(),
+        backgroundColor: this.color() + '20',
         borderWidth: 2,
         fill: true,
         tension: 0.3,
@@ -136,18 +143,19 @@ export class MetricChartComponent
       },
     ];
 
+    const secondaryDatapoints = this.secondaryDatapoints();
     if (
-      this.secondaryDatapoints &&
-      this.secondaryDatapoints.length > 0
+      secondaryDatapoints &&
+      secondaryDatapoints.length > 0
     ) {
       datasets.push({
-        label: this.secondaryLabel || 'Secondary',
-        data: this.secondaryDatapoints.map((p) => ({
+        label: this.secondaryLabel() || 'Secondary',
+        data: secondaryDatapoints.map((p) => ({
           x: new Date(p.timestamp),
           y: p.value,
         })),
-        borderColor: this.secondaryColor,
-        backgroundColor: this.secondaryColor + '20',
+        borderColor: this.secondaryColor(),
+        backgroundColor: this.secondaryColor() + '20',
         borderWidth: 2,
         fill: true,
         tension: 0.3,
@@ -156,15 +164,16 @@ export class MetricChartComponent
       });
     }
 
-    if (this.tertiaryDatapoints && this.tertiaryDatapoints.length > 0) {
+    const tertiaryDatapoints = this.tertiaryDatapoints();
+    if (tertiaryDatapoints && tertiaryDatapoints.length > 0) {
       datasets.push({
-        label: this.tertiaryLabel || 'Tertiary',
-        data: this.tertiaryDatapoints.map((p) => ({
+        label: this.tertiaryLabel() || 'Tertiary',
+        data: tertiaryDatapoints.map((p) => ({
           x: new Date(p.timestamp),
           y: p.value,
         })),
-        borderColor: this.tertiaryColor,
-        backgroundColor: this.tertiaryColor + '20',
+        borderColor: this.tertiaryColor(),
+        backgroundColor: this.tertiaryColor() + '20',
         borderWidth: 2,
         fill: false,
         tension: 0.3,
@@ -179,7 +188,7 @@ export class MetricChartComponent
       return;
     }
 
-    this.chart = new Chart(this.chartCanvas.nativeElement, {
+    this.chart = new Chart(chartCanvas.nativeElement, {
       type: 'line',
       data: { datasets },
       options: {

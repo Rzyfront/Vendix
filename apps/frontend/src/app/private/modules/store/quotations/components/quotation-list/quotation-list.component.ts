@@ -1,5 +1,5 @@
 import { Component, input, output, signal, computed, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { InputsearchComponent } from '../../../../../../shared/components/inputsearch/inputsearch.component';
 import { OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
@@ -23,14 +23,13 @@ import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
   selector: 'app-quotation-list',
   standalone: true,
   imports: [
-    CommonModule,
     CardComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
     ResponsiveDataViewComponent,
     IconComponent,
-    ButtonComponent,
-  ],
+    ButtonComponent
+],
   template: `
     <app-card [responsive]="true" [padding]="false">
       <!-- Search Section (inside card) -->

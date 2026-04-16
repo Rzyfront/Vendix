@@ -1,17 +1,16 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
   ChangeDetectionStrategy,
+  input,
+  output
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { IconComponent } from '../../index';
 
 @Component({
   selector: 'app-completion-step',
   standalone: true,
-  imports: [CommonModule, IconComponent],
+  imports: [IconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [
     `
@@ -446,7 +445,7 @@ import { IconComponent } from '../../index';
                 <div class="summary-card-info">
                   <span class="summary-card-title">Usuario</span>
                   <span class="summary-card-subtitle">{{
-                    wizardData.user?.email || 'Configurado'
+          wizardData().user?.email || 'Configurado'
                   }}</span>
                 </div>
               </div>
@@ -464,7 +463,7 @@ import { IconComponent } from '../../index';
                 <div class="summary-card-info">
                   <span class="summary-card-title">Tienda</span>
                   <span class="summary-card-subtitle">{{
-                    wizardData.store?.name || 'Configurada'
+          wizardData().store?.name || 'Configurada'
                   }}</span>
                 </div>
               </div>
@@ -549,8 +548,8 @@ import { IconComponent } from '../../index';
   `,
 })
 export class CompletionStepComponent {
-  @Input() wizardData: any = {};
-  @Input() isCompleting = false;
-  @Output() complete = new EventEmitter<void>();
-  @Output() goBack = new EventEmitter<void>();
+  readonly wizardData = input<any>({});
+  readonly isCompleting = input(false);
+  readonly complete = output<void>();
+  readonly goBack = output<void>();
 }

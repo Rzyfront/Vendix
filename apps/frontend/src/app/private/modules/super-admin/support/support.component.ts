@@ -1,5 +1,5 @@
 import { Component, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   FormsModule,
   ReactiveFormsModule,
@@ -45,7 +45,6 @@ import {
   selector: 'app-support',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     InputsearchComponent,
@@ -56,8 +55,8 @@ import {
     ModalComponent,
     IconComponent,
     PaginationComponent,
-    CardComponent,
-  ],
+    CardComponent
+],
   templateUrl: './support.component.html',
   styleUrls: ['./support.component.css'],
 })

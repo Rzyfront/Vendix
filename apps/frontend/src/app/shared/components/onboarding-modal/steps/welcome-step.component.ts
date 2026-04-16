@@ -1,12 +1,11 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
   ChangeDetectionStrategy,
   OnInit,
+  input,
+  output
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { IconComponent } from '../../index';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import { OnboardingWizardService } from '../../../../core/services/onboarding-wizard.service';
@@ -18,7 +17,7 @@ import { Subject } from 'rxjs';
 @Component({
   selector: 'app-welcome-step',
   standalone: true,
-  imports: [CommonModule, IconComponent],
+  imports: [IconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [
     `
@@ -368,7 +367,7 @@ import { Subject } from 'rxjs';
           <h1 class="welcome-title">Bienvenido a Vendix</h1>
 
           <p class="welcome-greeting">
-            ¡Hola, {{ userFirstName }}!
+            ¡Hola, {{ userFirstName() }}!
           </p>
 
           <p class="welcome-subtitle">
@@ -500,12 +499,12 @@ import { Subject } from 'rxjs';
   `,
 })
 export class WelcomeStepComponent implements OnInit {
-  @Input() userFirstName: string = 'Usuario';
-  @Output() businessTypeSelected = new EventEmitter<{
+  readonly userFirstName = input<string>('Usuario');
+  readonly businessTypeSelected = output<{
     type: 'STORE' | 'ORGANIZATION';
-  }>();
-  @Output() selectionChanged = new EventEmitter<'STORE' | 'ORGANIZATION' | null>();
-  @Output() nextStep = new EventEmitter<void>();
+}>();
+  readonly selectionChanged = output<'STORE' | 'ORGANIZATION' | null>();
+  readonly nextStep = output<void>();
 
   private destroy$ = new Subject<void>();
   primaryColor = '#7ed7a5';
@@ -566,6 +565,7 @@ export class WelcomeStepComponent implements OnInit {
   onContinue(): void {
     if (this.selectedType) {
       this.businessTypeSelected.emit({ type: this.selectedType });
+      // TODO: The 'emit' function requires a mandatory void argument
       this.nextStep.emit();
     }
   }
@@ -579,6 +579,7 @@ export class WelcomeStepComponent implements OnInit {
   }
 
   onNextStep(): void {
+    // TODO: The 'emit' function requires a mandatory void argument
     this.nextStep.emit();
   }
 }

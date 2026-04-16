@@ -1,19 +1,18 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
   ChangeDetectionStrategy,
   OnChanges,
   OnDestroy,
   HostListener,
   ElementRef,
-  ViewChild,
   SimpleChanges,
   ChangeDetectorRef,
   inject,
+  input,
+  output,
+  viewChild
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { Subject, Subscription } from 'rxjs';
 import { debounceTime } from 'rxjs/operators';
@@ -33,56 +32,55 @@ import {
   selector: 'app-options-dropdown',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     IconComponent,
     SelectorComponent,
-    MultiSelectorComponent,
-  ],
+    MultiSelectorComponent
+],
   templateUrl: './options-dropdown.component.html',
   styleUrls: ['./options-dropdown.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class OptionsDropdownComponent implements OnChanges, OnDestroy {
   /** Configuration for each filter in the dropdown */
-  @Input() filters: FilterConfig[] = [];
+  readonly filters = input<FilterConfig[]>([]);
 
   /** Actions to display in the dropdown */
-  @Input() actions: DropdownAction[] = [];
+  readonly actions = input<DropdownAction[]>([]);
 
   /** Whether to show the actions trigger button */
-  @Input() showActions: boolean = true;
+  readonly showActions = input<boolean>(true);
 
   /** Current filter values */
-  @Input() filterValues: FilterValues = {};
+  readonly filterValues = input<FilterValues>({});
 
   /** Title shown in the dropdown header */
-  @Input() title: string = 'Opciones';
+  readonly title = input<string>('Opciones');
 
   /** Label for the trigger button */
-  @Input() triggerLabel: string = 'Opciones';
+  readonly triggerLabel = input<string>('Opciones');
 
   /** Icon for the trigger button */
-  @Input() triggerIcon: IconName = 'sliders-horizontal';
+  readonly triggerIcon = input<IconName>('sliders-horizontal');
 
   /** Debounce time in milliseconds for filter changes */
-  @Input() debounceMs: number = 350;
+  readonly debounceMs = input<number>(350);
 
   /** Whether the component is in a loading state */
-  @Input() isLoading: boolean = false;
+  readonly isLoading = input<boolean>(false);
 
   /** Emits when filter values change (after debounce) */
-  @Output() filterChange = new EventEmitter<FilterValues>();
+  readonly filterChange = output<FilterValues>();
 
   /** Emits when an action is clicked */
-  @Output() actionClick = new EventEmitter<string>();
+  readonly actionClick = output<string>();
 
   /** Emits when "clear all" is clicked */
-  @Output() clearAllFilters = new EventEmitter<void>();
+  readonly clearAllFilters = output<void>();
 
-  @ViewChild('dropdownContainer') dropdownContainer!: ElementRef<HTMLElement>;
-  @ViewChild('actionsTriggerButton') actionsTriggerButton!: ElementRef<HTMLButtonElement>;
-  @ViewChild('filtersTriggerButton') filtersTriggerButton!: ElementRef<HTMLButtonElement>;
+  readonly dropdownContainer = viewChild.required<ElementRef<HTMLElement>>('dropdownContainer');
+  readonly actionsTriggerButton = viewChild.required<ElementRef<HTMLButtonElement>>('actionsTriggerButton');
+  readonly filtersTriggerButton = viewChild.required<ElementRef<HTMLButtonElement>>('filtersTriggerButton');
 
   private cdr = inject(ChangeDetectorRef);
 
@@ -108,20 +106,20 @@ export class OptionsDropdownComponent implements OnChanges, OnDestroy {
 
   constructor() {
     this.filterSubscription = this.filterChange$
-      .pipe(debounceTime(this.debounceMs))
+      .pipe(debounceTime(this.debounceMs()))
       .subscribe(() => this.emitFilterChange());
   }
 
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['filterValues']) {
-      this.localFilterValues = { ...this.filterValues };
+      this.localFilterValues = { ...this.filterValues() };
     }
 
     if (changes['debounceMs'] && !changes['debounceMs'].firstChange) {
       // Re-subscribe with new debounce time
       this.filterSubscription?.unsubscribe();
       this.filterSubscription = this.filterChange$
-        .pipe(debounceTime(this.debounceMs))
+        .pipe(debounceTime(this.debounceMs()))
         .subscribe(() => this.emitFilterChange());
     }
 
@@ -134,7 +132,7 @@ export class OptionsDropdownComponent implements OnChanges, OnDestroy {
 
   private calculateActiveFiltersCount(): void {
     let count = 0;
-    for (const filter of this.filters) {
+    for (const filter of this.filters()) {
       const value = this.localFilterValues[filter.key];
       if (filter.type === 'multi-select') {
         if (Array.isArray(value) && value.length > 0) {
@@ -176,9 +174,10 @@ export class OptionsDropdownComponent implements OnChanges, OnDestroy {
 
   @HostListener('document:click', ['$event'])
   onDocumentClick(event: MouseEvent): void {
+    const dropdownContainer = this.dropdownContainer();
     if (
-      this.dropdownContainer &&
-      !this.dropdownContainer.nativeElement.contains(event.target as Node)
+      dropdownContainer &&
+      !dropdownContainer.nativeElement.contains(event.target as Node)
     ) {
       this.closeAllDropdowns();
     }
@@ -217,11 +216,12 @@ export class OptionsDropdownComponent implements OnChanges, OnDestroy {
     // (e.g. thisMonth date range, default granularity).
     // We intentionally do NOT emit filterChange here to avoid dispatching
     // null/empty values before the parent sets the correct defaults.
+    // TODO: The 'emit' function requires a mandatory void argument
     this.clearAllFilters.emit();
   }
 
   onClearFilter(key: string): void {
-    const filter = this.filters.find((f) => f.key === key);
+    const filter = this.filters().find((f) => f.key === key);
     if (filter) {
       if (filter.type === 'multi-select') {
         this.localFilterValues[key] = [];
@@ -248,11 +248,11 @@ export class OptionsDropdownComponent implements OnChanges, OnDestroy {
   }
 
   get hasActions(): boolean {
-    return this.showActions && this.actions.length > 0;
+    return this.showActions() && this.actions().length > 0;
   }
 
   get hasFilters(): boolean {
-    return this.filters.length > 0;
+    return this.filters().length > 0;
   }
 
   /**

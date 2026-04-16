@@ -1,5 +1,5 @@
 import { Component, Input, Output, EventEmitter, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   ReactiveFormsModule,
   FormBuilder,
@@ -31,7 +31,6 @@ import { CategoriesService } from '../../../../products/services/categories.serv
   selector: 'app-promotion-form-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     MultiSelectorComponent,
     ModalComponent,
@@ -39,8 +38,8 @@ import { CategoriesService } from '../../../../products/services/categories.serv
     InputComponent,
     SelectorComponent,
     TextareaComponent,
-    SettingToggleComponent,
-  ],
+    SettingToggleComponent
+],
   template: `
     <app-modal
       [isOpen]="true"

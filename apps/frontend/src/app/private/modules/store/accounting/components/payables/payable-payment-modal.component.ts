@@ -7,7 +7,7 @@ import {
   SimpleChanges,
   inject,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 
 import { CarteraService } from '../../services/cartera.service';
@@ -26,14 +26,13 @@ import {
   selector: 'vendix-payable-payment-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
     InputComponent,
     SelectorComponent,
-    TextareaComponent,
-  ],
+    TextareaComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen"
@@ -188,6 +187,11 @@ export class PayablePaymentModalComponent implements OnChanges {
         next: () => {
           this.is_submitting = false;
           this.toastService.success('Pago registrado exitosamente');
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
           this.saved.emit();
           this.onClose();
         },

@@ -1,13 +1,12 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
   ChangeDetectionStrategy,
   OnInit,
   ChangeDetectorRef,
+  input,
+  output
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { IconComponent, InputComponent, SelectorComponent } from '../../index';
 import {
@@ -21,13 +20,12 @@ import {
   selector: 'app-user-setup-step',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     IconComponent,
     InputComponent,
-    SelectorComponent,
-  ],
+    SelectorComponent
+],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [
     `
@@ -429,7 +427,7 @@ import {
         </div>
 
         <!-- User Form -->
-        <form class="user-form" [formGroup]="formGroup">
+        <form class="user-form" [formGroup]="formGroup()">
           <!-- Personal Information Section -->
           <div class="form-section">
             <div class="section-header">
@@ -561,10 +559,10 @@ import {
   `,
 })
 export class UserSetupStepComponent implements OnInit {
-  @Input() formGroup: any;
-  @Output() nextStep = new EventEmitter<void>();
-  @Output() skipStep = new EventEmitter<void>();
-  @Output() previousStep = new EventEmitter<void>();
+  readonly formGroup = input<any>();
+  readonly nextStep = output<void>();
+  readonly skipStep = output<void>();
+  readonly previousStep = output<void>();
 
   countries: Country[] = [];
   departments: Department[] = [];
@@ -578,11 +576,12 @@ export class UserSetupStepComponent implements OnInit {
   ngOnInit(): void {
     this.countries = this.countryService.getCountries();
 
-    if (!this.formGroup) return;
+    const formGroup = this.formGroup();
+    if (!formGroup) return;
 
-    const countryControl = this.formGroup.get('country_code');
-    const depControl = this.formGroup.get('state_province');
-    const cityControl = this.formGroup.get('city');
+    const countryControl = formGroup.get('country_code');
+    const depControl = formGroup.get('state_province');
+    const cityControl = formGroup.get('city');
 
     // Cargar departamentos al cambiar país
     countryControl.valueChanges.subscribe((code: string) => {

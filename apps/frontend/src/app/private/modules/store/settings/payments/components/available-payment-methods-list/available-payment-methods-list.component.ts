@@ -1,5 +1,5 @@
 import { Component, input, output, computed } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import {
   InputsearchComponent,
@@ -15,12 +15,11 @@ import {
   selector: 'app-available-payment-methods-list',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     InputsearchComponent,
     OptionsDropdownComponent,
-    ResponsiveDataViewComponent,
-  ],
+    ResponsiveDataViewComponent
+],
   templateUrl: './available-payment-methods-list.component.html',
 })
 export class AvailablePaymentMethodsListComponent {

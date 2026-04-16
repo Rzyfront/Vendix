@@ -6,7 +6,7 @@ import {
   output,
   signal,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { ReactiveFormsModule, FormGroup, FormBuilder } from '@angular/forms';
 import {
   ModalComponent,
@@ -22,14 +22,13 @@ import { DispatchNote } from '../../interfaces/dispatch-note.interface';
   selector: 'app-deliver-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
     InputComponent,
     TextareaComponent,
-    IconComponent,
-  ],
+    IconComponent
+],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <app-modal

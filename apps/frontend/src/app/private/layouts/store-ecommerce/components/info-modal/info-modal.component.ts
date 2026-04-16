@@ -1,13 +1,13 @@
-import { Component, EventEmitter, Input, Output } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, Input, input, output } from '@angular/core';
+
 import { IconComponent } from '../../../../../shared/components';
 
 @Component({
   selector: 'app-info-modal',
   standalone: true,
-  imports: [CommonModule, IconComponent],
+  imports: [IconComponent],
   template: `
-    @if (isOpen) {
+    @if (isOpen()) {
     <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
       <!-- Backdrop -->
       <div
@@ -19,7 +19,7 @@ import { IconComponent } from '../../../../../shared/components';
         class="relative bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[80vh] overflow-hidden animate-in fade-in zoom-in-95 duration-200">
         <!-- Header -->
         <div class="flex items-center justify-between p-4 md:p-6 border-b border-gray-200">
-          <h2 class="text-xl font-semibold text-gray-900">{{ title }}</h2>
+          <h2 class="text-xl font-semibold text-gray-900">{{ title() }}</h2>
           <button
             type="button"
             (click)="close()"
@@ -54,12 +54,15 @@ import { IconComponent } from '../../../../../shared/components';
   `,
 })
 export class InfoModalComponent {
-  @Input() isOpen = false;
-  @Input() title = '';
+  readonly isOpen = input(false);
+  readonly title = input('');
   @Input() content = '';
-  @Output() closed = new EventEmitter<void>();
+  readonly closed = output<void>();
 
   close(): void {
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.closed.emit();
   }
 }

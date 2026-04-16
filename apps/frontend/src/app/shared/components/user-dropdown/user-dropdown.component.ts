@@ -1,11 +1,10 @@
 import {
   Component,
-  Output,
-  EventEmitter,
   HostListener,
   inject,
   OnInit,
   OnDestroy,
+  output
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
@@ -40,10 +39,12 @@ export interface UserMenuOption {
         (click)="toggleDropdown()"
         [attr.aria-expanded]="isOpen"
         aria-label="Menú de usuario"
-      >
+        >
         <div class="user-avatar" style="position: relative;">
           <span class="user-initials">{{ user.initials || 'US' }}</span>
-          <span class="settings-badge" *ngIf="hasNewModules$ | async"></span>
+          @if (hasNewModules$ | async) {
+            <span class="settings-badge"></span>
+          }
         </div>
         <div class="user-info">
           <span class="user-name">{{ user.name || 'Usuario' }}</span>
@@ -54,23 +55,25 @@ export interface UserMenuOption {
           [size]="14"
           class="chevron-icon"
           [class.rotate]="isOpen"
-        >
+          >
         </app-icon>
       </button>
-
+    
       <!-- Mobile: Minimal trigger -->
       <button
         class="user-trigger user-trigger-minimal flex md:hidden"
         (click)="toggleDropdown()"
         [attr.aria-expanded]="isOpen"
         aria-label="Menú de usuario"
-      >
+        >
         <div class="user-avatar-minimal" style="position: relative;">
           <span class="user-initials">{{ user.initials || 'US' }}</span>
-          <span class="settings-badge" *ngIf="hasNewModules$ | async"></span>
+          @if (hasNewModules$ | async) {
+            <span class="settings-badge"></span>
+          }
         </div>
       </button>
-
+    
       <div class="dropdown-menu" [class.show]="isOpen">
         <div class="dropdown-header">
           <div class="header-avatar">{{ user.initials || 'US' }}</div>
@@ -79,51 +82,54 @@ export interface UserMenuOption {
             <p class="header-email">{{ user.email || 'user@example.com' }}</p>
           </div>
         </div>
-
+    
         <div class="dropdown-divider"></div>
-
+    
         <!-- New Modules Info Banner -->
-        <div
-          class="new-modules-banner"
-          *ngIf="(newModuleCount$ | async) as count"
-        >
-          <app-icon name="info" [size]="16" class="banner-icon"></app-icon>
-          <span class="banner-text">
-            Tienes <strong>{{ count }}</strong> {{ count === 1 ? 'módulo nuevo disponible' : 'módulos nuevos disponibles' }}.
-            Actívalos en <strong>Configuración</strong>.
-          </span>
-        </div>
-
-        <div class="dropdown-content">
-          <button
-            *ngFor="let option of visibleMenuOptions"
-            class="dropdown-item"
-            [class.danger]="option.type === 'danger'"
-            (click)="handleOptionClick(option)"
-          >
-            <app-icon
-              [name]="option.icon"
-              [size]="18"
-              class="item-icon"
-            ></app-icon>
-            <span class="item-label">{{ option.label }}</span>
-            <span
-              class="settings-sync-badge"
-              *ngIf="
-                option.label === 'Configuración de usuario' &&
-                (newModuleCount$ | async) as count
-              "
-              >{{ count }}</span
+        @if ((newModuleCount$ | async); as count) {
+          <div
+            class="new-modules-banner"
             >
-          </button>
+            <app-icon name="info" [size]="16" class="banner-icon"></app-icon>
+            <span class="banner-text">
+              Tienes <strong>{{ count }}</strong> {{ count === 1 ? 'módulo nuevo disponible' : 'módulos nuevos disponibles' }}.
+              Actívalos en <strong>Configuración</strong>.
+            </span>
+          </div>
+        }
+    
+        <div class="dropdown-content">
+          @for (option of visibleMenuOptions; track option) {
+            <button
+              class="dropdown-item"
+              [class.danger]="option.type === 'danger'"
+              (click)="handleOptionClick(option)"
+              >
+              <app-icon
+                [name]="option.icon"
+                [size]="18"
+                class="item-icon"
+              ></app-icon>
+              <span class="item-label">{{ option.label }}</span>
+              @if (
+                option.label === 'Configuración de usuario' &&
+                (newModuleCount$ | async); as count
+                ) {
+                <span
+                  class="settings-sync-badge"
+                  >{{ count }}</span
+                  >
+                }
+              </button>
+            }
+          </div>
         </div>
       </div>
-    </div>
-  `,
+    `,
   styleUrls: ['./user-dropdown.component.scss'],
 })
 export class UserDropdownComponent implements OnInit, OnDestroy {
-  @Output() closeDropdown = new EventEmitter<void>();
+  readonly closeDropdown = output<void>();
 
   isOpen = false;
   isFullscreen = false;
@@ -267,6 +273,7 @@ export class UserDropdownComponent implements OnInit, OnDestroy {
     const target = event.target as HTMLElement;
     if (!this.elementContains(target)) {
       this.isOpen = false;
+      // TODO: The 'emit' function requires a mandatory void argument
       this.closeDropdown.emit();
     }
   }
@@ -274,12 +281,14 @@ export class UserDropdownComponent implements OnInit, OnDestroy {
   @HostListener('keydown.escape')
   onEscape() {
     this.isOpen = false;
+    // TODO: The 'emit' function requires a mandatory void argument
     this.closeDropdown.emit();
   }
 
   toggleDropdown() {
     this.isOpen = !this.isOpen;
     if (this.isOpen) {
+      // TODO: The 'emit' function requires a mandatory void argument
       this.closeDropdown.emit();
     }
   }
@@ -292,24 +301,28 @@ export class UserDropdownComponent implements OnInit, OnDestroy {
   handleOptionClick(option: UserMenuOption) {
     option.action();
     this.isOpen = false;
+    // TODO: The 'emit' function requires a mandatory void argument
     this.closeDropdown.emit();
   }
 
   private goToProfile() {
     this.userUiService.openProfile();
     this.isOpen = false;
+    // TODO: The 'emit' function requires a mandatory void argument
     this.closeDropdown.emit();
   }
 
   private goToSettings() {
     this.userUiService.openSettings();
     this.isOpen = false;
+    // TODO: The 'emit' function requires a mandatory void argument
     this.closeDropdown.emit();
   }
 
   private logout() {
     this.authFacade.logout();
     this.isOpen = false;
+    // TODO: The 'emit' function requires a mandatory void argument
     this.closeDropdown.emit();
   }
 

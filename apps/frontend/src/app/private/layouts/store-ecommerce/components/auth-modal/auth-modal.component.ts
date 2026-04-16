@@ -1,13 +1,13 @@
 import {
   Component,
   Input,
-  Output,
-  EventEmitter,
   inject,
   OnChanges,
   DestroyRef,
   SimpleChanges,
   ChangeDetectorRef,
+  input,
+  output
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
@@ -53,7 +53,7 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
           @if (storeLogo) {
             <img
               [src]="storeLogo"
-              [alt]="storeName"
+              [alt]="storeName()"
               class="h-12 w-auto object-contain"
             />
           } @else {
@@ -61,7 +61,7 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
               <app-icon name="shopping-bag" [size]="32"></app-icon>
               <span
                 class="text-xl font-bold text-[var(--color-text-primary)]"
-                >{{ storeName }}</span
+                >{{ storeName() }}</span
               >
             </div>
           }
@@ -215,10 +215,10 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
 })
 export class AuthModalComponent implements OnChanges {
   @Input() isOpen = false;
-  @Input() initialMode: 'login' | 'register' = 'login';
+  readonly initialMode = input<'login' | 'register'>('login');
   @Input() storeLogo: string | null = null;
-  @Input() storeName = 'Tienda';
-  @Output() closed = new EventEmitter<void>();
+  readonly storeName = input('Tienda');
+  readonly closed = output<void>();
 
   isLogin = true;
   errorMessage: string | null = null;
@@ -380,7 +380,7 @@ export class AuthModalComponent implements OnChanges {
     let shouldLoadDocs = false;
 
     if (changes['initialMode']) {
-      this.isLogin = this.initialMode === 'login';
+      this.isLogin = this.initialMode() === 'login';
       this.updateValidators();
       if (!this.isLogin) {
         shouldLoadDocs = true;
@@ -508,6 +508,9 @@ export class AuthModalComponent implements OnChanges {
   onClose(): void {
     this.isOpen = false;
     this.errorMessage = null;
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.closed.emit();
     this.authForm.reset();
     this.pendingDocuments = [];

@@ -1,13 +1,12 @@
 import {
   Component,
   Input,
-  Output,
-  EventEmitter,
   OnInit,
   OnDestroy,
   inject,
+  output
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   ReactiveFormsModule,
   FormBuilder,
@@ -28,12 +27,11 @@ import { Subject, takeUntil } from 'rxjs';
   selector: 'app-user-edit-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     InputComponent,
     ButtonComponent,
-    ModalComponent,
-  ],
+    ModalComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen"
@@ -42,148 +40,141 @@ import { Subject, takeUntil } from 'rxjs';
       [size]="'lg'"
       title="Editar Usuario"
       subtitle="Actualiza la información del usuario seleccionado"
-    >
-      <form [formGroup]="userForm" (ngSubmit)="onSubmit()" *ngIf="user">
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-
-          <app-input
-            formControlName="first_name"
-            label="Nombre *"
-            placeholder="Juan"
-            [required]="true"
-            [control]="userForm.get('first_name')"
-            [disabled]="isUpdating"
-          ></app-input>
-
-          <app-input
-            formControlName="last_name"
-            label="Apellido *"
-            placeholder="Pérez"
-            [required]="true"
-            [control]="userForm.get('last_name')"
-            [disabled]="isUpdating"
-          ></app-input>
-
-          <app-input
-            formControlName="username"
-            label="Nombre de Usuario *"
-            placeholder="juanperez"
-            [required]="true"
-            [control]="userForm.get('username')"
-            [disabled]="isUpdating"
-            helpText="Mínimo 3 caracteres, solo letras, números y guiones bajos"
-          ></app-input>
-
-          <app-input
-            formControlName="email"
-            label="Email *"
-            type="email"
-            placeholder="juan@ejemplo.com"
-            [required]="true"
-            [control]="userForm.get('email')"
-            [disabled]="isUpdating"
-          ></app-input>
-
-          <app-input
-            formControlName="password"
-            label="Nueva Contraseña (opcional)"
-            type="password"
-            placeholder="Dejar en blanco para mantener actual"
-            [control]="userForm.get('password')"
-            [disabled]="isUpdating"
-            helpText="Mínimo 8 caracteres, debe incluir mayúscula, minúscula, número y carácter especial"
-          ></app-input>
-
-
-
-          <div class="space-y-2">
-            <label
-              class="block text-sm font-medium text-[var(--color-text-primary)]"
-            >
-              Estado
-            </label>
-            <select
-              formControlName="state"
-              class="w-full px-3 py-2 border border-[var(--color-border)] rounded-md bg-[var(--color-surface)] text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:border-[var(--color-primary)]"
+      >
+      @if (user) {
+        <form [formGroup]="userForm" (ngSubmit)="onSubmit()">
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <app-input
+              formControlName="first_name"
+              label="Nombre *"
+              placeholder="Juan"
+              [required]="true"
+              [control]="userForm.get('first_name')"
               [disabled]="isUpdating"
-            >
-              <option value="">Seleccionar estado</option>
-              <option [value]="UserState.ACTIVE">Activo</option>
-              <option [value]="UserState.INACTIVE">Inactivo</option>
-              <option [value]="UserState.PENDING_VERIFICATION">
-                Pendiente de Verificación
-              </option>
-              <option [value]="UserState.SUSPENDED">Suspendido</option>
-              <option [value]="UserState.ARCHIVED">Archivado</option>
-            </select>
+            ></app-input>
+            <app-input
+              formControlName="last_name"
+              label="Apellido *"
+              placeholder="Pérez"
+              [required]="true"
+              [control]="userForm.get('last_name')"
+              [disabled]="isUpdating"
+            ></app-input>
+            <app-input
+              formControlName="username"
+              label="Nombre de Usuario *"
+              placeholder="juanperez"
+              [required]="true"
+              [control]="userForm.get('username')"
+              [disabled]="isUpdating"
+              helpText="Mínimo 3 caracteres, solo letras, números y guiones bajos"
+            ></app-input>
+            <app-input
+              formControlName="email"
+              label="Email *"
+              type="email"
+              placeholder="juan@ejemplo.com"
+              [required]="true"
+              [control]="userForm.get('email')"
+              [disabled]="isUpdating"
+            ></app-input>
+            <app-input
+              formControlName="password"
+              label="Nueva Contraseña (opcional)"
+              type="password"
+              placeholder="Dejar en blanco para mantener actual"
+              [control]="userForm.get('password')"
+              [disabled]="isUpdating"
+              helpText="Mínimo 8 caracteres, debe incluir mayúscula, minúscula, número y carácter especial"
+            ></app-input>
+            <div class="space-y-2">
+              <label
+                class="block text-sm font-medium text-[var(--color-text-primary)]"
+                >
+                Estado
+              </label>
+              <select
+                formControlName="state"
+                class="w-full px-3 py-2 border border-[var(--color-border)] rounded-md bg-[var(--color-surface)] text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:border-[var(--color-primary)]"
+                [disabled]="isUpdating"
+                >
+                <option value="">Seleccionar estado</option>
+                <option [value]="UserState.ACTIVE">Activo</option>
+                <option [value]="UserState.INACTIVE">Inactivo</option>
+                <option [value]="UserState.PENDING_VERIFICATION">
+                  Pendiente de Verificación
+                </option>
+                <option [value]="UserState.SUSPENDED">Suspendido</option>
+                <option [value]="UserState.ARCHIVED">Archivado</option>
+              </select>
+            </div>
           </div>
-        </div>
-
-        <!-- User Info -->
-        <div class="mt-6 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
-          <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-            Información del Usuario
-          </h4>
-          <div class="grid grid-cols-2 gap-4 text-sm">
-            <div>
-              <span class="text-gray-500 dark:text-gray-400">ID:</span>
-              <span class="ml-2 text-gray-900 dark:text-gray-100">{{
-                user.id
-              }}</span>
-            </div>
-            <div>
-              <span class="text-gray-500 dark:text-gray-400">Creado:</span>
-              <span class="ml-2 text-gray-900 dark:text-gray-100">{{
-                formatDate(user.created_at)
-              }}</span>
-            </div>
-            <div>
-              <span class="text-gray-500 dark:text-gray-400"
-                >Email Verificado:</span
-              >
-              <span
-                class="ml-2"
+          <!-- User Info -->
+          <div class="mt-6 p-4 bg-gray-50 dark:bg-gray-800 rounded-lg">
+            <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+              Información del Usuario
+            </h4>
+            <div class="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <span class="text-gray-500 dark:text-gray-400">ID:</span>
+                <span class="ml-2 text-gray-900 dark:text-gray-100">{{
+                  user.id
+                }}</span>
+              </div>
+              <div>
+                <span class="text-gray-500 dark:text-gray-400">Creado:</span>
+                <span class="ml-2 text-gray-900 dark:text-gray-100">{{
+                  formatDate(user.created_at)
+                }}</span>
+              </div>
+              <div>
+                <span class="text-gray-500 dark:text-gray-400"
+                  >Email Verificado:</span
+                  >
+                  <span
+                    class="ml-2"
                 [class]="
                   user.email_verified ? 'text-green-600' : 'text-yellow-600'
                 "
-              >
-                {{ user.email_verified ? 'Sí' : 'No' }}
-              </span>
-            </div>
-            <div>
-              <span class="text-gray-500 dark:text-gray-400">2FA:</span>
-              <span
-                class="ml-2"
+                    >
+                    {{ user.email_verified ? 'Sí' : 'No' }}
+                  </span>
+                </div>
+                <div>
+                  <span class="text-gray-500 dark:text-gray-400">2FA:</span>
+                  <span
+                    class="ml-2"
                 [class]="
                   user.two_factor_enabled ? 'text-green-600' : 'text-gray-600'
                 "
-              >
-                {{ user.two_factor_enabled ? 'Habilitado' : 'Deshabilitado' }}
-              </span>
+                    >
+                    {{ user.two_factor_enabled ? 'Habilitado' : 'Deshabilitado' }}
+                  </span>
+                </div>
+              </div>
             </div>
-          </div>
+          </form>
+        }
+    
+        <div slot="footer" class="flex justify-end gap-3">
+          <app-button
+            variant="outline"
+            (clicked)="onCancel()"
+            [disabled]="isUpdating"
+            >
+            Cancelar
+          </app-button>
+          <app-button
+            variant="primary"
+            (clicked)="onSubmit()"
+            [disabled]="userForm.invalid || isUpdating"
+            [loading]="isUpdating"
+            >
+            Actualizar Usuario
+          </app-button>
         </div>
-      </form>
-
-      <div slot="footer" class="flex justify-end gap-3">
-        <app-button
-          variant="outline"
-          (clicked)="onCancel()"
-          [disabled]="isUpdating"
-        >
-          Cancelar
-        </app-button>
-        <app-button
-          variant="primary"
-          (clicked)="onSubmit()"
-          [disabled]="userForm.invalid || isUpdating"
-          [loading]="isUpdating"
-        >
-          Actualizar Usuario
-        </app-button>
-      </div>
-    </app-modal>
-  `,
+      </app-modal>
+    `,
   styles: [
     `
       :host {
@@ -195,8 +186,8 @@ import { Subject, takeUntil } from 'rxjs';
 export class UserEditModalComponent implements OnInit, OnDestroy {
   @Input() user: User | null = null;
   @Input() isOpen: boolean = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() onUserUpdated = new EventEmitter<void>();
+  readonly isOpenChange = output<boolean>();
+  readonly onUserUpdated = output<void>();
 
   userForm: FormGroup;
   isUpdating: boolean = false;
@@ -283,6 +274,10 @@ export class UserEditModalComponent implements OnInit, OnDestroy {
       .subscribe({
         next: () => {
           this.isUpdating = false;
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
           this.onUserUpdated.emit();
           this.isOpenChange.emit(false);
         },

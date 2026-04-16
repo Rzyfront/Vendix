@@ -96,142 +96,146 @@ const ACTION_LABELS: Record<string, string> = {
       [size]="'xl'"
       [title]="'Permisos: ' + (role?.name || '')"
       subtitle="Configura los permisos de acceso para este rol"
-    >
-      <div *ngIf="isLoadingPermissions" class="p-6 text-center">
-        <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-        <p class="mt-2 text-text-secondary">Cargando permisos...</p>
-      </div>
-
-      <div *ngIf="!isLoadingPermissions" class="space-y-3">
-        <!-- Search & Module Filter -->
-        <div class="flex flex-col sm:flex-row gap-2">
-          <app-inputsearch
-            class="flex-1"
-            size="sm"
-            placeholder="Buscar permisos..."
-            [debounceTime]="200"
-            (search)="onSearchPermissions($event)"
-          ></app-inputsearch>
-
-          <select
+      >
+      @if (isLoadingPermissions) {
+        <div class="p-6 text-center">
+          <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+          <p class="mt-2 text-text-secondary">Cargando permisos...</p>
+        </div>
+      }
+    
+      @if (!isLoadingPermissions) {
+        <div class="space-y-3">
+          <!-- Search & Module Filter -->
+          <div class="flex flex-col sm:flex-row gap-2">
+            <app-inputsearch
+              class="flex-1"
+              size="sm"
+              placeholder="Buscar permisos..."
+              [debounceTime]="200"
+              (search)="onSearchPermissions($event)"
+            ></app-inputsearch>
+            <select
             class="px-3 py-2 border border-border rounded-lg bg-surface text-text-primary text-sm min-w-[160px]
                    focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary"
-            [value]="moduleFilter"
-            (change)="onModuleFilterChange($event)"
-          >
-            <option value="">Todos los modulos</option>
-            <option *ngFor="let mod of availableModules" [value]="mod">
-              {{ getModuleMeta(mod).label }}
-            </option>
-          </select>
-        </div>
-
-        <!-- Summary bar -->
-        <div class="flex items-center gap-3 px-3 py-2 rounded-lg bg-surface border border-border">
-          <div class="flex-1 min-w-0">
-            <div class="flex items-center justify-between mb-1">
-              <span class="text-xs font-medium text-text-secondary">
-                {{ selectedPermissionIds.size }} de {{ allPermissions.length }} permisos seleccionados
-              </span>
-              <span class="text-xs font-semibold text-primary">
-                {{ getSelectionPercentage() }}%
-              </span>
-            </div>
-            <div class="w-full h-1.5 rounded-full overflow-hidden" style="background: var(--color-border)">
-              <div
-                class="h-full rounded-full transition-all duration-300"
-                [style.width.%]="getSelectionPercentage()"
-                [style.background]="'var(--color-primary)'"
-              ></div>
+              [value]="moduleFilter"
+              (change)="onModuleFilterChange($event)"
+              >
+              <option value="">Todos los modulos</option>
+              @for (mod of availableModules; track mod) {
+                <option [value]="mod">
+                  {{ getModuleMeta(mod).label }}
+                </option>
+              }
+            </select>
+          </div>
+          <!-- Summary bar -->
+          <div class="flex items-center gap-3 px-3 py-2 rounded-lg bg-surface border border-border">
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center justify-between mb-1">
+                <span class="text-xs font-medium text-text-secondary">
+                  {{ selectedPermissionIds.size }} de {{ allPermissions.length }} permisos seleccionados
+                </span>
+                <span class="text-xs font-semibold text-primary">
+                  {{ getSelectionPercentage() }}%
+                </span>
+              </div>
+              <div class="w-full h-1.5 rounded-full overflow-hidden" style="background: var(--color-border)">
+                <div
+                  class="h-full rounded-full transition-all duration-300"
+                  [style.width.%]="getSelectionPercentage()"
+                  [style.background]="'var(--color-primary)'"
+                ></div>
+              </div>
             </div>
           </div>
-        </div>
-
-        <!-- Module Cards -->
-        <div class="max-h-[60vh] overflow-y-auto space-y-2.5 pr-0.5">
-          <div
-            *ngFor="let group of filteredPermissionGroups"
-            class="rounded-xl border overflow-hidden transition-colors"
+          <!-- Module Cards -->
+          <div class="max-h-[60vh] overflow-y-auto space-y-2.5 pr-0.5">
+            @for (group of filteredPermissionGroups; track group) {
+              <div
+                class="rounded-xl border overflow-hidden transition-colors"
             [ngClass]="isModuleComplete(group)
               ? 'border-primary/25 bg-primary/[0.02]'
               : 'border-border bg-surface'"
-          >
-            <!-- Card Header -->
-            <div class="px-4 py-2.5 bg-surface-hover/30 flex items-center justify-between">
-              <div class="flex items-center gap-2.5 min-w-0">
-                <app-icon
-                  [name]="getModuleMeta(group.module).icon"
-                  [size]="16"
-                  class="text-text-secondary shrink-0"
-                ></app-icon>
-                <span class="text-sm font-semibold text-text-primary">
-                  {{ getModuleMeta(group.module).label }}
-                </span>
-                <span
-                  class="px-1.5 py-px text-[10px] font-semibold rounded-full"
+                >
+                <!-- Card Header -->
+                <div class="px-4 py-2.5 bg-surface-hover/30 flex items-center justify-between">
+                  <div class="flex items-center gap-2.5 min-w-0">
+                    <app-icon
+                      [name]="getModuleMeta(group.module).icon"
+                      [size]="16"
+                      class="text-text-secondary shrink-0"
+                    ></app-icon>
+                    <span class="text-sm font-semibold text-text-primary">
+                      {{ getModuleMeta(group.module).label }}
+                    </span>
+                    <span
+                      class="px-1.5 py-px text-[10px] font-semibold rounded-full"
                   [ngClass]="isModuleComplete(group)
                     ? 'bg-primary/10 text-primary'
                     : 'bg-surface text-text-secondary'"
-                >
-                  {{ getGroupSelectedCount(group) }}/{{ group.permissions.length }}
-                </span>
-              </div>
-              <label
-                class="flex items-center gap-1.5 cursor-pointer text-xs text-text-secondary hover:text-text-primary select-none"
-              >
-                <span>Todos</span>
-                <input
-                  type="checkbox"
-                  [checked]="isGroupFullySelected(group)"
-                  [indeterminate]="isGroupPartiallySelected(group)"
-                  (change)="toggleGroup(group, $any($event.target).checked)"
-                  class="w-3.5 h-3.5 rounded border-border text-primary focus:ring-primary accent-[var(--color-primary)]"
-                />
-              </label>
-            </div>
-
-            <!-- Mini progress bar -->
-            <div class="h-[2px]" style="background: var(--color-border)">
-              <div
-                class="h-full transition-all duration-300"
-                [style.width.%]="getModuleProgress(group)"
-                [style.background]="'var(--color-primary)'"
-              ></div>
-            </div>
-
-            <!-- Permissions Grid -->
-            <div class="p-2.5">
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-0.5">
-                <label
-                  *ngFor="let perm of group.permissions"
-                  class="flex items-center gap-2 px-3 py-1.5 rounded-lg cursor-pointer text-sm transition-colors"
+                      >
+                      {{ getGroupSelectedCount(group) }}/{{ group.permissions.length }}
+                    </span>
+                  </div>
+                  <label
+                    class="flex items-center gap-1.5 cursor-pointer text-xs text-text-secondary hover:text-text-primary select-none"
+                    >
+                    <span>Todos</span>
+                    <input
+                      type="checkbox"
+                      [checked]="isGroupFullySelected(group)"
+                      [indeterminate]="isGroupPartiallySelected(group)"
+                      (change)="toggleGroup(group, $any($event.target).checked)"
+                      class="w-3.5 h-3.5 rounded border-border text-primary focus:ring-primary accent-[var(--color-primary)]"
+                      />
+                  </label>
+                </div>
+                <!-- Mini progress bar -->
+                <div class="h-[2px]" style="background: var(--color-border)">
+                  <div
+                    class="h-full transition-all duration-300"
+                    [style.width.%]="getModuleProgress(group)"
+                    [style.background]="'var(--color-primary)'"
+                  ></div>
+                </div>
+                <!-- Permissions Grid -->
+                <div class="p-2.5">
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-0.5">
+                    @for (perm of group.permissions; track perm) {
+                      <label
+                        class="flex items-center gap-2 px-3 py-1.5 rounded-lg cursor-pointer text-sm transition-colors"
                   [ngClass]="selectedPermissionIds.has(perm.id)
                     ? 'bg-primary/5 hover:bg-primary/10'
                     : 'hover:bg-surface-hover/50'"
-                >
-                  <input
-                    type="checkbox"
-                    [checked]="selectedPermissionIds.has(perm.id)"
-                    (change)="togglePermission(perm.id)"
-                    class="w-3.5 h-3.5 rounded border-border text-primary focus:ring-primary accent-[var(--color-primary)] shrink-0"
-                  />
-                  <span class="text-text-primary leading-tight truncate">
-                    {{ getPermissionLabel(perm) }}
-                  </span>
-                </label>
+                        >
+                        <input
+                          type="checkbox"
+                          [checked]="selectedPermissionIds.has(perm.id)"
+                          (change)="togglePermission(perm.id)"
+                          class="w-3.5 h-3.5 rounded border-border text-primary focus:ring-primary accent-[var(--color-primary)] shrink-0"
+                          />
+                        <span class="text-text-primary leading-tight truncate">
+                          {{ getPermissionLabel(perm) }}
+                        </span>
+                      </label>
+                    }
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
-
-          <div *ngIf="filteredPermissionGroups.length === 0" class="p-8 text-center">
-            <app-icon name="search-x" [size]="32" class="text-text-secondary/40 mx-auto mb-2"></app-icon>
-            <p class="text-text-secondary text-sm">
-              {{ searchTerm || moduleFilter ? 'No se encontraron permisos con esos filtros' : 'No hay permisos disponibles' }}
-            </p>
+            }
+            @if (filteredPermissionGroups.length === 0) {
+              <div class="p-8 text-center">
+                <app-icon name="search-x" [size]="32" class="text-text-secondary/40 mx-auto mb-2"></app-icon>
+                <p class="text-text-secondary text-sm">
+                  {{ searchTerm || moduleFilter ? 'No se encontraron permisos con esos filtros' : 'No hay permisos disponibles' }}
+                </p>
+              </div>
+            }
           </div>
         </div>
-      </div>
-
+      }
+    
       <div slot="footer" class="flex justify-end gap-3">
         <app-button variant="outline" (clicked)="onCancel()" [disabled]="isSaving">Cancelar</app-button>
         <app-button variant="primary" (clicked)="onSave()" [disabled]="isSaving" [loading]="isSaving">
@@ -239,7 +243,7 @@ const ACTION_LABELS: Record<string, string> = {
         </app-button>
       </div>
     </app-modal>
-  `,
+    `,
   styles: [
     `
       :host {
@@ -483,6 +487,11 @@ export class StoreRolePermissionsModalComponent implements OnDestroy, OnChanges 
         next: () => {
           this.isSaving = false;
           this.toastService.success('Permisos actualizados exitosamente');
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
           this.onPermissionsUpdated.emit();
           this.isOpenChange.emit(false);
         },

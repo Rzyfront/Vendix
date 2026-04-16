@@ -1,38 +1,66 @@
 <div class="w-full max-w-[1600px] mx-auto min-h-screen">
   <!-- Loading State -->
-  <div *ngIf="isLoading" class="flex flex-col items-center justify-center py-20 gap-4">
-    <div class="loader-2 animate-spin text-6xl text-[var(--color-primary)]"></div>
-    <p class="text-[var(--color-text-secondary)]">Cargando configuración...</p>
-  </div>
+  @if (isLoading) {
+    <div class="flex flex-col items-center justify-center py-20 gap-4">
+      <div
+        class="loader-2 animate-spin text-6xl text-[var(--color-primary)]"
+      ></div>
+      <p class="text-[var(--color-text-secondary)]">
+        Cargando configuración...
+      </p>
+    </div>
+  }
 
   <!-- Main Content -->
-  <ng-container *ngIf="!isLoading">
+  @if (!isLoading) {
     <form [formGroup]="settingsForm" (ngSubmit)="onSubmit()" class="space-y-4">
-      <app-sticky-header [title]="isEditMode() ? 'Configuración de E-commerce' : 'Configurar Tienda E-commerce'"
-        [subtitle]="isEditMode() ? 'Administra la configuración de tu tienda en línea' : 'Configura tu tienda e-commerce con los parámetros básicos para empezar a vender'"
-        icon="shopping-bag" [badgeText]="isSetupMode() ? 'Configurar' : 'Editar'"
-        [badgeColor]="isEditMode() ? 'green' : 'blue'" [actions]="ecommerceHeaderActions()"
-        (actionClicked)="onHeaderAction($event)">
+      <app-sticky-header
+        [title]="
+          isEditMode()
+            ? 'Configuración de E-commerce'
+            : 'Configurar Tienda E-commerce'
+        "
+        [subtitle]="
+          isEditMode()
+            ? 'Administra la configuración de tu tienda en línea'
+            : 'Configura tu tienda e-commerce con los parámetros básicos para empezar a vender'
+        "
+        icon="shopping-bag"
+        [badgeText]="isSetupMode() ? 'Configurar' : 'Editar'"
+        [badgeColor]="isEditMode() ? 'green' : 'blue'"
+        [actions]="ecommerceHeaderActions()"
+        (actionClicked)="onHeaderAction($event)"
+      >
       </app-sticky-header>
-
       <!-- Shipping Methods Warning Banner -->
       @if (hasShippingMethods() === false) {
-        <div class="bg-red-50 border border-red-300 rounded-xl p-4 md:p-5 shadow-sm">
+        <div
+          class="bg-red-50 border border-red-300 rounded-xl p-4 md:p-5 shadow-sm"
+        >
           <div class="flex items-start gap-3">
-            <div class="w-10 h-10 rounded-lg bg-red-100 flex items-center justify-center flex-shrink-0">
-              <app-icon name="alert-triangle" size="20" class="text-red-600"></app-icon>
+            <div
+              class="w-10 h-10 rounded-lg bg-red-100 flex items-center justify-center flex-shrink-0"
+            >
+              <app-icon
+                name="alert-triangle"
+                size="20"
+                class="text-red-600"
+              ></app-icon>
             </div>
             <div class="flex-1">
               <h3 class="text-sm font-semibold text-red-900 mb-1">
                 Métodos de Envío No Configurados
               </h3>
               <p class="text-sm text-red-700 mb-3">
-                Tu tienda e-commerce necesita al menos un método de envío activo para funcionar correctamente.
-                Sin métodos de envío, tus clientes no podrán completar sus compras.
+                Tu tienda e-commerce necesita al menos un método de envío activo
+                para funcionar correctamente. Sin métodos de envío, tus clientes
+                no podrán completar sus compras.
               </p>
-              <button type="button"
+              <button
+                type="button"
                 (click)="navigateToShipping()"
-                class="text-sm font-medium text-red-700 hover:text-red-900 flex items-center gap-1.5 transition-colors underline underline-offset-2">
+                class="text-sm font-medium text-red-700 hover:text-red-900 flex items-center gap-1.5 transition-colors underline underline-offset-2"
+              >
                 <app-icon name="settings" size="14"></app-icon>
                 Configurar Métodos de Envío
               </button>
@@ -40,70 +68,114 @@
           </div>
         </div>
       }
-
       <div class="grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
         <!-- Columna Izquierda -->
         <div class="space-y-6">
-          <div class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm" data-tour="inicio-section">
-            <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-              <div class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center">
-                <app-icon name="home" size="18" class="text-primary-600"></app-icon>
+          <div
+            class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm"
+            data-tour="inicio-section"
+          >
+            <h2
+              class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2"
+            >
+              <div
+                class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center"
+              >
+                <app-icon
+                  name="home"
+                  size="18"
+                  class="text-primary-600"
+                ></app-icon>
               </div>
               Sección de Inicio
             </h2>
             <p class="text-sm text-gray-500 mb-6">
-              Configura el título y párrafo de bienvenida de tu tienda. Si dejas los
-              campos vacíos, se rellenarán automáticamente.
+              Configura el título y párrafo de bienvenida de tu tienda. Si dejas
+              los campos vacíos, se rellenarán automáticamente.
             </p>
-
             <div class="space-y-4">
               <!-- Título -->
-              <app-input label="Título de Bienvenida" [formControl]="tituloControl" placeholder="Bienvenido a Mi Tienda"
-                helperText="Se auto-rellena como: 'Bienvenido a {nombre de la tienda}' si está vacío">
+              <app-input
+                label="Título de Bienvenida"
+                [formControl]="tituloControl"
+                placeholder="Bienvenido a Mi Tienda"
+                helperText="Se auto-rellena como: 'Bienvenido a {nombre de la tienda}' si está vacío"
+              >
               </app-input>
-
               <!-- Párrafo -->
               <div class="space-y-1.5">
-                <label class="block text-sm font-medium text-gray-700">Párrafo Descriptivo</label>
-                <textarea [formControl]="parrafoControl" rows="3"
+                <label class="block text-sm font-medium text-gray-700"
+                  >Párrafo Descriptivo</label
+                >
+                <textarea
+                  [formControl]="parrafoControl"
+                  rows="3"
                   placeholder="Encuentra aquí todo lo que buscas y si no lo encuentras pregúntanos..."
-                  class="w-full px-3 py-2 rounded-lg bg-white border border-gray-300 text-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none resize-none">
-            </textarea>
-                <small class="text-xs text-gray-500">Se auto-rellena con un mensaje por defecto si está vacío</small>
+                  class="w-full px-3 py-2 rounded-lg bg-white border border-gray-300 text-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500/20 outline-none resize-none"
+                >
+                </textarea>
+                <small class="text-xs text-gray-500"
+                  >Se auto-rellena con un mensaje por defecto si está
+                  vacío</small
+                >
               </div>
-
               <!-- Logo Upload -->
               <!-- ... (Keep logo upload part as is, it doesn't use formControlName directly on the component) ... -->
               <div class="space-y-1.5">
-                <label class="block text-sm font-medium text-gray-700">Logo de la Tienda</label>
+                <label class="block text-sm font-medium text-gray-700"
+                  >Logo de la Tienda</label
+                >
                 <div class="flex items-center gap-4">
                   <!-- Preview del Logo -->
                   <div
-                    class="w-24 h-24 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 flex items-center justify-center overflow-hidden relative group">
-                    <img *ngIf="logoPreview" [src]="logoPreview" alt="Logo preview"
-                      class="w-full h-full object-contain p-2" />
-                    <div *ngIf="!logoPreview && !isUploadingLogo" class="text-gray-400 flex flex-col items-center">
-                      <app-icon name="image" size="24"></app-icon>
-                      <span class="text-[10px] mt-1">Sin logo</span>
-                    </div>
-
+                    class="w-24 h-24 rounded-xl border-2 border-dashed border-gray-200 bg-gray-50 flex items-center justify-center overflow-hidden relative group"
+                  >
+                    @if (logoPreview) {
+                      <img
+                        [src]="logoPreview"
+                        alt="Logo preview"
+                        class="w-full h-full object-contain p-2"
+                      />
+                    }
+                    @if (!logoPreview && !isUploadingLogo) {
+                      <div class="text-gray-400 flex flex-col items-center">
+                        <app-icon name="image" size="24"></app-icon>
+                        <span class="text-[10px] mt-1">Sin logo</span>
+                      </div>
+                    }
                     <!-- Loading State -->
-                    <div *ngIf="isUploadingLogo" class="absolute inset-0 bg-white/80 flex items-center justify-center">
-                      <div class="loader-2 animate-spin text-xl text-primary-600"></div>
-                    </div>
-
+                    @if (isUploadingLogo) {
+                      <div
+                        class="absolute inset-0 bg-white/80 flex items-center justify-center"
+                      >
+                        <div
+                          class="loader-2 animate-spin text-xl text-primary-600"
+                        ></div>
+                      </div>
+                    }
                     <!-- Botón Eliminar (Overlay) -->
-                    <button *ngIf="logoPreview && !isUploadingLogo" type="button" (click)="removeLogo()"
-                      class="absolute top-1 right-1 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all shadow-lg">
-                      <app-icon name="x" size="14"></app-icon>
-                    </button>
+                    @if (logoPreview && !isUploadingLogo) {
+                      <button
+                        type="button"
+                        (click)="removeLogo()"
+                        class="absolute top-1 right-1 w-6 h-6 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all shadow-lg"
+                      >
+                        <app-icon name="x" size="14"></app-icon>
+                      </button>
+                    }
                   </div>
-
                   <!-- Botón Subir -->
                   <div class="flex flex-col gap-2">
-                    <app-button variant="outline" size="sm" [loading]="isUploadingLogo" (clicked)="triggerLogoInput()">
+                    <app-button
+                      variant="outline"
+                      size="sm"
+                      [loading]="isUploadingLogo"
+                      (clicked)="triggerLogoInput()"
+                    >
                       <app-icon name="upload" size="14" slot="icon"></app-icon>
-                      <span>{{ logoPreview ? "Cambiar Logo" : "Subir Logo" }}</span>
+                      <span>{{
+                        logoPreview ? "Cambiar Logo" : "Subir Logo"
+                      }}</span>
                     </app-button>
                     <p class="text-xs text-gray-500">
                       PNG, JPG o SVG. Máx 2MB. Recomendado: fondo transparente.
@@ -111,26 +183,37 @@
                   </div>
                 </div>
               </div>
-
               <!-- Colores de la Marca -->
               <div>
                 <h3 class="text-base font-semibold text-gray-900 mb-3 mt-6">
                   Colores de la Marca
                 </h3>
-
                 <!-- Info Place Sync -->
-                <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
+                <div
+                  class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4"
+                >
                   <div class="flex items-start gap-3">
-                    <app-icon name="info" size="20" class="text-blue-500 mt-0.5"></app-icon>
+                    <app-icon
+                      name="info"
+                      size="20"
+                      class="text-blue-500 mt-0.5"
+                    ></app-icon>
                     <div class="flex-1">
-                      <h4 class="text-sm font-semibold text-blue-900 mb-1">Personalización de Marca</h4>
+                      <h4 class="text-sm font-semibold text-blue-900 mb-1">
+                        Personalización de Marca
+                      </h4>
                       <p class="text-sm text-blue-700 mb-3">
-                        El branding de tu tienda E-commerce es independiente y puede ser personalizado para ofrecer una
-                        experiencia única a tus clientes. Puedes optar por un diseño que se diferencie de tu panel
-                        administrativo o mantener la coherencia visual.
+                        El branding de tu tienda E-commerce es independiente y
+                        puede ser personalizado para ofrecer una experiencia
+                        única a tus clientes. Puedes optar por un diseño que se
+                        diferencie de tu panel administrativo o mantener la
+                        coherencia visual.
                       </p>
-                      <button type="button" (click)="syncColorsFromBranding()"
-                        class="text-sm font-medium text-blue-600 hover:text-blue-800 flex items-center gap-1.5 transition-colors">
+                      <button
+                        type="button"
+                        (click)="syncColorsFromBranding()"
+                        class="text-sm font-medium text-blue-600 hover:text-blue-800 flex items-center gap-1.5 transition-colors"
+                      >
                         <app-icon name="refresh-cw" size="14"></app-icon>
                         Sincronizar con branding de la tienda
                       </button>
@@ -141,291 +224,474 @@
                   <div class="color-card">
                     <label class="color-card-label">Primario</label>
                     <div class="color-card-row">
-                      <input type="color" [value]="primaryColorControl.value"
+                      <input
+                        type="color"
+                        [value]="primaryColorControl.value"
                         (change)="onColorPickerChange('primary_color', $event)"
-                        class="color-picker" />
-                      <input type="text" [formControl]="primaryColorControl"
+                        class="color-picker"
+                      />
+                      <input
+                        type="text"
+                        [formControl]="primaryColorControl"
                         class="color-hex-input"
-                        placeholder="#000000" />
+                        placeholder="#000000"
+                      />
                     </div>
                   </div>
                   <div class="color-card">
                     <label class="color-card-label">Secundario</label>
                     <div class="color-card-row">
-                      <input type="color" [value]="secondaryColorControl.value"
-                        (change)="onColorPickerChange('secondary_color', $event)"
-                        class="color-picker" />
-                      <input type="text" [formControl]="secondaryColorControl"
+                      <input
+                        type="color"
+                        [value]="secondaryColorControl.value"
+                        (change)="
+                          onColorPickerChange('secondary_color', $event)
+                        "
+                        class="color-picker"
+                      />
+                      <input
+                        type="text"
+                        [formControl]="secondaryColorControl"
                         class="color-hex-input"
-                        placeholder="#000000" />
+                        placeholder="#000000"
+                      />
                     </div>
                   </div>
                   <div class="color-card">
                     <label class="color-card-label">Acento</label>
                     <div class="color-card-row">
-                      <input type="color" [value]="accentColorControl.value"
+                      <input
+                        type="color"
+                        [value]="accentColorControl.value"
                         (change)="onColorPickerChange('accent_color', $event)"
-                        class="color-picker" />
-                      <input type="text" [formControl]="accentColorControl"
+                        class="color-picker"
+                      />
+                      <input
+                        type="text"
+                        [formControl]="accentColorControl"
                         class="color-hex-input"
-                        placeholder="#000000" />
+                        placeholder="#000000"
+                      />
                     </div>
                   </div>
                 </div>
               </div>
             </div>
           </div>
-
           <!-- SECCIÓN 3: CONFIGURACIÓN DE SLIDER -->
-          <div formGroupName="slider" class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm" data-tour="slider-section">
+          <div
+            formGroupName="slider"
+            class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm"
+            data-tour="slider-section"
+          >
             <div class="flex items-center justify-between mb-4">
-              <h2 class="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                <div class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center">
-                  <app-icon name="image" size="18" class="text-primary-600"></app-icon>
+              <h2
+                class="text-lg font-semibold text-gray-900 flex items-center gap-2"
+              >
+                <div
+                  class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center"
+                >
+                  <app-icon
+                    name="image"
+                    size="18"
+                    class="text-primary-600"
+                  ></app-icon>
                 </div>
                 Slider Principal
               </h2>
               <label class="relative inline-flex cursor-pointer">
-                <input type="checkbox" formControlName="enable" class="sr-only peer" />
+                <input
+                  type="checkbox"
+                  formControlName="enable"
+                  class="sr-only peer"
+                />
                 <div
-                  class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600">
-                </div>
+                  class="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-primary-600"
+                ></div>
               </label>
             </div>
-
             <!-- Info Box Slider -->
             <div class="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-4">
               <div class="flex items-start gap-3">
-                <app-icon name="info" size="20" class="text-blue-500 mt-0.5"></app-icon>
+                <app-icon
+                  name="info"
+                  size="20"
+                  class="text-blue-500 mt-0.5"
+                ></app-icon>
                 <div class="flex-1">
-                  <h4 class="text-sm font-semibold text-blue-900 mb-1">Impacto Visual del Slider</h4>
+                  <h4 class="text-sm font-semibold text-blue-900 mb-1">
+                    Impacto Visual del Slider
+                  </h4>
                   <p class="text-sm text-blue-700">
-                    El slider es lo primero que verán tus clientes al entrar. Utiliza **títulos impactantes** y
-                    **párrafos descriptivos** (leyendas) en cada imagen para contar una historia, destacar promociones
-                    o comunicar la propuesta de valor de tu marca. Un slider bien documentado aumenta la tasa de
-                    conversión.
+                    El slider es lo primero que verán tus clientes al entrar.
+                    Utiliza **títulos impactantes** y **párrafos descriptivos**
+                    (leyendas) en cada imagen para contar una historia, destacar
+                    promociones o comunicar la propuesta de valor de tu marca.
+                    Un slider bien documentado aumenta la tasa de conversión.
                   </p>
                 </div>
               </div>
             </div>
-
             <!-- Mensaje cuando slider está desactivado -->
-            <div *ngIf="!sliderEnableControl.value" class="p-4 bg-gray-50 rounded-lg border border-gray-200">
-              <p class="text-sm text-gray-600">
-                El slider de imágenes está desactivado. Actívalo para mostrar un
-                carrusel de imágenes en la página de inicio de tu tienda.
-              </p>
-            </div>
-
-            <div *ngIf="sliderEnableControl.value" class="space-y-3">
-              <p class="text-sm text-gray-500">
-                Agrega hasta 5 imágenes para el carrusel principal (PNG, JPG, WebP -
-                máx 5MB cada una).
-              </p>
-
-              <!-- Thumbnails Grid Compacto -->
-              <div class="flex gap-2 flex-wrap">
-                <div *ngFor="let img of sliderImages; let i = index"
-                  class="relative w-20 h-20 flex-shrink-0 rounded-lg overflow-hidden cursor-pointer border-2 transition-all hover:border-primary-500 group"
-                  [class.border-primary-500]="activeImageIndex === i" [class.border-gray-200]="activeImageIndex !== i"
-                  [class.opacity-60]="img.uploading" (click)="!img.uploading && setActiveImage(i)">
-                  <img [src]="img.url || img.thumbnail" alt="Thumbnail" class="w-full h-full object-cover" />
-                  <div *ngIf="img.uploading" class="absolute inset-0 flex items-center justify-center bg-white/80">
-                    <div class="loader-2 animate-spin text-xl text-primary-600"></div>
-                  </div>
-                  <button *ngIf="!img.uploading" type="button"
-                    class="absolute top-1 right-1 w-6 h-6 bg-red-500 hover:bg-red-600 rounded-full text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all text-xs shadow-lg"
-                    (click)="$event.stopPropagation(); removeSliderImage(i)">
-                    ✕
-                  </button>
-                </div>
-
-                <div *ngIf="sliderImages.length < 5 && !isUploadingImage"
-                  class="w-20 h-20 flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-primary-500 hover:bg-primary-50 transition-all text-gray-400 hover:text-primary-600"
-                  (click)="triggerFileInput()">
-                  <app-icon name="upload" class="text-2xl"></app-icon>
-                  <span class="text-[10px] mt-1">Subir</span>
-                </div>
+            @if (!sliderEnableControl.value) {
+              <div class="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                <p class="text-sm text-gray-600">
+                  El slider de imágenes está desactivado. Actívalo para mostrar
+                  un carrusel de imágenes en la página de inicio de tu tienda.
+                </p>
               </div>
-
-              <!-- Metadata Compacta (solo si hay imagen seleccionada) -->
-              <div
-                *ngIf="sliderImages.length > 0 && sliderImages[activeImageIndex] && !sliderImages[activeImageIndex].uploading"
-                class="p-4 bg-primary-50/50 border border-primary-100 rounded-xl shadow-sm animate-in fade-in slide-in-from-top-2 duration-300">
-
-                <!-- Indicator of which image is being edited -->
-                <div class="flex items-center gap-3 mb-4 pb-3 border-b border-primary-100">
-                  <div class="w-10 h-10 rounded-lg overflow-hidden border border-primary-200 shadow-sm">
-                    <img [src]="sliderImages[activeImageIndex].url || sliderImages[activeImageIndex].thumbnail"
-                      alt="Current editing" class="w-full h-full object-cover">
-                  </div>
-                  <div>
-                    <h4 class="text-xs font-bold text-primary-900 uppercase tracking-wider">
-                      Modificando Contenido: Imagen #{{ activeImageIndex + 1 }}
-                    </h4>
-                    <p class="text-[10px] text-primary-600 font-medium">Define cómo se verá esta imagen en el carrusel
-                    </p>
-                  </div>
+            }
+            @if (sliderEnableControl.value) {
+              <div class="space-y-3">
+                <p class="text-sm text-gray-500">
+                  Agrega hasta 5 imágenes para el carrusel principal (PNG, JPG,
+                  WebP - máx 5MB cada una).
+                </p>
+                <!-- Thumbnails Grid Compacto -->
+                <div class="flex gap-2 flex-wrap">
+                  @for (img of sliderImages; track img; let i = $index) {
+                    <div
+                      class="relative w-20 h-20 flex-shrink-0 rounded-lg overflow-hidden cursor-pointer border-2 transition-all hover:border-primary-500 group"
+                      [class.border-primary-500]="activeImageIndex === i"
+                      [class.border-gray-200]="activeImageIndex !== i"
+                      [class.opacity-60]="img.uploading"
+                      (click)="!img.uploading && setActiveImage(i)"
+                    >
+                      <img
+                        [src]="img.url || img.thumbnail"
+                        alt="Thumbnail"
+                        class="w-full h-full object-cover"
+                      />
+                      @if (img.uploading) {
+                        <div
+                          class="absolute inset-0 flex items-center justify-center bg-white/80"
+                        >
+                          <div
+                            class="loader-2 animate-spin text-xl text-primary-600"
+                          ></div>
+                        </div>
+                      }
+                      @if (!img.uploading) {
+                        <button
+                          type="button"
+                          class="absolute top-1 right-1 w-6 h-6 bg-red-500 hover:bg-red-600 rounded-full text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all text-xs shadow-lg"
+                          (click)="
+                            $event.stopPropagation(); removeSliderImage(i)
+                          "
+                        >
+                          ✕
+                        </button>
+                      }
+                    </div>
+                  }
+                  @if (sliderImages.length < 5 && !isUploadingImage) {
+                    <div
+                      class="w-20 h-20 flex flex-col items-center justify-center border-2 border-dashed border-gray-300 rounded-lg cursor-pointer hover:border-primary-500 hover:bg-primary-50 transition-all text-gray-400 hover:text-primary-600"
+                      (click)="triggerFileInput()"
+                    >
+                      <app-icon name="upload" class="text-2xl"></app-icon>
+                      <span class="text-[10px] mt-1">Subir</span>
+                    </div>
+                  }
                 </div>
-
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <app-input label="Título del Slide" [value]="sliderImages[activeImageIndex].title || ''"
-                    (inputChange)="onTitleInputChange($event)" placeholder="Ej: Nueva Colección 2024"
-                    customWrapperClass="!mt-0"></app-input>
-
-                  <app-input label="Párrafo Descriptivo (Leyenda)"
-                    [value]="sliderImages[activeImageIndex].caption || ''" (inputChange)="onCaptionInputChange($event)"
-                    placeholder="Ej: Descubre nuestras ofertas exclusivas..." customWrapperClass="!mt-0"></app-input>
-                </div>
+                <!-- Metadata Compacta (solo si hay imagen seleccionada) -->
+                @if (
+                  sliderImages.length > 0 &&
+                  sliderImages[activeImageIndex] &&
+                  !sliderImages[activeImageIndex].uploading
+                ) {
+                  <div
+                    class="p-4 bg-primary-50/50 border border-primary-100 rounded-xl shadow-sm animate-in fade-in slide-in-from-top-2 duration-300"
+                  >
+                    <!-- Indicator of which image is being edited -->
+                    <div
+                      class="flex items-center gap-3 mb-4 pb-3 border-b border-primary-100"
+                    >
+                      <div
+                        class="w-10 h-10 rounded-lg overflow-hidden border border-primary-200 shadow-sm"
+                      >
+                        <img
+                          [src]="
+                            sliderImages[activeImageIndex].url ||
+                            sliderImages[activeImageIndex].thumbnail
+                          "
+                          alt="Current editing"
+                          class="w-full h-full object-cover"
+                        />
+                      </div>
+                      <div>
+                        <h4
+                          class="text-xs font-bold text-primary-900 uppercase tracking-wider"
+                        >
+                          Modificando Contenido: Imagen #{{
+                            activeImageIndex + 1
+                          }}
+                        </h4>
+                        <p class="text-[10px] text-primary-600 font-medium">
+                          Define cómo se verá esta imagen en el carrusel
+                        </p>
+                      </div>
+                    </div>
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <app-input
+                        label="Título del Slide"
+                        [value]="sliderImages[activeImageIndex].title || ''"
+                        (inputChange)="onTitleInputChange($event)"
+                        placeholder="Ej: Nueva Colección 2024"
+                        customWrapperClass="!mt-0"
+                      ></app-input>
+                      <app-input
+                        label="Párrafo Descriptivo (Leyenda)"
+                        [value]="sliderImages[activeImageIndex].caption || ''"
+                        (inputChange)="onCaptionInputChange($event)"
+                        placeholder="Ej: Descubre nuestras ofertas exclusivas..."
+                        customWrapperClass="!mt-0"
+                      ></app-input>
+                    </div>
+                  </div>
+                }
               </div>
-            </div>
+            }
           </div>
         </div>
-
         <!-- Columna Derecha -->
         <div class="space-y-6">
           <!-- SECCIÓN 2: PREFERENCIAS DE ZONA -->
-          <div class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm">
-            <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-              <div class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center">
-                <app-icon name="globe" size="18" class="text-primary-600"></app-icon>
+          <div
+            class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm"
+          >
+            <h2
+              class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2"
+            >
+              <div
+                class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center"
+              >
+                <app-icon
+                  name="globe"
+                  size="18"
+                  class="text-primary-600"
+                ></app-icon>
               </div>
               Preferencias de Zona
             </h2>
-
             <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <app-selector label="Moneda" [formControl]="currencyControl" size="md" [options]="currencies"></app-selector>
-
-              <app-selector label="Idioma" [formControl]="localeControl" size="md" [options]="[
-              { value: 'es-CO', label: 'Español (Colombia)' },
-              { value: 'es-ES', label: 'Español (España)' },
-              { value: 'es-MX', label: 'Español (México)' },
-              { value: 'en-US', label: 'English (United States)' },
-              { value: 'pt-BR', label: 'Português (Brasil)' },
-            ]"></app-selector>
-
-              <app-selector label="Zona Horaria" [formControl]="timezoneControl" size="md" [options]="[
-              { value: 'America/Bogota', label: 'Bogotá (UTC-5)' },
-              { value: 'America/Mexico_City', label: 'México (UTC-6)' },
-              {
-                value: 'America/Argentina/Buenos_Aires',
-                label: 'Buenos Aires (UTC-3)',
-              },
-              { value: 'America/Lima', label: 'Lima (UTC-5)' },
-              { value: 'America/Santiago', label: 'Santiago (UTC-4)' },
-            ]"></app-selector>
+              <app-selector
+                label="Moneda"
+                [formControl]="currencyControl"
+                size="md"
+                [options]="currencies"
+              ></app-selector>
+              <app-selector
+                label="Idioma"
+                [formControl]="localeControl"
+                size="md"
+                [options]="[
+                  { value: 'es-CO', label: 'Español (Colombia)' },
+                  { value: 'es-ES', label: 'Español (España)' },
+                  { value: 'es-MX', label: 'Español (México)' },
+                  { value: 'en-US', label: 'English (United States)' },
+                  { value: 'pt-BR', label: 'Português (Brasil)' },
+                ]"
+              ></app-selector>
+              <app-selector
+                label="Zona Horaria"
+                [formControl]="timezoneControl"
+                size="md"
+                [options]="[
+                  { value: 'America/Bogota', label: 'Bogotá (UTC-5)' },
+                  { value: 'America/Mexico_City', label: 'México (UTC-6)' },
+                  {
+                    value: 'America/Argentina/Buenos_Aires',
+                    label: 'Buenos Aires (UTC-3)',
+                  },
+                  { value: 'America/Lima', label: 'Lima (UTC-5)' },
+                  { value: 'America/Santiago', label: 'Santiago (UTC-4)' },
+                ]"
+              ></app-selector>
             </div>
           </div>
-
           <!-- SECCIÓN 4: CATÁLOGO -->
-          <div class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm" data-tour="catalog-section">
-            <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-              <div class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center">
-                <app-icon name="package" size="18" class="text-primary-600"></app-icon>
+          <div
+            class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm"
+            data-tour="catalog-section"
+          >
+            <h2
+              class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2"
+            >
+              <div
+                class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center"
+              >
+                <app-icon
+                  name="package"
+                  size="18"
+                  class="text-primary-600"
+                ></app-icon>
               </div>
               Configuración del Catálogo
             </h2>
-
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <app-input label="Productos por página" type="number" [formControl]="productsPerPageControl"
-                placeholder="16"></app-input>
-
-              <app-setting-toggle [formControl]="showOutOfStockControl" label="Mostrar productos sin stock"
-                description="Permite ver productos agotados"></app-setting-toggle>
-
-              <app-setting-toggle [formControl]="allowReviewsControl" label="Permitir reseñas"
-                description="Los clientes pueden calificar"></app-setting-toggle>
-
-              <app-setting-toggle [formControl]="showVariantsControl" label="Mostrar variantes"
-                description="Opciones de producto"></app-setting-toggle>
-
-              <app-setting-toggle [formControl]="showRelatedProductsControl" label="Productos relacionados"
-                description="Sugerir productos similares"></app-setting-toggle>
-
-              <app-setting-toggle [formControl]="enableFiltersControl" label="Habilitar filtros"
-                description="Filtros avanzados"></app-setting-toggle>
+              <app-input
+                label="Productos por página"
+                type="number"
+                [formControl]="productsPerPageControl"
+                placeholder="16"
+              ></app-input>
+              <app-setting-toggle
+                [formControl]="showOutOfStockControl"
+                label="Mostrar productos sin stock"
+                description="Permite ver productos agotados"
+              ></app-setting-toggle>
+              <app-setting-toggle
+                [formControl]="allowReviewsControl"
+                label="Permitir reseñas"
+                description="Los clientes pueden calificar"
+              ></app-setting-toggle>
+              <app-setting-toggle
+                [formControl]="showVariantsControl"
+                label="Mostrar variantes"
+                description="Opciones de producto"
+              ></app-setting-toggle>
+              <app-setting-toggle
+                [formControl]="showRelatedProductsControl"
+                label="Productos relacionados"
+                description="Sugerir productos similares"
+              ></app-setting-toggle>
+              <app-setting-toggle
+                [formControl]="enableFiltersControl"
+                label="Habilitar filtros"
+                description="Filtros avanzados"
+              ></app-setting-toggle>
             </div>
           </div>
-
           <!-- SECCIÓN 5: CARRITO Y CHECKOUT -->
-          <div class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm" data-tour="checkout-section">
-            <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-              <div class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center">
-                <app-icon name="shopping-cart" size="18" class="text-primary-600"></app-icon>
+          <div
+            class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm"
+            data-tour="checkout-section"
+          >
+            <h2
+              class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2"
+            >
+              <div
+                class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center"
+              >
+                <app-icon
+                  name="shopping-cart"
+                  size="18"
+                  class="text-primary-600"
+                ></app-icon>
               </div>
               Configuración del Carrito y Checkout
             </h2>
-
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <!-- Inputs del Carrito -->
-              <app-input label="Expiración (horas)" type="number" [formControl]="cartExpirationHoursControl"
-                placeholder="24"></app-input>
-
-              <app-input label="Cantidad máxima por item" type="number" [formControl]="maxQuantityPerItemControl"
-                placeholder="10"></app-input>
-
+              <app-input
+                label="Expiración (horas)"
+                type="number"
+                [formControl]="cartExpirationHoursControl"
+                placeholder="24"
+              ></app-input>
+              <app-input
+                label="Cantidad máxima por item"
+                type="number"
+                [formControl]="maxQuantityPerItemControl"
+                placeholder="10"
+              ></app-input>
               <!-- Toggles del Checkout -->
-              <app-setting-toggle [formControl]="whatsappCheckoutControl" label="Whatsapp Checkout"
-                description="Permitir terminar compra en whatsapp"></app-setting-toggle>
-
+              <app-setting-toggle
+                [formControl]="whatsappCheckoutControl"
+                label="Whatsapp Checkout"
+                description="Permitir terminar compra en whatsapp"
+              ></app-setting-toggle>
               @if (whatsappCheckoutControl.value) {
                 <div class="col-span-1 md:col-span-2">
-                  <div class="space-y-3 pl-3 border-l-2 border-green-200 ml-1 mt-1">
-                    <app-input [formControl]="whatsappNumberControl" type="tel"
-                      label="Numero de WhatsApp" placeholder="+57 300 123 4567"
-                      size="sm"></app-input>
-                    <app-input [formControl]="confirmWhatsappNumberControl" type="tel"
-                      label="Confirmar Numero de WhatsApp" placeholder="+57 300 123 4567"
-                      [error]="confirmWhatsappNumberControl.value && whatsappNumberControl.value !== confirmWhatsappNumberControl.value ? 'Los numeros no coinciden' : undefined"
-                      size="sm"></app-input>
+                  <div
+                    class="space-y-3 pl-3 border-l-2 border-green-200 ml-1 mt-1"
+                  >
+                    <app-input
+                      [formControl]="whatsappNumberControl"
+                      type="tel"
+                      label="Numero de WhatsApp"
+                      placeholder="+57 300 123 4567"
+                      size="sm"
+                    ></app-input>
+                    <app-input
+                      [formControl]="confirmWhatsappNumberControl"
+                      type="tel"
+                      label="Confirmar Numero de WhatsApp"
+                      placeholder="+57 300 123 4567"
+                      [error]="
+                        confirmWhatsappNumberControl.value &&
+                        whatsappNumberControl.value !==
+                          confirmWhatsappNumberControl.value
+                          ? 'Los numeros no coinciden'
+                          : undefined
+                      "
+                      size="sm"
+                    ></app-input>
                   </div>
                 </div>
               }
-
-              <app-setting-toggle [formControl]="requireRegistrationControl" label="Requerir registro"
-                description="Obligar a crear cuenta"></app-setting-toggle>
+              <app-setting-toggle
+                [formControl]="requireRegistrationControl"
+                label="Requerir registro"
+                description="Obligar a crear cuenta"
+              ></app-setting-toggle>
             </div>
           </div>
         </div>
-
         <!-- SECCIÓN 6: CONFIGURACIÓN DEL FOOTER (Ocupa ancho completo) -->
         <div class="xl:col-span-2">
-          <div class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm">
-            <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
-              <div class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center">
-                <app-icon name="panel-bottom" size="18" class="text-primary-600"></app-icon>
+          <div
+            class="bg-white rounded-xl border border-gray-200 p-4 md:p-6 shadow-sm"
+          >
+            <h2
+              class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2"
+            >
+              <div
+                class="w-8 h-8 rounded-lg bg-primary-50 flex items-center justify-center"
+              >
+                <app-icon
+                  name="panel-bottom"
+                  size="18"
+                  class="text-primary-600"
+                ></app-icon>
               </div>
               Configuración del Footer
             </h2>
             <p class="text-sm text-gray-500 mb-6">
-              Personaliza el pie de página de tu tienda online con información de contacto,
-              enlaces útiles, ayuda al cliente y redes sociales.
+              Personaliza el pie de página de tu tienda online con información
+              de contacto, enlaces útiles, ayuda al cliente y redes sociales.
             </p>
             <app-footer-settings-form
               [initialData]="footerSettings"
-              (valueChange)="onFooterChange($event)">
+              (valueChange)="onFooterChange($event)"
+            >
             </app-footer-settings-form>
           </div>
         </div>
       </div>
     </form>
-  </ng-container>
+  }
 
-  <!-- Share Store Modal -->
-  <app-store-share-modal
-    [isOpen]="isShareModalOpen"
-    [storeUrl]="ecommerceUrl"
-    [storeName]="storeName"
-    [logoUrl]="logoPreview"
-    [primaryColor]="primaryColorControl.value"
-    [secondaryColor]="secondaryColorControl.value"
-    [accentColor]="accentColorControl.value"
-    (closed)="isShareModalOpen = false">
-  </app-store-share-modal>
+  @defer (when isShareModalOpen) {
+    <app-store-share-modal
+      [isOpen]="isShareModalOpen"
+      [storeUrl]="ecommerceUrl"
+      [storeName]="storeName"
+      [logoUrl]="logoPreview"
+      [primaryColor]="primaryColorControl.value"
+      [secondaryColor]="secondaryColorControl.value"
+      [accentColor]="accentColorControl.value"
+      (closed)="isShareModalOpen = false"
+    >
+    </app-store-share-modal>
+  }
 
-  <!-- Tour Modal -->
-  <app-tour-modal
-    [(isOpen)]="showTourModal"
-    [tourConfig]="ecommerceTourConfig">
-  </app-tour-modal>
+  @defer (when showTourModal) {
+    <app-tour-modal
+      [(isOpen)]="showTourModal"
+      [tourConfig]="ecommerceTourConfig"
+    >
+    </app-tour-modal>
+  }
 </div>

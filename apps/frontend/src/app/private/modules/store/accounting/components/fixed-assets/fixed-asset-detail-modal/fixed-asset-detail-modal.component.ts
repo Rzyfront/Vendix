@@ -335,6 +335,11 @@ export class FixedAssetDetailModalComponent implements OnChanges {
     this.accounting_service.retireAsset(this.asset.id).subscribe({
       next: () => {
         this.toast_service.show({ variant: 'success', description: 'Activo retirado correctamente' });
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
         this.assetUpdated.emit();
         this.onClose();
       },
@@ -358,6 +363,11 @@ export class FixedAssetDetailModalComponent implements OnChanges {
         next: () => {
           this.toast_service.show({ variant: 'success', description: 'Activo dado de baja correctamente' });
           this.is_disposing = false;
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
           this.assetUpdated.emit();
           this.onClose();
         },

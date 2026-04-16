@@ -27,7 +27,7 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
   ],
   template: `
     <div class="w-full max-w-4xl mx-auto p-4 md:p-6 space-y-6">
-
+    
       <!-- Page Header -->
       <div class="flex items-center justify-between mb-2">
         <div class="flex items-center gap-3">
@@ -40,755 +40,810 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
           </div>
         </div>
         <div class="flex items-center gap-2">
-          <app-button
-            *ngIf="viewMode === 'list'"
-            [variant]="showDashboard ? 'outline' : 'ghost'"
-            size="sm"
-            (clicked)="toggleDashboard()"
-          >
-            <app-icon slot="icon" name="bar-chart-2" [size]="14"></app-icon>
-            {{ showDashboard ? 'Configuraciones' : 'Dashboard' }}
-          </app-button>
-          <app-button
-            *ngIf="viewMode === 'detail'"
-            variant="outline"
-            size="sm"
-            (clicked)="backToList()"
-          >
-            <app-icon slot="icon" name="arrow-left" [size]="14"></app-icon>
-            Volver al listado
-          </app-button>
+          @if (viewMode === 'list') {
+            <app-button
+              [variant]="showDashboard ? 'outline' : 'ghost'"
+              size="sm"
+              (clicked)="toggleDashboard()"
+              >
+              <app-icon slot="icon" name="bar-chart-2" [size]="14"></app-icon>
+              {{ showDashboard ? 'Configuraciones' : 'Dashboard' }}
+            </app-button>
+          }
+          @if (viewMode === 'detail') {
+            <app-button
+              variant="outline"
+              size="sm"
+              (clicked)="backToList()"
+              >
+              <app-icon slot="icon" name="arrow-left" [size]="14"></app-icon>
+              Volver al listado
+            </app-button>
+          }
         </div>
       </div>
-
+    
       <!-- ═══════════════════════════════════════════════════════ -->
       <!-- DASHBOARD VIEW                                         -->
       <!-- ═══════════════════════════════════════════════════════ -->
-      <div *ngIf="!loading && viewMode === 'list' && showDashboard" class="space-y-4">
-
-        <div *ngIf="loadingDashboard" class="flex justify-center py-12">
-          <app-spinner size="lg"></app-spinner>
-        </div>
-
-        <div *ngIf="!loadingDashboard && dashboardData" class="space-y-4">
-
-          <!-- Stats Cards -->
-          <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div class="border border-border rounded-xl p-4 bg-white">
-              <div class="text-xs text-text-secondary mb-1">Total Enviados</div>
-              <div class="text-2xl font-bold text-text-primary">{{ dashboardData.stats.total_sent }}</div>
+      @if (!loading && viewMode === 'list' && showDashboard) {
+        <div class="space-y-4">
+          @if (loadingDashboard) {
+            <div class="flex justify-center py-12">
+              <app-spinner size="lg"></app-spinner>
             </div>
-            <div class="border border-border rounded-xl p-4 bg-white">
-              <div class="text-xs text-text-secondary mb-1">Exitosos</div>
-              <div class="text-2xl font-bold text-green-600">{{ dashboardData.stats.total_success }}</div>
-            </div>
-            <div class="border border-border rounded-xl p-4 bg-white">
-              <div class="text-xs text-text-secondary mb-1">Errores</div>
-              <div class="text-2xl font-bold text-red-600">{{ dashboardData.stats.total_errors }}</div>
-            </div>
-            <div class="border border-border rounded-xl p-4 bg-white">
-              <div class="text-xs text-text-secondary mb-1">Tasa de Exito</div>
-              <div class="text-2xl font-bold text-text-primary">{{ dashboardData.stats.success_rate }}%</div>
-              <div class="mt-2 h-2 bg-gray-100 rounded-full overflow-hidden">
-                <div
-                  class="h-full rounded-full transition-all duration-500"
+          }
+          @if (!loadingDashboard && dashboardData) {
+            <div class="space-y-4">
+              <!-- Stats Cards -->
+              <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div class="border border-border rounded-xl p-4 bg-white">
+                  <div class="text-xs text-text-secondary mb-1">Total Enviados</div>
+                  <div class="text-2xl font-bold text-text-primary">{{ dashboardData.stats.total_sent }}</div>
+                </div>
+                <div class="border border-border rounded-xl p-4 bg-white">
+                  <div class="text-xs text-text-secondary mb-1">Exitosos</div>
+                  <div class="text-2xl font-bold text-green-600">{{ dashboardData.stats.total_success }}</div>
+                </div>
+                <div class="border border-border rounded-xl p-4 bg-white">
+                  <div class="text-xs text-text-secondary mb-1">Errores</div>
+                  <div class="text-2xl font-bold text-red-600">{{ dashboardData.stats.total_errors }}</div>
+                </div>
+                <div class="border border-border rounded-xl p-4 bg-white">
+                  <div class="text-xs text-text-secondary mb-1">Tasa de Exito</div>
+                  <div class="text-2xl font-bold text-text-primary">{{ dashboardData.stats.success_rate }}%</div>
+                  <div class="mt-2 h-2 bg-gray-100 rounded-full overflow-hidden">
+                    <div
+                      class="h-full rounded-full transition-all duration-500"
                   [ngClass]="{
                     'bg-green-500': dashboardData.stats.success_rate >= 90,
                     'bg-yellow-500': dashboardData.stats.success_rate >= 70 && dashboardData.stats.success_rate < 90,
                     'bg-red-500': dashboardData.stats.success_rate < 70
                   }"
-                  [style.width.%]="dashboardData.stats.success_rate"
-                ></div>
+                      [style.width.%]="dashboardData.stats.success_rate"
+                    ></div>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
-
-          <!-- Certificate Indicator -->
-          <div *ngIf="dashboardData.certificate_status" class="border border-border rounded-xl p-4 bg-white">
-            <div class="flex items-center justify-between">
-              <div class="flex items-center gap-2">
-                <app-icon name="shield" [size]="18"
+              <!-- Certificate Indicator -->
+              @if (dashboardData.certificate_status) {
+                <div class="border border-border rounded-xl p-4 bg-white">
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                      <app-icon name="shield" [size]="18"
                   [ngClass]="{
                     'text-green-600': dashboardData.certificate_status.status === 'valid',
                     'text-yellow-600': dashboardData.certificate_status.status === 'expiring_soon',
                     'text-red-600': dashboardData.certificate_status.status === 'expired',
                     'text-gray-400': dashboardData.certificate_status.status === 'not_configured'
                   }"
-                ></app-icon>
-                <span class="text-sm font-medium text-text-primary">Certificado Digital</span>
-              </div>
-              <span class="px-2 py-0.5 text-xs rounded-full font-medium"
+                      ></app-icon>
+                      <span class="text-sm font-medium text-text-primary">Certificado Digital</span>
+                    </div>
+                    <span class="px-2 py-0.5 text-xs rounded-full font-medium"
                 [ngClass]="{
                   'bg-green-100 text-green-700': dashboardData.certificate_status.status === 'valid',
                   'bg-yellow-100 text-yellow-700': dashboardData.certificate_status.status === 'expiring_soon',
                   'bg-red-100 text-red-700': dashboardData.certificate_status.status === 'expired',
                   'bg-gray-100 text-gray-600': dashboardData.certificate_status.status === 'not_configured'
                 }"
-              >
-                {{ getCertStatusLabel(dashboardData.certificate_status.status) }}
-              </span>
-            </div>
-            <div *ngIf="dashboardData.certificate_status.expires" class="mt-2 text-xs text-text-secondary">
-              Expira: {{ dashboardData.certificate_status.expires | date:'dd/MM/yyyy' }}
-              <span *ngIf="dashboardData.certificate_status.days_remaining !== null">
-                ({{ dashboardData.certificate_status.days_remaining }} dias restantes)
-              </span>
-            </div>
-          </div>
-
-          <!-- Recent Submissions Table -->
-          <div class="border border-border rounded-xl p-4 bg-white">
-            <h3 class="text-sm font-semibold text-text-primary mb-3">Ultimos 20 Envios</h3>
-            <div class="overflow-x-auto">
-              <table *ngIf="dashboardData.recent_submissions.length > 0" class="w-full text-sm">
-                <thead>
-                  <tr class="border-b border-border">
-                    <th class="text-left py-2 px-3 text-text-secondary font-medium">Accion</th>
-                    <th class="text-left py-2 px-3 text-text-secondary font-medium hidden md:table-cell">Documento</th>
-                    <th class="text-center py-2 px-3 text-text-secondary font-medium">Estado</th>
-                    <th class="text-right py-2 px-3 text-text-secondary font-medium hidden md:table-cell">Duracion</th>
-                    <th class="text-right py-2 px-3 text-text-secondary font-medium">Fecha</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr *ngFor="let log of dashboardData.recent_submissions" class="border-b border-border/50 hover:bg-gray-50">
-                    <td class="py-2 px-3">
-                      <div class="text-text-primary">{{ log.action }}</div>
-                      <div *ngIf="log.error_message" class="text-xs text-red-500 mt-0.5 max-w-[200px] truncate">{{ log.error_message }}</div>
-                    </td>
-                    <td class="py-2 px-3 hidden md:table-cell">
-                      <span *ngIf="log.document_number" class="text-text-primary">{{ log.document_type }} {{ log.document_number }}</span>
-                      <span *ngIf="!log.document_number" class="text-text-secondary">-</span>
-                    </td>
-                    <td class="py-2 px-3 text-center">
-                      <span class="px-1.5 py-0.5 text-xs rounded-full"
+                      >
+                      {{ getCertStatusLabel(dashboardData.certificate_status.status) }}
+                    </span>
+                  </div>
+                  @if (dashboardData.certificate_status.expires) {
+                    <div class="mt-2 text-xs text-text-secondary">
+                      Expira: {{ dashboardData.certificate_status.expires | date:'dd/MM/yyyy' }}
+                      @if (dashboardData.certificate_status.days_remaining !== null) {
+                        <span>
+                          ({{ dashboardData.certificate_status.days_remaining }} dias restantes)
+                        </span>
+                      }
+                    </div>
+                  }
+                </div>
+              }
+              <!-- Recent Submissions Table -->
+              <div class="border border-border rounded-xl p-4 bg-white">
+                <h3 class="text-sm font-semibold text-text-primary mb-3">Ultimos 20 Envios</h3>
+                <div class="overflow-x-auto">
+                  @if (dashboardData.recent_submissions.length > 0) {
+                    <table class="w-full text-sm">
+                      <thead>
+                        <tr class="border-b border-border">
+                          <th class="text-left py-2 px-3 text-text-secondary font-medium">Accion</th>
+                          <th class="text-left py-2 px-3 text-text-secondary font-medium hidden md:table-cell">Documento</th>
+                          <th class="text-center py-2 px-3 text-text-secondary font-medium">Estado</th>
+                          <th class="text-right py-2 px-3 text-text-secondary font-medium hidden md:table-cell">Duracion</th>
+                          <th class="text-right py-2 px-3 text-text-secondary font-medium">Fecha</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        @for (log of dashboardData.recent_submissions; track log) {
+                          <tr class="border-b border-border/50 hover:bg-gray-50">
+                            <td class="py-2 px-3">
+                              <div class="text-text-primary">{{ log.action }}</div>
+                              @if (log.error_message) {
+                                <div class="text-xs text-red-500 mt-0.5 max-w-[200px] truncate">{{ log.error_message }}</div>
+                              }
+                            </td>
+                            <td class="py-2 px-3 hidden md:table-cell">
+                              @if (log.document_number) {
+                                <span class="text-text-primary">{{ log.document_type }} {{ log.document_number }}</span>
+                              }
+                              @if (!log.document_number) {
+                                <span class="text-text-secondary">-</span>
+                              }
+                            </td>
+                            <td class="py-2 px-3 text-center">
+                              <span class="px-1.5 py-0.5 text-xs rounded-full"
                         [ngClass]="{
                           'bg-green-100 text-green-700': log.status === 'success',
                           'bg-red-100 text-red-700': log.status === 'error',
                           'bg-gray-100 text-gray-600': log.status !== 'success' && log.status !== 'error'
                         }"
-                      >{{ log.status }}</span>
-                    </td>
-                    <td class="py-2 px-3 text-right hidden md:table-cell text-text-secondary">
-                      {{ log.duration_ms ? log.duration_ms + 'ms' : '-' }}
-                    </td>
-                    <td class="py-2 px-3 text-right text-text-secondary text-xs">
-                      {{ log.created_at | date:'dd/MM/yy HH:mm' }}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-              <div *ngIf="dashboardData.recent_submissions.length === 0" class="py-8 text-center">
-                <app-icon name="bar-chart-2" [size]="32" class="text-gray-400 mx-auto mb-2"></app-icon>
-                <p class="text-text-secondary text-sm">No hay envios registrados</p>
+                              >{{ log.status }}</span>
+                            </td>
+                            <td class="py-2 px-3 text-right hidden md:table-cell text-text-secondary">
+                              {{ log.duration_ms ? log.duration_ms + 'ms' : '-' }}
+                            </td>
+                            <td class="py-2 px-3 text-right text-text-secondary text-xs">
+                              {{ log.created_at | date:'dd/MM/yy HH:mm' }}
+                            </td>
+                          </tr>
+                        }
+                      </tbody>
+                    </table>
+                  }
+                  @if (dashboardData.recent_submissions.length === 0) {
+                    <div class="py-8 text-center">
+                      <app-icon name="bar-chart-2" [size]="32" class="text-gray-400 mx-auto mb-2"></app-icon>
+                      <p class="text-text-secondary text-sm">No hay envios registrados</p>
+                    </div>
+                  }
+                </div>
               </div>
             </div>
-          </div>
+          }
         </div>
-      </div>
-
+      }
+    
       <!-- Loading State -->
-      <div *ngIf="loading" class="flex justify-center py-12">
-        <app-spinner size="lg"></app-spinner>
-      </div>
-
+      @if (loading) {
+        <div class="flex justify-center py-12">
+          <app-spinner size="lg"></app-spinner>
+        </div>
+      }
+    
       <!-- ═══════════════════════════════════════════════════════ -->
       <!-- LIST VIEW                                              -->
       <!-- ═══════════════════════════════════════════════════════ -->
-      <div *ngIf="!loading && viewMode === 'list' && !showDashboard" class="space-y-4">
-
-        <!-- Add Button -->
-        <div class="flex justify-end">
-          <app-button variant="primary" size="sm" (clicked)="startNewConfig()">
-            <app-icon slot="icon" name="plus" [size]="14"></app-icon>
-            Agregar Configuracion
-          </app-button>
-        </div>
-
-        <!-- Config Cards -->
-        <div *ngIf="configs.length > 0" class="space-y-3">
-          <div
-            *ngFor="let cfg of configs"
-            class="border border-border rounded-xl p-4 bg-white hover:shadow-sm transition-shadow"
-          >
-            <div class="flex items-start justify-between gap-3">
-              <!-- Left: Info -->
-              <div class="flex-1 min-w-0">
-                <div class="flex items-center gap-2 mb-1">
-                  <h3 class="text-sm font-semibold text-text-primary truncate">{{ cfg.name }}</h3>
-                  <span
-                    *ngIf="cfg.is_default"
-                    class="px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-primary/10 text-primary whitespace-nowrap"
+      @if (!loading && viewMode === 'list' && !showDashboard) {
+        <div class="space-y-4">
+          <!-- Add Button -->
+          <div class="flex justify-end">
+            <app-button variant="primary" size="sm" (clicked)="startNewConfig()">
+              <app-icon slot="icon" name="plus" [size]="14"></app-icon>
+              Agregar Configuracion
+            </app-button>
+          </div>
+          <!-- Config Cards -->
+          @if (configs.length > 0) {
+            <div class="space-y-3">
+              @for (cfg of configs; track cfg) {
+                <div
+                  class="border border-border rounded-xl p-4 bg-white hover:shadow-sm transition-shadow"
                   >
-                    Predeterminada
-                  </span>
-                </div>
-                <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-secondary">
-                  <span>{{ getNitTypeLabel(cfg.nit_type) }}: {{ cfg.nit }}{{ cfg.nit_dv ? '-' + cfg.nit_dv : '' }}</span>
-                  <span class="px-1.5 py-0.5 rounded-full text-[10px] font-medium"
+                  <div class="flex items-start justify-between gap-3">
+                    <!-- Left: Info -->
+                    <div class="flex-1 min-w-0">
+                      <div class="flex items-center gap-2 mb-1">
+                        <h3 class="text-sm font-semibold text-text-primary truncate">{{ cfg.name }}</h3>
+                        @if (cfg.is_default) {
+                          <span
+                            class="px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-primary/10 text-primary whitespace-nowrap"
+                            >
+                            Predeterminada
+                          </span>
+                        }
+                      </div>
+                      <div class="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-text-secondary">
+                        <span>{{ getNitTypeLabel(cfg.nit_type) }}: {{ cfg.nit }}{{ cfg.nit_dv ? '-' + cfg.nit_dv : '' }}</span>
+                        <span class="px-1.5 py-0.5 rounded-full text-[10px] font-medium"
                     [ngClass]="{
                       'bg-yellow-100 text-yellow-700': cfg.environment === 'test',
                       'bg-green-100 text-green-700': cfg.environment === 'production'
                     }"
-                  >
-                    {{ cfg.environment === 'test' ? 'Pruebas' : 'Produccion' }}
-                  </span>
-                  <span class="px-1.5 py-0.5 rounded-full text-[10px] font-medium"
-                    [ngClass]="getEnablementStatusClass(cfg.enablement_status)"
-                  >
-                    {{ getEnablementStatusLabel(cfg.enablement_status) }}
-                  </span>
+                          >
+                          {{ cfg.environment === 'test' ? 'Pruebas' : 'Produccion' }}
+                        </span>
+                        <span class="px-1.5 py-0.5 rounded-full text-[10px] font-medium"
+                          [ngClass]="getEnablementStatusClass(cfg.enablement_status)"
+                          >
+                          {{ getEnablementStatusLabel(cfg.enablement_status) }}
+                        </span>
+                      </div>
+                    </div>
+                    <!-- Right: Actions -->
+                    <div class="flex items-center gap-1 shrink-0">
+                      @if (getNextStep(cfg) < 4) {
+                        <app-button
+                          variant="outline"
+                          size="sm"
+                          (clicked)="continueConfig(cfg)"
+                          title="Continuar configuracion"
+                          >
+                          <app-icon slot="icon" name="arrow-right" [size]="14"></app-icon>
+                          Continuar
+                        </app-button>
+                      }
+                      @if (!cfg.is_default) {
+                        <app-button
+                          variant="ghost"
+                          size="sm"
+                          (clicked)="markAsDefault(cfg)"
+                          title="Marcar como predeterminada"
+                          >
+                          <app-icon name="star" [size]="14"></app-icon>
+                        </app-button>
+                      }
+                      <app-button variant="ghost" size="sm" (clicked)="editConfig(cfg)" title="Editar">
+                        <app-icon name="pencil" [size]="14"></app-icon>
+                      </app-button>
+                      <app-button
+                        variant="ghost"
+                        size="sm"
+                        (clicked)="confirmDelete(cfg)"
+                        title="Eliminar"
+                        [disabled]="deletingId === cfg.id"
+                        >
+                        <app-icon name="trash-2" [size]="14" class="text-red-500"></app-icon>
+                      </app-button>
+                    </div>
+                  </div>
                 </div>
-              </div>
-
-              <!-- Right: Actions -->
-              <div class="flex items-center gap-1 shrink-0">
-                <app-button
-                  *ngIf="getNextStep(cfg) < 4"
-                  variant="outline"
-                  size="sm"
-                  (clicked)="continueConfig(cfg)"
-                  title="Continuar configuracion"
-                >
-                  <app-icon slot="icon" name="arrow-right" [size]="14"></app-icon>
-                  Continuar
-                </app-button>
-                <app-button
-                  *ngIf="!cfg.is_default"
-                  variant="ghost"
-                  size="sm"
-                  (clicked)="markAsDefault(cfg)"
-                  title="Marcar como predeterminada"
-                >
-                  <app-icon name="star" [size]="14"></app-icon>
-                </app-button>
-                <app-button variant="ghost" size="sm" (clicked)="editConfig(cfg)" title="Editar">
-                  <app-icon name="pencil" [size]="14"></app-icon>
-                </app-button>
-                <app-button
-                  variant="ghost"
-                  size="sm"
-                  (clicked)="confirmDelete(cfg)"
-                  title="Eliminar"
-                  [disabled]="deletingId === cfg.id"
-                >
-                  <app-icon name="trash-2" [size]="14" class="text-red-500"></app-icon>
-                </app-button>
-              </div>
+              }
             </div>
-          </div>
+          }
+          <!-- Empty State -->
+          @if (configs.length === 0) {
+            <div class="py-12 text-center border border-dashed border-border rounded-xl">
+              <app-icon name="shield" [size]="40" class="text-gray-300 mx-auto mb-3"></app-icon>
+              <h3 class="text-sm font-medium text-text-primary mb-1">Sin configuraciones DIAN</h3>
+              <p class="text-xs text-text-secondary mb-4">Agregue una configuracion para habilitar la facturacion electronica</p>
+              <app-button variant="primary" size="sm" (clicked)="startNewConfig()">
+                <app-icon slot="icon" name="plus" [size]="14"></app-icon>
+                Agregar Primera Configuracion
+              </app-button>
+            </div>
+          }
         </div>
-
-        <!-- Empty State -->
-        <div *ngIf="configs.length === 0" class="py-12 text-center border border-dashed border-border rounded-xl">
-          <app-icon name="shield" [size]="40" class="text-gray-300 mx-auto mb-3"></app-icon>
-          <h3 class="text-sm font-medium text-text-primary mb-1">Sin configuraciones DIAN</h3>
-          <p class="text-xs text-text-secondary mb-4">Agregue una configuracion para habilitar la facturacion electronica</p>
-          <app-button variant="primary" size="sm" (clicked)="startNewConfig()">
-            <app-icon slot="icon" name="plus" [size]="14"></app-icon>
-            Agregar Primera Configuracion
-          </app-button>
-        </div>
-      </div>
-
+      }
+    
       <!-- ═══════════════════════════════════════════════════════ -->
       <!-- DETAIL VIEW (Stepper Wizard)                           -->
       <!-- ═══════════════════════════════════════════════════════ -->
-      <div *ngIf="!loading && viewMode === 'detail'">
-
-        <!-- Stepper Navigation -->
-        <app-steps-line
-          [steps]="stepsConfig"
-          [currentStep]="activeStep"
-          [clickable]="true"
-          size="md"
-          (stepClicked)="activeStep = $event"
-        ></app-steps-line>
-
-        <div class="mt-6">
-
-          <!-- ═══ Step 1: Credentials ═══ -->
-          <div *ngIf="activeStep === 0" class="border border-border rounded-xl p-4 md:p-6 space-y-4 bg-white">
-            <div class="flex items-center gap-2 mb-2">
-              <app-icon name="key" [size]="18" class="text-primary"></app-icon>
-              <h2 class="text-base font-semibold text-text-primary">Credenciales DIAN</h2>
-            </div>
-            <p class="text-sm text-text-secondary mb-4">
-              Ingrese los datos de su empresa y credenciales del software de facturacion electronica.
-            </p>
-
-            <form [formGroup]="credentialsForm" class="space-y-4">
-              <!-- Name + NIT Type (new fields) -->
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <app-input
-                  label="Nombre de la configuracion"
-                  formControlName="name"
-                  [control]="credentialsForm.get('name')"
-                  placeholder="Ej: Empresa SAS, Persona Natural"
-                  [required]="true"
-                ></app-input>
-
-                <app-selector
-                  label="Tipo de documento"
-                  formControlName="nit_type"
-                  [options]="nitTypeOptions"
-                  placeholder="Seleccione tipo"
-                ></app-selector>
-              </div>
-
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <app-input
-                  label="NIT / Documento"
-                  formControlName="nit"
-                  [control]="credentialsForm.get('nit')"
-                  placeholder="Ej: 900123456"
-                  [required]="true"
-                ></app-input>
-
-                <app-input
-                  label="Digito de Verificacion (DV)"
-                  formControlName="nit_dv"
-                  [control]="credentialsForm.get('nit_dv')"
-                  placeholder="Ej: 7"
-                ></app-input>
-              </div>
-
-              <app-input
-                label="Software ID"
-                formControlName="software_id"
-                [control]="credentialsForm.get('software_id')"
-                placeholder="ID del software registrado en la DIAN"
-                [required]="true"
-              ></app-input>
-
-              <app-input
-                label="PIN del Software"
-                type="password"
-                formControlName="software_pin"
-                [control]="credentialsForm.get('software_pin')"
-                placeholder="PIN secreto del software"
-                [required]="true"
-              ></app-input>
-
-              <app-input
-                label="Test Set ID"
-                formControlName="test_set_id"
-                [control]="credentialsForm.get('test_set_id')"
-                placeholder="ID del set de pruebas (opcional)"
-              ></app-input>
-            </form>
-
-            <div class="flex items-center justify-end gap-3 pt-4 border-t border-border">
-              <app-button
-                variant="primary"
-                (clicked)="saveCredentials()"
-                [disabled]="credentialsForm.invalid || savingCredentials"
-                [loading]="savingCredentials"
-              >
-                {{ selectedConfig ? 'Actualizar' : 'Guardar' }} Credenciales
-              </app-button>
-            </div>
-          </div>
-
-          <!-- ═══ Step 2: Certificate ═══ -->
-          <div *ngIf="activeStep === 1" class="border border-border rounded-xl p-4 md:p-6 space-y-4 bg-white">
-            <div class="flex items-center gap-2 mb-2">
-              <app-icon name="upload" [size]="18" class="text-primary"></app-icon>
-              <h2 class="text-base font-semibold text-text-primary">Certificado Digital</h2>
-            </div>
-            <p class="text-sm text-text-secondary mb-4">
-              Suba su certificado digital (.p12) para firmar las facturas electronicas.
-            </p>
-
-            <div *ngIf="!selectedConfig" class="p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-sm">
-              <div class="flex items-center gap-2">
-                <app-icon name="alert-triangle" [size]="16"></app-icon>
-                Primero debe guardar las credenciales en el Paso 1.
-              </div>
-            </div>
-
-            <div *ngIf="selectedConfig" class="space-y-4">
-              <div *ngIf="selectedConfig.certificate_s3_key" class="p-3 rounded-lg bg-green-50 border border-green-200 text-green-700 text-sm">
-                <div class="flex items-center gap-2">
-                  <app-icon name="check-circle" [size]="16"></app-icon>
-                  <span>Certificado cargado</span>
+      @if (!loading && viewMode === 'detail') {
+        <div>
+          <!-- Stepper Navigation -->
+          <app-steps-line
+            [steps]="stepsConfig"
+            [currentStep]="activeStep"
+            [clickable]="true"
+            size="md"
+            (stepClicked)="activeStep = $event"
+          ></app-steps-line>
+          <div class="mt-6">
+            <!-- ═══ Step 1: Credentials ═══ -->
+            @if (activeStep === 0) {
+              <div class="border border-border rounded-xl p-4 md:p-6 space-y-4 bg-white">
+                <div class="flex items-center gap-2 mb-2">
+                  <app-icon name="key" [size]="18" class="text-primary"></app-icon>
+                  <h2 class="text-base font-semibold text-text-primary">Credenciales DIAN</h2>
                 </div>
-                <div *ngIf="selectedConfig.certificate_expiry" class="mt-1 text-xs">
-                  Expira: {{ selectedConfig.certificate_expiry | date:'dd/MM/yyyy' }}
+                <p class="text-sm text-text-secondary mb-4">
+                  Ingrese los datos de su empresa y credenciales del software de facturacion electronica.
+                </p>
+                <form [formGroup]="credentialsForm" class="space-y-4">
+                  <!-- Name + NIT Type (new fields) -->
+                  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <app-input
+                      label="Nombre de la configuracion"
+                      formControlName="name"
+                      [control]="credentialsForm.get('name')"
+                      placeholder="Ej: Empresa SAS, Persona Natural"
+                      [required]="true"
+                    ></app-input>
+                    <app-selector
+                      label="Tipo de documento"
+                      formControlName="nit_type"
+                      [options]="nitTypeOptions"
+                      placeholder="Seleccione tipo"
+                    ></app-selector>
+                  </div>
+                  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <app-input
+                      label="NIT / Documento"
+                      formControlName="nit"
+                      [control]="credentialsForm.get('nit')"
+                      placeholder="Ej: 900123456"
+                      [required]="true"
+                    ></app-input>
+                    <app-input
+                      label="Digito de Verificacion (DV)"
+                      formControlName="nit_dv"
+                      [control]="credentialsForm.get('nit_dv')"
+                      placeholder="Ej: 7"
+                    ></app-input>
+                  </div>
+                  <app-input
+                    label="Software ID"
+                    formControlName="software_id"
+                    [control]="credentialsForm.get('software_id')"
+                    placeholder="ID del software registrado en la DIAN"
+                    [required]="true"
+                  ></app-input>
+                  <app-input
+                    label="PIN del Software"
+                    type="password"
+                    formControlName="software_pin"
+                    [control]="credentialsForm.get('software_pin')"
+                    placeholder="PIN secreto del software"
+                    [required]="true"
+                  ></app-input>
+                  <app-input
+                    label="Test Set ID"
+                    formControlName="test_set_id"
+                    [control]="credentialsForm.get('test_set_id')"
+                    placeholder="ID del set de pruebas (opcional)"
+                  ></app-input>
+                </form>
+                <div class="flex items-center justify-end gap-3 pt-4 border-t border-border">
+                  <app-button
+                    variant="primary"
+                    (clicked)="saveCredentials()"
+                    [disabled]="credentialsForm.invalid || savingCredentials"
+                    [loading]="savingCredentials"
+                    >
+                    {{ selectedConfig ? 'Actualizar' : 'Guardar' }} Credenciales
+                  </app-button>
                 </div>
               </div>
-
-              <div class="space-y-3">
-                <label class="block text-sm font-medium text-text-primary">Archivo del certificado (.p12)</label>
-                <div
-                  class="border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-primary/50 transition-colors"
-                  (click)="fileInput.click()"
-                  (dragover)="onDragOver($event)"
-                  (drop)="onDrop($event)"
-                >
-                  <app-icon name="upload-cloud" [size]="32" class="text-gray-400 mx-auto mb-2"></app-icon>
-                  <p class="text-sm text-text-secondary">
-                    {{ selectedFile ? selectedFile.name : 'Haga clic o arrastre su archivo .p12 aqui' }}
-                  </p>
-                  <p *ngIf="!selectedFile" class="text-xs text-gray-400 mt-1">Solo archivos .p12</p>
+            }
+            <!-- ═══ Step 2: Certificate ═══ -->
+            @if (activeStep === 1) {
+              <div class="border border-border rounded-xl p-4 md:p-6 space-y-4 bg-white">
+                <div class="flex items-center gap-2 mb-2">
+                  <app-icon name="upload" [size]="18" class="text-primary"></app-icon>
+                  <h2 class="text-base font-semibold text-text-primary">Certificado Digital</h2>
                 </div>
-                <input
-                  #fileInput
-                  type="file"
-                  accept=".p12,.pfx"
-                  (change)="onFileSelected($event)"
-                  class="hidden"
-                />
+                <p class="text-sm text-text-secondary mb-4">
+                  Suba su certificado digital (.p12) para firmar las facturas electronicas.
+                </p>
+                @if (!selectedConfig) {
+                  <div class="p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-sm">
+                    <div class="flex items-center gap-2">
+                      <app-icon name="alert-triangle" [size]="16"></app-icon>
+                      Primero debe guardar las credenciales en el Paso 1.
+                    </div>
+                  </div>
+                }
+                @if (selectedConfig) {
+                  <div class="space-y-4">
+                    @if (selectedConfig.certificate_s3_key) {
+                      <div class="p-3 rounded-lg bg-green-50 border border-green-200 text-green-700 text-sm">
+                        <div class="flex items-center gap-2">
+                          <app-icon name="check-circle" [size]="16"></app-icon>
+                          <span>Certificado cargado</span>
+                        </div>
+                        @if (selectedConfig.certificate_expiry) {
+                          <div class="mt-1 text-xs">
+                            Expira: {{ selectedConfig.certificate_expiry | date:'dd/MM/yyyy' }}
+                          </div>
+                        }
+                      </div>
+                    }
+                    <div class="space-y-3">
+                      <label class="block text-sm font-medium text-text-primary">Archivo del certificado (.p12)</label>
+                      <div
+                        class="border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-primary/50 transition-colors"
+                        (click)="fileInput.click()"
+                        (dragover)="onDragOver($event)"
+                        (drop)="onDrop($event)"
+                        >
+                        <app-icon name="upload-cloud" [size]="32" class="text-gray-400 mx-auto mb-2"></app-icon>
+                        <p class="text-sm text-text-secondary">
+                          {{ selectedFile ? selectedFile.name : 'Haga clic o arrastre su archivo .p12 aqui' }}
+                        </p>
+                        @if (!selectedFile) {
+                          <p class="text-xs text-gray-400 mt-1">Solo archivos .p12</p>
+                        }
+                      </div>
+                      <input
+                        #fileInput
+                        type="file"
+                        accept=".p12,.pfx"
+                        (change)="onFileSelected($event)"
+                        class="hidden"
+                        />
+                    </div>
+                    <form [formGroup]="certificateForm" class="space-y-4">
+                      <app-input
+                        label="Contrasena del certificado"
+                        type="password"
+                        formControlName="certificate_password"
+                        [control]="certificateForm.get('certificate_password')"
+                        placeholder="Contrasena del archivo .p12"
+                        [required]="true"
+                      ></app-input>
+                    </form>
+                    <div class="flex items-center justify-end gap-3 pt-4 border-t border-border">
+                      <app-button
+                        variant="primary"
+                        (clicked)="uploadCertificate()"
+                        [disabled]="!selectedFile || certificateForm.invalid || uploadingCertificate"
+                        [loading]="uploadingCertificate"
+                        >
+                        Subir Certificado
+                      </app-button>
+                    </div>
+                  </div>
+                }
               </div>
-
-              <form [formGroup]="certificateForm" class="space-y-4">
-                <app-input
-                  label="Contrasena del certificado"
-                  type="password"
-                  formControlName="certificate_password"
-                  [control]="certificateForm.get('certificate_password')"
-                  placeholder="Contrasena del archivo .p12"
-                  [required]="true"
-                ></app-input>
-              </form>
-
-              <div class="flex items-center justify-end gap-3 pt-4 border-t border-border">
-                <app-button
-                  variant="primary"
-                  (clicked)="uploadCertificate()"
-                  [disabled]="!selectedFile || certificateForm.invalid || uploadingCertificate"
-                  [loading]="uploadingCertificate"
-                >
-                  Subir Certificado
-                </app-button>
-              </div>
-            </div>
-          </div>
-
-          <!-- ═══ Step 3: Environment ═══ -->
-          <div *ngIf="activeStep === 2" class="border border-border rounded-xl p-4 md:p-6 space-y-4 bg-white">
-            <div class="flex items-center gap-2 mb-2">
-              <app-icon name="globe" [size]="18" class="text-primary"></app-icon>
-              <h2 class="text-base font-semibold text-text-primary">Ambiente</h2>
-            </div>
-            <p class="text-sm text-text-secondary mb-4">
-              Seleccione el ambiente de facturacion electronica.
-            </p>
-
-            <div *ngIf="!selectedConfig" class="p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-sm">
-              <div class="flex items-center gap-2">
-                <app-icon name="alert-triangle" [size]="16"></app-icon>
-                Primero debe guardar las credenciales en el Paso 1.
-              </div>
-            </div>
-
-            <div *ngIf="selectedConfig" class="space-y-4">
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <button
-                  (click)="setEnvironment('test')"
-                  class="p-4 rounded-lg border-2 text-left transition-all"
+            }
+            <!-- ═══ Step 3: Environment ═══ -->
+            @if (activeStep === 2) {
+              <div class="border border-border rounded-xl p-4 md:p-6 space-y-4 bg-white">
+                <div class="flex items-center gap-2 mb-2">
+                  <app-icon name="globe" [size]="18" class="text-primary"></app-icon>
+                  <h2 class="text-base font-semibold text-text-primary">Ambiente</h2>
+                </div>
+                <p class="text-sm text-text-secondary mb-4">
+                  Seleccione el ambiente de facturacion electronica.
+                </p>
+                @if (!selectedConfig) {
+                  <div class="p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-sm">
+                    <div class="flex items-center gap-2">
+                      <app-icon name="alert-triangle" [size]="16"></app-icon>
+                      Primero debe guardar las credenciales en el Paso 1.
+                    </div>
+                  </div>
+                }
+                @if (selectedConfig) {
+                  <div class="space-y-4">
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <button
+                        (click)="setEnvironment('test')"
+                        class="p-4 rounded-lg border-2 text-left transition-all"
                   [ngClass]="{
                     'border-primary bg-primary/5': selectedEnvironment === 'test',
                     'border-border hover:border-primary/30': selectedEnvironment !== 'test'
                   }"
-                >
-                  <div class="flex items-center gap-2 mb-2">
-                    <div class="w-4 h-4 rounded-full border-2 flex items-center justify-center"
+                        >
+                        <div class="flex items-center gap-2 mb-2">
+                          <div class="w-4 h-4 rounded-full border-2 flex items-center justify-center"
                       [ngClass]="{
                         'border-primary': selectedEnvironment === 'test',
                         'border-gray-300': selectedEnvironment !== 'test'
                       }"
-                    >
-                      <div *ngIf="selectedEnvironment === 'test'" class="w-2 h-2 rounded-full bg-primary"></div>
-                    </div>
-                    <span class="text-sm font-medium text-text-primary">Pruebas (Habilitacion)</span>
-                  </div>
-                  <p class="text-xs text-text-secondary pl-6">
-                    Envia facturas al ambiente de pruebas de la DIAN. Use este modo durante la habilitacion.
-                  </p>
-                </button>
-
-                <button
-                  (click)="setEnvironment('production')"
-                  class="p-4 rounded-lg border-2 text-left transition-all"
+                            >
+                            @if (selectedEnvironment === 'test') {
+                              <div class="w-2 h-2 rounded-full bg-primary"></div>
+                            }
+                          </div>
+                          <span class="text-sm font-medium text-text-primary">Pruebas (Habilitacion)</span>
+                        </div>
+                        <p class="text-xs text-text-secondary pl-6">
+                          Envia facturas al ambiente de pruebas de la DIAN. Use este modo durante la habilitacion.
+                        </p>
+                      </button>
+                      <button
+                        (click)="setEnvironment('production')"
+                        class="p-4 rounded-lg border-2 text-left transition-all"
                   [ngClass]="{
                     'border-primary bg-primary/5': selectedEnvironment === 'production',
                     'border-border hover:border-primary/30': selectedEnvironment !== 'production'
                   }"
-                >
-                  <div class="flex items-center gap-2 mb-2">
-                    <div class="w-4 h-4 rounded-full border-2 flex items-center justify-center"
+                        >
+                        <div class="flex items-center gap-2 mb-2">
+                          <div class="w-4 h-4 rounded-full border-2 flex items-center justify-center"
                       [ngClass]="{
                         'border-primary': selectedEnvironment === 'production',
                         'border-gray-300': selectedEnvironment !== 'production'
                       }"
-                    >
-                      <div *ngIf="selectedEnvironment === 'production'" class="w-2 h-2 rounded-full bg-primary"></div>
+                            >
+                            @if (selectedEnvironment === 'production') {
+                              <div class="w-2 h-2 rounded-full bg-primary"></div>
+                            }
+                          </div>
+                          <span class="text-sm font-medium text-text-primary">Produccion</span>
+                        </div>
+                        <p class="text-xs text-text-secondary pl-6">
+                          Envia facturas reales a la DIAN. Solo active despues de completar la habilitacion.
+                        </p>
+                      </button>
                     </div>
-                    <span class="text-sm font-medium text-text-primary">Produccion</span>
+                    <div class="p-3 rounded-lg bg-gray-50 border border-border text-sm">
+                      <div class="flex items-center justify-between">
+                        <span class="text-text-secondary">Estado de habilitacion:</span>
+                        <span class="px-2 py-0.5 rounded-full text-xs font-medium"
+                          [ngClass]="getEnablementStatusClass(selectedConfig.enablement_status)"
+                          >
+                          {{ getEnablementStatusLabel(selectedConfig.enablement_status) }}
+                        </span>
+                      </div>
+                      <div class="flex items-center justify-between mt-2">
+                        <span class="text-text-secondary">Ambiente actual:</span>
+                        <span class="text-text-primary font-medium">{{ selectedConfig.environment === 'test' ? 'Pruebas' : 'Produccion' }}</span>
+                      </div>
+                    </div>
+                    <div class="flex items-center justify-end gap-3 pt-4 border-t border-border">
+                      <app-button
+                        variant="primary"
+                        (clicked)="saveEnvironment()"
+                        [disabled]="savingEnvironment"
+                        [loading]="savingEnvironment"
+                        >
+                        {{ selectedEnvironment === selectedConfig.environment ? 'Continuar' : 'Guardar Ambiente' }}
+                      </app-button>
+                    </div>
                   </div>
-                  <p class="text-xs text-text-secondary pl-6">
-                    Envia facturas reales a la DIAN. Solo active despues de completar la habilitacion.
-                  </p>
-                </button>
+                }
               </div>
-
-              <div class="p-3 rounded-lg bg-gray-50 border border-border text-sm">
-                <div class="flex items-center justify-between">
-                  <span class="text-text-secondary">Estado de habilitacion:</span>
-                  <span class="px-2 py-0.5 rounded-full text-xs font-medium"
-                    [ngClass]="getEnablementStatusClass(selectedConfig.enablement_status)"
-                  >
-                    {{ getEnablementStatusLabel(selectedConfig.enablement_status) }}
-                  </span>
+            }
+            <!-- ═══ Step 4: Test Connection ═══ -->
+            @if (activeStep === 3) {
+              <div class="border border-border rounded-xl p-4 md:p-6 space-y-4 bg-white">
+                <div class="flex items-center gap-2 mb-2">
+                  <app-icon name="zap" [size]="18" class="text-primary"></app-icon>
+                  <h2 class="text-base font-semibold text-text-primary">Probar Conexion</h2>
                 </div>
-                <div class="flex items-center justify-between mt-2">
-                  <span class="text-text-secondary">Ambiente actual:</span>
-                  <span class="text-text-primary font-medium">{{ selectedConfig.environment === 'test' ? 'Pruebas' : 'Produccion' }}</span>
-                </div>
-              </div>
-
-              <div class="flex items-center justify-end gap-3 pt-4 border-t border-border">
-                <app-button
-                  variant="primary"
-                  (clicked)="saveEnvironment()"
-                  [disabled]="savingEnvironment"
-                  [loading]="savingEnvironment"
-                >
-                  {{ selectedEnvironment === selectedConfig.environment ? 'Continuar' : 'Guardar Ambiente' }}
-                </app-button>
-              </div>
-            </div>
-          </div>
-
-          <!-- ═══ Step 4: Test Connection ═══ -->
-          <div *ngIf="activeStep === 3" class="border border-border rounded-xl p-4 md:p-6 space-y-4 bg-white">
-            <div class="flex items-center gap-2 mb-2">
-              <app-icon name="zap" [size]="18" class="text-primary"></app-icon>
-              <h2 class="text-base font-semibold text-text-primary">Probar Conexion</h2>
-            </div>
-            <p class="text-sm text-text-secondary mb-4">
-              Verifique la conexion con la DIAN y ejecute el set de pruebas de habilitacion.
-            </p>
-
-            <div *ngIf="!selectedConfig" class="p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-sm">
-              <div class="flex items-center gap-2">
-                <app-icon name="alert-triangle" [size]="16"></app-icon>
-                Primero debe completar los pasos anteriores.
-              </div>
-            </div>
-
-            <div *ngIf="selectedConfig" class="space-y-4">
-              <div class="space-y-3 mb-4">
-                <label class="text-sm font-medium text-text-primary">Resolucion para el set de pruebas</label>
-                <select
-                  class="w-full px-3 py-2 border border-border rounded-lg text-sm bg-white focus:border-primary focus:ring-1 focus:ring-primary outline-none"
-                  [(ngModel)]="selectedResolutionId"
-                >
-                  <option [ngValue]="null" disabled>Seleccione una resolucion</option>
-                  <option *ngFor="let res of resolutions" [ngValue]="res.id">
-                    {{ res.prefix }} — Resolucion {{ res.resolution_number }} ({{ res.range_from }} - {{ res.range_to }})
-                  </option>
-                </select>
-              </div>
-
-              <div class="flex items-center gap-3">
-                <app-button
-                  variant="outline"
-                  (clicked)="testConnection()"
-                  [disabled]="testingConnection"
-                  [loading]="testingConnection"
-                >
-                  <app-icon slot="icon" name="wifi" [size]="14"></app-icon>
-                  Probar Conexion
-                </app-button>
-
-                <app-button
-                  variant="primary"
-                  (clicked)="runTestSet()"
-                  [disabled]="runningTestSet || !selectedResolutionId"
-                  [loading]="runningTestSet"
-                >
-                  <app-icon slot="icon" name="play" [size]="14"></app-icon>
-                  Ejecutar Set de Pruebas
-                </app-button>
-              </div>
-
-              <div *ngIf="testResult" class="p-4 rounded-lg border"
+                <p class="text-sm text-text-secondary mb-4">
+                  Verifique la conexion con la DIAN y ejecute el set de pruebas de habilitacion.
+                </p>
+                @if (!selectedConfig) {
+                  <div class="p-3 rounded-lg bg-amber-50 border border-amber-200 text-amber-700 text-sm">
+                    <div class="flex items-center gap-2">
+                      <app-icon name="alert-triangle" [size]="16"></app-icon>
+                      Primero debe completar los pasos anteriores.
+                    </div>
+                  </div>
+                }
+                @if (selectedConfig) {
+                  <div class="space-y-4">
+                    <div class="space-y-3 mb-4">
+                      <label class="text-sm font-medium text-text-primary">Resolucion para el set de pruebas</label>
+                      <select
+                        class="w-full px-3 py-2 border border-border rounded-lg text-sm bg-white focus:border-primary focus:ring-1 focus:ring-primary outline-none"
+                        [(ngModel)]="selectedResolutionId"
+                        >
+                        <option [ngValue]="null" disabled>Seleccione una resolucion</option>
+                        @for (res of resolutions; track res) {
+                          <option [ngValue]="res.id">
+                            {{ res.prefix }} — Resolucion {{ res.resolution_number }} ({{ res.range_from }} - {{ res.range_to }})
+                          </option>
+                        }
+                      </select>
+                    </div>
+                    <div class="flex items-center gap-3">
+                      <app-button
+                        variant="outline"
+                        (clicked)="testConnection()"
+                        [disabled]="testingConnection"
+                        [loading]="testingConnection"
+                        >
+                        <app-icon slot="icon" name="wifi" [size]="14"></app-icon>
+                        Probar Conexion
+                      </app-button>
+                      <app-button
+                        variant="primary"
+                        (clicked)="runTestSet()"
+                        [disabled]="runningTestSet || !selectedResolutionId"
+                        [loading]="runningTestSet"
+                        >
+                        <app-icon slot="icon" name="play" [size]="14"></app-icon>
+                        Ejecutar Set de Pruebas
+                      </app-button>
+                    </div>
+                    @if (testResult) {
+                      <div class="p-4 rounded-lg border"
                 [ngClass]="{
                   'bg-green-50 border-green-200': testResult.success,
                   'bg-red-50 border-red-200': !testResult.success
                 }"
-              >
-                <div class="flex items-center gap-2 mb-2">
-                  <app-icon
-                    [name]="testResult.success ? 'check-circle' : 'x-circle'"
-                    [size]="18"
-                    [class]="testResult.success ? 'text-green-600' : 'text-red-600'"
-                  ></app-icon>
-                  <span class="text-sm font-medium" [class]="testResult.success ? 'text-green-700' : 'text-red-700'">
-                    {{ testResult.success ? 'Conexion exitosa' : 'Error de conexion' }}
-                  </span>
-                </div>
-                <div class="text-xs space-y-1 pl-6" [class]="testResult.success ? 'text-green-600' : 'text-red-600'">
-                  <div>{{ testResult.message }}</div>
-                  <div>Ambiente: {{ testResult.environment === 'test' ? 'Pruebas' : 'Produccion' }}</div>
-                  <div>Tiempo de respuesta: {{ testResult.response_time_ms }}ms</div>
-                  <div *ngIf="testResult.dian_status">Estado DIAN: {{ testResult.dian_status }}</div>
-                </div>
-              </div>
-
-              <div *ngIf="testSetResult" class="p-4 rounded-lg border"
+                        >
+                        <div class="flex items-center gap-2 mb-2">
+                          <app-icon
+                            [name]="testResult.success ? 'check-circle' : 'x-circle'"
+                            [size]="18"
+                            [class]="testResult.success ? 'text-green-600' : 'text-red-600'"
+                          ></app-icon>
+                          <span class="text-sm font-medium" [class]="testResult.success ? 'text-green-700' : 'text-red-700'">
+                            {{ testResult.success ? 'Conexion exitosa' : 'Error de conexion' }}
+                          </span>
+                        </div>
+                        <div class="text-xs space-y-1 pl-6" [class]="testResult.success ? 'text-green-600' : 'text-red-600'">
+                          <div>{{ testResult.message }}</div>
+                          <div>Ambiente: {{ testResult.environment === 'test' ? 'Pruebas' : 'Produccion' }}</div>
+                          <div>Tiempo de respuesta: {{ testResult.response_time_ms }}ms</div>
+                          @if (testResult.dian_status) {
+                            <div>Estado DIAN: {{ testResult.dian_status }}</div>
+                          }
+                        </div>
+                      </div>
+                    }
+                    @if (testSetResult) {
+                      <div class="p-4 rounded-lg border"
                 [ngClass]="{
                   'bg-green-50 border-green-200': testSetResult.success,
                   'bg-blue-50 border-blue-200': !testSetResult.success
                 }"
-              >
-                <div class="flex items-center gap-2 mb-3">
-                  <app-icon
-                    [name]="testSetResult.success ? 'check-circle' : 'info'"
-                    [size]="18"
-                    [class]="testSetResult.success ? 'text-green-600' : 'text-blue-600'"
-                  ></app-icon>
-                  <span class="text-sm font-medium" [class]="testSetResult.success ? 'text-green-700' : 'text-blue-700'">
-                    {{ testSetResult.message }}
-                  </span>
-                </div>
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
-                  <div class="p-2 bg-white rounded border border-border text-center">
-                    <div class="text-text-secondary">Total</div>
-                    <div class="text-lg font-semibold text-text-primary">{{ testSetResult.total_documents }}</div>
-                  </div>
-                  <div class="p-2 bg-white rounded border border-border text-center">
-                    <div class="text-text-secondary">Facturas</div>
-                    <div class="text-lg font-semibold text-text-primary">{{ testSetResult.invoices_count }}</div>
-                  </div>
-                  <div class="p-2 bg-white rounded border border-border text-center">
-                    <div class="text-text-secondary">Notas Debito</div>
-                    <div class="text-lg font-semibold text-text-primary">{{ testSetResult.debit_notes_count }}</div>
-                  </div>
-                  <div class="p-2 bg-white rounded border border-border text-center">
-                    <div class="text-text-secondary">Notas Credito</div>
-                    <div class="text-lg font-semibold text-text-primary">{{ testSetResult.credit_notes_count }}</div>
-                  </div>
-                </div>
-                <div *ngIf="testSetResult.tracking_id && testSetResult.tracking_id !== 's:Sender'" class="mt-3 text-xs text-text-secondary">
-                  Tracking ID: <span class="font-mono">{{ testSetResult.tracking_id }}</span>
-                </div>
-                <div *ngIf="testSetResult.dian_status === 's:Sender'" class="mt-3 p-2 rounded bg-amber-50 border border-amber-200 text-xs text-amber-700">
-                  <strong>Nota:</strong> Los 50 documentos se generaron y firmaron correctamente. La DIAN requiere WS-Security en el envelope SOAP para procesar el set. Esta funcionalidad esta en desarrollo.
-                </div>
-              </div>
-
-              <!-- Navigation buttons -->
-              <div class="flex items-center justify-between pt-4 border-t border-border">
-                <app-button variant="outline" size="sm" (clicked)="activeStep = 2">
-                  <app-icon slot="icon" name="arrow-left" [size]="14"></app-icon>
-                  Anterior
-                </app-button>
-                <app-button variant="primary" size="sm" (clicked)="activeStep = 4">
-                  Registros
-                  <app-icon slot="icon" name="arrow-right" [size]="14"></app-icon>
-                </app-button>
-              </div>
-            </div>
-          </div>
-
-          <!-- ═══ Step 5: Audit Logs ═══ -->
-          <div *ngIf="activeStep === 4" class="border border-border rounded-xl p-4 md:p-6 space-y-4 bg-white">
-            <div class="flex items-center gap-2 mb-2">
-              <app-icon name="file-text" [size]="18" class="text-primary"></app-icon>
-              <h2 class="text-base font-semibold text-text-primary">Registro de Operaciones</h2>
-            </div>
-            <p class="text-sm text-text-secondary mb-4">
-              Historial de operaciones realizadas con esta configuracion DIAN.
-            </p>
-
-            <div class="flex items-center justify-end mb-3">
-              <app-button
-                variant="outline"
-                size="sm"
-                (clicked)="loadAuditLogs()"
-                [loading]="loadingAuditLogs"
-              >
-                <app-icon slot="icon" name="refresh-cw" [size]="14"></app-icon>
-                Actualizar
-              </app-button>
-            </div>
-
-            <div *ngIf="loadingAuditLogs" class="py-6 text-center">
-              <div class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
-            </div>
-
-            <div *ngIf="!loadingAuditLogs" class="overflow-x-auto">
-              <table *ngIf="auditLogs.length > 0" class="w-full text-sm">
-                <thead>
-                  <tr class="border-b border-border">
-                    <th class="text-left py-2 px-3 text-text-secondary font-medium">Accion</th>
-                    <th class="text-left py-2 px-3 text-text-secondary font-medium hidden md:table-cell">Documento</th>
-                    <th class="text-center py-2 px-3 text-text-secondary font-medium">Estado</th>
-                    <th class="text-right py-2 px-3 text-text-secondary font-medium hidden md:table-cell">Duracion</th>
-                    <th class="text-right py-2 px-3 text-text-secondary font-medium">Fecha</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr *ngFor="let log of auditLogs" class="border-b border-border/50 hover:bg-gray-50">
-                    <td class="py-2 px-3">
-                      <div class="text-text-primary">{{ log.action }}</div>
-                      <div *ngIf="log.error_message" class="text-xs text-red-500 mt-0.5 max-w-[200px] truncate">
-                        {{ log.error_message }}
+                        >
+                        <div class="flex items-center gap-2 mb-3">
+                          <app-icon
+                            [name]="testSetResult.success ? 'check-circle' : 'info'"
+                            [size]="18"
+                            [class]="testSetResult.success ? 'text-green-600' : 'text-blue-600'"
+                          ></app-icon>
+                          <span class="text-sm font-medium" [class]="testSetResult.success ? 'text-green-700' : 'text-blue-700'">
+                            {{ testSetResult.message }}
+                          </span>
+                        </div>
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+                          <div class="p-2 bg-white rounded border border-border text-center">
+                            <div class="text-text-secondary">Total</div>
+                            <div class="text-lg font-semibold text-text-primary">{{ testSetResult.total_documents }}</div>
+                          </div>
+                          <div class="p-2 bg-white rounded border border-border text-center">
+                            <div class="text-text-secondary">Facturas</div>
+                            <div class="text-lg font-semibold text-text-primary">{{ testSetResult.invoices_count }}</div>
+                          </div>
+                          <div class="p-2 bg-white rounded border border-border text-center">
+                            <div class="text-text-secondary">Notas Debito</div>
+                            <div class="text-lg font-semibold text-text-primary">{{ testSetResult.debit_notes_count }}</div>
+                          </div>
+                          <div class="p-2 bg-white rounded border border-border text-center">
+                            <div class="text-text-secondary">Notas Credito</div>
+                            <div class="text-lg font-semibold text-text-primary">{{ testSetResult.credit_notes_count }}</div>
+                          </div>
+                        </div>
+                        @if (testSetResult.tracking_id && testSetResult.tracking_id !== 's:Sender') {
+                          <div class="mt-3 text-xs text-text-secondary">
+                            Tracking ID: <span class="font-mono">{{ testSetResult.tracking_id }}</span>
+                          </div>
+                        }
+                        @if (testSetResult.dian_status === 's:Sender') {
+                          <div class="mt-3 p-2 rounded bg-amber-50 border border-amber-200 text-xs text-amber-700">
+                            <strong>Nota:</strong> Los 50 documentos se generaron y firmaron correctamente. La DIAN requiere WS-Security en el envelope SOAP para procesar el set. Esta funcionalidad esta en desarrollo.
+                          </div>
+                        }
                       </div>
-                    </td>
-                    <td class="py-2 px-3 hidden md:table-cell">
-                      <span *ngIf="log.document_number" class="text-text-primary">{{ log.document_type }} {{ log.document_number }}</span>
-                      <span *ngIf="!log.document_number" class="text-text-secondary">-</span>
-                    </td>
-                    <td class="py-2 px-3 text-center">
-                      <span class="px-1.5 py-0.5 text-xs rounded-full"
+                    }
+                    <!-- Navigation buttons -->
+                    <div class="flex items-center justify-between pt-4 border-t border-border">
+                      <app-button variant="outline" size="sm" (clicked)="activeStep = 2">
+                        <app-icon slot="icon" name="arrow-left" [size]="14"></app-icon>
+                        Anterior
+                      </app-button>
+                      <app-button variant="primary" size="sm" (clicked)="activeStep = 4">
+                        Registros
+                        <app-icon slot="icon" name="arrow-right" [size]="14"></app-icon>
+                      </app-button>
+                    </div>
+                  </div>
+                }
+              </div>
+            }
+            <!-- ═══ Step 5: Audit Logs ═══ -->
+            @if (activeStep === 4) {
+              <div class="border border-border rounded-xl p-4 md:p-6 space-y-4 bg-white">
+                <div class="flex items-center gap-2 mb-2">
+                  <app-icon name="file-text" [size]="18" class="text-primary"></app-icon>
+                  <h2 class="text-base font-semibold text-text-primary">Registro de Operaciones</h2>
+                </div>
+                <p class="text-sm text-text-secondary mb-4">
+                  Historial de operaciones realizadas con esta configuracion DIAN.
+                </p>
+                <div class="flex items-center justify-end mb-3">
+                  <app-button
+                    variant="outline"
+                    size="sm"
+                    (clicked)="loadAuditLogs()"
+                    [loading]="loadingAuditLogs"
+                    >
+                    <app-icon slot="icon" name="refresh-cw" [size]="14"></app-icon>
+                    Actualizar
+                  </app-button>
+                </div>
+                @if (loadingAuditLogs) {
+                  <div class="py-6 text-center">
+                    <div class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                  </div>
+                }
+                @if (!loadingAuditLogs) {
+                  <div class="overflow-x-auto">
+                    @if (auditLogs.length > 0) {
+                      <table class="w-full text-sm">
+                        <thead>
+                          <tr class="border-b border-border">
+                            <th class="text-left py-2 px-3 text-text-secondary font-medium">Accion</th>
+                            <th class="text-left py-2 px-3 text-text-secondary font-medium hidden md:table-cell">Documento</th>
+                            <th class="text-center py-2 px-3 text-text-secondary font-medium">Estado</th>
+                            <th class="text-right py-2 px-3 text-text-secondary font-medium hidden md:table-cell">Duracion</th>
+                            <th class="text-right py-2 px-3 text-text-secondary font-medium">Fecha</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          @for (log of auditLogs; track log) {
+                            <tr class="border-b border-border/50 hover:bg-gray-50">
+                              <td class="py-2 px-3">
+                                <div class="text-text-primary">{{ log.action }}</div>
+                                @if (log.error_message) {
+                                  <div class="text-xs text-red-500 mt-0.5 max-w-[200px] truncate">
+                                    {{ log.error_message }}
+                                  </div>
+                                }
+                              </td>
+                              <td class="py-2 px-3 hidden md:table-cell">
+                                @if (log.document_number) {
+                                  <span class="text-text-primary">{{ log.document_type }} {{ log.document_number }}</span>
+                                }
+                                @if (!log.document_number) {
+                                  <span class="text-text-secondary">-</span>
+                                }
+                              </td>
+                              <td class="py-2 px-3 text-center">
+                                <span class="px-1.5 py-0.5 text-xs rounded-full"
                         [ngClass]="{
                           'bg-green-100 text-green-700': log.status === 'success',
                           'bg-red-100 text-red-700': log.status === 'error',
                           'bg-yellow-100 text-yellow-700': log.status === 'pending',
                           'bg-gray-100 text-gray-600': log.status !== 'success' && log.status !== 'error' && log.status !== 'pending'
                         }"
-                      >
-                        {{ log.status }}
-                      </span>
-                    </td>
-                    <td class="py-2 px-3 text-right hidden md:table-cell text-text-secondary">
-                      {{ log.duration_ms ? log.duration_ms + 'ms' : '-' }}
-                    </td>
-                    <td class="py-2 px-3 text-right text-text-secondary text-xs">
-                      {{ log.created_at | date:'dd/MM/yy HH:mm' }}
-                    </td>
-                  </tr>
-                </tbody>
-              </table>
-
-              <div *ngIf="auditLogs.length === 0" class="py-8 text-center">
-                <app-icon name="file-text" [size]="32" class="text-gray-400 mx-auto mb-2"></app-icon>
-                <p class="text-text-secondary text-sm">No hay registros de operaciones</p>
+                                  >
+                                  {{ log.status }}
+                                </span>
+                              </td>
+                              <td class="py-2 px-3 text-right hidden md:table-cell text-text-secondary">
+                                {{ log.duration_ms ? log.duration_ms + 'ms' : '-' }}
+                              </td>
+                              <td class="py-2 px-3 text-right text-text-secondary text-xs">
+                                {{ log.created_at | date:'dd/MM/yy HH:mm' }}
+                              </td>
+                            </tr>
+                          }
+                        </tbody>
+                      </table>
+                    }
+                    @if (auditLogs.length === 0) {
+                      <div class="py-8 text-center">
+                        <app-icon name="file-text" [size]="32" class="text-gray-400 mx-auto mb-2"></app-icon>
+                        <p class="text-text-secondary text-sm">No hay registros de operaciones</p>
+                      </div>
+                    }
+                  </div>
+                }
+                @if (auditLogs.length > 0) {
+                  <div class="flex items-center justify-between pt-3 border-t border-border">
+                    <span class="text-xs text-text-secondary">Pagina {{ auditLogPage }}</span>
+                    <div class="flex gap-2">
+                      <app-button variant="outline" size="sm" (clicked)="prevAuditPage()" [disabled]="auditLogPage <= 1">
+                        Anterior
+                      </app-button>
+                      <app-button variant="outline" size="sm" (clicked)="nextAuditPage()">
+                        Siguiente
+                      </app-button>
+                    </div>
+                  </div>
+                }
               </div>
-            </div>
-
-            <div *ngIf="auditLogs.length > 0" class="flex items-center justify-between pt-3 border-t border-border">
-              <span class="text-xs text-text-secondary">Pagina {{ auditLogPage }}</span>
-              <div class="flex gap-2">
-                <app-button variant="outline" size="sm" (clicked)="prevAuditPage()" [disabled]="auditLogPage <= 1">
-                  Anterior
-                </app-button>
-                <app-button variant="outline" size="sm" (clicked)="nextAuditPage()">
-                  Siguiente
-                </app-button>
-              </div>
-            </div>
+            }
           </div>
-
         </div>
-      </div>
-
+      }
+    
     </div>
-  `,
+    `,
 })
 export class DianConfigComponent implements OnInit {
   private invoicingService = inject(InvoicingService);

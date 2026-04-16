@@ -1,12 +1,12 @@
 import {
   Component,
   Input,
-  Output,
-  EventEmitter,
   inject,
   OnInit,
+  input,
+  output
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   FormsModule,
   ReactiveFormsModule,
@@ -39,7 +39,6 @@ import {
   selector: 'app-order-create-modal',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     ModalComponent,
@@ -47,8 +46,8 @@ import {
     ButtonComponent,
     SelectorComponent,
     IconComponent,
-    ProductSelectorComponent,
-  ],
+    ProductSelectorComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen"
@@ -57,16 +56,16 @@ import {
       [size]="'lg'"
       title="Create New Order"
       subtitle="Fill in the details to create a new order"
-    >
+      >
       <form [formGroup]="orderForm" class="space-y-6">
         <!-- Order Information -->
         <div class="space-y-4">
           <h3
             class="text-lg font-semibold text-text-primary border-b border-border pb-2"
-          >
+            >
             Order Information
           </h3>
-
+    
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <!-- Order Type (first to control other fields) -->
             <app-selector
@@ -76,7 +75,7 @@ import {
               [required]="true"
               [options]="orderTypeOptions"
             ></app-selector>
-
+    
             <app-input
               formControlName="organization_id"
               label="Organization ID"
@@ -84,7 +83,7 @@ import {
               placeholder="Enter organization ID"
               [required]="true"
             ></app-input>
-
+    
             <!-- Customer fields (shown for Sales and Return orders) -->
             <app-input
               formControlName="customer_id"
@@ -97,7 +96,7 @@ import {
               "
               [hidden]="orderForm.get('order_type')?.value === 'PURCHASE'"
             ></app-input>
-
+    
             <!-- Supplier field (shown for Purchase orders) -->
             <app-input
               formControlName="supplier_id"
@@ -107,7 +106,7 @@ import {
               [required]="orderForm.get('order_type')?.value === 'PURCHASE'"
               [hidden]="orderForm.get('order_type')?.value !== 'PURCHASE'"
             ></app-input>
-
+    
             <!-- Store field (shown for Sales and Return orders) -->
             <app-selector
               formControlName="store_id"
@@ -117,10 +116,10 @@ import {
                 orderForm.get('order_type')?.value === 'SALE' ||
                 orderForm.get('order_type')?.value === 'RETURN'
               "
-              [options]="storeOptions"
+              [options]="storeOptions()"
               [hidden]="orderForm.get('order_type')?.value === 'PURCHASE'"
             ></app-selector>
-
+    
             <!-- Location field (shown for Purchase orders and Transfers) -->
             <app-input
               formControlName="location_id"
@@ -136,7 +135,7 @@ import {
                 orderForm.get('order_type')?.value === 'RETURN'
               "
             ></app-input>
-
+    
             <!-- Partner field (shown for Return orders) -->
             <app-input
               formControlName="partner_id"
@@ -145,20 +144,20 @@ import {
               placeholder="Enter partner ID"
               [hidden]="orderForm.get('order_type')?.value !== 'RETURN'"
             ></app-input>
-
+    
             <!-- Order dates -->
             <app-input
               formControlName="order_date"
               label="Order Date"
               type="date"
             ></app-input>
-
+    
             <app-input
               formControlName="expected_delivery_date"
               label="Expected Delivery Date"
               type="date"
             ></app-input>
-
+    
             <!-- Status and payment -->
             <app-selector
               formControlName="status"
@@ -166,26 +165,26 @@ import {
               placeholder="Select status"
               [options]="getStatusOptions()"
             ></app-selector>
-
+    
             <app-input
               formControlName="payment_method"
               label="Payment Method"
               placeholder="e.g., credit_card, cash, paypal"
             ></app-input>
-
+    
             <app-selector
               formControlName="payment_status"
               label="Payment Status"
               placeholder="Select payment status"
               [options]="getPaymentStatusOptions()"
             ></app-selector>
-
+    
             <app-input
               formControlName="shipping_method"
               label="Shipping Method"
               placeholder="e.g., standard, express"
             ></app-input>
-
+    
             <!-- Purchase order specific -->
             <app-input
               formControlName="payment_terms"
@@ -193,7 +192,7 @@ import {
               placeholder="e.g., NET 30, NET 60"
               [hidden]="orderForm.get('order_type')?.value !== 'PURCHASE'"
             ></app-input>
-
+    
             <!-- Return order specific -->
             <app-selector
               formControlName="return_type"
@@ -202,7 +201,7 @@ import {
               [options]="getReturnTypeOptions()"
               [hidden]="orderForm.get('order_type')?.value !== 'RETURN'"
             ></app-selector>
-
+    
             <app-selector
               formControlName="return_reason"
               label="Return Reason"
@@ -210,7 +209,7 @@ import {
               [options]="getReturnReasonOptions()"
               [hidden]="orderForm.get('order_type')?.value !== 'RETURN'"
             ></app-selector>
-
+    
             <app-selector
               formControlName="refund_method"
               label="Refund Method"
@@ -218,7 +217,7 @@ import {
               [options]="getRefundMethodOptions()"
               [hidden]="orderForm.get('order_type')?.value !== 'RETURN'"
             ></app-selector>
-
+    
             <app-selector
               formControlName="currency"
               label="Currency"
@@ -227,13 +226,13 @@ import {
             ></app-selector>
           </div>
         </div>
-
+    
         <!-- Order Items -->
         <div class="space-y-4">
           <div class="flex justify-between items-center">
             <h3
               class="text-lg font-semibold text-text-primary border-b border-border pb-2"
-            >
+              >
               Order Items
             </h3>
             <app-button
@@ -241,292 +240,276 @@ import {
               size="sm"
               (clicked)="addItem()"
               [disabled]="items.length >= 10"
-            >
+              >
               <app-icon name="plus" [size]="16" slot="icon"></app-icon>
               Add Item
             </app-button>
           </div>
-
+    
           <div formArrayName="items" class="space-y-3">
-            <div
-              *ngFor="let itemGroup of itemsArray.controls; let i = index"
-              [formGroupName]="i"
-              class="border border-border rounded-lg p-4 bg-surface/50"
-            >
-              <div class="space-y-4">
-                <!-- Basic product info -->
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <app-product-selector
-                    [storeId]="selectedStoreId"
-                    [label]="'Product'"
-                    [required]="true"
-                    (productSelected)="onProductSelected($event, i)"
-                    (inventoryChecked)="onInventoryChecked($event, i)"
-                  ></app-product-selector>
-
-                  <app-input
-                    formControlName="product_name"
-                    label="Product Name"
-                    placeholder="Product name"
-                    [required]="true"
-                  ></app-input>
-
-                  <app-input
-                    formControlName="product_variant_id"
-                    label="Variant ID"
-                    type="number"
-                    placeholder="Enter variant ID (optional)"
-                  ></app-input>
-                </div>
-
-                <!-- Quantity and pricing -->
-                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <app-input
-                    formControlName="quantity"
-                    label="Quantity"
-                    type="number"
-                    placeholder="1"
-                    [required]="true"
-                    (input)="calculateItemTotal(i)"
-                  ></app-input>
-
-                  <app-input
-                    formControlName="unit_price"
-                    label="Unit Price"
-                    type="number"
-                    step="0.01"
-                    placeholder="0.00"
-                    [required]="true"
-                    (input)="calculateItemTotal(i)"
-                  ></app-input>
-
-                  <app-input
-                    formControlName="total_price"
-                    label="Total Price"
-                    type="number"
-                    step="0.01"
-                    placeholder="0.00"
-                    [readonly]="true"
-                  ></app-input>
-
-                  <app-input
-                    formControlName="discount_percentage"
-                    label="Discount %"
-                    type="number"
-                    step="0.01"
-                    placeholder="0"
-                    min="0"
-                    max="100"
-                  ></app-input>
-                </div>
-
-                <!-- Tax and location -->
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <app-input
-                    formControlName="tax_rate"
-                    label="Tax Rate"
-                    type="number"
-                    step="0.01"
-                    placeholder="0.10"
-                    (input)="calculateItemTotal(i)"
-                  ></app-input>
-
-                  <app-input
-                    formControlName="tax_amount_item"
-                    label="Tax Amount"
-                    type="number"
-                    step="0.01"
-                    placeholder="0.00"
-                    [readonly]="true"
-                  ></app-input>
-
-                  <app-input
-                    formControlName="location_id"
-                    label="Location ID"
-                    type="number"
-                    placeholder="Enter location ID"
+            @for (itemGroup of itemsArray.controls; track itemGroup; let i = $index) {
+              <div
+                [formGroupName]="i"
+                class="border border-border rounded-lg p-4 bg-surface/50"
+                >
+                <div class="space-y-4">
+                  <!-- Basic product info -->
+                  <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <app-product-selector
+                      [storeId]="selectedStoreId()"
+                      [label]="'Product'"
+                      [required]="true"
+                      (productSelected)="onProductSelected($event, i)"
+                      (inventoryChecked)="onInventoryChecked($event, i)"
+                    ></app-product-selector>
+                    <app-input
+                      formControlName="product_name"
+                      label="Product Name"
+                      placeholder="Product name"
+                      [required]="true"
+                    ></app-input>
+                    <app-input
+                      formControlName="product_variant_id"
+                      label="Variant ID"
+                      type="number"
+                      placeholder="Enter variant ID (optional)"
+                    ></app-input>
+                  </div>
+                  <!-- Quantity and pricing -->
+                  <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <app-input
+                      formControlName="quantity"
+                      label="Quantity"
+                      type="number"
+                      placeholder="1"
+                      [required]="true"
+                      (input)="calculateItemTotal(i)"
+                    ></app-input>
+                    <app-input
+                      formControlName="unit_price"
+                      label="Unit Price"
+                      type="number"
+                      step="0.01"
+                      placeholder="0.00"
+                      [required]="true"
+                      (input)="calculateItemTotal(i)"
+                    ></app-input>
+                    <app-input
+                      formControlName="total_price"
+                      label="Total Price"
+                      type="number"
+                      step="0.01"
+                      placeholder="0.00"
+                      [readonly]="true"
+                    ></app-input>
+                    <app-input
+                      formControlName="discount_percentage"
+                      label="Discount %"
+                      type="number"
+                      step="0.01"
+                      placeholder="0"
+                      min="0"
+                      max="100"
+                    ></app-input>
+                  </div>
+                  <!-- Tax and location -->
+                  <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <app-input
+                      formControlName="tax_rate"
+                      label="Tax Rate"
+                      type="number"
+                      step="0.01"
+                      placeholder="0.10"
+                      (input)="calculateItemTotal(i)"
+                    ></app-input>
+                    <app-input
+                      formControlName="tax_amount_item"
+                      label="Tax Amount"
+                      type="number"
+                      step="0.01"
+                      placeholder="0.00"
+                      [readonly]="true"
+                    ></app-input>
+                    <app-input
+                      formControlName="location_id"
+                      label="Location ID"
+                      type="number"
+                      placeholder="Enter location ID"
                     [hidden]="
                       orderForm.get('order_type')?.value !== 'PURCHASE' &&
                       orderForm.get('order_type')?.value !== 'TRANSFER'
                     "
-                  ></app-input>
-                </div>
-
-                <!-- Return order specific fields -->
-                <div
-                  class="grid grid-cols-1 md:grid-cols-4 gap-4"
-                  [hidden]="orderForm.get('order_type')?.value !== 'RETURN'"
-                >
-                  <app-input
-                    formControlName="order_item_id"
-                    label="Order Item ID"
-                    type="number"
-                    placeholder="Original order item ID"
-                  ></app-input>
-
-                  <app-input
-                    formControlName="quantity_returned"
-                    label="Quantity Returned"
-                    type="number"
-                    placeholder="1"
-                    [required]="orderForm.get('order_type')?.value === 'RETURN'"
-                  ></app-input>
-
-                  <app-selector
-                    formControlName="return_reason"
-                    label="Return Reason"
-                    placeholder="Select reason"
-                    [options]="getReturnReasonOptions()"
-                    [required]="orderForm.get('order_type')?.value === 'RETURN'"
-                  ></app-selector>
-
-                  <app-selector
-                    formControlName="condition_on_return"
-                    label="Condition on Return"
-                    placeholder="Select condition"
-                    [options]="getConditionOptions()"
-                    [required]="orderForm.get('order_type')?.value === 'RETURN'"
-                  ></app-selector>
-                </div>
-
-                <!-- Return specific fields continued -->
-                <div
-                  class="grid grid-cols-1 md:grid-cols-3 gap-4"
-                  [hidden]="orderForm.get('order_type')?.value !== 'RETURN'"
-                >
-                  <app-input
-                    formControlName="refund_amount"
-                    label="Refund Amount"
-                    type="number"
-                    step="0.01"
-                    placeholder="0.00"
-                  ></app-input>
-
-                  <div class="flex items-center space-x-2">
-                    <input
-                      type="checkbox"
-                      id="restock_{{ i }}"
-                      formControlName="restock"
-                      class="mr-2"
-                    />
-                    <label
-                      for="restock_{{ i }}"
-                      class="text-sm text-text-primary"
-                    >
-                      Restock Item
-                    </label>
+                    ></app-input>
                   </div>
-
-                  <app-input
-                    formControlName="notes"
-                    label="Item Notes"
-                    placeholder="Additional notes for this item"
-                  ></app-input>
-                </div>
-
-                <!-- Remove button -->
-                <div class="flex justify-end">
-                  <app-button
-                    variant="outline"
-                    size="sm"
-                    (clicked)="removeItem(i)"
-                    [disabled]="items.length <= 1"
-                  >
-                    <app-icon name="trash-2" [size]="16" slot="icon"></app-icon>
-                    Remove Item
-                  </app-button>
+                  <!-- Return order specific fields -->
+                  <div
+                    class="grid grid-cols-1 md:grid-cols-4 gap-4"
+                    [hidden]="orderForm.get('order_type')?.value !== 'RETURN'"
+                    >
+                    <app-input
+                      formControlName="order_item_id"
+                      label="Order Item ID"
+                      type="number"
+                      placeholder="Original order item ID"
+                    ></app-input>
+                    <app-input
+                      formControlName="quantity_returned"
+                      label="Quantity Returned"
+                      type="number"
+                      placeholder="1"
+                      [required]="orderForm.get('order_type')?.value === 'RETURN'"
+                    ></app-input>
+                    <app-selector
+                      formControlName="return_reason"
+                      label="Return Reason"
+                      placeholder="Select reason"
+                      [options]="getReturnReasonOptions()"
+                      [required]="orderForm.get('order_type')?.value === 'RETURN'"
+                    ></app-selector>
+                    <app-selector
+                      formControlName="condition_on_return"
+                      label="Condition on Return"
+                      placeholder="Select condition"
+                      [options]="getConditionOptions()"
+                      [required]="orderForm.get('order_type')?.value === 'RETURN'"
+                    ></app-selector>
+                  </div>
+                  <!-- Return specific fields continued -->
+                  <div
+                    class="grid grid-cols-1 md:grid-cols-3 gap-4"
+                    [hidden]="orderForm.get('order_type')?.value !== 'RETURN'"
+                    >
+                    <app-input
+                      formControlName="refund_amount"
+                      label="Refund Amount"
+                      type="number"
+                      step="0.01"
+                      placeholder="0.00"
+                    ></app-input>
+                    <div class="flex items-center space-x-2">
+                      <input
+                        type="checkbox"
+                        id="restock_{{ i }}"
+                        formControlName="restock"
+                        class="mr-2"
+                        />
+                      <label
+                        for="restock_{{ i }}"
+                        class="text-sm text-text-primary"
+                        >
+                        Restock Item
+                      </label>
+                    </div>
+                    <app-input
+                      formControlName="notes"
+                      label="Item Notes"
+                      placeholder="Additional notes for this item"
+                    ></app-input>
+                  </div>
+                  <!-- Remove button -->
+                  <div class="flex justify-end">
+                    <app-button
+                      variant="outline"
+                      size="sm"
+                      (clicked)="removeItem(i)"
+                      [disabled]="items.length <= 1"
+                      >
+                      <app-icon name="trash-2" [size]="16" slot="icon"></app-icon>
+                      Remove Item
+                    </app-button>
+                  </div>
                 </div>
               </div>
-            </div>
+            }
           </div>
         </div>
-
+    
         <!-- Shipping Address -->
         <div class="space-y-4">
           <h3
             class="text-lg font-semibold text-text-primary border-b border-border pb-2"
-          >
+            >
             Shipping Address
           </h3>
-
+    
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <app-input
               formControlName="shipping_street"
               label="Street Address"
               placeholder="123 Main St"
             ></app-input>
-
+    
             <app-input
               formControlName="shipping_city"
               label="City"
               placeholder="New York"
             ></app-input>
-
+    
             <app-input
               formControlName="shipping_state"
               label="State/Province"
               placeholder="NY"
             ></app-input>
-
+    
             <app-input
               formControlName="shipping_postal_code"
               label="Postal Code"
               placeholder="10001"
             ></app-input>
-
+    
             <app-input
               formControlName="shipping_country"
               label="Country"
               placeholder="United States"
             ></app-input>
-
+    
             <div class="flex items-center">
               <input
                 type="checkbox"
                 id="sameAsBilling"
                 formControlName="sameAsBilling"
                 class="mr-2"
-              />
+                />
               <label for="sameAsBilling" class="text-sm text-text-primary">
                 Same as billing address
               </label>
             </div>
           </div>
         </div>
-
+    
         <!-- Billing Address -->
         <div class="space-y-4" [hidden]="orderForm.get('sameAsBilling')?.value">
           <h3
             class="text-lg font-semibold text-text-primary border-b border-border pb-2"
-          >
+            >
             Billing Address
           </h3>
-
+    
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <app-input
               formControlName="billing_street"
               label="Street Address"
               placeholder="123 Main St"
             ></app-input>
-
+    
             <app-input
               formControlName="billing_city"
               label="City"
               placeholder="New York"
             ></app-input>
-
+    
             <app-input
               formControlName="billing_state"
               label="State/Province"
               placeholder="NY"
             ></app-input>
-
+    
             <app-input
               formControlName="billing_postal_code"
               label="Postal Code"
               placeholder="10001"
             ></app-input>
-
+    
             <app-input
               formControlName="billing_country"
               label="Country"
@@ -534,15 +517,15 @@ import {
             ></app-input>
           </div>
         </div>
-
+    
         <!-- Financial Information -->
         <div class="space-y-4">
           <h3
             class="text-lg font-semibold text-text-primary border-b border-border pb-2"
-          >
+            >
             Financial Information
           </h3>
-
+    
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <app-input
               formControlName="discount_amount"
@@ -551,7 +534,7 @@ import {
               step="0.01"
               placeholder="0.00"
             ></app-input>
-
+    
             <app-input
               formControlName="tax_amount"
               label="Tax Amount"
@@ -559,7 +542,7 @@ import {
               step="0.01"
               placeholder="0.00"
             ></app-input>
-
+    
             <app-input
               formControlName="shipping_cost"
               label="Shipping Cost"
@@ -569,15 +552,15 @@ import {
             ></app-input>
           </div>
         </div>
-
+    
         <!-- Order Notes -->
         <div class="space-y-4">
           <h3
             class="text-lg font-semibold text-text-primary border-b border-border pb-2"
-          >
+            >
             Additional Information
           </h3>
-
+    
           <div class="grid grid-cols-1 gap-4">
             <app-input
               formControlName="notes"
@@ -588,25 +571,25 @@ import {
           </div>
         </div>
       </form>
-
+    
       <div slot="footer" class="flex justify-end space-x-3">
         <app-button variant="outline" (clicked)="onCancel()">
           <app-icon name="close" [size]="16" slot="icon"></app-icon>
           Cancel
         </app-button>
-
+    
         <app-button
           variant="primary"
           (clicked)="onSubmit()"
           [disabled]="!orderForm.valid || isSubmitting"
           [loading]="isSubmitting"
-        >
+          >
           <app-icon name="cart" [size]="16" slot="icon"></app-icon>
           Create Order
         </app-button>
       </div>
     </app-modal>
-  `,
+    `,
   styles: [
     `
       :host {
@@ -619,10 +602,13 @@ export class OrderCreateModalComponent implements OnInit {
   private currencyFormatService = inject(CurrencyFormatService);
   private currencyService = inject(CurrencyService);
   @Input() isOpen = false;
-  @Input() storeOptions: Array<{ label: string; value: string }> = [];
-  @Input() selectedStoreId: number | null = null;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() orderCreated = new EventEmitter<CreateOrderDto>();
+  readonly storeOptions = input<Array<{
+    label: string;
+    value: string;
+}>>([]);
+  readonly selectedStoreId = input<number | null>(null);
+  readonly isOpenChange = output<boolean>();
+  readonly orderCreated = output<CreateOrderDto>();
 
   orderForm!: FormGroup;
   isSubmitting = false;

@@ -6,7 +6,7 @@ import {
   HostListener,
 } from '@angular/core';
 import { Subject, takeUntil } from 'rxjs';
-import { CommonModule } from '@angular/common';
+
 import { Router, ActivatedRoute } from '@angular/router';
 import { Store } from '@ngrx/store';
 
@@ -70,7 +70,6 @@ import { PosAISummaryModalComponent } from './components/pos-ai-summary-modal.co
   selector: 'app-pos',
   standalone: true,
   imports: [
-    CommonModule,
     ButtonComponent,
     IconComponent,
     SpinnerComponent,
@@ -187,39 +186,40 @@ import { PosAISummaryModalComponent } from './components/pos-ai-summary-modal.co
               <!-- Desktop: Full expanded view -->
               <div class="hidden xl:flex items-center gap-2 xl:gap-3">
                 <!-- Customer Badge -->
-                <div
-                  *ngIf="selectedCustomer"
-                  class="group flex items-center gap-2.5 self-stretch bg-gradient-to-r from-primary-light/50 to-primary-light/30 px-3 rounded-lg cursor-pointer hover:from-primary-light/70 hover:to-primary-light/50 transition-all border border-primary/30 shadow-sm"
-                  (click)="onOpenCustomerModal()"
-                >
+                @if (selectedCustomer) {
                   <div
-                    class="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-primary flex-shrink-0"
+                    class="group flex items-center gap-2.5 self-stretch bg-gradient-to-r from-primary-light/50 to-primary-light/30 px-3 rounded-lg cursor-pointer hover:from-primary-light/70 hover:to-primary-light/50 transition-all border border-primary/30 shadow-sm"
+                    (click)="onOpenCustomerModal()"
                   >
-                    <app-icon name="user" [size]="16"></app-icon>
-                  </div>
-                  <div class="flex flex-col min-w-0 flex-1">
-                    <span
-                      class="font-semibold text-text-primary text-sm leading-tight truncate"
-                      [title]="selectedCustomer.name"
-                      >{{ selectedCustomer.name }}</span
+                    <div
+                      class="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-primary flex-shrink-0"
                     >
-                    <span
-                      class="text-xs text-text-secondary leading-tight truncate"
-                      [title]="selectedCustomer.email"
-                      >{{ selectedCustomer.email }}</span
+                      <app-icon name="user" [size]="16"></app-icon>
+                    </div>
+                    <div class="flex flex-col min-w-0 flex-1">
+                      <span
+                        class="font-semibold text-text-primary text-sm leading-tight truncate"
+                        [title]="selectedCustomer.name"
+                        >{{ selectedCustomer.name }}</span
+                      >
+                      <span
+                        class="text-xs text-text-secondary leading-tight truncate"
+                        [title]="selectedCustomer.email"
+                        >{{ selectedCustomer.email }}</span
+                      >
+                    </div>
+                    <div
+                      class="w-6 h-6 rounded-full hover:bg-surface/60 flex items-center justify-center transition-colors flex-shrink-0"
+                      (click)="$event.stopPropagation(); onClearCustomer()"
                     >
+                      <app-icon
+                        name="x"
+                        [size]="14"
+                        class="text-text-secondary group-hover:text-destructive transition-colors"
+                      ></app-icon>
+                    </div>
                   </div>
-                  <div
-                    class="w-6 h-6 rounded-full hover:bg-surface/60 flex items-center justify-center transition-colors flex-shrink-0"
-                    (click)="$event.stopPropagation(); onClearCustomer()"
-                  >
-                    <app-icon
-                      name="x"
-                      [size]="14"
-                      class="text-text-secondary group-hover:text-destructive transition-colors"
-                    ></app-icon>
-                  </div>
-                </div>
+                }
 
                 <!-- Schedule Indicator -->
                 @if (enableScheduleValidation) {
@@ -374,20 +374,21 @@ import { PosAISummaryModalComponent } from './components/pos-ai-summary-modal.co
       </div>
 
       <!-- Mobile Footer (visible on mobile and tablet for sidebar sync) -->
-      <app-pos-mobile-footer
-        *ngIf="isMobile() || isTablet()"
-        [cartSummary]="cartSummary"
-        [itemCount]="cartItems.length"
-        [isTablet]="isTablet()"
-        [isQuotationMode]="isQuotationMode()"
-        [isLayawayMode]="isLayawayMode()"
-        (viewCart)="onOpenCartModal()"
-        (saveDraft)="onSaveDraft()"
-        (shipping)="onShipping()"
-        (checkout)="onCheckout()"
-        (quote)="onQuote()"
-        (layaway)="onLayaway()"
-      ></app-pos-mobile-footer>
+      @if (isMobile() || isTablet()) {
+        <app-pos-mobile-footer
+          [cartSummary]="cartSummary"
+          [itemCount]="cartItems.length"
+          [isTablet]="isTablet()"
+          [isQuotationMode]="isQuotationMode()"
+          [isLayawayMode]="isLayawayMode()"
+          (viewCart)="onOpenCartModal()"
+          (saveDraft)="onSaveDraft()"
+          (shipping)="onShipping()"
+          (checkout)="onCheckout()"
+          (quote)="onQuote()"
+          (layaway)="onLayaway()"
+        ></app-pos-mobile-footer>
+      }
 
       <!-- Mobile Cart Modal -->
       <app-pos-cart-modal
@@ -403,19 +404,20 @@ import { PosAISummaryModalComponent } from './components/pos-ai-summary-modal.co
       ></app-pos-cart-modal>
 
       <!-- Loading Overlay -->
-      <div
-        *ngIf="loading"
-        class="fixed inset-0 z-50 bg-surface/80 backdrop-blur-sm flex items-center justify-center"
-      >
-        <app-card class="w-auto min-w-[200px]" [padding]="true">
-          <div class="flex flex-col items-center py-6 px-4">
-            <app-spinner [size]="'lg'" color="primary"></app-spinner>
-            <p class="mt-4 text-text-primary font-medium text-sm">
-              Procesando solicitud...
-            </p>
-          </div>
-        </app-card>
-      </div>
+      @if (loading) {
+        <div
+          class="fixed inset-0 z-50 bg-surface/80 backdrop-blur-sm flex items-center justify-center"
+        >
+          <app-card class="w-auto min-w-[200px]" [padding]="true">
+            <div class="flex flex-col items-center py-6 px-4">
+              <app-spinner [size]="'lg'" color="primary"></app-spinner>
+              <p class="mt-4 text-text-primary font-medium text-sm">
+                Procesando solicitud...
+              </p>
+            </div>
+          </app-card>
+        </div>
+      }
 
       <!-- Modals -->
       <app-pos-customer-modal
@@ -456,61 +458,72 @@ import { PosAISummaryModalComponent } from './components/pos-ai-summary-modal.co
 
       <!-- Cash Register Modals -->
       @if (cashRegisterEnabled) {
-        <app-pos-session-open-modal
-          [isOpen]="showSessionOpenModal"
-          (isOpenChange)="showSessionOpenModal = $event"
-          (sessionOpened)="onSessionOpened($event)"
-        ></app-pos-session-open-modal>
+        @defer (when showSessionOpenModal) {
+          <app-pos-session-open-modal
+            [isOpen]="showSessionOpenModal"
+            (isOpenChange)="showSessionOpenModal = $event"
+            (sessionOpened)="onSessionOpened($event)"
+          ></app-pos-session-open-modal>
+        }
 
-        <app-pos-session-close-modal
-          [isOpen]="showSessionCloseModal"
-          [session]="activeSession"
-          (isOpenChange)="showSessionCloseModal = $event"
-          (sessionClosed)="onSessionClosed($event)"
-        ></app-pos-session-close-modal>
+        @defer (when showSessionCloseModal) {
+          <app-pos-session-close-modal
+            [isOpen]="showSessionCloseModal"
+            [session]="activeSession"
+            (isOpenChange)="showSessionCloseModal = $event"
+            (sessionClosed)="onSessionClosed($event)"
+          ></app-pos-session-close-modal>
+        }
 
-        <app-pos-ai-summary-modal
-          [isOpen]="showAISummaryModal"
-          [sessionId]="closedSessionIdForSummary"
-          (isOpenChange)="showAISummaryModal = $event"
-        ></app-pos-ai-summary-modal>
+        @defer (when showAISummaryModal) {
+          <app-pos-ai-summary-modal
+            [isOpen]="showAISummaryModal"
+            [sessionId]="closedSessionIdForSummary"
+            (isOpenChange)="showAISummaryModal = $event"
+          ></app-pos-ai-summary-modal>
+        }
 
-        <app-pos-cash-movement-modal
-          [isOpen]="showCashMovementModal"
-          [sessionId]="activeSession?.id || null"
-          (isOpenChange)="showCashMovementModal = $event"
-          (movementCreated)="onMovementCreated($event)"
-        ></app-pos-cash-movement-modal>
+        @defer (when showCashMovementModal) {
+          <app-pos-cash-movement-modal
+            [isOpen]="showCashMovementModal"
+            [sessionId]="activeSession?.id || null"
+            (isOpenChange)="showCashMovementModal = $event"
+            (movementCreated)="onMovementCreated($event)"
+          ></app-pos-cash-movement-modal>
+        }
 
-        <app-pos-session-detail-modal
-          [isOpen]="showSessionDetailModal"
-          [session]="activeSession"
-          (isOpenChange)="showSessionDetailModal = $event"
-        ></app-pos-session-detail-modal>
+        @defer (when showSessionDetailModal) {
+          <app-pos-session-detail-modal
+            [isOpen]="showSessionDetailModal"
+            [session]="activeSession"
+            (isOpenChange)="showSessionDetailModal = $event"
+          ></app-pos-session-detail-modal>
+        }
       }
 
-      <!-- Schedule Modal -->
-      <app-pos-schedule-modal
-        [isOpen]="showScheduleModal"
-        [businessHours]="businessHours"
-        [isWithinHours]="!isActuallyOutOfHours"
-        [todayKey]="todayKey"
-        (isOpenChange)="showScheduleModal = $event"
-        (goToSettings)="showScheduleModal = false; goToSettings()"
-      ></app-pos-schedule-modal>
+      @defer (when showScheduleModal) {
+        <app-pos-schedule-modal
+          [isOpen]="showScheduleModal"
+          [businessHours]="businessHours"
+          [isWithinHours]="!isActuallyOutOfHours"
+          [todayKey]="todayKey"
+          (isOpenChange)="showScheduleModal = $event"
+          (goToSettings)="showScheduleModal = false; goToSettings()"
+        ></app-pos-schedule-modal>
+      }
 
-      <!-- Reservation Modal from POS Cart -->
-      <app-reservation-form-modal
-        [isOpen]="showReservationModal"
-        [initialProduct]="pendingBookingProduct"
-        [initialCustomer]="selectedCustomer"
-        [posMode]="true"
-        (closed)="onBookingModalClosed()"
-        (created)="onBookingCreated($event)"
-      ></app-reservation-form-modal>
+      @defer (when showReservationModal) {
+        <app-reservation-form-modal
+          [isOpen]="showReservationModal"
+          [initialProduct]="pendingBookingProduct"
+          [initialCustomer]="selectedCustomer"
+          [posMode]="true"
+          (closed)="onBookingModalClosed()"
+          (created)="onBookingCreated($event)"
+        ></app-reservation-form-modal>
+      }
 
-      <!-- Layaway Config Modal -->
-      @if (showLayawayConfigModal()) {
+      @defer (when showLayawayConfigModal()) {
         <app-layaway-config-modal
           [cartItems]="cartState?.items || []"
           [cartTotal]="cartSummary.total"

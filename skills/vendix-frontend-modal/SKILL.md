@@ -15,9 +15,11 @@ This skill describes the standard pattern for implementing modals in Vendix, usi
 ## Critical Rules (Best Practices)
 
 1.  **System Components Only**: Inside the modal, ALWAYS use system components (`app-input`, `app-selector`, `app-textarea`). Avoid raw HTML inputs to maintain consistency and prevent event conflicts.
-2.  **State Propagation (Prevent NG0100)**: When handling `isOpenChange`, **ALWAYS** emit the raw event (`$event`).
-    - Correct: `(isOpenChange)="isOpenChange.emit($event)"`
-    - Incorrect: `(isOpenChange)="closeModal()"` (If `closeModal` forces `false` immediately, it causes an `ExpressionChangedAfterItHasBeenCheckedError` loop when the modal tries to open).
+2.  **Two-Way Binding con `model()`**: `app-modal` usa `model()` para `isOpen`.
+    Usar siempre `[(isOpen)]` para two-way binding.
+    - Correcto: `[(isOpen)]="showModal"`
+    - También válido (one-way + handler): `[isOpen]="showModal" (isOpenChange)="onClose($event)"`
+    - El NG0100 ya no aplica con `model()` — el cierre es reactivo por diseño.
 3.  **Single-View Architecture**: For simple CRUD modules, avoid creating child routes (`/create`, `/edit/:id`). Use a single "List" view and handle Creation/Editing through modals on the same view.
 
 ---
@@ -29,7 +31,7 @@ Follow this template to create robust modals:
 **File:** `feature-create/feature-create.component.ts`
 
 ```typescript
-import { Component, Input, Output, EventEmitter } from "@angular/core";
+import { Component, model, signal, inject } from "@angular/core";
 import { CommonModule } from "@angular/common";
 import {
   ReactiveFormsModule,
@@ -46,7 +48,7 @@ import {
 } from "@/shared/components";
 
 @Component({
-  selector: "app-feature-create", // Or vendix-feature-create
+  selector: "app-feature-create",
   standalone: true,
   imports: [
     CommonModule,
@@ -59,8 +61,7 @@ import {
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
-      (isOpenChange)="isOpenChange.emit($event)"
+      [(isOpen)]="isOpen"
       (cancel)="onClose()"
       title="New Item"
       size="md"
@@ -74,69 +75,62 @@ import {
             [control]="form.get('name')"
             [required]="true"
           ></app-input>
-
-          <app-selector
-            label="Category"
-            formControlName="categoryId"
-            [options]="categories"
-          ></app-selector>
-
-          <app-textarea
-            label="Notes"
-            formControlName="notes"
-            rows="3"
-          ></app-textarea>
         </form>
       </div>
 
       <!-- Footer -->
-      <div slot="footer">
-        <div
-          class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100"
-        >
-          <app-button variant="outline" (clicked)="onClose()">
-            Cancel
-          </app-button>
-
-          <app-button
-            variant="primary"
-            (clicked)="onSubmit()"
-            [disabled]="form.invalid || isSubmitting"
-            [loading]="isSubmitting"
-          >
-            Save
-          </app-button>
-        </div>
+      <div slot="footer" class="flex gap-3 justify-end w-full">
+        <app-button variant="ghost" (clicked)="onClose()">Cancelar</app-button>
+        <app-button variant="primary" [loading]="isSubmitting()" (clicked)="onSubmit()">
+          Guardar
+        </app-button>
       </div>
     </app-modal>
   `,
 })
 export class FeatureCreateComponent {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
+  private fb = inject(FormBuilder);
 
-  form: FormGroup;
-  isSubmitting = false;
+  // Two-way binding con el padre — model() reemplaza @Input() + @Output()
+  readonly isOpen = model<boolean>(false);
 
-  constructor(private fb: FormBuilder) {
-    this.form = this.fb.group({
-      name: ["", Validators.required],
-      categoryId: [null],
-      notes: [""],
-    });
+  // Estado local con signals
+  readonly isSubmitting = signal(false);
+
+  form = this.fb.group({
+    name: ['', Validators.required],
+  });
+
+  onClose(): void {
+    this.isOpen.set(false);
   }
 
-  onSubmit() {
-    if (this.form.valid) {
-      // Dispatch Action
-      this.onClose();
-    }
-  }
-
-  onClose() {
-    this.isOpenChange.emit(false);
+  onSubmit(): void {
+    if (this.form.invalid) return;
+    this.isSubmitting.set(true);
+    // ... lógica de submit
   }
 }
+```
+
+> **Nota sobre patrones legacy**: Si encuentras modales con `@Input() isOpen` y `@Output() isOpenChange = new EventEmitter()`, son componentes que aún no se han migrado. En código nuevo, **siempre usar `model()`**.
+
+---
+
+## Uso desde el Padre
+
+El componente padre declara un signal local y lo pasa con two-way binding:
+
+```html
+<!-- padre.component.html -->
+<app-feature-create [(isOpen)]="showCreateModal" />
+
+<app-button (clicked)="showCreateModal.set(true)">Crear</app-button>
+```
+
+```typescript
+// padre.component.ts
+readonly showCreateModal = signal(false);
 ```
 
 ---
@@ -167,7 +161,7 @@ The footer typically has the following characteristics:
 ## Best Practices
 
 1.  **Using Slots**: Use `slot="footer"` for the bottom action area.
-2.  **Two-Way Binding**: Implement `isOpen` and `isOpenChange` to allow `[(isOpen)]` usage in the parent component.
+2.  **Two-Way Binding**: Usar `model<boolean>(false)` para `isOpen`. El padre usa `[(isOpen)]="showModal"` con un signal local.
 3.  **Close Handling**: Listen to the `(cancel)` event from `app-modal` to clean up state or properly close the modal when the user presses Escape or clicks outside.
 4.  **Form Validation**: Disable the primary action button if the form is invalid or if an operation is in progress (`isSubmitting`).
 5.  **Responsiveness**: Use Tailwind classes like `p-2 md:p-4` to adjust padding based on screen size.
@@ -187,14 +181,9 @@ The footer typically has the following characteristics:
 
 ### NG0100 Error (ExpressionChangedAfterItHasBeenCheckedError)
 
-**Cause**: Mapping the `isOpenChange` event (which emits `true` on open) to a function that sets the variable to `false` immediately.
-**Solution**: In the modal template, use:
+**Estado**: Ya no aplica con `model()`. El two-way binding reactivo de `model()` gestiona el estado de apertura de forma sincrónica dentro del ciclo de Signals, eliminando este error por diseño.
 
-```html
-(isOpenChange)="isOpenChange.emit($event)"
-```
-
-This ensures the parent receives the actual value (`true`) at the start, maintaining synchronization. It only emits `false` when it actually closes.
+**Si aún aparece en código legacy** (componentes con `@Input()/@Output()`): La causa es mapear `isOpenChange` a una función que fuerza `false` inmediatamente. La solución legacy era usar `(isOpenChange)="isOpenChange.emit($event)"`. La solución definitiva es migrar a `model()`.
 
 ### Double borders or strange styles
 

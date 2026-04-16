@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
-import { CommonModule, DatePipe } from '@angular/common';
+import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Subject, timer, forkJoin } from 'rxjs';
 import { takeUntil, map, catchError, filter } from 'rxjs/operators';
@@ -12,7 +12,7 @@ import { BackupStatus, SnapshotInfo } from './interfaces';
 @Component({
   selector: 'app-backups',
   standalone: true,
-  imports: [CommonModule, FormsModule, StatsComponent, IconComponent],
+  imports: [FormsModule, StatsComponent, IconComponent],
   providers: [BackupService, DatePipe],
   template: `
     <div style="background-color: var(--color-background);" class="space-y-6">
@@ -22,7 +22,7 @@ import { BackupStatus, SnapshotInfo } from './interfaces';
           <div
             class="w-10 h-10 rounded-lg flex items-center justify-center"
             style="background: linear-gradient(135deg, rgba(6,182,212,0.8), rgba(20,184,166,0.6));"
-          >
+            >
             <app-icon name="hard-drive" [size]="20" class="text-white"></app-icon>
           </div>
           <div>
@@ -41,13 +41,13 @@ import { BackupStatus, SnapshotInfo } from './interfaces';
             class="px-4 py-2 rounded-lg text-sm font-medium text-white flex items-center gap-2 transition-opacity hover:opacity-90"
             style="background: linear-gradient(135deg, #06b6d4, #14b8a6);"
             [disabled]="creating"
-          >
+            >
             <app-icon name="plus" [size]="16" class="text-white"></app-icon>
             Crear Snapshot
           </button>
         </div>
       </div>
-
+    
       <!-- Stats Cards -->
       <div class="stats-container">
         <app-stats
@@ -87,41 +87,42 @@ import { BackupStatus, SnapshotInfo } from './interfaces';
           [loading]="loadingStatus"
         ></app-stats>
       </div>
-
+    
       <!-- Instance Info Bar -->
-      <div
-        *ngIf="status?.instance"
-        class="rounded-card shadow-card p-4 flex items-center gap-4 flex-wrap"
-        style="background: var(--color-surface); border: 1px solid var(--color-border);"
-      >
-        <app-icon name="server" [size]="18" style="color: var(--color-text-muted);"></app-icon>
-        <span class="text-sm" style="color: var(--color-text-secondary);">
-          Instancia: <strong style="color: var(--color-text-primary);">{{ status!.instance.id }}</strong>
-        </span>
-        <span class="text-xs px-2 py-0.5 rounded-full" style="background: var(--color-border); color: var(--color-text-secondary);">
-          {{ status!.instance.engine }}
-        </span>
-        <span class="text-xs" style="color: var(--color-text-muted);">
-          {{ status!.instance.storage_gb }} GB
-        </span>
-        <span
-          class="text-xs font-medium px-2 py-0.5 rounded-full ml-auto"
-          [style.background]="status!.instance.status === 'available' ? 'rgba(34,197,94,0.1)' : 'rgba(234,179,8,0.1)'"
-          [style.color]="status!.instance.status === 'available' ? '#22c55e' : '#eab308'"
-        >
-          {{ status!.instance.status }}
-        </span>
-      </div>
-
+      @if (status?.instance) {
+        <div
+          class="rounded-card shadow-card p-4 flex items-center gap-4 flex-wrap"
+          style="background: var(--color-surface); border: 1px solid var(--color-border);"
+          >
+          <app-icon name="server" [size]="18" style="color: var(--color-text-muted);"></app-icon>
+          <span class="text-sm" style="color: var(--color-text-secondary);">
+            Instancia: <strong style="color: var(--color-text-primary);">{{ status!.instance.id }}</strong>
+          </span>
+          <span class="text-xs px-2 py-0.5 rounded-full" style="background: var(--color-border); color: var(--color-text-secondary);">
+            {{ status!.instance.engine }}
+          </span>
+          <span class="text-xs" style="color: var(--color-text-muted);">
+            {{ status!.instance.storage_gb }} GB
+          </span>
+          <span
+            class="text-xs font-medium px-2 py-0.5 rounded-full ml-auto"
+            [style.background]="status!.instance.status === 'available' ? 'rgba(34,197,94,0.1)' : 'rgba(234,179,8,0.1)'"
+            [style.color]="status!.instance.status === 'available' ? '#22c55e' : '#eab308'"
+            >
+            {{ status!.instance.status }}
+          </span>
+        </div>
+      }
+    
       <!-- Snapshots Table Section -->
       <div
         class="rounded-card shadow-card"
         style="background: var(--color-surface); border: 1px solid var(--color-border);"
-      >
+        >
         <div
           class="flex items-center gap-3 p-6"
           style="border-bottom: 1px solid var(--color-border); background: linear-gradient(135deg, rgba(6,182,212,0.05) 0%, transparent 100%);"
-        >
+          >
           <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-cyan-500/10">
             <app-icon name="database" [size]="16" class="text-cyan-500"></app-icon>
           </div>
@@ -132,152 +133,163 @@ import { BackupStatus, SnapshotInfo } from './interfaces';
             {{ snapshots.length }} snapshot{{ snapshots.length !== 1 ? 's' : '' }}
           </span>
         </div>
-
+    
         <div class="p-6">
           <!-- Loading state -->
-          <div *ngIf="loadingSnapshots" class="flex items-center justify-center py-12">
-            <div class="animate-spin w-6 h-6 border-2 border-cyan-500 border-t-transparent rounded-full"></div>
-            <span class="ml-3 text-sm" style="color: var(--color-text-muted);">Cargando snapshots...</span>
-          </div>
-
-          <!-- Empty state -->
-          <div *ngIf="!loadingSnapshots && snapshots.length === 0" class="text-center py-12">
-            <app-icon name="database" [size]="48" style="color: var(--color-text-muted); opacity: 0.3;"></app-icon>
-            <p class="mt-3 text-sm" style="color: var(--color-text-muted);">No se encontraron snapshots</p>
-          </div>
-
-          <!-- Table -->
-          <div *ngIf="!loadingSnapshots && snapshots.length > 0" class="overflow-x-auto">
-            <table class="w-full text-sm">
-              <thead>
-                <tr style="border-bottom: 1px solid var(--color-border);">
-                  <th class="text-left py-3 px-3 text-xs font-medium uppercase tracking-wider" style="color: var(--color-text-muted);">Estado</th>
-                  <th class="text-left py-3 px-3 text-xs font-medium uppercase tracking-wider" style="color: var(--color-text-muted);">Tipo</th>
-                  <th class="text-left py-3 px-3 text-xs font-medium uppercase tracking-wider" style="color: var(--color-text-muted);">Nombre</th>
-                  <th class="text-left py-3 px-3 text-xs font-medium uppercase tracking-wider" style="color: var(--color-text-muted);">Fecha de Creacion</th>
-                  <th class="text-left py-3 px-3 text-xs font-medium uppercase tracking-wider" style="color: var(--color-text-muted);">Tamano</th>
-                  <th class="text-right py-3 px-3 text-xs font-medium uppercase tracking-wider" style="color: var(--color-text-muted);">Acciones</th>
-                </tr>
-              </thead>
-              <tbody>
-                <tr
-                  *ngFor="let snapshot of snapshots"
-                  style="border-bottom: 1px solid var(--color-border);"
-                  class="hover:opacity-80 transition-opacity"
-                >
-                  <td class="py-3 px-3">
-                    <span
-                      class="text-xs font-medium px-2 py-1 rounded-full"
-                      [style.background]="getStatusBg(snapshot.status)"
-                      [style.color]="getStatusColor(snapshot.status)"
-                    >
-                      {{ snapshot.status }}
-                    </span>
-                  </td>
-                  <td class="py-3 px-3">
-                    <span
-                      class="text-xs font-medium px-2 py-1 rounded-full"
-                      [style.background]="snapshot.type === 'automated' ? 'rgba(59,130,246,0.1)' : 'rgba(139,92,246,0.1)'"
-                      [style.color]="snapshot.type === 'automated' ? '#3b82f6' : '#8b5cf6'"
-                    >
-                      {{ snapshot.type === 'automated' ? 'Automatico' : 'Manual' }}
-                    </span>
-                  </td>
-                  <td class="py-3 px-3">
-                    <span class="font-mono text-xs" style="color: var(--color-text-primary);">{{ snapshot.id }}</span>
-                  </td>
-                  <td class="py-3 px-3" style="color: var(--color-text-secondary);">
-                    {{ snapshot.created_at ? datePipe.transform(snapshot.created_at, 'dd/MM/yyyy HH:mm') : '--' }}
-                  </td>
-                  <td class="py-3 px-3" style="color: var(--color-text-secondary);">
-                    {{ snapshot.size_gb > 0 ? snapshot.size_gb.toFixed(2) + ' GB' : '--' }}
-                  </td>
-                  <td class="py-3 px-3 text-right">
-                    <button
-                      *ngIf="snapshot.type === 'manual'"
-                      (click)="deleteSnapshot(snapshot)"
-                      [disabled]="deletingId === snapshot.id"
-                      class="p-1.5 rounded-lg transition-colors hover:bg-red-500/10"
-                      style="color: var(--color-text-muted);"
-                      title="Eliminar snapshot"
-                    >
-                      <app-icon
-                        [name]="deletingId === snapshot.id ? 'loader-2' : 'trash-2'"
-                        [size]="16"
-                        [class]="deletingId === snapshot.id ? 'animate-spin text-red-400' : 'hover:text-red-500'"
-                      ></app-icon>
-                    </button>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </div>
-      </div>
-
-      <!-- Create Snapshot Modal Overlay -->
-      <div
-        *ngIf="showCreateModal"
-        class="fixed inset-0 z-50 flex items-center justify-center p-4"
-        style="background: rgba(0,0,0,0.5);"
-        (click)="onOverlayClick($event)"
-      >
-        <div
-          class="rounded-card shadow-card w-full max-w-md p-6 space-y-4"
-          style="background: var(--color-surface); border: 1px solid var(--color-border);"
-        >
-          <div class="flex items-center gap-3">
-            <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-cyan-500/10">
-              <app-icon name="plus" [size]="16" class="text-cyan-500"></app-icon>
+          @if (loadingSnapshots) {
+            <div class="flex items-center justify-center py-12">
+              <div class="animate-spin w-6 h-6 border-2 border-cyan-500 border-t-transparent rounded-full"></div>
+              <span class="ml-3 text-sm" style="color: var(--color-text-muted);">Cargando snapshots...</span>
             </div>
-            <h3 class="text-lg font-semibold" style="color: var(--color-text-primary);">
-              Crear Snapshot Manual
-            </h3>
-          </div>
-
-          <div>
-            <label class="block text-sm font-medium mb-1.5" style="color: var(--color-text-secondary);">
-              Nombre del Snapshot
-            </label>
-            <input
-              [(ngModel)]="newSnapshotName"
-              (keydown.enter)="confirmCreateSnapshot()"
-              type="text"
-              placeholder="mi-snapshot-manual"
-              class="w-full px-3 py-2 rounded-lg text-sm outline-none transition-colors"
-              style="background: var(--color-background); border: 1px solid var(--color-border); color: var(--color-text-primary);"
-              [style.border-color]="snapshotNameError ? '#ef4444' : 'var(--color-border)'"
-            />
-            <p *ngIf="snapshotNameError" class="text-xs mt-1" style="color: #ef4444;">
-              {{ snapshotNameError }}
-            </p>
-            <p class="text-xs mt-1" style="color: var(--color-text-muted);">
-              Solo letras, numeros y guiones
-            </p>
-          </div>
-
-          <div class="flex justify-end gap-2 pt-2">
-            <button
-              (click)="cancelCreateSnapshot()"
-              class="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-              style="color: var(--color-text-secondary); background: var(--color-background); border: 1px solid var(--color-border);"
-            >
-              Cancelar
-            </button>
-            <button
-              (click)="confirmCreateSnapshot()"
-              [disabled]="creating || !newSnapshotName.trim()"
-              class="px-4 py-2 rounded-lg text-sm font-medium text-white transition-opacity hover:opacity-90 flex items-center gap-2 disabled:opacity-50"
-              style="background: linear-gradient(135deg, #06b6d4, #14b8a6);"
-            >
-              <app-icon *ngIf="creating" name="loader-2" [size]="14" class="animate-spin text-white"></app-icon>
-              {{ creating ? 'Creando...' : 'Crear' }}
-            </button>
-          </div>
+          }
+    
+          <!-- Empty state -->
+          @if (!loadingSnapshots && snapshots.length === 0) {
+            <div class="text-center py-12">
+              <app-icon name="database" [size]="48" style="color: var(--color-text-muted); opacity: 0.3;"></app-icon>
+              <p class="mt-3 text-sm" style="color: var(--color-text-muted);">No se encontraron snapshots</p>
+            </div>
+          }
+    
+          <!-- Table -->
+          @if (!loadingSnapshots && snapshots.length > 0) {
+            <div class="overflow-x-auto">
+              <table class="w-full text-sm">
+                <thead>
+                  <tr style="border-bottom: 1px solid var(--color-border);">
+                    <th class="text-left py-3 px-3 text-xs font-medium uppercase tracking-wider" style="color: var(--color-text-muted);">Estado</th>
+                    <th class="text-left py-3 px-3 text-xs font-medium uppercase tracking-wider" style="color: var(--color-text-muted);">Tipo</th>
+                    <th class="text-left py-3 px-3 text-xs font-medium uppercase tracking-wider" style="color: var(--color-text-muted);">Nombre</th>
+                    <th class="text-left py-3 px-3 text-xs font-medium uppercase tracking-wider" style="color: var(--color-text-muted);">Fecha de Creacion</th>
+                    <th class="text-left py-3 px-3 text-xs font-medium uppercase tracking-wider" style="color: var(--color-text-muted);">Tamano</th>
+                    <th class="text-right py-3 px-3 text-xs font-medium uppercase tracking-wider" style="color: var(--color-text-muted);">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  @for (snapshot of snapshots; track snapshot) {
+                    <tr
+                      style="border-bottom: 1px solid var(--color-border);"
+                      class="hover:opacity-80 transition-opacity"
+                      >
+                      <td class="py-3 px-3">
+                        <span
+                          class="text-xs font-medium px-2 py-1 rounded-full"
+                          [style.background]="getStatusBg(snapshot.status)"
+                          [style.color]="getStatusColor(snapshot.status)"
+                          >
+                          {{ snapshot.status }}
+                        </span>
+                      </td>
+                      <td class="py-3 px-3">
+                        <span
+                          class="text-xs font-medium px-2 py-1 rounded-full"
+                          [style.background]="snapshot.type === 'automated' ? 'rgba(59,130,246,0.1)' : 'rgba(139,92,246,0.1)'"
+                          [style.color]="snapshot.type === 'automated' ? '#3b82f6' : '#8b5cf6'"
+                          >
+                          {{ snapshot.type === 'automated' ? 'Automatico' : 'Manual' }}
+                        </span>
+                      </td>
+                      <td class="py-3 px-3">
+                        <span class="font-mono text-xs" style="color: var(--color-text-primary);">{{ snapshot.id }}</span>
+                      </td>
+                      <td class="py-3 px-3" style="color: var(--color-text-secondary);">
+                        {{ snapshot.created_at ? datePipe.transform(snapshot.created_at, 'dd/MM/yyyy HH:mm') : '--' }}
+                      </td>
+                      <td class="py-3 px-3" style="color: var(--color-text-secondary);">
+                        {{ snapshot.size_gb > 0 ? snapshot.size_gb.toFixed(2) + ' GB' : '--' }}
+                      </td>
+                      <td class="py-3 px-3 text-right">
+                        @if (snapshot.type === 'manual') {
+                          <button
+                            (click)="deleteSnapshot(snapshot)"
+                            [disabled]="deletingId === snapshot.id"
+                            class="p-1.5 rounded-lg transition-colors hover:bg-red-500/10"
+                            style="color: var(--color-text-muted);"
+                            title="Eliminar snapshot"
+                            >
+                            <app-icon
+                              [name]="deletingId === snapshot.id ? 'loader-2' : 'trash-2'"
+                              [size]="16"
+                              [class]="deletingId === snapshot.id ? 'animate-spin text-red-400' : 'hover:text-red-500'"
+                            ></app-icon>
+                          </button>
+                        }
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+          }
         </div>
       </div>
+    
+      <!-- Create Snapshot Modal Overlay -->
+      @if (showCreateModal) {
+        <div
+          class="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style="background: rgba(0,0,0,0.5);"
+          (click)="onOverlayClick($event)"
+          >
+          <div
+            class="rounded-card shadow-card w-full max-w-md p-6 space-y-4"
+            style="background: var(--color-surface); border: 1px solid var(--color-border);"
+            >
+            <div class="flex items-center gap-3">
+              <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-cyan-500/10">
+                <app-icon name="plus" [size]="16" class="text-cyan-500"></app-icon>
+              </div>
+              <h3 class="text-lg font-semibold" style="color: var(--color-text-primary);">
+                Crear Snapshot Manual
+              </h3>
+            </div>
+            <div>
+              <label class="block text-sm font-medium mb-1.5" style="color: var(--color-text-secondary);">
+                Nombre del Snapshot
+              </label>
+              <input
+                [(ngModel)]="newSnapshotName"
+                (keydown.enter)="confirmCreateSnapshot()"
+                type="text"
+                placeholder="mi-snapshot-manual"
+                class="w-full px-3 py-2 rounded-lg text-sm outline-none transition-colors"
+                style="background: var(--color-background); border: 1px solid var(--color-border); color: var(--color-text-primary);"
+                [style.border-color]="snapshotNameError ? '#ef4444' : 'var(--color-border)'"
+                />
+              @if (snapshotNameError) {
+                <p class="text-xs mt-1" style="color: #ef4444;">
+                  {{ snapshotNameError }}
+                </p>
+              }
+              <p class="text-xs mt-1" style="color: var(--color-text-muted);">
+                Solo letras, numeros y guiones
+              </p>
+            </div>
+            <div class="flex justify-end gap-2 pt-2">
+              <button
+                (click)="cancelCreateSnapshot()"
+                class="px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                style="color: var(--color-text-secondary); background: var(--color-background); border: 1px solid var(--color-border);"
+                >
+                Cancelar
+              </button>
+              <button
+                (click)="confirmCreateSnapshot()"
+                [disabled]="creating || !newSnapshotName.trim()"
+                class="px-4 py-2 rounded-lg text-sm font-medium text-white transition-opacity hover:opacity-90 flex items-center gap-2 disabled:opacity-50"
+                style="background: linear-gradient(135deg, #06b6d4, #14b8a6);"
+                >
+                @if (creating) {
+                  <app-icon name="loader-2" [size]="14" class="animate-spin text-white"></app-icon>
+                }
+                {{ creating ? 'Creando...' : 'Crear' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      }
     </div>
-  `,
+    `,
   styles: [],
 })
 export class BackupsComponent implements OnInit, OnDestroy {

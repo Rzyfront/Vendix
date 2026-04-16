@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { Store } from '@ngrx/store';
-import { Observable } from 'rxjs';
+import { toSignal } from '@angular/core/rxjs-interop';
 import * as GlobalSelectors from './global.selectors';
 
 @Injectable({
@@ -32,41 +32,36 @@ export class GlobalFacade {
   // Debug observable (only in development)
   readonly debugInfo$ = this.store.select(GlobalSelectors.selectDebugInfo);
 
+  // ─── Signal parallels (Angular 20 — backward compatible) ──────────────────
+  readonly appState = toSignal(this.appState$);
+  readonly userContext = toSignal(this.userContext$);
+  readonly appReady = toSignal(this.appReady$);
+  readonly brandingContext = toSignal(this.brandingContext$);
+  readonly permissionContext = toSignal(this.permissionContext$);
+  readonly navigationContext = toSignal(this.navigationContext$);
+  readonly globalLoadingState = toSignal(this.globalLoadingState$);
+  readonly dataFreshness = toSignal(this.dataFreshness$);
+  readonly debugInfo = toSignal(this.debugInfo$);
+
   // Synchronous getters for templates
   getUserContext(): any {
-    let result: any = null;
-    this.userContext$.subscribe((context) => (result = context)).unsubscribe();
-    return result;
+    return this.userContext() ?? null;
   }
 
   getAppReady(): any {
-    let result: any = null;
-    this.appReady$.subscribe((ready) => (result = ready)).unsubscribe();
-    return result;
+    return this.appReady() ?? null;
   }
 
   getPermissionContext(): any {
-    let result: any = null;
-    this.permissionContext$
-      .subscribe((context) => (result = context))
-      .unsubscribe();
-    return result;
+    return this.permissionContext() ?? null;
   }
 
   getNavigationContext(): any {
-    let result: any = null;
-    this.navigationContext$
-      .subscribe((context) => (result = context))
-      .unsubscribe();
-    return result;
+    return this.navigationContext() ?? null;
   }
 
   getBrandingContext(): any {
-    let result: any = null;
-    this.brandingContext$
-      .subscribe((context) => (result = context))
-      .unsubscribe();
-    return result;
+    return this.brandingContext() ?? null;
   }
 
   // Utility methods
@@ -105,8 +100,6 @@ export class GlobalFacade {
 
   // Debug method
   getDebugInfo(): any {
-    let result: any = null;
-    this.debugInfo$.subscribe((info) => (result = info)).unsubscribe();
-    return result;
+    return this.debugInfo() ?? null;
   }
 }

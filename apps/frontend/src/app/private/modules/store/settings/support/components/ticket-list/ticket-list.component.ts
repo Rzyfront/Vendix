@@ -1,5 +1,5 @@
 import { Component, EventEmitter, Input, Output, OnInit } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   ResponsiveDataViewComponent,
   InputsearchComponent,
@@ -26,30 +26,29 @@ import {
   selector: 'app-ticket-list',
   standalone: true,
   imports: [
-    CommonModule,
     ResponsiveDataViewComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
     IconComponent,
     ButtonComponent,
     PaginationComponent,
-    CardComponent,
-  ],
+    CardComponent
+],
   template: `
     <app-card [responsive]="true" [padding]="false">
       <!-- Search Section (sticky on mobile) -->
       <div
         class="sticky top-[99px] bg-background px-2 py-1.5 -mt-[5px] md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
-      >
+        >
         <div
           class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
-        >
+          >
           <h2
             class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary"
-          >
+            >
             Todos los Tickets ({{ totalItems }})
           </h2>
-
+    
           <div class="flex items-center gap-2 w-full md:w-auto">
             <app-inputsearch
               class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
@@ -57,7 +56,7 @@ import {
               placeholder="Buscar tickets..."
               (search)="onSearch($event)"
             ></app-inputsearch>
-
+    
             <app-options-dropdown
               class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
               [filters]="filterConfigs"
@@ -71,66 +70,72 @@ import {
           </div>
         </div>
       </div>
-
+    
       <!-- Loading State -->
-      <div *ngIf="loading" class="p-4 md:p-6 text-center">
-        <div
-          class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-        ></div>
-        <p class="mt-2 text-text-secondary">Cargando tickets...</p>
-      </div>
-
+      @if (loading) {
+        <div class="p-4 md:p-6 text-center">
+          <div
+            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+          ></div>
+          <p class="mt-2 text-text-secondary">Cargando tickets...</p>
+        </div>
+      }
+    
       <!-- Empty State -->
-      <div
-        *ngIf="!loading && tickets.length === 0"
-        class="p-12 text-center text-gray-500"
-      >
-        <app-icon
-          name="ticket"
-          [size]="48"
-          class="mx-auto mb-4 text-gray-300"
-        ></app-icon>
-        <h3 class="text-lg font-medium text-gray-900">No hay tickets aún</h3>
-        <p class="mt-1">
-          Crea tu primer ticket y te ayudaremos lo antes posible.
-        </p>
-        <div class="mt-6 flex justify-center">
-          <app-button variant="primary" (clicked)="create.emit()">
-            <app-icon slot="icon" name="plus" [size]="16"></app-icon>
-            Crear Ticket
-          </app-button>
+      @if (!loading && tickets.length === 0) {
+        <div
+          class="p-12 text-center text-gray-500"
+          >
+          <app-icon
+            name="ticket"
+            [size]="48"
+            class="mx-auto mb-4 text-gray-300"
+          ></app-icon>
+          <h3 class="text-lg font-medium text-gray-900">No hay tickets aún</h3>
+          <p class="mt-1">
+            Crea tu primer ticket y te ayudaremos lo antes posible.
+          </p>
+          <div class="mt-6 flex justify-center">
+            <app-button variant="primary" (clicked)="create.emit()">
+              <app-icon slot="icon" name="plus" [size]="16"></app-icon>
+              Crear Ticket
+            </app-button>
+          </div>
         </div>
-      </div>
-
+      }
+    
       <!-- Responsive Data View -->
-      <div *ngIf="!loading && tickets.length > 0" class="px-2 pb-2 pt-1 md:p-4">
-        <app-responsive-data-view
-          [data]="tickets"
-          [columns]="columns"
-          [cardConfig]="cardConfig"
-          [loading]="loading"
-          [hoverable]="true"
-          [striped]="true"
-          [emptyMessage]="'No se encontraron tickets'"
-          [emptyIcon]="'ticket'"
-          tableSize="md"
-          (rowClick)="onRowClick($event)"
-        ></app-responsive-data-view>
-
-        <!-- Pagination -->
-        <div *ngIf="totalPages > 1" class="mt-4 border-t border-border pt-4">
-          <app-pagination
-            [currentPage]="page"
-            [total]="totalItems"
-            [limit]="limit"
-            [totalPages]="totalPages"
-            infoStyle="none"
-            (pageChange)="onPageChange($event)"
-          ></app-pagination>
+      @if (!loading && tickets.length > 0) {
+        <div class="px-2 pb-2 pt-1 md:p-4">
+          <app-responsive-data-view
+            [data]="tickets"
+            [columns]="columns"
+            [cardConfig]="cardConfig"
+            [loading]="loading"
+            [hoverable]="true"
+            [striped]="true"
+            [emptyMessage]="'No se encontraron tickets'"
+            [emptyIcon]="'ticket'"
+            tableSize="md"
+            (rowClick)="onRowClick($event)"
+          ></app-responsive-data-view>
+          <!-- Pagination -->
+          @if (totalPages > 1) {
+            <div class="mt-4 border-t border-border pt-4">
+              <app-pagination
+                [currentPage]="page"
+                [total]="totalItems"
+                [limit]="limit"
+                [totalPages]="totalPages"
+                infoStyle="none"
+                (pageChange)="onPageChange($event)"
+              ></app-pagination>
+            </div>
+          }
         </div>
-      </div>
+      }
     </app-card>
-  `,
+    `,
 })
 export class TicketListComponent implements OnInit {
   @Input() tickets: Ticket[] = [];
@@ -320,6 +325,11 @@ export class TicketListComponent implements OnInit {
 
   onActionClick(action: string): void {
     if (action === 'create') {
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
       this.create.emit();
     }
   }

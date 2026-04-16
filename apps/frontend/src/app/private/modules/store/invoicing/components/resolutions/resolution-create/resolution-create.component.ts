@@ -1,5 +1,5 @@
 import { Component, Input, Output, EventEmitter, inject, OnChanges, SimpleChanges } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
 import { InvoiceResolution } from '../../../interfaces/invoice.interface';
@@ -12,12 +12,11 @@ import { InputComponent } from '../../../../../../../shared/components/input/inp
   selector: 'vendix-resolution-create',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
-    InputComponent,
-  ],
+    InputComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen"

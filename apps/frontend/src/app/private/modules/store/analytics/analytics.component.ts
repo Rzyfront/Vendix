@@ -1,5 +1,5 @@
 import { Component } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { RouterModule } from '@angular/router';
 import { IconComponent } from '../../../../shared/components/icon/icon.component';
 import { CardComponent } from '../../../../shared/components/card/card.component';
@@ -8,7 +8,7 @@ import { AnalyticsCategory } from './interfaces/analytics.interface';
 @Component({
   selector: 'vendix-analytics',
   standalone: true,
-  imports: [CommonModule, RouterModule, IconComponent, CardComponent],
+  imports: [RouterModule, IconComponent, CardComponent],
   template: `
     <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
       <!-- Header -->

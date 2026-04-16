@@ -1,5 +1,5 @@
 import { Component, Input, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { StatsComponent } from '../../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency';
 import { PromotionsSummary } from '../../interfaces/promotion.interface';
@@ -7,7 +7,7 @@ import { PromotionsSummary } from '../../interfaces/promotion.interface';
 @Component({
   selector: 'app-promotions-stats',
   standalone: true,
-  imports: [CommonModule, StatsComponent],
+  imports: [StatsComponent],
   template: `
     <div class="stats-container">
       <app-stats

@@ -1,13 +1,25 @@
 <div class="space-y-2 md:space-y-2 md:space-y-4">
   <!-- Stats Cards -->
   <div class="stats-container">
-    <app-stats *ngFor="let item of statsItems" [title]="item.title" [value]="item.value" [smallText]="item.smallText"
-      [iconName]="item.iconName" [iconBgColor]="item.iconBgColor" [iconColor]="item.iconColor"></app-stats>
+    @for (item of statsItems; track item) {
+      <app-stats
+        [title]="item.title"
+        [value]="item.value"
+        [smallText]="item.smallText"
+        [iconName]="item.iconName"
+        [iconBgColor]="item.iconBgColor"
+        [iconColor]="item.iconColor"
+      ></app-stats>
+    }
   </div>
 
   <!-- Users Table Header -->
-  <div class="p-2 md:px-6 md:py-4 border-b border-border sticky top-0 bg-surface z-10">
-    <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 md:gap-4">
+  <div
+    class="p-2 md:px-6 md:py-4 border-b border-border sticky top-0 bg-surface z-10"
+  >
+    <div
+      class="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 md:gap-4"
+    >
       <!-- Título y contador -->
       <div class="flex-1 min-w-0">
         <h2 class="text-lg font-semibold text-text-primary">
@@ -16,26 +28,49 @@
       </div>
 
       <!-- Controles compactos -->
-      <div class="flex flex-wrap items-center gap-3 w-full md:w-auto" [formGroup]="filterForm">
+      <div
+        class="flex flex-wrap items-center gap-3 w-full md:w-auto"
+        [formGroup]="filterForm"
+      >
         <!-- Búsqueda -->
-        <app-inputsearch class="min-w-[200px] flex-1 md:flex-none" size="sm" placeholder="Buscar usuarios..."
-          [debounceTime]="500" (searchChange)="onSearchChange($event)"></app-inputsearch>
+        <app-inputsearch
+          class="min-w-[200px] flex-1 md:flex-none"
+          size="sm"
+          placeholder="Buscar usuarios..."
+          [debounceTime]="500"
+          (searchChange)="onSearchChange($event)"
+        ></app-inputsearch>
 
         <!-- Filtro por estado -->
-        <select formControlName="state"
+        <select
+          formControlName="state"
           class="px-3 py-2 border border-border rounded-button bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary text-sm min-w-[140px]"
-          [disabled]="isLoading">
-          <option *ngFor="let state of userStates" [value]="state.value">
-            {{ state.label }}
-          </option>
+          [disabled]="isLoading"
+        >
+          @for (state of userStates; track state) {
+            <option [value]="state.value">
+              {{ state.label }}
+            </option>
+          }
         </select>
 
         <!-- Botones de acción -->
         <div class="flex gap-2 items-center">
-          <app-button variant="outline" size="sm" (clicked)="refreshUsers()" [disabled]="isLoading" title="Actualizar">
+          <app-button
+            variant="outline"
+            size="sm"
+            (clicked)="refreshUsers()"
+            [disabled]="isLoading"
+            title="Actualizar"
+          >
             <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
           </app-button>
-          <app-button variant="primary" size="sm" (clicked)="createUser()" title="Nuevo Usuario">
+          <app-button
+            variant="primary"
+            size="sm"
+            (clicked)="createUser()"
+            title="Nuevo Usuario"
+          >
             <app-icon name="plus" [size]="16" slot="icon"></app-icon>
             <span class="hidden md:inline ml-2">Nuevo</span>
           </app-button>
@@ -43,33 +78,61 @@
       </div>
     </div>
     <!-- Loading State -->
-    <div *ngIf="isLoading" class="p-2 md:p-6 text-center">
-      <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-      <p class="mt-2 text-text-secondary">Loading users...</p>
-    </div>
+    @if (isLoading) {
+      <div class="p-2 md:p-6 text-center">
+        <div
+          class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+        ></div>
+        <p class="mt-2 text-text-secondary">Loading users...</p>
+      </div>
+    }
 
     <!-- Empty State -->
-    <app-empty-state *ngIf="!isLoading && users.length === 0"
-      icon="users"
-      [title]="getEmptyStateTitle()"
-      [description]="getEmptyStateDescription()"
-      actionButtonText="Crear Primer Usuario"
-      (actionClick)="createUser()">
-    </app-empty-state>
+    @if (!isLoading && users.length === 0) {
+      <app-empty-state
+        icon="users"
+        [title]="getEmptyStateTitle()"
+        [description]="getEmptyStateDescription()"
+        actionButtonText="Crear Primer Usuario"
+        (actionClick)="createUser()"
+      >
+      </app-empty-state>
+    }
 
     <!-- Responsive Data View -->
-    <app-responsive-data-view *ngIf="users.length > 0" [data]="users" [columns]="tableColumns" [actions]="tableActions"
-      [cardConfig]="cardConfig" [loading]="isLoading" (sort)="onSortChange($event.column, $event.direction)">
-    </app-responsive-data-view>
+    @if (users.length > 0) {
+      <app-responsive-data-view
+        [data]="users"
+        [columns]="tableColumns"
+        [actions]="tableActions"
+        [cardConfig]="cardConfig"
+        [loading]="isLoading"
+        (sort)="onSortChange($event.column, $event.direction)"
+      >
+      </app-responsive-data-view>
+    }
   </div>
 
-  <!-- Create User Modal -->
-  <app-user-create-modal [(isOpen)]="showCreateModal" (onUserCreated)="onUserCreated()"></app-user-create-modal>
+  @defer (when showCreateModal) {
+    <app-user-create-modal
+      [(isOpen)]="showCreateModal"
+      (onUserCreated)="onUserCreated()"
+    ></app-user-create-modal>
+  }
 
-  <!-- Edit User Modal -->
-  <app-user-edit-modal *ngIf="currentUser" [user]="currentUser" [(isOpen)]="showEditModal"
-    (onUserUpdated)="onUserUpdated()"></app-user-edit-modal>
+  @defer (when showEditModal && currentUser) {
+    <app-user-edit-modal
+      [user]="currentUser"
+      [(isOpen)]="showEditModal"
+      (onUserUpdated)="onUserUpdated()"
+    ></app-user-edit-modal>
+  }
 
-  <!-- Config User Modal -->
-  <app-user-config-modal *ngIf="userForConfig" [user]="userForConfig" [(isOpen)]="showConfigModal"
-    (onSaved)="onUserConfigured()"></app-user-config-modal>
+  @defer (when showConfigModal && userForConfig) {
+    <app-user-config-modal
+      [user]="userForConfig"
+      [(isOpen)]="showConfigModal"
+      (onSaved)="onUserConfigured()"
+    ></app-user-config-modal>
+  }
+</div>

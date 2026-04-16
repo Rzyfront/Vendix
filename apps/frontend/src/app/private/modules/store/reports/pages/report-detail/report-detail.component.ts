@@ -1,5 +1,5 @@
 import { Component, inject, OnInit, OnDestroy, computed, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { Store } from '@ngrx/store';
@@ -45,7 +45,6 @@ import * as AccountingActions from '../../../accounting/state/actions/accounting
   selector: 'vendix-report-detail',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     IconComponent,
     ResponsiveDataViewComponent,
@@ -59,8 +58,8 @@ import * as AccountingActions from '../../../accounting/state/actions/accounting
     CardComponent,
     StatsComponent,
     EmptyStateComponent,
-    PaginationComponent,
-  ],
+    PaginationComponent
+],
   templateUrl: './report-detail.component.html',
   styleUrls: ['./report-detail.component.scss'],
 })

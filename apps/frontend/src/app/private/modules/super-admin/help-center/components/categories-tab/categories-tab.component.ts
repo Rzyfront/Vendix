@@ -1,5 +1,5 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { HelpCenterAdminService } from '../../services/help-center-admin.service';
 import { HelpCategory } from '../../../../../modules/store/help/models/help-article.model';
@@ -16,7 +16,6 @@ import { ConfirmationModalComponent } from '../../../../../../shared/components/
   selector: 'app-categories-tab',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ButtonComponent,
     InputComponent,
@@ -24,8 +23,8 @@ import { ConfirmationModalComponent } from '../../../../../../shared/components/
     ToggleComponent,
     ModalComponent,
     IconComponent,
-    ConfirmationModalComponent,
-  ],
+    ConfirmationModalComponent
+],
   template: `
     <div class="p-4 md:p-6">
       <!-- Header -->
@@ -41,82 +40,88 @@ import { ConfirmationModalComponent } from '../../../../../../shared/components/
           size="sm"
           iconName="plus"
           (clicked)="openCreateModal()"
-        >
+          >
           Nueva categoría
         </app-button>
       </div>
-
+    
       <!-- Loading -->
-      <div *ngIf="loading()" class="flex items-center justify-center py-10">
-        <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
-      </div>
-
-      <!-- Empty State -->
-      <div *ngIf="!loading() && categories().length === 0" class="text-center py-10">
-        <app-icon name="folder" size="40" class="text-text-tertiary mb-2"></app-icon>
-        <p class="text-text-secondary">No hay categorías creadas</p>
-      </div>
-
-      <!-- Categories Grid -->
-      <div *ngIf="!loading() && categories().length > 0" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-        <div
-          *ngFor="let category of categories()"
-          class="border border-border rounded-lg p-4 bg-surface hover:shadow-sm transition-shadow"
-        >
-          <div class="flex items-start justify-between">
-            <div class="flex items-center gap-3">
-              <div class="p-2 rounded-lg bg-primary-50">
-                <app-icon [name]="category.icon || 'folder'" size="20" class="text-primary-600"></app-icon>
-              </div>
-              <div>
-                <h4 class="font-medium text-text-primary">{{ category.name }}</h4>
-                <p class="text-xs text-text-secondary mt-0.5">
-                  {{ category._count?.articles || 0 }} artículos
-                </p>
-              </div>
-            </div>
-
-            <div class="flex items-center gap-1">
-              <span
-                class="inline-flex px-2 py-0.5 text-xs rounded-full"
-                [class.bg-green-100]="category.is_active"
-                [class.text-green-700]="category.is_active"
-                [class.bg-gray-100]="!category.is_active"
-                [class.text-gray-600]="!category.is_active"
-              >
-                {{ category.is_active ? 'Activa' : 'Inactiva' }}
-              </span>
-            </div>
-          </div>
-
-          <p *ngIf="category.description" class="text-xs text-text-secondary mt-2 line-clamp-2">
-            {{ category.description }}
-          </p>
-
-          <div class="flex items-center gap-2 mt-3 pt-3 border-t border-border">
-            <app-button variant="ghost" size="sm" iconName="edit-2" (clicked)="openEditModal(category)">
-              Editar
-            </app-button>
-            <app-button
-              variant="ghost"
-              size="sm"
-              iconName="trash-2"
-              (clicked)="confirmDelete(category)"
-              [disabled]="(category._count?.articles || 0) > 0"
-            >
-              Eliminar
-            </app-button>
-          </div>
+      @if (loading()) {
+        <div class="flex items-center justify-center py-10">
+          <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
         </div>
-      </div>
+      }
+    
+      <!-- Empty State -->
+      @if (!loading() && categories().length === 0) {
+        <div class="text-center py-10">
+          <app-icon name="folder" size="40" class="text-text-tertiary mb-2"></app-icon>
+          <p class="text-text-secondary">No hay categorías creadas</p>
+        </div>
+      }
+    
+      <!-- Categories Grid -->
+      @if (!loading() && categories().length > 0) {
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          @for (category of categories(); track category) {
+            <div
+              class="border border-border rounded-lg p-4 bg-surface hover:shadow-sm transition-shadow"
+              >
+              <div class="flex items-start justify-between">
+                <div class="flex items-center gap-3">
+                  <div class="p-2 rounded-lg bg-primary-50">
+                    <app-icon [name]="category.icon || 'folder'" size="20" class="text-primary-600"></app-icon>
+                  </div>
+                  <div>
+                    <h4 class="font-medium text-text-primary">{{ category.name }}</h4>
+                    <p class="text-xs text-text-secondary mt-0.5">
+                      {{ category._count?.articles || 0 }} artículos
+                    </p>
+                  </div>
+                </div>
+                <div class="flex items-center gap-1">
+                  <span
+                    class="inline-flex px-2 py-0.5 text-xs rounded-full"
+                    [class.bg-green-100]="category.is_active"
+                    [class.text-green-700]="category.is_active"
+                    [class.bg-gray-100]="!category.is_active"
+                    [class.text-gray-600]="!category.is_active"
+                    >
+                    {{ category.is_active ? 'Activa' : 'Inactiva' }}
+                  </span>
+                </div>
+              </div>
+              @if (category.description) {
+                <p class="text-xs text-text-secondary mt-2 line-clamp-2">
+                  {{ category.description }}
+                </p>
+              }
+              <div class="flex items-center gap-2 mt-3 pt-3 border-t border-border">
+                <app-button variant="ghost" size="sm" iconName="edit-2" (clicked)="openEditModal(category)">
+                  Editar
+                </app-button>
+                <app-button
+                  variant="ghost"
+                  size="sm"
+                  iconName="trash-2"
+                  (clicked)="confirmDelete(category)"
+                  [disabled]="(category._count?.articles || 0) > 0"
+                  >
+                  Eliminar
+                </app-button>
+              </div>
+            </div>
+          }
+        </div>
+      }
     </div>
-
+    
     <!-- Create/Edit Modal -->
     <app-modal
       [(isOpen)]="isModalOpen"
       [title]="editingCategory ? 'Editar Categoría' : 'Nueva Categoría'"
       size="md"
-    >
+      >
       <form [formGroup]="categoryForm" (ngSubmit)="onSaveCategory()" class="flex flex-col gap-4">
         <app-input
           label="Nombre"
@@ -124,32 +129,32 @@ import { ConfirmationModalComponent } from '../../../../../../shared/components/
           [formControl]="$any(categoryForm.get('name'))"
           [required]="true"
         ></app-input>
-
+    
         <app-textarea
           label="Descripción"
           placeholder="Breve descripción (opcional)"
           [formControl]="$any(categoryForm.get('description'))"
           [rows]="2"
         ></app-textarea>
-
+    
         <app-input
           label="Ícono (Lucide)"
           placeholder="Ej: book-open, help-circle"
           [formControl]="$any(categoryForm.get('icon'))"
         ></app-input>
-
+    
         <app-input
           label="Orden"
           type="number"
           placeholder="0"
           [formControl]="$any(categoryForm.get('sort_order'))"
         ></app-input>
-
+    
         <app-toggle
           label="Categoría activa"
           [formControl]="$any(categoryForm.get('is_active'))"
         ></app-toggle>
-
+    
         <div class="flex justify-end gap-3 mt-2">
           <app-button variant="outline" size="sm" (clicked)="closeModal()">
             Cancelar
@@ -159,13 +164,13 @@ import { ConfirmationModalComponent } from '../../../../../../shared/components/
             size="sm"
             type="submit"
             [disabled]="modalSubmitting() || categoryForm.invalid"
-          >
+            >
             {{ modalSubmitting() ? 'Guardando...' : 'Guardar' }}
           </app-button>
         </div>
       </form>
     </app-modal>
-
+    
     <!-- Delete Confirmation -->
     <app-confirmation-modal
       [(isOpen)]="isDeleteConfirmOpen"
@@ -176,7 +181,7 @@ import { ConfirmationModalComponent } from '../../../../../../shared/components/
       (confirm)="onConfirmDelete()"
       (cancel)="isDeleteConfirmOpen = false"
     ></app-confirmation-modal>
-  `,
+    `,
 })
 export class CategoriesTabComponent implements OnInit {
   private fb = inject(FormBuilder);

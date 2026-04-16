@@ -1,5 +1,5 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { WithholdingTaxService } from './services/withholding-tax.service';
 import { WithholdingConcept, WithholdingStats } from './interfaces/withholding.interface';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
@@ -8,7 +8,7 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency/currenc
 @Component({
   selector: 'app-withholding-tax',
   standalone: true,
-  imports: [CommonModule, StatsComponent],
+  imports: [StatsComponent],
   template: `
     <div class="w-full">
       <!-- Stats -->

@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { RouterModule, Router } from '@angular/router';
 import {
   FormBuilder,
@@ -52,14 +52,13 @@ export interface OrganizationCandidate {
   selector: 'app-contextual-login',
   standalone: true,
   imports: [
-    CommonModule,
     RouterModule,
     ReactiveFormsModule,
     InputComponent,
     ButtonComponent,
     CardComponent,
-    IconComponent,
-  ],
+    IconComponent
+],
   template: `
     <div
       class="min-h-screen flex flex-col justify-center px-4 py-6 sm:px-6 sm:py-12 lg:px-8 bg-[var(--color-background)]"

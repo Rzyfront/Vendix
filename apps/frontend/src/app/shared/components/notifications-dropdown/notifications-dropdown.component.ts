@@ -21,36 +21,38 @@ import { NotificationsFacade, AppNotification } from '../../../core/store/notifi
         (click)="toggleDropdown($event)"
         [attr.aria-label]="'Notificaciones'"
         [attr.aria-expanded]="isOpen"
-      >
-        <app-icon name="bell" [size]="18"></app-icon>
-        <span
-          *ngIf="(unreadCount$ | async) as count"
-          class="notif-badge"
         >
-          {{ count > 99 ? '99+' : count }}
-        </span>
+        <app-icon name="bell" [size]="18"></app-icon>
+        @if ((unreadCount$ | async); as count) {
+          <span
+            class="notif-badge"
+            >
+            {{ count > 99 ? '99+' : count }}
+          </span>
+        }
       </button>
-
+    
       <!-- Dropdown panel -->
       <div class="notif-panel" [class.show]="isOpen">
         <div class="notif-header">
           <span class="notif-title">Notificaciones</span>
-          <button
-            *ngIf="(unreadCount$ | async)! > 0"
-            class="notif-mark-all"
-            (click)="markAllRead($event)"
-          >
-            Marcar todo leído
-          </button>
+          @if ((unreadCount$ | async)! > 0) {
+            <button
+              class="notif-mark-all"
+              (click)="markAllRead($event)"
+              >
+              Marcar todo leído
+            </button>
+          }
         </div>
-
+    
         <div class="notif-list">
-          <ng-container *ngFor="let n of (notifications$ | async)">
+          @for (n of (notifications$ | async); track n) {
             <div
               class="notif-item"
               [class.unread]="!n.is_read"
               (click)="onNotificationClick(n)"
-            >
+              >
               <div class="notif-icon-wrap" [attr.data-type]="n.type">
                 <app-icon [name]="getIconForType(n.type)" [size]="16"></app-icon>
               </div>
@@ -59,21 +61,24 @@ import { NotificationsFacade, AppNotification } from '../../../core/store/notifi
                 <p class="notif-item-body">{{ n.body }}</p>
                 <span class="notif-item-time">{{ formatTime(n.created_at) }}</span>
               </div>
-              <div *ngIf="!n.is_read" class="notif-dot"></div>
+              @if (!n.is_read) {
+                <div class="notif-dot"></div>
+              }
             </div>
-          </ng-container>
-
-          <div
-            *ngIf="(notifications$ | async)?.length === 0"
-            class="notif-empty"
-          >
-            <app-icon name="bell" [size]="32" class="notif-empty-icon"></app-icon>
-            <p>Sin notificaciones</p>
-          </div>
+          }
+    
+          @if ((notifications$ | async)?.length === 0) {
+            <div
+              class="notif-empty"
+              >
+              <app-icon name="bell" [size]="32" class="notif-empty-icon"></app-icon>
+              <p>Sin notificaciones</p>
+            </div>
+          }
         </div>
       </div>
     </div>
-  `,
+    `,
   styleUrls: ['./notifications-dropdown.component.scss'],
 })
 export class NotificationsDropdownComponent {

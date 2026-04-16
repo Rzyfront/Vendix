@@ -1,5 +1,5 @@
 import { Component, Input, Output, EventEmitter, OnChanges, SimpleChanges, OnInit } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 
 // Shared Components
@@ -22,15 +22,14 @@ import { CountryService, Country, Department, City } from '../../../../../../ser
   selector: 'app-location-form-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
     InputComponent,
     SettingToggleComponent,
     SelectorComponent,
-    IconComponent,
-  ],
+    IconComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen"
@@ -39,7 +38,7 @@ import { CountryService, Country, Department, City } from '../../../../../../ser
       [size]="'md'"
       [title]="location ? 'Editar Ubicación' : 'Nueva Ubicación'"
       subtitle="Configura los detalles de la ubicación de inventario"
-    >
+      >
       <form [formGroup]="form" (ngSubmit)="onSubmit()">
         <div class="space-y-6 max-h-[70vh] overflow-y-auto px-1">
           <!-- Basic Info -->
@@ -61,7 +60,7 @@ import { CountryService, Country, Department, City } from '../../../../../../ser
               ></app-input>
             </div>
           </div>
-
+    
           <!-- Type Selection -->
           <div class="grid grid-cols-2 gap-4">
             <div class="col-span-2 md:col-span-1">
@@ -80,14 +79,14 @@ import { CountryService, Country, Department, City } from '../../../../../../ser
               ></app-setting-toggle>
             </div>
           </div>
-
+    
           <!-- Address Section Toggle (PRO UI) -->
           <div class="pt-2">
-            <button 
+            <button
               type="button"
               (click)="toggleAddress()"
               class="w-full flex items-center justify-between p-4 rounded-2xl bg-gradient-to-r from-primary/5 to-transparent border border-primary/20 hover:border-primary/40 transition-all group"
-            >
+              >
               <div class="flex items-center gap-3">
                 <div class="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center text-primary group-hover:scale-110 transition-transform">
                   <app-icon name="map-pin" size="20"></app-icon>
@@ -97,92 +96,101 @@ import { CountryService, Country, Department, City } from '../../../../../../ser
                   <p class="text-xs text-text-secondary">Agregar ubicación geográfica específica</p>
                 </div>
               </div>
-              <app-icon 
-                [name]="showAddress ? 'chevron-up' : 'chevron-down'" 
-                size="20" 
+              <app-icon
+                [name]="showAddress ? 'chevron-up' : 'chevron-down'"
+                size="20"
                 class="text-text-secondary group-hover:text-primary transition-colors"
               ></app-icon>
             </button>
-
+    
             <!-- Expandable Content -->
-            <div 
-              *ngIf="showAddress"
-              formGroupName="address"
-              class="mt-4 space-y-4 p-4 rounded-2xl border border-border-subtle bg-background-secondary/30"
-            >
-              <div class="grid grid-cols-2 gap-4">
-                <div class="col-span-2">
-                  <label class="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-1.5 ml-1">Línea de Dirección 1 *</label>
-                  <app-input
-                    formControlName="address_line_1"
-                    placeholder="Ej: Calle 123 # 45 - 67"
-                    [error]="getError('address.address_line_1')"
-                  ></app-input>
-                </div>
-                <div class="col-span-2">
-                   <label class="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-1.5 ml-1">Línea de Dirección 2</label>
-                  <app-input
-                    formControlName="address_line_2"
-                    placeholder="Ej: Bodega 4 o Apt 101"
-                  ></app-input>
-                </div>
-                <div class="col-span-2 md:col-span-1">
-                  <label class="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-1.5 ml-1">País *</label>
-                  <app-selector
-                    formControlName="country"
-                    [options]="countryOptions"
-                    placeholder="Seleccionar país"
-                    [errorText]="getError('address.country')"
-                  ></app-selector>
-                </div>
-                <div class="col-span-2 md:col-span-1" *ngIf="form.get('address.country')?.value === 'CO'">
-                  <label class="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-1.5 ml-1">Departamento *</label>
-                  <app-selector
-                    formControlName="state"
-                    [options]="departmentOptions"
-                    placeholder="Seleccionar departamento"
-                    [errorText]="getError('address.state')"
-                  ></app-selector>
-                </div>
-                <div class="col-span-2 md:col-span-1" *ngIf="form.get('address.country')?.value !== 'CO'">
-                  <label class="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-1.5 ml-1">Estado / Provincia *</label>
-                  <app-input
-                    formControlName="state"
-                    placeholder="Ej: Cundinamarca"
-                    [error]="getError('address.state')"
-                  ></app-input>
-                </div>
-                <div class="col-span-2 md:col-span-1" *ngIf="form.get('address.country')?.value === 'CO'">
-                  <label class="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-1.5 ml-1">Ciudad *</label>
-                  <app-selector
-                    formControlName="city"
-                    [options]="cityOptions"
-                    placeholder="Seleccionar ciudad"
-                    [errorText]="getError('address.city')"
-                  ></app-selector>
-                </div>
-                <div class="col-span-2 md:col-span-1" *ngIf="form.get('address.country')?.value !== 'CO'">
-                  <label class="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-1.5 ml-1">Ciudad *</label>
-                  <app-input
-                    formControlName="city"
-                    placeholder="Ej: Bogotá"
-                    [error]="getError('address.city')"
-                  ></app-input>
-                </div>
-                <div class="col-span-2 md:col-span-1">
-                  <label class="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-1.5 ml-1">Código Postal *</label>
-                  <app-input
-                    formControlName="postal_code"
-                    placeholder="Ej: 110111"
-                    [error]="getError('address.postal_code')"
-                  ></app-input>
+            @if (showAddress) {
+              <div
+                formGroupName="address"
+                class="mt-4 space-y-4 p-4 rounded-2xl border border-border-subtle bg-background-secondary/30"
+                >
+                <div class="grid grid-cols-2 gap-4">
+                  <div class="col-span-2">
+                    <label class="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-1.5 ml-1">Línea de Dirección 1 *</label>
+                    <app-input
+                      formControlName="address_line_1"
+                      placeholder="Ej: Calle 123 # 45 - 67"
+                      [error]="getError('address.address_line_1')"
+                    ></app-input>
+                  </div>
+                  <div class="col-span-2">
+                    <label class="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-1.5 ml-1">Línea de Dirección 2</label>
+                    <app-input
+                      formControlName="address_line_2"
+                      placeholder="Ej: Bodega 4 o Apt 101"
+                    ></app-input>
+                  </div>
+                  <div class="col-span-2 md:col-span-1">
+                    <label class="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-1.5 ml-1">País *</label>
+                    <app-selector
+                      formControlName="country"
+                      [options]="countryOptions"
+                      placeholder="Seleccionar país"
+                      [errorText]="getError('address.country')"
+                    ></app-selector>
+                  </div>
+                  @if (form.get('address.country')?.value === 'CO') {
+                    <div class="col-span-2 md:col-span-1">
+                      <label class="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-1.5 ml-1">Departamento *</label>
+                      <app-selector
+                        formControlName="state"
+                        [options]="departmentOptions"
+                        placeholder="Seleccionar departamento"
+                        [errorText]="getError('address.state')"
+                      ></app-selector>
+                    </div>
+                  }
+                  @if (form.get('address.country')?.value !== 'CO') {
+                    <div class="col-span-2 md:col-span-1">
+                      <label class="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-1.5 ml-1">Estado / Provincia *</label>
+                      <app-input
+                        formControlName="state"
+                        placeholder="Ej: Cundinamarca"
+                        [error]="getError('address.state')"
+                      ></app-input>
+                    </div>
+                  }
+                  @if (form.get('address.country')?.value === 'CO') {
+                    <div class="col-span-2 md:col-span-1">
+                      <label class="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-1.5 ml-1">Ciudad *</label>
+                      <app-selector
+                        formControlName="city"
+                        [options]="cityOptions"
+                        placeholder="Seleccionar ciudad"
+                        [errorText]="getError('address.city')"
+                      ></app-selector>
+                    </div>
+                  }
+                  @if (form.get('address.country')?.value !== 'CO') {
+                    <div class="col-span-2 md:col-span-1">
+                      <label class="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-1.5 ml-1">Ciudad *</label>
+                      <app-input
+                        formControlName="city"
+                        placeholder="Ej: Bogotá"
+                        [error]="getError('address.city')"
+                      ></app-input>
+                    </div>
+                  }
+                  <div class="col-span-2 md:col-span-1">
+                    <label class="block text-xs font-semibold text-text-secondary uppercase tracking-wider mb-1.5 ml-1">Código Postal *</label>
+                    <app-input
+                      formControlName="postal_code"
+                      placeholder="Ej: 110111"
+                      [error]="getError('address.postal_code')"
+                    ></app-input>
+                  </div>
                 </div>
               </div>
-            </div>
+            }
           </div>
         </div>
       </form>
-
+    
       <!-- Footer -->
       <div slot="footer" class="flex justify-end gap-3 w-full">
         <app-button variant="secondary" type="button" (clicked)="onCancel()">
@@ -194,12 +202,12 @@ import { CountryService, Country, Department, City } from '../../../../../../ser
           [loading]="isSubmitting"
           [disabled]="form.invalid || isSubmitting"
           (clicked)="onSubmit()"
-        >
+          >
           {{ location ? 'Guardar Cambios' : 'Crear Ubicación' }}
         </app-button>
       </div>
     </app-modal>
-  `,
+    `,
 })
 export class LocationFormModalComponent implements OnInit, OnChanges {
   @Input() isOpen = false;
@@ -402,6 +410,11 @@ export class LocationFormModalComponent implements OnInit, OnChanges {
   }
 
   onCancel(): void {
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.cancel.emit();
   }
 

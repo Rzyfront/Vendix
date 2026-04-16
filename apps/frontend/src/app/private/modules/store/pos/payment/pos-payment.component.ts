@@ -26,139 +26,157 @@ import {
           Total a pagar: \${{ totalAmount | number: '1.2-2' }}
         </p>
       </div>
-
-      <div class="payment-methods" *ngIf="!processing">
-        <h3 class="text-lg font-semibold mb-4">Seleccionar Método de Pago</h3>
-        <div class="methods-grid">
-          <div
-            *ngFor="let method of paymentMethods$ | async"
-            class="method-card"
-            [class.selected]="selectedMethod?.id === method.id"
-            (click)="selectPaymentMethod(method)"
-          >
-            <div class="method-icon">
-              <i class="fas fa-{{ method.icon }}"></i>
-            </div>
-            <div class="method-info">
-              <h4>{{ method.name }}</h4>
-            </div>
+    
+      @if (!processing) {
+        <div class="payment-methods">
+          <h3 class="text-lg font-semibold mb-4">Seleccionar Método de Pago</h3>
+          <div class="methods-grid">
+            @for (method of paymentMethods$ | async; track method) {
+              <div
+                class="method-card"
+                [class.selected]="selectedMethod?.id === method.id"
+                (click)="selectPaymentMethod(method)"
+                >
+                <div class="method-icon">
+                  <i class="fas fa-{{ method.icon }}"></i>
+                </div>
+                <div class="method-info">
+                  <h4>{{ method.name }}</h4>
+                </div>
+              </div>
+            }
           </div>
         </div>
-      </div>
-
-      <div class="payment-form" *ngIf="selectedMethod && !processing">
-        <form [formGroup]="paymentForm" (ngSubmit)="processPayment()">
-          <div class="form-group" *ngIf="selectedMethod.type === 'cash'">
-            <label for="cashReceived">Monto Recibido</label>
-            <input
-              type="number"
-              id="cashReceived"
-              formControlName="cashReceived"
-              class="form-control"
-              placeholder="0.00"
-              step="0.01"
-              min="0"
-            />
+      }
+    
+      @if (selectedMethod && !processing) {
+        <div class="payment-form">
+          <form [formGroup]="paymentForm" (ngSubmit)="processPayment()">
+            @if (selectedMethod.type === 'cash') {
+              <div class="form-group">
+                <label for="cashReceived">Monto Recibido</label>
+                <input
+                  type="number"
+                  id="cashReceived"
+                  formControlName="cashReceived"
+                  class="form-control"
+                  placeholder="0.00"
+                  step="0.01"
+                  min="0"
+                  />
+                @if (cashReceived && cashReceived > totalAmount) {
+                  <div
+                    class="change-info"
+                    >
+                    <span class="change-amount"
+                      >Cambio: \${{
+                      cashReceived - totalAmount | number: '1.2-2'
+                      }}</span
+                      >
+                    </div>
+                  }
+                </div>
+              }
+              @if (selectedMethod.requiresReference) {
+                <div class="form-group">
+                  <label for="reference">{{ selectedMethod.referenceLabel }}</label>
+                  <input
+                    type="text"
+                    id="reference"
+                    formControlName="reference"
+                    class="form-control"
+                    [placeholder]="selectedMethod.referenceLabel"
+                    [maxLength]="selectedMethod.type === 'card' ? 4 : 50"
+                    />
+                </div>
+              }
+              <div class="form-actions">
+                <button
+                  type="button"
+                  class="btn btn-secondary"
+                  (click)="cancelPayment()"
+                  >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  class="btn btn-primary"
+                  [disabled]="!paymentForm.valid || processing"
+                  >
+                  {{ getProcessingText() }}
+                </button>
+              </div>
+            </form>
+          </div>
+        }
+    
+        @if (processing) {
+          <div class="payment-processing">
+            <div class="processing-content">
+              <div class="spinner"></div>
+              <p>{{ getProcessingMessage() }}</p>
+            </div>
+          </div>
+        }
+    
+        @if (awaitingConfirmation) {
+          <div class="payment-awaiting">
+            <div class="awaiting-content">
+              <div class="spinner"></div>
+              <p class="text-lg font-semibold">{{ awaitingMessage }}</p>
+              <p class="text-sm text-gray-500 mt-2">El estado se actualizará automáticamente cuando el pago sea confirmado.</p>
+              <div class="awaiting-actions mt-4">
+                <button class="btn btn-secondary" (click)="cancelAwaitingPayment()">
+                  Cancelar espera
+                </button>
+                <button class="btn btn-primary" (click)="checkPaymentStatus()">
+                  Verificar estado
+                </button>
+              </div>
+            </div>
+          </div>
+        }
+    
+        @if (paymentResult) {
+          <div class="payment-result">
             <div
-              class="change-info"
-              *ngIf="cashReceived && cashReceived > totalAmount"
-            >
-              <span class="change-amount"
-                >Cambio: \${{
-                  cashReceived - totalAmount | number: '1.2-2'
-                }}</span
+              class="result-content"
+              [class.success]="paymentResult.success"
+              [class.error]="!paymentResult.success"
               >
-            </div>
-          </div>
-
-          <div class="form-group" *ngIf="selectedMethod.requiresReference">
-            <label for="reference">{{ selectedMethod.referenceLabel }}</label>
-            <input
-              type="text"
-              id="reference"
-              formControlName="reference"
-              class="form-control"
-              [placeholder]="selectedMethod.referenceLabel"
-              [maxLength]="selectedMethod.type === 'card' ? 4 : 50"
-            />
-          </div>
-
-          <div class="form-actions">
-            <button
-              type="button"
-              class="btn btn-secondary"
-              (click)="cancelPayment()"
-            >
-              Cancelar
-            </button>
-            <button
-              type="submit"
-              class="btn btn-primary"
-              [disabled]="!paymentForm.valid || processing"
-            >
-              {{ getProcessingText() }}
-            </button>
-          </div>
-        </form>
-      </div>
-
-      <div class="payment-processing" *ngIf="processing">
-        <div class="processing-content">
-          <div class="spinner"></div>
-          <p>{{ getProcessingMessage() }}</p>
-        </div>
-      </div>
-
-      <div class="payment-awaiting" *ngIf="awaitingConfirmation">
-        <div class="awaiting-content">
-          <div class="spinner"></div>
-          <p class="text-lg font-semibold">{{ awaitingMessage }}</p>
-          <p class="text-sm text-gray-500 mt-2">El estado se actualizará automáticamente cuando el pago sea confirmado.</p>
-          <div class="awaiting-actions mt-4">
-            <button class="btn btn-secondary" (click)="cancelAwaitingPayment()">
-              Cancelar espera
-            </button>
-            <button class="btn btn-primary" (click)="checkPaymentStatus()">
-              Verificar estado
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div class="payment-result" *ngIf="paymentResult">
-        <div
-          class="result-content"
-          [class.success]="paymentResult.success"
-          [class.error]="!paymentResult.success"
-        >
-          <div class="result-icon">
-            <i
+              <div class="result-icon">
+                <i
               class="fas fa-{{
                 paymentResult.success ? 'check-circle' : 'exclamation-circle'
               }}"
-            ></i>
-          </div>
-          <h3>
-            {{ paymentResult.success ? '¡Pago Exitoso!' : 'Error en el Pago' }}
-          </h3>
-          <p>{{ paymentResult.message }}</p>
-          <div *ngIf="paymentResult.change" class="change-display">
-            <strong
-              >Cambio: \${{ paymentResult.change | number: '1.2-2' }}</strong
-            >
-          </div>
-          <div *ngIf="paymentResult.transactionId" class="transaction-id">
-            <small>ID de Transacción: {{ paymentResult.transactionId }}</small>
-          </div>
-          <div class="result-actions">
-            <button class="btn btn-primary" (click)="onPaymentComplete()">
-              {{ paymentResult.success ? 'Continuar' : 'Reintentar' }}
-            </button>
-          </div>
+                ></i>
+              </div>
+              <h3>
+                {{ paymentResult.success ? '¡Pago Exitoso!' : 'Error en el Pago' }}
+              </h3>
+              <p>{{ paymentResult.message }}</p>
+              @if (paymentResult.change) {
+                <div class="change-display">
+                  <strong
+                    >Cambio: \${{ paymentResult.change | number: '1.2-2' }}</strong
+                    >
+                  </div>
+                }
+                @if (paymentResult.transactionId) {
+                  <div class="transaction-id">
+                    <small>ID de Transacción: {{ paymentResult.transactionId }}</small>
+                  </div>
+                }
+                <div class="result-actions">
+                  <button class="btn btn-primary" (click)="onPaymentComplete()">
+                    {{ paymentResult.success ? 'Continuar' : 'Reintentar' }}
+                  </button>
+                </div>
+              </div>
+            </div>
+          }
         </div>
-      </div>
-    </div>
-  `,
+    `,
   styles: [
     `
       .pos-payment-container {
@@ -521,6 +539,11 @@ export class PosPaymentComponent implements OnInit {
   }
 
   cancelPayment(): void {
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.paymentCancelled.emit();
   }
 

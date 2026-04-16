@@ -41,9 +41,11 @@
               class="w-full px-3 py-1.5 border border-border rounded-md bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary text-sm h-[38px]"
               [disabled]="isLoading"
             >
-              <option *ngFor="let state of userStates" [value]="state.value">
-                {{ state.label }}
-              </option>
+              @for (state of userStates; track state) {
+                <option [value]="state.value">
+                  {{ state.label }}
+                </option>
+              }
             </select>
           </form>
         </div>
@@ -97,14 +99,15 @@
     <!-- Table Content -->
     <div class="relative min-h-[400px] p-2 md:p-4">
       <!-- Loading Overlay -->
-      <div
-        *ngIf="isLoading"
-        class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
-      >
+      @if (isLoading) {
         <div
-          class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-        ></div>
-      </div>
+          class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
+        >
+          <div
+            class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+          ></div>
+        </div>
+      }
 
       <!-- Table Section -->
       <app-responsive-data-view
@@ -118,19 +121,18 @@
         (sort)="onSortChange($event.column, $event.direction)"
       >
         <!-- Empty State internal slot (standard practice) -->
-        <div
-          class="p-8 flex justify-center w-full"
-          *ngIf="!isLoading && users.length === 0"
-        >
-          <app-empty-state
-            icon="users"
-            [title]="getEmptyStateTitle()"
-            [description]="getEmptyStateDescription()"
-            actionButtonText="Crear Usuario"
-            (actionClick)="createUser()"
-          >
-          </app-empty-state>
-        </div>
+        @if (!isLoading && users.length === 0) {
+          <div class="p-8 flex justify-center w-full">
+            <app-empty-state
+              icon="users"
+              [title]="getEmptyStateTitle()"
+              [description]="getEmptyStateDescription()"
+              actionButtonText="Crear Usuario"
+              (actionClick)="createUser()"
+            >
+            </app-empty-state>
+          </div>
+        }
       </app-responsive-data-view>
 
       <!-- Pagination -->
@@ -145,16 +147,18 @@
     </div>
   </app-card>
 
-  <!-- Create User Modal -->
-  <app-user-create-modal
-    [(isOpen)]="showCreateModal"
-    (onUserCreated)="onUserCreated()"
-  ></app-user-create-modal>
+  @defer (when showCreateModal) {
+    <app-user-create-modal
+      [(isOpen)]="showCreateModal"
+      (onUserCreated)="onUserCreated()"
+    ></app-user-create-modal>
+  }
 
-  <!-- Edit User Modal -->
-  <app-user-edit-modal
-    [(isOpen)]="showEditModal"
-    [user]="currentUser"
-    (onUserUpdated)="onUserUpdated()"
-  ></app-user-edit-modal>
+  @defer (when showEditModal) {
+    <app-user-edit-modal
+      [(isOpen)]="showEditModal"
+      [user]="currentUser"
+      (onUserUpdated)="onUserUpdated()"
+    ></app-user-edit-modal>
+  }
 </div>

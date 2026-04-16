@@ -1,18 +1,17 @@
 /** REBUILD TRIGGER 2 **/
 import {
   Component,
-  Output,
-  EventEmitter,
   OnInit,
   ChangeDetectionStrategy,
   ChangeDetectorRef,
   inject,
   signal,
   computed,
-  ViewChild,
   ElementRef,
+  output,
+  viewChild
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { ButtonComponent } from '../../button/button.component';
@@ -35,7 +34,7 @@ interface DocumentStatus extends LegalDocument {
 @Component({
   selector: 'app-terms-step',
   standalone: true,
-  imports: [CommonModule, FormsModule, ButtonComponent, IconComponent],
+  imports: [FormsModule, ButtonComponent, IconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [
     `
@@ -502,115 +501,118 @@ interface DocumentStatus extends LegalDocument {
             para activar tu cuenta.
           </p>
         </div>
-
+    
         <!-- Loading State -->
-        <div *ngIf="loading" class="loading-state">
-          <app-icon name="loader-2" [spin]="true" size="32"></app-icon>
-          <p class="loading-text">Cargando documentos...</p>
-        </div>
-
+        @if (loading) {
+          <div class="loading-state">
+            <app-icon name="loader-2" [spin]="true" size="32"></app-icon>
+            <p class="loading-text">Cargando documentos...</p>
+          </div>
+        }
+    
         <!-- Empty State -->
-        <div *ngIf="!loading && documents.length === 0" class="empty-state">
-          <p class="empty-text">No hay documentos pendientes por aceptar.</p>
-          <app-button variant="primary" (clicked)="onComplete()">
-            Continuar
-          </app-button>
-        </div>
-
+        @if (!loading && documents.length === 0) {
+          <div class="empty-state">
+            <p class="empty-text">No hay documentos pendientes por aceptar.</p>
+            <app-button variant="primary" (clicked)="onComplete()">
+              Continuar
+            </app-button>
+          </div>
+        }
+    
         <!-- Documents Layout -->
-        <div
-          *ngIf="!loading && documents.length > 0"
-          class="terms-layout"
-        >
-          <!-- Document List -->
-          <div class="terms-documents">
-            <div
-              *ngFor="let doc of documents"
-              class="document-card"
-              [class.selected]="selectedDoc()?.id === doc.id"
-              (click)="selectDocument(doc)"
-            >
-              <div class="card-header">
-                <div class="card-title-row">
-                  <div class="card-icon">
-                    <app-icon name="file-text" size="18" class="terms-icon"></app-icon>
-                  </div>
-                  <h4 class="card-title">{{ doc.title }}</h4>
-                </div>
-
-                <div
-                  class="card-checkbox"
-                  (click)="$event.stopPropagation(); toggleAcceptance(doc)"
-                >
-                  <input
-                    type="checkbox"
-                    [id]="'doc-' + doc.id"
-                    [checked]="doc.accepted"
-                    [disabled]="doc.loading"
-                    (click)="$event.stopPropagation()"
-                    (change)="toggleAcceptance(doc)"
-                  />
-                  <div class="checkbox-visual">
-                    <app-icon
-                      name="check"
-                      size="14"
-                      color="#ffffff"
-                      class="checkbox-icon"
-                    ></app-icon>
-                  </div>
-                </div>
-
-                <app-icon
-                  *ngIf="doc.loading"
-                  name="loader-2"
-                  [spin]="true"
-                  size="14"
-                  class="card-loading"
-                ></app-icon>
-              </div>
-
-              <div class="card-meta">
-                <span class="version-badge">v{{ doc.version }}</span>
-                <span
-                  class="view-link"
-                  (click)="$event.stopPropagation(); selectDocument(doc)"
-                >
-                  Ver documento
-                  <app-icon name="chevron-right" size="12"></app-icon>
-                </span>
-              </div>
-
-              <p class="card-hint">
-                Haz clic en el checkbox para aceptar los términos
-              </p>
-            </div>
-          </div>
-
-          <!-- Document Viewer -->
+        @if (!loading && documents.length > 0) {
           <div
-            *ngIf="selectedDoc()"
-            #documentViewer
-            class="document-viewer animate-in fade-in slide-in-from-right-4 duration-300"
-          >
-            <div class="viewer-header">
-              <span class="viewer-title">{{ selectedDoc()?.title }}</span>
-              <span class="viewer-version">
-                Versión {{ selectedDoc()?.version }}
-              </span>
+            class="terms-layout"
+            >
+            <!-- Document List -->
+            <div class="terms-documents">
+              @for (doc of documents; track doc) {
+                <div
+                  class="document-card"
+                  [class.selected]="selectedDoc()?.id === doc.id"
+                  (click)="selectDocument(doc)"
+                  >
+                  <div class="card-header">
+                    <div class="card-title-row">
+                      <div class="card-icon">
+                        <app-icon name="file-text" size="18" class="terms-icon"></app-icon>
+                      </div>
+                      <h4 class="card-title">{{ doc.title }}</h4>
+                    </div>
+                    <div
+                      class="card-checkbox"
+                      (click)="$event.stopPropagation(); toggleAcceptance(doc)"
+                      >
+                      <input
+                        type="checkbox"
+                        [id]="'doc-' + doc.id"
+                        [checked]="doc.accepted"
+                        [disabled]="doc.loading"
+                        (click)="$event.stopPropagation()"
+                        (change)="toggleAcceptance(doc)"
+                        />
+                      <div class="checkbox-visual">
+                        <app-icon
+                          name="check"
+                          size="14"
+                          color="#ffffff"
+                          class="checkbox-icon"
+                        ></app-icon>
+                      </div>
+                    </div>
+                    @if (doc.loading) {
+                      <app-icon
+                        name="loader-2"
+                        [spin]="true"
+                        size="14"
+                        class="card-loading"
+                      ></app-icon>
+                    }
+                  </div>
+                  <div class="card-meta">
+                    <span class="version-badge">v{{ doc.version }}</span>
+                    <span
+                      class="view-link"
+                      (click)="$event.stopPropagation(); selectDocument(doc)"
+                      >
+                      Ver documento
+                      <app-icon name="chevron-right" size="12"></app-icon>
+                    </span>
+                  </div>
+                  <p class="card-hint">
+                    Haz clic en el checkbox para aceptar los términos
+                  </p>
+                </div>
+              }
             </div>
-            <div
-              class="viewer-body prose prose-sm max-w-none prose-slate"
-              [innerHTML]="renderedContent()"
-            ></div>
+            <!-- Document Viewer -->
+            @if (selectedDoc()) {
+              <div
+                #documentViewer
+                class="document-viewer animate-in fade-in slide-in-from-right-4 duration-300"
+                >
+                <div class="viewer-header">
+                  <span class="viewer-title">{{ selectedDoc()?.title }}</span>
+                  <span class="viewer-version">
+                    Versión {{ selectedDoc()?.version }}
+                  </span>
+                </div>
+                <div
+                  class="viewer-body prose prose-sm max-w-none prose-slate"
+                  [innerHTML]="renderedContent()"
+                ></div>
+              </div>
+            }
           </div>
-        </div>
+        }
       </div>
     </div>
-  `,
+    `,
 })
 export class TermsStepComponent implements OnInit {
-  @Output() completed = new EventEmitter<void>();
-  @Output() back = new EventEmitter<void>();
+  readonly completed = output<void>();
+  readonly back = output<void>();
 
   private legalService = inject(LegalService);
   private toastService = inject(ToastService);
@@ -624,7 +626,7 @@ export class TermsStepComponent implements OnInit {
   // Selected document for viewing
   selectedDoc = signal<DocumentStatus | null>(null);
 
-  @ViewChild('documentViewer') documentViewer?: ElementRef<HTMLElement>;
+  readonly documentViewer = viewChild<ElementRef<HTMLElement>>('documentViewer');
 
   // Rendered HTML from Markdown
   renderedContent = computed(() => {
@@ -669,6 +671,7 @@ export class TermsStepComponent implements OnInit {
 
           // If no documents are pending, automatically proceed
           if (this.documents.length === 0) {
+            // TODO: The 'emit' function requires a mandatory void argument
             this.completed.emit();
           } else {
             // Auto-select first document
@@ -692,7 +695,7 @@ export class TermsStepComponent implements OnInit {
 
     // Scroll to document viewer after a brief delay to allow rendering
     setTimeout(() => {
-      this.documentViewer?.nativeElement?.scrollIntoView({
+      this.documentViewer()?.nativeElement?.scrollIntoView({
         behavior: 'smooth',
         block: 'start'
       });
@@ -746,6 +749,7 @@ export class TermsStepComponent implements OnInit {
 
       if (failures.length === 0) {
         this.toastService.success('Documentos aceptados correctamente');
+        // TODO: The 'emit' function requires a mandatory void argument
         this.completed.emit();
       } else {
         this.submitting = false;
@@ -758,10 +762,12 @@ export class TermsStepComponent implements OnInit {
   }
 
   onComplete() {
+    // TODO: The 'emit' function requires a mandatory void argument
     this.completed.emit();
   }
 
   onBack() {
+    // TODO: The 'emit' function requires a mandatory void argument
     this.back.emit();
   }
 }

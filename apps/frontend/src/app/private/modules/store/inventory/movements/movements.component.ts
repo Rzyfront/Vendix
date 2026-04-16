@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { Subscription } from 'rxjs';
 
 // Shared Components
@@ -23,11 +23,10 @@ import { InventoryMovement, MovementType } from '../interfaces';
   selector: 'app-movements',
   standalone: true,
   imports: [
-    CommonModule,
     StatsComponent,
     MovementDetailModalComponent,
-    MovementListComponent,
-  ],
+    MovementListComponent
+],
   template: `
     <div class="w-full overflow-x-hidden">
       <!-- Stats Grid: sticky at top on mobile, static on desktop -->

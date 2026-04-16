@@ -1,5 +1,5 @@
 import { Component, Input, inject, OnInit } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { StatsComponent } from '../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { DispatchNoteStats } from '../../interfaces/dispatch-note.interface';
@@ -7,7 +7,7 @@ import { DispatchNoteStats } from '../../interfaces/dispatch-note.interface';
 @Component({
   selector: 'app-dispatch-note-stats',
   standalone: true,
-  imports: [CommonModule, StatsComponent],
+  imports: [StatsComponent],
   templateUrl: './dispatch-note-stats.component.html',
   styles: [`:host { display: contents; }`],
 })

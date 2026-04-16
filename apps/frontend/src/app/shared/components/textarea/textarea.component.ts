@@ -1,11 +1,11 @@
 import {
   Component,
   Input,
-  Output,
-  EventEmitter,
   forwardRef,
+  input,
+  output
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   ControlValueAccessor,
   NG_VALUE_ACCESSOR,
@@ -16,7 +16,7 @@ import { FormStyleVariant } from '../../types/form.types';
 @Component({
   selector: 'app-textarea',
   standalone: true,
-  imports: [CommonModule],
+  imports: [],
   providers: [
     {
       provide: NG_VALUE_ACCESSOR,
@@ -25,53 +25,58 @@ import { FormStyleVariant } from '../../types/form.types';
     },
   ],
   template: `
-    <div [class]="'w-full ' + customWrapperClass">
+    <div [class]="'w-full ' + customWrapperClass()">
       <!-- Label -->
-      <label
-        *ngIf="label"
-        [for]="textareaId"
-        [class]="labelClasses"
-      >
-        {{ label }}
-        <span *ngIf="required" class="text-[var(--color-destructive)] ml-1"
-          >*</span
-        >
-      </label>
-
-      <!-- Textarea wrapper -->
-      <div class="relative">
-        <textarea
-          [id]="textareaId"
-          [placeholder]="placeholder"
-          [disabled]="disabled"
-          [readonly]="readonly"
-          [value]="value"
-          [rows]="rows"
-          [class]="textareaClasses"
-          [style]="customStyle"
-          (input)="onInput($event)"
-          (blur)="onBlur()"
-          (focus)="onFocus()"
-        ></textarea>
+      @if (label) {
+        <label
+          [for]="textareaId"
+          [class]="labelClasses"
+          >
+          {{ label }}
+          @if (required()) {
+            <span class="text-[var(--color-destructive)] ml-1"
+              >*</span
+              >
+            }
+          </label>
+        }
+    
+        <!-- Textarea wrapper -->
+        <div class="relative">
+          <textarea
+            [id]="textareaId"
+            [placeholder]="placeholder()"
+            [disabled]="disabled"
+            [readonly]="readonly()"
+            [value]="value"
+            [rows]="rows()"
+            [class]="textareaClasses"
+            [style]="customStyle()"
+            (input)="onInput($event)"
+            (blur)="onBlur()"
+            (focus)="onFocus()"
+          ></textarea>
+        </div>
+    
+        <!-- Helper text -->
+        @if (helperText && !getValidationError()) {
+          <p
+            class="mt-2 text-sm text-[var(--color-text-secondary)]"
+            >
+            {{ helperText }}
+          </p>
+        }
+    
+        <!-- Error message -->
+        @if (getValidationError()) {
+          <p
+            class="mt-2 text-sm text-[var(--color-destructive)]"
+            >
+            {{ getValidationError() }}
+          </p>
+        }
       </div>
-
-      <!-- Helper text -->
-      <p
-        *ngIf="helperText && !getValidationError()"
-        class="mt-2 text-sm text-[var(--color-text-secondary)]"
-      >
-        {{ helperText }}
-      </p>
-
-      <!-- Error message -->
-      <p
-        *ngIf="getValidationError()"
-        class="mt-2 text-sm text-[var(--color-destructive)]"
-      >
-        {{ getValidationError() }}
-      </p>
-    </div>
-  `,
+    `,
   styles: [`
     :host {
       display: block;
@@ -85,23 +90,23 @@ import { FormStyleVariant } from '../../types/form.types';
 })
 export class TextareaComponent implements ControlValueAccessor {
   @Input() label?: string;
-  @Input() placeholder = '';
-  @Input() rows = 3;
+  readonly placeholder = input('');
+  readonly rows = input(3);
   @Input() disabled = false;
-  @Input() readonly = false;
-  @Input() required = false;
-  @Input() error?: string;
+  readonly readonly = input(false);
+  readonly required = input(false);
+  readonly error = input<string>();
   @Input() helperText?: string;
-  @Input() control?: AbstractControl | null;
-  @Input() styleVariant: FormStyleVariant = 'modern';
-  @Input() customStyle = '';
-  @Input() customWrapperClass = '';
-  @Input() customLabelClass = '';
-  @Input() customClass = '';
+  readonly control = input<AbstractControl | null>();
+  readonly styleVariant = input<FormStyleVariant>('modern');
+  readonly customStyle = input('');
+  readonly customWrapperClass = input('');
+  readonly customLabelClass = input('');
+  readonly customClass = input('');
 
-  @Output() valueChange = new EventEmitter<string>();
-  @Output() textareaFocus = new EventEmitter<void>();
-  @Output() textareaBlur = new EventEmitter<void>();
+  readonly valueChange = output<string>();
+  readonly textareaFocus = output<void>();
+  readonly textareaBlur = output<void>();
 
   value = '';
   textareaId = `textarea-${Math.random().toString(36).substr(2, 9)}`;
@@ -129,14 +134,14 @@ export class TextareaComponent implements ControlValueAccessor {
   get labelClasses(): string {
     const baseClasses = ['block', 'font-medium', 'mb-2'];
 
-    if (this.styleVariant === 'modern') {
+    if (this.styleVariant() === 'modern') {
       return [
         ...baseClasses,
         'text-[11px]',
         'uppercase',
         'tracking-[0.05em]',
         'text-[var(--color-text-muted)]',
-        this.customLabelClass,
+        this.customLabelClass(),
       ]
         .filter(Boolean)
         .join(' ');
@@ -146,7 +151,7 @@ export class TextareaComponent implements ControlValueAccessor {
       ...baseClasses,
       'text-sm',
       'text-[var(--color-text-primary)]',
-      this.customLabelClass,
+      this.customLabelClass(),
     ]
       .filter(Boolean)
       .join(' ');
@@ -163,7 +168,9 @@ export class TextareaComponent implements ControlValueAccessor {
       'placeholder:text-text-muted',
     ];
 
-    const isInvalid = (this.control?.invalid || this.error) && (this.control?.touched || this.error);
+    const control = this.control();
+    const error = this.error();
+    const isInvalid = (control?.invalid || error) && (control?.touched || error);
 
     let stateClasses: string[];
     if (isInvalid) {
@@ -182,7 +189,7 @@ export class TextareaComponent implements ControlValueAccessor {
 
     let variantClasses: string[];
 
-    if (this.styleVariant === 'modern') {
+    if (this.styleVariant() === 'modern') {
       // Modern: iOS-inspired with shadow focus (auto-height for textarea)
       variantClasses = [
         'rounded-xl',                     // 0.75rem = 12px
@@ -210,18 +217,21 @@ export class TextareaComponent implements ControlValueAccessor {
     }
 
     const classes = [...baseClasses, ...variantClasses, ...stateClasses];
-    if (this.customClass) classes.push(this.customClass);
+    const customClass = this.customClass();
+    if (customClass) classes.push(customClass);
 
     return classes.filter(Boolean).join(' ');
   }
 
   getValidationError(): string | null {
-    if (this.error) return this.error;
-    if (!this.control || !this.control.errors || !this.control.touched) {
+    const error = this.error();
+    if (error) return error;
+    const control = this.control();
+    if (!control || !control.errors || !control.touched) {
       return null;
     }
 
-    const errors = this.control.errors;
+    const errors = control.errors;
     if (errors['required']) return 'Este campo es requerido.';
     if (errors['maxlength']) return `No puede superar ${errors['maxlength'].requiredLength} caracteres.`;
 
@@ -237,10 +247,12 @@ export class TextareaComponent implements ControlValueAccessor {
 
   onBlur(): void {
     this.onTouched();
+    // TODO: The 'emit' function requires a mandatory void argument
     this.textareaBlur.emit();
   }
 
   onFocus(): void {
+    // TODO: The 'emit' function requires a mandatory void argument
     this.textareaFocus.emit();
   }
 }

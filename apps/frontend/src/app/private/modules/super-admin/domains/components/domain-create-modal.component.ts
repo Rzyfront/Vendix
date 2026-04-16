@@ -1,5 +1,5 @@
-import { Component, EventEmitter, Input, Output } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, Input, output } from '@angular/core';
+
 import {
   ReactiveFormsModule,
   FormBuilder,
@@ -17,12 +17,11 @@ import { CreateDomainDto, DomainType } from '../interfaces/domain.interface';
   selector: 'app-domain-create-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ModalComponent,
     InputComponent,
-    ButtonComponent,
-  ],
+    ButtonComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen"
@@ -128,9 +127,9 @@ import { CreateDomainDto, DomainType } from '../interfaces/domain.interface';
 export class DomainCreateModalComponent {
   @Input() isOpen = false;
   @Input() isLoading = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() create = new EventEmitter<CreateDomainDto>();
-  @Output() cancel = new EventEmitter<void>();
+  readonly isOpenChange = output<boolean>();
+  readonly create = output<CreateDomainDto>();
+  readonly cancel = output<void>();
   domainForm!: FormGroup;
 
   constructor(private fb: FormBuilder) {

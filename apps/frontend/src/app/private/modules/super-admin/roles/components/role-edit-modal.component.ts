@@ -6,7 +6,7 @@ import {
   inject,
   SimpleChanges,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   FormsModule,
   ReactiveFormsModule,
@@ -23,13 +23,12 @@ import { ButtonComponent } from '../../../../../shared/components/button/button.
   selector: 'app-role-edit-modal',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     ModalComponent,
     IconComponent,
-    ButtonComponent,
-  ],
+    ButtonComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen()"
@@ -39,20 +38,22 @@ import { ButtonComponent } from '../../../../../shared/components/button/button.
       size="md"
       [showCloseButton]="true"
       (closed)="onCancel()"
-    >
+      >
       <form [formGroup]="roleForm" (ngSubmit)="onSubmit()">
         <div class="space-y-6">
           <!-- System Role Warning -->
-          <div *ngIf="role()?.is_system_role" class="warning-banner">
-            <app-icon name="warning" size="20" class="warning-icon"></app-icon>
-            <div class="warning-content">
-              <h4 class="warning-title">Rol de Sistema</h4>
-              <p class="warning-message">
-                Este es un rol de sistema y no modificado completamente. Solo la descripción puede ser actualizada.
-              </p>
+          @if (role()?.is_system_role) {
+            <div class="warning-banner">
+              <app-icon name="warning" size="20" class="warning-icon"></app-icon>
+              <div class="warning-content">
+                <h4 class="warning-title">Rol de Sistema</h4>
+                <p class="warning-message">
+                  Este es un rol de sistema y no modificado completamente. Solo la descripción puede ser actualizada.
+                </p>
+              </div>
             </div>
-          </div>
-
+          }
+    
           <!-- Role Name -->
           <div class="form-group">
             <label for="name" class="form-label"> Nombre del Rol * </label>
@@ -67,107 +68,121 @@ import { ButtonComponent } from '../../../../../shared/components/button/button.
               "
               [readonly]="role()?.is_system_role"
               [class.form-input-disabled]="role()?.is_system_role"
-            />
-            <div
-              *ngIf="
-                roleForm.get('name')?.invalid && roleForm.get('name')?.touched
-              "
-              class="form-error"
-            >
-              <span *ngIf="roleForm.get('name')?.errors?.['required']"
-                >El nombre es requerido</span
-              >
-              <span *ngIf="roleForm.get('name')?.errors?.['minlength']"
-                >El nombre debe tener al menos 2 caracteres</span
-              >
-            </div>
-          </div>
-
-          <!-- Description -->
-          <div class="form-group">
-            <label for="description" class="form-label"> Descripción * </label>
-            <textarea
-              id="description"
-              formControlName="description"
-              rows="3"
-              class="form-input"
-              placeholder="Describe el rol y sus responsabilidades"
+              />
+            @if (
+              roleForm.get('name')?.invalid && roleForm.get('name')?.touched
+              ) {
+              <div
+                class="form-error"
+                >
+                @if (roleForm.get('name')?.errors?.['required']) {
+                  <span
+                    >El nombre es requerido</span
+                    >
+                  }
+                  @if (roleForm.get('name')?.errors?.['minlength']) {
+                    <span
+                      >El nombre debe tener al menos 2 caracteres</span
+                      >
+                    }
+                  </div>
+                }
+              </div>
+    
+              <!-- Description -->
+              <div class="form-group">
+                <label for="description" class="form-label"> Descripción * </label>
+                <textarea
+                  id="description"
+                  formControlName="description"
+                  rows="3"
+                  class="form-input"
+                  placeholder="Describe el rol y sus responsabilidades"
               [class.form-input-error]="
                 roleForm.get('description')?.invalid &&
                 roleForm.get('description')?.touched
               "
-            ></textarea>
-            <div
-              *ngIf="
-                roleForm.get('description')?.invalid &&
-                roleForm.get('description')?.touched
-              "
-              class="form-error"
-            >
-              <span *ngIf="roleForm.get('description')?.errors?.['required']"
-                >La descripción es requerida</span
-              >
-              <span *ngIf="roleForm.get('description')?.errors?.['minlength']"
-                >La descripción debe tener al menos 10 caracteres</span
-              >
-            </div>
-          </div>
-
-          <!-- Role Info -->
-          <div class="info-card">
-            <h4 class="info-title">Información del Rol</h4>
-            <div class="info-grid">
-              <div class="info-item">
-                <span class="info-label">ID de Rol:</span>
-                <span class="info-value">{{ role()?.id }}</span>
-              </div>
-              <div class="info-item">
-                <span class="info-label">Rol de Sistema:</span>
-                <span
-                  class="info-value"
-                  [class.info-value-danger]="role()?.is_system_role"
-                  [class.info-value-success]="!role()?.is_system_role"
-                >
-                  {{ role()?.is_system_role ? 'Si' : 'No' }}
-                </span>
-              </div>
-              <div class="info-item">
-                <span class="info-label">Creado:</span>
-                <span class="info-value">{{
-                  formatDate(role()?.created_at)
-                }}</span>
-              </div>
-              <div class="info-item">
-                <span class="info-label">Actualizado:</span>
-                <span class="info-value">{{
-                  formatDate(role()?.updated_at)
-                }}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="modal-footer mt-6">
-          <app-button
-            variant="outline"
-            (clicked)="onCancel()"
-            [disabled]="isSubmitting()"
-          >
-            Cancelar
-          </app-button>
-          <app-button
-            variant="primary"
-            (clicked)="onSubmit()"
-            [disabled]="isSubmitting() || roleForm.invalid"
-            [loading]="isSubmitting()"
-          >
-            <span *ngIf="!isSubmitting()">Actualizar Rol</span>
-            <span *ngIf="isSubmitting()">Actualizando...</span>
-          </app-button>
-        </div>
-      </form>
-    </app-modal>
-  `,
+                ></textarea>
+                @if (
+                  roleForm.get('description')?.invalid &&
+                  roleForm.get('description')?.touched
+                  ) {
+                  <div
+                    class="form-error"
+                    >
+                    @if (roleForm.get('description')?.errors?.['required']) {
+                      <span
+                        >La descripción es requerida</span
+                        >
+                      }
+                      @if (roleForm.get('description')?.errors?.['minlength']) {
+                        <span
+                          >La descripción debe tener al menos 10 caracteres</span
+                          >
+                        }
+                      </div>
+                    }
+                  </div>
+    
+                  <!-- Role Info -->
+                  <div class="info-card">
+                    <h4 class="info-title">Información del Rol</h4>
+                    <div class="info-grid">
+                      <div class="info-item">
+                        <span class="info-label">ID de Rol:</span>
+                        <span class="info-value">{{ role()?.id }}</span>
+                      </div>
+                      <div class="info-item">
+                        <span class="info-label">Rol de Sistema:</span>
+                        <span
+                          class="info-value"
+                          [class.info-value-danger]="role()?.is_system_role"
+                          [class.info-value-success]="!role()?.is_system_role"
+                          >
+                          {{ role()?.is_system_role ? 'Si' : 'No' }}
+                        </span>
+                      </div>
+                      <div class="info-item">
+                        <span class="info-label">Creado:</span>
+                        <span class="info-value">{{
+                          formatDate(role()?.created_at)
+                        }}</span>
+                      </div>
+                      <div class="info-item">
+                        <span class="info-label">Actualizado:</span>
+                        <span class="info-value">{{
+                          formatDate(role()?.updated_at)
+                        }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+    
+                <div class="modal-footer mt-6">
+                  <app-button
+                    variant="outline"
+                    (clicked)="onCancel()"
+                    [disabled]="isSubmitting()"
+                    >
+                    Cancelar
+                  </app-button>
+                  <app-button
+                    variant="primary"
+                    (clicked)="onSubmit()"
+                    [disabled]="isSubmitting() || roleForm.invalid"
+                    [loading]="isSubmitting()"
+                    >
+                    @if (!isSubmitting()) {
+                      <span>Actualizar Rol</span>
+                    }
+                    @if (isSubmitting()) {
+                      <span>Actualizando...</span>
+                    }
+                  </app-button>
+                </div>
+              </form>
+            </app-modal>
+    `,
   styleUrls: ['./role-edit-modal.component.scss'],
 })
 export class RoleEditModalComponent implements OnChanges {

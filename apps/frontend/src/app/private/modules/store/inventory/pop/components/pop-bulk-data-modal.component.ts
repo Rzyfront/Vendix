@@ -596,6 +596,11 @@ export class PopBulkDataModalComponent implements OnChanges, OnDestroy {
   }
 
   onCancel() {
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.close.emit();
     this.isOpenChange.emit(false);
     this.resetState();

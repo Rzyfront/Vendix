@@ -1,4 +1,12 @@
-import { Component, OnInit, OnDestroy, ViewChild, inject } from '@angular/core';
+import {
+  Component,
+  OnInit,
+  ViewChild,
+  inject,
+  signal,
+  computed,
+  DestroyRef,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import {
@@ -11,8 +19,8 @@ import { OnboardingWizardService } from '../../../core/services/onboarding-wizar
 import { OnboardingModalComponent } from '../../../shared/components/onboarding-modal';
 import { MenuFilterService } from '../../../core/services/menu-filter.service';
 
-import { Observable, Subject } from 'rxjs';
-import { take, takeUntil, map } from 'rxjs/operators';
+import { map } from 'rxjs/operators';
+import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { ConfigFacade } from '../../../core/store/config';
 
@@ -41,13 +49,13 @@ import { ToastService } from '../../../shared/components/toast/toast.service';
       <!-- Sidebar -->
       <app-sidebar
         #sidebarRef
-        [menuItems]="filteredMenuItems"
-        [title]="(organizationName$ | async) || 'Cargando...'"
-        [logoUrl]="logoUrl$ | async"
+        [menuItems]="filteredMenuItems()"
+        [title]="organizationName() || 'Cargando...'"
+        [logoUrl]="logoUrl()"
         subtitle="Administrador de Organización"
-        [vlink]="(organizationSlug$ | async) || 'slug'"
-        [domainHostname]="organizationDomainHostname"
-        [collapsed]="sidebarCollapsed"
+        [vlink]="organizationSlug() || 'slug'"
+        [domainHostname]="organizationDomainHostname()"
+        [collapsed]="sidebarCollapsed()"
         (expandSidebar)="toggleSidebar()"
       >
       </app-sidebar>
@@ -55,15 +63,13 @@ import { ToastService } from '../../../shared/components/toast/toast.service';
       <!-- Main Content -->
       <div
         class="main-content flex-1 flex flex-col h-screen overflow-hidden transition-all duration-300 ease-in-out"
-        [class.margin-desktop]="!sidebarRef?.isMobile"
+        [class.margin-desktop]="!sidebarRef?.isMobile()"
         [style.margin-left]="
-          !sidebarRef?.isMobile ? (sidebarCollapsed ? '3.5rem' : '12.5rem') : '0'
+          !sidebarRef?.isMobile() ? (sidebarCollapsed() ? '3.5rem' : '12.5rem') : '0'
         "
       >
         <!-- Header (Fixed) -->
         <app-header
-          [breadcrumb]="breadcrumb"
-          [user]="user"
           (toggleSidebar)="toggleSidebar()"
         >
         </app-header>
@@ -81,42 +87,64 @@ import { ToastService } from '../../../shared/components/toast/toast.service';
     </div>
 
     <!-- Onboarding Modal - Only render if onboarding is needed -->
-    <app-onboarding-modal
-      *ngIf="needsOnboarding"
-      [(isOpen)]="showOnboardingModal"
-      (completed)="onOnboardingCompleted($event)"
-    ></app-onboarding-modal>
+    @if (needsOnboarding()) {
+      <app-onboarding-modal
+        [isOpen]="showOnboardingModal()"
+        (isOpenChange)="showOnboardingModal.set($event)"
+        (completed)="onOnboardingCompleted($event)"
+      ></app-onboarding-modal>
+    }
   `,
   styleUrls: ['./organization-admin-layout.component.scss'],
 })
-export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
+export class OrganizationAdminLayoutComponent implements OnInit {
   @ViewChild('sidebarRef') sidebarRef!: SidebarComponent;
 
-  sidebarCollapsed = false;
-  currentVlink = 'organization-admin';
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly authFacade = inject(AuthFacade);
+  private readonly onboardingWizardService = inject(OnboardingWizardService);
+  private readonly storesService = inject(OrganizationStoresService);
+  private readonly environmentSwitchService = inject(EnvironmentSwitchService);
+  private readonly dialogService = inject(DialogService);
+  private readonly toastService = inject(ToastService);
+  private readonly menuFilterService = inject(MenuFilterService);
+  private readonly configFacade = inject(ConfigFacade);
 
-  // Dynamic user data
-  organizationName$: Observable<string | null>;
-  organizationSlug$: Observable<string | null>;
-  organizationDomainHostname$: Observable<string | null>;
-  organizationDomainHostname: string | null = null;
-  logoUrl$: Observable<string | null>;
+  // --- Signals from facade observables ---
+  readonly organizationName = toSignal(this.authFacade.userOrganizationName$, {
+    initialValue: null as string | null,
+  });
+  readonly organizationSlug = toSignal(this.authFacade.userOrganizationSlug$, {
+    initialValue: null as string | null,
+  });
+  readonly organizationDomainHostname = toSignal(
+    this.authFacade.userDomainHostname$,
+    { initialValue: null as string | null },
+  );
+  readonly logoUrl = toSignal(
+    this.authFacade.userOrganization$.pipe(
+      map((org) => {
+        const domainConfig = this.configFacade.getCurrentConfig()?.domainConfig;
+        if (domainConfig?.isMainVendixDomain) return 'vlogo.png';
+        return org?.logo_url || null;
+      }),
+    ),
+    { initialValue: null as string | null },
+  );
+  readonly needsOrganizationOnboarding = toSignal(
+    this.authFacade.needsOrganizationOnboarding$,
+    { initialValue: false },
+  );
 
-  // Onboarding Modal
-  showOnboardingModal = false;
-  needsOnboarding = false;
-  private destroy$ = new Subject<void>();
+  // --- Local state signals ---
+  readonly sidebarCollapsed = signal(false);
+  readonly showOnboardingModal = signal(false);
+  readonly needsOnboarding = signal(false);
+  readonly stores = signal<StoreListItem[]>([]);
+  readonly isLoadingStores = signal(false);
 
-  // Panel UI menu filtering
-  private menuFilterService = inject(MenuFilterService);
-  private configFacade = inject(ConfigFacade);
-
-  // Stores
-  stores: StoreListItem[] = [];
-  isLoadingStores = false;
-
-  // ALL possible menu items (constant) with alwaysVisible on "Tiendas" children
-  private allMenuItems: MenuItem[] = [
+  // --- ALL possible menu items (constant) ---
+  private readonly allMenuItems: MenuItem[] = [
     {
       label: 'Panel Principal',
       icon: 'home',
@@ -130,7 +158,7 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
           label: 'Ver Todas las Tiendas',
           icon: '',
           route: '/admin/stores',
-          alwaysVisible: true, // Always visible if parent is visible
+          alwaysVisible: true,
         },
       ],
     },
@@ -177,178 +205,126 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
     },
   ];
 
-  // Reactive menu items
-  menuItems$: Observable<MenuItem[]> = this.menuFilterService.filterMenuItems(
-    this.allMenuItems,
+  // --- Reactive filtered menu (base, without stores) ---
+  private readonly baseFilteredMenuItems = toSignal(
+    this.menuFilterService.filterMenuItems(this.allMenuItems),
+    { initialValue: [] as MenuItem[] },
   );
-  filteredMenuItems: MenuItem[] = [];
 
-  constructor(
-    private authFacade: AuthFacade,
-    private onboardingWizardService: OnboardingWizardService,
-    private storesService: OrganizationStoresService,
-    private environmentSwitchService: EnvironmentSwitchService,
-    private dialogService: DialogService,
-    private toastService: ToastService,
-  ) {
-    this.organizationName$ = this.authFacade.userOrganizationName$;
-    this.organizationSlug$ = this.authFacade.userOrganizationSlug$;
-    this.organizationDomainHostname$ = this.authFacade.userDomainHostname$;
-    this.logoUrl$ = this.authFacade.userOrganization$.pipe(
-      map((org) => {
-        const domainConfig = this.configFacade.getCurrentConfig()?.domainConfig;
-        if (domainConfig?.isMainVendixDomain) return 'vlogo.png';
-        return org?.logo_url || null;
-      }),
-    );
-  }
+  // --- Computed menu: base filtered + dynamic stores ---
+  readonly filteredMenuItems = computed(() =>
+    this.addDynamicStoresToMenu(this.baseFilteredMenuItems()),
+  );
 
   ngOnInit(): void {
-    // Subscribe to filtered menu items based on panel_ui configuration
-    this.menuItems$.pipe(takeUntil(this.destroy$)).subscribe((items) => {
-      // Add dynamic stores AFTER filtering
-      this.filteredMenuItems = this.addDynamicStoresToMenu(items);
-    });
-
     // Check onboarding status considering both organization state and user role
     this.checkOnboardingWithRoleValidation();
 
-    // Subscribe to organization onboarding status from user data (no API call)
+    // Subscribe to organization onboarding status from user data
     this.authFacade.needsOrganizationOnboarding$
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((needsOnboarding: boolean) => {
-        this.needsOnboarding = needsOnboarding;
+        this.needsOnboarding.set(needsOnboarding);
         this.updateOnboardingModal();
-      });
-
-    // Subscribe to domain hostname for sidebar vlink
-    this.organizationDomainHostname$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe((hostname) => {
-        this.organizationDomainHostname = hostname;
       });
 
     // Load stores for sidebar
     this.loadStores();
-
   }
 
   private checkOnboardingWithRoleValidation(): void {
-    // Only proceed with onboarding logic if user is owner
     const isOwner = this.authFacade.isOwner();
     if (!isOwner) {
-      this.needsOnboarding = false;
-      this.showOnboardingModal = false;
+      this.needsOnboarding.set(false);
+      this.showOnboardingModal.set(false);
       return;
     }
 
-    // Check actual onboarding status from persistent data
     const currentUser = this.authFacade.getCurrentUser();
     const organizationOnboarding = currentUser?.organizations?.onboarding;
 
-    this.needsOnboarding = !organizationOnboarding;
+    this.needsOnboarding.set(!organizationOnboarding);
     this.updateOnboardingModal();
   }
 
   private updateOnboardingModal(): void {
-    // Double-check owner role before showing modal
     const isOwner = this.authFacade.isOwner();
     if (!isOwner) {
-      this.showOnboardingModal = false;
+      this.showOnboardingModal.set(false);
       return;
     }
 
-    // Verify onboarding status from current user data
     const currentUser = this.authFacade.getCurrentUser();
     const organizationOnboarding = currentUser?.organizations?.onboarding;
     const actuallyNeedsOnboarding = !organizationOnboarding;
 
-    this.showOnboardingModal = actuallyNeedsOnboarding && this.needsOnboarding;
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
+    this.showOnboardingModal.set(actuallyNeedsOnboarding && this.needsOnboarding());
   }
 
   loadStores(): void {
-    this.isLoadingStores = true;
+    this.isLoadingStores.set(true);
 
     this.storesService.getStores().subscribe({
       next: (response) => {
         if (response.success && response.data) {
-          this.stores = response.data.map((store: any) => ({
-            id: store.id,
-            name: store.name,
-            slug: store.slug,
-            store_code: store.store_code || '',
-            store_type: store.store_type || StoreType.PHYSICAL,
-            timezone: store.timezone || 'America/Bogota',
-            is_active: store.is_active !== undefined ? store.is_active : true,
-            manager_user_id: store.manager_user_id,
-            organization_id: store.organization_id,
-            created_at: store.created_at || new Date().toISOString(),
-            updated_at: store.updated_at || new Date().toISOString(),
-            onboarding: store.onboarding || false,
-            organizations: store.organizations || {
-              id: store.organization_id,
-              name: 'Unknown',
-              slug: 'unknown',
-            },
-            addresses: store.addresses || [],
-            _count: store._count || { products: 0, orders: 0, store_users: 0 },
-          }));
+          this.stores.set(
+            response.data.map((store: any) => ({
+              id: store.id,
+              name: store.name,
+              slug: store.slug,
+              store_code: store.store_code || '',
+              store_type: store.store_type || StoreType.PHYSICAL,
+              timezone: store.timezone || 'America/Bogota',
+              is_active: store.is_active !== undefined ? store.is_active : true,
+              manager_user_id: store.manager_user_id,
+              organization_id: store.organization_id,
+              created_at: store.created_at || new Date().toISOString(),
+              updated_at: store.updated_at || new Date().toISOString(),
+              onboarding: store.onboarding || false,
+              organizations: store.organizations || {
+                id: store.organization_id,
+                name: 'Unknown',
+                slug: 'unknown',
+              },
+              addresses: store.addresses || [],
+              _count: store._count || { products: 0, orders: 0, store_users: 0 },
+            })),
+          );
         } else {
-          this.stores = [];
+          this.stores.set([]);
         }
-        this.isLoadingStores = false;
-
-        // Update menu items with loaded stores
-        this.refreshMenuWithStores();
+        this.isLoadingStores.set(false);
       },
       error: (error) => {
         console.error('Error loading stores:', error);
-        this.stores = [];
-        this.isLoadingStores = false;
-        this.refreshMenuWithStores();
+        this.stores.set([]);
+        this.isLoadingStores.set(false);
       },
     });
   }
 
   /**
-   * Adds dynamic stores to the already-filtered menu
-   * Only modifies the "Tiendas" item if it's visible
+   * Adds dynamic stores to the already-filtered menu.
+   * Only modifies the "Tiendas" item if it's visible.
    */
   private addDynamicStoresToMenu(filteredItems: MenuItem[]): MenuItem[] {
     return filteredItems.map((item: MenuItem) => {
       if (item.label === 'Tiendas' && item.children) {
-        // Keep "Ver Todas las Tiendas" and add dynamic stores
         const staticChildren = item.children || [];
-
         return {
           ...item,
           children: [
             ...staticChildren,
-            ...this.stores.map((store) => ({
+            ...this.stores().map((store) => ({
               label: store.name,
               icon: '',
               action: () => this.switchToStoreEnvironment(store),
-              alwaysVisible: true, // Dynamic stores are always visible
+              alwaysVisible: true,
             })),
           ],
         };
       }
       return item;
-    });
-  }
-
-  /**
-   * Refreshes the menu when new stores are loaded
-   */
-  private refreshMenuWithStores(): void {
-    // Get current filtered items and add stores
-    this.menuItems$.pipe(take(1)).subscribe((items) => {
-      this.filteredMenuItems = this.addDynamicStoresToMenu(items);
     });
   }
 
@@ -401,19 +377,15 @@ export class OrganizationAdminLayoutComponent implements OnInit, OnDestroy {
   };
 
   toggleSidebar() {
-    // If mobile, delegate to sidebar component
-    if (this.sidebarRef?.isMobile) {
-      this.sidebarRef.toggleSidebar();
+    if (this.sidebarRef?.isMobile()) {
+      this.sidebarRef.toggleSidebarState();
     } else {
-      // Desktop: toggle collapsed state
-      this.sidebarCollapsed = !this.sidebarCollapsed;
+      this.sidebarCollapsed.update((v) => !v);
     }
   }
 
   onOnboardingCompleted(event: any): void {
-    // Update auth state to reflect onboarding completion
     this.authFacade.setOnboardingCompleted(true);
-    // Reload user data to get updated organization/store info
     this.authFacade.loadUser();
   }
 }

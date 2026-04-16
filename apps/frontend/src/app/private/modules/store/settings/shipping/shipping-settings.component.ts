@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy, signal, computed } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { Subject, takeUntil } from 'rxjs';
 import { ShippingMethodsService } from './services/shipping-methods.service';
@@ -37,7 +37,6 @@ import {
   selector: 'app-shipping-settings',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     StatsComponent,
     ButtonComponent,
@@ -67,14 +66,18 @@ import {
         ></app-stats>
         <app-stats
           title="Zonas Config."
-          [value]="zone_stats()?.total_zones || (zone_stats()?.store_zones || 0)"
+          [value]="zone_stats()?.total_zones || zone_stats()?.store_zones || 0"
           iconName="map-pin"
           iconBgColor="bg-green-100"
           iconColor="text-green-600"
         ></app-stats>
         <app-stats
           title="Tarifas Activas"
-          [value]="zone_stats()?.store_rates || shipping_method_stats()?.total_rates || 0"
+          [value]="
+            zone_stats()?.store_rates ||
+            shipping_method_stats()?.total_rates ||
+            0
+          "
           iconName="tag"
           iconBgColor="bg-purple-100"
           iconColor="text-purple-600"
@@ -98,13 +101,18 @@ import {
       <!-- Tab: Methods -->
       @if (active_tab() === 'methods') {
         <app-card [responsive]="true" [padding]="false">
-
           <!-- Sticky search header -->
-          <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
-                      md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
-            <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
-              <h2 class="text-[13px] font-bold text-gray-600 tracking-wide
-                         md:text-lg md:font-semibold md:text-text-primary">
+          <div
+            class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
+                      md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
+          >
+            <div
+              class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
+            >
+              <h2
+                class="text-[13px] font-bold text-gray-600 tracking-wide
+                         md:text-lg md:font-semibold md:text-text-primary"
+              >
                 Métodos de Envío ({{ filtered_methods().length }})
               </h2>
               <div class="flex items-center gap-2 w-full md:w-auto">
@@ -147,22 +155,38 @@ import {
           <!-- Loading State -->
           @if (is_loading()) {
             <div class="p-4 md:p-6 text-center">
-              <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-              <p class="mt-2 text-text-secondary">Cargando métodos de envío...</p>
+              <div
+                class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+              ></div>
+              <p class="mt-2 text-text-secondary">
+                Cargando métodos de envío...
+              </p>
             </div>
           }
 
           <!-- Empty State -->
           @if (!is_loading() && filtered_methods().length === 0) {
             <div class="p-8 text-center">
-              <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-gray-100 flex items-center justify-center">
-                <app-icon name="truck" [size]="24" class="text-gray-400"></app-icon>
+              <div
+                class="w-12 h-12 mx-auto mb-3 rounded-full bg-gray-100 flex items-center justify-center"
+              >
+                <app-icon
+                  name="truck"
+                  [size]="24"
+                  class="text-gray-400"
+                ></app-icon>
               </div>
               @if (search_term()) {
-                <p class="text-sm text-text-secondary">No se encontraron métodos con ese criterio</p>
+                <p class="text-sm text-text-secondary">
+                  No se encontraron métodos con ese criterio
+                </p>
               } @else {
-                <p class="text-sm text-text-secondary">No hay métodos de envío configurados</p>
-                <p class="text-xs text-gray-400 mt-1">Agrega tu primer método de envío</p>
+                <p class="text-sm text-text-secondary">
+                  No hay métodos de envío configurados
+                </p>
+                <p class="text-xs text-gray-400 mt-1">
+                  Agrega tu primer método de envío
+                </p>
               }
             </div>
           }
@@ -172,13 +196,18 @@ import {
       <!-- Tab: Zones -->
       @if (active_tab() === 'zones') {
         <app-card [responsive]="true" [padding]="false">
-
           <!-- Sticky search header -->
-          <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
-                      md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
-            <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
-              <h2 class="text-[13px] font-bold text-gray-600 tracking-wide
-                         md:text-lg md:font-semibold md:text-text-primary">
+          <div
+            class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
+                      md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
+          >
+            <div
+              class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
+            >
+              <h2
+                class="text-[13px] font-bold text-gray-600 tracking-wide
+                         md:text-lg md:font-semibold md:text-text-primary"
+              >
                 Zonas y Tarifas ({{ filtered_store_zones().length }})
               </h2>
               <div class="flex items-center gap-2 w-full md:w-auto">
@@ -217,116 +246,147 @@ import {
           <!-- Loading State -->
           @if (is_loading_store_zones()) {
             <div class="p-4 md:p-6 text-center">
-              <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+              <div
+                class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+              ></div>
               <p class="mt-2 text-text-secondary">Cargando zonas...</p>
             </div>
           }
 
           <!-- Empty State -->
-          @if (!is_loading_store_zones() && filtered_store_zones().length === 0) {
+          @if (
+            !is_loading_store_zones() && filtered_store_zones().length === 0
+          ) {
             <div class="p-8 text-center">
-              <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-gray-100 flex items-center justify-center">
-                <app-icon name="map-pin" [size]="24" class="text-gray-400"></app-icon>
+              <div
+                class="w-12 h-12 mx-auto mb-3 rounded-full bg-gray-100 flex items-center justify-center"
+              >
+                <app-icon
+                  name="map-pin"
+                  [size]="24"
+                  class="text-gray-400"
+                ></app-icon>
               </div>
               @if (zones_search_term()) {
-                <p class="text-sm text-text-secondary">No se encontraron zonas con ese criterio</p>
+                <p class="text-sm text-text-secondary">
+                  No se encontraron zonas con ese criterio
+                </p>
               } @else {
-                <p class="text-sm text-text-secondary">No tienes zonas creadas</p>
-                <p class="text-xs text-gray-400 mt-1">Activa un método de envío o crea una zona personalizada</p>
+                <p class="text-sm text-text-secondary">
+                  No tienes zonas creadas
+                </p>
+                <p class="text-xs text-gray-400 mt-1">
+                  Activa un método de envío o crea una zona personalizada
+                </p>
               }
             </div>
           }
         </app-card>
       }
 
-      <!-- Zone CRUD Modal -->
-        @if (show_zone_modal()) {
-          <app-zone-modal
-            [zone]="selected_zone"
-            [mode]="zone_modal_mode"
-            (close)="closeZoneModal()"
-            (saved)="onZoneSaved()"
-          ></app-zone-modal>
+      @defer (when show_zone_modal()) {
+        <app-zone-modal
+          [zone]="selected_zone"
+          [mode]="zone_modal_mode"
+          (close)="closeZoneModal()"
+          (saved)="onZoneSaved()"
+        ></app-zone-modal>
+      }
+
+      @defer (when show_rates_modal()) {
+        <app-rates-modal
+          [zone]="selected_zone_for_rates!"
+          [is_read_only]="is_rates_read_only()"
+          (close)="closeRatesModal()"
+          (rates_changed)="onRatesChanged()"
+        ></app-rates-modal>
+      }
+
+      <!-- System Zones Modal -->
+      <app-modal
+        [isOpen]="show_system_zones_modal()"
+        title="Zonas del Sistema"
+        subtitle="Duplica zonas preconfiguradas para personalizar"
+        size="lg"
+        (closed)="closeSystemZonesModal()"
+      >
+        <div slot="header">
+          <div
+            class="w-10 h-10 rounded-xl bg-green-50 flex items-center justify-center border border-green-100"
+          >
+            <app-icon
+              name="globe"
+              [size]="20"
+              class="text-green-600"
+            ></app-icon>
+          </div>
+        </div>
+
+        <div class="mb-4">
+          <app-inputsearch
+            class="w-full"
+            size="sm"
+            placeholder="Buscar zonas del sistema..."
+            [debounceTime]="300"
+            [ngModel]="system_zones_search_term()"
+            (ngModelChange)="onSystemZonesSearchChange($event)"
+          ></app-inputsearch>
+        </div>
+
+        @if (is_loading_system_zones()) {
+          <div class="p-4 text-center">
+            <div
+              class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary"
+            ></div>
+            <p class="mt-2 text-sm text-text-secondary">
+              Cargando zonas del sistema...
+            </p>
+          </div>
         }
 
-        <!-- Rates Modal -->
-        @if (show_rates_modal()) {
-          <app-rates-modal
-            [zone]="selected_zone_for_rates!"
-            [is_read_only]="is_rates_read_only()"
-            (close)="closeRatesModal()"
-            (rates_changed)="onRatesChanged()"
-          ></app-rates-modal>
+        @if (!is_loading_system_zones() && filtered_system_zones().length > 0) {
+          <app-responsive-data-view
+            [data]="filtered_system_zones()"
+            [columns]="system_zones_columns"
+            [cardConfig]="system_zones_card_config"
+            [actions]="system_zones_actions"
+            [loading]="is_loading_system_zones()"
+            emptyMessage="No hay zonas del sistema"
+            emptyIcon="globe"
+          ></app-responsive-data-view>
         }
 
-        <!-- System Zones Modal -->
-        <app-modal
-          [isOpen]="show_system_zones_modal()"
-          title="Zonas del Sistema"
-          subtitle="Duplica zonas preconfiguradas para personalizar"
-          size="lg"
-          (closed)="closeSystemZonesModal()"
-        >
-          <div slot="header">
-            <div class="w-10 h-10 rounded-xl bg-green-50 flex items-center justify-center border border-green-100">
-              <app-icon name="globe" [size]="20" class="text-green-600"></app-icon>
+        @if (
+          !is_loading_system_zones() && filtered_system_zones().length === 0
+        ) {
+          <div class="p-6 text-center">
+            <div
+              class="w-12 h-12 mx-auto mb-3 rounded-full bg-green-50 flex items-center justify-center"
+            >
+              <app-icon
+                name="check-circle"
+                [size]="24"
+                class="text-green-500"
+              ></app-icon>
             </div>
+            <p class="text-sm text-text-secondary">
+              @if (system_zones_search_term()) {
+                No hay zonas del sistema con ese criterio
+              } @else {
+                No hay zonas del sistema disponibles
+              }
+            </p>
           </div>
+        }
 
-          <div class="mb-4">
-            <app-inputsearch
-              class="w-full"
-              size="sm"
-              placeholder="Buscar zonas del sistema..."
-              [debounceTime]="300"
-              [ngModel]="system_zones_search_term()"
-              (ngModelChange)="onSystemZonesSearchChange($event)"
-            ></app-inputsearch>
-          </div>
+        <div slot="footer" class="flex justify-end gap-3">
+          <app-button variant="ghost" (clicked)="closeSystemZonesModal()">
+            Cerrar
+          </app-button>
+        </div>
+      </app-modal>
 
-          @if (is_loading_system_zones()) {
-            <div class="p-4 text-center">
-              <div class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
-              <p class="mt-2 text-sm text-text-secondary">Cargando zonas del sistema...</p>
-            </div>
-          }
-
-          @if (!is_loading_system_zones() && filtered_system_zones().length > 0) {
-            <app-responsive-data-view
-              [data]="filtered_system_zones()"
-              [columns]="system_zones_columns"
-              [cardConfig]="system_zones_card_config"
-              [actions]="system_zones_actions"
-              [loading]="is_loading_system_zones()"
-              emptyMessage="No hay zonas del sistema"
-              emptyIcon="globe"
-            ></app-responsive-data-view>
-          }
-
-          @if (!is_loading_system_zones() && filtered_system_zones().length === 0) {
-            <div class="p-6 text-center">
-              <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-green-50 flex items-center justify-center">
-                <app-icon name="check-circle" [size]="24" class="text-green-500"></app-icon>
-              </div>
-              <p class="text-sm text-text-secondary">
-                @if (system_zones_search_term()) {
-                  No hay zonas del sistema con ese criterio
-                } @else {
-                  No hay zonas del sistema disponibles
-                }
-              </p>
-            </div>
-          }
-
-          <div slot="footer" class="flex justify-end gap-3">
-            <app-button variant="ghost" (clicked)="closeSystemZonesModal()">
-              Cerrar
-            </app-button>
-          </div>
-        </app-modal>
-
-      <!-- Modal para agregar métodos disponibles -->
-      @if (show_methods_modal()) {
+      @defer (when show_methods_modal()) {
         <app-shipping-methods-modal
           [available_methods]="available_shipping_methods()"
           [is_loading]="is_loading_available()"

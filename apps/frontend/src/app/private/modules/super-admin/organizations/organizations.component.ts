@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { RouterModule } from '@angular/router';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
@@ -10,7 +10,10 @@ import {
   OrganizationsService,
   CreateOrganizationDto,
 } from './services/organizations.service';
-import { OrganizationListItem, OrganizationMode } from './interfaces/organization.interface';
+import {
+  OrganizationListItem,
+  OrganizationMode,
+} from './interfaces/organization.interface';
 import { Organization } from '../../../../core/models/organization.model';
 
 // Import new components
@@ -44,7 +47,6 @@ import './organizations.component.css';
   selector: 'app-organizations',
   standalone: true,
   imports: [
-    CommonModule,
     RouterModule,
     FormsModule,
     ReactiveFormsModule,
@@ -131,69 +133,75 @@ import './organizations.component.css';
         </div>
 
         <!-- Loading State -->
-        <div *ngIf="isLoading" class="p-8 text-center">
-          <div
-            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-          ></div>
-          <p class="mt-2 text-text-secondary">Cargando organizaciones...</p>
-        </div>
+        @if (isLoading) {
+          <div class="p-8 text-center">
+            <div
+              class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            ></div>
+            <p class="mt-2 text-text-secondary">Cargando organizaciones...</p>
+          </div>
+        }
 
         <!-- Empty State -->
-        <app-empty-state
-          *ngIf="!isLoading && organizations.length === 0"
-          icon="building"
-          [title]="getEmptyStateTitle()"
-          [description]="getEmptyStateDescription()"
-          actionButtonText="Crear Organizacion"
-          (actionClick)="openCreateOrganizationModal()"
-        >
-        </app-empty-state>
+        @if (!isLoading && organizations.length === 0) {
+          <app-empty-state
+            icon="building"
+            [title]="getEmptyStateTitle()"
+            [description]="getEmptyStateDescription()"
+            actionButtonText="Crear Organizacion"
+            (actionClick)="openCreateOrganizationModal()"
+          >
+          </app-empty-state>
+        }
 
         <!-- Organizations Table -->
-        <div *ngIf="!isLoading && organizations.length > 0" class="p-6">
-          <app-responsive-data-view
-            [data]="organizations"
-            [columns]="tableColumns"
-            [cardConfig]="cardConfig"
-            [actions]="tableActions"
-            [loading]="isLoading"
-            emptyMessage="No hay organizaciones"
-            emptyIcon="building"
-          >
-          </app-responsive-data-view>
-
-          <!-- Pagination -->
-          <div class="mt-6 flex justify-center">
-            <app-pagination
-              [currentPage]="pagination.page"
-              [totalPages]="pagination.totalPages"
-              [total]="pagination.total"
-              [limit]="pagination.limit"
-              infoStyle="page"
-              (pageChange)="changePage($event)"
-            />
+        @if (!isLoading && organizations.length > 0) {
+          <div class="p-6">
+            <app-responsive-data-view
+              [data]="organizations"
+              [columns]="tableColumns"
+              [cardConfig]="cardConfig"
+              [actions]="tableActions"
+              [loading]="isLoading"
+              emptyMessage="No hay organizaciones"
+              emptyIcon="building"
+            >
+            </app-responsive-data-view>
+            <!-- Pagination -->
+            <div class="mt-6 flex justify-center">
+              <app-pagination
+                [currentPage]="pagination.page"
+                [totalPages]="pagination.totalPages"
+                [total]="pagination.total"
+                [limit]="pagination.limit"
+                infoStyle="page"
+                (pageChange)="changePage($event)"
+              />
+            </div>
           </div>
-        </div>
+        }
       </div>
 
-      <!-- Create Organization Modal -->
-      <app-organization-create-modal
-        [isOpen]="isCreateModalOpen"
-        [isSubmitting]="isCreatingOrganization"
-        (isOpenChange)="onCreateModalChange($event)"
-        (submit)="createOrganization($event)"
-        (cancel)="onCreateModalCancel()"
-      ></app-organization-create-modal>
+      @defer (when isCreateModalOpen) {
+        <app-organization-create-modal
+          [isOpen]="isCreateModalOpen"
+          [isSubmitting]="isCreatingOrganization"
+          (isOpenChange)="onCreateModalChange($event)"
+          (submit)="createOrganization($event)"
+          (cancel)="onCreateModalCancel()"
+        ></app-organization-create-modal>
+      }
 
-      <!-- Edit Organization Modal -->
-      <app-organization-edit-modal
-        [isOpen]="isEditModalOpen"
-        [isSubmitting]="isUpdatingOrganization"
-        [organization]="selectedOrganization"
-        (isOpenChange)="onEditModalChange($event)"
-        (submit)="updateOrganization($event)"
-        (cancel)="onEditModalCancel()"
-      ></app-organization-edit-modal>
+      @defer (when isEditModalOpen) {
+        <app-organization-edit-modal
+          [isOpen]="isEditModalOpen"
+          [isSubmitting]="isUpdatingOrganization"
+          [organization]="selectedOrganization"
+          (isOpenChange)="onEditModalChange($event)"
+          (submit)="updateOrganization($event)"
+          (cancel)="onEditModalCancel()"
+        ></app-organization-edit-modal>
+      }
     </div>
   `,
 })
@@ -463,7 +471,10 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
       ...(this.searchTerm && { search: this.searchTerm }),
       ...(this.selectedStatus && { state: this.selectedStatus as any }),
       ...(this.selectedMode
-        ? { mode: this.selectedMode as OrganizationMode, include_non_production: true }
+        ? {
+            mode: this.selectedMode as OrganizationMode,
+            include_non_production: true,
+          }
         : {}),
     };
 

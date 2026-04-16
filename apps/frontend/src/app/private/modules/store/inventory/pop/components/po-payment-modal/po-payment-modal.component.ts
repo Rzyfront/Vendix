@@ -8,7 +8,7 @@ import {
   effect,
   ChangeDetectionStrategy,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
@@ -21,11 +21,10 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
   selector: 'app-po-payment-modal',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ModalComponent,
-    ButtonComponent,
-  ],
+    ButtonComponent
+],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <app-modal

@@ -1,15 +1,13 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
-  OnInit,
-  OnDestroy,
   inject,
+  input,
+  output,
+  signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router, RouterModule } from '@angular/router';
-import { Subscription, Observable } from 'rxjs';
+import { Observable } from 'rxjs';
 
 import { IconComponent } from '../icon/icon.component';
 import { UserDropdownComponent } from '../user-dropdown/user-dropdown.component';
@@ -57,15 +55,17 @@ import { ConfigFacade } from '../../../core/store/config';
             aria-label="Abrir menú"
           >
             <div class="mobile-logo-container">
-              <img
-                *ngIf="storeLogo"
-                [src]="storeLogo"
-                [alt]="storeName || 'Logo'"
-                class="mobile-logo"
-              />
-              <div *ngIf="!storeLogo" class="mobile-logo-placeholder">
-                <app-icon name="store" [size]="18"></app-icon>
-              </div>
+              @if (storeLogo()) {
+                <img
+                  [src]="storeLogo()"
+                  [alt]="storeName() || 'Logo'"
+                  class="mobile-logo"
+                />
+              } @else {
+                <div class="mobile-logo-placeholder">
+                  <app-icon name="store" [size]="18"></app-icon>
+                </div>
+              }
             </div>
             <app-icon
               name="chevron-right"
@@ -130,7 +130,7 @@ import { ConfigFacade } from '../../../core/store/config';
             <h1
               class="text-sm sm:text-xl md:text-2xl lg:text-3xl font-bold text-slate-900 m-0 leading-none tracking-tight block truncate"
             >
-              {{ (breadcrumb$ | async)?.title || title }}
+              {{ (breadcrumb$ | async)?.title || title() }}
             </h1>
           </div>
         </div>
@@ -182,73 +182,56 @@ import { ConfigFacade } from '../../../core/store/config';
     `,
   ],
 })
-export class HeaderComponent implements OnInit, OnDestroy {
-  @Input() title: string = 'Panel Principal';
-  @Input() breadcrumb: any = {};
-  @Input() user: any = {};
-  @Output() toggleSidebar = new EventEmitter<void>();
+export class HeaderComponent {
+  // --- Inputs ---
+  readonly title = input<string>('Panel Principal');
 
-  private globalFacade = inject(GlobalFacade);
-  private configFacade = inject(ConfigFacade);
+  // --- Outputs ---
+  readonly toggleSidebar = output<void>();
 
-  breadcrumb$: Observable<{
+  // --- Dependencies ---
+  private readonly breadcrumbService = inject(BreadcrumbService);
+  private readonly router = inject(Router);
+  private readonly globalFacade = inject(GlobalFacade);
+  private readonly configFacade = inject(ConfigFacade);
+
+  // --- Observables (async pipe compatible con Zoneless) ---
+  readonly breadcrumb$: Observable<{
     parent?: BreadcrumbItem;
     current: BreadcrumbItem;
     title: string;
-  }>;
-  private subscription?: Subscription;
+  }> = this.breadcrumbService.breadcrumb$;
 
-  // Store branding
-  storeLogo: string | null = null;
-  storeName: string | null = null;
+  // --- State signals ---
+  readonly storeLogo = signal<string | null>(null);
+  readonly storeName = signal<string | null>(null);
 
-  constructor(
-    private breadcrumbService: BreadcrumbService,
-    private router: Router,
-  ) {
-    // Inicializar el observable del breadcrumb en el constructor
-    this.breadcrumb$ = this.breadcrumbService.breadcrumb$;
-  }
-
-  ngOnInit() {
-    // Suscribirse a cambios en el breadcrumb para actualizar dinámicamente
-    this.subscription = this.breadcrumb$.subscribe((breadcrumb) => {
-      // Opcional: Puedes agregar lógica adicional aquí si necesitas
-      // reaccionar a cambios en el breadcrumb
-    });
-
-    // Cargar branding de la tienda para el logo mobile
+  constructor() {
     this.loadStoreBranding();
   }
 
   private loadStoreBranding(): void {
     const brandingContext = this.globalFacade.getBrandingContext();
     if (brandingContext?.logo?.url) {
-      this.storeLogo = brandingContext.logo.url;
+      this.storeLogo.set(brandingContext.logo.url);
     } else {
       const domainConfig = this.configFacade.getCurrentConfig()?.domainConfig;
       if (domainConfig?.isMainVendixDomain) {
-        this.storeLogo = 'vlogo.png';
+        this.storeLogo.set('vlogo.png');
       }
     }
 
     const userContext = this.globalFacade.getUserContext();
     if (userContext?.store?.name) {
-      this.storeName = userContext.store.name;
+      this.storeName.set(userContext.store.name);
     }
   }
 
-  ngOnDestroy() {
-    if (this.subscription) {
-      this.subscription.unsubscribe();
-    }
+  onDropdownClose(): void {
+    // Lógica adicional cuando se cierra el dropdown si es necesario
   }
 
-  onDropdownClose() {
-    // Puedes agregar lógica cuando se cierra el dropdown si es necesario
-  }
-
-  navigateToUrl(url: string) {
+  navigateToUrl(url: string): void {
     this.router.navigateByUrl(url);
   }
 }

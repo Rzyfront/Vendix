@@ -1,14 +1,14 @@
 import {
   Component,
   Input,
-  Output,
-  EventEmitter,
   OnInit,
   OnDestroy,
   inject,
   OnChanges,
+  input,
+  output
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   ReactiveFormsModule,
   FormBuilder,
@@ -30,13 +30,12 @@ import { Subject, takeUntil } from 'rxjs';
   selector: 'app-user-config-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ButtonComponent,
     ModalComponent,
     InputComponent,
-    TextareaComponent,
-  ],
+    TextareaComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen"
@@ -45,147 +44,157 @@ import { Subject, takeUntil } from 'rxjs';
       [size]="'lg'"
       title="Configuración de Usuario"
       subtitle="Administra los roles, tiendas y configuraciones del panel UI"
-    >
-      <form [formGroup]="configForm" (ngSubmit)="onSubmit()" *ngIf="user">
-        <!-- Tabs -->
-        <div class="flex border-b border-gray-200 dark:border-gray-700 mb-6">
-          <button
-            type="button"
-            class="px-4 py-2 text-sm font-medium border-b-2 focus:outline-none transition-colors"
-            [class.border-primary]="activeTab === 'general'"
-            [class.text-primary]="activeTab === 'general'"
-            [class.border-transparent]="activeTab !== 'general'"
-            [class.text-gray-500]="activeTab !== 'general'"
-            (click)="activeTab = 'general'"
-          >
-            General
-          </button>
-          <button
-            type="button"
-            class="px-4 py-2 text-sm font-medium border-b-2 focus:outline-none transition-colors"
-            [class.border-primary]="activeTab === 'roles'"
-            [class.text-primary]="activeTab === 'roles'"
-            [class.border-transparent]="activeTab !== 'roles'"
-            [class.text-gray-500]="activeTab !== 'roles'"
-            (click)="activeTab = 'roles'"
-          >
-            Roles
-          </button>
-          <button
-            type="button"
-            class="px-4 py-2 text-sm font-medium border-b-2 focus:outline-none transition-colors"
-            [class.border-primary]="activeTab === 'stores'"
-            [class.text-primary]="activeTab === 'stores'"
-            [class.border-transparent]="activeTab !== 'stores'"
-            [class.text-gray-500]="activeTab !== 'stores'"
-            (click)="activeTab = 'stores'"
-          >
-            Tiendas
-          </button>
-          <button
-            type="button"
-            class="px-4 py-2 text-sm font-medium border-b-2 focus:outline-none transition-colors"
-            [class.border-primary]="activeTab === 'panel_ui'"
-            [class.text-primary]="activeTab === 'panel_ui'"
-            [class.border-transparent]="activeTab !== 'panel_ui'"
-            [class.text-gray-500]="activeTab !== 'panel_ui'"
-            (click)="activeTab = 'panel_ui'"
-          >
-            Panel UI
-          </button>
-        </div>
-
-        <!-- Content -->
-        <div [ngSwitch]="activeTab">
-          <!-- General Tab -->
-          <div *ngSwitchCase="'general'" class="space-y-4">
-            <div class="space-y-2">
-              <label
-                class="block text-sm font-medium text-[var(--color-text-primary)]"
+      >
+      @if (user()) {
+        <form [formGroup]="configForm" (ngSubmit)="onSubmit()">
+          <!-- Tabs -->
+          <div class="flex border-b border-gray-200 dark:border-gray-700 mb-6">
+            <button
+              type="button"
+              class="px-4 py-2 text-sm font-medium border-b-2 focus:outline-none transition-colors"
+              [class.border-primary]="activeTab === 'general'"
+              [class.text-primary]="activeTab === 'general'"
+              [class.border-transparent]="activeTab !== 'general'"
+              [class.text-gray-500]="activeTab !== 'general'"
+              (click)="activeTab = 'general'"
               >
-                Aplicación Asignada
-              </label>
-              <select
-                formControlName="app"
-                class="w-full px-3 py-2 border border-[var(--color-border)] rounded-md bg-[var(--color-surface)] text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:border-[var(--color-primary)]"
+              General
+            </button>
+            <button
+              type="button"
+              class="px-4 py-2 text-sm font-medium border-b-2 focus:outline-none transition-colors"
+              [class.border-primary]="activeTab === 'roles'"
+              [class.text-primary]="activeTab === 'roles'"
+              [class.border-transparent]="activeTab !== 'roles'"
+              [class.text-gray-500]="activeTab !== 'roles'"
+              (click)="activeTab = 'roles'"
               >
-                <option value="VENDIX_LANDING">VENDIX_LANDING</option>
-                <option value="ORG_ADMIN">ORG_ADMIN</option>
-                <option value="STORE_ADMIN">STORE_ADMIN</option>
-                <option value="STORE_ECOMMERCE">STORE_ECOMMERCE</option>
-              </select>
-              <p class="text-xs text-gray-500">
-                Selecciona la aplicación principal a la que tendrá acceso el
-                usuario.
-              </p>
-            </div>
+              Roles
+            </button>
+            <button
+              type="button"
+              class="px-4 py-2 text-sm font-medium border-b-2 focus:outline-none transition-colors"
+              [class.border-primary]="activeTab === 'stores'"
+              [class.text-primary]="activeTab === 'stores'"
+              [class.border-transparent]="activeTab !== 'stores'"
+              [class.text-gray-500]="activeTab !== 'stores'"
+              (click)="activeTab = 'stores'"
+              >
+              Tiendas
+            </button>
+            <button
+              type="button"
+              class="px-4 py-2 text-sm font-medium border-b-2 focus:outline-none transition-colors"
+              [class.border-primary]="activeTab === 'panel_ui'"
+              [class.text-primary]="activeTab === 'panel_ui'"
+              [class.border-transparent]="activeTab !== 'panel_ui'"
+              [class.text-gray-500]="activeTab !== 'panel_ui'"
+              (click)="activeTab = 'panel_ui'"
+              >
+              Panel UI
+            </button>
           </div>
-
-          <!-- Roles Tab -->
-          <div *ngSwitchCase="'roles'" class="space-y-4">
-            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <!-- Placeholder for dynamic roles. In a real scenario, we'd fetch available roles. For now, manual input or simplified list -->
-              <div class="p-3 border rounded bg-gray-50 dark:bg-gray-800">
-                <p class="text-sm text-gray-500 italic">
-                  La gestión dinámica de roles se implementará conectando con el
-                  servicio de roles. Por ahora, puedes ingresar IDs de roles
-                  manualmente (separados por coma).
-                </p>
-                <app-input
-                  styleVariant="modern"
-                  formControlName="rolesInput"
-                  [label]="'Role IDs'"
-                  placeholder="Ej: 1, 2, 3"
-                ></app-input>
-              </div>
-            </div>
+          <!-- Content -->
+          <div>
+            @switch (activeTab) {
+              <!-- General Tab -->
+              @case ('general') {
+                <div class="space-y-4">
+                  <div class="space-y-2">
+                    <label
+                      class="block text-sm font-medium text-[var(--color-text-primary)]"
+                      >
+                      Aplicación Asignada
+                    </label>
+                    <select
+                      formControlName="app"
+                      class="w-full px-3 py-2 border border-[var(--color-border)] rounded-md bg-[var(--color-surface)] text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:border-[var(--color-primary)]"
+                      >
+                      <option value="VENDIX_LANDING">VENDIX_LANDING</option>
+                      <option value="ORG_ADMIN">ORG_ADMIN</option>
+                      <option value="STORE_ADMIN">STORE_ADMIN</option>
+                      <option value="STORE_ECOMMERCE">STORE_ECOMMERCE</option>
+                    </select>
+                    <p class="text-xs text-gray-500">
+                      Selecciona la aplicación principal a la que tendrá acceso el
+                      usuario.
+                    </p>
+                  </div>
+                </div>
+              }
+              <!-- Roles Tab -->
+              @case ('roles') {
+                <div class="space-y-4">
+                  <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <!-- Placeholder for dynamic roles. In a real scenario, we'd fetch available roles. For now, manual input or simplified list -->
+                    <div class="p-3 border rounded bg-gray-50 dark:bg-gray-800">
+                      <p class="text-sm text-gray-500 italic">
+                        La gestión dinámica de roles se implementará conectando con el
+                        servicio de roles. Por ahora, puedes ingresar IDs de roles
+                        manualmente (separados por coma).
+                      </p>
+                      <app-input
+                        styleVariant="modern"
+                        formControlName="rolesInput"
+                        [label]="'Role IDs'"
+                        placeholder="Ej: 1, 2, 3"
+                      ></app-input>
+                    </div>
+                  </div>
+                </div>
+              }
+              <!-- Stores Tab -->
+              @case ('stores') {
+                <div class="space-y-4">
+                  <div class="p-3 border rounded bg-gray-50 dark:bg-gray-800">
+                    <p class="text-sm text-gray-500 italic">
+                      La selección de tiendas se conectará con el servicio de tiendas.
+                      Por ahora, ingresa IDs de tiendas manualmente.
+                    </p>
+                    <app-input
+                      styleVariant="modern"
+                      formControlName="storesInput"
+                      [label]="'Store IDs'"
+                      placeholder="Ej: 10, 20"
+                    ></app-input>
+                  </div>
+                </div>
+              }
+              <!-- Panel UI Tab -->
+              @case ('panel_ui') {
+                <div class="space-y-4">
+                  <div class="space-y-2">
+                    <app-textarea
+                      styleVariant="modern"
+                      formControlName="panelUiInput"
+                      [label]="'Configuración JSON'"
+                      [rows]="10"
+                      placeholder='{"dashboard": true, "settings": false}'
+                      customClass="font-mono"
+                    ></app-textarea>
+                    @if (jsonError) {
+                      <p class="text-xs text-red-500">
+                        {{ jsonError }}
+                      </p>
+                    }
+                  </div>
+                </div>
+              }
+            }
           </div>
-
-          <!-- Stores Tab -->
-          <div *ngSwitchCase="'stores'" class="space-y-4">
-            <div class="p-3 border rounded bg-gray-50 dark:bg-gray-800">
-              <p class="text-sm text-gray-500 italic">
-                La selección de tiendas se conectará con el servicio de tiendas.
-                Por ahora, ingresa IDs de tiendas manualmente.
-              </p>
-              <app-input
-                styleVariant="modern"
-                formControlName="storesInput"
-                [label]="'Store IDs'"
-                placeholder="Ej: 10, 20"
-              ></app-input>
-            </div>
-          </div>
-
-          <!-- Panel UI Tab -->
-          <div *ngSwitchCase="'panel_ui'" class="space-y-4">
-            <div class="space-y-2">
-              <app-textarea
-                styleVariant="modern"
-                formControlName="panelUiInput"
-                [label]="'Configuración JSON'"
-                [rows]="10"
-                placeholder='{"dashboard": true, "settings": false}'
-                customClass="font-mono"
-              ></app-textarea>
-              <p *ngIf="jsonError" class="text-xs text-red-500">
-                {{ jsonError }}
-              </p>
-            </div>
-          </div>
-        </div>
-      </form>
-
+        </form>
+      }
+    
       <div
         class="flex justify-between items-center pt-4 border-t border-[var(--color-border)]"
         slot="footer"
-      >
+        >
         <app-button
           variant="outline-danger"
           (clicked)="onCancel()"
           [disabled]="isSaving"
           size="sm"
-        >
+          >
           Cancelar
         </app-button>
         <app-button
@@ -194,12 +203,12 @@ import { Subject, takeUntil } from 'rxjs';
           [disabled]="configForm.invalid || isSaving || !!jsonError"
           [loading]="isSaving"
           size="sm"
-        >
+          >
           Guardar Configuración
         </app-button>
       </div>
     </app-modal>
-  `,
+    `,
   styles: [
     `
       :host {
@@ -209,10 +218,10 @@ import { Subject, takeUntil } from 'rxjs';
   ],
 })
 export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
-  @Input() user: User | null = null;
+  readonly user = input<User | null>(null);
   @Input() isOpen: boolean = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() onSaved = new EventEmitter<void>();
+  readonly isOpenChange = output<boolean>();
+  readonly onSaved = output<void>();
 
   configForm: FormGroup;
   isSaving: boolean = false;
@@ -255,7 +264,7 @@ export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
   }
 
   ngOnChanges(): void {
-    if (this.isOpen && this.user) {
+    if (this.isOpen && this.user()) {
       this.loadConfiguration();
     }
   }
@@ -266,7 +275,8 @@ export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
   }
 
   loadConfiguration(): void {
-    if (!this.user) return;
+    const user = this.user();
+    if (!user) return;
 
     // Default panel_ui structure with all submodules
     const defaultPanelUi = {
@@ -372,7 +382,7 @@ export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
     });
 
     this.usersService
-      .getUserConfiguration(this.user.id)
+      .getUserConfiguration(user.id)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (config: any) => {
@@ -394,7 +404,8 @@ export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
   }
 
   onSubmit(): void {
-    if (this.configForm.invalid || this.jsonError || !this.user) return;
+    const user = this.user();
+    if (this.configForm.invalid || this.jsonError || !user) return;
 
     this.isSaving = true;
     const formVal = this.configForm.value;
@@ -417,7 +428,7 @@ export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
     };
 
     this.usersService
-      .updateUserConfiguration(this.user.id, payload)
+      .updateUserConfiguration(user.id, payload)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: () => {
@@ -425,7 +436,8 @@ export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
 
           // Update auth state if editing current user's configuration
           const currentUserId = this.authFacade.getUserId();
-          if (this.user && currentUserId === this.user.id) {
+          const userValue = this.user();
+          if (userValue && currentUserId === userValue.id) {
             const currentUserSettings = this.authFacade.getUserSettings();
             const updatedSettings = {
               ...currentUserSettings,
@@ -440,6 +452,10 @@ export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
             this.authFacade.updateUserSettings(updatedSettings);
           }
 
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
           this.onSaved.emit();
           this.isOpenChange.emit(false);
         },

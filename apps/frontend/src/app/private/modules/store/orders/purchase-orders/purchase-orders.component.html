@@ -1,6 +1,8 @@
 <div class="w-full">
   <!-- Stats: Sticky on mobile, static on desktop -->
-  <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
+  <div
+    class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+  >
     <app-purchase-order-stats [stats]="stats"></app-purchase-order-stats>
   </div>
 
@@ -12,11 +14,12 @@
     (statsUpdated)="onStatsUpdated($any($event))"
   ></app-purchase-order-list>
 
-  <!-- Detail Modal with tabs (Detalle, Recepciones, Pagos, Adjuntos, Historial) -->
-  <app-po-detail-modal
-    [isOpen]="isDetailModalOpen"
-    [order]="selectedOrder"
-    (close)="closeDetailModal()"
-    (orderUpdated)="onOrderUpdated()"
-  ></app-po-detail-modal>
+  @defer (when isDetailModalOpen) {
+    <app-po-detail-modal
+      [isOpen]="isDetailModalOpen"
+      [order]="selectedOrder"
+      (close)="closeDetailModal()"
+      (orderUpdated)="onOrderUpdated()"
+    ></app-po-detail-modal>
+  }
 </div>

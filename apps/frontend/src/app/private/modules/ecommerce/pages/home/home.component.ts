@@ -1,5 +1,5 @@
 import { Component, OnInit, inject, DestroyRef, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { RouterModule, Router } from '@angular/router';
 import {
   CatalogService,
@@ -23,14 +23,13 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
   selector: 'app-home',
   standalone: true,
   imports: [
-    CommonModule,
     RouterModule,
     ProductCardComponent,
     HeroBannerComponent,
     ProductQuickViewModalComponent,
     ShareModalComponent,
-    ButtonComponent,
-  ],
+    ButtonComponent
+],
   templateUrl: './home.component.html',
   styleUrls: ['./home.component.scss'],
 })

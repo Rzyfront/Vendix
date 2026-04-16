@@ -10,7 +10,7 @@ import {
   OnInit,
   OnDestroy,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { switchMap, of } from 'rxjs';
 
 import {
@@ -41,7 +41,6 @@ import { ReviewStepComponent } from './review-step.component';
   selector: 'app-dispatch-note-wizard',
   standalone: true,
   imports: [
-    CommonModule,
     ModalComponent,
     ButtonComponent,
     IconComponent,
@@ -49,8 +48,8 @@ import { ReviewStepComponent } from './review-step.component';
     CustomerStepComponent,
     ProductsStepComponent,
     DetailsStepComponent,
-    ReviewStepComponent,
-  ],
+    ReviewStepComponent
+],
   providers: [DispatchNoteWizardService],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `

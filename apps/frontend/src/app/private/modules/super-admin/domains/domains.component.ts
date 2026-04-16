@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { RouterModule } from '@angular/router';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
@@ -43,7 +43,6 @@ import './domains.component.css';
   selector: 'app-domains',
   standalone: true,
   imports: [
-    CommonModule,
     RouterModule,
     FormsModule,
     ReactiveFormsModule,
@@ -111,85 +110,92 @@ import './domains.component.css';
         </div>
 
         <!-- Loading State -->
-        <div *ngIf="isLoading" class="p-8 text-center">
-          <div
-            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-          ></div>
-          <p class="mt-2 text-text-secondary">Cargando dominios...</p>
-        </div>
+        @if (isLoading) {
+          <div class="p-8 text-center">
+            <div
+              class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            ></div>
+            <p class="mt-2 text-text-secondary">Cargando dominios...</p>
+          </div>
+        }
 
         <!-- Empty State -->
-        <div *ngIf="!isLoading && domains.length === 0" class="p-8 text-center">
-          <div class="flex flex-col items-center justify-center space-y-4">
-            <div class="p-4 bg-surface rounded-full">
-              <app-icon
-                name="globe-2"
-                [size]="32"
-                class="text-text-tertiary"
-              ></app-icon>
+        @if (!isLoading && domains.length === 0) {
+          <div class="p-8 text-center">
+            <div class="flex flex-col items-center justify-center space-y-4">
+              <div class="p-4 bg-surface rounded-full">
+                <app-icon
+                  name="globe-2"
+                  [size]="32"
+                  class="text-text-tertiary"
+                ></app-icon>
+              </div>
+              <div>
+                <h3 class="text-lg font-medium text-text-primary">
+                  {{ getEmptyStateTitle() }}
+                </h3>
+                <p class="text-text-secondary mt-1">
+                  {{ getEmptyStateDescription() }}
+                </p>
+              </div>
+              <app-button
+                variant="primary"
+                size="sm"
+                (clicked)="openCreateDomainModal()"
+              >
+                <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+                Crear Primer Dominio
+              </app-button>
             </div>
-            <div>
-              <h3 class="text-lg font-medium text-text-primary">
-                {{ getEmptyStateTitle() }}
-              </h3>
-              <p class="text-text-secondary mt-1">
-                {{ getEmptyStateDescription() }}
-              </p>
-            </div>
-            <app-button
-              variant="primary"
-              size="sm"
-              (clicked)="openCreateDomainModal()"
-            >
-              <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-              Crear Primer Dominio
-            </app-button>
           </div>
-        </div>
+        }
 
         <!-- Domains Table -->
-        <div *ngIf="!isLoading && domains.length > 0" class="p-6">
-          <app-responsive-data-view
-            [data]="domains"
-            [columns]="tableColumns"
-            [cardConfig]="cardConfig"
-            [actions]="tableActions"
-            [loading]="isLoading"
-            emptyMessage="No hay dominios"
-            emptyIcon="globe"
-          >
-          </app-responsive-data-view>
-
-          <!-- Pagination -->
-          <app-pagination
-            [currentPage]="pagination.page"
-            [totalPages]="pagination.totalPages"
-            [total]="pagination.total"
-            [limit]="pagination.limit"
-            infoStyle="range"
-            (pageChange)="changePage($event)"
-          />
-        </div>
+        @if (!isLoading && domains.length > 0) {
+          <div class="p-6">
+            <app-responsive-data-view
+              [data]="domains"
+              [columns]="tableColumns"
+              [cardConfig]="cardConfig"
+              [actions]="tableActions"
+              [loading]="isLoading"
+              emptyMessage="No hay dominios"
+              emptyIcon="globe"
+            >
+            </app-responsive-data-view>
+            <!-- Pagination -->
+            <app-pagination
+              [currentPage]="pagination.page"
+              [totalPages]="pagination.totalPages"
+              [total]="pagination.total"
+              [limit]="pagination.limit"
+              infoStyle="range"
+              (pageChange)="changePage($event)"
+            />
+          </div>
+        }
       </div>
 
-      <!-- Create Domain Modal -->
-      <app-domain-create-modal
-        [isOpen]="isCreateModalOpen"
-        [isLoading]="isCreatingDomain"
-        (isOpenChange)="onCreateModalChange($event)"
-        (create)="createDomain($event)"
-        (cancel)="onCreateModalCancel()"
-      ></app-domain-create-modal>
+      @defer (when isCreateModalOpen) {
+        <app-domain-create-modal
+          [isOpen]="isCreateModalOpen"
+          [isLoading]="isCreatingDomain"
+          (isOpenChange)="onCreateModalChange($event)"
+          (create)="createDomain($event)"
+          (cancel)="onCreateModalCancel()"
+        ></app-domain-create-modal>
+      }
 
-      <!-- Edit Domain Modal -->
-      <app-domain-edit-modal
-        [isOpen]="isEditModalOpen"
-        [isLoading]="isUpdatingDomain"
-        [domain]="selectedDomain"
-        (isOpenChange)="onEditModalChange($event)"
-        (update)="updateDomain($event)"
-        (cancel)="onEditModalCancel()"
-      ></app-domain-edit-modal>
+      @defer (when isEditModalOpen) {
+        <app-domain-edit-modal
+          [isOpen]="isEditModalOpen"
+          [isLoading]="isUpdatingDomain"
+          [domain]="selectedDomain"
+          (isOpenChange)="onEditModalChange($event)"
+          (update)="updateDomain($event)"
+          (cancel)="onEditModalCancel()"
+        ></app-domain-edit-modal>
+      }
     </div>
   `,
 })

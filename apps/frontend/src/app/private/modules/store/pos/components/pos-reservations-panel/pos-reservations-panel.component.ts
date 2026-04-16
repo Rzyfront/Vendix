@@ -7,7 +7,7 @@ import {
   ChangeDetectionStrategy,
   signal,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { HttpClient } from '@angular/common/http';
 import { environment } from '../../../../../../../environments/environment';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
@@ -17,7 +17,7 @@ import { ButtonComponent } from '../../../../../../shared/components/button/butt
 @Component({
   selector: 'app-pos-reservations-panel',
   standalone: true,
-  imports: [CommonModule, IconComponent, SpinnerComponent, ButtonComponent],
+  imports: [IconComponent, SpinnerComponent, ButtonComponent],
   templateUrl: './pos-reservations-panel.component.html',
   styleUrls: ['./pos-reservations-panel.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,

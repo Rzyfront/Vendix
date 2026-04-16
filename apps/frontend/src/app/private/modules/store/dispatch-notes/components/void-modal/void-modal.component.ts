@@ -9,7 +9,7 @@ import {
   OnInit,
   OnDestroy,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   ReactiveFormsModule,
   FormGroup,
@@ -30,13 +30,12 @@ import { DispatchNote } from '../../interfaces/dispatch-note.interface';
   selector: 'app-void-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
     TextareaComponent,
-    IconComponent,
-  ],
+    IconComponent
+],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <app-modal
@@ -45,12 +44,12 @@ import { DispatchNote } from '../../interfaces/dispatch-note.interface';
       (cancel)="onClose()"
       title="Anular Remision"
       size="md"
-    >
+      >
       <!-- Header icon -->
       <div slot="header" class="flex items-center justify-center w-10 h-10 rounded-full bg-red-100">
         <app-icon name="alert-triangle" [size]="20" class="text-red-600"></app-icon>
       </div>
-
+    
       <!-- Body -->
       <div class="space-y-5">
         <!-- Warning Banner -->
@@ -64,16 +63,17 @@ import { DispatchNote } from '../../interfaces/dispatch-note.interface';
               <p class="text-[var(--fs-sm)] text-red-700">
                 Se liberaran las reservas de inventario asociadas a esta remision.
               </p>
-              <p
-                *ngIf="dispatchNote().status === 'confirmed'"
-                class="text-[var(--fs-sm)] text-red-700"
-              >
-                El stock reservado sera liberado y quedara disponible nuevamente.
-              </p>
+              @if (dispatchNote().status === 'confirmed') {
+                <p
+                  class="text-[var(--fs-sm)] text-red-700"
+                  >
+                  El stock reservado sera liberado y quedara disponible nuevamente.
+                </p>
+              }
             </div>
           </div>
         </div>
-
+    
         <!-- Summary Card -->
         <div class="rounded-xl bg-[var(--color-background)] border border-[var(--color-border)] p-4 space-y-2">
           <div class="flex items-center justify-between">
@@ -95,7 +95,7 @@ import { DispatchNote } from '../../interfaces/dispatch-note.interface';
             </span>
           </div>
         </div>
-
+    
         <!-- Form -->
         <form [formGroup]="form" class="space-y-4">
           <div>
@@ -111,28 +111,28 @@ import { DispatchNote } from '../../interfaces/dispatch-note.interface';
                [class]="reasonLength() >= 10
                  ? 'text-emerald-600'
                  : 'text-[var(--color-text-secondary)]'"
-            >
+              >
               {{ reasonLength() }}/10 caracteres minimo
             </p>
           </div>
-
+    
           <!-- Confirmation Checkbox -->
           <label
             class="flex items-start gap-3 p-3 rounded-lg border border-[var(--color-border)] cursor-pointer select-none hover:bg-[var(--color-background)] transition-colors duration-150"
-          >
+            >
             <input
               type="checkbox"
               class="mt-0.5 h-5 w-5 rounded border-gray-300 text-red-600 focus:ring-red-500 cursor-pointer flex-shrink-0"
               [checked]="confirmChecked()"
               (change)="confirmChecked.set(!confirmChecked())"
-            />
+              />
             <span class="text-[var(--fs-sm)] text-[var(--color-text-primary)]">
               Confirmo que deseo anular esta remision de forma permanente
             </span>
           </label>
         </form>
       </div>
-
+    
       <!-- Footer -->
       <div slot="footer">
         <div class="flex items-center justify-end gap-3">
@@ -144,13 +144,13 @@ import { DispatchNote } from '../../interfaces/dispatch-note.interface';
             iconName="x-circle"
             [disabled]="!canVoid()"
             (clicked)="onVoid()"
-          >
+            >
             Anular Remision
           </app-button>
         </div>
       </div>
     </app-modal>
-  `,
+    `,
 })
 export class VoidModalComponent implements OnInit, OnDestroy {
   private fb = inject(FormBuilder);

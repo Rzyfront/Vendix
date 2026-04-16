@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { Subject, takeUntil } from 'rxjs';
@@ -18,7 +18,11 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
 import { AnalyticsService } from '../../services/analytics.service';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
-import { getDefaultStartDate, getDefaultEndDate, formatChartPeriod } from '../../../../../../shared/utils/date.util';
+import {
+  getDefaultStartDate,
+  getDefaultEndDate,
+  formatChartPeriod,
+} from '../../../../../../shared/utils/date.util';
 import {
   SalesTrend,
   SalesAnalyticsQueryDto,
@@ -30,7 +34,6 @@ import { EChartsOption } from 'echarts';
   selector: 'vendix-sales-trends',
   standalone: true,
   imports: [
-    CommonModule,
     RouterModule,
     FormsModule,
     CardComponent,
@@ -113,10 +116,16 @@ import { EChartsOption } from 'echarts';
                 ></div>
               </div>
             } @else {
-              <app-chart
-                [options]="combinedChartOptions()"
-                size="large"
-              ></app-chart>
+              @defer (on viewport) {
+                <app-chart
+                  [options]="combinedChartOptions()"
+                  size="large"
+                ></app-chart>
+              } @placeholder {
+                <div
+                  class="h-80 bg-surface-secondary animate-pulse rounded-xl"
+                ></div>
+              }
             }
           </div>
         </app-card>
@@ -144,7 +153,16 @@ import { EChartsOption } from 'echarts';
                 ></div>
               </div>
             } @else {
-              <app-chart [options]="aovChartOptions()" size="large"></app-chart>
+              @defer (on viewport) {
+                <app-chart
+                  [options]="aovChartOptions()"
+                  size="large"
+                ></app-chart>
+              } @placeholder {
+                <div
+                  class="h-64 bg-surface-secondary animate-pulse rounded-xl"
+                ></div>
+              }
             }
           </div>
         </app-card>
@@ -220,7 +238,9 @@ export class SalesTrendsComponent implements OnInit, OnDestroy {
   }
 
   private updateCharts(data: SalesTrend[]): void {
-    const labels = data.map((t) => formatChartPeriod(t.period, this.granularity()));
+    const labels = data.map((t) =>
+      formatChartPeriod(t.period, this.granularity()),
+    );
     const revenues = data.map((t) => t.revenue);
     const orders = data.map((t) => t.orders);
     const aov = data.map((t) => t.average_order_value);
@@ -257,7 +277,8 @@ export class SalesTrendsComponent implements OnInit, OnDestroy {
           axisLine: { show: false },
           axisLabel: {
             color: '#6b7280',
-            formatter: (value: number) => this.currencyService.formatChartAxis(value),
+            formatter: (value: number) =>
+              this.currencyService.formatChartAxis(value),
           },
           splitLine: { lineStyle: { color: '#f3f4f6' } },
         },
@@ -332,7 +353,8 @@ export class SalesTrendsComponent implements OnInit, OnDestroy {
         axisLine: { show: false },
         axisLabel: {
           color: '#6b7280',
-          formatter: (value: number) => this.currencyService.formatChartAxis(value),
+          formatter: (value: number) =>
+            this.currencyService.formatChartAxis(value),
         },
         splitLine: { lineStyle: { color: '#f3f4f6' } },
       },
@@ -390,5 +412,4 @@ export class SalesTrendsComponent implements OnInit, OnDestroy {
   formatCurrency(value: number): string {
     return this.currencyService.format(value, 0);
   }
-
 }

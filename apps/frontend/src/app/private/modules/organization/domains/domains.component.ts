@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { Subject, takeUntil, forkJoin } from 'rxjs';
 
@@ -56,7 +56,6 @@ interface StoreOption {
   selector: 'app-domains',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     StatsComponent,
@@ -68,39 +67,40 @@ interface StoreOption {
     InputsearchComponent,
     IconComponent,
     ResponsiveDataViewComponent,
-    ButtonComponent,
-  ],
+    ButtonComponent
+],
   template: `
     <div class="space-y-6">
       <!-- Stats Cards -->
       <div class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6">
-        <app-stats
-          *ngFor="let item of statsItems"
-          [title]="item.title"
-          [value]="item.value"
-          [smallText]="item.smallText"
-          [iconName]="item.iconName"
-          [iconBgColor]="item.iconBgColor"
-          [iconColor]="item.iconColor"
-        >
-        </app-stats>
+        @for (item of statsItems; track item) {
+          <app-stats
+            [title]="item.title"
+            [value]="item.value"
+            [smallText]="item.smallText"
+            [iconName]="item.iconName"
+            [iconBgColor]="item.iconBgColor"
+            [iconColor]="item.iconColor"
+            >
+          </app-stats>
+        }
       </div>
-
+    
       <!-- Domains List -->
       <div class="bg-surface rounded-card shadow-card border border-border">
         <div class="px-6 py-4 border-b border-border">
           <div
             class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
-          >
+            >
             <div class="flex-1 min-w-0">
               <h2 class="text-lg font-semibold text-text-primary">
                 Todos los dominios ({{ domains.length }})
               </h2>
             </div>
-
+    
             <div
               class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto"
-            >
+              >
               <!-- Search Input -->
               <app-inputsearch
                 class="w-full sm:w-64"
@@ -109,44 +109,46 @@ interface StoreOption {
                 [debounceTime]="1000"
                 (searchChange)="onSearchChange($event)"
               ></app-inputsearch>
-
+    
               <!-- Status Filter -->
               <select
                 class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
                 (change)="onStatusChange($event)"
                 [value]="selectedStatus"
-              >
+                >
                 <option value="">Todos los Estados</option>
                 <option value="active">Activo</option>
                 <option value="pending_dns">Pendiente DNS</option>
                 <option value="pending_ssl">Pendiente SSL</option>
                 <option value="disabled">Deshabilitado</option>
               </select>
-
+    
               <!-- Ownership Filter -->
               <select
                 class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
                 (change)="onOwnershipChange($event)"
                 [value]="selectedOwnership"
-              >
+                >
                 <option value="">Todos los Tipos</option>
                 <option value="vendix_subdomain">Subdominio Vendix</option>
                 <option value="custom_domain">Dominio Personalizado</option>
                 <option value="custom_subdomain">Subdominio Personalizado</option>
               </select>
-
+    
               <!-- Store Filter -->
               <select
                 class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
                 (change)="onStoreChange($event)"
                 [value]="selectedStoreId"
-              >
+                >
                 <option value="">Todas las Tiendas</option>
-                <option *ngFor="let store of stores" [value]="store.id">
-                  {{ store.name }}
-                </option>
+                @for (store of stores; track store) {
+                  <option [value]="store.id">
+                    {{ store.name }}
+                  </option>
+                }
               </select>
-
+    
               <div class="flex gap-2 items-center">
                 <app-button
                   variant="outline"
@@ -154,7 +156,7 @@ interface StoreOption {
                   (clicked)="refreshDomains()"
                   [disabled]="isLoading"
                   title="Actualizar"
-                >
+                  >
                   <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
                 </app-button>
                 <app-button
@@ -162,7 +164,7 @@ interface StoreOption {
                   size="sm"
                   (clicked)="openCreateModal()"
                   title="Nuevo Dominio"
-                >
+                  >
                   <app-icon name="plus" [size]="16" slot="icon"></app-icon>
                   <span class="hidden sm:inline">Nuevo Dominio</span>
                 </app-button>
@@ -170,46 +172,51 @@ interface StoreOption {
             </div>
           </div>
         </div>
-
+    
         <!-- Loading State -->
-        <div *ngIf="isLoading" class="p-8 text-center">
-          <div
-            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-          ></div>
-          <p class="mt-2 text-text-secondary">Cargando dominios...</p>
-        </div>
-
+        @if (isLoading) {
+          <div class="p-8 text-center">
+            <div
+              class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            ></div>
+            <p class="mt-2 text-text-secondary">Cargando dominios...</p>
+          </div>
+        }
+    
         <!-- Empty State -->
-        <app-empty-state
-          *ngIf="!isLoading && domains.length === 0"
-          icon="globe"
-          [title]="getEmptyStateTitle()"
-          [description]="getEmptyStateDescription()"
-          actionButtonText="Crear Dominio"
-          [showRefreshButton]="hasFilters"
-          [showClearFilters]="hasFilters"
-          (actionClick)="openCreateModal()"
-          (refreshClick)="refreshDomains()"
-          (clearFiltersClick)="clearFilters()"
-        >
-        </app-empty-state>
-
+        @if (!isLoading && domains.length === 0) {
+          <app-empty-state
+            icon="globe"
+            [title]="getEmptyStateTitle()"
+            [description]="getEmptyStateDescription()"
+            actionButtonText="Crear Dominio"
+            [showRefreshButton]="hasFilters"
+            [showClearFilters]="hasFilters"
+            (actionClick)="openCreateModal()"
+            (refreshClick)="refreshDomains()"
+            (clearFiltersClick)="clearFilters()"
+            >
+          </app-empty-state>
+        }
+    
         <!-- Domains Table -->
-        <div *ngIf="!isLoading && domains.length > 0" class="p-6">
-          <app-responsive-data-view
-            [data]="domains"
-            [columns]="tableColumns"
-            [cardConfig]="cardConfig"
-            [actions]="tableActions"
-            [loading]="isLoading"
-            emptyMessage="No hay dominios registrados"
-            emptyIcon="globe"
-            (sort)="onTableSort($event)"
-          >
-          </app-responsive-data-view>
-        </div>
+        @if (!isLoading && domains.length > 0) {
+          <div class="p-6">
+            <app-responsive-data-view
+              [data]="domains"
+              [columns]="tableColumns"
+              [cardConfig]="cardConfig"
+              [actions]="tableActions"
+              [loading]="isLoading"
+              emptyMessage="No hay dominios registrados"
+              emptyIcon="globe"
+              (sort)="onTableSort($event)"
+              >
+            </app-responsive-data-view>
+          </div>
+        }
       </div>
-
+    
       <!-- Create Domain Modal -->
       <app-domain-create-modal
         [(isOpen)]="isCreateModalOpen"
@@ -218,7 +225,7 @@ interface StoreOption {
         (submit)="createDomain($event)"
         (cancel)="onCreateModalCancel()"
       ></app-domain-create-modal>
-
+    
       <!-- Edit Domain Modal -->
       <app-domain-edit-modal
         [(isOpen)]="isEditModalOpen"
@@ -227,7 +234,7 @@ interface StoreOption {
         (submit)="updateDomain($event)"
         (cancel)="onEditModalCancel()"
       ></app-domain-edit-modal>
-
+    
       <!-- Verify Domain Modal -->
       <app-domain-verify-modal
         [(isOpen)]="isVerifyModalOpen"
@@ -237,7 +244,7 @@ interface StoreOption {
         (verify)="verifyDomain($event)"
         (cancel)="onVerifyModalCancel()"
       ></app-domain-verify-modal>
-
+    
       <!-- Delete Domain Confirmation Modal -->
       <app-domain-delete-confirmation
         [(isOpen)]="isDeleteModalOpen"
@@ -246,7 +253,7 @@ interface StoreOption {
         (cancel)="onDeleteModalCancel()"
       ></app-domain-delete-confirmation>
     </div>
-  `,
+    `,
   styles: [
     `
       :host {

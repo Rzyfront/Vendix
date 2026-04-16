@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy, inject, signal, computed } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { RouterModule } from '@angular/router';
 import { Subject, takeUntil, forkJoin } from 'rxjs';
 
@@ -30,14 +30,13 @@ import {
   selector: 'vendix-low-stock',
   standalone: true,
   imports: [
-    CommonModule,
     RouterModule,
     CardComponent,
     ResponsiveDataViewComponent,
     StatsComponent,
     InputsearchComponent,
-    OptionsDropdownComponent,
-  ],
+    OptionsDropdownComponent
+],
   template: `
     <div class="w-full">
       <!-- Stats: Sticky on mobile, static on desktop -->

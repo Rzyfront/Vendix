@@ -1,5 +1,5 @@
 import { Component, Input, inject, OnInit } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 
 // Import shared components
 import { StatsComponent } from '../../../../../../shared/components/index';
@@ -9,7 +9,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 @Component({
   selector: 'app-order-stats',
   standalone: true,
-  imports: [CommonModule, StatsComponent],
+  imports: [StatsComponent],
   templateUrl: './order-stats.component.html',
   styleUrls: ['./order-stats.component.scss'],
 })

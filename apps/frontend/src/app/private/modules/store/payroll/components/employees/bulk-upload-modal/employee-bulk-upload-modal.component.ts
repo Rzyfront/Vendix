@@ -659,6 +659,11 @@ export class EmployeeBulkUploadModalComponent implements OnChanges, OnDestroy {
       this.payrollService.cancelBulkEmployeeSession(this.sessionId).subscribe();
     }
     if ((this.uploadResults?.successful ?? 0) > 0) {
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
       this.uploadComplete.emit();
     }
     this.isOpenChange.emit(false);

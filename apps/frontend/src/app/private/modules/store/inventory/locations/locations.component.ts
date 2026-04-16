@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { Subscription } from 'rxjs';
 
@@ -40,7 +40,6 @@ import { LocationFormModalComponent } from './components/location-form-modal.com
   selector: 'app-locations',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ButtonComponent,
     ResponsiveDataViewComponent,
@@ -50,14 +49,14 @@ import { LocationFormModalComponent } from './components/location-form-modal.com
     OptionsDropdownComponent,
     PaginationComponent,
     CardComponent,
-    LocationFormModalComponent,
-  ],
+    LocationFormModalComponent
+],
   template: `
     <div class="w-full overflow-x-hidden">
       <!-- Stats Grid: sticky at top on mobile, static on desktop -->
       <div
         class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
-      >
+        >
         <app-stats
           title="Total Ubicaciones"
           [value]="stats.total"
@@ -66,7 +65,7 @@ import { LocationFormModalComponent } from './components/location-form-modal.com
           iconBgColor="bg-blue-100"
           iconColor="text-blue-600"
         ></app-stats>
-
+    
         <app-stats
           title="Almacenes"
           [value]="stats.warehouses"
@@ -75,7 +74,7 @@ import { LocationFormModalComponent } from './components/location-form-modal.com
           iconBgColor="bg-purple-100"
           iconColor="text-purple-600"
         ></app-stats>
-
+    
         <app-stats
           title="Activas"
           [value]="stats.active"
@@ -84,7 +83,7 @@ import { LocationFormModalComponent } from './components/location-form-modal.com
           iconBgColor="bg-green-100"
           iconColor="text-green-600"
         ></app-stats>
-
+    
         <app-stats
           title="Inactivas"
           [value]="stats.inactive"
@@ -94,23 +93,23 @@ import { LocationFormModalComponent } from './components/location-form-modal.com
           iconColor="text-amber-600"
         ></app-stats>
       </div>
-
+    
       <!-- Locations List Container: mobile-first (no container on mobile, full styling on desktop) -->
       <app-card [responsive]="true" [padding]="false">
         <!-- Search Section: sticky below stats on mobile, normal on desktop -->
         <div
           class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
-        >
+          >
           <div
             class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
-          >
+            >
             <!-- Title - smaller on mobile, larger on desktop -->
             <h2
               class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary"
-            >
+              >
               Ubicaciones ({{ pagination.total }})
             </h2>
-
+    
             <!-- Search row - horizontal on mobile -->
             <div class="flex items-center gap-2 w-full md:w-auto">
               <app-inputsearch
@@ -120,17 +119,17 @@ import { LocationFormModalComponent } from './components/location-form-modal.com
                 [debounceTime]="300"
                 (search)="onSearch($event)"
               ></app-inputsearch>
-
+    
               <app-button
                 variant="outline"
                 size="md"
                 customClasses="w-10 sm:w-11 !px-0 bg-surface shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none !rounded-[10px] shrink-0"
                 (clicked)="openCreateModal()"
                 title="Nueva Ubicación"
-              >
+                >
                 <app-icon slot="icon" name="plus" [size]="18"></app-icon>
               </app-button>
-
+    
               <app-options-dropdown
                 class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
                 [filters]="filterConfigs"
@@ -144,67 +143,70 @@ import { LocationFormModalComponent } from './components/location-form-modal.com
             </div>
           </div>
         </div>
-
+    
         <!-- Loading State -->
-        <div *ngIf="is_loading" class="p-4 md:p-6 text-center">
-          <div
-            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-          ></div>
-          <p class="mt-2 text-text-secondary">Cargando ubicaciones...</p>
-        </div>
-
+        @if (is_loading) {
+          <div class="p-4 md:p-6 text-center">
+            <div
+              class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            ></div>
+            <p class="mt-2 text-text-secondary">Cargando ubicaciones...</p>
+          </div>
+        }
+    
         <!-- Empty State -->
-        <div
-          *ngIf="!is_loading && filtered_locations.length === 0"
-          class="p-8 md:p-12 text-center text-gray-500"
-        >
-          <app-icon
-            name="map-pin"
-            [size]="48"
-            class="mx-auto mb-4 text-gray-300"
-          ></app-icon>
-          <h3 class="text-lg font-medium text-gray-900">No hay ubicaciones</h3>
-          <p class="mt-1 text-sm md:text-base">
-            Comienza agregando una nueva ubicación para tu inventario.
-          </p>
-          <div class="mt-6">
-            <app-button variant="primary" (clicked)="openCreateModal()">
-              <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-              Agregar Ubicación
-            </app-button>
+        @if (!is_loading && filtered_locations.length === 0) {
+          <div
+            class="p-8 md:p-12 text-center text-gray-500"
+            >
+            <app-icon
+              name="map-pin"
+              [size]="48"
+              class="mx-auto mb-4 text-gray-300"
+            ></app-icon>
+            <h3 class="text-lg font-medium text-gray-900">No hay ubicaciones</h3>
+            <p class="mt-1 text-sm md:text-base">
+              Comienza agregando una nueva ubicación para tu inventario.
+            </p>
+            <div class="mt-6">
+              <app-button variant="primary" (clicked)="openCreateModal()">
+                <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+                Agregar Ubicación
+              </app-button>
+            </div>
           </div>
-        </div>
-
+        }
+    
         <!-- Table -->
-        <div
-          *ngIf="!is_loading && filtered_locations.length > 0"
-          class="px-2 pb-2 pt-3 md:p-4"
-        >
-          <app-responsive-data-view
-            [data]="filtered_locations"
-            [columns]="table_columns"
-            [cardConfig]="cardConfig"
-            [actions]="table_actions"
-            [loading]="is_loading"
-            emptyMessage="No hay ubicaciones registradas"
-            emptyIcon="map-pin"
-            (sort)="onSort($event)"
-            (rowClick)="onRowClick($event)"
-          ></app-responsive-data-view>
-
-          <div class="mt-4 flex justify-center">
-            <app-pagination
-              [currentPage]="pagination.page"
-              [totalPages]="pagination.totalPages"
-              [total]="pagination.total"
-              [limit]="pagination.limit"
-              infoStyle="none"
-              (pageChange)="changePage($event)"
-            />
+        @if (!is_loading && filtered_locations.length > 0) {
+          <div
+            class="px-2 pb-2 pt-3 md:p-4"
+            >
+            <app-responsive-data-view
+              [data]="filtered_locations"
+              [columns]="table_columns"
+              [cardConfig]="cardConfig"
+              [actions]="table_actions"
+              [loading]="is_loading"
+              emptyMessage="No hay ubicaciones registradas"
+              emptyIcon="map-pin"
+              (sort)="onSort($event)"
+              (rowClick)="onRowClick($event)"
+            ></app-responsive-data-view>
+            <div class="mt-4 flex justify-center">
+              <app-pagination
+                [currentPage]="pagination.page"
+                [totalPages]="pagination.totalPages"
+                [total]="pagination.total"
+                [limit]="pagination.limit"
+                infoStyle="none"
+                (pageChange)="changePage($event)"
+                />
+            </div>
           </div>
-        </div>
+        }
       </app-card>
-
+    
       <!-- Create/Edit Modal -->
       <app-location-form-modal
         [isOpen]="is_modal_open"
@@ -214,7 +216,7 @@ import { LocationFormModalComponent } from './components/location-form-modal.com
         (save)="onSaveLocation($event)"
       ></app-location-form-modal>
     </div>
-  `,
+    `,
 })
 export class LocationsComponent implements OnInit, OnDestroy {
   // Data

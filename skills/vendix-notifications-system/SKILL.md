@@ -12,7 +12,7 @@
 - Adding a **new notification type** (e.g. `product_updated`, `refund_issued`)
 - Modifying the **SSE streaming** pipeline or connection lifecycle
 - Working on the **notifications dropdown** or bell badge UI
-- Debugging **NgZone errors** related to SSE (EventSource runs outside Angular zone)
+- Debugging **SSE connection issues** (EventSource lifecycle, reconnection, callbacks)
 - Adding **email/SMS delivery** channels
 - Implementing per-user **subscription filtering** (currently saved but not enforced)
 - Understanding the notification data flow end-to-end
@@ -98,20 +98,31 @@ export class NotificationsSseService {
 }
 ```
 
-### 3. EventSource Callbacks MUST Run Inside NgZone
+### 3. EventSource Callbacks — Zoneless (Angular 20)
 
-`EventSource` is a native browser API. Its callbacks execute outside Angular Zone.js. NgRx's `strictActionWithinNgZone: true` will throw if actions are dispatched outside the zone.
+`EventSource` is a native browser API. In the previous Zone.js setup, callbacks had to be wrapped with `NgZone.run()` to trigger change detection. **Vendix uses Angular 20 Zoneless — `NgZone.run()` has been removed.**
 
 ```typescript
-// notifications.effects.ts - ALWAYS wrap callbacks with NgZone
-private ngZone = inject(NgZone);
-
+// notifications.effects.ts - Zoneless: callbacks directos, sin NgZone.run()
 this.eventSource.onopen = () => {
-  this.ngZone.run(() => {
-    observer.next(NotificationsActions.sseConnected());
-  });
+  observer.next(NotificationsActions.sseConnected());
+};
+
+this.eventSource.onmessage = (event: MessageEvent) => {
+  try {
+    const data = JSON.parse(event.data);
+    observer.next(NotificationsActions.receivedNotification({ notification: data }));
+  } catch {
+    // Ignore malformed SSE messages
+  }
+};
+
+this.eventSource.onerror = () => {
+  observer.next(NotificationsActions.sseDisconnected());
 };
 ```
+
+> **Zoneless**: En Vendix (Angular 20 Zoneless), `EventSource` dispara callbacks fuera de zona — pero en Zoneless esto es irrelevante. Los `observer.next()` dentro de efectos NgRx funcionan directamente sin `NgZone.run()`. El NgZone.run() era necesario con Zone.js para disparar change detection; en Zoneless los signals/dispatches se procesan correctamente sin el.
 
 ### 4. SSE Auth via Query Parameter (Not Headers)
 

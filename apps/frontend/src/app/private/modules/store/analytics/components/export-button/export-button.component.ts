@@ -1,12 +1,12 @@
 import { Component, input, output } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 
 @Component({
   selector: 'vendix-export-button',
   standalone: true,
-  imports: [CommonModule, ButtonComponent, IconComponent],
+  imports: [ButtonComponent, IconComponent],
   template: `
     <app-button
       variant="outline"

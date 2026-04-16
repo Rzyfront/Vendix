@@ -8,7 +8,7 @@ import {
   SimpleChanges,
   inject,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
 import { CartState, CartItem } from '../models/cart.model';
@@ -18,10 +18,9 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
   selector: 'app-pos-cart-modal',
   standalone: true,
   imports: [
-    CommonModule,
     IconComponent,
-    QuantityControlComponent,
-  ],
+    QuantityControlComponent
+],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <!-- Overlay -->
@@ -29,13 +28,13 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
       class="modal-overlay"
       [class.open]="isOpen"
       (click)="onOverlayClick($event)"
-    >
+      >
       <!-- Modal Content -->
       <div
         class="modal-content"
         [class.open]="isOpen"
         (click)="$event.stopPropagation()"
-      >
+        >
         <!-- Header -->
         <div class="modal-header">
           <button class="back-btn" (click)="closed.emit()">
@@ -49,111 +48,122 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
             class="clear-btn"
             (click)="onClearCart()"
             [disabled]="!cartState?.items?.length"
-          >
+            >
             Vaciar
           </button>
         </div>
-
+    
         <!-- Items List -->
         <div class="items-container">
           <!-- Empty State -->
-          <div *ngIf="!cartState?.items?.length" class="empty-state">
-            <div class="empty-icon">
-              <app-icon name="shopping-cart" [size]="40"></app-icon>
+          @if (!cartState?.items?.length) {
+            <div class="empty-state">
+              <div class="empty-icon">
+                <app-icon name="shopping-cart" [size]="40"></app-icon>
+              </div>
+              <p class="empty-text">Tu carrito está vacío</p>
+              <p class="empty-hint">Selecciona productos para comenzar</p>
             </div>
-            <p class="empty-text">Tu carrito está vacío</p>
-            <p class="empty-hint">Selecciona productos para comenzar</p>
-          </div>
-
+          }
+    
           <!-- Cart Items -->
-          <div *ngIf="cartState?.items?.length" class="items-list">
-            <div
-              *ngFor="let item of cartState?.items; trackBy: trackByItemId"
-              class="cart-item"
-            >
-              <!-- Product Image -->
-              <div class="item-image">
-                <img
-                  *ngIf="item.product.image_url || item.product.image"
-                  [src]="item.product.image_url || item.product.image"
-                  [alt]="item.product.name"
-                  (error)="handleImageError($event)"
-                />
+          @if (cartState?.items?.length) {
+            <div class="items-list">
+              @for (item of cartState?.items; track trackByItemId($index, item)) {
                 <div
-                  *ngIf="!item.product.image_url && !item.product.image"
-                  class="image-placeholder"
-                >
-                  <app-icon name="image" [size]="18"></app-icon>
-                </div>
-              </div>
-
-              <!-- Item Info -->
-              <div class="item-info">
-                <h4 class="item-name">{{ item.product.name }}</h4>
-                <p *ngIf="item.variant_display_name" style="font-size: 11px; color: var(--color-primary); font-weight: 500; margin: 0 0 2px 0;">
-                  {{ item.variant_display_name }}
-                </p>
-                <div class="item-meta">
-                  <span *ngIf="item.variant_sku || item.product.sku" class="item-sku">{{ item.variant_sku || item.product.sku }}</span>
-                  <span *ngIf="item.is_weight_product && item.weight" class="item-weight-badge">
-                    {{ item.weight }} {{ item.weight_unit || 'kg' }}
-                  </span>
-                  <span class="item-unit-price">
-                    {{ formatCurrency(item.finalPrice) }}{{ item.is_weight_product ? '/' + (item.weight_unit || 'kg') : ' c/u' }}
-                  </span>
-                </div>
-              </div>
-
-              <!-- Remove Button -->
-              <button
-                class="remove-btn"
-                (click)="onRemoveItem(item.id)"
-                title="Eliminar"
-              >
-                <app-icon name="x" [size]="16"></app-icon>
-              </button>
-
-              <!-- Actions Row: Quantity + Total -->
-              <div class="item-actions">
-                <ng-container *ngIf="item.is_weight_product; else mobileUnitQty">
-                  <div class="weight-badge-mobile">
-                    <span class="weight-value">{{ item.weight }} {{ item.weight_unit || 'kg' }}</span>
+                  class="cart-item"
+                  >
+                  <!-- Product Image -->
+                  <div class="item-image">
+                    @if (item.product.image_url || item.product.image) {
+                      <img
+                        [src]="item.product.image_url || item.product.image"
+                        [alt]="item.product.name"
+                        (error)="handleImageError($event)"
+                        />
+                    }
+                    @if (!item.product.image_url && !item.product.image) {
+                      <div
+                        class="image-placeholder"
+                        >
+                        <app-icon name="image" [size]="18"></app-icon>
+                      </div>
+                    }
                   </div>
-                </ng-container>
-                <ng-template #mobileUnitQty>
-                  <app-quantity-control
-                    [value]="item.quantity"
-                    [min]="1"
-                    [max]="item.product.track_inventory !== false ? item.product.stock : 999"
-                    [editable]="true"
-                    [size]="'sm'"
-                    (valueChange)="onQuantityChange(item.id, $event)"
-                  ></app-quantity-control>
-                </ng-template>
-                <span class="item-total">{{ formatCurrency(item.totalPrice) }}</span>
-              </div>
+                  <!-- Item Info -->
+                  <div class="item-info">
+                    <h4 class="item-name">{{ item.product.name }}</h4>
+                    @if (item.variant_display_name) {
+                      <p style="font-size: 11px; color: var(--color-primary); font-weight: 500; margin: 0 0 2px 0;">
+                        {{ item.variant_display_name }}
+                      </p>
+                    }
+                    <div class="item-meta">
+                      @if (item.variant_sku || item.product.sku) {
+                        <span class="item-sku">{{ item.variant_sku || item.product.sku }}</span>
+                      }
+                      @if (item.is_weight_product && item.weight) {
+                        <span class="item-weight-badge">
+                          {{ item.weight }} {{ item.weight_unit || 'kg' }}
+                        </span>
+                      }
+                      <span class="item-unit-price">
+                        {{ formatCurrency(item.finalPrice) }}{{ item.is_weight_product ? '/' + (item.weight_unit || 'kg') : ' c/u' }}
+                      </span>
+                    </div>
+                  </div>
+                  <!-- Remove Button -->
+                  <button
+                    class="remove-btn"
+                    (click)="onRemoveItem(item.id)"
+                    title="Eliminar"
+                    >
+                    <app-icon name="x" [size]="16"></app-icon>
+                  </button>
+                  <!-- Actions Row: Quantity + Total -->
+                  <div class="item-actions">
+                    @if (item.is_weight_product) {
+                      <div class="weight-badge-mobile">
+                        <span class="weight-value">{{ item.weight }} {{ item.weight_unit || 'kg' }}</span>
+                      </div>
+                    } @else {
+                      <app-quantity-control
+                        [value]="item.quantity"
+                        [min]="1"
+                        [max]="item.product.track_inventory !== false ? item.product.stock : 999"
+                        [editable]="true"
+                        [size]="'sm'"
+                        (valueChange)="onQuantityChange(item.id, $event)"
+                      ></app-quantity-control>
+                    }
+                    <span class="item-total">{{ formatCurrency(item.totalPrice) }}</span>
+                  </div>
+                </div>
+              }
+            </div>
+          }
+        </div>
+    
+        <!-- Summary Section -->
+        @if (cartState?.items?.length) {
+          <div class="summary-section">
+            <div class="summary-row">
+              <span>Subtotal</span>
+              <span>{{ formatCurrency(cartState?.summary?.subtotal || 0) }}</span>
+            </div>
+            <div class="summary-row">
+              <span>Impuestos</span>
+              <span>{{ formatCurrency(cartState?.summary?.taxAmount || 0) }}</span>
+            </div>
+            <div class="summary-row total">
+              <span>Total</span>
+              <span class="total-amount">{{
+                formatCurrency(cartState?.summary?.total || 0)
+              }}</span>
             </div>
           </div>
-        </div>
-
-        <!-- Summary Section -->
-        <div class="summary-section" *ngIf="cartState?.items?.length">
-          <div class="summary-row">
-            <span>Subtotal</span>
-            <span>{{ formatCurrency(cartState?.summary?.subtotal || 0) }}</span>
-          </div>
-          <div class="summary-row">
-            <span>Impuestos</span>
-            <span>{{ formatCurrency(cartState?.summary?.taxAmount || 0) }}</span>
-          </div>
-          <div class="summary-row total">
-            <span>Total</span>
-            <span class="total-amount">{{
-              formatCurrency(cartState?.summary?.total || 0)
-            }}</span>
-          </div>
-        </div>
-
+        }
+    
         <!-- Action Buttons -->
         <div class="modal-actions">
           <div class="modal-actions-row">
@@ -161,7 +171,7 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
               class="action-btn save-btn"
               (click)="saveDraft.emit()"
               [disabled]="!cartState?.items?.length"
-            >
+              >
               <app-icon name="save" [size]="18"></app-icon>
               <span>Guardar</span>
             </button>
@@ -169,7 +179,7 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
               class="action-btn shipping-btn"
               (click)="shipping.emit()"
               [disabled]="!cartState?.items?.length"
-            >
+              >
               <app-icon name="truck" [size]="18"></app-icon>
               <span>Envío</span>
             </button>
@@ -178,14 +188,14 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
             class="action-btn checkout-btn"
             (click)="checkout.emit()"
             [disabled]="!cartState?.items?.length"
-          >
+            >
             <app-icon name="credit-card" [size]="18"></app-icon>
             <span>Finalizar Venta</span>
           </button>
         </div>
       </div>
     </div>
-  `,
+    `,
   styles: [
     `
       :host {
@@ -631,6 +641,11 @@ export class PosCartModalComponent implements OnChanges {
 
   onOverlayClick(event: MouseEvent): void {
     if (event.target === event.currentTarget) {
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
       this.closed.emit();
     }
   }
@@ -644,6 +659,11 @@ export class PosCartModalComponent implements OnChanges {
   }
 
   onClearCart(): void {
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.clearCart.emit();
   }
 

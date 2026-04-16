@@ -1774,6 +1774,11 @@ export class PosShippingModalComponent implements OnInit, OnDestroy, OnChanges {
 
   onModalClosed(): void {
     this.resetState();
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.closed.emit();
   }
 }

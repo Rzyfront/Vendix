@@ -1,5 +1,5 @@
 import { Component, Input, Output, EventEmitter, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 
 import { AccountingService } from '../../../services/accounting.service';
@@ -17,14 +17,13 @@ import {
   selector: 'vendix-fixed-asset-categories-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
     IconComponent,
     InputComponent,
-    SelectorComponent,
-  ],
+    SelectorComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen"
@@ -222,6 +221,11 @@ export class FixedAssetCategoriesModalComponent {
         this.is_submitting = false;
         this.show_form = false;
         this.editing_category = null;
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
         this.categoriesChanged.emit();
       },
       error: () => {
@@ -237,6 +241,11 @@ export class FixedAssetCategoriesModalComponent {
     this.accounting_service.deleteFixedAssetCategory(cat.id).subscribe({
       next: () => {
         this.toast_service.show({ variant: 'success', description: 'Categoria eliminada' });
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
         this.categoriesChanged.emit();
       },
       error: () => {

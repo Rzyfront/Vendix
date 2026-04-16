@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { RouterModule, Router, ActivatedRoute } from '@angular/router';
 import {
   FormBuilder,
@@ -67,72 +67,72 @@ export function passwordStrengthValidator(
   selector: 'app-reset-owner-password',
   standalone: true,
   imports: [
-    CommonModule,
     RouterModule,
     ReactiveFormsModule,
     CardComponent,
     InputComponent,
-    ButtonComponent,
-  ],
+    ButtonComponent
+],
   template: `
     <div
       class="min-h-screen flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 bg-gradient-to-br from-[var(--color-background)] to-[rgba(126, 215, 165, 0.1)]"
-    >
+      >
       <div class="max-w-sm w-full space-y-8">
         <!-- Header section with logo and title -->
         <div class="text-center my-3">
           <div
             class="mx-auto h-16 w-16 bg-[var(--color-primary)] rounded-full flex items-center justify-center mb-4"
-          >
+            >
             <span class="text-white font-bold text-xl">V</span>
           </div>
           <h2
             class="mt-6 text-2xl font-extrabold text-[var(--color-text-primary)]"
-          >
+            >
             Restablecer Contraseña
           </h2>
           <p class="mt-2 text-sm text-[var(--color-text-secondary)]">
             Ingresa tu nueva contraseña.
           </p>
         </div>
-
+    
         <!-- Card with form -->
         <app-card shadow="md" class="mt-20" [animateOnLoad]="true">
           <form
             [formGroup]="resetPasswordForm"
             (ngSubmit)="onSubmit()"
             class="space-y-8"
-          >
+            >
             <div class="space-y-4">
               <!-- Error message display -->
-              <div
-                *ngIf="error"
-                class="rounded-md bg-[rgba(239, 68, 68, 0.1)] p-4 border border-[rgba(239, 68, 68, 0.2)]"
-              >
-                <div class="flex">
-                  <div class="flex-shrink-0">
-                    <svg
-                      class="h-5 w-5 text-[var(--color-destructive)]"
-                      viewBox="0 0 20 20"
-                      fill="currentColor"
-                    >
-                      <path
-                        fill-rule="evenodd"
-                        d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
-                        clip-rule="evenodd"
-                      />
-                    </svg>
-                  </div>
-                  <div class="ml-3">
-                    <h3
-                      class="text-sm font-medium text-[var(--color-destructive)]"
-                    >
-                      {{ error }}
-                    </h3>
+              @if (error) {
+                <div
+                  class="rounded-md bg-[rgba(239, 68, 68, 0.1)] p-4 border border-[rgba(239, 68, 68, 0.2)]"
+                  >
+                  <div class="flex">
+                    <div class="flex-shrink-0">
+                      <svg
+                        class="h-5 w-5 text-[var(--color-destructive)]"
+                        viewBox="0 0 20 20"
+                        fill="currentColor"
+                        >
+                        <path
+                          fill-rule="evenodd"
+                          d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                          clip-rule="evenodd"
+                          />
+                      </svg>
+                    </div>
+                    <div class="ml-3">
+                      <h3
+                        class="text-sm font-medium text-[var(--color-destructive)]"
+                        >
+                        {{ error }}
+                      </h3>
+                    </div>
                   </div>
                 </div>
-              </div>
-
+              }
+    
               <app-input
                 label="Nueva Contraseña"
                 formControlName="new_password"
@@ -141,7 +141,7 @@ export function passwordStrengthValidator(
                 size="md"
                 placeholder="••••••••"
               ></app-input>
-
+    
               <app-input
                 label="Confirmar Nueva Contraseña"
                 formControlName="confirmPassword"
@@ -150,19 +150,20 @@ export function passwordStrengthValidator(
                 size="md"
                 placeholder="••••••••"
               ></app-input>
-
+    
               <!-- Passwords mismatch error -->
-              <div
-                *ngIf="
-                  resetPasswordForm.hasError('passwordsMismatch') &&
-                  resetPasswordForm.get('confirmPassword')?.touched
-                "
-                class="text-sm text-[var(--color-destructive)]"
-              >
-                Las contraseñas no coinciden.
-              </div>
+              @if (
+                resetPasswordForm.hasError('passwordsMismatch') &&
+                resetPasswordForm.get('confirmPassword')?.touched
+                ) {
+                <div
+                  class="text-sm text-[var(--color-destructive)]"
+                  >
+                  Las contraseñas no coinciden.
+                </div>
+              }
             </div>
-
+    
             <app-button
               type="submit"
               variant="primary"
@@ -172,21 +173,21 @@ export function passwordStrengthValidator(
               [fullWidth]="true"
               [showTextWhileLoading]="true"
               class="mt-4 w-full"
-            >
+              >
               @if (isLoading) {
                 Restableciendo contraseña...
               } @else {
                 Restablecer Contraseña
               }
             </app-button>
-
+    
             <!-- Back to login link -->
             <div class="flex justify-center mt-4">
               <div class="text-sm">
                 <a
                   routerLink="/auth/login"
                   class="font-medium text-[var(--color-primary)] hover:text-[var(--color-secondary)]"
-                >
+                  >
                   Volver a Iniciar Sesión
                 </a>
               </div>
@@ -195,7 +196,7 @@ export function passwordStrengthValidator(
         </app-card>
       </div>
     </div>
-  `,
+    `,
   styleUrls: [],
 })
 export class ResetOwnerPasswordComponent implements OnInit, OnDestroy {

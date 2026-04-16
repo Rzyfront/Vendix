@@ -1,14 +1,14 @@
 import {
   Component,
   Input,
-  Output,
-  EventEmitter,
   forwardRef,
   inject,
-  ViewChild,
   ElementRef,
+  input,
+  output,
+  viewChild
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   ControlValueAccessor,
   NG_VALUE_ACCESSOR,
@@ -34,7 +34,7 @@ export type InputSize = 'sm' | 'md' | 'lg';
 @Component({
   selector: 'app-input',
   standalone: true,
-  imports: [CommonModule],
+  imports: [],
   providers: [
     {
       provide: NG_VALUE_ACCESSOR,
@@ -43,147 +43,158 @@ export type InputSize = 'sm' | 'md' | 'lg';
     },
   ],
   template: `
-    <div [class]="'w-full ' + customWrapperClass">
+    <div [class]="'w-full ' + customWrapperClass()">
       <!-- Label -->
-      <label
-        *ngIf="label"
-        [for]="inputId"
-        [class]="labelClasses"
-        class="label-with-tooltip"
-      >
-        <span>{{ label }}</span>
-        <span
-          *ngIf="tooltipText"
-          class="help-icon"
-          [attr.data-tooltip]="tooltipText"
-        >
-          <svg
-            class="h-4 w-4"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            stroke-width="2"
+      @if (label) {
+        <label
+          [for]="inputId"
+          [class]="labelClasses"
+          class="label-with-tooltip"
           >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+          <span>{{ label }}</span>
+          @if (tooltipText) {
+            <span
+              class="help-icon"
+              [attr.data-tooltip]="tooltipText"
+              >
+              <svg
+                class="h-4 w-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                stroke-width="2"
+                >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+              </svg>
+            </span>
+          }
+          @if (required()) {
+            <span class="text-[var(--color-destructive)] ml-1"
+              >*</span
+              >
+            }
+          </label>
+        }
+    
+        <!-- Input wrapper -->
+        <div class="relative">
+          <!-- Prefix icon -->
+          @if (prefixIcon()) {
+            <div
+              class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"
+              >
+              <ng-content select="[slot=prefix-icon]"></ng-content>
+            </div>
+          }
+    
+          <!-- Input field -->
+          <input
+            #inputRef
+            [id]="inputId"
+            [type]="actualInputType"
+            [attr.inputmode]="currency() ? 'decimal' : null"
+            [placeholder]="placeholder()"
+            [disabled]="disabled"
+            [readonly]="readonly()"
+            [value]="value"
+            [step]="step()"
+            [min]="min()"
+            [max]="max()"
+            [class]="inputClasses"
+            [style]="customInputStyle()"
+            (input)="onInput($event)"
+            (blur)="onBlur()"
+            (focus)="onFocus()"
+            (keydown)="onKeydown($event)"
+            (paste)="onPaste($event)"
             />
-          </svg>
-        </span>
-        <span *ngIf="required" class="text-[var(--color-destructive)] ml-1"
-          >*</span
-        >
-      </label>
-
-      <!-- Input wrapper -->
-      <div class="relative">
-        <!-- Prefix icon -->
-        <div
-          *ngIf="prefixIcon"
-          class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"
-        >
-          <ng-content select="[slot=prefix-icon]"></ng-content>
-        </div>
-
-        <!-- Input field -->
-        <input
-          #inputRef
-          [id]="inputId"
-          [type]="actualInputType"
-          [attr.inputmode]="currency ? 'decimal' : null"
-          [placeholder]="placeholder"
-          [disabled]="disabled"
-          [readonly]="readonly"
-          [value]="value"
-          [step]="step"
-          [min]="min"
-          [max]="max"
-          [class]="inputClasses"
-          [style]="customInputStyle"
-          (input)="onInput($event)"
-          (blur)="onBlur()"
-          (focus)="onFocus()"
-          (keydown)="onKeydown($event)"
-          (paste)="onPaste($event)"
-        />
-
-        <!-- Password visibility toggle -->
-        <button
-          *ngIf="type === 'password'"
-          type="button"
-          class="absolute inset-y-0 right-0 pr-3 flex items-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors duration-200 focus:outline-none"
-          (click)="togglePasswordVisibility()"
+    
+          <!-- Password visibility toggle -->
+          @if (type() === 'password') {
+            <button
+              type="button"
+              class="absolute inset-y-0 right-0 pr-3 flex items-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors duration-200 focus:outline-none"
+              (click)="togglePasswordVisibility()"
           [attr.aria-label]="
             showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'
           "
-          tabindex="-1"
-        >
-          <!-- Eye icon (show password) -->
-          <svg
-            *ngIf="!showPassword"
-            class="h-5 w-5"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            stroke-width="2"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-            />
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
-            />
-          </svg>
-          <!-- Eye-off icon (hide password) -->
-          <svg
-            *ngIf="showPassword"
-            class="h-5 w-5"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            stroke-width="2"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"
-            />
-          </svg>
-        </button>
-
-        <!-- Suffix icon (only show if not password type) -->
-        <div
-          *ngIf="suffixIcon && type !== 'password'"
-          class="absolute inset-y-0 right-0 pr-3 flex items-center"
-          [class.pointer-events-none]="!suffixClickable"
-          (click)="onSuffixClick()"
-        >
-          <ng-content select="[slot=suffix-icon]"></ng-content>
+              tabindex="-1"
+              >
+              <!-- Eye icon (show password) -->
+              @if (!showPassword) {
+                <svg
+                  class="h-5 w-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                    />
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                    />
+                </svg>
+              }
+              <!-- Eye-off icon (hide password) -->
+              @if (showPassword) {
+                <svg
+                  class="h-5 w-5"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  >
+                  <path
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"
+                    />
+                </svg>
+              }
+            </button>
+          }
+    
+          <!-- Suffix icon (only show if not password type) -->
+          @if (suffixIcon() && type() !== 'password') {
+            <div
+              class="absolute inset-y-0 right-0 pr-3 flex items-center"
+              [class.pointer-events-none]="!suffixClickable()"
+              (click)="onSuffixClick()"
+              >
+              <ng-content select="[slot=suffix-icon]"></ng-content>
+            </div>
+          }
         </div>
+    
+        <!-- Helper text -->
+        @if (helperText && !getValidationError()) {
+          <p
+            class="mt-2 text-sm text-[var(--color-text-secondary)]"
+            >
+            {{ helperText }}
+          </p>
+        }
+    
+        <!-- Error message -->
+        @if (getValidationError()) {
+          <p
+            class="mt-2 text-sm text-[var(--color-destructive)]"
+            >
+            {{ getValidationError() }}
+          </p>
+        }
       </div>
-
-      <!-- Helper text -->
-      <p
-        *ngIf="helperText && !getValidationError()"
-        class="mt-2 text-sm text-[var(--color-text-secondary)]"
-      >
-        {{ helperText }}
-      </p>
-
-      <!-- Error message -->
-      <p
-        *ngIf="getValidationError()"
-        class="mt-2 text-sm text-[var(--color-destructive)]"
-      >
-        {{ getValidationError() }}
-      </p>
-    </div>
-  `,
+    `,
   styles: [
     `
       :host {
@@ -259,44 +270,44 @@ export type InputSize = 'sm' | 'md' | 'lg';
 })
 export class InputComponent implements ControlValueAccessor {
   @Input() label?: string;
-  @Input() placeholder = '';
-  @Input() type: InputType = 'text';
-  @Input() size: InputSize = 'md';
-  @Input() styleVariant: FormStyleVariant = 'modern';
+  readonly placeholder = input('');
+  readonly type = input<InputType>('text');
+  readonly size = input<InputSize>('md');
+  readonly styleVariant = input<FormStyleVariant>('modern');
   @Input() disabled = false;
-  @Input() readonly = false;
-  @Input() required = false;
-  @Input() error?: string;
+  readonly readonly = input(false);
+  readonly required = input(false);
+  readonly error = input<string>();
   @Input() helperText?: string;
-  @Input() prefixIcon = false;
-  @Input() suffixIcon = false;
-  @Input() suffixClickable = false;
-  @Input() control?: AbstractControl | null;
-  @Input() step?: string;
-  @Input() min?: string | number;
-  @Input() max?: string | number;
+  readonly prefixIcon = input(false);
+  readonly suffixIcon = input(false);
+  readonly suffixClickable = input(false);
+  readonly control = input<AbstractControl | null>();
+  readonly step = input<string>();
+  readonly min = input<string | number>();
+  readonly max = input<string | number>();
 
   // ✅ Nuevos inputs para personalización de estilos
-  @Input() customInputStyle = ''; // Estilos inline personalizados
-  @Input() customWrapperClass = ''; // Clases para el wrapper
-  @Input() customLabelClass = ''; // Clases para el label
-  @Input() customInputClass = ''; // Clases adicionales para el input
-  @Input() customClasses = ''; // Retrocompatibilidad
+  readonly customInputStyle = input(''); // Estilos inline personalizados
+  readonly customWrapperClass = input(''); // Clases para el wrapper
+  readonly customLabelClass = input(''); // Clases para el label
+  readonly customInputClass = input(''); // Clases adicionales para el input
+  readonly customClasses = input(''); // Retrocompatibilidad
   @Input() tooltipText?: string; // Texto para el tooltip de ayuda (muestra ícono automáticamente)
-  @Input() currency = false; // Enable currency formatting mode
-  @Input() currencyDecimals?: number; // Override decimal places
-  @Input() allowNegative = false; // Allow negative values in currency mode
+  readonly currency = input(false); // Enable currency formatting mode
+  readonly currencyDecimals = input<number>(); // Override decimal places
+  readonly allowNegative = input(false); // Allow negative values in currency mode
 
-  @Output() inputChange = new EventEmitter<string>();
-  @Output() inputFocus = new EventEmitter<void>();
-  @Output() inputBlur = new EventEmitter<void>();
-  @Output() suffixClick = new EventEmitter<void>();
+  readonly inputChange = output<string>();
+  readonly inputFocus = output<void>();
+  readonly inputBlur = output<void>();
+  readonly suffixClick = output<void>();
 
   @Input() value = '';
   inputId = `input-${Math.random().toString(36).substr(2, 9)}`;
   showPassword = false;
 
-  @ViewChild('inputRef') inputRef!: ElementRef<HTMLInputElement>;
+  readonly inputRef = viewChild.required<ElementRef<HTMLInputElement>>('inputRef');
 
   private currencyService = inject(CurrencyFormatService);
   private currencyRawValue: number | null = null;
@@ -307,7 +318,7 @@ export class InputComponent implements ControlValueAccessor {
   private onTouched = () => { };
 
   writeValue(value: any): void {
-    if (this.currency) {
+    if (this.currency()) {
       this.currencyRawValue = value != null ? Number(value) : null;
       if (!this.isCurrencyFocused) {
         this.value = this.currencyFormatForDisplay(this.currencyRawValue);
@@ -332,7 +343,7 @@ export class InputComponent implements ControlValueAccessor {
   get labelClasses(): string {
     const baseClasses = ['block', 'font-medium', 'mb-2'];
 
-    if (this.styleVariant === 'modern') {
+    if (this.styleVariant() === 'modern') {
       // Modern: iOS-inspired uppercase labels
       return [
         ...baseClasses,
@@ -340,7 +351,7 @@ export class InputComponent implements ControlValueAccessor {
         'uppercase',
         'tracking-[0.05em]',
         'text-[var(--color-text-muted)]',
-        this.customLabelClass,
+        this.customLabelClass(),
       ]
         .filter(Boolean)
         .join(' ');
@@ -351,7 +362,7 @@ export class InputComponent implements ControlValueAccessor {
       ...baseClasses,
       'text-sm',
       'text-[var(--color-text-primary)]',
-      this.customLabelClass,
+      this.customLabelClass(),
     ]
       .filter(Boolean)
       .join(' ');
@@ -371,16 +382,17 @@ export class InputComponent implements ControlValueAccessor {
 
     // Clases de validación por estado
     let stateClasses: string[];
-    if (this.control?.invalid && this.control?.touched) {
+    const control = this.control();
+    if (control?.invalid && control?.touched) {
       stateClasses = [
         'border-[var(--color-destructive)]',
         'focus:border-[var(--color-destructive)]',
         'bg-[rgba(239,68,68,0.1)]',
       ];
     } else if (
-      this.control?.valid &&
-      this.control?.touched &&
-      this.control?.value
+      control?.valid &&
+      control?.touched &&
+      control?.value
     ) {
       stateClasses = [
         'border-[var(--color-primary)]',
@@ -401,8 +413,8 @@ export class InputComponent implements ControlValueAccessor {
       md: { pl: ['pl-3', 'sm:pl-4'], pr: ['pr-3', 'sm:pr-4'] },
       lg: { pl: ['pl-4'], pr: ['pr-4'] },
     };
-    const leftPadding = this.prefixIcon ? ['pl-10'] : basePadding[this.size].pl;
-    const rightPadding = (this.suffixIcon || this.type === 'password') ? ['pr-10'] : basePadding[this.size].pr;
+    const leftPadding = this.prefixIcon() ? ['pl-10'] : basePadding[this.size()].pl;
+    const rightPadding = (this.suffixIcon() || this.type() === 'password') ? ['pr-10'] : basePadding[this.size()].pr;
 
     let variantClasses: string[];
 
@@ -416,29 +428,29 @@ export class InputComponent implements ControlValueAccessor {
       lg: ['h-12', 'sm:h-[52px]', 'text-base', 'sm:text-lg'],
     };
 
-    if (this.styleVariant === 'modern') {
+    if (this.styleVariant() === 'modern') {
       // Modern: iOS-inspired with shadow focus
       variantClasses = [
-        ...sizeClasses[this.size],
+        ...sizeClasses[this.size()],
         'rounded-xl',
         'bg-[var(--color-background)]',
         'focus:bg-[var(--color-surface)]',
         'focus:shadow-[0_0_0_3px_var(--color-ring)]',
-        this.control?.invalid && this.control?.touched
+        control?.invalid && control?.touched
           ? 'focus:shadow-[0_0_0_3px_rgba(239,68,68,0.3)]'
-          : this.control?.valid && this.control?.touched && this.control?.value
+          : control?.valid && control?.touched && control?.value
             ? 'focus:shadow-[0_0_0_3px_rgba(126,215,165,0.3)]'
             : '',
       ];
     } else {
       // Classic: with ring focus
       variantClasses = [
-        ...sizeClasses[this.size],
+        ...sizeClasses[this.size()],
         'rounded-xl',
         'focus:ring-2',
-        this.control?.invalid && this.control?.touched
+        control?.invalid && control?.touched
           ? 'focus:ring-[var(--color-destructive)]/30'
-          : this.control?.valid && this.control?.touched && this.control?.value
+          : control?.valid && control?.touched && control?.value
             ? 'focus:ring-[var(--color-primary)]/30'
             : 'focus:ring-secondary/40',
       ];
@@ -454,26 +466,30 @@ export class InputComponent implements ControlValueAccessor {
     ];
 
     // Agregar clases personalizadas
-    if (this.customInputClass) {
-      classes.push(this.customInputClass);
+    const customInputClass = this.customInputClass();
+    if (customInputClass) {
+      classes.push(customInputClass);
     }
-    if (this.customClasses) {
-      classes.push(this.customClasses);
+    const customClasses = this.customClasses();
+    if (customClasses) {
+      classes.push(customClasses);
     }
 
     return classes.filter(Boolean).join(' ');
   }
 
   getValidationError(): string | null {
-    if (this.error) {
-      return this.error;
+    const error = this.error();
+    if (error) {
+      return error;
     }
 
-    if (!this.control || !this.control.errors || !this.control.touched) {
+    const control = this.control();
+    if (!control || !control.errors || !control.touched) {
       return null;
     }
 
-    const errors = this.control.errors;
+    const errors = control.errors;
     if (errors['required']) {
       return 'Este campo es requerido.';
     }
@@ -496,7 +512,7 @@ export class InputComponent implements ControlValueAccessor {
       return 'La contraseña debe contener al menos un carácter especial.';
     }
     if (errors['pattern']) {
-      if (this.type === 'tel') {
+      if (this.type() === 'tel') {
         return 'Solo se permiten números y los símbolos + # * ( ) -';
       }
       return 'El formato es inválido.';
@@ -509,7 +525,7 @@ export class InputComponent implements ControlValueAccessor {
   onInput(event: Event): void {
     const target = event.target as HTMLInputElement;
 
-    if (this.currency) {
+    if (this.currency()) {
       const cursorPos = target.selectionStart ?? 0;
       const oldValue = target.value;
       const sanitized = this.currencySanitize(oldValue);
@@ -526,7 +542,7 @@ export class InputComponent implements ControlValueAccessor {
       return;
     }
 
-    if (this.type === 'tel') {
+    if (this.type() === 'tel') {
       target.value = target.value.replace(/[^\d+#*\s()-]/g, '');
     }
     this.value = target.value;
@@ -535,40 +551,45 @@ export class InputComponent implements ControlValueAccessor {
   }
 
   onBlur(): void {
-    if (this.currency) {
+    if (this.currency()) {
       this.isCurrencyFocused = false;
       const formatted = this.currencyFormatForDisplay(this.currencyRawValue);
       this.value = formatted;
-      if (this.inputRef?.nativeElement) {
-        this.inputRef.nativeElement.value = formatted;
+      const inputRef = this.inputRef();
+      if (inputRef?.nativeElement) {
+        inputRef.nativeElement.value = formatted;
       }
     }
     this.onTouched();
+    // TODO: The 'emit' function requires a mandatory void argument
     this.inputBlur.emit();
   }
 
   onFocus(): void {
-    if (this.currency) {
+    if (this.currency()) {
       this.isCurrencyFocused = true;
     }
+    // TODO: The 'emit' function requires a mandatory void argument
     this.inputFocus.emit();
   }
 
   onSuffixClick(): void {
-    if (this.suffixClickable && !this.disabled) {
+    if (this.suffixClickable() && !this.disabled) {
+      // TODO: The 'emit' function requires a mandatory void argument
       this.suffixClick.emit();
     }
   }
 
   // Password visibility toggle
   get actualInputType(): InputType {
-    if (this.currency) {
+    if (this.currency()) {
       return 'text';
     }
-    if (this.type === 'password' && this.showPassword) {
+    const type = this.type();
+    if (type === 'password' && this.showPassword) {
       return 'text';
     }
-    return this.type;
+    return type;
   }
 
   togglePasswordVisibility(): void {
@@ -582,7 +603,7 @@ export class InputComponent implements ControlValueAccessor {
   // =========================================================================
 
   onKeydown(event: KeyboardEvent): void {
-    if (!this.currency) return;
+    if (!this.currency()) return;
 
     const { decimal } = this.currencyGetSeparators();
 
@@ -599,7 +620,7 @@ export class InputComponent implements ControlValueAccessor {
     if (event.key >= '0' && event.key <= '9') return;
 
     // Allow minus at position 0 if allowed
-    if (event.key === '-' && this.allowNegative) {
+    if (event.key === '-' && this.allowNegative()) {
       const input = event.target as HTMLInputElement;
       if ((input.selectionStart ?? 0) === 0 && !input.value.includes('-')) return;
     }
@@ -621,7 +642,7 @@ export class InputComponent implements ControlValueAccessor {
   }
 
   onPaste(event: ClipboardEvent): void {
-    if (!this.currency) return;
+    if (!this.currency()) return;
     event.preventDefault();
     const pasted = event.clipboardData?.getData('text') || '';
     const input = event.target as HTMLInputElement;
@@ -652,7 +673,7 @@ export class InputComponent implements ControlValueAccessor {
   }
 
   private currencyGetDecimals(): number {
-    return this.currencyDecimals ?? this.currencyService.currencyDecimals();
+    return this.currencyDecimals() ?? this.currencyService.currencyDecimals();
   }
 
   private currencyFormatForDisplay(value: number | null): string {
@@ -720,7 +741,7 @@ export class InputComponent implements ControlValueAccessor {
       const ch = value[i];
       if (ch >= '0' && ch <= '9') {
         result += ch;
-      } else if (ch === '-' && i === 0 && this.allowNegative) {
+      } else if (ch === '-' && i === 0 && this.allowNegative()) {
         result += ch;
       } else if (ch === thousands || ch === '\u00A0') {
         // Thousands separator → skip (added automatically by formatLive)

@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { Subject, takeUntil } from 'rxjs';
 import { HttpClient } from '@angular/common/http';
 import { map } from 'rxjs/operators';
@@ -29,7 +29,6 @@ import {
   selector: 'app-stock-adjustments',
   standalone: true,
   imports: [
-    CommonModule,
     StatsComponent,
     AdjustmentDetailModalComponent,
     AdjustmentCreateModalComponent,
@@ -39,7 +38,9 @@ import {
   template: `
     <div class="w-full overflow-x-hidden">
       <!-- Stats Grid -->
-      <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
+      <div
+        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+      >
         <app-stats
           title="Total Ajustes"
           [value]="stats.total"
@@ -90,35 +91,38 @@ import {
         (pageChange)="changePage($event)"
       ></app-adjustment-list>
 
-      <!-- Create Modal (Wizard) -->
-      <app-adjustment-create-modal
-        [isOpen]="showCreateModal()"
-        [isSubmitting]="isSubmitting()"
-        [locations]="locationOptions()"
-        (isOpenChange)="showCreateModal.set($event)"
-        (cancel)="showCreateModal.set(false)"
-        (save)="onCreateDraft($event)"
-        (saveAndComplete)="onCreateAndComplete($event)"
-      ></app-adjustment-create-modal>
+      @defer (when showCreateModal()) {
+        <app-adjustment-create-modal
+          [isOpen]="showCreateModal()"
+          [isSubmitting]="isSubmitting()"
+          [locations]="locationOptions()"
+          (isOpenChange)="showCreateModal.set($event)"
+          (cancel)="showCreateModal.set(false)"
+          (save)="onCreateDraft($event)"
+          (saveAndComplete)="onCreateAndComplete($event)"
+        ></app-adjustment-create-modal>
+      }
 
-      <!-- Bulk Adjustment Modal -->
-      <app-bulk-adjustment-modal
-        [isOpen]="showBulkModal()"
-        [locations]="locationOptions()"
-        (isOpenChange)="showBulkModal.set($event)"
-        (completed)="refresh()"
-      ></app-bulk-adjustment-modal>
+      @defer (when showBulkModal()) {
+        <app-bulk-adjustment-modal
+          [isOpen]="showBulkModal()"
+          [locations]="locationOptions()"
+          (isOpenChange)="showBulkModal.set($event)"
+          (completed)="refresh()"
+        ></app-bulk-adjustment-modal>
+      }
 
-      <!-- Detail Modal -->
-      <app-adjustment-detail-modal
-        [isOpen]="is_detail_modal_open"
-        [adjustment]="selected_adjustment"
-        [isProcessing]="isSubmitting()"
-        (isOpenChange)="is_detail_modal_open = $event"
-        (close)="closeDetailModal()"
-        (approve)="onApprove($event)"
-        (deleteAdjustment)="onDelete($event)"
-      ></app-adjustment-detail-modal>
+      @defer (when is_detail_modal_open) {
+        <app-adjustment-detail-modal
+          [isOpen]="is_detail_modal_open"
+          [adjustment]="selected_adjustment"
+          [isProcessing]="isSubmitting()"
+          (isOpenChange)="is_detail_modal_open = $event"
+          (close)="closeDetailModal()"
+          (approve)="onApprove($event)"
+          (deleteAdjustment)="onDelete($event)"
+        ></app-adjustment-detail-modal>
+      }
     </div>
   `,
 })
@@ -177,7 +181,8 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
       offset: (this.pagination.page - 1) * this.pagination.limit,
     };
 
-    this.inventoryService.getAdjustments(query)
+    this.inventoryService
+      .getAdjustments(query)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (response) => {
@@ -205,7 +210,8 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
   }
 
   loadLocations(): void {
-    this.http.get<any>(`${environment.apiUrl}/store/inventory/locations`)
+    this.http
+      .get<any>(`${environment.apiUrl}/store/inventory/locations`)
       .pipe(
         map((r) => r.data || r),
         takeUntil(this.destroy$),
@@ -314,7 +320,8 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
 
   onCreateDraft(dto: BatchCreateAdjustmentsRequest): void {
     this.isSubmitting.set(true);
-    this.inventoryService.batchCreateAdjustments(dto)
+    this.inventoryService
+      .batchCreateAdjustments(dto)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: () => {
@@ -332,11 +339,14 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
 
   onCreateAndComplete(dto: BatchCreateAdjustmentsRequest): void {
     this.isSubmitting.set(true);
-    this.inventoryService.batchCreateAndComplete(dto)
+    this.inventoryService
+      .batchCreateAndComplete(dto)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: () => {
-          this.toastService.success('Ajustes creados y aprobados. Movimientos de inventario aplicados.');
+          this.toastService.success(
+            'Ajustes creados y aprobados. Movimientos de inventario aplicados.',
+          );
           this.showCreateModal.set(false);
           this.isSubmitting.set(false);
           this.refresh();
@@ -362,7 +372,8 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
     if (!confirmed) return;
 
     this.isSubmitting.set(true);
-    this.inventoryService.approveAdjustment(adjustment.id, 0)
+    this.inventoryService
+      .approveAdjustment(adjustment.id, 0)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: () => {
@@ -389,7 +400,8 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
     if (!confirmed) return;
 
     this.isSubmitting.set(true);
-    this.inventoryService.deleteAdjustment(adjustment.id)
+    this.inventoryService
+      .deleteAdjustment(adjustment.id)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: () => {

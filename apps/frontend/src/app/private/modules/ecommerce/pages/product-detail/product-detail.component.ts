@@ -46,7 +46,7 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
               <span>{{ p.categories[0].name }}</span>
             }
           </nav>
-
+    
           <!-- Main Product Layout -->
           <div class="product-main-grid">
             <!-- Gallery -->
@@ -61,14 +61,14 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
                       class="thumbnail"
                       [class.active]="activeImageUrl() === img.image_url"
                       (click)="setActiveImage(img.image_url)"
-                    >
+                      >
                       <img [src]="img.image_url" [alt]="p.name" />
                     </div>
                   }
                 </div>
               }
             </div>
-
+    
             <!-- Info Panel Minimalist -->
             <div class="product-info-panel">
               <div class="brand-line">
@@ -76,22 +76,24 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
                   <span class="brand-name">{{ p.brand.name }}</span>
                 }
               </div>
-              
+    
               <h1 class="product-title">{{ p.name }}</h1>
-              
-              <div class="rating-line" *ngIf="p.avg_rating">
-                <div class="stars">
-                   @for (s of [1,2,3,4,5]; track s) {
-                    <app-icon
-                      name="star"
-                      [size]="14"
-                      [class]="s <= p.avg_rating ? 'text-warning fill-warning' : 'text-gray-300'"
-                    />
-                  }
+    
+              @if (p.avg_rating) {
+                <div class="rating-line">
+                  <div class="stars">
+                    @for (s of [1,2,3,4,5]; track s) {
+                      <app-icon
+                        name="star"
+                        [size]="14"
+                        [class]="s <= p.avg_rating ? 'text-warning fill-warning' : 'text-gray-300'"
+                        />
+                    }
+                  </div>
+                  <span class="count">({{ p.review_count }})</span>
                 </div>
-                <span class="count">({{ p.review_count }})</span>
-              </div>
-
+              }
+    
               <!-- Service Info Section -->
               @if (p.product_type === 'service') {
                 <div class="service-info-section">
@@ -118,7 +120,7 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
                   </div>
                 </div>
               }
-
+    
               <div class="price-line">
                 @if (displayPriceLabel(); as label) {
                   <span class="text-sm text-text-muted font-medium mr-1">{{ label }}</span>
@@ -132,7 +134,7 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
                   <span class="original-price" style="text-decoration: line-through; opacity: 0.6; margin-left: 10px;">{{ p.base_price | currency }}</span>
                 }
               </div>
-
+    
               <!-- Options: Attribute-based groups -->
               @if (hasAttributeGroups()) {
                 <div class="options-group">
@@ -147,7 +149,7 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
                             customClasses="v-btn"
                             [disabled]="!isOnDemand() && !getAvailableValues(group.name).includes(val)"
                             (clicked)="selectAttributeValue(group.name, val)"
-                          >
+                            >
                             {{ val }}
                             @if (getPriceDiffForValue(group.name, val); as diff) {
                               <span class="text-[10px] ml-1 opacity-80">
@@ -171,7 +173,7 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
                         customClasses="v-btn"
                         [disabled]="!isOnDemand() && v.stock_quantity === 0"
                         (clicked)="selectVariant(v)"
-                      >
+                        >
                         {{ v.name }}
                         @if (v.final_price !== p.final_price) {
                           <span class="text-[10px] ml-1 opacity-80">
@@ -186,7 +188,7 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
                   </div>
                 </div>
               }
-
+    
               <!-- Purchase Section -->
               <div class="purchase-box">
                 <app-quantity-control
@@ -195,29 +197,29 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
                   [max]="isOnDemand() ? 999 : (displayStock() || 99)"
                   [size]="'sm'"
                   (valueChange)="quantity.set($event)"
-                />
-
+                  />
+    
                 <app-button
                   variant="primary"
                   size="sm"
                   customClasses="btn-cart"
                   [disabled]="!isService() && !isOnDemand() && displayStock() === 0"
                   (clicked)="onAddToCart(p)"
-                >
+                  >
                   <app-icon slot="icon" name="shopping-cart" [size]="18" />
                   {{ isService() ? 'Agendar' : (!isOnDemand() && displayStock() === 0 ? 'Agotado' : 'Añadir') }}
                 </app-button>
-
+    
                 <app-button
                   variant="outline"
                   size="sm"
                   customClasses="btn-share"
                   (clicked)="onShareClick()"
-                >
+                  >
                   <app-icon slot="icon" name="share" [size]="18" />
                 </app-button>
               </div>
-
+    
               <!-- Buy Now -->
               <app-button
                 variant="primary"
@@ -226,10 +228,10 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
                 customClasses="btn-buy-now"
                 [disabled]="!isService() && !isOnDemand() && displayStock() === 0"
                 (clicked)="onBuyNow(p)"
-              >
+                >
                 {{ isService() ? 'Agendar ahora' : (!isOnDemand() && displayStock() === 0 ? 'Agotado' : 'Comprar ahora') }}
               </app-button>
-
+    
               <!-- Stock Minimal -->
               <div class="stock-minimal">
                 @if (isService()) {
@@ -246,7 +248,7 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
                   <span class="s-text">Sin stock</span>
                 }
               </div>
-
+    
               <!-- Vertical Flow: Categories & Description -->
               <div class="product-content-flow">
                 <div class="info-section">
@@ -257,40 +259,42 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
                     }
                   </div>
                 </div>
-
-                <div class="info-section" *ngIf="p.description">
-                  <h4 class="info-label">Descripción</h4>
-                  <div class="desc-box">
-                    <p class="desc-text" [class.expanded]="isDescriptionExpanded()">
-                      {{ p.description }}
-                    </p>
-                    @if (p.description && p.description.length > 150) {
-                      <app-button
-                        variant="ghost"
-                        size="sm"
-                        customClasses="btn-more"
-                        (clicked)="toggleDescription()"
-                      >
-                        {{ isDescriptionExpanded() ? 'Ver menos' : 'Leer más' }}
-                      </app-button>
-                    }
+    
+                @if (p.description) {
+                  <div class="info-section">
+                    <h4 class="info-label">Descripción</h4>
+                    <div class="desc-box">
+                      <p class="desc-text" [class.expanded]="isDescriptionExpanded()">
+                        {{ p.description }}
+                      </p>
+                      @if (p.description && p.description.length > 150) {
+                        <app-button
+                          variant="ghost"
+                          size="sm"
+                          customClasses="btn-more"
+                          (clicked)="toggleDescription()"
+                          >
+                          {{ isDescriptionExpanded() ? 'Ver menos' : 'Leer más' }}
+                        </app-button>
+                      }
+                    </div>
                   </div>
-                </div>
+                }
               </div>
             </div>
           </div>
-
+    
           <!-- Recommendations Carousel -->
           <app-product-carousel
             title="Productos sugeridos"
             [products]="recommendedProducts()"
             (quick_view)="onQuickView($event)"
-          />
-
+            />
+    
           <!-- Reviews Section -->
           <div class="reviews-section">
             <h3 class="rv-section-title">Opiniones ({{ reviewsTotalCount() }})</h3>
-
+    
             <!-- Rating Summary -->
             @if (reviewsTotalCount() > 0) {
               <div class="rv-summary">
@@ -317,7 +321,7 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
                 </div>
               </div>
             }
-
+    
             <!-- Sort controls -->
             @if (reviewsTotalCount() > 0) {
               <div class="rv-sort">
@@ -325,7 +329,7 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
                 <button [class.active]="reviewsSortBy() === 'helpful'" (click)="onReviewsSortChange('helpful')">Más útiles</button>
               </div>
             }
-
+    
             <!-- Reviews List -->
             <div class="rv-list">
               @if (reviewsLoading()) {
@@ -371,82 +375,82 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
                   </div>
                 }
                 @empty {
-                  <p class="rv-empty">Aún no hay opiniones para este producto.</p>
-                }
+                <p class="rv-empty">Aún no hay opiniones para este producto.</p>
               }
-            </div>
-
-            <!-- Pagination -->
-            @if (reviewsTotalPages() > 1) {
-              <div class="rv-pagination">
-                @for (pg of [].constructor(reviewsTotalPages()); track $index) {
-                  <button
-                    class="rv-page-btn"
-                    [class.active]="reviewsPage() === $index + 1"
-                    (click)="onReviewsPageChange($index + 1)"
-                  >{{ $index + 1 }}</button>
-                }
-              </div>
             }
-
-            <!-- Write Review Form -->
-            <div class="rv-form-section">
-              @if (reviewSubmitted()) {
-                <div class="rv-submitted">
-                  <app-icon name="check-circle" [size]="24" class="text-green-500" />
-                  <p>Tu reseña fue enviada y está pendiente de moderación.</p>
-                </div>
-              } @else if (canWriteReview()?.can_review) {
-                <h4 class="rv-form-title">Escribe tu opinión</h4>
-                <form [formGroup]="reviewForm" (ngSubmit)="onSubmitReview()">
-                  <div class="star-picker">
-                    @for (s of [1,2,3,4,5]; track s) {
-                      <app-icon
-                        name="star"
-                        [size]="24"
-                        [class]="s <= (reviewForm.get('rating')?.value ?? 0) ? 'text-warning fill-warning cursor-pointer' : 'text-gray-300 cursor-pointer'"
-                        (click)="reviewForm.get('rating')?.setValue(s)"
-                      />
-                    }
-                  </div>
-                  <input type="text" formControlName="title" placeholder="Título (opcional)" class="rv-input" />
-                  <textarea formControlName="comment" placeholder="Comparte tu opinión..." class="rv-textarea"></textarea>
-                  <app-button
-                    type="submit"
-                    variant="primary"
-                    size="sm"
-                    [fullWidth]="true"
-                    [disabled]="reviewForm.invalid || reviewSubmitting()"
-                  >
-                    {{ reviewSubmitting() ? 'Enviando...' : 'Publicar opinión' }}
-                  </app-button>
-                </form>
-              } @else if (canWriteReview()?.reason === 'already_reviewed') {
-                <p class="rv-info">Ya has dejado una reseña para este producto.</p>
-              } @else if (canWriteReview()?.reason === 'no_purchase') {
-                <p class="rv-info">Compra este producto para dejar una reseña.</p>
+          </div>
+    
+          <!-- Pagination -->
+          @if (reviewsTotalPages() > 1) {
+            <div class="rv-pagination">
+              @for (pg of [].constructor(reviewsTotalPages()); track $index) {
+                <button
+                  class="rv-page-btn"
+                  [class.active]="reviewsPage() === $index + 1"
+                  (click)="onReviewsPageChange($index + 1)"
+                >{{ $index + 1 }}</button>
               }
             </div>
+          }
+    
+          <!-- Write Review Form -->
+          <div class="rv-form-section">
+            @if (reviewSubmitted()) {
+              <div class="rv-submitted">
+                <app-icon name="check-circle" [size]="24" class="text-green-500" />
+                <p>Tu reseña fue enviada y está pendiente de moderación.</p>
+              </div>
+            } @else if (canWriteReview()?.can_review) {
+              <h4 class="rv-form-title">Escribe tu opinión</h4>
+              <form [formGroup]="reviewForm" (ngSubmit)="onSubmitReview()">
+                <div class="star-picker">
+                  @for (s of [1,2,3,4,5]; track s) {
+                    <app-icon
+                      name="star"
+                      [size]="24"
+                      [class]="s <= (reviewForm.get('rating')?.value ?? 0) ? 'text-warning fill-warning cursor-pointer' : 'text-gray-300 cursor-pointer'"
+                      (click)="reviewForm.get('rating')?.setValue(s)"
+                      />
+                  }
+                </div>
+                <input type="text" formControlName="title" placeholder="Título (opcional)" class="rv-input" />
+                <textarea formControlName="comment" placeholder="Comparte tu opinión..." class="rv-textarea"></textarea>
+                <app-button
+                  type="submit"
+                  variant="primary"
+                  size="sm"
+                  [fullWidth]="true"
+                  [disabled]="reviewForm.invalid || reviewSubmitting()"
+                  >
+                  {{ reviewSubmitting() ? 'Enviando...' : 'Publicar opinión' }}
+                </app-button>
+              </form>
+            } @else if (canWriteReview()?.reason === 'already_reviewed') {
+              <p class="rv-info">Ya has dejado una reseña para este producto.</p>
+            } @else if (canWriteReview()?.reason === 'no_purchase') {
+              <p class="rv-info">Compra este producto para dejar una reseña.</p>
+            }
           </div>
         </div>
-      }
+      </div>
+    }
     </div>
-
+    
     <!-- Quick View Modal -->
     <app-product-quick-view-modal
       [isOpen]="quickViewOpen"
       [productSlug]="selectedProductSlug"
       (closed)="quickViewOpen = false"
       (addedToCart)="onAddToCart($event)"
-    />
-
+      />
+    
     <!-- Share Modal -->
     <app-share-modal
       [isOpen]="shareModalOpen"
       [product]="productForShare()"
       (closed)="shareModalOpen = false"
-    />
-  `,
+      />
+    `,
   styles: [`
     .product-detail-page {
       max-width: 1100px;

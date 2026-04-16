@@ -1,5 +1,14 @@
-import { Component, OnInit, OnDestroy, signal, inject, effect, untracked, computed } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {
+  Component,
+  OnInit,
+  OnDestroy,
+  signal,
+  inject,
+  effect,
+  untracked,
+  computed,
+} from '@angular/core';
+
 import { Router } from '@angular/router';
 import { Subject, takeUntil } from 'rxjs';
 import { EChartsOption } from 'echarts';
@@ -12,9 +21,17 @@ import { EmptyStateComponent } from '../../../../shared/components/empty-state/e
 import { ToastService } from '../../../../shared/components/toast/toast.service';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 import { OptionsDropdownComponent } from '../../../../shared/components/options-dropdown/options-dropdown.component';
-import { FilterConfig, FilterValues } from '../../../../shared/components/options-dropdown/options-dropdown.interfaces';
+import {
+  FilterConfig,
+  FilterValues,
+} from '../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 
-import { toLocalDateString, getDefaultStartDate, getDefaultEndDate, formatChartPeriod } from '../../../../shared/utils/date.util';
+import {
+  toLocalDateString,
+  getDefaultStartDate,
+  getDefaultEndDate,
+  formatChartPeriod,
+} from '../../../../shared/utils/date.util';
 import { AnalyticsService } from '../analytics/services/analytics.service';
 import { DateRangeFilter } from '../analytics/interfaces/analytics.interface';
 import {
@@ -43,12 +60,28 @@ interface QuickLink {
 }
 
 const QUICK_LINKS: QuickLink[] = [
-  { icon: 'trending-up', label: 'Resumen de Ventas', route: '/admin/analytics/sales/summary' },
-  { icon: 'package', label: 'Ventas por Producto', route: '/admin/analytics/sales/by-product' },
+  {
+    icon: 'trending-up',
+    label: 'Resumen de Ventas',
+    route: '/admin/analytics/sales/summary',
+  },
+  {
+    icon: 'package',
+    label: 'Ventas por Producto',
+    route: '/admin/analytics/sales/by-product',
+  },
   { icon: 'shopping-cart', label: 'Órdenes', route: '/admin/orders/sales' },
-  { icon: 'alert-triangle', label: 'Stock Info', route: '/admin/analytics/inventory/stock-info' },
+  {
+    icon: 'alert-triangle',
+    label: 'Stock Info',
+    route: '/admin/analytics/inventory/stock-info',
+  },
   { icon: 'credit-card', label: 'Gastos', route: '/admin/expenses' },
-  { icon: 'users', label: 'Clientes', route: '/admin/analytics/customers/summary' },
+  {
+    icon: 'users',
+    label: 'Clientes',
+    route: '/admin/analytics/customers/summary',
+  },
   { icon: 'shopping-bag', label: 'Compras', route: '/admin/inventory/pop' },
 ];
 
@@ -56,7 +89,6 @@ const QUICK_LINKS: QuickLink[] = [
   selector: 'app-store-dashboard',
   standalone: true,
   imports: [
-    CommonModule,
     StatsComponent,
     ChartComponent,
     IconComponent,
@@ -108,10 +140,16 @@ const QUICK_LINKS: QuickLink[] = [
       <!-- Charts: Trend (2/3) + Channels (1/3) -->
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
         <!-- Sales Trend Chart -->
-        <div class="lg:col-span-2 bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border overflow-hidden flex flex-col">
-          <div class="p-4 border-b border-border flex items-center justify-between gap-2">
+        <div
+          class="lg:col-span-2 bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border overflow-hidden flex flex-col"
+        >
+          <div
+            class="p-4 border-b border-border flex items-center justify-between gap-2"
+          >
             <div>
-              <h3 class="font-semibold text-text-primary text-sm">Tendencia de Ventas</h3>
+              <h3 class="font-semibold text-text-primary text-sm">
+                Tendencia de Ventas
+              </h3>
               <p class="text-xs text-text-secondary">{{ dateRangeLabel() }}</p>
             </div>
             <app-options-dropdown
@@ -126,7 +164,9 @@ const QUICK_LINKS: QuickLink[] = [
           <div class="p-4 flex-1">
             @if (loadingTrends()) {
               <div class="h-56 flex items-center justify-center">
-                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                <div
+                  class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+                ></div>
               </div>
             } @else if (trends().length === 0) {
               <app-empty-state
@@ -137,21 +177,36 @@ const QUICK_LINKS: QuickLink[] = [
                 size="sm"
               />
             } @else {
-              <app-chart [options]="trendChartOptions()" size="large"></app-chart>
+              @defer (on viewport) {
+                <app-chart
+                  [options]="trendChartOptions()"
+                  size="large"
+                ></app-chart>
+              } @placeholder {
+                <div
+                  class="h-56 bg-surface-secondary animate-pulse rounded-xl"
+                ></div>
+              }
             }
           </div>
         </div>
 
         <!-- Sales by Channel Chart -->
-        <div class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border overflow-hidden flex flex-col">
+        <div
+          class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border overflow-hidden flex flex-col"
+        >
           <div class="p-4 border-b border-border">
-            <h3 class="font-semibold text-text-primary text-sm">Ventas por Canal</h3>
+            <h3 class="font-semibold text-text-primary text-sm">
+              Ventas por Canal
+            </h3>
             <p class="text-xs text-text-secondary">Distribución del período</p>
           </div>
           <div class="p-4 flex-1">
             @if (loadingChannels()) {
               <div class="h-56 flex items-center justify-center">
-                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                <div
+                  class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+                ></div>
               </div>
             } @else if (channels().length === 0) {
               <app-empty-state
@@ -162,7 +217,16 @@ const QUICK_LINKS: QuickLink[] = [
                 size="sm"
               />
             } @else {
-              <app-chart [options]="channelChartOptions()" size="large"></app-chart>
+              @defer (on viewport) {
+                <app-chart
+                  [options]="channelChartOptions()"
+                  size="large"
+                ></app-chart>
+              } @placeholder {
+                <div
+                  class="h-56 bg-surface-secondary animate-pulse rounded-xl"
+                ></div>
+              }
             }
           </div>
         </div>
@@ -171,14 +235,20 @@ const QUICK_LINKS: QuickLink[] = [
       <!-- Alerts (1/2) + Quick Links (1/2) -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <!-- Alerts Panel -->
-        <div class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border overflow-hidden">
+        <div
+          class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border overflow-hidden"
+        >
           <div class="px-4 py-3 border-b border-border">
-            <h3 class="font-semibold text-text-primary text-sm">Alertas Operativas</h3>
+            <h3 class="font-semibold text-text-primary text-sm">
+              Alertas Operativas
+            </h3>
           </div>
           <div class="p-3 space-y-2">
             @if (loadingAlerts()) {
               <div class="py-4 flex items-center justify-center">
-                <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                <div
+                  class="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"
+                ></div>
               </div>
             } @else {
               @if (lowStockCount() > 0) {
@@ -186,13 +256,25 @@ const QUICK_LINKS: QuickLink[] = [
                   class="flex items-center gap-3 p-3 bg-warning-light rounded-lg cursor-pointer hover:bg-warning/15 transition-colors"
                   (click)="navigateTo('/admin/analytics/inventory/stock-info')"
                 >
-                  <div class="flex-shrink-0 w-7 h-7 bg-warning/20 rounded-full flex items-center justify-center">
-                    <app-icon name="alert-triangle" [size]="14" class="text-warning"></app-icon>
+                  <div
+                    class="flex-shrink-0 w-7 h-7 bg-warning/20 rounded-full flex items-center justify-center"
+                  >
+                    <app-icon
+                      name="alert-triangle"
+                      [size]="14"
+                      class="text-warning"
+                    ></app-icon>
                   </div>
                   <div class="flex-1 min-w-0">
-                    <p class="text-sm font-medium text-warning">{{ lowStockCount() }} bajo stock</p>
+                    <p class="text-sm font-medium text-warning">
+                      {{ lowStockCount() }} bajo stock
+                    </p>
                   </div>
-                  <app-icon name="chevron-right" [size]="14" class="text-warning/60"></app-icon>
+                  <app-icon
+                    name="chevron-right"
+                    [size]="14"
+                    class="text-warning/60"
+                  ></app-icon>
                 </div>
               }
 
@@ -201,28 +283,56 @@ const QUICK_LINKS: QuickLink[] = [
                   class="flex items-center gap-3 p-3 bg-error-light rounded-lg cursor-pointer hover:bg-error/15 transition-colors"
                   (click)="navigateTo('/admin/analytics/inventory/stock-info')"
                 >
-                  <div class="flex-shrink-0 w-7 h-7 bg-error/20 rounded-full flex items-center justify-center">
-                    <app-icon name="x-circle" [size]="14" class="text-error"></app-icon>
+                  <div
+                    class="flex-shrink-0 w-7 h-7 bg-error/20 rounded-full flex items-center justify-center"
+                  >
+                    <app-icon
+                      name="x-circle"
+                      [size]="14"
+                      class="text-error"
+                    ></app-icon>
                   </div>
                   <div class="flex-1 min-w-0">
-                    <p class="text-sm font-medium text-error">{{ outOfStockCount() }} agotados</p>
+                    <p class="text-sm font-medium text-error">
+                      {{ outOfStockCount() }} agotados
+                    </p>
                   </div>
-                  <app-icon name="chevron-right" [size]="14" class="text-error/60"></app-icon>
+                  <app-icon
+                    name="chevron-right"
+                    [size]="14"
+                    class="text-error/60"
+                  ></app-icon>
                 </div>
               }
 
               @if (dispatchPendingCount() > 0) {
                 <div
                   class="flex items-center gap-3 p-3 bg-primary/10 rounded-lg cursor-pointer hover:bg-primary/15 transition-colors"
-                  (click)="navigateTo('/admin/orders/sales?status=processing&delivery=home_delivery')"
+                  (click)="
+                    navigateTo(
+                      '/admin/orders/sales?status=processing&delivery=home_delivery'
+                    )
+                  "
                 >
-                  <div class="flex-shrink-0 w-7 h-7 bg-primary/20 rounded-full flex items-center justify-center">
-                    <app-icon name="truck" [size]="14" class="text-primary"></app-icon>
+                  <div
+                    class="flex-shrink-0 w-7 h-7 bg-primary/20 rounded-full flex items-center justify-center"
+                  >
+                    <app-icon
+                      name="truck"
+                      [size]="14"
+                      class="text-primary"
+                    ></app-icon>
                   </div>
                   <div class="flex-1 min-w-0">
-                    <p class="text-sm font-medium text-primary">{{ dispatchPendingCount() }} listas para despachar</p>
+                    <p class="text-sm font-medium text-primary">
+                      {{ dispatchPendingCount() }} listas para despachar
+                    </p>
                   </div>
-                  <app-icon name="chevron-right" [size]="14" class="text-primary/60"></app-icon>
+                  <app-icon
+                    name="chevron-right"
+                    [size]="14"
+                    class="text-primary/60"
+                  ></app-icon>
                 </div>
               }
 
@@ -231,17 +341,34 @@ const QUICK_LINKS: QuickLink[] = [
                   class="flex items-center gap-3 p-3 bg-accent/10 rounded-lg cursor-pointer hover:bg-accent/15 transition-colors"
                   (click)="navigateTo('/admin/orders/sales?status=refunded')"
                 >
-                  <div class="flex-shrink-0 w-7 h-7 bg-accent/20 rounded-full flex items-center justify-center">
-                    <app-icon name="rotate-ccw" [size]="14" class="text-accent"></app-icon>
+                  <div
+                    class="flex-shrink-0 w-7 h-7 bg-accent/20 rounded-full flex items-center justify-center"
+                  >
+                    <app-icon
+                      name="rotate-ccw"
+                      [size]="14"
+                      class="text-accent"
+                    ></app-icon>
                   </div>
                   <div class="flex-1 min-w-0">
-                    <p class="text-sm font-medium text-accent">{{ refundPendingCount() }} reembolsos pendientes</p>
+                    <p class="text-sm font-medium text-accent">
+                      {{ refundPendingCount() }} reembolsos pendientes
+                    </p>
                   </div>
-                  <app-icon name="chevron-right" [size]="14" class="text-accent/60"></app-icon>
+                  <app-icon
+                    name="chevron-right"
+                    [size]="14"
+                    class="text-accent/60"
+                  ></app-icon>
                 </div>
               }
 
-              @if (lowStockCount() === 0 && outOfStockCount() === 0 && dispatchPendingCount() === 0 && refundPendingCount() === 0) {
+              @if (
+                lowStockCount() === 0 &&
+                outOfStockCount() === 0 &&
+                dispatchPendingCount() === 0 &&
+                refundPendingCount() === 0
+              ) {
                 <app-empty-state
                   icon="check-circle"
                   iconColor="success"
@@ -256,9 +383,13 @@ const QUICK_LINKS: QuickLink[] = [
         </div>
 
         <!-- Quick Links -->
-        <div class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border overflow-hidden">
+        <div
+          class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border overflow-hidden"
+        >
           <div class="px-4 py-3 border-b border-border">
-            <h3 class="font-semibold text-text-primary text-sm">Accesos Rápidos</h3>
+            <h3 class="font-semibold text-text-primary text-sm">
+              Accesos Rápidos
+            </h3>
           </div>
           <div class="p-3 grid grid-cols-2 gap-1">
             @for (link of quickLinks; track link.route) {
@@ -266,7 +397,11 @@ const QUICK_LINKS: QuickLink[] = [
                 class="flex items-center gap-2 px-3 py-2.5 text-sm text-text-primary hover:bg-primary/5 rounded-lg transition-colors text-left"
                 (click)="navigateTo(link.route)"
               >
-                <app-icon [name]="link.icon" [size]="15" class="text-text-secondary"></app-icon>
+                <app-icon
+                  [name]="link.icon"
+                  [size]="15"
+                  class="text-text-secondary"
+                ></app-icon>
                 <span class="truncate">{{ link.label }}</span>
               </button>
             }
@@ -337,8 +472,14 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   dateRangeLabel = computed(() => {
     const range = this.dateRange();
-    const start = new Date(range.start_date + 'T12:00:00').toLocaleDateString('es-CO', { day: '2-digit', month: 'short' });
-    const end = new Date(range.end_date + 'T12:00:00').toLocaleDateString('es-CO', { day: '2-digit', month: 'short' });
+    const start = new Date(range.start_date + 'T12:00:00').toLocaleDateString(
+      'es-CO',
+      { day: '2-digit', month: 'short' },
+    );
+    const end = new Date(range.end_date + 'T12:00:00').toLocaleDateString(
+      'es-CO',
+      { day: '2-digit', month: 'short' },
+    );
     return `${start} - ${end}`;
   });
 
@@ -372,7 +513,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
     let isFirst = true;
     effect(() => {
       this.dateRange();
-      if (isFirst) { isFirst = false; return; }
+      if (isFirst) {
+        isFirst = false;
+        return;
+      }
       untracked(() => this.loadAllData());
     });
   }
@@ -407,7 +551,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
       if (start) this.customStartDate.set(start);
       if (end) this.customEndDate.set(end);
       if (start && end) {
-        this.dateRange.set({ start_date: start, end_date: end, preset: 'custom' });
+        this.dateRange.set({
+          start_date: start,
+          end_date: end,
+          preset: 'custom',
+        });
       }
     } else {
       const range = this.getDateRangeFromPreset(preset);
@@ -481,7 +629,9 @@ export class DashboardComponent implements OnInit, OnDestroy {
           this.dispatchPendingCount.set(stats.dispatchPendingCount || 0);
           this.refundPendingCount.set(stats.refundPendingCount || 0);
         },
-        error: () => { /* alerts are non-critical */ },
+        error: () => {
+          /* alerts are non-critical */
+        },
       });
 
     // 5. Inventory summary → low stock/out of stock alerts
@@ -504,10 +654,14 @@ export class DashboardComponent implements OnInit, OnDestroy {
     if (!trends?.length) return;
 
     const style = getComputedStyle(document.documentElement);
-    const primaryColor = style.getPropertyValue('--color-primary').trim() || '#2ecc71';
-    const accentColor = style.getPropertyValue('--color-accent').trim() || '#06b6d4';
-    const mutedColor = style.getPropertyValue('--color-muted-foreground').trim() || '#6b7280';
-    const borderColor = style.getPropertyValue('--color-border').trim() || '#e5e7eb';
+    const primaryColor =
+      style.getPropertyValue('--color-primary').trim() || '#2ecc71';
+    const accentColor =
+      style.getPropertyValue('--color-accent').trim() || '#06b6d4';
+    const mutedColor =
+      style.getPropertyValue('--color-muted-foreground').trim() || '#6b7280';
+    const borderColor =
+      style.getPropertyValue('--color-border').trim() || '#e5e7eb';
 
     const labels = trends.map((t) => formatChartPeriod(t.period, 'day'));
     const revenues = trends.map((t) => t.revenue);
@@ -527,7 +681,13 @@ export class DashboardComponent implements OnInit, OnDestroy {
         bottom: 0,
         textStyle: { color: mutedColor, fontSize: 11 },
       },
-      grid: { left: '3%', right: '4%', bottom: '15%', top: '5%', containLabel: true },
+      grid: {
+        left: '3%',
+        right: '4%',
+        bottom: '15%',
+        top: '5%',
+        containLabel: true,
+      },
       xAxis: {
         type: 'category',
         data: labels,
@@ -542,7 +702,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
           axisLabel: {
             color: mutedColor,
             fontSize: 10,
-            formatter: (value: number) => this.currencyService.formatChartAxis(value),
+            formatter: (value: number) =>
+              this.currencyService.formatChartAxis(value),
           },
           splitLine: { lineStyle: { color: borderColor } },
         },
@@ -564,7 +725,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
           areaStyle: {
             color: {
               type: 'linear',
-              x: 0, y: 0, x2: 0, y2: 1,
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
               colorStops: [
                 { offset: 0, color: primaryColor + '4D' },
                 { offset: 1, color: primaryColor + '0D' },
@@ -590,12 +754,17 @@ export class DashboardComponent implements OnInit, OnDestroy {
     if (!channels?.length) return;
 
     const style = getComputedStyle(document.documentElement);
-    const mutedColor = style.getPropertyValue('--color-muted-foreground').trim() || '#6b7280';
-    const textColor = style.getPropertyValue('--color-text-primary').trim() || '#374151';
-    const surfaceColor = style.getPropertyValue('--color-surface').trim() || '#fff';
+    const mutedColor =
+      style.getPropertyValue('--color-muted-foreground').trim() || '#6b7280';
+    const textColor =
+      style.getPropertyValue('--color-text-primary').trim() || '#374151';
+    const surfaceColor =
+      style.getPropertyValue('--color-surface').trim() || '#fff';
 
     const channelColors = channels.map((c) => {
-      const cssVar = CHANNEL_COLOR_VAR[c.channel.toLowerCase()] || CHANNEL_COLOR_VAR['default'];
+      const cssVar =
+        CHANNEL_COLOR_VAR[c.channel.toLowerCase()] ||
+        CHANNEL_COLOR_VAR['default'];
       return style.getPropertyValue(cssVar).trim() || '#6b7280';
     });
 
@@ -622,7 +791,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
           radius: [30, 110],
           center: ['50%', '45%'],
           roseType: 'area',
-          itemStyle: { borderRadius: 4, borderColor: surfaceColor, borderWidth: 2 },
+          itemStyle: {
+            borderRadius: 4,
+            borderColor: surfaceColor,
+            borderWidth: 2,
+          },
           label: {
             show: true,
             fontSize: 11,
@@ -636,7 +809,11 @@ export class DashboardComponent implements OnInit, OnDestroy {
           },
           emphasis: {
             label: { show: true, fontSize: 13, fontWeight: 'bold' },
-            itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0, 0, 0, 0.2)' },
+            itemStyle: {
+              shadowBlur: 10,
+              shadowOffsetX: 0,
+              shadowColor: 'rgba(0, 0, 0, 0.2)',
+            },
           },
           data: channels.map((c, i) => ({
             value: c.revenue,
@@ -683,24 +860,41 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
     switch (preset) {
       case 'today':
-        start = today; end = today; break;
+        start = today;
+        end = today;
+        break;
       case 'yesterday':
-        start = new Date(today); start.setDate(start.getDate() - 1); end = start; break;
+        start = new Date(today);
+        start.setDate(start.getDate() - 1);
+        end = start;
+        break;
       case 'thisWeek':
-        start = new Date(today); start.setDate(start.getDate() - start.getDay()); end = today; break;
+        start = new Date(today);
+        start.setDate(start.getDate() - start.getDay());
+        end = today;
+        break;
       case 'lastWeek':
-        start = new Date(today); start.setDate(start.getDate() - start.getDay() - 7);
-        end = new Date(start); end.setDate(end.getDate() + 6); break;
+        start = new Date(today);
+        start.setDate(start.getDate() - start.getDay() - 7);
+        end = new Date(start);
+        end.setDate(end.getDate() + 6);
+        break;
       case 'thisMonth':
-        start = new Date(today.getFullYear(), today.getMonth(), 1); end = today; break;
+        start = new Date(today.getFullYear(), today.getMonth(), 1);
+        end = today;
+        break;
       case 'lastMonth':
         start = new Date(today.getFullYear(), today.getMonth() - 1, 1);
-        end = new Date(today.getFullYear(), today.getMonth(), 0); break;
+        end = new Date(today.getFullYear(), today.getMonth(), 0);
+        break;
       case 'thisYear':
-        start = new Date(today.getFullYear(), 0, 1); end = today; break;
+        start = new Date(today.getFullYear(), 0, 1);
+        end = today;
+        break;
       case 'lastYear':
         start = new Date(today.getFullYear() - 1, 0, 1);
-        end = new Date(today.getFullYear() - 1, 11, 31); break;
+        end = new Date(today.getFullYear() - 1, 11, 31);
+        break;
       default:
         return null;
     }
@@ -710,5 +904,4 @@ export class DashboardComponent implements OnInit, OnDestroy {
       preset: preset as any,
     };
   }
-
 }

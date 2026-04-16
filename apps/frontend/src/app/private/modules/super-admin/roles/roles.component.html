@@ -95,14 +95,15 @@
     <!-- Table Content -->
     <div class="relative min-h-[400px] p-2 md:p-4">
       <!-- Loading Overlay -->
-      <div
-        *ngIf="isLoading"
-        class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
-      >
+      @if (isLoading) {
         <div
-          class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-        ></div>
-      </div>
+          class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
+        >
+          <div
+            class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+          ></div>
+        </div>
+      }
 
       <!-- Table -->
       <!-- Table -->
@@ -115,65 +116,70 @@
         (sortChange)="onSortChange($any($event))"
       >
         <!-- Empty State -->
-        <div
-          class="p-8 flex justify-center"
-          *ngIf="!isLoading && roles.length === 0"
-        >
-          <app-empty-state
-            icon="shield"
-            [title]="getEmptyStateTitle()"
-            [description]="getEmptyStateDescription()"
-            actionButtonText="Crear Rol"
-            [showActionButton]="
-              !filterForm.value.search && !filterForm.value.is_system_role
-            "
-            (actionClick)="createRole()"
-          >
-          </app-empty-state>
-        </div>
+        @if (!isLoading && roles.length === 0) {
+          <div class="p-8 flex justify-center">
+            <app-empty-state
+              icon="shield"
+              [title]="getEmptyStateTitle()"
+              [description]="getEmptyStateDescription()"
+              actionButtonText="Crear Rol"
+              [showActionButton]="
+                !filterForm.value.search && !filterForm.value.is_system_role
+              "
+              (actionClick)="createRole()"
+            >
+            </app-empty-state>
+          </div>
+        }
       </app-responsive-data-view>
     </div>
 
     <!-- Pagination -->
-    <div
-      class="px-6 py-4 border-t border-border bg-muted/30 flex justify-center"
-      *ngIf="roles.length > 0"
-    >
-      <app-pagination
-        [currentPage]="pagination.page"
-        [totalPages]="pagination.totalPages"
-        [total]="pagination.total"
-        [limit]="pagination.limit"
-        infoStyle="range"
-        (pageChange)="onPageChange($event)"
-      />
-    </div>
+    @if (roles.length > 0) {
+      <div
+        class="px-6 py-4 border-t border-border bg-muted/30 flex justify-center"
+      >
+        <app-pagination
+          [currentPage]="pagination.page"
+          [totalPages]="pagination.totalPages"
+          [total]="pagination.total"
+          [limit]="pagination.limit"
+          infoStyle="range"
+          (pageChange)="onPageChange($event)"
+        />
+      </div>
+    }
   </app-card>
 </div>
 
-<!-- Modals -->
-<app-role-create-modal
-  [isOpen]="showCreateModal"
-  (isOpenChange)="showCreateModal = $event"
-  [isSubmitting]="isCreatingRole"
-  (submit)="onRoleCreated($event)"
-  (cancel)="showCreateModal = false"
-></app-role-create-modal>
+@defer (when showCreateModal) {
+  <app-role-create-modal
+    [isOpen]="showCreateModal"
+    (isOpenChange)="showCreateModal = $event"
+    [isSubmitting]="isCreatingRole"
+    (submit)="onRoleCreated($event)"
+    (cancel)="showCreateModal = false"
+  ></app-role-create-modal>
+}
 
-<app-role-edit-modal
-  [isOpen]="showEditModal"
-  (isOpenChange)="showEditModal = $event"
-  [role]="currentRole"
-  [isSubmitting]="isUpdatingRole"
-  (submit)="onRoleUpdated($event)"
-  (cancel)="showEditModal = false"
-></app-role-edit-modal>
+@defer (when showEditModal) {
+  <app-role-edit-modal
+    [isOpen]="showEditModal"
+    (isOpenChange)="showEditModal = $event"
+    [role]="currentRole"
+    [isSubmitting]="isUpdatingRole"
+    (submit)="onRoleUpdated($event)"
+    (cancel)="showEditModal = false"
+  ></app-role-edit-modal>
+}
 
-<app-role-permissions-modal
-  [isOpen]="showPermissionsModal"
-  (isOpenChange)="showPermissionsModal = $event"
-  [role]="currentRole"
-  [isSubmitting]="isUpdatingPermissions"
-  (submit)="onPermissionsUpdated($event)"
-  (cancel)="showPermissionsModal = false"
-></app-role-permissions-modal>
+@defer (when showPermissionsModal) {
+  <app-role-permissions-modal
+    [isOpen]="showPermissionsModal"
+    (isOpenChange)="showPermissionsModal = $event"
+    [role]="currentRole"
+    [isSubmitting]="isUpdatingPermissions"
+    (submit)="onPermissionsUpdated($event)"
+    (cancel)="showPermissionsModal = false"
+  ></app-role-permissions-modal>
+}

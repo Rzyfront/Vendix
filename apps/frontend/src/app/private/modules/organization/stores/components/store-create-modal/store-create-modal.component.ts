@@ -1,13 +1,12 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
   OnInit,
   OnDestroy,
   ChangeDetectionStrategy,
+  input,
+  output
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   FormsModule,
   ReactiveFormsModule,
@@ -58,7 +57,6 @@ export interface StoreCreateModalData {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     ModalComponent,
@@ -66,11 +64,11 @@ export interface StoreCreateModalData {
     ButtonComponent,
     IconComponent,
     SelectorComponent,
-    ToggleComponent,
-  ],
+    ToggleComponent
+],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="onModalChange($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
@@ -261,15 +259,15 @@ export interface StoreCreateModalData {
           <app-button
             variant="outline"
             (clicked)="onCancel()"
-            [disabled]="isSubmitting"
+            [disabled]="isSubmitting()"
           >
             Cancelar
           </app-button>
           <app-button
             variant="primary"
             (clicked)="onSubmit()"
-            [disabled]="storeForm.invalid || isSubmitting"
-            [loading]="isSubmitting"
+            [disabled]="storeForm.invalid || isSubmitting()"
+            [loading]="isSubmitting()"
           >
             <app-icon name="plus" [size]="16" slot="icon"></app-icon>
             Crear Tienda
@@ -303,12 +301,12 @@ export interface StoreCreateModalData {
   ],
 })
 export class StoreCreateModalComponent implements OnInit, OnDestroy {
-  @Input() isOpen = false;
-  @Input() isSubmitting = false;
+  readonly isOpen = input(false);
+  readonly isSubmitting = input(false);
 
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() submit = new EventEmitter<StoreCreateModalData>();
-  @Output() cancel = new EventEmitter<void>();
+  readonly isOpenChange = output<boolean>();
+  readonly submit = output<StoreCreateModalData>();
+  readonly cancel = output<void>();
 
   storeForm!: FormGroup;
   storeTypeOptions: SelectorOption[] = [];
@@ -396,6 +394,10 @@ export class StoreCreateModalComponent implements OnInit, OnDestroy {
 
   onCancel(): void {
     this.isOpenChange.emit(false);
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.cancel.emit();
   }
 

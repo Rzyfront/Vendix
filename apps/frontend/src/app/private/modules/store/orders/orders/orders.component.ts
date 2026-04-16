@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { Router } from '@angular/router';
 import { Subject, takeUntil } from 'rxjs';
 
@@ -14,7 +14,7 @@ import { StoreOrdersService } from '../services/store-orders.service';
 @Component({
   selector: 'app-orders',
   standalone: true,
-  imports: [CommonModule, OrdersListComponent, OrderStatsComponent],
+  imports: [OrdersListComponent, OrderStatsComponent],
   templateUrl: './orders.component.html',
   styleUrls: ['./orders.component.css'],
 })

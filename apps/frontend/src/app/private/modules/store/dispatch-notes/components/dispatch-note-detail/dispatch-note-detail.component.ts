@@ -6,7 +6,7 @@ import {
   input,
   output,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   StickyHeaderComponent,
   StickyHeaderActionButton,
@@ -45,14 +45,13 @@ const BADGE_COLOR_MAP: Record<DispatchNoteStatus, StickyHeaderBadgeColor> = {
   selector: 'app-dispatch-note-detail',
   standalone: true,
   imports: [
-    CommonModule,
     StickyHeaderComponent,
     StatsComponent,
     CardComponent,
     TimelineComponent,
     ResponsiveDataViewComponent,
-    IconComponent,
-  ],
+    IconComponent
+],
   templateUrl: './dispatch-note-detail.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })

@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { RouterModule } from '@angular/router';
 import { Subject, takeUntil } from 'rxjs';
 
@@ -27,14 +27,13 @@ import {
   selector: 'vendix-sales-by-customer',
   standalone: true,
   imports: [
-    CommonModule,
     RouterModule,
     CardComponent,
     ResponsiveDataViewComponent,
     IconComponent,
     DateRangeFilterComponent,
-    ExportButtonComponent,
-  ],
+    ExportButtonComponent
+],
   template: `
     <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
       <!-- Header -->

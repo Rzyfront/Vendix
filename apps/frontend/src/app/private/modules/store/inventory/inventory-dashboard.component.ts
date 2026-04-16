@@ -1,5 +1,5 @@
 import { Component, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { RouterModule } from '@angular/router';
 
 // Shared Components
@@ -20,7 +20,7 @@ import { InventoryStats, PurchaseOrder, Supplier } from './interfaces';
 @Component({
   selector: 'app-inventory-dashboard',
   standalone: true,
-  imports: [CommonModule, RouterModule, StatsComponent, IconComponent, TableComponent],
+  imports: [RouterModule, StatsComponent, IconComponent, TableComponent],
   template: `
     <div class="w-full">
       <!-- Stats Grid -->

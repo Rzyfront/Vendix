@@ -1,5 +1,5 @@
 import { Component, EventEmitter, Input, Output, inject, ViewChild, TemplateRef, AfterViewInit } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import {
@@ -27,7 +27,6 @@ import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
   selector: 'app-reservation-list',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     CardComponent,
     ResponsiveDataViewComponent,
@@ -38,8 +37,8 @@ import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
     PaginationComponent,
     EmptyStateComponent,
     BadgeComponent,
-    TooltipComponent,
-  ],
+    TooltipComponent
+],
   templateUrl: './reservation-list.component.html',
   styleUrls: ['./reservation-list.component.scss'],
 })
@@ -304,6 +303,11 @@ export class ReservationListComponent implements AfterViewInit {
 
   onActionClick(action: string): void {
     if (action === 'create') {
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
       this.create.emit();
     }
   }

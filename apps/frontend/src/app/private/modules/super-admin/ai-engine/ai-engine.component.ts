@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { Subject, takeUntil } from 'rxjs';
 import {
   AIEngineConfig,
@@ -46,7 +46,6 @@ type ActiveTab = 'configs' | 'apps';
   selector: 'app-ai-engine',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     AIEngineConfigModalComponent,
@@ -58,8 +57,8 @@ type ActiveTab = 'configs' | 'apps';
     StatsComponent,
     SelectorComponent,
     PaginationComponent,
-    CardComponent,
-  ],
+    CardComponent
+],
   templateUrl: './ai-engine.component.html',
   styleUrls: ['./ai-engine.component.css'],
 })

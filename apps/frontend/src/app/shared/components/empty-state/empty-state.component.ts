@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
+import { Component, Input, input, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 
 import { ButtonComponent } from '../button/button.component';
@@ -9,52 +9,59 @@ import { IconComponent } from '../icon/icon.component';
   standalone: true,
   imports: [CommonModule, ButtonComponent, IconComponent],
   template: `
-    <div class="empty-state-container" [class.empty-state--sm]="size === 'sm'" [class.empty-state--xsm]="size === 'xsm'">
+    <div class="empty-state-container" [class.empty-state--sm]="size() === 'sm'" [class.empty-state--xsm]="size() === 'xsm'">
       <!-- Icon -->
       <div class="empty-state-icon" [ngStyle]="iconBgStyle">
-        <app-icon [name]="icon" [size]="size === 'xsm' ? 24 : size === 'sm' ? 32 : 48" class="empty-state-icon-svg" [ngStyle]="iconColorStyle"></app-icon>
+        <app-icon [name]="icon()" [size]="size() === 'xsm' ? 24 : size() === 'sm' ? 32 : 48" class="empty-state-icon-svg" [ngStyle]="iconColorStyle"></app-icon>
       </div>
-
+    
       <!-- Title -->
-      <h3 class="empty-state-title">{{ title }}</h3>
-
+      <h3 class="empty-state-title">{{ title() }}</h3>
+    
       <!-- Description -->
-      <p class="empty-state-description" *ngIf="description">{{ description }}</p>
-
+      @if (description) {
+        <p class="empty-state-description">{{ description }}</p>
+      }
+    
       <!-- Actions -->
-      <div class="empty-state-actions" *ngIf="showActionButton || showRefreshButton || showClearFilters">
-        <app-button
-          *ngIf="showActionButton"
-          variant="primary"
-          size="sm"
-          (clicked)="actionClick.emit()"
-        >
-          <app-icon *ngIf="actionButtonIcon" [name]="actionButtonIcon" [size]="16" slot="icon"></app-icon>
-          {{ actionButtonText }}
-        </app-button>
-
-        <app-button
-          *ngIf="showRefreshButton"
-          variant="outline"
-          size="sm"
-          (clicked)="refreshClick.emit()"
-        >
-          <app-icon name="refresh-cw" [size]="16" slot="icon"></app-icon>
-          Actualizar
-        </app-button>
-
-        <app-button
-          *ngIf="showClearFilters"
-          variant="outline"
-          size="sm"
-          (clicked)="clearFiltersClick.emit()"
-        >
-          <app-icon name="x" [size]="16" slot="icon"></app-icon>
-          Limpiar Filtros
-        </app-button>
-      </div>
+      @if (showActionButton || showRefreshButton || showClearFilters) {
+        <div class="empty-state-actions">
+          @if (showActionButton) {
+            <app-button
+              variant="primary"
+              size="sm"
+              (clicked)="actionClick.emit()"
+              >
+              @if (actionButtonIcon) {
+                <app-icon [name]="actionButtonIcon" [size]="16" slot="icon"></app-icon>
+              }
+              {{ actionButtonText() }}
+            </app-button>
+          }
+          @if (showRefreshButton) {
+            <app-button
+              variant="outline"
+              size="sm"
+              (clicked)="refreshClick.emit()"
+              >
+              <app-icon name="refresh-cw" [size]="16" slot="icon"></app-icon>
+              Actualizar
+            </app-button>
+          }
+          @if (showClearFilters) {
+            <app-button
+              variant="outline"
+              size="sm"
+              (clicked)="clearFiltersClick.emit()"
+              >
+              <app-icon name="x" [size]="16" slot="icon"></app-icon>
+              Limpiar Filtros
+            </app-button>
+          }
+        </div>
+      }
     </div>
-  `,
+    `,
   styles: [`
     :host {
       display: flex;
@@ -155,20 +162,20 @@ import { IconComponent } from '../icon/icon.component';
   `],
 })
 export class EmptyStateComponent {
-  @Input() size: 'default' | 'sm' | 'xsm' = 'default';
-  @Input() icon = 'inbox';
-  @Input() iconColor: 'default' | 'success' | 'warning' | 'error' | 'primary' = 'default';
-  @Input() title = 'No hay datos';
+  readonly size = input<'default' | 'sm' | 'xsm'>('default');
+  readonly icon = input('inbox');
+  readonly iconColor = input<'default' | 'success' | 'warning' | 'error' | 'primary'>('default');
+  readonly title = input('No hay datos');
   @Input() description = 'No se encontraron registros.';
-  @Input() actionButtonText = 'Crear Nuevo';
+  readonly actionButtonText = input('Crear Nuevo');
   @Input() actionButtonIcon: string | null = 'plus';
   @Input() showActionButton = true;
   @Input() showRefreshButton = false;
   @Input() showClearFilters = false;
 
-  @Output() actionClick = new EventEmitter<void>();
-  @Output() refreshClick = new EventEmitter<void>();
-  @Output() clearFiltersClick = new EventEmitter<void>();
+  readonly actionClick = output<void>();
+  readonly refreshClick = output<void>();
+  readonly clearFiltersClick = output<void>();
 
   private colorMap: Record<string, { bg: string; fg: string }> = {
     default: { bg: 'linear-gradient(135deg, #f3f4f6 0%, #e5e7eb 100%)', fg: '#9ca3af' },
@@ -179,12 +186,14 @@ export class EmptyStateComponent {
   };
 
   get iconBgStyle(): Record<string, string> {
-    if (this.iconColor === 'default') return {};
-    return { background: this.colorMap[this.iconColor].bg };
+    const iconColor = this.iconColor();
+    if (iconColor === 'default') return {};
+    return { background: this.colorMap[iconColor].bg };
   }
 
   get iconColorStyle(): Record<string, string> {
-    if (this.iconColor === 'default') return {};
-    return { color: this.colorMap[this.iconColor].fg };
+    const iconColor = this.iconColor();
+    if (iconColor === 'default') return {};
+    return { color: this.colorMap[iconColor].fg };
   }
 }

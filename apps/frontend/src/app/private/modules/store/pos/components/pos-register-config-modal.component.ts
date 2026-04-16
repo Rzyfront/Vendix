@@ -11,7 +11,7 @@ import {
     Validators,
     ReactiveFormsModule,
 } from '@angular/forms';
-import { CommonModule } from '@angular/common';
+
 
 import {
     ButtonComponent,
@@ -24,13 +24,12 @@ import {
     selector: 'app-pos-register-config-modal',
     standalone: true,
     imports: [
-        CommonModule,
-        ReactiveFormsModule,
-        ButtonComponent,
-        ModalComponent,
-        InputComponent,
-        IconComponent,
-    ],
+    ReactiveFormsModule,
+    ButtonComponent,
+    ModalComponent,
+    InputComponent,
+    IconComponent
+],
     template: `
     <app-modal
       [isOpen]="isOpen"
@@ -168,6 +167,11 @@ export class PosRegisterConfigModalComponent implements OnInit {
             const registerId = this.configForm.value.registerId;
             localStorage.setItem('pos_register_id', registerId);
             this.saved.emit(registerId);
+            // TODO: The 'emit' function requires a mandatory void argument
+            // TODO: The 'emit' function requires a mandatory void argument
+            // TODO: The 'emit' function requires a mandatory void argument
+            // TODO: The 'emit' function requires a mandatory void argument
+            // TODO: The 'emit' function requires a mandatory void argument
             this.closed.emit();
         } else {
             this.configForm.markAllAsTouched();
@@ -176,6 +180,11 @@ export class PosRegisterConfigModalComponent implements OnInit {
 
     onCancel(): void {
         this.configForm.reset();
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
         this.closed.emit();
         this.isOpenChange.emit(false);
     }

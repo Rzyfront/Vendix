@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 
@@ -19,12 +19,11 @@ import { AdvanceDetailComponent } from '../components/advances/advance-detail/ad
   selector: 'vendix-payroll-advances-page',
   standalone: true,
   imports: [
-    CommonModule,
     StatsComponent,
     AdvanceListComponent,
     AdvanceCreateComponent,
-    AdvanceDetailComponent,
-  ],
+    AdvanceDetailComponent
+],
   template: `
     <div class="w-full">
 

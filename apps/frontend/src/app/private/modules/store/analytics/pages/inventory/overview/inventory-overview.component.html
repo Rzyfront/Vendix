@@ -117,10 +117,16 @@
             ></div>
           </div>
         } @else {
-          <app-chart
-            [options]="movementTrendChartOptions"
-            size="large"
-          ></app-chart>
+          @defer (on viewport) {
+            <app-chart
+              [options]="movementTrendChartOptions"
+              size="large"
+            ></app-chart>
+          } @placeholder {
+            <div
+              class="h-64 bg-surface-secondary animate-pulse rounded-xl"
+            ></div>
+          }
         }
       </div>
     </app-card>
@@ -150,10 +156,16 @@
               ></div>
             </div>
           } @else {
-            <app-chart
-              [options]="valuationChartOptions"
-              size="large"
-            ></app-chart>
+            @defer (on viewport) {
+              <app-chart
+                [options]="valuationChartOptions"
+                size="large"
+              ></app-chart>
+            } @placeholder {
+              <div
+                class="h-64 bg-surface-secondary animate-pulse rounded-xl"
+              ></div>
+            }
           }
         </div>
       </app-card>
@@ -181,10 +193,16 @@
               ></div>
             </div>
           } @else {
-            <app-chart
-              [options]="quantityChartOptions"
-              size="large"
-            ></app-chart>
+            @defer (on viewport) {
+              <app-chart
+                [options]="quantityChartOptions"
+                size="large"
+              ></app-chart>
+            } @placeholder {
+              <div
+                class="h-64 bg-surface-secondary animate-pulse rounded-xl"
+              ></div>
+            }
           }
         </div>
       </app-card>

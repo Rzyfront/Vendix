@@ -1,10 +1,10 @@
 import { Component } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 
 @Component({
   selector: 'app-application',
   standalone: true,
-  imports: [CommonModule],
+  imports: [],
   template: `
     <div class="p-6">
       <h1 class="text-2xl font-bold mb-6">Configuración de la aplicación</h1>

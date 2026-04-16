@@ -1759,6 +1759,11 @@ export class PosPaymentInterfaceComponent
     if (method.type === 'wallet') {
       if (!this.cartState?.customer) {
         this.toastService.info('Seleccione un cliente para pagar con Wallet');
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
         this.requestCustomer.emit();
         return;
       }
@@ -1928,6 +1933,11 @@ export class PosPaymentInterfaceComponent
 
     if (!this.paymentState.isAnonymousSale && !this.cartState.customer) {
       this.toastService.info('Seleccione un cliente para continuar');
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
       this.requestCustomer.emit();
       this.onModalClosed();
       return;
@@ -1942,6 +1952,11 @@ export class PosPaymentInterfaceComponent
 
     if (!register_id) {
       this.toastService.info('Configure la caja para continuar');
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
       this.requestRegisterConfig.emit();
       this.onModalClosed();
       return;
@@ -2048,6 +2063,11 @@ export class PosPaymentInterfaceComponent
 
     if (!register_id) {
       this.toastService.info('Configure la caja para continuar');
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
       this.requestRegisterConfig.emit();
       this.onModalClosed();
       return;
@@ -2120,6 +2140,11 @@ export class PosPaymentInterfaceComponent
     // Credit sales always require a customer (cannot be anonymous)
     if (!this.cartState.customer) {
       this.toastService.info('Seleccione un cliente para continuar');
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
       this.requestCustomer.emit();
       this.onModalClosed();
       return;
@@ -2135,6 +2160,11 @@ export class PosPaymentInterfaceComponent
 
     if (!register_id) {
       this.toastService.info('Configure la caja para continuar');
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
       this.requestRegisterConfig.emit();
       this.onModalClosed();
       return;
@@ -2270,6 +2300,11 @@ export class PosPaymentInterfaceComponent
     this.creditInterestType = 'simple';
     this.setDefaultCreditFirstDate();
     this.updateCreditCalculations();
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.closed.emit();
   }
 

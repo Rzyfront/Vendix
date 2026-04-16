@@ -29,7 +29,10 @@ import { PayrollRunCreateComponent } from './components/payroll-runs/payroll-run
 import { PayrollRunDetailComponent } from './components/payroll-runs/payroll-run-detail/payroll-run-detail.component';
 import { PayrollSettingsComponent } from './components/payroll-settings/payroll-settings.component';
 import { EmployeeBulkUploadModalComponent } from './components/employees/bulk-upload-modal/employee-bulk-upload-modal.component';
-import { ScrollableTabsComponent, ScrollableTab } from '../../../../shared/components/scrollable-tabs/scrollable-tabs.component';
+import {
+  ScrollableTabsComponent,
+  ScrollableTab,
+} from '../../../../shared/components/scrollable-tabs/scrollable-tabs.component';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 
 @Component({
@@ -61,12 +64,16 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
       </div>
 
       <!-- Stats: Sticky on mobile, static on desktop (hidden on settings tab) -->
-      <div *ngIf="activeTab === 'employees' || activeTab === 'payroll-runs'" class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
-        <vendix-payroll-stats [view]="activeTab"></vendix-payroll-stats>
-      </div>
+      @if (activeTab === 'employees' || activeTab === 'payroll-runs') {
+        <div
+          class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+        >
+          <vendix-payroll-stats [view]="activeTab"></vendix-payroll-stats>
+        </div>
+      }
 
       <!-- Employees Tab -->
-      <ng-container *ngIf="activeTab === 'employees'">
+      @if (activeTab === 'employees') {
         <app-employee-list
           [employees]="(employees$ | async) || []"
           [loading]="(employeesLoading$ | async) || false"
@@ -76,24 +83,27 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
           (refresh)="refreshEmployees()"
           (bulkUpload)="openBulkUploadModal()"
         ></app-employee-list>
-
-        <vendix-employee-create
-          [(isOpen)]="isEmployeeCreateModalOpen"
-        ></vendix-employee-create>
-
-        <vendix-employee-detail
-          [(isOpen)]="isEmployeeDetailModalOpen"
-          [employee]="selectedEmployee"
-        ></vendix-employee-detail>
-
-        <app-employee-bulk-upload-modal
-          [(isOpen)]="isEmployeeBulkUploadModalOpen"
-          (uploadComplete)="onBulkUploadComplete()"
-        ></app-employee-bulk-upload-modal>
-      </ng-container>
+        @defer (when isEmployeeCreateModalOpen) {
+          <vendix-employee-create
+            [(isOpen)]="isEmployeeCreateModalOpen"
+          ></vendix-employee-create>
+        }
+        @defer (when isEmployeeDetailModalOpen) {
+          <vendix-employee-detail
+            [(isOpen)]="isEmployeeDetailModalOpen"
+            [employee]="selectedEmployee"
+          ></vendix-employee-detail>
+        }
+        @defer (when isEmployeeBulkUploadModalOpen) {
+          <app-employee-bulk-upload-modal
+            [(isOpen)]="isEmployeeBulkUploadModalOpen"
+            (uploadComplete)="onBulkUploadComplete()"
+          ></app-employee-bulk-upload-modal>
+        }
+      }
 
       <!-- Payroll Runs Tab -->
-      <ng-container *ngIf="activeTab === 'payroll-runs'">
+      @if (activeTab === 'payroll-runs') {
         <app-payroll-run-list
           [payrollRuns]="(payrollRuns$ | async) || []"
           [loading]="(payrollRunsLoading$ | async) || false"
@@ -101,21 +111,23 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
           (detail)="viewPayrollRun($event)"
           (refresh)="refreshPayrollRuns()"
         ></app-payroll-run-list>
-
-        <vendix-payroll-run-create
-          [(isOpen)]="isPayrollRunCreateModalOpen"
-        ></vendix-payroll-run-create>
-
-        <vendix-payroll-run-detail
-          [(isOpen)]="isPayrollRunDetailModalOpen"
-          [payrollRun]="selectedPayrollRun"
-        ></vendix-payroll-run-detail>
-      </ng-container>
+        @defer (when isPayrollRunCreateModalOpen) {
+          <vendix-payroll-run-create
+            [(isOpen)]="isPayrollRunCreateModalOpen"
+          ></vendix-payroll-run-create>
+        }
+        @defer (when isPayrollRunDetailModalOpen) {
+          <vendix-payroll-run-detail
+            [(isOpen)]="isPayrollRunDetailModalOpen"
+            [payrollRun]="selectedPayrollRun"
+          ></vendix-payroll-run-detail>
+        }
+      }
 
       <!-- Settings Tab -->
-      <ng-container *ngIf="activeTab === 'settings'">
+      @if (activeTab === 'settings') {
         <vendix-payroll-settings></vendix-payroll-settings>
-      </ng-container>
+      }
     </div>
   `,
 })
@@ -136,7 +148,12 @@ export class PayrollComponent implements OnInit, OnDestroy {
     { id: 'advances', label: 'Adelantos', icon: 'hand-coins' },
     { id: 'settings', label: 'Configuración', icon: 'settings' },
   ];
-  activeTab: 'employees' | 'payroll-runs' | 'settlements' | 'advances' | 'settings' = 'employees';
+  activeTab:
+    | 'employees'
+    | 'payroll-runs'
+    | 'settlements'
+    | 'advances'
+    | 'settings' = 'employees';
 
   // Modal states
   isEmployeeCreateModalOpen = false;
@@ -155,14 +172,20 @@ export class PayrollComponent implements OnInit, OnDestroy {
     this.payrollRunsLoading$ = this.store.select(selectPayrollRunsLoading);
 
     // Keep detail modal in sync with store after state transitions
-    this.store.select(selectCurrentPayrollRun).pipe(
-      takeUntil(this.destroy$),
-      filter((run): run is PayrollRun => run !== null),
-    ).subscribe((run) => {
-      if (this.isPayrollRunDetailModalOpen && this.selectedPayrollRun?.id === run.id) {
-        this.selectedPayrollRun = run;
-      }
-    });
+    this.store
+      .select(selectCurrentPayrollRun)
+      .pipe(
+        takeUntil(this.destroy$),
+        filter((run): run is PayrollRun => run !== null),
+      )
+      .subscribe((run) => {
+        if (
+          this.isPayrollRunDetailModalOpen &&
+          this.selectedPayrollRun?.id === run.id
+        ) {
+          this.selectedPayrollRun = run;
+        }
+      });
   }
 
   ngOnInit(): void {

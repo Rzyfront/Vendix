@@ -110,7 +110,13 @@
             ></div>
           </div>
         } @else {
-          <app-chart [options]="gaugeChartOptions" size="medium"></app-chart>
+          @defer (on viewport) {
+            <app-chart [options]="gaugeChartOptions" size="medium"></app-chart>
+          } @placeholder {
+            <div
+              class="h-64 bg-surface-secondary animate-pulse rounded-xl"
+            ></div>
+          }
 
           <!-- Range Legend -->
           <div class="space-y-1.5">
@@ -185,10 +191,16 @@
             ></div>
           </div>
         } @else {
-          <app-chart
-            [options]="comparativeChartOptions"
-            size="large"
-          ></app-chart>
+          @defer (on viewport) {
+            <app-chart
+              [options]="comparativeChartOptions"
+              size="large"
+            ></app-chart>
+          } @placeholder {
+            <div
+              class="h-80 bg-surface-secondary animate-pulse rounded-xl"
+            ></div>
+          }
         }
       </div>
     </app-card>

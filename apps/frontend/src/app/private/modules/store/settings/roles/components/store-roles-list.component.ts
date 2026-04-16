@@ -1,5 +1,5 @@
 import { Component, Input, Output, EventEmitter } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 
 import {
   ResponsiveDataViewComponent,
@@ -21,35 +21,34 @@ import { StoreRole } from '../interfaces/store-role.interface';
   selector: 'app-store-roles-list',
   standalone: true,
   imports: [
-    CommonModule,
     ResponsiveDataViewComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
     IconComponent,
     ButtonComponent,
-    CardComponent,
-  ],
+    CardComponent
+],
   template: `
     <app-card [responsive]="true" [padding]="false">
       <!-- Search Section: sticky below stats on mobile -->
       <div
         class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
                   md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
-      >
+        >
         <div
           class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
-        >
+          >
           <!-- Title -->
           <h2
             class="text-[13px] font-bold text-gray-600 tracking-wide
                      md:text-lg md:font-semibold md:text-text-primary"
-          >
+            >
             Roles
             <span class="text-text-secondary font-normal">
               ({{ totalCount }})
             </span>
           </h2>
-
+    
           <!-- Search + Actions Row -->
           <div class="flex items-center gap-2 w-full md:w-auto">
             <app-inputsearch
@@ -59,17 +58,17 @@ import { StoreRole } from '../interfaces/store-role.interface';
               [debounceTime]="300"
               (search)="onSearch($event)"
             ></app-inputsearch>
-
+    
             <app-button
               variant="outline"
               size="md"
               customClasses="w-10 sm:w-11 !px-0 bg-surface shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none !rounded-[10px] shrink-0"
               (clicked)="create.emit()"
               title="Nuevo Rol"
-            >
+              >
               <app-icon slot="icon" name="plus" [size]="18"></app-icon>
             </app-button>
-
+    
             <app-options-dropdown
               class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
               [filters]="filterConfigs"
@@ -83,55 +82,60 @@ import { StoreRole } from '../interfaces/store-role.interface';
           </div>
         </div>
       </div>
-
+    
       <!-- Loading State -->
-      <div *ngIf="loading" class="p-4 md:p-6 text-center">
-        <div
-          class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-        ></div>
-        <p class="mt-2 text-text-secondary">Cargando roles...</p>
-      </div>
-
-      <!-- Empty State -->
-      <div
-        *ngIf="!loading && roles.length === 0"
-        class="p-12 text-center text-gray-500"
-      >
-        <app-icon
-          name="shield"
-          [size]="48"
-          class="mx-auto mb-4 text-gray-300"
-        ></app-icon>
-        <h3 class="text-lg font-medium text-gray-900">
-          No se encontraron roles
-        </h3>
-        <p class="mt-1">Comienza creando un nuevo rol personalizado.</p>
-        <div class="mt-6 flex justify-center">
-          <app-button variant="primary" (clicked)="create.emit()">
-            <app-icon slot="icon" name="plus" [size]="16"></app-icon>
-            Nuevo Rol
-          </app-button>
+      @if (loading) {
+        <div class="p-4 md:p-6 text-center">
+          <div
+            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+          ></div>
+          <p class="mt-2 text-text-secondary">Cargando roles...</p>
         </div>
-      </div>
-
+      }
+    
+      <!-- Empty State -->
+      @if (!loading && roles.length === 0) {
+        <div
+          class="p-12 text-center text-gray-500"
+          >
+          <app-icon
+            name="shield"
+            [size]="48"
+            class="mx-auto mb-4 text-gray-300"
+          ></app-icon>
+          <h3 class="text-lg font-medium text-gray-900">
+            No se encontraron roles
+          </h3>
+          <p class="mt-1">Comienza creando un nuevo rol personalizado.</p>
+          <div class="mt-6 flex justify-center">
+            <app-button variant="primary" (clicked)="create.emit()">
+              <app-icon slot="icon" name="plus" [size]="16"></app-icon>
+              Nuevo Rol
+            </app-button>
+          </div>
+        </div>
+      }
+    
       <!-- Data View -->
-      <div *ngIf="!loading && roles.length > 0" class="px-2 pb-2 pt-3 md:p-4">
-        <app-responsive-data-view
-          [data]="roles"
-          [columns]="columns"
-          [cardConfig]="cardConfig"
-          [actions]="tableActions"
-          [loading]="loading"
-          [hoverable]="true"
-          [striped]="true"
-          emptyMessage="No hay roles"
-          emptyIcon="shield"
-          tableSize="md"
-          (sort)="onSortChange($event)"
-        ></app-responsive-data-view>
-      </div>
+      @if (!loading && roles.length > 0) {
+        <div class="px-2 pb-2 pt-3 md:p-4">
+          <app-responsive-data-view
+            [data]="roles"
+            [columns]="columns"
+            [cardConfig]="cardConfig"
+            [actions]="tableActions"
+            [loading]="loading"
+            [hoverable]="true"
+            [striped]="true"
+            emptyMessage="No hay roles"
+            emptyIcon="shield"
+            tableSize="md"
+            (sort)="onSortChange($event)"
+          ></app-responsive-data-view>
+        </div>
+      }
     </app-card>
-  `,
+    `,
   styles: [
     `
       :host {
@@ -297,6 +301,11 @@ export class StoreRolesListComponent {
 
   onActionClick(action: string): void {
     if (action === 'create') {
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
       this.create.emit();
     }
   }

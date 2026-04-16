@@ -1,9 +1,8 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
   ChangeDetectionStrategy,
+  input,
+  output
 } from '@angular/core';
 import { IconComponent } from '../icon/icon.component';
 
@@ -18,20 +17,22 @@ export type PaginationInfoStyle = 'range' | 'page' | 'none';
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class PaginationComponent {
-  @Input() currentPage: number = 1;
-  @Input() totalPages: number = 0;
-  @Input() total: number = 0;
-  @Input() limit: number = 10;
-  @Input() infoStyle: PaginationInfoStyle = 'none';
+  readonly currentPage = input<number>(1);
+  readonly totalPages = input<number>(0);
+  readonly total = input<number>(0);
+  readonly limit = input<number>(10);
+  readonly infoStyle = input<PaginationInfoStyle>('none');
 
-  @Output() pageChange = new EventEmitter<number>();
+  readonly pageChange = output<number>();
 
   get isVisible(): boolean {
-    return this.totalPages > 1;
+    return this.totalPages() > 1;
   }
 
   get pageNumbers(): (number | string)[] {
-    const { currentPage, totalPages } = this;
+    const { currentPage: currentPageInput, totalPages: totalPagesInput } = this;
+    const currentPage = currentPageInput();
+    const totalPages = totalPagesInput();
     const pages: (number | string)[] = [];
 
     pages.push(1);
@@ -59,16 +60,16 @@ export class PaginationComponent {
   }
 
   get rangeStart(): number {
-    return (this.currentPage - 1) * this.limit + 1;
+    return (this.currentPage() - 1) * this.limit() + 1;
   }
 
   get rangeEnd(): number {
-    return Math.min(this.currentPage * this.limit, this.total);
+    return Math.min(this.currentPage() * this.limit(), this.total());
   }
 
   goToPage(page: number | string): void {
     if (typeof page === 'string') return;
-    if (page >= 1 && page <= this.totalPages && page !== this.currentPage) {
+    if (page >= 1 && page <= this.totalPages() && page !== this.currentPage()) {
       this.pageChange.emit(page);
     }
   }
@@ -78,6 +79,6 @@ export class PaginationComponent {
   }
 
   isActivePage(page: number | string): boolean {
-    return page === this.currentPage;
+    return page === this.currentPage();
   }
 }

@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { Router } from '@angular/router';
 import { Subject, takeUntil, finalize } from 'rxjs';
 import { CustomerListComponent, CustomerModalComponent, CustomerBulkUploadModalComponent } from './components';
@@ -19,12 +19,11 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
   selector: 'app-customers',
   standalone: true,
   imports: [
-    CommonModule,
     StatsComponent,
     CustomerListComponent,
     CustomerModalComponent,
-    CustomerBulkUploadModalComponent,
-  ],
+    CustomerBulkUploadModalComponent
+],
   template: `
     <div class="w-full">
       <!-- Stats Grid -->

@@ -6,7 +6,7 @@ import {
   OnDestroy,
   inject,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   ReactiveFormsModule,
   FormBuilder,
@@ -27,12 +27,11 @@ import { Subject, takeUntil } from 'rxjs';
   selector: 'app-store-role-create-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     InputComponent,
     ButtonComponent,
-    ModalComponent,
-  ],
+    ModalComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen"
@@ -139,6 +138,11 @@ export class StoreRoleCreateModalComponent implements OnDestroy {
         next: () => {
           this.isCreating = false;
           this.toastService.success('Rol creado exitosamente');
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
           this.onRoleCreated.emit();
           this.isOpenChange.emit(false);
           this.resetForm();

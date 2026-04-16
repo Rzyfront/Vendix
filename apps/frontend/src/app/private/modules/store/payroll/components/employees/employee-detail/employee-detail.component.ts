@@ -34,29 +34,35 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
       (cancel)="onClose()"
       title="Detalle de Empleado"
       size="lg"
-    >
+      >
       <div class="p-4">
         <!-- Status Badge -->
-        <div *ngIf="employee" class="mb-4 flex items-center gap-2">
-          <span class="text-sm text-text-secondary">Estado:</span>
-          <span [class]="getStatusBadgeClass(employee.status)" class="px-2 py-0.5 rounded-full text-xs font-medium">
-            {{ getStatusLabel(employee.status) }}
-          </span>
-          <span *ngIf="employee.employee_code" class="ml-auto text-sm text-text-secondary">
-            Codigo: {{ employee.employee_code }}
-          </span>
-        </div>
-
-        <!-- Linked user info -->
-        <div *ngIf="employee?.user" class="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
-          <div class="flex items-center gap-2">
-            <span class="text-sm font-medium text-blue-800">Usuario vinculado:</span>
-            <span class="text-sm text-blue-700">{{ employee?.user?.first_name }} {{ employee?.user?.last_name }} ({{ employee?.user?.email }})</span>
+        @if (employee) {
+          <div class="mb-4 flex items-center gap-2">
+            <span class="text-sm text-text-secondary">Estado:</span>
+            <span [class]="getStatusBadgeClass(employee.status)" class="px-2 py-0.5 rounded-full text-xs font-medium">
+              {{ getStatusLabel(employee.status) }}
+            </span>
+            @if (employee.employee_code) {
+              <span class="ml-auto text-sm text-text-secondary">
+                Codigo: {{ employee.employee_code }}
+              </span>
+            }
           </div>
-        </div>
-
+        }
+    
+        <!-- Linked user info -->
+        @if (employee?.user) {
+          <div class="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+            <div class="flex items-center gap-2">
+              <span class="text-sm font-medium text-blue-800">Usuario vinculado:</span>
+              <span class="text-sm text-blue-700">{{ employee?.user?.first_name }} {{ employee?.user?.last_name }} ({{ employee?.user?.email }})</span>
+            </div>
+          </div>
+        }
+    
         <form [formGroup]="employeeForm" (ngSubmit)="onSubmit()" class="space-y-6">
-
+    
           <!-- Link User (optional) -->
           <div class="mb-2">
             <h3 class="text-sm font-semibold text-text-primary mb-3 uppercase tracking-wide">Vincular con Usuario</h3>
@@ -68,7 +74,7 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
             ></app-selector>
             <p class="text-xs text-text-secondary mt-1">Al seleccionar un usuario, se autocompletaran los datos personales.</p>
           </div>
-
+    
           <!-- Personal Data -->
           <div>
             <h3 class="text-sm font-semibold text-text-primary mb-3 uppercase tracking-wide">Datos Personales</h3>
@@ -79,21 +85,21 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
                 [control]="employeeForm.get('first_name')"
                 [required]="true"
               ></app-input>
-
+    
               <app-input
                 label="Apellido"
                 formControlName="last_name"
                 [control]="employeeForm.get('last_name')"
                 [required]="true"
               ></app-input>
-
+    
               <app-selector
                 label="Tipo de Documento"
                 formControlName="document_type"
                 [options]="documentTypeOptions"
                 [required]="true"
               ></app-selector>
-
+    
               <app-input
                 label="Número de Documento"
                 formControlName="document_number"
@@ -102,7 +108,7 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
               ></app-input>
             </div>
           </div>
-
+    
           <!-- Employment Data -->
           <div>
             <h3 class="text-sm font-semibold text-text-primary mb-3 uppercase tracking-wide">Datos Laborales</h3>
@@ -114,26 +120,26 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
                 [control]="employeeForm.get('hire_date')"
                 [required]="true"
               ></app-input>
-
+    
               <app-selector
                 label="Tipo de Contrato"
                 formControlName="contract_type"
                 [options]="contractTypeOptions"
                 [required]="true"
               ></app-selector>
-
+    
               <app-input
                 label="Cargo"
                 formControlName="position"
                 [control]="employeeForm.get('position')"
               ></app-input>
-
+    
               <app-input
                 label="Departamento"
                 formControlName="department"
                 [control]="employeeForm.get('department')"
               ></app-input>
-
+    
               <app-selector
                 label="Centro de Costo"
                 formControlName="cost_center"
@@ -141,7 +147,7 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
               ></app-selector>
             </div>
           </div>
-
+    
           <!-- Compensation -->
           <div>
             <h3 class="text-sm font-semibold text-text-primary mb-3 uppercase tracking-wide">Compensación</h3>
@@ -153,23 +159,23 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
                 [control]="employeeForm.get('base_salary')"
                 [required]="true"
                 [prefixIcon]="true"
-              >
+                >
                 <span slot="prefix-icon" class="text-text-secondary">$</span>
               </app-input>
-
+    
               <app-selector
                 label="Frecuencia de Pago"
                 formControlName="payment_frequency"
                 [options]="paymentFrequencyOptions"
                 [required]="true"
               ></app-selector>
-
+    
               <app-input
                 label="Banco"
                 formControlName="bank_name"
                 [control]="employeeForm.get('bank_name')"
               ></app-input>
-
+    
               <app-input
                 label="Número de Cuenta"
                 formControlName="bank_account_number"
@@ -177,7 +183,7 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
               ></app-input>
             </div>
           </div>
-
+    
           <!-- Social Security -->
           <div>
             <h3 class="text-sm font-semibold text-text-primary mb-3 uppercase tracking-wide">Seguridad Social</h3>
@@ -187,25 +193,25 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
                 formControlName="health_provider"
                 [control]="employeeForm.get('health_provider')"
               ></app-input>
-
+    
               <app-input
                 label="Fondo de Pensión"
                 formControlName="pension_fund"
                 [control]="employeeForm.get('pension_fund')"
               ></app-input>
-
+    
               <app-selector
                 label="Nivel de Riesgo ARL"
                 formControlName="arl_risk_level"
                 [options]="arlRiskLevelOptions"
               ></app-selector>
-
+    
               <app-input
                 label="Fondo de Cesantías"
                 formControlName="severance_fund"
                 [control]="employeeForm.get('severance_fund')"
               ></app-input>
-
+    
               <app-input
                 label="Caja de Compensación"
                 formControlName="compensation_fund"
@@ -213,11 +219,11 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
               ></app-input>
             </div>
           </div>
-
+    
         </form>
-
+    
         <!-- Terminate Action -->
-        <ng-container *ngIf="employee && employee.status === 'active'">
+        @if (employee && employee.status === 'active') {
           <div class="mt-5 pt-4 border-t border-border space-y-2">
             <span class="text-xs font-medium text-text-secondary uppercase tracking-wide">Acciones</span>
             <div class="flex justify-end">
@@ -226,21 +232,23 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
                 size="sm"
                 (clicked)="onTerminate()"
                 [loading]="(loading$ | async) || false"
-              >
+                >
                 Terminar Contrato
               </app-button>
             </div>
           </div>
-        </ng-container>
-
+        }
+    
         <!-- Termination info -->
-        <div *ngIf="employee?.termination_date" class="mt-4 p-3 bg-red-50 rounded-lg border border-red-200">
-          <p class="text-sm text-red-800">
-            <strong>Fecha de terminacion:</strong> {{ employee?.termination_date | date:'dd/MM/yyyy' }}
-          </p>
-        </div>
+        @if (employee?.termination_date) {
+          <div class="mt-4 p-3 bg-red-50 rounded-lg border border-red-200">
+            <p class="text-sm text-red-800">
+              <strong>Fecha de terminacion:</strong> {{ employee?.termination_date | date:'dd/MM/yyyy' }}
+            </p>
+          </div>
+        }
       </div>
-
+    
       <!-- Footer -->
       <div slot="footer">
         <div class="flex items-center justify-end gap-2 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
@@ -250,20 +258,21 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
             (clicked)="onClose()">
             Cerrar
           </app-button>
-
-          <app-button
-            *ngIf="employee?.status !== 'terminated'"
-            variant="primary"
-            size="sm"
-            (clicked)="onSubmit()"
-            [disabled]="employeeForm.invalid || ((loading$ | async) || false)"
-            [loading]="(loading$ | async) || false">
-            Actualizar
-          </app-button>
+    
+          @if (employee?.status !== 'terminated') {
+            <app-button
+              variant="primary"
+              size="sm"
+              (clicked)="onSubmit()"
+              [disabled]="employeeForm.invalid || ((loading$ | async) || false)"
+              [loading]="(loading$ | async) || false">
+              Actualizar
+            </app-button>
+          }
         </div>
       </div>
     </app-modal>
-  `
+    `
 })
 export class EmployeeDetailComponent implements OnChanges {
   @Input() isOpen = false;

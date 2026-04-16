@@ -6,7 +6,7 @@ import {
   signal,
   computed,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { Router } from '@angular/router';
 import { Subject, takeUntil } from 'rxjs';
 
@@ -33,14 +33,13 @@ import { SessionCreateModalComponent } from '../session-create-modal/session-cre
   selector: 'vendix-consolidation-sessions',
   standalone: true,
   imports: [
-    CommonModule,
     CardComponent,
     StatsComponent,
     InputsearchComponent,
     ResponsiveDataViewComponent,
     OptionsDropdownComponent,
-    SessionCreateModalComponent,
-  ],
+    SessionCreateModalComponent
+],
   template: `
     <div class="w-full">
       <!-- Stats: Sticky on mobile, static on desktop -->

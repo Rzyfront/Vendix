@@ -5,7 +5,7 @@ import {
   OnInit,
   inject,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { timer } from 'rxjs';
 import { filter, map, catchError } from 'rxjs/operators';
@@ -30,12 +30,11 @@ import {
   selector: 'app-monitoring-performance-page',
   standalone: true,
   imports: [
-    CommonModule,
     StatsComponent,
     MetricChartComponent,
     TimeRangeSelectorComponent,
-    SlowEndpointsComponent,
-  ],
+    SlowEndpointsComponent
+],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="space-y-6">
@@ -44,22 +43,23 @@ import {
         <h3
           class="text-lg font-semibold"
           style="color: var(--color-text-primary);"
-        >
-          Performance
-          <span
-            *ngIf="performanceSnapshot"
-            class="text-xs font-mono px-2 py-0.5 rounded-full ml-2"
-            style="background: var(--color-surface); color: var(--color-text-muted);"
           >
-            {{ performanceSnapshot.totalRecorded }} requests tracked
-          </span>
+          Performance
+          @if (performanceSnapshot) {
+            <span
+              class="text-xs font-mono px-2 py-0.5 rounded-full ml-2"
+              style="background: var(--color-surface); color: var(--color-text-muted);"
+              >
+              {{ performanceSnapshot.totalRecorded }} requests tracked
+            </span>
+          }
         </h3>
         <app-time-range-selector
           [selected]="performanceTimeRange"
           (rangeChange)="onTimeRangeChange($event)"
         ></app-time-range-selector>
       </div>
-
+    
       <!-- Performance Stats Cards -->
       <div class="stats-container">
         <app-stats
@@ -74,7 +74,7 @@ import {
           [iconBgColor]="avgResponseTimeIconBg"
           [iconColor]="avgResponseTimeIconColor"
           [loading]="loadingPerformance"
-        />
+          />
         <app-stats
           title="Requests/seg"
           [value]="reqPerSec"
@@ -87,7 +87,7 @@ import {
           iconBgColor="bg-blue-100"
           iconColor="text-blue-500"
           [loading]="loadingPerformance"
-        />
+          />
         <app-stats
           title="Error Rate (5m)"
           [value]="errorRate"
@@ -100,7 +100,7 @@ import {
           [iconBgColor]="errorRateIconBg"
           [iconColor]="errorRateIconColor"
           [loading]="loadingPerformance"
-        />
+          />
         <app-stats
           title="Event Loop p99"
           [value]="eventLoopP99"
@@ -116,9 +116,9 @@ import {
           [iconBgColor]="eventLoopIconBg"
           [iconColor]="eventLoopIconColor"
           [loading]="loadingPerformance"
-        />
+          />
       </div>
-
+    
       <!-- Response Time & Throughput Charts -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <app-metric-chart
@@ -142,13 +142,13 @@ import {
           [loading]="loadingPerformance"
         ></app-metric-chart>
       </div>
-
+    
       <!-- Slow Endpoints - Own section -->
       <app-slow-endpoints
         [endpoints]="performanceSnapshot?.slowestEndpoints ?? null"
         [loading]="loadingPerformance"
       ></app-slow-endpoints>
-
+    
       <!-- Error & Event Loop Charts -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <app-metric-chart
@@ -170,7 +170,7 @@ import {
         ></app-metric-chart>
       </div>
     </div>
-  `,
+    `,
 })
 export class MonitoringPerformancePage implements OnInit {
   private readonly monitoringService = inject(MonitoringService);

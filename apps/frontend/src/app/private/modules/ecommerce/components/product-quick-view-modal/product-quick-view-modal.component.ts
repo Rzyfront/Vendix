@@ -755,6 +755,11 @@ export class ProductQuickViewModalComponent implements OnChanges {
 
   onClose(): void {
     this.isOpen = false;
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.closed.emit();
     // Reset state
     this.product = null;

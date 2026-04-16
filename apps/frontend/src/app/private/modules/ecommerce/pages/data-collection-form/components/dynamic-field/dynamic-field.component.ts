@@ -1,5 +1,5 @@
 import { Component, ChangeDetectionStrategy, input, output, computed, signal, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { environment } from '../../../../../../../../environments/environment';
@@ -16,7 +16,7 @@ import {
 @Component({
   selector: 'app-dynamic-field',
   standalone: true,
-  imports: [CommonModule, FormsModule, InputComponent, SelectorComponent, TextareaComponent, ToggleComponent, IconComponent, ButtonComponent, SpinnerComponent],
+  imports: [FormsModule, InputComponent, SelectorComponent, TextareaComponent, ToggleComponent, IconComponent, ButtonComponent, SpinnerComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div>

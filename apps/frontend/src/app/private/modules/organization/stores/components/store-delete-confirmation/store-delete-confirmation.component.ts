@@ -1,5 +1,5 @@
-import { Component, Input, Output, EventEmitter, OnDestroy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, Input, OnDestroy, input, output } from '@angular/core';
+
 import {
   FormsModule,
   ReactiveFormsModule,
@@ -18,23 +18,22 @@ import { StoreListItem } from '../../interfaces/store.interface';
   selector: 'app-store-delete-confirmation',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
-    IconComponent,
-  ],
+    IconComponent
+],
   templateUrl: './store-delete-confirmation.component.html',
   styleUrl: './store-delete-confirmation.component.scss',
 })
 export class StoreDeleteConfirmationComponent implements OnDestroy {
   @Input() isOpen = false;
-  @Input() store: StoreListItem | null = null;
+  readonly store = input<StoreListItem | null>(null);
 
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() confirm = new EventEmitter<void>();
-  @Output() cancel = new EventEmitter<void>();
+  readonly isOpenChange = output<boolean>();
+  readonly confirm = output<void>();
+  readonly cancel = output<void>();
 
   slugInput = new FormControl('', {
     validators: [Validators.required],
@@ -57,14 +56,16 @@ export class StoreDeleteConfirmationComponent implements OnDestroy {
   }
 
   get placeholderText(): string {
-    return this.store ? `Escribe '${this.store.slug}' para confirmar` : '';
+    const store = this.store();
+    return store ? `Escribe '${store.slug}' para confirmar` : '';
   }
 
   get isSlugValid(): boolean {
-    if (!this.store || !this.slugInput.value) {
+    const store = this.store();
+    if (!store || !this.slugInput.value) {
       return false;
     }
-    return this.slugInput.value.trim() === this.store.slug;
+    return this.slugInput.value.trim() === store.slug;
   }
 
   showError = false;
@@ -75,6 +76,10 @@ export class StoreDeleteConfirmationComponent implements OnDestroy {
       return;
     }
 
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.confirm.emit();
     this.slugInput.reset();
     this.showError = false;
@@ -82,6 +87,10 @@ export class StoreDeleteConfirmationComponent implements OnDestroy {
 
   onCancel(): void {
     this.isOpenChange.emit(false);
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.cancel.emit();
     this.slugInput.reset();
     this.showError = false;

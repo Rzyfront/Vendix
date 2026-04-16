@@ -74,11 +74,12 @@ services:
       dockerfile: Dockerfile.dev
     container_name: vendix_frontend
     restart: unless-stopped
-    mem_limit: 3g
+    mem_limit: 4g
+    memswap_limit: 5g
     environment:
       - NODE_ENV=development
       - BACKEND_URL=http://api.vendix.com
-      - NODE_OPTIONS=--max-old-space-size=2048
+      - NODE_OPTIONS=--max-old-space-size=3072
       - CHOKIDAR_USEPOLLING="true"
     depends_on:
       - backend

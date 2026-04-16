@@ -1,5 +1,5 @@
 import { Component, EventEmitter, Input, Output, ViewChild, ElementRef } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   ModalComponent,
   ButtonComponent,
@@ -15,15 +15,14 @@ import { CreateTicketRequest, TicketPriority } from '../../models/ticket.model';
   selector: 'app-create-ticket-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
     InputComponent,
     SelectorComponent,
     TextareaComponent,
-    IconComponent,
-  ],
+    IconComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen"
@@ -186,6 +185,11 @@ export class CreateTicketModalComponent {
   }
 
   onCancel() {
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.closed.emit();
     this.isOpenChange.emit(false);
     this.form.reset();

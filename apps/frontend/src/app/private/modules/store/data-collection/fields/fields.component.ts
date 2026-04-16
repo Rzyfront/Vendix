@@ -1,5 +1,5 @@
 import { Component, OnInit, ChangeDetectionStrategy, signal, computed, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { MetadataFieldsService } from '../services/metadata-fields.service';
 import { MetadataField } from '../interfaces/metadata-field.interface';
@@ -25,7 +25,6 @@ import type { ScrollableTab } from '../../../../../shared/components/scrollable-
   selector: 'app-fields',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     FieldModalComponent,
     SpinnerComponent,
@@ -35,8 +34,8 @@ import type { ScrollableTab } from '../../../../../shared/components/scrollable-
     CardComponent,
     InputsearchComponent,
     ButtonComponent,
-    IconComponent,
-  ],
+    IconComponent
+],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="md:space-y-4">

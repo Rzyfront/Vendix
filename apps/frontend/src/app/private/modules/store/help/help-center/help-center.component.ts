@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { ActivatedRoute } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { Subject, takeUntil, debounceTime, distinctUntilChanged } from 'rxjs';
@@ -14,12 +14,11 @@ import { HelpArticleCardComponent } from './components/help-article-card/help-ar
   selector: 'app-help-center',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     IconComponent,
     SpinnerComponent,
-    HelpArticleCardComponent,
-  ],
+    HelpArticleCardComponent
+],
   template: `
     <div class="help-center-container">
       <!-- Header -->
@@ -27,7 +26,7 @@ import { HelpArticleCardComponent } from './components/help-article-card/help-ar
         <h2 class="help-title">Centro de Ayuda</h2>
         <p class="help-subtitle">Encuentra respuestas, tutoriales y guías para aprovechar Vendix al máximo</p>
       </div>
-
+    
       <!-- Search Bar -->
       <div class="search-section">
         <div class="search-input-wrapper">
@@ -38,71 +37,96 @@ import { HelpArticleCardComponent } from './components/help-article-card/help-ar
             placeholder="Buscar artículos..."
             [(ngModel)]="searchQuery"
             (ngModelChange)="onSearchChange($event)"
-          />
-          <button
-            *ngIf="searchQuery"
-            class="clear-btn"
-            (click)="clearSearch()"
-            aria-label="Limpiar búsqueda"
-          >
-            <app-icon name="x" [size]="16"></app-icon>
-          </button>
+            />
+          @if (searchQuery) {
+            <button
+              class="clear-btn"
+              (click)="clearSearch()"
+              aria-label="Limpiar búsqueda"
+              >
+              <app-icon name="x" [size]="16"></app-icon>
+            </button>
+          }
         </div>
       </div>
-
+    
       <!-- Category Filters -->
-      <div class="category-filters" *ngIf="categories.length > 0 && !searchQuery">
-        <button
-          class="category-chip"
-          [class.active]="!selectedCategory"
-          (click)="selectCategory(null)"
-        >
-          Todos
-        </button>
-        <button
-          *ngFor="let cat of categories"
-          class="category-chip"
-          [class.active]="selectedCategory === cat.slug"
-          (click)="selectCategory(cat.slug)"
-        >
-          <app-icon *ngIf="cat.icon" [name]="cat.icon" [size]="14"></app-icon>
-          {{ cat.name }}
-          <span class="chip-count" *ngIf="cat._count?.articles">{{ cat._count!.articles }}</span>
-        </button>
-      </div>
-
+      @if (categories.length > 0 && !searchQuery) {
+        <div class="category-filters">
+          <button
+            class="category-chip"
+            [class.active]="!selectedCategory"
+            (click)="selectCategory(null)"
+            >
+            Todos
+          </button>
+          @for (cat of categories; track cat) {
+            <button
+              class="category-chip"
+              [class.active]="selectedCategory === cat.slug"
+              (click)="selectCategory(cat.slug)"
+              >
+              @if (cat.icon) {
+                <app-icon [name]="cat.icon" [size]="14"></app-icon>
+              }
+              {{ cat.name }}
+              @if (cat._count?.articles) {
+                <span class="chip-count">{{ cat._count!.articles }}</span>
+              }
+            </button>
+          }
+        </div>
+      }
+    
       <!-- Loading State -->
-      <div class="loading-state" *ngIf="isLoading">
-        <app-spinner size="md"></app-spinner>
-      </div>
-
+      @if (isLoading) {
+        <div class="loading-state">
+          <app-spinner size="md"></app-spinner>
+        </div>
+      }
+    
       <!-- Articles Grid -->
-      <div class="articles-grid" *ngIf="!isLoading && articles.length > 0">
-        <app-help-article-card
-          *ngFor="let article of articles; trackBy: trackBySlug"
-          [article]="article"
-          [isExpanded]="expandedSlug === article.slug"
-          (expanded)="onArticleExpanded($event)"
-        ></app-help-article-card>
-      </div>
-
+      @if (!isLoading && articles.length > 0) {
+        <div class="articles-grid">
+          @for (article of articles; track trackBySlug($index, article)) {
+            <app-help-article-card
+              [article]="article"
+              [isExpanded]="expandedSlug === article.slug"
+              (expanded)="onArticleExpanded($event)"
+            ></app-help-article-card>
+          }
+        </div>
+      }
+    
       <!-- Empty State -->
-      <div class="empty-state" *ngIf="!isLoading && articles.length === 0">
-        <app-icon name="search" [size]="48" class="empty-icon"></app-icon>
-        <h3>No se encontraron artículos</h3>
-        <p *ngIf="searchQuery">Intenta con otros términos de búsqueda</p>
-        <p *ngIf="!searchQuery">Aún no hay artículos en esta categoría</p>
-      </div>
-
+      @if (!isLoading && articles.length === 0) {
+        <div class="empty-state">
+          <app-icon name="search" [size]="48" class="empty-icon"></app-icon>
+          <h3>No se encontraron artículos</h3>
+          @if (searchQuery) {
+            <p>Intenta con otros términos de búsqueda</p>
+          }
+          @if (!searchQuery) {
+            <p>Aún no hay artículos en esta categoría</p>
+          }
+        </div>
+      }
+    
       <!-- Load More -->
-      <div class="load-more" *ngIf="!isLoading && hasMore && !searchQuery">
-        <button class="load-more-btn" (click)="loadMore()" [disabled]="isLoadingMore">
-          <app-spinner *ngIf="isLoadingMore" size="sm"></app-spinner>
-          <span *ngIf="!isLoadingMore">Cargar más artículos</span>
-        </button>
-      </div>
+      @if (!isLoading && hasMore && !searchQuery) {
+        <div class="load-more">
+          <button class="load-more-btn" (click)="loadMore()" [disabled]="isLoadingMore">
+            @if (isLoadingMore) {
+              <app-spinner size="sm"></app-spinner>
+            }
+            @if (!isLoadingMore) {
+              <span>Cargar más artículos</span>
+            }
+          </button>
+        </div>
+      }
     </div>
-  `,
+    `,
   styles: [`
     .help-center-container {
       max-width: 960px;

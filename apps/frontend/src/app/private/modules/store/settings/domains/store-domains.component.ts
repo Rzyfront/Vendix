@@ -6,7 +6,7 @@ import {
   TemplateRef,
   AfterViewInit,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
@@ -42,7 +42,6 @@ import { DomainFormModalComponent } from './components/domain-form-modal.compone
   selector: 'app-store-domains',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ButtonComponent,
     ResponsiveDataViewComponent,
@@ -133,49 +132,48 @@ import { DomainFormModalComponent } from './components/domain-form-modal.compone
         <!-- Content Area -->
         <div class="px-2 pb-2 pt-0 md:p-4">
           <!-- Loading State -->
-          <div
-            *ngIf="is_loading"
-            class="flex justify-center items-center py-12"
-          >
-            <div
-              class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-            ></div>
-          </div>
+          @if (is_loading) {
+            <div class="flex justify-center items-center py-12">
+              <div
+                class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+              ></div>
+            </div>
+          }
 
           <!-- Empty State -->
-          <div
-            *ngIf="!is_loading && domains.length === 0"
-            class="text-center py-12"
-          >
-            <app-icon
-              name="globe"
-              [size]="48"
-              class="mx-auto text-text-muted mb-4 opacity-20"
-            ></app-icon>
-            <h3 class="text-lg font-medium text-text-primary mb-2">
-              Sin dominios
-            </h3>
-            <p class="text-text-muted mb-6">
-              Aún no tienes dominios configurados para tu tienda.
-            </p>
-            <app-button variant="primary" (clicked)="openCreateModal()">
-              <app-icon name="plus" [size]="16" class="mr-2"></app-icon>
-              Crear primer dominio
-            </app-button>
-          </div>
+          @if (!is_loading && domains.length === 0) {
+            <div class="text-center py-12">
+              <app-icon
+                name="globe"
+                [size]="48"
+                class="mx-auto text-text-muted mb-4 opacity-20"
+              ></app-icon>
+              <h3 class="text-lg font-medium text-text-primary mb-2">
+                Sin dominios
+              </h3>
+              <p class="text-text-muted mb-6">
+                Aún no tienes dominios configurados para tu tienda.
+              </p>
+              <app-button variant="primary" (clicked)="openCreateModal()">
+                <app-icon name="plus" [size]="16" class="mr-2"></app-icon>
+                Crear primer dominio
+              </app-button>
+            </div>
+          }
 
-          <app-responsive-data-view
-            *ngIf="!is_loading && domains.length > 0"
-            [columns]="table_columns"
-            [data]="domains"
-            [cardConfig]="card_config"
-            [actions]="table_actions"
-            [loading]="is_loading"
-            emptyMessage="No hay dominios configurados"
-            emptyIcon="globe"
-            (rowClick)="openEditModal($event)"
-          >
-          </app-responsive-data-view>
+          @if (!is_loading && domains.length > 0) {
+            <app-responsive-data-view
+              [columns]="table_columns"
+              [data]="domains"
+              [cardConfig]="card_config"
+              [actions]="table_actions"
+              [loading]="is_loading"
+              emptyMessage="No hay dominios configurados"
+              emptyIcon="globe"
+              (rowClick)="openEditModal($event)"
+            >
+            </app-responsive-data-view>
+          }
         </div>
       </app-card>
 
@@ -194,13 +192,14 @@ import { DomainFormModalComponent } from './components/domain-form-modal.compone
         </div>
       </ng-template>
 
-      <!-- New Form Modal -->
-      <app-domain-form-modal
-        [(isOpen)]="is_modal_open"
-        [domain]="editing_domain"
-        [isSaving]="is_saving"
-        (save)="onSaveDomain($event)"
-      ></app-domain-form-modal>
+      @defer (when is_modal_open) {
+        <app-domain-form-modal
+          [(isOpen)]="is_modal_open"
+          [domain]="editing_domain"
+          [isSaving]="is_saving"
+          (save)="onSaveDomain($event)"
+        ></app-domain-form-modal>
+      }
 
       <!-- Delete Confirmation Modal -->
       <app-confirmation-modal

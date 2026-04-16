@@ -1,5 +1,5 @@
 import { Component, OnInit, ChangeDetectionStrategy, signal, computed, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { Router } from '@angular/router';
 import { ConsultationsService } from './services/consultations.service';
 import { ConsultationBooking } from './interfaces/consultation.interface';
@@ -13,7 +13,7 @@ import { TooltipComponent } from '../../../../shared/components/tooltip/tooltip.
 @Component({
   selector: 'app-consultations',
   standalone: true,
-  imports: [CommonModule, IconComponent, CardComponent, BadgeComponent, TooltipComponent],
+  imports: [IconComponent, CardComponent, BadgeComponent, TooltipComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="p-4 sm:p-6">

@@ -6,7 +6,7 @@ import {
   OnInit,
   OnDestroy,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   PosKeyboardService,
   ShortcutGroup,
@@ -16,7 +16,7 @@ import { Subject } from 'rxjs';
 @Component({
   selector: 'app-pos-keyboard-shortcuts',
   standalone: true,
-  imports: [CommonModule],
+  imports: [],
   template: `
     <div class="keyboard-shortcuts-container">
       <button
@@ -25,65 +25,73 @@ import { Subject } from 'rxjs';
         [class.active]="showHelp"
         type="button"
         title="Mostrar atajos de teclado (F1)"
-      >
+        >
         <i class="fas fa-keyboard"></i>
         <span>Atajos</span>
       </button>
-
-      <div
-        class="shortcuts-help-modal"
-        *ngIf="showHelp"
-        (click)="onBackdropClick($event)"
-      >
-        <div class="shortcuts-help-content" (click)="$event.stopPropagation()">
-          <div class="help-header">
-            <h3>Atajos de Teclado</h3>
-            <button
-              class="close-btn"
-              (click)="toggleShortcutsHelp()"
-              type="button"
-            >
-              <i class="fas fa-times"></i>
-            </button>
-          </div>
-
-          <div class="help-body">
-            <div class="shortcut-section" *ngFor="let group of shortcutGroups">
-              <h4>{{ group.name }}</h4>
-              <div class="shortcuts-list">
-                <div
-                  class="shortcut-item"
-                  *ngFor="let shortcut of group.shortcuts"
+    
+      @if (showHelp) {
+        <div
+          class="shortcuts-help-modal"
+          (click)="onBackdropClick($event)"
+          >
+          <div class="shortcuts-help-content" (click)="$event.stopPropagation()">
+            <div class="help-header">
+              <h3>Atajos de Teclado</h3>
+              <button
+                class="close-btn"
+                (click)="toggleShortcutsHelp()"
+                type="button"
                 >
-                  <div class="shortcut-keys">
-                    <span class="key" *ngIf="shortcut.ctrlKey">Ctrl</span>
-                    <span class="key" *ngIf="shortcut.altKey">Alt</span>
-                    <span class="key" *ngIf="shortcut.shiftKey">Shift</span>
-                    <span class="key main-key">{{
-                      shortcut.key.toUpperCase()
-                    }}</span>
-                  </div>
-                  <div class="shortcut-description">
-                    {{ shortcut.description }}
+                <i class="fas fa-times"></i>
+              </button>
+            </div>
+            <div class="help-body">
+              @for (group of shortcutGroups; track group) {
+                <div class="shortcut-section">
+                  <h4>{{ group.name }}</h4>
+                  <div class="shortcuts-list">
+                    @for (shortcut of group.shortcuts; track shortcut) {
+                      <div
+                        class="shortcut-item"
+                        >
+                        <div class="shortcut-keys">
+                          @if (shortcut.ctrlKey) {
+                            <span class="key">Ctrl</span>
+                          }
+                          @if (shortcut.altKey) {
+                            <span class="key">Alt</span>
+                          }
+                          @if (shortcut.shiftKey) {
+                            <span class="key">Shift</span>
+                          }
+                          <span class="key main-key">{{
+                            shortcut.key.toUpperCase()
+                          }}</span>
+                        </div>
+                        <div class="shortcut-description">
+                          {{ shortcut.description }}
+                        </div>
+                      </div>
+                    }
                   </div>
                 </div>
-              </div>
+              }
+            </div>
+            <div class="help-footer">
+              <button
+                class="btn btn-primary"
+                (click)="toggleShortcutsHelp()"
+                type="button"
+                >
+                Cerrar
+              </button>
             </div>
           </div>
-
-          <div class="help-footer">
-            <button
-              class="btn btn-primary"
-              (click)="toggleShortcutsHelp()"
-              type="button"
-            >
-              Cerrar
-            </button>
-          </div>
         </div>
-      </div>
+      }
     </div>
-  `,
+    `,
   styles: [
     `
       .keyboard-shortcuts-container {

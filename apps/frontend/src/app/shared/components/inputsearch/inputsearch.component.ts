@@ -1,13 +1,13 @@
 import {
   Component,
   Input,
-  Output,
-  EventEmitter,
   OnInit,
   OnDestroy,
   forwardRef,
+  input,
+  output
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   ControlValueAccessor,
   NG_VALUE_ACCESSOR,
@@ -21,7 +21,7 @@ export type InputSearchSize = 'sm' | 'md' | 'lg';
 @Component({
   selector: 'app-inputsearch',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule],
+  imports: [ReactiveFormsModule],
   providers: [
     {
       provide: NG_VALUE_ACCESSOR,
@@ -43,18 +43,18 @@ export type InputSearchSize = 'sm' | 'md' | 'lg';
             stroke-width="2"
             stroke-linecap="round"
             stroke-linejoin="round"
-          >
+            >
             <circle cx="11" cy="11" r="8"></circle>
             <path d="m21 21-4.35-4.35"></path>
           </svg>
         </div>
-
+    
         <!-- Input de búsqueda -->
         <input
-          [type]="type"
-          [placeholder]="placeholder"
+          [type]="type()"
+          [placeholder]="placeholder()"
           [disabled]="disabled"
-          [readonly]="readonly"
+          [readonly]="readonly()"
           [value]="value"
           [class]="inputClasses"
           (input)="onInputChange($event)"
@@ -62,71 +62,77 @@ export type InputSearchSize = 'sm' | 'md' | 'lg';
           (blur)="onBlur()"
           (keyup.enter)="onEnter()"
           (keyup.escape)="onEscape()"
-        />
-
+          />
+    
         <!-- Botón de limpiar (opcional) -->
-        <button
-          *ngIf="showClear && value"
-          type="button"
-          class="inputsearch-clear"
-          [class]="clearButtonClasses"
-          (click)="clearInput()"
-          [disabled]="disabled"
-        >
-          <svg
-            class="clear-icon"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
-          >
-            <line x1="18" y1="6" x2="6" y2="18"></line>
-            <line x1="6" y1="6" x2="18" y2="18"></line>
-          </svg>
-        </button>
+        @if (showClear() && value) {
+          <button
+            type="button"
+            class="inputsearch-clear"
+            [class]="clearButtonClasses"
+            (click)="clearInput()"
+            [disabled]="disabled"
+            >
+            <svg
+              class="clear-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              >
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        }
       </div>
-
+    
       <!-- Mensaje de ayuda o error -->
-      <div
-        *ngIf="helpText || errorMessage"
-        class="inputsearch-help"
-        [class]="helpClasses"
-      >
-        <span *ngIf="errorMessage" class="error-message">{{
-          errorMessage
-        }}</span>
-        <span *ngIf="!errorMessage && helpText" class="help-text">{{
-          helpText
-        }}</span>
-      </div>
+      @if (helpText || errorMessage) {
+        <div
+          class="inputsearch-help"
+          [class]="helpClasses"
+          >
+          @if (errorMessage) {
+            <span class="error-message">{{
+              errorMessage
+            }}</span>
+          }
+          @if (!errorMessage && helpText) {
+            <span class="help-text">{{
+              helpText
+            }}</span>
+          }
+        </div>
+      }
     </div>
-  `,
+    `,
 })
 export class InputsearchComponent
   implements OnInit, OnDestroy, ControlValueAccessor
 {
-  @Input() type: 'text' | 'search' | 'email' | 'url' = 'text';
-  @Input() placeholder = 'Buscar...';
+  readonly type = input<'text' | 'search' | 'email' | 'url'>('text');
+  readonly placeholder = input('Buscar...');
   @Input() disabled = false;
-  @Input() readonly = false;
-  @Input() required = false;
-  @Input() showClear = true;
-  @Input() size: InputSearchSize = 'md';
-  @Input() styleVariant: FormStyleVariant = 'modern';
-  @Input() debounceTime = 300; // 300 ms por defecto
+  readonly readonly = input(false);
+  readonly required = input(false);
+  readonly showClear = input(true);
+  readonly size = input<InputSearchSize>('md');
+  readonly styleVariant = input<FormStyleVariant>('modern');
+  readonly debounceTime = input(300); // 300 ms por defecto
   @Input() helpText = '';
   @Input() errorMessage = '';
-  @Input() customClasses = '';
+  readonly customClasses = input('');
 
-  @Output() searchChange = new EventEmitter<string>();
-  @Output() search = new EventEmitter<string>();
-  @Output() focus = new EventEmitter<void>();
-  @Output() blur = new EventEmitter<void>();
-  @Output() enter = new EventEmitter<void>();
-  @Output() escape = new EventEmitter<void>();
-  @Output() clear = new EventEmitter<void>();
+  readonly searchChange = output<string>();
+  readonly search = output<string>();
+  readonly focus = output<void>();
+  readonly blur = output<void>();
+  readonly enter = output<void>();
+  readonly escape = output<void>();
+  readonly clear = output<void>();
 
   value = '';
   isFocused = false;
@@ -142,7 +148,7 @@ export class InputsearchComponent
     // Configurar el debounce para la búsqueda
     this.searchSubject$
       .pipe(
-        debounceTime(this.debounceTime),
+        debounceTime(this.debounceTime()),
         distinctUntilChanged(),
         takeUntil(this.destroy$),
       )
@@ -188,20 +194,24 @@ export class InputsearchComponent
 
   onFocus(): void {
     this.isFocused = true;
+    // TODO: The 'emit' function requires a mandatory void argument
     this.focus.emit();
   }
 
   onBlur(): void {
     this.isFocused = false;
     this.onTouched();
+    // TODO: The 'emit' function requires a mandatory void argument
     this.blur.emit();
   }
 
   onEnter(): void {
+    // TODO: The 'emit' function requires a mandatory void argument
     this.enter.emit();
   }
 
   onEscape(): void {
+    // TODO: The 'emit' function requires a mandatory void argument
     this.escape.emit();
   }
 
@@ -209,6 +219,7 @@ export class InputsearchComponent
     this.value = '';
     this.onChange(this.value);
     this.searchSubject$.next(this.value);
+    // TODO: The 'emit' function requires a mandatory void argument
     this.clear.emit();
   }
 
@@ -216,16 +227,16 @@ export class InputsearchComponent
   get containerClasses(): string {
     const baseClasses = ['inputsearch-container'];
 
-    const variantClasses = this.styleVariant === 'modern'
+    const variantClasses = this.styleVariant() === 'modern'
       ? ['inputsearch-modern']
       : [];
 
-    const sizeClasses = this.styleVariant === 'classic'
+    const sizeClasses = this.styleVariant() === 'classic'
       ? {
           sm: ['inputsearch-container-sm'],
           md: ['inputsearch-container-md'],
           lg: ['inputsearch-container-lg'],
-        }[this.size]
+        }[this.size()]
       : [];
 
     const stateClasses = [
@@ -241,8 +252,9 @@ export class InputsearchComponent
       ...stateClasses,
     ];
 
-    if (this.customClasses) {
-      classes.push(this.customClasses);
+    const customClasses = this.customClasses();
+    if (customClasses) {
+      classes.push(customClasses);
     }
 
     return classes.join(' ');
@@ -251,16 +263,16 @@ export class InputsearchComponent
   get wrapperClasses(): string {
     const baseClasses = ['inputsearch-wrapper'];
 
-    const variantClasses = this.styleVariant === 'modern'
+    const variantClasses = this.styleVariant() === 'modern'
       ? ['inputsearch-wrapper-modern']
       : [];
 
-    const sizeClasses = this.styleVariant === 'classic'
+    const sizeClasses = this.styleVariant() === 'classic'
       ? {
           sm: ['inputsearch-wrapper-sm'],
           md: ['inputsearch-wrapper-md'],
           lg: ['inputsearch-wrapper-lg'],
-        }[this.size]
+        }[this.size()]
       : [];
 
     const stateClasses = [
@@ -275,16 +287,16 @@ export class InputsearchComponent
   get inputClasses(): string {
     const baseClasses = ['inputsearch-input'];
 
-    const variantClasses = this.styleVariant === 'modern'
+    const variantClasses = this.styleVariant() === 'modern'
       ? ['inputsearch-input-modern']
       : [];
 
-    const sizeClasses = this.styleVariant === 'classic'
+    const sizeClasses = this.styleVariant() === 'classic'
       ? {
           sm: ['inputsearch-input-sm'],
           md: ['inputsearch-input-md'],
           lg: ['inputsearch-input-lg'],
-        }[this.size]
+        }[this.size()]
       : [];
 
     const stateClasses = [
@@ -299,16 +311,16 @@ export class InputsearchComponent
   get iconClasses(): string {
     const baseClasses = ['inputsearch-icon'];
 
-    const variantClasses = this.styleVariant === 'modern'
+    const variantClasses = this.styleVariant() === 'modern'
       ? ['inputsearch-icon-modern']
       : [];
 
-    const sizeClasses = this.styleVariant === 'classic'
+    const sizeClasses = this.styleVariant() === 'classic'
       ? {
           sm: ['inputsearch-icon-sm'],
           md: ['inputsearch-icon-md'],
           lg: ['inputsearch-icon-lg'],
-        }[this.size]
+        }[this.size()]
       : [];
 
     return [...baseClasses, ...variantClasses, ...sizeClasses].join(' ');
@@ -317,16 +329,16 @@ export class InputsearchComponent
   get clearButtonClasses(): string {
     const baseClasses = ['inputsearch-clear'];
 
-    const variantClasses = this.styleVariant === 'modern'
+    const variantClasses = this.styleVariant() === 'modern'
       ? ['inputsearch-clear-modern']
       : [];
 
-    const sizeClasses = this.styleVariant === 'classic'
+    const sizeClasses = this.styleVariant() === 'classic'
       ? {
           sm: ['inputsearch-clear-sm'],
           md: ['inputsearch-clear-md'],
           lg: ['inputsearch-clear-lg'],
-        }[this.size]
+        }[this.size()]
       : [];
 
     return [...baseClasses, ...variantClasses, ...sizeClasses].join(' ');

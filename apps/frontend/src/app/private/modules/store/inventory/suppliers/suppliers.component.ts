@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { Subscription } from 'rxjs';
 
 // Shared Components
@@ -24,11 +24,10 @@ import { SupplierListComponent } from './components/supplier-list/supplier-list.
   selector: 'app-suppliers',
   standalone: true,
   imports: [
-    CommonModule,
     StatsComponent,
     SupplierFormModalComponent,
-    SupplierListComponent,
-  ],
+    SupplierListComponent
+],
   template: `
     <div class="w-full overflow-x-hidden">
       <!-- Stats Grid: sticky at top on mobile -->

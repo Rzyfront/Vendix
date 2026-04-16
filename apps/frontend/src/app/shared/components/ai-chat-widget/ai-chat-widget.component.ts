@@ -1,13 +1,13 @@
 import {
   Component,
   signal,
-  ViewChild,
   ElementRef,
   OnInit,
   OnDestroy,
   ChangeDetectionStrategy,
+  viewChild
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { Subscription } from 'rxjs';
 import { AIChatFacade } from '../../../core/store/ai-chat/ai-chat.facade';
@@ -16,7 +16,7 @@ import { IconComponent } from '../icon/icon.component';
 @Component({
   selector: 'app-ai-chat-widget',
   standalone: true,
-  imports: [CommonModule, FormsModule, IconComponent],
+  imports: [FormsModule, IconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <!-- Floating Action Button -->
@@ -410,7 +410,7 @@ import { IconComponent } from '../icon/icon.component';
   `],
 })
 export class AIChatWidgetComponent implements OnInit, OnDestroy {
-  @ViewChild('messagesContainer') messagesContainer!: ElementRef;
+  readonly messagesContainer = viewChild.required<ElementRef>('messagesContainer');
 
   isOpen = signal(false);
   showSidebar = signal(false);
@@ -495,7 +495,7 @@ export class AIChatWidgetComponent implements OnInit, OnDestroy {
 
   private scrollToBottom(): void {
     setTimeout(() => {
-      const container = this.messagesContainer?.nativeElement;
+      const container = this.messagesContainer()?.nativeElement;
       if (container) {
         container.scrollTop = container.scrollHeight;
       }

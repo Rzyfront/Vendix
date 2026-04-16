@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { debounceTime, distinctUntilChanged, Subject, takeUntil } from 'rxjs';
 import {
   PaymentMethod,
@@ -42,7 +42,6 @@ import {
   selector: 'app-payment-methods',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     PaymentMethodStatsComponent,
@@ -54,8 +53,8 @@ import {
     SelectorComponent,
     IconComponent,
     ButtonComponent,
-    CardComponent,
-  ],
+    CardComponent
+],
   templateUrl: './payment-methods.component.html',
 })
 export class PaymentMethodsComponent implements OnInit, OnDestroy {

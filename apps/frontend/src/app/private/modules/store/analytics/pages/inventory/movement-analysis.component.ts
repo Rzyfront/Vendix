@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { Subject, takeUntil, forkJoin } from 'rxjs';
@@ -24,7 +24,10 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
 
 import { AnalyticsService } from '../../services/analytics.service';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
-import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
+import {
+  getDefaultStartDate,
+  getDefaultEndDate,
+} from '../../../../../../shared/utils/date.util';
 import {
   StockMovementReport,
   MovementSummaryItem,
@@ -36,7 +39,6 @@ import {
   selector: 'vendix-movement-analysis',
   standalone: true,
   imports: [
-    CommonModule,
     RouterModule,
     FormsModule,
     CardComponent,
@@ -168,10 +170,16 @@ import {
               >Tendencia de Movimientos</span
             >
             <div class="h-[350px]">
-              <app-chart
-                [options]="trendsChartOptions()"
-                [loading]="loadingTrends()"
-              ></app-chart>
+              @defer (on viewport) {
+                <app-chart
+                  [options]="trendsChartOptions()"
+                  [loading]="loadingTrends()"
+                ></app-chart>
+              } @placeholder {
+                <div
+                  class="h-full bg-surface-secondary animate-pulse rounded-xl"
+                ></div>
+              }
             </div>
           </app-card>
 
@@ -181,10 +189,16 @@ import {
               >Distribución por Tipo</span
             >
             <div class="h-[350px]">
-              <app-chart
-                [options]="distributionChartOptions()"
-                [loading]="loadingSummary()"
-              ></app-chart>
+              @defer (on viewport) {
+                <app-chart
+                  [options]="distributionChartOptions()"
+                  [loading]="loadingSummary()"
+                ></app-chart>
+              } @placeholder {
+                <div
+                  class="h-full bg-surface-secondary animate-pulse rounded-xl"
+                ></div>
+              }
             </div>
           </app-card>
         </div>
@@ -625,5 +639,4 @@ export class MovementAnalysisComponent implements OnInit, OnDestroy {
         },
       });
   }
-
 }

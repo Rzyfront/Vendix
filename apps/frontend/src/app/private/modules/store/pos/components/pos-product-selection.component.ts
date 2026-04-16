@@ -60,7 +60,7 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
   template: `
     <div
       class="h-full flex flex-col bg-surface rounded-card lg:rounded-card shadow-card border border-border overflow-hidden"
-    >
+      >
       <!-- Products Header -->
       <div class="px-3 lg:px-6 py-3 lg:py-4 border-b border-border product-header">
         <!-- Single header row: count badge + search + filters -->
@@ -73,8 +73,8 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
             [debounceTime]="300"
             [(ngModel)]="searchQuery"
             (searchChange)="onSearch($event)"
-          />
-
+            />
+    
           <!-- Componente de filtros -->
           <app-options-dropdown
             [filters]="filterConfigs"
@@ -86,18 +86,18 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
             (clearAllFilters)="onClearFilters()"
             class="shrink-0"
           ></app-options-dropdown>
-
+    
           <!-- Botón cliente / Cola -->
           @if (queueEnabled && queueCount > 0) {
             <button
               class="relative flex items-center justify-center w-10 sm:w-11 h-10 sm:h-11 rounded-[10px] bg-accent/10 hover:bg-accent/20 transition-colors border border-accent/30 shrink-0"
               (click)="openQueueModal.emit()"
               title="Cola de clientes ({{ queueCount }})"
-            >
+              >
               <app-icon name="users" [size]="18" class="text-accent"></app-icon>
               <span
                 class="absolute -top-1.5 -right-1.5 min-w-[20px] h-5 flex items-center justify-center rounded-full bg-accent text-white text-xs font-bold px-1"
-              >
+                >
                 {{ queueCount }}
               </span>
             </button>
@@ -108,7 +108,7 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
               customClasses="w-10 sm:w-11 !px-0 bg-surface !rounded-[10px] shrink-0"
               (clicked)="openCustomerModal.emit()"
               [title]="selectedCustomer ? selectedCustomer.name : 'Agregar cliente'"
-            >
+              >
               <app-icon
                 slot="icon"
                 [name]="selectedCustomer ? 'user-check' : 'user-plus'"
@@ -119,220 +119,233 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
           }
         </div>
       </div>
-
+    
       <!-- Products Content -->
       <div class="flex-1 overflow-y-auto min-h-0 p-3 lg:p-6 relative z-0">
         <!-- Loading State -->
-        <div *ngIf="loading" class="p-8 text-center">
-          <div
-            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-          ></div>
-          <p class="mt-2 text-text-secondary">Cargando productos...</p>
-        </div>
-
-        <!-- Empty State -->
-        <div
-          *ngIf="!loading && filteredProducts.length === 0"
-          class="flex flex-col items-center justify-center h-64 text-center p-8"
-        >
-          <div
-            class="w-20 h-20 rounded-2xl flex items-center justify-center mb-4"
-            style="background-color: var(--color-primary-light)"
-          >
-            <app-icon
-              name="package-open"
-              [size]="36"
-              color="var(--color-primary)"
-            ></app-icon>
+        @if (loading) {
+          <div class="p-8 text-center">
+            <div
+              class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            ></div>
+            <p class="mt-2 text-text-secondary">Cargando productos...</p>
           </div>
-          <h3 class="text-lg font-semibold text-text-primary mb-2">
-            {{ getEmptyStateTitle() }}
-          </h3>
-          <p class="text-sm text-text-secondary mb-4 max-w-xs mx-auto">
-            {{ getEmptyStateDescription() }}
-          </p>
-          <app-button
-            *ngIf="searchQuery"
-            variant="outline"
-            size="md"
-            (clicked)="onClearSearch()"
-          >
-            Limpiar búsqueda
-          </app-button>
-        </div>
-
-        <!-- Modern Compact Products Grid -->
-        <div
-          *ngIf="!loading && filteredProducts.length > 0"
-          class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-2 sm:gap-3"
-        >
-          <!-- Modern Product Card (iOS-style) -->
+        }
+    
+        <!-- Empty State -->
+        @if (!loading && filteredProducts.length === 0) {
           <div
-            *ngFor="let product of filteredProducts; trackBy: trackByProductId"
-            (click)="onAddToCart(product)"
-            class="group relative bg-surface border border-border rounded-card shadow-sm hover:shadow-lg transition-all duration-200 cursor-pointer overflow-hidden product-card"
+            class="flex flex-col items-center justify-center h-64 text-center p-8"
+            >
+            <div
+              class="w-20 h-20 rounded-2xl flex items-center justify-center mb-4"
+              style="background-color: var(--color-primary-light)"
+              >
+              <app-icon
+                name="package-open"
+                [size]="36"
+                color="var(--color-primary)"
+              ></app-icon>
+            </div>
+            <h3 class="text-lg font-semibold text-text-primary mb-2">
+              {{ getEmptyStateTitle() }}
+            </h3>
+            <p class="text-sm text-text-secondary mb-4 max-w-xs mx-auto">
+              {{ getEmptyStateDescription() }}
+            </p>
+            @if (searchQuery) {
+              <app-button
+                variant="outline"
+                size="md"
+                (clicked)="onClearSearch()"
+                >
+                Limpiar búsqueda
+              </app-button>
+            }
+          </div>
+        }
+    
+        <!-- Modern Compact Products Grid -->
+        @if (!loading && filteredProducts.length > 0) {
+          <div
+            class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-2 sm:gap-3"
+            >
+            <!-- Modern Product Card (iOS-style) -->
+            @for (product of filteredProducts; track trackByProductId($index, product)) {
+              <div
+                (click)="onAddToCart(product)"
+                class="group relative bg-surface border border-border rounded-card shadow-sm hover:shadow-lg transition-all duration-200 cursor-pointer overflow-hidden product-card"
             [class]="
               product.track_inventory !== false && product.stock === 0
                 ? 'opacity-60 cursor-not-allowed'
                 : 'cursor-pointer hover:border-primary active:scale-[0.97]'
             "
-          >
-            <!-- Product Image or Icon -->
-            <div
-              class="aspect-square bg-gradient-to-br from-surface to-muted/30 relative overflow-hidden"
-            >
-              <!-- Product Image -->
-              <img
-                *ngIf="product.image_url || product.image"
-                [src]="product.image_url || product.image"
-                [alt]="product.name"
-                class="w-full h-full object-cover"
-                (error)="onImageError($event)"
-              />
-
-              <!-- Default Icon when no image -->
-              <div
-                *ngIf="!product.image && !product.image_url"
-                class="absolute inset-0 flex items-center justify-center"
-              >
-                <div
-                  class="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center"
                 >
-                  <app-icon
-                    name="image"
-                    [size]="24"
-                    class="text-primary/60"
-                  ></app-icon>
-                </div>
-              </div>
-
-              <!-- Stock Badge -->
-              @if (product.track_inventory !== false) {
-                @if (product.stock <= 5) {
-                  <app-badge
-                    [variant]="product.stock === 0 ? 'error' : 'warning'"
-                    size="xs"
-                    badgeStyle="outline"
-                    class="absolute top-2 right-2 z-[1]">
-                    {{ product.stock === 0 ? 'AGOTADO' : 'Últimas ' + product.stock }}
-                  </app-badge>
-                }
-              } @else {
-                <app-badge variant="info" size="xs" badgeStyle="outline" class="absolute top-2 right-2 z-[1]">
-                  Disponible
-                </app-badge>
-              }
-
-              <!-- Variant Indicator -->
-              <div
-                *ngIf="product.has_variants"
-                class="absolute top-2 left-2 px-1.5 py-1 rounded-md text-[10px] font-semibold backdrop-blur-md bg-black/60 border border-white/10 flex items-center gap-1"
-              >
-                <app-icon name="layers" [size]="12" [color]="'#ffffff'"></app-icon>
-                <span class="text-white">{{ product.product_variants?.length }}</span>
-              </div>
-
-              <!-- Weight Product Badge -->
-              <div
-                *ngIf="product.pricing_type === 'weight'"
-                class="absolute bottom-2 left-2 px-1.5 py-1 rounded-md text-[10px] font-semibold backdrop-blur-md bg-blue-600/80 border border-white/10 flex items-center gap-1"
-              >
-                <app-icon name="scale" [size]="12" [color]="'#ffffff'"></app-icon>
-                <span class="text-white">Peso</span>
-              </div>
-            </div>
-
-            <!-- Product Info -->
-            <div class="p-2 sm:p-3">
-              <!-- Product Name -->
-              <h3
-                class="text-text-primary font-medium text-xs sm:text-sm leading-tight line-clamp-2 mb-1 sm:mb-2 group-hover:text-primary transition-colors"
-                [title]="product.name"
-              >
-                {{ product.name }}
-              </h3>
-
-              <!-- Product Description (hidden on mobile, shortened on desktop) -->
-              <p
-                *ngIf="product.description"
-                class="hidden sm:block text-text-secondary text-xs line-clamp-1 mb-2"
-                [title]="product.description"
-              >
-                {{ product.description }}
-              </p>
-
-              <!-- Bottom Section: Price and Stock -->
-              <div class="flex items-center justify-between">
-                <!-- Price -->
-                <div class="flex flex-col">
-                  <span class="text-text-primary font-bold text-xs sm:text-sm lg:text-base xl:text-lg leading-tight truncate">
-                    {{ product.final_price | currency }}<span *ngIf="product.pricing_type === 'weight'" class="text-[10px] font-normal text-text-secondary">/{{ defaultWeightUnit }}</span>
-                  </span>
-                  <!-- Stock indicator for non-variant products -->
+                <!-- Product Image or Icon -->
+                <div
+                  class="aspect-square bg-gradient-to-br from-surface to-muted/30 relative overflow-hidden"
+                  >
+                  <!-- Product Image -->
+                  @if (product.image_url || product.image) {
+                    <img
+                      [src]="product.image_url || product.image"
+                      [alt]="product.name"
+                      class="w-full h-full object-cover"
+                      (error)="onImageError($event)"
+                      />
+                  }
+                  <!-- Default Icon when no image -->
+                  @if (!product.image && !product.image_url) {
+                    <div
+                      class="absolute inset-0 flex items-center justify-center"
+                      >
+                      <div
+                        class="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center"
+                        >
+                        <app-icon
+                          name="image"
+                          [size]="24"
+                          class="text-primary/60"
+                        ></app-icon>
+                      </div>
+                    </div>
+                  }
+                  <!-- Stock Badge -->
                   @if (product.track_inventory !== false) {
-                    <span
-                      *ngIf="!product.has_variants"
-                      class="text-[10px] sm:text-xs leading-tight"
+                    @if (product.stock <= 5) {
+                      <app-badge
+                        [variant]="product.stock === 0 ? 'error' : 'warning'"
+                        size="xs"
+                        badgeStyle="outline"
+                        class="absolute top-2 right-2 z-[1]">
+                        {{ product.stock === 0 ? 'AGOTADO' : 'Últimas ' + product.stock }}
+                      </app-badge>
+                    }
+                  } @else {
+                    <app-badge variant="info" size="xs" badgeStyle="outline" class="absolute top-2 right-2 z-[1]">
+                      Disponible
+                    </app-badge>
+                  }
+                  <!-- Variant Indicator -->
+                  @if (product.has_variants) {
+                    <div
+                      class="absolute top-2 left-2 px-1.5 py-1 rounded-md text-[10px] font-semibold backdrop-blur-md bg-black/60 border border-white/10 flex items-center gap-1"
+                      >
+                      <app-icon name="layers" [size]="12" [color]="'#ffffff'"></app-icon>
+                      <span class="text-white">{{ product.product_variants?.length }}</span>
+                    </div>
+                  }
+                  <!-- Weight Product Badge -->
+                  @if (product.pricing_type === 'weight') {
+                    <div
+                      class="absolute bottom-2 left-2 px-1.5 py-1 rounded-md text-[10px] font-semibold backdrop-blur-md bg-blue-600/80 border border-white/10 flex items-center gap-1"
+                      >
+                      <app-icon name="scale" [size]="12" [color]="'#ffffff'"></app-icon>
+                      <span class="text-white">Peso</span>
+                    </div>
+                  }
+                </div>
+                <!-- Product Info -->
+                <div class="p-2 sm:p-3">
+                  <!-- Product Name -->
+                  <h3
+                    class="text-text-primary font-medium text-xs sm:text-sm leading-tight line-clamp-2 mb-1 sm:mb-2 group-hover:text-primary transition-colors"
+                    [title]="product.name"
+                    >
+                    {{ product.name }}
+                  </h3>
+                  <!-- Product Description (hidden on mobile, shortened on desktop) -->
+                  @if (product.description) {
+                    <p
+                      class="hidden sm:block text-text-secondary text-xs line-clamp-1 mb-2"
+                      [title]="product.description"
+                      >
+                      {{ product.description }}
+                    </p>
+                  }
+                  <!-- Bottom Section: Price and Stock -->
+                  <div class="flex items-center justify-between">
+                    <!-- Price -->
+                    <div class="flex flex-col">
+                      <span class="text-text-primary font-bold text-xs sm:text-sm lg:text-base xl:text-lg leading-tight truncate">
+                        {{ product.final_price | currency }}@if (product.pricing_type === 'weight') {
+                        <span class="text-[10px] font-normal text-text-secondary">/{{ defaultWeightUnit }}</span>
+                      }
+                    </span>
+                    <!-- Stock indicator for non-variant products -->
+                    @if (product.track_inventory !== false) {
+                      @if (!product.has_variants) {
+                        <span
+                          class="text-[10px] sm:text-xs leading-tight"
                       [class]="product.stock === 0
                         ? 'text-error font-semibold'
                         : product.stock <= 5
                           ? 'text-warning font-medium'
                           : 'text-text-muted'"
-                    >
-                      {{ product.stock === 0 ? 'Sin stock' : product.stock + ' en stock' }}
-                    </span>
-                  } @else {
-                    <span *ngIf="!product.has_variants" class="text-[10px] sm:text-xs leading-tight text-blue-600 font-medium">
-                      Disponible
-                    </span>
-                  }
+                          >
+                          {{ product.stock === 0 ? 'Sin stock' : product.stock + ' en stock' }}
+                        </span>
+                      }
+                    } @else {
+                      @if (!product.has_variants) {
+                        <span class="text-[10px] sm:text-xs leading-tight text-blue-600 font-medium">
+                          Disponible
+                        </span>
+                      }
+                    }
+                  </div>
                 </div>
-              </div>
-
-              <!-- Additional Product Details + Add Button -->
-              <div
-                class="hidden sm:flex items-center justify-between mt-2 pt-2 border-t border-border/60 gap-2"
-              >
-                <div class="flex-1 min-w-0 flex items-center gap-2 text-xs text-text-muted">
-                  <span *ngIf="product.sku" class="font-mono truncate max-w-[80px]" [title]="product.sku">{{
-                    product.sku
-                  }}</span>
-                  <span *ngIf="product.category_name" class="truncate">{{
-                    product.category_name
-                  }}</span>
-                </div>
-                <button
-                  class="shrink-0 w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 shadow-sm text-[var(--color-text-on-primary)]"
+                <!-- Additional Product Details + Add Button -->
+                <div
+                  class="hidden sm:flex items-center justify-between mt-2 pt-2 border-t border-border/60 gap-2"
+                  >
+                  <div class="flex-1 min-w-0 flex items-center gap-2 text-xs text-text-muted">
+                    @if (product.sku) {
+                      <span class="font-mono truncate max-w-[80px]" [title]="product.sku">{{
+                        product.sku
+                      }}</span>
+                    }
+                    @if (product.category_name) {
+                      <span class="truncate">{{
+                        product.category_name
+                      }}</span>
+                    }
+                  </div>
+                  <button
+                    class="shrink-0 w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 shadow-sm text-[var(--color-text-on-primary)]"
                   [ngClass]="
                     product.stock === 0
                       ? 'opacity-50 cursor-not-allowed bg-muted'
                       : 'bg-[var(--color-primary)] hover:opacity-90 hover:scale-110 active:scale-95'
                   "
-                  [disabled]="product.stock === 0"
-                  (click)="$event.stopPropagation(); onAddToCart(product)"
-                  aria-label="Agregar al carrito"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                    <line x1="12" y1="5" x2="12" y2="19"></line>
-                    <line x1="5" y1="12" x2="19" y2="12"></line>
-                  </svg>
-                </button>
+                    [disabled]="product.stock === 0"
+                    (click)="$event.stopPropagation(); onAddToCart(product)"
+                    aria-label="Agregar al carrito"
+                    >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                      <line x1="12" y1="5" x2="12" y2="19"></line>
+                      <line x1="5" y1="12" x2="19" y2="12"></line>
+                    </svg>
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
+          }
         </div>
-      </div>
+      }
     </div>
-
+    </div>
+    
     <!-- Variant Selector Modal -->
-    <app-pos-variant-selector
-      *ngIf="showVariantSelector && selectedProductForVariant"
-      [product]="selectedProductForVariant"
-      [variants]="selectedProductForVariant.product_variants"
-      (variantSelected)="onVariantSelected($event)"
-      (closed)="onVariantSelectorClosed()"
-    ></app-pos-variant-selector>
-  `,
+    @if (showVariantSelector && selectedProductForVariant) {
+      <app-pos-variant-selector
+        [product]="selectedProductForVariant"
+        [variants]="selectedProductForVariant.product_variants"
+        (variantSelected)="onVariantSelected($event)"
+        (closed)="onVariantSelectorClosed()"
+      ></app-pos-variant-selector>
+    }
+    `,
   styles: [
     `
       :host {

@@ -1,5 +1,5 @@
 import { Component, OnDestroy, ViewChild } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { Router } from '@angular/router';
 import { Subject, takeUntil } from 'rxjs';
 
@@ -25,11 +25,10 @@ import { PoDetailModalComponent } from '../../inventory/pop/components/po-detail
   selector: 'app-purchase-orders',
   standalone: true,
   imports: [
-    CommonModule,
     PurchaseOrderStatsComponent,
     PurchaseOrderListComponent,
-    PoDetailModalComponent,
-  ],
+    PoDetailModalComponent
+],
   templateUrl: './purchase-orders.component.html',
   styleUrls: ['./purchase-orders.component.scss'],
 })

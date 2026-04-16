@@ -1,5 +1,5 @@
 import { Component, Input, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { PaymentMethodStats } from '../interfaces/payment-methods.interface';
 import { StatsComponent } from '../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
@@ -7,7 +7,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
 @Component({
   selector: 'app-payment-methods-stats',
   standalone: true,
-  imports: [CommonModule, StatsComponent],
+  imports: [StatsComponent],
   template: `
     <div class="stats-container">
       <app-stats

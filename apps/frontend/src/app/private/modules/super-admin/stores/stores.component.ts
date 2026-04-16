@@ -6,7 +6,7 @@ import {
   SimpleChanges,
   inject,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { RouterModule, Router } from '@angular/router';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
@@ -54,7 +54,6 @@ import './stores.component.css';
   selector: 'app-stores',
   standalone: true,
   imports: [
-    CommonModule,
     RouterModule,
     FormsModule,
     ReactiveFormsModule,
@@ -69,8 +68,8 @@ import './stores.component.css';
     ResponsiveDataViewComponent,
     ButtonComponent,
     PaginationComponent,
-    CardComponent,
-  ],
+    CardComponent
+],
   providers: [StoresService],
   templateUrl: './stores.component.html',
 })

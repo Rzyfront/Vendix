@@ -6,7 +6,7 @@ import {
   OnDestroy,
   inject,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   ReactiveFormsModule,
   FormBuilder,
@@ -27,12 +27,11 @@ import { Subject, takeUntil } from 'rxjs';
   selector: 'app-store-user-create-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     InputComponent,
     ButtonComponent,
-    ModalComponent,
-  ],
+    ModalComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen"
@@ -192,6 +191,11 @@ export class StoreUserCreateModalComponent implements OnDestroy {
         next: () => {
           this.isCreating = false;
           this.toastService.success('Usuario creado exitosamente');
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
           this.onUserCreated.emit();
           this.isOpenChange.emit(false);
           this.resetForm();

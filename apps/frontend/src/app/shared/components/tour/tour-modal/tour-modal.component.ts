@@ -1,16 +1,16 @@
 import {
   Component,
   Input,
-  Output,
-  EventEmitter,
   inject,
   OnInit,
   OnDestroy,
   OnChanges,
   SimpleChanges,
   NgZone,
+  input,
+  output
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { ButtonComponent } from '../../button/button.component';
 import { TourService, TourStep, TourConfig } from '../services/tour.service';
 import { POS_TOUR_CONFIG } from '../configs/pos-tour.config';
@@ -26,94 +26,96 @@ interface SpotlightPosition {
 @Component({
   selector: 'app-tour-modal',
   standalone: true,
-  imports: [CommonModule, ButtonComponent],
+  imports: [ButtonComponent],
   template: `
     <!-- Spotlight Overlay -->
-    <div
-      *ngIf="isOpen && spotlight.visible && spotlight.width > 0"
-      class="tour-spotlight-overlay"
-      [style.top.px]="spotlight.top"
-      [style.left.px]="spotlight.left"
-      [style.width.px]="spotlight.width"
-      [style.height.px]="spotlight.height"
-    ></div>
-
+    @if (isOpen && spotlight.visible && spotlight.width > 0) {
+      <div
+        class="tour-spotlight-overlay"
+        [style.top.px]="spotlight.top"
+        [style.left.px]="spotlight.left"
+        [style.width.px]="spotlight.width"
+        [style.height.px]="spotlight.height"
+      ></div>
+    }
+    
     <!-- Tour Tooltip - Different design for mobile and desktop -->
-    <div
-      *ngIf="isOpen"
-      class="tour-tooltip"
-      [class.is-mobile]="isMobile"
-      [class.is-desktop]="!isMobile"
-      [class.is-minimized]="isMinimized"
-      [attr.data-position-mode]="isMobile ? 'compact' : 'absolute'"
-      [style.top.px]="tooltipPosition.top"
-      [style.left.px]="tooltipPosition.left"
-    >
-      <div class="tooltip-header">
-        <h3 class="tooltip-title">{{ currentStep?.title }}</h3>
-        <!-- Minimize button for mobile -->
-        <button
-          *ngIf="isMobile"
-          class="minimize-btn"
-          (click)="toggleMinimize()"
-          [attr.aria-label]="isMinimized ? 'Expandir' : 'Minimizar'"
+    @if (isOpen) {
+      <div
+        class="tour-tooltip"
+        [class.is-mobile]="isMobile"
+        [class.is-desktop]="!isMobile"
+        [class.is-minimized]="isMinimized"
+        [attr.data-position-mode]="isMobile ? 'compact' : 'absolute'"
+        [style.top.px]="tooltipPosition.top"
+        [style.left.px]="tooltipPosition.left"
         >
-          <svg
-            [class.rotated]="isMinimized"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-          >
-            <polyline points="6 9 12 15 18 9"></polyline>
-          </svg>
-        </button>
-      </div>
-
-      <div class="tooltip-content" [class.expanded]="!isMinimized">
-        <p class="tooltip-description">{{ currentStep?.description }}</p>
-
-        <p *ngIf="currentStep?.action" class="tooltip-action">
-          👆 {{ currentStep?.action }}
-        </p>
-      </div>
-
-      <!-- Footer Navigation -->
-      <div class="tooltip-footer" [class.expanded]="!isMinimized">
-        <div class="footer-left">
-          <app-button
-            variant="outline"
-            [size]="isMobile ? 'xsm' : 'xsm'"
-            (clicked)="skipTour()"
-            class="skip-btn"
-          >
-            Saltar
-          </app-button>
+        <div class="tooltip-header">
+          <h3 class="tooltip-title">{{ currentStep?.title }}</h3>
+          <!-- Minimize button for mobile -->
+          @if (isMobile) {
+            <button
+              class="minimize-btn"
+              (click)="toggleMinimize()"
+              [attr.aria-label]="isMinimized ? 'Expandir' : 'Minimizar'"
+              >
+              <svg
+                [class.rotated]="isMinimized"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                >
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </button>
+          }
         </div>
-
-        <!-- Progress indicator (desktop only) -->
-        <div class="footer-center" *ngIf="!isMobile">
-          <span class="tour-progress">
-            {{ currentIndex + 1 }} de {{ totalSteps }}
-          </span>
+        <div class="tooltip-content" [class.expanded]="!isMinimized">
+          <p class="tooltip-description">{{ currentStep?.description }}</p>
+          @if (currentStep?.action) {
+            <p class="tooltip-action">
+              👆 {{ currentStep?.action }}
+            </p>
+          }
         </div>
-
-        <div class="footer-right">
-          <app-button
-            variant="primary"
-            [size]="isMobile ? 'sm' : 'xsm'"
-            (clicked)="nextStep()"
-            [disabled]="isProcessing"
-            class="next-btn"
-          >
-            {{ nextButtonText }}
-          </app-button>
+        <!-- Footer Navigation -->
+        <div class="tooltip-footer" [class.expanded]="!isMinimized">
+          <div class="footer-left">
+            <app-button
+              variant="outline"
+              [size]="isMobile ? 'xsm' : 'xsm'"
+              (clicked)="skipTour()"
+              class="skip-btn"
+              >
+              Saltar
+            </app-button>
+          </div>
+          <!-- Progress indicator (desktop only) -->
+          @if (!isMobile) {
+            <div class="footer-center">
+              <span class="tour-progress">
+                {{ currentIndex + 1 }} de {{ totalSteps }}
+              </span>
+            </div>
+          }
+          <div class="footer-right">
+            <app-button
+              variant="primary"
+              [size]="isMobile ? 'sm' : 'xsm'"
+              (clicked)="nextStep()"
+              [disabled]="isProcessing"
+              class="next-btn"
+              >
+              {{ nextButtonText }}
+            </app-button>
+          </div>
         </div>
       </div>
-    </div>
-  `,
+    }
+    `,
   styles: [
     `
       :host {
@@ -530,10 +532,10 @@ export class TourModalComponent implements OnInit, OnDestroy, OnChanges {
   private ngZone = inject(NgZone);
 
   @Input() isOpen = false;
-  @Input() tourConfig: TourConfig = POS_TOUR_CONFIG;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() completed = new EventEmitter<void>();
-  @Output() skipped = new EventEmitter<void>();
+  readonly tourConfig = input<TourConfig>(POS_TOUR_CONFIG);
+  readonly isOpenChange = output<boolean>();
+  readonly completed = output<void>();
+  readonly skipped = output<void>();
 
   currentIndex = 0;
   currentStep: TourStep | null = null;
@@ -641,7 +643,7 @@ export class TourModalComponent implements OnInit, OnDestroy, OnChanges {
   }
 
   get totalSteps(): number {
-    return this.tourConfig?.steps?.length || 0;
+    return this.tourConfig()?.steps?.length || 0;
   }
 
   get isLastStep(): boolean {
@@ -766,7 +768,7 @@ export class TourModalComponent implements OnInit, OnDestroy, OnChanges {
 
     this.isProcessing = true;
     this.currentIndex = index;
-    this.currentStep = this.tourConfig.steps[index];
+    this.currentStep = this.tourConfig().steps[index];
 
     this.clearSpotlight();
 
@@ -1172,23 +1174,25 @@ export class TourModalComponent implements OnInit, OnDestroy, OnChanges {
 
   completeTour(): void {
     this.clearSpotlight();
-    this.tourService.completeTour(this.tourConfig.id);
+    this.tourService.completeTour(this.tourConfig().id);
     this.isOpen = false;
     this.isOpenChange.emit(false);
+    // TODO: The 'emit' function requires a mandatory void argument
     this.completed.emit();
   }
 
   skipTour(): void {
     this.clearSpotlight();
-    this.tourService.skipTour(this.tourConfig.id);
+    this.tourService.skipTour(this.tourConfig().id);
     this.isOpen = false;
     this.isOpenChange.emit(false);
+    // TODO: The 'emit' function requires a mandatory void argument
     this.skipped.emit();
   }
 
   async startTour(): Promise<void> {
     this.currentIndex = 0;
-    this.currentStep = this.tourConfig.steps[0];
+    this.currentStep = this.tourConfig().steps[0];
 
     // Clear any existing spotlight
     this.clearSpotlight();

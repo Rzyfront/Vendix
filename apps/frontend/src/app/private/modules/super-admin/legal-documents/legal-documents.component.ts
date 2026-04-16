@@ -1,5 +1,5 @@
 import { Component, OnInit, inject, signal, computed } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { RouterModule } from '@angular/router';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
 import { LegalDocumentsService } from './services/legal-documents.service';
@@ -34,7 +34,6 @@ import { formatDateOnlyUTC } from '../../../../shared/utils/date.util';
   selector: 'app-legal-documents',
   standalone: true,
   imports: [
-    CommonModule,
     RouterModule,
     ReactiveFormsModule,
     LegalDocumentModalComponent,
@@ -144,14 +143,15 @@ import { formatDateOnlyUTC } from '../../../../shared/utils/date.util';
         <!-- Table Container -->
         <div class="relative min-h-[400px] p-2 md:p-4">
           <!-- Loading Overlay -->
-          <div
-            *ngIf="loading()"
-            class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
-          >
+          @if (loading()) {
             <div
-              class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-            ></div>
-          </div>
+              class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
+            >
+              <div
+                class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+              ></div>
+            </div>
+          }
 
           <app-responsive-data-view
             [data]="filteredDocuments()"
@@ -167,14 +167,15 @@ import { formatDateOnlyUTC } from '../../../../shared/utils/date.util';
       </app-card>
     </div>
 
-    <!-- Modal -->
-    <app-legal-document-modal
-      [(isOpen)]="isModalOpen"
-      [document]="selectedDocument"
-      [submitting]="isModalSubmitting"
-      (save)="onSaveDocument($event)"
-      (cancel)="closeModal()"
-    ></app-legal-document-modal>
+    @defer (when isModalOpen) {
+      <app-legal-document-modal
+        [(isOpen)]="isModalOpen"
+        [document]="selectedDocument"
+        [submitting]="isModalSubmitting"
+        (save)="onSaveDocument($event)"
+        (cancel)="closeModal()"
+      ></app-legal-document-modal>
+    }
 
     <!-- Confirmation Modal -->
     <app-confirmation-modal

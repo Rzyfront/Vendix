@@ -7,7 +7,7 @@ import {
   EventEmitter,
   inject,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { Subject, takeUntil, forkJoin } from 'rxjs';
 
@@ -45,7 +45,6 @@ import { OrderPrintService } from '../../services/order-print.service';
   selector: 'app-orders-list',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ResponsiveDataViewComponent,
     InputsearchComponent,
@@ -54,8 +53,8 @@ import { OrderPrintService } from '../../services/order-print.service';
     ButtonComponent,
     IconComponent,
     PaginationComponent,
-    CardComponent,
-  ],
+    CardComponent
+],
   templateUrl: './orders-list.component.html',
   styleUrls: ['./orders-list.component.css'],
 })
@@ -394,6 +393,11 @@ export class OrdersListComponent implements OnInit, OnDestroy {
   onActionClick(action: string): void {
     switch (action) {
       case 'create':
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
         this.create.emit();
         break;
       case 'export':
@@ -547,6 +551,11 @@ export class OrdersListComponent implements OnInit, OnDestroy {
           next: () => {
             this.toastService.success('Orden cancelada exitosamente');
             this.loadOrders();
+            // TODO: The 'emit' function requires a mandatory void argument
+            // TODO: The 'emit' function requires a mandatory void argument
+            // TODO: The 'emit' function requires a mandatory void argument
+            // TODO: The 'emit' function requires a mandatory void argument
+            // TODO: The 'emit' function requires a mandatory void argument
             this.refresh.emit();
           },
           error: (error: any) => {

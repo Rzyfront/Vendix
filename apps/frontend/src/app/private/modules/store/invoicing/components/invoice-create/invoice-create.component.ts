@@ -34,7 +34,7 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
       (cancel)="onClose()"
       title="Nueva Factura"
       size="lg"
-    >
+      >
       <div class="p-4">
         <!-- Mode toggle: Manual vs From Order -->
         <div class="flex gap-2 mb-4">
@@ -48,7 +48,7 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
             [class.text-text-primary]="mode !== 'manual'"
             [class.border-border]="mode !== 'manual'"
             (click)="mode = 'manual'"
-          >
+            >
             Factura Manual
           </button>
           <button
@@ -61,187 +61,175 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
             [class.text-text-primary]="mode !== 'from_order'"
             [class.border-border]="mode !== 'from_order'"
             (click)="mode = 'from_order'"
-          >
+            >
             Desde Pedido
           </button>
         </div>
-
+    
         <!-- From Order Mode -->
-        <div *ngIf="mode === 'from_order'" class="space-y-4">
-          <app-input
-            label="ID del Pedido"
-            type="number"
-            [formControl]="orderIdControl"
-            [control]="orderIdControl"
-            placeholder="Ingrese el ID del pedido"
-            [required]="true"
-            min="1"
-          ></app-input>
-        </div>
-
-        <!-- Manual Mode -->
-        <form *ngIf="mode === 'manual'" [formGroup]="invoiceForm" (ngSubmit)="onSubmit()" class="space-y-4">
-
-          <!-- Invoice Type -->
-          <app-selector
-            label="Tipo de Factura"
-            formControlName="invoice_type"
-            [options]="invoiceTypeOptions"
-            placeholder="Seleccione un tipo"
-          ></app-selector>
-
-          <!-- Resolution -->
-          <app-selector
-            label="Resolución"
-            formControlName="resolution_id"
-            [options]="(resolutionOptions$ | async) || []"
-            placeholder="Seleccione una resolución"
-          ></app-selector>
-
-          <!-- Customer Info -->
-          <div class="border border-border rounded-lg p-3 space-y-3">
-            <h4 class="text-sm font-medium text-text-primary">Datos del Cliente</h4>
-
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <app-input
-                label="Nombre / Razón Social"
-                formControlName="customer_name"
-                [control]="invoiceForm.get('customer_name')"
-                placeholder="Nombre del cliente"
-                [required]="true"
-              ></app-input>
-
-              <app-input
-                label="NIT / Cédula"
-                formControlName="customer_tax_id"
-                [control]="invoiceForm.get('customer_tax_id')"
-                placeholder="Ej: 900123456-7"
-              ></app-input>
-            </div>
-
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <app-input
-                label="Correo Electrónico"
-                type="email"
-                formControlName="customer_email"
-                [control]="invoiceForm.get('customer_email')"
-                placeholder="correo@ejemplo.com"
-              ></app-input>
-
-              <app-input
-                label="Teléfono"
-                formControlName="customer_phone"
-                [control]="invoiceForm.get('customer_phone')"
-                placeholder="300 123 4567"
-              ></app-input>
-            </div>
-
+        @if (mode === 'from_order') {
+          <div class="space-y-4">
             <app-input
-              label="Dirección"
-              formControlName="customer_address"
-              [control]="invoiceForm.get('customer_address')"
-              placeholder="Dirección del cliente"
-            ></app-input>
-          </div>
-
-          <!-- Dates -->
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <app-input
-              label="Fecha de Emisión"
-              type="date"
-              formControlName="issue_date"
-              [control]="invoiceForm.get('issue_date')"
+              label="ID del Pedido"
+              type="number"
+              [formControl]="orderIdControl"
+              [control]="orderIdControl"
+              placeholder="Ingrese el ID del pedido"
               [required]="true"
-            ></app-input>
-
-            <app-input
-              label="Fecha de Vencimiento"
-              type="date"
-              formControlName="due_date"
-              [control]="invoiceForm.get('due_date')"
+              min="1"
             ></app-input>
           </div>
-
-          <!-- Items -->
-          <div class="border border-border rounded-lg p-3 space-y-3">
-            <div class="flex items-center justify-between">
-              <h4 class="text-sm font-medium text-text-primary">Productos / Servicios</h4>
-              <app-button variant="outline" size="sm" type="button" (clicked)="addItem()">
-                <app-icon slot="icon" name="plus" [size]="14"></app-icon>
-                Agregar
-              </app-button>
-            </div>
-
-            <div formArrayName="items" class="space-y-3">
-              <div *ngFor="let item of itemsArray.controls; let i = index" [formGroupName]="i"
-                class="border border-gray-200 rounded-lg p-3 space-y-2 relative">
-                <button type="button" (click)="removeItem(i)"
-                  class="absolute top-2 right-2 text-gray-400 hover:text-red-500 transition-colors">
-                  <app-icon name="x" [size]="16"></app-icon>
-                </button>
-
+        }
+    
+        <!-- Manual Mode -->
+        @if (mode === 'manual') {
+          <form [formGroup]="invoiceForm" (ngSubmit)="onSubmit()" class="space-y-4">
+            <!-- Invoice Type -->
+            <app-selector
+              label="Tipo de Factura"
+              formControlName="invoice_type"
+              [options]="invoiceTypeOptions"
+              placeholder="Seleccione un tipo"
+            ></app-selector>
+            <!-- Resolution -->
+            <app-selector
+              label="Resolución"
+              formControlName="resolution_id"
+              [options]="(resolutionOptions$ | async) || []"
+              placeholder="Seleccione una resolución"
+            ></app-selector>
+            <!-- Customer Info -->
+            <div class="border border-border rounded-lg p-3 space-y-3">
+              <h4 class="text-sm font-medium text-text-primary">Datos del Cliente</h4>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <app-input
-                  label="Producto / Servicio"
-                  formControlName="product_name"
-                  [control]="item.get('product_name')"
-                  placeholder="Nombre del producto"
+                  label="Nombre / Razón Social"
+                  formControlName="customer_name"
+                  [control]="invoiceForm.get('customer_name')"
+                  placeholder="Nombre del cliente"
                   [required]="true"
                 ></app-input>
-
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
-                  <app-input
-                    label="Cantidad"
-                    type="number"
-                    formControlName="quantity"
-                    [control]="item.get('quantity')"
-                    [required]="true"
-                    min="1"
-                  ></app-input>
-
-                  <app-input
-                    label="Precio Unit."
-                    [currency]="true"
-                    formControlName="unit_price"
-                    [control]="item.get('unit_price')"
-                    [required]="true"
-                  ></app-input>
-
-                  <app-input
-                    label="Descuento"
-                    [currency]="true"
-                    formControlName="discount_amount"
-                    [control]="item.get('discount_amount')"
-                  ></app-input>
-
-                  <app-input
-                    label="% IVA"
-                    type="number"
-                    formControlName="tax_rate"
-                    [control]="item.get('tax_rate')"
-                    min="0"
-                    step="0.01"
-                  ></app-input>
-                </div>
+                <app-input
+                  label="NIT / Cédula"
+                  formControlName="customer_tax_id"
+                  [control]="invoiceForm.get('customer_tax_id')"
+                  placeholder="Ej: 900123456-7"
+                ></app-input>
               </div>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <app-input
+                  label="Correo Electrónico"
+                  type="email"
+                  formControlName="customer_email"
+                  [control]="invoiceForm.get('customer_email')"
+                  placeholder="correo@ejemplo.com"
+                ></app-input>
+                <app-input
+                  label="Teléfono"
+                  formControlName="customer_phone"
+                  [control]="invoiceForm.get('customer_phone')"
+                  placeholder="300 123 4567"
+                ></app-input>
+              </div>
+              <app-input
+                label="Dirección"
+                formControlName="customer_address"
+                [control]="invoiceForm.get('customer_address')"
+                placeholder="Dirección del cliente"
+              ></app-input>
             </div>
-
-            <div *ngIf="itemsArray.length === 0" class="text-center py-4 text-text-secondary text-sm">
-              Agregue al menos un producto o servicio
+            <!-- Dates -->
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <app-input
+                label="Fecha de Emisión"
+                type="date"
+                formControlName="issue_date"
+                [control]="invoiceForm.get('issue_date')"
+                [required]="true"
+              ></app-input>
+              <app-input
+                label="Fecha de Vencimiento"
+                type="date"
+                formControlName="due_date"
+                [control]="invoiceForm.get('due_date')"
+              ></app-input>
             </div>
-          </div>
-
-          <!-- Notes -->
-          <app-textarea
-            label="Notas"
-            formControlName="notes"
-            [control]="invoiceForm.get('notes')"
-            placeholder="Observaciones adicionales..."
-            [rows]="3"
-          ></app-textarea>
-
-        </form>
+            <!-- Items -->
+            <div class="border border-border rounded-lg p-3 space-y-3">
+              <div class="flex items-center justify-between">
+                <h4 class="text-sm font-medium text-text-primary">Productos / Servicios</h4>
+                <app-button variant="outline" size="sm" type="button" (clicked)="addItem()">
+                  <app-icon slot="icon" name="plus" [size]="14"></app-icon>
+                  Agregar
+                </app-button>
+              </div>
+              <div formArrayName="items" class="space-y-3">
+                @for (item of itemsArray.controls; track item; let i = $index) {
+                  <div [formGroupName]="i"
+                    class="border border-gray-200 rounded-lg p-3 space-y-2 relative">
+                    <button type="button" (click)="removeItem(i)"
+                      class="absolute top-2 right-2 text-gray-400 hover:text-red-500 transition-colors">
+                      <app-icon name="x" [size]="16"></app-icon>
+                    </button>
+                    <app-input
+                      label="Producto / Servicio"
+                      formControlName="product_name"
+                      [control]="item.get('product_name')"
+                      placeholder="Nombre del producto"
+                      [required]="true"
+                    ></app-input>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+                      <app-input
+                        label="Cantidad"
+                        type="number"
+                        formControlName="quantity"
+                        [control]="item.get('quantity')"
+                        [required]="true"
+                        min="1"
+                      ></app-input>
+                      <app-input
+                        label="Precio Unit."
+                        [currency]="true"
+                        formControlName="unit_price"
+                        [control]="item.get('unit_price')"
+                        [required]="true"
+                      ></app-input>
+                      <app-input
+                        label="Descuento"
+                        [currency]="true"
+                        formControlName="discount_amount"
+                        [control]="item.get('discount_amount')"
+                      ></app-input>
+                      <app-input
+                        label="% IVA"
+                        type="number"
+                        formControlName="tax_rate"
+                        [control]="item.get('tax_rate')"
+                        min="0"
+                        step="0.01"
+                      ></app-input>
+                    </div>
+                  </div>
+                }
+              </div>
+              @if (itemsArray.length === 0) {
+                <div class="text-center py-4 text-text-secondary text-sm">
+                  Agregue al menos un producto o servicio
+                </div>
+              }
+            </div>
+            <!-- Notes -->
+            <app-textarea
+              label="Notas"
+              formControlName="notes"
+              [control]="invoiceForm.get('notes')"
+              placeholder="Observaciones adicionales..."
+              [rows]="3"
+            ></app-textarea>
+          </form>
+        }
       </div>
-
+    
       <!-- Footer -->
       <div slot="footer">
         <div class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
@@ -250,7 +238,7 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
             (clicked)="onClose()">
             Cancelar
           </app-button>
-
+    
           <app-button
             variant="primary"
             (clicked)="onSubmit()"
@@ -261,7 +249,7 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
         </div>
       </div>
     </app-modal>
-  `
+    `
 })
 export class InvoiceCreateComponent {
   @Input() isOpen = false;

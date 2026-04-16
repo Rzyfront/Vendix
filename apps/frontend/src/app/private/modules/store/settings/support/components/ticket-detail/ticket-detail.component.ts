@@ -43,7 +43,7 @@ import {
           <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
         </div>
       }
-
+    
       <!-- Content when loaded -->
       @if (ticket(); as ticketData) {
         <app-sticky-header
@@ -57,7 +57,7 @@ import {
           [actions]="headerActions()"
           (actionClicked)="onHeaderAction($event)"
         ></app-sticky-header>
-
+    
         <!-- Main Content -->
         <div class="px-4 py-6 md:px-6 md:py-8 max-w-7xl mx-auto">
           <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -67,71 +67,81 @@ import {
               <div class="bg-surface rounded-lg border border-border p-6 shadow-sm">
                 <h2 class="text-lg font-semibold text-text-primary mb-4">Descripción</h2>
                 <p class="text-text-secondary whitespace-pre-wrap">{{ ticket()?.description }}</p>
-
+    
                 <!-- Attachments -->
-                <div *ngIf="(ticket()?.attachments?.length || 0) > 0" class="mt-6">
-                  <h3 class="text-sm font-semibold text-text-primary mb-3">Archivos adjuntos</h3>
-                  <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    <div
-                      *ngFor="let attachment of ticket()?.attachments; let i = index"
-                      class="relative aspect-square rounded-lg border border-border overflow-hidden cursor-pointer hover:border-primary transition-colors"
-                      (click)="openLightbox(i)"
-                    >
-                      <img
-                        *ngIf="attachment.file_type === 'IMAGE'"
-                        [src]="attachment.thumbnail_url || attachment.file_url"
-                        [alt]="attachment.file_name"
-                        class="w-full h-full object-cover"
-                      />
-                      <div
-                        *ngIf="attachment.file_type !== 'IMAGE'"
-                        class="flex items-center justify-center h-full bg-gray-100"
-                      >
-                        <app-icon name="file" [size]="32" class="text-gray-400"></app-icon>
-                      </div>
+                @if ((ticket()?.attachments?.length || 0) > 0) {
+                  <div class="mt-6">
+                    <h3 class="text-sm font-semibold text-text-primary mb-3">Archivos adjuntos</h3>
+                    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      @for (attachment of ticket()?.attachments; track attachment; let i = $index) {
+                        <div
+                          class="relative aspect-square rounded-lg border border-border overflow-hidden cursor-pointer hover:border-primary transition-colors"
+                          (click)="openLightbox(i)"
+                          >
+                          @if (attachment.file_type === 'IMAGE') {
+                            <img
+                              [src]="attachment.thumbnail_url || attachment.file_url"
+                              [alt]="attachment.file_name"
+                              class="w-full h-full object-cover"
+                              />
+                          }
+                          @if (attachment.file_type !== 'IMAGE') {
+                            <div
+                              class="flex items-center justify-center h-full bg-gray-100"
+                              >
+                              <app-icon name="file" [size]="32" class="text-gray-400"></app-icon>
+                            </div>
+                          }
+                        </div>
+                      }
                     </div>
                   </div>
-                </div>
+                }
               </div>
-
+    
               <!-- Comments Timeline -->
               <div class="bg-surface rounded-lg border border-border shadow-sm">
                 <div class="p-4 border-b border-border">
                   <h2 class="text-lg font-semibold text-text-primary">Comentarios ({{ comments().length }})</h2>
                 </div>
-
+    
                 <div class="p-4 space-y-4">
                   <!-- Comments List -->
-                  <div *ngFor="let comment of sortedComments()" class="flex gap-3">
-                    <!-- Avatar -->
-                    <div class="flex-shrink-0 w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
-                      <span class="text-sm font-semibold text-primary">
-                        {{ getCommentInitials(comment) }}
-                      </span>
-                    </div>
-
-                    <!-- Comment Content -->
-                    <div class="flex-1 min-w-0">
-                      <div class="flex items-center gap-2 mb-1">
-                        <span class="text-sm font-semibold text-text-primary">
-                          {{ comment.is_internal ? 'Soporte' : getCommentAuthorName(comment) }}
+                  @for (comment of sortedComments(); track comment) {
+                    <div class="flex gap-3">
+                      <!-- Avatar -->
+                      <div class="flex-shrink-0 w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center">
+                        <span class="text-sm font-semibold text-primary">
+                          {{ getCommentInitials(comment) }}
                         </span>
-                        <span *ngIf="comment.is_internal" class="px-1.5 py-0.5 bg-orange-100 text-orange-700 text-xs rounded">Interno</span>
-                        <span class="text-xs text-text-secondary">{{ formatCommentDate(comment.created_at) }}</span>
                       </div>
-                      <p class="text-sm text-text-secondary whitespace-pre-wrap">{{ comment.content }}</p>
+                      <!-- Comment Content -->
+                      <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-2 mb-1">
+                          <span class="text-sm font-semibold text-text-primary">
+                            {{ comment.is_internal ? 'Soporte' : getCommentAuthorName(comment) }}
+                          </span>
+                          @if (comment.is_internal) {
+                            <span class="px-1.5 py-0.5 bg-orange-100 text-orange-700 text-xs rounded">Interno</span>
+                          }
+                          <span class="text-xs text-text-secondary">{{ formatCommentDate(comment.created_at) }}</span>
+                        </div>
+                        <p class="text-sm text-text-secondary whitespace-pre-wrap">{{ comment.content }}</p>
+                      </div>
                     </div>
-                  </div>
-
+                  }
+    
                   <!-- Empty State -->
-                  <div *ngIf="comments().length === 0" class="text-center py-8">
-                    <app-icon name="message-square" [size]="48" class="text-gray-300 mx-auto mb-3"></app-icon>
-                    <p class="text-text-secondary">No hay comentarios aún</p>
-                  </div>
+                  @if (comments().length === 0) {
+                    <div class="text-center py-8">
+                      <app-icon name="message-square" [size]="48" class="text-gray-300 mx-auto mb-3"></app-icon>
+                      <p class="text-text-secondary">No hay comentarios aún</p>
+                    </div>
+                  }
                 </div>
               </div>
             </div>
-
+    
             <!-- Right Column - Info -->
             <div class="space-y-6">
               <!-- Details Card -->
@@ -164,16 +174,20 @@ import {
                       {{ ticket()?.assigned_to?.first_name }} {{ ticket()?.assigned_to?.last_name || 'Sin asignar' }}
                     </dd>
                   </div>
-                  <div class="flex justify-between" *ngIf="ticket()?.sla_deadline">
-                    <dt class="text-text-secondary">SLA</dt>
-                    <dd [class.text-red-600]="isOverdue()" class="text-text-primary">
-                      {{ formatDate(ticket()?.sla_deadline) }}
-                      <span *ngIf="isOverdue()" class="ml-1">(Vencido)</span>
-                    </dd>
-                  </div>
+                  @if (ticket()?.sla_deadline) {
+                    <div class="flex justify-between">
+                      <dt class="text-text-secondary">SLA</dt>
+                      <dd [class.text-red-600]="isOverdue()" class="text-text-primary">
+                        {{ formatDate(ticket()?.sla_deadline) }}
+                        @if (isOverdue()) {
+                          <span class="ml-1">(Vencido)</span>
+                        }
+                      </dd>
+                    </div>
+                  }
                 </dl>
               </div>
-
+    
               <!-- Need More Help -->
               <div class="bg-gradient-to-br from-primary/10 to-primary/5 rounded-lg border border-primary/20 p-6">
                 <h3 class="font-semibold text-text-primary mb-2">¿Necesitas más ayuda?</h3>
@@ -188,100 +202,104 @@ import {
             </div>
           </div>
         </div>
-
+    
         <!-- Comment Form - Only if not closed -->
-        <div *ngIf="ticket()?.status !== 'CLOSED'" class="border-t border-border bg-gray-50 p-4 shadow-sm">
-          <form (ngSubmit)="submitComment()" [formGroup]="commentForm" class="max-w-7xl mx-auto">
-            <div class="mb-3">
-              <textarea
-                formControlName="content"
-                class="w-full bg-white border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-primary focus:border-transparent resize-none h-24"
-                placeholder="Escribe un comentario..."
-                rows="3"
-              ></textarea>
-            </div>
-            <div class="flex justify-end">
-              <app-button
-                type="submit"
-                variant="primary"
-                [disabled]="!commentForm.get('content')?.value || sendingComment()"
-                [loading]="sendingComment()"
-                size="sm"
-              >
-                <app-icon name="send" [size]="14" slot="icon"></app-icon>
-                Enviar
-              </app-button>
-            </div>
-          </form>
-        </div>
-
-        <!-- Closed Message -->
-        <div *ngIf="ticket()?.status === 'CLOSED'" class="border-t border-border bg-gray-50 p-4 shadow-sm">
-          <div class="max-w-7xl mx-auto flex items-center gap-2 text-sm text-text-secondary">
-            <app-icon name="info" [size]="16" class="text-gray-400"></app-icon>
-            <span>Este ticket está cerrado. No se pueden agregar más comentarios.</span>
+        @if (ticket()?.status !== 'CLOSED') {
+          <div class="border-t border-border bg-gray-50 p-4 shadow-sm">
+            <form (ngSubmit)="submitComment()" [formGroup]="commentForm" class="max-w-7xl mx-auto">
+              <div class="mb-3">
+                <textarea
+                  formControlName="content"
+                  class="w-full bg-white border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-primary focus:border-transparent resize-none h-24"
+                  placeholder="Escribe un comentario..."
+                  rows="3"
+                ></textarea>
+              </div>
+              <div class="flex justify-end">
+                <app-button
+                  type="submit"
+                  variant="primary"
+                  [disabled]="!commentForm.get('content')?.value || sendingComment()"
+                  [loading]="sendingComment()"
+                  size="sm"
+                  >
+                  <app-icon name="send" [size]="14" slot="icon"></app-icon>
+                  Enviar
+                </app-button>
+              </div>
+            </form>
           </div>
-        </div>
+        }
+    
+        <!-- Closed Message -->
+        @if (ticket()?.status === 'CLOSED') {
+          <div class="border-t border-border bg-gray-50 p-4 shadow-sm">
+            <div class="max-w-7xl mx-auto flex items-center gap-2 text-sm text-text-secondary">
+              <app-icon name="info" [size]="16" class="text-gray-400"></app-icon>
+              <span>Este ticket está cerrado. No se pueden agregar más comentarios.</span>
+            </div>
+          </div>
+        }
       }
-
-    <!-- Loading Template -->
-    <ng-template #loadingTemplate>
-      <div class="min-h-screen flex items-center justify-center">
-        <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-      </div>
-    </ng-template>
-
-    <!-- Close Ticket Modal -->
-    <app-modal
-      [isOpen]="showCloseModal()"
-      [title]="'Cerrar Ticket'"
-      [subtitle]="'¿Estás seguro de que deseas cerrar este ticket?'"
-      (cancel)="closeCloseModal()"
-    >
-      <p class="text-text-primary mb-4 text-sm">
-        Una vez cerrado, el ticket será marcado como resuelto. Si necesitas ayuda adicional, puedes reabrir el ticket en cualquier momento.
-      </p>
-
-      <form [formGroup]="closeForm" class="space-y-4">
-        <div>
-          <label class="block text-sm font-semibold text-text-primary mb-2">Resolución (opcional)</label>
-          <textarea
-            formControlName="resolution_summary"
-            class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-primary focus:border-transparent resize-none"
-            rows="3"
-            placeholder="Describe brevemente cómo se resolvió el problema..."
-          ></textarea>
+    
+      <!-- Loading Template -->
+      <ng-template #loadingTemplate>
+        <div class="min-h-screen flex items-center justify-center">
+          <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
         </div>
-      </form>
-
-      <div slot="footer" class="flex justify-end gap-3">
-        <app-button variant="ghost" (click)="closeCloseModal()" size="sm">
-          Cancelar
-        </app-button>
-        <app-button
-          variant="danger"
-          [disabled]="closingTicket()"
-          [loading]="closingTicket()"
-          (click)="closeTicket()"
-          size="sm"
+      </ng-template>
+    
+      <!-- Close Ticket Modal -->
+      <app-modal
+        [isOpen]="showCloseModal()"
+        [title]="'Cerrar Ticket'"
+        [subtitle]="'¿Estás seguro de que deseas cerrar este ticket?'"
+        (cancel)="closeCloseModal()"
         >
-          Cerrar Ticket
-        </app-button>
-      </div>
-    </app-modal>
-
-    <!-- Image Lightbox -->
-    <app-image-lightbox
-      [isOpen]="lightboxOpen()"
-      [currentImage]="currentImage()"
-      [alt]="currentAttachment()?.file_name || 'Imagen'"
-      [currentIndex]="currentImageIndex()"
-      [totalImages]="ticket()?.attachments?.length || 0"
-      (close)="closeLightbox()"
-      (previous)="previousImage()"
-      (next)="nextImage()"
-    ></app-image-lightbox>
-  `,
+        <p class="text-text-primary mb-4 text-sm">
+          Una vez cerrado, el ticket será marcado como resuelto. Si necesitas ayuda adicional, puedes reabrir el ticket en cualquier momento.
+        </p>
+    
+        <form [formGroup]="closeForm" class="space-y-4">
+          <div>
+            <label class="block text-sm font-semibold text-text-primary mb-2">Resolución (opcional)</label>
+            <textarea
+              formControlName="resolution_summary"
+              class="w-full border border-gray-300 rounded-lg p-3 text-sm focus:ring-2 focus:ring-primary focus:border-transparent resize-none"
+              rows="3"
+              placeholder="Describe brevemente cómo se resolvió el problema..."
+            ></textarea>
+          </div>
+        </form>
+    
+        <div slot="footer" class="flex justify-end gap-3">
+          <app-button variant="ghost" (click)="closeCloseModal()" size="sm">
+            Cancelar
+          </app-button>
+          <app-button
+            variant="danger"
+            [disabled]="closingTicket()"
+            [loading]="closingTicket()"
+            (click)="closeTicket()"
+            size="sm"
+            >
+            Cerrar Ticket
+          </app-button>
+        </div>
+      </app-modal>
+    
+      <!-- Image Lightbox -->
+      <app-image-lightbox
+        [isOpen]="lightboxOpen()"
+        [currentImage]="currentImage()"
+        [alt]="currentAttachment()?.file_name || 'Imagen'"
+        [currentIndex]="currentImageIndex()"
+        [totalImages]="ticket()?.attachments?.length || 0"
+        (close)="closeLightbox()"
+        (previous)="previousImage()"
+        (next)="nextImage()"
+      ></app-image-lightbox>
+    `,
   styles: [`
     :host {
       display: block;

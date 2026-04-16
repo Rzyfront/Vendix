@@ -1,5 +1,5 @@
-import { Component, Input, Output, EventEmitter, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, OnInit, inject, input, output } from '@angular/core';
+
 import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ShippingService } from '../../services/shipping.service';
 import { ShippingMethod, ShippingMethodType } from '../../interfaces/shipping.interface';
@@ -13,21 +13,21 @@ import { SelectorComponent, SelectorOption } from '../../../../../../shared/comp
 @Component({
   selector: 'app-superadmin-shipping-method-modal',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, IconComponent, ButtonComponent, ModalComponent, InputComponent, ToggleComponent, SelectorComponent],
+  imports: [ReactiveFormsModule, IconComponent, ButtonComponent, ModalComponent, InputComponent, ToggleComponent, SelectorComponent],
   template: `
     <app-modal
       [isOpen]="true"
-      [title]="(method ? 'Editar' : 'Nuevo') + ' Método de Envío del Sistema'"
+      [title]="(method() ? 'Editar' : 'Nuevo') + ' Método de Envío del Sistema'"
       [subtitle]="'Configura los detalles de la opción de entrega del sistema'"
       (closed)="close.emit()"
       size="md"
-    >
+      >
       <div slot="header">
         <div class="w-10 h-10 rounded-xl bg-[var(--color-primary)]/10 flex items-center justify-center border border-[var(--color-primary)]/20">
           <app-icon name="truck" size="20" class="text-[var(--color-primary)]"></app-icon>
         </div>
       </div>
-
+    
       <form [formGroup]="form" id="shippingMethodForm" (ngSubmit)="onSubmit()" class="space-y-4">
         <app-input
           label="Nombre del Método"
@@ -35,22 +35,23 @@ import { SelectorComponent, SelectorOption } from '../../../../../../shared/comp
           placeholder="Ej: Envío Estándar Nacional"
           [required]="true"
         ></app-input>
-
+    
         <app-selector
           label="Tipo de Logística"
           formControlName="type"
           [options]="typeOptions"
           [required]="true"
         ></app-selector>
-
-        <app-input
-          *ngIf="showProviderField"
-          label="Nombre del Proveedor"
-          formControlName="provider_name"
-          placeholder="Ej: Fedex, Servientrega..."
-          class="animate-in slide-in-from-top-2 duration-200"
-        ></app-input>
-
+    
+        @if (showProviderField) {
+          <app-input
+            label="Nombre del Proveedor"
+            formControlName="provider_name"
+            placeholder="Ej: Fedex, Servientrega..."
+            class="animate-in slide-in-from-top-2 duration-200"
+          ></app-input>
+        }
+    
         <div class="grid grid-cols-2 gap-4">
           <app-input
             label="Días Mínimos"
@@ -67,7 +68,7 @@ import { SelectorComponent, SelectorOption } from '../../../../../../shared/comp
             suffixText="Días"
           ></app-input>
         </div>
-
+    
         <div class="flex items-center justify-between p-4 rounded-xl border border-[var(--color-border)] bg-gray-50/30 mt-6">
           <div class="flex items-center gap-3">
             <div class="w-8 h-8 rounded-lg bg-green-50 flex items-center justify-center border border-green-100">
@@ -81,23 +82,23 @@ import { SelectorComponent, SelectorOption } from '../../../../../../shared/comp
           <app-toggle formControlName="is_active"></app-toggle>
         </div>
       </form>
-
+    
       <div slot="footer" class="flex items-center justify-end gap-3 w-full">
         <app-button variant="ghost" (clicked)="close.emit()">
           Cancelar
         </app-button>
         <app-button variant="primary" [loading]="isSubmitting" [disabled]="form.invalid" (clicked)="onSubmit()">
           <app-icon name="save" size="18" slot="icon" class="mr-2"></app-icon>
-          {{ method ? 'Actualizar Método' : 'Crear Método' }}
+          {{ method() ? 'Actualizar Método' : 'Crear Método' }}
         </app-button>
       </div>
     </app-modal>
-  `
+    `
 })
 export class ShippingMethodModalComponent implements OnInit {
-  @Input() method?: ShippingMethod;
-  @Output() close = new EventEmitter<void>();
-  @Output() saved = new EventEmitter<void>();
+  readonly method = input<ShippingMethod>();
+  readonly close = output<void>();
+  readonly saved = output<void>();
 
   private fb = inject(FormBuilder);
   private shippingService = inject(ShippingService);
@@ -126,8 +127,9 @@ export class ShippingMethodModalComponent implements OnInit {
   }
 
   ngOnInit() {
-    if (this.method) {
-      this.form.patchValue(this.method);
+    const method = this.method();
+    if (method) {
+      this.form.patchValue(method);
     }
   }
 
@@ -142,14 +144,25 @@ export class ShippingMethodModalComponent implements OnInit {
     this.isSubmitting = true;
     const value = this.form.value;
 
-    const request$ = this.method
-      ? this.shippingService.updateMethod(this.method.id, value)
+    const method = this.method();
+    const request$ = method
+      ? this.shippingService.updateMethod(method.id, value)
       : this.shippingService.createMethod(value);
 
     request$.subscribe({
       next: () => {
         this.isSubmitting = false;
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
         this.saved.emit();
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
         this.close.emit();
       },
       error: () => {

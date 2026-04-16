@@ -5,7 +5,7 @@ import {
   OnInit,
   OnDestroy,
 } from "@angular/core";
-import { CommonModule } from "@angular/common";
+
 import { FormsModule } from "@angular/forms";
 import { Subject, takeUntil } from "rxjs";
 
@@ -42,15 +42,14 @@ import { InventoryService } from "../../services/inventory.service";
   selector: "app-pop-header",
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     SelectorComponent,
     IconComponent,
     ButtonComponent,
     InputComponent,
     BadgeComponent,
-    TooltipComponent,
-  ],
+    TooltipComponent
+],
   template: `
     <div class="px-4 lg:px-6 py-4 lg:py-5 bg-surface rounded-t-xl">
       <div class="flex flex-col gap-4 lg:gap-6">
@@ -59,7 +58,7 @@ import { InventoryService } from "../../services/inventory.service";
           <div class="flex items-center gap-3">
             <div
               class="w-10 h-10 lg:w-12 lg:h-12 rounded-xl bg-primary/10 flex items-center justify-center"
-            >
+              >
               <app-icon
                 name="shopping-bag"
                 [size]="20"
@@ -81,71 +80,73 @@ import { InventoryService } from "../../services/inventory.service";
               </span>
             </div>
           </div>
-
+    
           <!-- Mobile Settings Toggle -->
           <button
             class="lg:hidden flex items-center gap-2 px-3 py-2 rounded-lg border border-border bg-surface hover:bg-muted transition-colors"
             (click)="toggleMobileSettings()"
-          >
+            >
             <app-icon [name]="showMobileSettings ? 'chevron-up' : 'settings'" [size]="18"></app-icon>
             <span class="text-xs font-medium">{{ showMobileSettings ? 'Ocultar' : 'Ajustes' }}</span>
           </button>
         </div>
-
+    
         <!-- Mobile: Quick Summary Badges (when settings collapsed) -->
-        <div
-          class="lg:hidden flex items-center gap-1.5 overflow-x-auto pb-1 -mx-1 px-1"
-          *ngIf="!showMobileSettings && (selectedSupplierId || selectedLocationId || expectedDate)"
-        >
-          <!-- Proveedor Badge -->
+        @if (!showMobileSettings && (selectedSupplierId || selectedLocationId || expectedDate)) {
           <div
-            *ngIf="getSupplierName()"
-            class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-primary/10 text-primary shrink-0"
-          >
-            <app-icon name="truck" [size]="14"></app-icon>
-            <span class="text-xs font-medium truncate max-w-[80px]">{{ getSupplierName() }}</span>
+            class="lg:hidden flex items-center gap-1.5 overflow-x-auto pb-1 -mx-1 px-1"
+            >
+            <!-- Proveedor Badge -->
+            @if (getSupplierName()) {
+              <div
+                class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-primary/10 text-primary shrink-0"
+                >
+                <app-icon name="truck" [size]="14"></app-icon>
+                <span class="text-xs font-medium truncate max-w-[80px]">{{ getSupplierName() }}</span>
+              </div>
+            }
+            <!-- Arrow -->
+            @if (getSupplierName() && getLocationName()) {
+              <app-icon
+                name="chevron-right"
+                [size]="14"
+                class="text-text-muted shrink-0"
+              ></app-icon>
+            }
+            <!-- Bodega Badge -->
+            @if (getLocationName()) {
+              <div
+                class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-emerald-500/10 text-emerald-600 shrink-0"
+                >
+                <app-icon name="warehouse" [size]="14"></app-icon>
+                <span class="text-xs font-medium truncate max-w-[80px]">{{ getLocationName() }}</span>
+              </div>
+            }
+            <!-- Arrow -->
+            @if (getLocationName() && expectedDate) {
+              <app-icon
+                name="chevron-right"
+                [size]="14"
+                class="text-text-muted shrink-0"
+              ></app-icon>
+            }
+            <!-- Fecha Entrega Badge -->
+            @if (expectedDate) {
+              <div
+                class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-amber-500/10 text-amber-600 shrink-0"
+                >
+                <app-icon name="calendar" [size]="14"></app-icon>
+                <span class="text-xs font-medium">{{ formatDateShort(expectedDate) }}</span>
+              </div>
+            }
           </div>
-
-          <!-- Arrow -->
-          <app-icon
-            *ngIf="getSupplierName() && getLocationName()"
-            name="chevron-right"
-            [size]="14"
-            class="text-text-muted shrink-0"
-          ></app-icon>
-
-          <!-- Bodega Badge -->
-          <div
-            *ngIf="getLocationName()"
-            class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-emerald-500/10 text-emerald-600 shrink-0"
-          >
-            <app-icon name="warehouse" [size]="14"></app-icon>
-            <span class="text-xs font-medium truncate max-w-[80px]">{{ getLocationName() }}</span>
-          </div>
-
-          <!-- Arrow -->
-          <app-icon
-            *ngIf="getLocationName() && expectedDate"
-            name="chevron-right"
-            [size]="14"
-            class="text-text-muted shrink-0"
-          ></app-icon>
-
-          <!-- Fecha Entrega Badge -->
-          <div
-            *ngIf="expectedDate"
-            class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-full bg-amber-500/10 text-amber-600 shrink-0"
-          >
-            <app-icon name="calendar" [size]="14"></app-icon>
-            <span class="text-xs font-medium">{{ formatDateShort(expectedDate) }}</span>
-          </div>
-        </div>
-
+        }
+    
         <!-- Desktop: Full Filters Grid (always visible) -->
         <div class="hidden lg:grid lg:grid-cols-5 gap-4">
           <!-- 1+2. Supplier + Warehouse (wrapped for flash warning) -->
           <div class="col-span-2 grid grid-cols-2 gap-4 relative rounded-lg"
-               [class.config-flash-warning]="showConfigWarning">
+            [class.config-flash-warning]="showConfigWarning">
             <app-tooltip
               position="top"
               color="warning"
@@ -153,12 +154,12 @@ import { InventoryService } from "../../services/inventory.service";
               [visible]="showConfigWarning"
               class="!absolute left-1/2 -translate-x-1/2 top-0 z-10"
             >Selecciona proveedor y bodega</app-tooltip>
-
+    
             <!-- 1. Supplier Selector -->
             <div class="flex flex-col gap-1.5 min-w-0">
               <label
                 class="text-xs font-semibold text-text-secondary pl-0.5 flex items-center gap-1"
-              >
+                >
                 Proveedor <span class="text-destructive">*</span>
               </label>
               <div class="flex gap-2">
@@ -171,14 +172,14 @@ import { InventoryService } from "../../services/inventory.service";
                   placeholder="Seleccionar..."
                 ></app-selector>
                 <div class="relative"
-                     (mouseenter)="hoveredTooltip = 'supplier'"
-                     (mouseleave)="hoveredTooltip = null">
+                  (mouseenter)="hoveredTooltip = 'supplier'"
+                  (mouseleave)="hoveredTooltip = null">
                   <app-button
                     variant="outline"
                     size="sm"
                     customClasses="!px-2 flex items-center justify-center"
                     (clicked)="openSupplierModal.emit()"
-                  >
+                    >
                     <app-icon name="plus" [size]="18" slot="icon"></app-icon>
                   </app-button>
                   <app-tooltip position="top" size="sm" [visible]="hoveredTooltip === 'supplier'"
@@ -188,12 +189,12 @@ import { InventoryService } from "../../services/inventory.service";
                 </div>
               </div>
             </div>
-
+    
             <!-- 2. Warehouse Selector -->
             <div class="flex flex-col gap-1.5 min-w-0">
               <label
                 class="text-xs font-semibold text-text-secondary pl-0.5 flex items-center gap-1"
-              >
+                >
                 Bodega <span class="text-destructive">*</span>
               </label>
               <div class="flex gap-2">
@@ -206,14 +207,14 @@ import { InventoryService } from "../../services/inventory.service";
                   placeholder="Seleccionar..."
                 ></app-selector>
                 <div class="relative"
-                     (mouseenter)="hoveredTooltip = 'warehouse'"
-                     (mouseleave)="hoveredTooltip = null">
+                  (mouseenter)="hoveredTooltip = 'warehouse'"
+                  (mouseleave)="hoveredTooltip = null">
                   <app-button
                     variant="outline"
                     size="sm"
                     customClasses="!px-2 flex items-center justify-center"
                     (clicked)="openWarehouseModal.emit()"
-                  >
+                    >
                     <app-icon name="plus" [size]="18" slot="icon"></app-icon>
                   </app-button>
                   <app-tooltip position="top" size="sm" [visible]="hoveredTooltip === 'warehouse'"
@@ -224,118 +225,12 @@ import { InventoryService } from "../../services/inventory.service";
               </div>
             </div>
           </div>
-
+    
           <!-- 3. Order Date -->
           <div class="flex flex-col gap-1.5 min-w-0">
             <label class="text-xs font-semibold text-text-secondary pl-0.5"
               >Fecha Orden</label
-            >
-            <app-input
-              type="date"
-              size="sm"
-              [(ngModel)]="orderDate"
-              (ngModelChange)="onOrderDateChange($event)"
-              customWrapperClass="!mt-0"
-            ></app-input>
-          </div>
-
-          <!-- 4. Delivery Date -->
-          <div class="flex flex-col gap-1.5 min-w-0">
-            <label class="text-xs font-semibold text-text-secondary pl-0.5"
-              >Fecha Entrega</label
-            >
-            <app-input
-              type="date"
-              size="sm"
-              [(ngModel)]="expectedDate"
-              (ngModelChange)="onExpectedDateChange($event)"
-              [min]="minExpectedDate"
-              customWrapperClass="!mt-0"
-            ></app-input>
-          </div>
-
-          <!-- 5. Shipping Method -->
-          <div class="flex flex-col gap-1.5 min-w-0">
-            <label class="text-xs font-semibold text-text-secondary pl-0.5"
-              >Método Envío</label
-            >
-            <div class="h-9">
-              <app-selector
-                class="w-full h-full"
-                size="sm"
-                [options]="shippingMethodOptions"
-                [(ngModel)]="shippingMethod"
-                (ngModelChange)="onShippingMethodChange($event)"
-                placeholder="Elegir método..."
-              ></app-selector>
-            </div>
-          </div>
-        </div>
-
-        <!-- Mobile: Collapsible Settings -->
-        <div class="lg:hidden" *ngIf="showMobileSettings">
-          <!-- Row 1: Supplier + Warehouse -->
-          <div class="grid grid-cols-2 gap-3 mb-3 relative rounded-lg"
-               [class.config-flash-warning]="showConfigWarning">
-            <app-tooltip
-              position="top"
-              color="warning"
-              size="sm"
-              [visible]="showConfigWarning"
-              class="!absolute left-1/2 -translate-x-1/2 top-0 z-10"
-            >Selecciona proveedor y bodega</app-tooltip>
-            <div class="flex flex-col gap-1.5 min-w-0">
-              <label class="text-xs font-semibold text-text-secondary pl-0.5 flex items-center gap-1">
-                Proveedor <span class="text-destructive">*</span>
-              </label>
-              <div class="flex gap-1">
-                <app-selector
-                  class="flex-1 min-w-0"
-                  size="sm"
-                  [options]="supplierOptions"
-                  [(ngModel)]="selectedSupplierId"
-                  (ngModelChange)="onSupplierChange($event)"
-                  placeholder="Seleccionar..."
-                ></app-selector>
-                <app-button
-                  variant="outline"
-                  size="sm"
-                  customClasses="!px-2 flex items-center justify-center"
-                  (clicked)="openSupplierModal.emit()"
-                >
-                  <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-                </app-button>
-              </div>
-            </div>
-            <div class="flex flex-col gap-1.5 min-w-0">
-              <label class="text-xs font-semibold text-text-secondary pl-0.5 flex items-center gap-1">
-                Bodega <span class="text-destructive">*</span>
-              </label>
-              <div class="flex gap-1">
-                <app-selector
-                  class="flex-1 min-w-0"
-                  size="sm"
-                  [options]="locationOptions"
-                  [(ngModel)]="selectedLocationId"
-                  (ngModelChange)="onLocationChange($event)"
-                  placeholder="Seleccionar..."
-                ></app-selector>
-                <app-button
-                  variant="outline"
-                  size="sm"
-                  customClasses="!px-2 flex items-center justify-center"
-                  (clicked)="openWarehouseModal.emit()"
-                >
-                  <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-                </app-button>
-              </div>
-            </div>
-          </div>
-
-          <!-- Row 2: Dates -->
-          <div class="grid grid-cols-2 gap-3 mb-3">
-            <div class="flex flex-col gap-1.5 min-w-0">
-              <label class="text-xs font-semibold text-text-secondary pl-0.5">Fecha Orden</label>
+              >
               <app-input
                 type="date"
                 size="sm"
@@ -344,35 +239,141 @@ import { InventoryService } from "../../services/inventory.service";
                 customWrapperClass="!mt-0"
               ></app-input>
             </div>
+    
+            <!-- 4. Delivery Date -->
             <div class="flex flex-col gap-1.5 min-w-0">
-              <label class="text-xs font-semibold text-text-secondary pl-0.5">Fecha Entrega</label>
-              <app-input
-                type="date"
-                size="sm"
-                [(ngModel)]="expectedDate"
-                (ngModelChange)="onExpectedDateChange($event)"
-                [min]="minExpectedDate"
-                customWrapperClass="!mt-0"
-              ></app-input>
+              <label class="text-xs font-semibold text-text-secondary pl-0.5"
+                >Fecha Entrega</label
+                >
+                <app-input
+                  type="date"
+                  size="sm"
+                  [(ngModel)]="expectedDate"
+                  (ngModelChange)="onExpectedDateChange($event)"
+                  [min]="minExpectedDate"
+                  customWrapperClass="!mt-0"
+                ></app-input>
+              </div>
+    
+              <!-- 5. Shipping Method -->
+              <div class="flex flex-col gap-1.5 min-w-0">
+                <label class="text-xs font-semibold text-text-secondary pl-0.5"
+                  >Método Envío</label
+                  >
+                  <div class="h-9">
+                    <app-selector
+                      class="w-full h-full"
+                      size="sm"
+                      [options]="shippingMethodOptions"
+                      [(ngModel)]="shippingMethod"
+                      (ngModelChange)="onShippingMethodChange($event)"
+                      placeholder="Elegir método..."
+                    ></app-selector>
+                  </div>
+                </div>
+              </div>
+    
+              <!-- Mobile: Collapsible Settings -->
+              @if (showMobileSettings) {
+                <div class="lg:hidden">
+                  <!-- Row 1: Supplier + Warehouse -->
+                  <div class="grid grid-cols-2 gap-3 mb-3 relative rounded-lg"
+                    [class.config-flash-warning]="showConfigWarning">
+                    <app-tooltip
+                      position="top"
+                      color="warning"
+                      size="sm"
+                      [visible]="showConfigWarning"
+                      class="!absolute left-1/2 -translate-x-1/2 top-0 z-10"
+                    >Selecciona proveedor y bodega</app-tooltip>
+                    <div class="flex flex-col gap-1.5 min-w-0">
+                      <label class="text-xs font-semibold text-text-secondary pl-0.5 flex items-center gap-1">
+                        Proveedor <span class="text-destructive">*</span>
+                      </label>
+                      <div class="flex gap-1">
+                        <app-selector
+                          class="flex-1 min-w-0"
+                          size="sm"
+                          [options]="supplierOptions"
+                          [(ngModel)]="selectedSupplierId"
+                          (ngModelChange)="onSupplierChange($event)"
+                          placeholder="Seleccionar..."
+                        ></app-selector>
+                        <app-button
+                          variant="outline"
+                          size="sm"
+                          customClasses="!px-2 flex items-center justify-center"
+                          (clicked)="openSupplierModal.emit()"
+                          >
+                          <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+                        </app-button>
+                      </div>
+                    </div>
+                    <div class="flex flex-col gap-1.5 min-w-0">
+                      <label class="text-xs font-semibold text-text-secondary pl-0.5 flex items-center gap-1">
+                        Bodega <span class="text-destructive">*</span>
+                      </label>
+                      <div class="flex gap-1">
+                        <app-selector
+                          class="flex-1 min-w-0"
+                          size="sm"
+                          [options]="locationOptions"
+                          [(ngModel)]="selectedLocationId"
+                          (ngModelChange)="onLocationChange($event)"
+                          placeholder="Seleccionar..."
+                        ></app-selector>
+                        <app-button
+                          variant="outline"
+                          size="sm"
+                          customClasses="!px-2 flex items-center justify-center"
+                          (clicked)="openWarehouseModal.emit()"
+                          >
+                          <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+                        </app-button>
+                      </div>
+                    </div>
+                  </div>
+                  <!-- Row 2: Dates -->
+                  <div class="grid grid-cols-2 gap-3 mb-3">
+                    <div class="flex flex-col gap-1.5 min-w-0">
+                      <label class="text-xs font-semibold text-text-secondary pl-0.5">Fecha Orden</label>
+                      <app-input
+                        type="date"
+                        size="sm"
+                        [(ngModel)]="orderDate"
+                        (ngModelChange)="onOrderDateChange($event)"
+                        customWrapperClass="!mt-0"
+                      ></app-input>
+                    </div>
+                    <div class="flex flex-col gap-1.5 min-w-0">
+                      <label class="text-xs font-semibold text-text-secondary pl-0.5">Fecha Entrega</label>
+                      <app-input
+                        type="date"
+                        size="sm"
+                        [(ngModel)]="expectedDate"
+                        (ngModelChange)="onExpectedDateChange($event)"
+                        [min]="minExpectedDate"
+                        customWrapperClass="!mt-0"
+                      ></app-input>
+                    </div>
+                  </div>
+                  <!-- Row 3: Shipping Method -->
+                  <div class="flex flex-col gap-1.5 min-w-0">
+                    <label class="text-xs font-semibold text-text-secondary pl-0.5">Método Envío</label>
+                    <app-selector
+                      class="w-full"
+                      size="sm"
+                      [options]="shippingMethodOptions"
+                      [(ngModel)]="shippingMethod"
+                      (ngModelChange)="onShippingMethodChange($event)"
+                      placeholder="Elegir método..."
+                    ></app-selector>
+                  </div>
+                </div>
+              }
             </div>
           </div>
-
-          <!-- Row 3: Shipping Method -->
-          <div class="flex flex-col gap-1.5 min-w-0">
-            <label class="text-xs font-semibold text-text-secondary pl-0.5">Método Envío</label>
-            <app-selector
-              class="w-full"
-              size="sm"
-              [options]="shippingMethodOptions"
-              [(ngModel)]="shippingMethod"
-              (ngModelChange)="onShippingMethodChange($event)"
-              placeholder="Elegir método..."
-            ></app-selector>
-          </div>
-        </div>
-      </div>
-    </div>
-  `,
+    `,
   styles: [
     `
       :host {

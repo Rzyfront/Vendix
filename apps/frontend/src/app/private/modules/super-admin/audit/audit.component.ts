@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   debounceTime,
   distinctUntilChanged,
@@ -47,7 +47,6 @@ import {
   selector: 'app-audit',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     AuditStatsComponent,
@@ -59,8 +58,8 @@ import {
     ButtonComponent,
     SelectorComponent,
     PaginationComponent,
-    CardComponent,
-  ],
+    CardComponent
+],
   templateUrl: './audit.component.html',
 })
 export class AuditComponent implements OnInit, OnDestroy {

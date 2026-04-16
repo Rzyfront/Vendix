@@ -10,7 +10,7 @@ import {
   effect,
   inject,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { forkJoin, of } from 'rxjs';
 import { catchError } from 'rxjs/operators';
@@ -45,15 +45,14 @@ export interface PopProductConfigResult {
   selector: 'app-pop-product-config-modal',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ModalComponent,
     ScrollableTabsComponent,
     SettingToggleComponent,
     IconComponent,
     ButtonComponent,
-    InputComponent,
-  ],
+    InputComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen"
@@ -894,6 +893,11 @@ export class PopProductConfigModalComponent implements OnChanges {
 
   onClose(): void {
     this.isOpen = false;
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.closed.emit();
   }
 

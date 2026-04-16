@@ -1,16 +1,16 @@
 import {
   Component,
   Input,
-  Output,
-  EventEmitter,
   forwardRef,
   OnInit,
   OnDestroy,
   ChangeDetectionStrategy,
   ChangeDetectorRef,
   inject,
+  input,
+  output
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   ControlValueAccessor,
   NG_VALUE_ACCESSOR,
@@ -35,7 +35,7 @@ export type SelectorVariant = 'default' | 'outline' | 'filled';
 @Component({
   selector: 'app-selector',
   standalone: true,
-  imports: [CommonModule, FormsModule, ReactiveFormsModule, IconComponent],
+  imports: [FormsModule, ReactiveFormsModule, IconComponent],
   providers: [
     {
       provide: NG_VALUE_ACCESSOR,
@@ -45,78 +45,90 @@ export type SelectorVariant = 'default' | 'outline' | 'filled';
   ],
   template: `
     <div [class]="containerClasses">
-      <label
-        *ngIf="label"
-        [class]="labelClasses"
-        [for]="id"
-        class="label-with-tooltip"
-      >
-        <span>{{ label }}</span>
-        <span
-          *ngIf="tooltipText"
-          class="help-icon"
-          [attr.data-tooltip]="tooltipText"
-        >
-          <svg
-            class="h-4 w-4"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            stroke-width="2"
+      @if (label) {
+        <label
+          [class]="labelClasses"
+          [for]="id()"
+          class="label-with-tooltip"
           >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-            />
-          </svg>
-        </span>
-        <span
-          *ngIf="required"
-          class="text-[var(--color-destructive)] ml-0.5"
-          >*</span
-        >
-      </label>
-
-      <div [class]="wrapperClasses">
-        <select
-          [id]="id"
-          [class]="selectClasses"
-          [disabled]="disabled"
-          [required]="required"
-          [ngModel]="selectedValue"
-          (ngModelChange)="onModelChange($event)"
-          (blur)="onBlur()"
-          (focus)="onFocus()"
-        >
-          <option *ngIf="placeholder" [ngValue]="null" disabled selected class="text-text-muted">
-            {{ placeholder }}
-          </option>
-          <option
-            *ngFor="let option of options; trackBy: trackByOption"
-            [ngValue]="option.value"
-            [disabled]="option.disabled"
-          >
-            {{ option.label }}
-          </option>
-        </select>
-
-        <div [class]="iconClasses">
-          <app-icon name="chevron-down" [size]="iconSize"></app-icon>
+          <span>{{ label }}</span>
+          @if (tooltipText) {
+            <span
+              class="help-icon"
+              [attr.data-tooltip]="tooltipText"
+              >
+              <svg
+                class="h-4 w-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                stroke-width="2"
+                >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                  />
+              </svg>
+            </span>
+          }
+          @if (required()) {
+            <span
+              class="text-[var(--color-destructive)] ml-0.5"
+              >*</span
+              >
+            }
+          </label>
+        }
+    
+        <div [class]="wrapperClasses">
+          <select
+            [id]="id()"
+            [class]="selectClasses"
+            [disabled]="disabled"
+            [required]="required()"
+            [ngModel]="selectedValue"
+            (ngModelChange)="onModelChange($event)"
+            (blur)="onBlur()"
+            (focus)="onFocus()"
+            >
+            @if (placeholder) {
+              <option [ngValue]="null" disabled selected class="text-text-muted">
+                {{ placeholder }}
+              </option>
+            }
+            @for (option of options(); track trackByOption($index, option)) {
+              <option
+                [ngValue]="option.value"
+                [disabled]="option.disabled"
+                >
+                {{ option.label }}
+              </option>
+            }
+          </select>
+    
+          <div [class]="iconClasses">
+            <app-icon name="chevron-down" [size]="iconSize"></app-icon>
+          </div>
         </div>
+    
+        @if (helpText || errorText) {
+          <div class="mt-1 text-sm">
+            @if (helpText && !errorText) {
+              <span class="text-[var(--color-text-secondary)]">
+                {{ helpText }}
+              </span>
+            }
+            @if (errorText) {
+              <span class="text-[var(--color-destructive)] flex items-center gap-1 font-medium">
+                <app-icon name="alert-circle" [size]="12"></app-icon>
+                {{ errorText }}
+              </span>
+            }
+          </div>
+        }
       </div>
-
-      <div *ngIf="helpText || errorText" class="mt-1 text-sm">
-        <span *ngIf="helpText && !errorText" class="text-[var(--color-text-secondary)]">
-          {{ helpText }}
-        </span>
-        <span *ngIf="errorText" class="text-[var(--color-destructive)] flex items-center gap-1 font-medium">
-          <app-icon name="alert-circle" [size]="12"></app-icon>
-          {{ errorText }}
-        </span>
-      </div>
-    </div>
-  `,
+    `,
   styleUrls: ['./selector.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
@@ -124,22 +136,22 @@ export class SelectorComponent
   implements ControlValueAccessor, OnInit, OnDestroy {
   private cdr = inject(ChangeDetectorRef);
 
-  @Input() id = `selector-${Math.random().toString(36).substr(2, 9)}`;
+  readonly id = input(`selector-${Math.random().toString(36).substr(2, 9)}`);
   @Input() label = '';
   @Input() placeholder = '';
   @Input() helpText = '';
   @Input() errorText = '';
-  @Input() required = false;
+  readonly required = input(false);
   @Input() disabled = false;
-  @Input() size: SelectorSize = 'md';
-  @Input() variant: SelectorVariant = 'default';
-  @Input() styleVariant: FormStyleVariant = 'modern';
-  @Input() options: SelectorOption[] = [];
+  readonly size = input<SelectorSize>('md');
+  readonly variant = input<SelectorVariant>('default');
+  readonly styleVariant = input<FormStyleVariant>('modern');
+  readonly options = input<SelectorOption[]>([]);
   @Input() tooltipText?: string;
 
-  @Output() valueChange = new EventEmitter<string | number | null>();
-  @Output() blur = new EventEmitter<void>();
-  @Output() focus = new EventEmitter<void>();
+  readonly valueChange = output<string | number | null>();
+  readonly blur = output<void>();
+  readonly focus = output<void>();
 
   selectedValue: string | number | null = null;
   private destroy$ = new Subject<void>();
@@ -180,11 +192,13 @@ export class SelectorComponent
   }
 
   onFocus(): void {
+    // TODO: The 'emit' function requires a mandatory void argument
     this.focus.emit();
   }
 
   onBlur(): void {
     this.onTouched();
+    // TODO: The 'emit' function requires a mandatory void argument
     this.blur.emit();
   }
 
@@ -204,7 +218,7 @@ export class SelectorComponent
   get labelClasses(): string {
     const baseClasses = ['block', 'font-medium', 'mb-2'];
 
-    if (this.styleVariant === 'modern') {
+    if (this.styleVariant() === 'modern') {
       return [
         ...baseClasses,
         'text-[11px]',
@@ -272,10 +286,10 @@ export class SelectorComponent
       lg: ['h-12', 'sm:h-[52px]', 'pl-4', 'pr-10', 'text-base', 'sm:text-lg'],
     };
 
-    if (this.styleVariant === 'modern') {
+    if (this.styleVariant() === 'modern') {
       // Modern: iOS-inspired with shadow focus
       variantClasses = [
-        ...sizeClasses[this.size],
+        ...sizeClasses[this.size()],
         'rounded-xl',
         '!bg-[var(--color-background)]',
         'focus:!bg-[var(--color-surface)]',
@@ -286,7 +300,7 @@ export class SelectorComponent
     } else {
       // Classic: with ring focus
       variantClasses = [
-        ...sizeClasses[this.size],
+        ...sizeClasses[this.size()],
         'rounded-xl',
         'focus:ring-2',
         this.errorText
@@ -295,11 +309,12 @@ export class SelectorComponent
       ];
     }
 
+    const variant = this.variant();
     return [
       ...baseClasses,
       ...variantClasses,
       ...stateClasses,
-      this.variant && this.variant !== 'default' ? `selector-${this.variant}` : '',
+      variant && variant !== 'default' ? `selector-${variant}` : '',
     ]
       .filter(Boolean)
       .join(' ');
@@ -310,9 +325,10 @@ export class SelectorComponent
   }
 
   get placeholderClasses(): string {
+    const size = this.size();
     return [
       'selector-placeholder',
-      this.size && `selector-placeholder-${this.size}`,
+      size && `selector-placeholder-${size}`,
       this.disabled ? 'selector-placeholder-disabled' : '',
     ]
       .filter(Boolean)
@@ -320,7 +336,7 @@ export class SelectorComponent
   }
 
   get iconSize(): number {
-    switch (this.size) {
+    switch (this.size()) {
       case 'sm':
         return 14;
       case 'lg':

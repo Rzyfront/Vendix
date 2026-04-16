@@ -9,7 +9,7 @@ import {
   untracked,
   OnDestroy,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { Subject, takeUntil, finalize } from 'rxjs';
 import { ReservationsService } from '../../../services/reservations.service';
@@ -35,7 +35,7 @@ interface ScheduleDay {
 @Component({
   selector: 'app-weekly-schedule-editor',
   standalone: true,
-  imports: [CommonModule, FormsModule, IconComponent, SpinnerComponent, ButtonComponent, ToggleComponent],
+  imports: [FormsModule, IconComponent, SpinnerComponent, ButtonComponent, ToggleComponent],
   templateUrl: './weekly-schedule-editor.component.html',
   styleUrls: ['./weekly-schedule-editor.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,

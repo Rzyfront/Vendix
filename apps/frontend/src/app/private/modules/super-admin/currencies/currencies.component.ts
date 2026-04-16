@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { Subject, takeUntil } from 'rxjs';
 import {
   Currency,
@@ -43,7 +43,6 @@ import {
   selector: 'app-currencies',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     CurrencyCreateModalComponent,
@@ -55,8 +54,8 @@ import {
     StatsComponent,
     SelectorComponent,
     PaginationComponent,
-    CardComponent,
-  ],
+    CardComponent
+],
   templateUrl: './currencies.component.html',
   styleUrls: ['./currencies.component.css'],
 })

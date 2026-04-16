@@ -1,5 +1,5 @@
 import { Component, inject, signal, computed, OnInit, OnDestroy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { Router, ActivatedRoute } from '@angular/router';
 import { Subject, takeUntil } from 'rxjs';
 import { ReportCardComponent } from '../../components/report-card/report-card.component';
@@ -14,13 +14,12 @@ import { REPORT_CATEGORIES, REPORT_DEFINITIONS, getCategoryById } from '../../co
   selector: 'vendix-report-list',
   standalone: true,
   imports: [
-    CommonModule,
     ReportCardComponent,
     ReportSearchComponent,
     ReportCategoryChipsComponent,
     IconComponent,
-    StickyHeaderComponent,
-  ],
+    StickyHeaderComponent
+],
   templateUrl: './report-list.component.html',
   styleUrls: ['./report-list.component.scss'],
 })

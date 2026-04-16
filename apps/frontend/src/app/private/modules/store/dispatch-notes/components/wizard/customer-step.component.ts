@@ -6,7 +6,7 @@ import {
   OnInit,
   OnDestroy,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { Subject, takeUntil } from 'rxjs';
 
 import {
@@ -21,11 +21,10 @@ import { DispatchNoteWizardService, WizardCustomer } from '../../services/dispat
   selector: 'app-dispatch-wizard-customer-step',
   standalone: true,
   imports: [
-    CommonModule,
     InputsearchComponent,
     IconComponent,
-    ButtonComponent,
-  ],
+    ButtonComponent
+],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="space-y-2">

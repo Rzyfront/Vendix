@@ -1,5 +1,5 @@
 import { Component, OnInit, inject, DestroyRef, Input, Output, EventEmitter, ChangeDetectorRef } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { Observable } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -20,7 +20,7 @@ export interface AddressModalData {
 @Component({
     selector: 'app-address-modal',
     standalone: true,
-    imports: [CommonModule, ReactiveFormsModule, ModalComponent, ButtonComponent, IconComponent, InputComponent, SelectorComponent, ToggleComponent],
+    imports: [ReactiveFormsModule, ModalComponent, ButtonComponent, IconComponent, InputComponent, SelectorComponent, ToggleComponent],
     templateUrl: './address-modal.component.html',
     styleUrls: ['./address-modal.component.scss'],
 })

@@ -1,5 +1,5 @@
 import { Component, EventEmitter, inject, Input, OnChanges, OnInit, Output, SimpleChanges } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormArray, FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { debounceTime, filter, skip } from 'rxjs';
 
@@ -21,12 +21,11 @@ import {
   selector: 'app-footer-settings-form',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     InputComponent,
     IconComponent,
-    TextareaComponent,
-  ],
+    TextareaComponent
+],
   templateUrl: './footer-settings-form.component.html',
 })
 export class FooterSettingsFormComponent implements OnInit, OnChanges {

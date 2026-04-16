@@ -5,7 +5,7 @@ import {
   signal,
   inject,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { HttpClient } from '@angular/common/http';
 import { Router } from '@angular/router';
 import { map } from 'rxjs/operators';
@@ -29,15 +29,14 @@ import { environment } from '../../../../../../environments/environment';
   selector: 'app-templates',
   standalone: true,
   imports: [
-    CommonModule,
     StickyHeaderComponent,
     ButtonComponent,
     SpinnerComponent,
     EmptyStateComponent,
     BadgeComponent,
     TemplateModalComponent,
-    IconComponent,
-  ],
+    IconComponent
+],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div>

@@ -10,7 +10,7 @@ import {
   computed,
   effect,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import {
   ReactiveFormsModule,
@@ -46,7 +46,6 @@ import {
   selector: 'app-store-user-edit-modal',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     InputComponent,
@@ -56,8 +55,8 @@ import {
     SettingToggleComponent,
     ScrollableTabsComponent,
     InputsearchComponent,
-    BadgeComponent,
-  ],
+    BadgeComponent
+],
   template: `
     @if (isOpen) {
     <app-modal

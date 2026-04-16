@@ -1,5 +1,5 @@
 import { Component, OnInit, inject, signal, computed } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { RouterModule } from '@angular/router';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
 import { StoreLegalDocumentsService } from './services/store-legal-documents.service';
@@ -29,7 +29,6 @@ import { formatDateOnlyUTC } from '../../../../../shared/utils/date.util';
   selector: 'app-legal-documents',
   standalone: true,
   imports: [
-    CommonModule,
     RouterModule,
     ReactiveFormsModule,
     StoreLegalDocumentModalComponent,
@@ -38,8 +37,8 @@ import { formatDateOnlyUTC } from '../../../../../shared/utils/date.util';
     InputsearchComponent,
     ResponsiveDataViewComponent,
     IconComponent,
-    CardComponent,
-  ],
+    CardComponent
+],
   template: `
     <div class="md:space-y-4">
       <!-- Stats -->

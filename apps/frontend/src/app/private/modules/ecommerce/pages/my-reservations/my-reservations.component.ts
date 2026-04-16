@@ -7,7 +7,7 @@ import {
     inject,
     ChangeDetectionStrategy,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
 import { HttpClient } from '@angular/common/http';
@@ -44,7 +44,7 @@ const STATUS_MAP: Record<BookingStatus, StatusConfig> = {
 @Component({
     selector: 'app-my-reservations',
     standalone: true,
-    imports: [CommonModule, FormsModule, RouterModule, ButtonComponent, IconComponent],
+    imports: [FormsModule, RouterModule, ButtonComponent, IconComponent],
     templateUrl: './my-reservations.component.html',
     styleUrls: ['./my-reservations.component.scss'],
     changeDetection: ChangeDetectionStrategy.OnPush,

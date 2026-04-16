@@ -1,42 +1,77 @@
-import { Component, inject, OnInit, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, effect, inject, OnInit, signal } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { RouterOutlet } from '@angular/router';
-import { GlobalUserModalsComponent } from './shared/components/global-user-modals/global-user-modals.component';
+import { ConfigFacade } from './core/store/config';
 import { RouteManagerService } from './core/services/route-manager.service';
 import { ToastService } from './shared/components/toast/toast.service';
+import { ToastContainerComponent } from './shared/components/toast/toast-container.component';
+import { GlobalUserModalsComponent } from './shared/components/global-user-modals/global-user-modals.component';
 import { AppLoadingComponent } from './shared/components/app-loading/app-loading.component';
 
 @Component({
   selector: 'app-root',
   standalone: true,
   imports: [
-    CommonModule,
     RouterOutlet,
+    ToastContainerComponent,
     GlobalUserModalsComponent,
     AppLoadingComponent,
   ],
   template: `
     @if (is_loading()) {
       <app-loading />
+    } @else if (config_error()) {
+      <div class="min-h-screen flex items-center justify-center bg-background">
+        <div class="w-full max-w-md mx-4 text-center py-8">
+          <div class="text-6xl mb-4">&#x26A0;&#xFE0F;</div>
+          <h2 class="text-xl font-semibold text-text-primary mb-2">
+            Error de Aplicaci&oacute;n
+          </h2>
+          <p class="text-text-secondary mb-6">{{ config_error() }}</p>
+        </div>
+      </div>
     } @else {
       <main>
         <router-outlet></router-outlet>
-        <app-global-user-modals></app-global-user-modals>
       </main>
+      <app-toast-container></app-toast-container>
+      <app-global-user-modals></app-global-user-modals>
+    }
+  `,
+  styles: `
+    :host {
+      color-scheme: light;
     }
   `,
 })
 export class AppComponent implements OnInit {
   private routeManager = inject(RouteManagerService);
+  private configFacade = inject(ConfigFacade);
   private toastService = inject(ToastService);
 
-  // Signal para controlar el estado de carga
   is_loading = signal(true);
+  config_error = toSignal(this.configFacade.error$, {
+    initialValue: null as any,
+  });
+
+  constructor() {
+    effect(() => {
+      if (!this.is_loading()) {
+        this.removePrerenderGate();
+      }
+    });
+  }
 
   ngOnInit() {
-    // NO llamar a this.routeManager.init() aquí
-    // El servicio ya se inicializa en su constructor
     this.setupRouteErrorHandling();
+  }
+
+  private removePrerenderGate(): void {
+    if (typeof document === 'undefined') return;
+
+    document.documentElement.classList.remove('vendix-prerender-hidden');
+    document.getElementById('vendix-prerender-gate')?.remove();
+    document.querySelector('.vendix-gate-spinner')?.remove();
   }
 
   private setupRouteErrorHandling(): void {

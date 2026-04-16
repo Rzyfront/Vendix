@@ -1,21 +1,21 @@
-import { Component, Input } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, Input, input } from '@angular/core';
+
 import { IconComponent } from '../icon/icon.component';
 
 @Component({
   selector: 'app-stats',
   standalone: true,
-  imports: [CommonModule, IconComponent],
+  imports: [IconComponent],
   templateUrl: './stats.component.html',
   styleUrls: ['./stats.component.scss'],
 })
 export class StatsComponent {
-  @Input() title!: string;
-  @Input() value: string | number = '';
+  readonly title = input.required<string>();
+  readonly value = input<string | number>('');
   @Input() smallText?: string;
-  @Input() iconName: string = 'info';
-  @Input() iconBgColor: string = 'bg-primary/10';
-  @Input() iconColor: string = 'text-primary';
-  @Input() clickable: boolean = false;
-  @Input() loading: boolean = false;
+  readonly iconName = input<string>('info');
+  readonly iconBgColor = input<string>('bg-primary/10');
+  readonly iconColor = input<string>('text-primary');
+  readonly clickable = input<boolean>(false);
+  readonly loading = input<boolean>(false);
 }

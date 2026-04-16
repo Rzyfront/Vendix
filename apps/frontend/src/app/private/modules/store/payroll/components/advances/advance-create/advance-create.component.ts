@@ -1,5 +1,5 @@
 import { Component, Input, Output, EventEmitter, OnInit, OnDestroy, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
@@ -17,13 +17,12 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
   selector: 'app-advance-create',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
     InputComponent,
-    SelectorComponent,
-  ],
+    SelectorComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen"
@@ -190,6 +189,11 @@ export class AdvanceCreateComponent implements OnInit, OnDestroy {
           this.toastService.show({ variant: 'success', description: 'Adelanto creado exitosamente' });
           this.submitting = false;
           this.form.reset({ installments: 1, frequency: 'monthly' });
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
           this.created.emit();
           this.onClose();
         },

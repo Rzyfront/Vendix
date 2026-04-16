@@ -2,6 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
 import { take } from 'rxjs/operators';
+import { toSignal } from '@angular/core/rxjs-interop';
 import * as AuthActions from './auth.actions';
 import * as AuthSelectors from './auth.selectors';
 import { AuthState } from './auth.reducer';
@@ -15,7 +16,8 @@ export class AuthFacade {
   private store = inject(Store<AuthState>);
   private sessionService = inject(SessionService);
 
-  // State observables
+  // ─── Observables (backward compatible) ────────────────────────────────────
+
   readonly user$ = this.store.select(AuthSelectors.selectUser);
   readonly userSettings$ = this.store.select(AuthSelectors.selectUserSettings);
   readonly tokens$ = this.store.select(AuthSelectors.selectTokens);
@@ -126,7 +128,55 @@ export class AuthFacade {
     AuthSelectors.selectUserDomainHostname,
   );
 
-  // Actions
+  // ─── Signal parallels (Angular 20 — backward compatible) ──────────────────
+  // Consumers can migrate from `| async` / `take(1)` to these signals.
+  // Naming: same as Observable but without the `$` suffix.
+
+  readonly user = toSignal(this.user$);
+  readonly userSettings = toSignal(this.userSettings$);
+  readonly tokens = toSignal(this.tokens$);
+  readonly isAuthenticated = toSignal(this.isAuthenticated$, { initialValue: false });
+  readonly authLoading = toSignal(this.loading$, { initialValue: false });
+  readonly authError = toSignal(this.error$, { initialValue: null });
+  readonly userRole = toSignal(this.userRole$);
+  readonly userRoles = toSignal(this.userRoles$, { initialValue: [] as string[] });
+  readonly userPermissions = toSignal(this.userPermissions$, { initialValue: [] as string[] });
+  readonly adminFlag = toSignal(this.isAdmin$, { initialValue: false });
+  readonly ownerFlag = toSignal(this.isOwner$, { initialValue: false });
+  readonly managerFlag = toSignal(this.isManager$, { initialValue: false });
+  readonly employeeFlag = toSignal(this.isEmployee$, { initialValue: false });
+  readonly customerFlag = toSignal(this.isCustomer$, { initialValue: false });
+  readonly userId = toSignal(this.userId$);
+  readonly userEmail = toSignal(this.userEmail$);
+  readonly userName = toSignal(this.userName$);
+  readonly authInfo = toSignal(this.authInfo$);
+  readonly onboardingCompleted = toSignal(this.onboardingCompleted$, { initialValue: false });
+  readonly onboardingCurrentStep = toSignal(this.onboardingCurrentStep$);
+  readonly onboardingCompletedSteps = toSignal(this.onboardingCompletedSteps$, { initialValue: [] as string[] });
+  readonly onboardingNeeded = toSignal(this.needsOnboarding$, { initialValue: false });
+  readonly userOrganization = toSignal(this.userOrganization$);
+  readonly userOrganizationName = toSignal(this.userOrganizationName$);
+  readonly userOrganizationSlug = toSignal(this.userOrganizationSlug$);
+  readonly organizationOnboarding = toSignal(this.organizationOnboarding$);
+  readonly organizationOnboardingNeeded = toSignal(this.needsOrganizationOnboarding$, { initialValue: false });
+  readonly userStore = toSignal(this.userStore$);
+  readonly userStoreName = toSignal(this.userStoreName$);
+  readonly userStoreSlug = toSignal(this.userStoreSlug$);
+  readonly userStoreType = toSignal(this.userStoreType$);
+  readonly storeSettings = toSignal(this.storeSettings$);
+  readonly panelUiConfig = toSignal(this.panelUiConfig$);
+  readonly selectedAppType = toSignal(this.selectedAppType$);
+  readonly currentAppPanelUi = toSignal(this.currentAppPanelUi$);
+  readonly visibleModules = toSignal(this.visibleModules$, { initialValue: [] as string[] });
+  readonly defaultPanelUi = toSignal(this.defaultPanelUi$);
+  readonly hasNewModules = toSignal(this.hasNewModules$, { initialValue: false });
+  readonly newModuleCount = toSignal(this.newModuleCount$, { initialValue: 0 });
+  readonly newModuleKeys = toSignal(this.newModuleKeys$, { initialValue: [] as string[] });
+  readonly userDomainSettings = toSignal(this.userDomainSettings$);
+  readonly userDomainHostname = toSignal(this.userDomainHostname$);
+
+  // ─── Actions ──────────────────────────────────────────────────────────────
+
   login(
     email: string,
     password: string,
@@ -220,64 +270,46 @@ export class AuthFacade {
     this.store.dispatch(AuthActions.resendVerificationEmail({ email }));
   }
 
-  // Synchronous getters for templates
+  // ─── Synchronous getters — powered by signals (no take(1) antipattern) ────
+
   getCurrentUser(): any {
-    let result: any = null;
-    this.user$.pipe(take(1)).subscribe((user) => (result = user));
-    return result;
+    return this.user();
   }
 
   getUserSettings(): any {
-    let result: any = null;
-    this.userSettings$
-      .pipe(take(1))
-      .subscribe((userSettings) => (result = userSettings));
-    return result;
+    return this.userSettings();
   }
 
   getCurrentUserRole(): string | null {
-    let result: string | null = null;
-    this.userRole$.pipe(take(1)).subscribe((role) => (result = role));
-    return result;
+    return this.userRole() ?? null;
   }
 
   isLoggedIn(): boolean {
-    let result = false;
-    this.isAuthenticated$.pipe(take(1)).subscribe((auth) => (result = auth));
-    return result;
+    return this.isAuthenticated();
   }
 
   isAdmin(): boolean {
-    let result = false;
-    this.isAdmin$.pipe(take(1)).subscribe((admin) => (result = admin));
-    return result;
+    return this.adminFlag();
   }
 
   isOwner(): boolean {
-    let result = false;
-    this.isOwner$.pipe(take(1)).subscribe((owner) => (result = owner));
-    return result;
+    return this.ownerFlag();
   }
 
   isLoading(): boolean {
-    let result = false;
-    this.loading$.pipe(take(1)).subscribe((loading) => (result = loading));
-    return result;
+    return this.authLoading();
   }
 
   getError(): string | null {
-    let result: string | null = null;
-    this.error$.pipe(take(1)).subscribe((error) => {
-      if (error === null) {
-        result = null;
-      } else if (typeof error === 'string') {
-        result = error;
-      } else {
-        // Handle NormalizedApiPayload by extracting the message
-        result = extractApiErrorMessage(error);
-      }
-    });
-    return result;
+    const error = this.authError();
+    if (error === null || error === undefined) {
+      return null;
+    } else if (typeof error === 'string') {
+      return error;
+    } else {
+      // Handle NormalizedApiPayload by extracting the message
+      return extractApiErrorMessage(error);
+    }
   }
 
   setLoading(loading: boolean): void {
@@ -289,58 +321,34 @@ export class AuthFacade {
   }
 
   getTokens(): { access_token: string; refresh_token: string } | null {
-    let result: { access_token: string; refresh_token: string } | null = null;
-    this.tokens$.pipe(take(1)).subscribe((tokens) => (result = tokens));
-    return result;
+    return this.tokens() ?? null;
   }
 
   // Permission methods
   hasPermission(permission: string): boolean {
-    let result = false;
-    this.userPermissions$.pipe(take(1)).subscribe((permissions) => {
-      result = permissions.includes(permission);
-    });
-    return result;
+    return this.userPermissions().includes(permission);
   }
 
   hasAnyPermission(permissions: string[]): boolean {
-    let result = false;
-    this.userPermissions$.pipe(take(1)).subscribe((userPermissions) => {
-      result = permissions.some((permission) =>
-        userPermissions.includes(permission),
-      );
-    });
-    return result;
+    const currentPermissions = this.userPermissions();
+    return permissions.some((permission) => currentPermissions.includes(permission));
   }
 
   hasRole(role: string): boolean {
-    let result = false;
-    this.userRoles$.pipe(take(1)).subscribe((roles) => {
-      result = roles.includes(role);
-    });
-    return result;
+    return this.userRoles().includes(role);
   }
 
   hasAnyRole(roles: string[]): boolean {
-    let result = false;
-    this.userRoles$.pipe(take(1)).subscribe((userRoles) => {
-      result = roles.some((role) => userRoles.includes(role));
-    });
-    return result;
+    const currentRoles = this.userRoles();
+    return roles.some((role) => currentRoles.includes(role));
   }
 
   getPermissions(): string[] {
-    let result: string[] = [];
-    this.userPermissions$
-      .pipe(take(1))
-      .subscribe((permissions) => (result = permissions));
-    return result;
+    return this.userPermissions();
   }
 
   getRoles(): string[] {
-    let result: string[] = [];
-    this.userRoles$.pipe(take(1)).subscribe((roles) => (result = roles));
-    return result;
+    return this.userRoles();
   }
 
   // Onboarding methods
@@ -354,43 +362,24 @@ export class AuthFacade {
 
   // Synchronous onboarding getters
   isOnboardingCompleted(): boolean {
-    let result = false;
-    this.onboardingCompleted$
-      .pipe(take(1))
-      .subscribe((completed) => (result = completed));
-    return result;
+    return this.onboardingCompleted();
   }
 
   getOnboardingCurrentStep(): string | undefined {
-    let result: string | undefined;
-    this.onboardingCurrentStep$
-      .pipe(take(1))
-      .subscribe((step) => (result = step));
-    return result;
+    return this.onboardingCurrentStep();
   }
 
   getOnboardingCompletedSteps(): string[] {
-    let result: string[] = [];
-    this.onboardingCompletedSteps$
-      .pipe(take(1))
-      .subscribe((steps) => (result = steps));
-    return result;
+    return this.onboardingCompletedSteps();
   }
 
   needsOnboarding(): boolean {
-    let result = false;
-    this.needsOnboarding$.pipe(take(1)).subscribe((needs) => (result = needs));
-    return result;
+    return this.onboardingNeeded();
   }
 
   // Panel UI methods
   isModuleVisible(moduleKey: string): boolean {
-    let result = false;
-    this.store
-      .select(AuthSelectors.selectIsModuleVisible(moduleKey))
-      .pipe(take(1))
-      .subscribe((visible) => (result = visible));
-    return result;
+    return this.visibleModules().includes(moduleKey);
   }
 
   getVisibleModules$(): Observable<string[]> {
@@ -411,9 +400,7 @@ export class AuthFacade {
   }
 
   getStoreSettings(): any {
-    let result: any = null;
-    this.storeSettings$.pipe(take(1)).subscribe((settings) => (result = settings));
-    return result;
+    return this.storeSettings();
   }
 
   setDefaultPanelUi(default_panel_ui: Record<string, Record<string, boolean>>): void {
@@ -421,8 +408,6 @@ export class AuthFacade {
   }
 
   getUserId(): number | null {
-    let result: number | null = null;
-    this.userId$.pipe(take(1)).subscribe((id) => (result = id));
-    return result;
+    return this.userId() ?? null;
   }
 }

@@ -4,9 +4,11 @@
   [size]="size"
   [showCloseButton]="showCloseButton"
   [customClasses]="customClasses"
->
+  >
   <div class="modal-body">
-    <p *ngIf="message" class="mb-4 text-text-secondary">{{ message }}</p>
+    @if (message) {
+      <p class="mb-4 text-text-secondary">{{ message }}</p>
+    }
     <app-input
       [placeholder]="placeholder"
       [(ngModel)]="inputValue"

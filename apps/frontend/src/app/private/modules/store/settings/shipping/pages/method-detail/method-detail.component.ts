@@ -7,7 +7,7 @@ import {
   signal,
   computed,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { RouterModule, ActivatedRoute, Router } from '@angular/router';
 import { Subject, takeUntil, forkJoin, of } from 'rxjs';
 import { switchMap, map } from 'rxjs/operators';
@@ -30,7 +30,10 @@ import {
   ToastService,
   DialogService,
 } from '../../../../../../../shared/components/index';
-import { TableColumn, TableAction } from '../../../../../../../shared/components/table/table.component';
+import {
+  TableColumn,
+  TableAction,
+} from '../../../../../../../shared/components/table/table.component';
 import { ItemListCardConfig } from '../../../../../../../shared/components/item-list/item-list.interfaces';
 import { AddRateWizardModalComponent } from '../../components/index';
 
@@ -38,7 +41,6 @@ import { AddRateWizardModalComponent } from '../../components/index';
   selector: 'app-method-detail',
   standalone: true,
   imports: [
-    CommonModule,
     RouterModule,
     StickyHeaderComponent,
     StatsComponent,
@@ -63,24 +65,49 @@ import { AddRateWizardModalComponent } from '../../components/index';
         [badgeText]="method() ? getTypeLabel(method()!.type) : ''"
         badgeColor="blue"
         [actions]="header_actions()"
-        (actionClicked)="onHeaderAction($event)" />
+        (actionClicked)="onHeaderAction($event)"
+      />
 
       <!-- Mini Stats (4 horizontal) -->
-      <div class="stats-container sticky top-[52px] z-20 bg-background py-3 md:static md:bg-transparent md:py-0 mb-4">
-        <div class="flex gap-3 overflow-x-auto px-4 md:px-0 md:grid md:grid-cols-4 md:gap-4 no-scrollbar">
-          <app-stats title="Zonas"
+      <div
+        class="stats-container sticky top-[52px] z-20 bg-background py-3 md:static md:bg-transparent md:py-0 mb-4"
+      >
+        <div
+          class="flex gap-3 overflow-x-auto px-4 md:px-0 md:grid md:grid-cols-4 md:gap-4 no-scrollbar"
+        >
+          <app-stats
+            title="Zonas"
             [value]="zones_with_rates().length"
-            iconName="map-pin" iconBgColor="#ECFDF5" iconColor="#10B981" [loading]="is_loading()" />
-          <app-stats title="Tarifas activas"
+            iconName="map-pin"
+            iconBgColor="#ECFDF5"
+            iconColor="#10B981"
+            [loading]="is_loading()"
+          />
+          <app-stats
+            title="Tarifas activas"
             [value]="active_rates_count()"
-            iconName="tag" iconBgColor="#F5F3FF" iconColor="#8B5CF6" [loading]="is_loading()" />
-          <app-stats title="Pedidos este mes"
+            iconName="tag"
+            iconBgColor="#F5F3FF"
+            iconColor="#8B5CF6"
+            [loading]="is_loading()"
+          />
+          <app-stats
+            title="Pedidos este mes"
             [value]="0"
-            iconName="package" iconBgColor="#FFF7ED" iconColor="#F59E0B" [loading]="is_loading()"
-            smallText="—" />
-          <app-stats title="Ingresos envio"
+            iconName="package"
+            iconBgColor="#FFF7ED"
+            iconColor="#F59E0B"
+            [loading]="is_loading()"
+            smallText="—"
+          />
+          <app-stats
+            title="Ingresos envio"
             [value]="'—'"
-            iconName="banknote" iconBgColor="#EEF2FF" iconColor="#6366F1" [loading]="is_loading()" />
+            iconName="banknote"
+            iconBgColor="#EEF2FF"
+            iconColor="#6366F1"
+            [loading]="is_loading()"
+          />
         </div>
       </div>
 
@@ -88,13 +115,23 @@ import { AddRateWizardModalComponent } from '../../components/index';
       <div class="mx-4 md:mx-0 mb-6">
         <div class="bg-surface rounded-xl border border-border overflow-hidden">
           <!-- Table Header -->
-          <div class="flex flex-col md:flex-row md:items-center justify-between p-3 md:p-4 border-b border-border gap-3">
+          <div
+            class="flex flex-col md:flex-row md:items-center justify-between p-3 md:p-4 border-b border-border gap-3"
+          >
             <div class="flex items-center gap-3">
-              <h3 class="text-sm md:text-base font-semibold text-text-primary">Zonas y Tarifas</h3>
-              <app-badge variant="neutral" size="xs">{{ zones_with_rates().length }} zonas</app-badge>
+              <h3 class="text-sm md:text-base font-semibold text-text-primary">
+                Zonas y Tarifas
+              </h3>
+              <app-badge variant="neutral" size="xs"
+                >{{ zones_with_rates().length }} zonas</app-badge
+              >
             </div>
             <div class="flex items-center gap-2 md:gap-3">
-              <app-inputsearch placeholder="Buscar zona..." class="flex-1 md:w-56" (searchChange)="search_term.set($event)" />
+              <app-inputsearch
+                placeholder="Buscar zona..."
+                class="flex-1 md:w-56"
+                (searchChange)="search_term.set($event)"
+              />
               <app-button size="sm" (clicked)="openRateWizard()">
                 <app-icon slot="icon" name="plus" [size]="16" />
                 Agregar Tarifa
@@ -116,29 +153,41 @@ import { AddRateWizardModalComponent } from '../../components/index';
             [showEmptyAction]="true"
             [emptyActionText]="'Agregar Tarifa'"
             (actionClick)="onTableAction($event)"
-            (emptyActionClick)="openRateWizard()" />
+            (emptyActionClick)="openRateWizard()"
+          />
         </div>
       </div>
 
-      <!-- Rate Wizard Modal -->
-      @if (show_rate_wizard() && method()) {
+      @defer (when show_rate_wizard() && method()) {
         <app-add-rate-wizard-modal
           [method_id]="method()!.id"
           [existing_zones]="getAvailableZones()"
           [edit_rate]="edit_rate()"
           (close)="closeRateWizard()"
-          (saved)="onRateSaved()" />
+          (saved)="onRateSaved()"
+        />
       }
     </div>
   `,
-  styles: [`
-    :host { display: block; }
-    .no-scrollbar {
-      scrollbar-width: none;
-      &::-webkit-scrollbar { display: none; }
-    }
-    :host ::ng-deep app-stats { min-width: 140px; @media (min-width: 768px) { min-width: auto; } }
-  `],
+  styles: [
+    `
+      :host {
+        display: block;
+      }
+      .no-scrollbar {
+        scrollbar-width: none;
+        &::-webkit-scrollbar {
+          display: none;
+        }
+      }
+      :host ::ng-deep app-stats {
+        min-width: 140px;
+        @media (min-width: 768px) {
+          min-width: auto;
+        }
+      }
+    `,
+  ],
 })
 export class MethodDetailComponent implements OnInit, OnDestroy {
   private route = inject(ActivatedRoute);
@@ -161,21 +210,27 @@ export class MethodDetailComponent implements OnInit, OnDestroy {
   filtered_zones = computed(() => {
     const term = this.search_term().toLowerCase();
     if (!term) return this.zones_with_rates();
-    return this.zones_with_rates().filter(zr =>
-      zr.zone.name.toLowerCase().includes(term) ||
-      (zr.zone.display_name || '').toLowerCase().includes(term)
+    return this.zones_with_rates().filter(
+      (zr) =>
+        zr.zone.name.toLowerCase().includes(term) ||
+        (zr.zone.display_name || '').toLowerCase().includes(term),
     );
   });
 
-  active_rates_count = computed(() =>
-    this.zones_with_rates().filter(zr => zr.rate.is_active).length
+  active_rates_count = computed(
+    () => this.zones_with_rates().filter((zr) => zr.rate.is_active).length,
   );
 
   header_actions = computed<StickyHeaderActionButton[]>(() => {
     const m = this.method();
     if (!m) return [];
     return [
-      { id: 'configure', label: 'Configurar', variant: 'outline' as const, icon: 'settings' },
+      {
+        id: 'configure',
+        label: 'Configurar',
+        variant: 'outline' as const,
+        icon: 'settings',
+      },
       {
         id: 'toggle',
         label: m.is_active ? 'Desactivar' : 'Activar',
@@ -186,7 +241,7 @@ export class MethodDetailComponent implements OnInit, OnDestroy {
   });
 
   table_data = computed(() => {
-    return this.filtered_zones().map(zr => ({
+    return this.filtered_zones().map((zr) => ({
       _original: zr,
       zone_name: zr.zone.name,
       countries_display: this.formatCountries(zr.zone.countries),
@@ -213,8 +268,8 @@ export class MethodDetailComponent implements OnInit, OnDestroy {
           'Tarifa plana': '#3B82F6',
           'Por peso': '#F59E0B',
           'Por precio': '#6366F1',
-          'Calculado': '#6B7280',
-          'Gratis': '#10B981',
+          Calculado: '#6B7280',
+          Gratis: '#10B981',
         },
       },
     },
@@ -227,8 +282,8 @@ export class MethodDetailComponent implements OnInit, OnDestroy {
       badgeConfig: {
         type: 'custom',
         colorMap: {
-          'Activa': '#10B981',
-          'Inactiva': '#F59E0B',
+          Activa: '#10B981',
+          Inactiva: '#F59E0B',
         },
       },
     },
@@ -245,7 +300,8 @@ export class MethodDetailComponent implements OnInit, OnDestroy {
       label: 'Eliminar',
       icon: 'trash-2',
       variant: 'danger',
-      action: (item: any) => this.confirmDeleteRate(item._original as ZoneWithRates),
+      action: (item: any) =>
+        this.confirmDeleteRate(item._original as ZoneWithRates),
     },
   ];
 
@@ -267,7 +323,7 @@ export class MethodDetailComponent implements OnInit, OnDestroy {
   // ─── Lifecycle ───
 
   ngOnInit(): void {
-    this.route.params.pipe(takeUntil(this.destroy$)).subscribe(params => {
+    this.route.params.pipe(takeUntil(this.destroy$)).subscribe((params) => {
       const methodId = Number(params['methodId']);
       if (methodId) {
         this.loadMethodData(methodId);
@@ -286,40 +342,50 @@ export class MethodDetailComponent implements OnInit, OnDestroy {
     this.is_loading.set(true);
 
     // Load method details
-    this.shippingService.getShippingMethod(methodId)
+    this.shippingService
+      .getShippingMethod(methodId)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (method) => this.method.set(method),
         error: () => {
-          this.toastService.show({ variant: 'error', description: 'Error al cargar el metodo' });
+          this.toastService.show({
+            variant: 'error',
+            description: 'Error al cargar el metodo',
+          });
           this.router.navigate(['/admin/settings/shipping']);
         },
       });
 
     // Load zones and their rates for this method
-    this.shippingService.getStoreZones().pipe(
-      switchMap(zones => {
-        this.all_store_zones.set(zones);
-        if (zones.length === 0) return of([]);
-        return forkJoin(
-          zones.map(zone =>
-            this.shippingService.getStoreZoneRates(zone.id).pipe(
-              map(rates => rates
-                .filter(r => r.shipping_method_id === methodId)
-                .map(rate => ({ zone, rate } as ZoneWithRates))
-              )
-            )
-          )
-        ).pipe(map(results => results.flat()));
-      }),
-      takeUntil(this.destroy$),
-    ).subscribe({
-      next: (zonesWithRates) => {
-        this.zones_with_rates.set(zonesWithRates);
-        this.is_loading.set(false);
-      },
-      error: () => this.is_loading.set(false),
-    });
+    this.shippingService
+      .getStoreZones()
+      .pipe(
+        switchMap((zones) => {
+          this.all_store_zones.set(zones);
+          if (zones.length === 0) return of([]);
+          return forkJoin(
+            zones.map((zone) =>
+              this.shippingService
+                .getStoreZoneRates(zone.id)
+                .pipe(
+                  map((rates) =>
+                    rates
+                      .filter((r) => r.shipping_method_id === methodId)
+                      .map((rate) => ({ zone, rate }) as ZoneWithRates),
+                  ),
+                ),
+            ),
+          ).pipe(map((results) => results.flat()));
+        }),
+        takeUntil(this.destroy$),
+      )
+      .subscribe({
+        next: (zonesWithRates) => {
+          this.zones_with_rates.set(zonesWithRates);
+          this.is_loading.set(false);
+        },
+        error: () => this.is_loading.set(false),
+      });
   }
 
   // ─── Header Actions ───
@@ -357,7 +423,10 @@ export class MethodDetailComponent implements OnInit, OnDestroy {
         });
       },
       error: () => {
-        this.toastService.show({ variant: 'error', description: `Error al ${action} el metodo` });
+        this.toastService.show({
+          variant: 'error',
+          description: `Error al ${action} el metodo`,
+        });
       },
     });
   }
@@ -387,16 +456,23 @@ export class MethodDetailComponent implements OnInit, OnDestroy {
 
     if (!confirmed) return;
 
-    this.shippingService.deleteRate(zr.rate.id)
+    this.shippingService
+      .deleteRate(zr.rate.id)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: () => {
-          this.toastService.show({ variant: 'success', description: 'Tarifa eliminada correctamente' });
+          this.toastService.show({
+            variant: 'success',
+            description: 'Tarifa eliminada correctamente',
+          });
           const m = this.method();
           if (m) this.loadMethodData(m.id);
         },
         error: () => {
-          this.toastService.show({ variant: 'error', description: 'Error al eliminar la tarifa' });
+          this.toastService.show({
+            variant: 'error',
+            description: 'Error al eliminar la tarifa',
+          });
         },
       });
   }
@@ -420,8 +496,10 @@ export class MethodDetailComponent implements OnInit, OnDestroy {
   }
 
   getAvailableZones(): ShippingZone[] {
-    const existingZoneIds = new Set(this.zones_with_rates().map(zr => zr.zone.id));
-    return this.all_store_zones().filter(z => !existingZoneIds.has(z.id));
+    const existingZoneIds = new Set(
+      this.zones_with_rates().map((zr) => zr.zone.id),
+    );
+    return this.all_store_zones().filter((z) => !existingZoneIds.has(z.id));
   }
 
   // ─── Helpers ───
@@ -446,11 +524,19 @@ export class MethodDetailComponent implements OnInit, OnDestroy {
   formatCountries(countries: string[]): string {
     if (!countries || countries.length === 0) return '—';
     const names: Record<string, string> = {
-      CO: 'Colombia', MX: 'Mexico', US: 'Estados Unidos', DO: 'Rep. Dominicana',
-      VE: 'Venezuela', AR: 'Argentina', CL: 'Chile', PE: 'Peru', PA: 'Panama',
-      PR: 'Puerto Rico', ES: 'Espana',
+      CO: 'Colombia',
+      MX: 'Mexico',
+      US: 'Estados Unidos',
+      DO: 'Rep. Dominicana',
+      VE: 'Venezuela',
+      AR: 'Argentina',
+      CL: 'Chile',
+      PE: 'Peru',
+      PA: 'Panama',
+      PR: 'Puerto Rico',
+      ES: 'Espana',
     };
-    const mapped = countries.map(c => names[c] || c);
+    const mapped = countries.map((c) => names[c] || c);
     if (mapped.length <= 2) return mapped.join(', ');
     return `${mapped.slice(0, 2).join(', ')} +${mapped.length - 2}`;
   }
@@ -462,7 +548,10 @@ export class MethodDetailComponent implements OnInit, OnDestroy {
   formatCost(rate: ShippingRate): string {
     if (rate.type === 'free') return 'Gratis';
     let cost = `$${Number(rate.base_cost).toLocaleString('es-CO')}`;
-    if (rate.per_unit_cost && (rate.type === 'weight_based' || rate.type === 'price_based')) {
+    if (
+      rate.per_unit_cost &&
+      (rate.type === 'weight_based' || rate.type === 'price_based')
+    ) {
       const unit = rate.type === 'weight_based' ? 'kg' : '$';
       cost += ` + $${Number(rate.per_unit_cost).toLocaleString('es-CO')}/${unit}`;
     }

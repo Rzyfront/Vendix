@@ -1,10 +1,9 @@
 import {
   Component,
-  EventEmitter,
   inject,
   Input,
   OnInit,
-  Output,
+  output
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
@@ -51,101 +50,110 @@ import { environment } from '../../../../environments/environment';
       [size]="'lg'"
       (closed)="onClose()"
       (opened)="onOpen()"
-    >
-      <div *ngIf="!isEditing; else editMode">
-        <!-- ═══ VISTA DE PERFIL (Mobile-First) ═══ -->
-
-        <!-- Profile Header — centered card -->
-        <div class="flex flex-col items-center text-center pt-2 pb-5">
-          <div class="w-20 h-20 md:w-24 md:h-24 rounded-xl overflow-hidden border-2 border-primary-200 mb-3">
-            <img
-              *ngIf="userInfo?.avatar_url"
-              [src]="userInfo.avatar_url"
-              alt="Avatar"
-              class="w-full h-full object-contain"
-            />
-            <div
-              *ngIf="!userInfo?.avatar_url"
-              class="w-full h-full bg-primary-100 flex items-center justify-center text-primary-600 text-2xl md:text-3xl font-bold"
-            >
-              {{ getInitials() }}
+      >
+      @if (!isEditing) {
+        <div>
+          <!-- ═══ VISTA DE PERFIL (Mobile-First) ═══ -->
+          <!-- Profile Header — centered card -->
+          <div class="flex flex-col items-center text-center pt-2 pb-5">
+            <div class="w-20 h-20 md:w-24 md:h-24 rounded-xl overflow-hidden border-2 border-primary-200 mb-3">
+              @if (userInfo?.avatar_url) {
+                <img
+                  [src]="userInfo.avatar_url"
+                  alt="Avatar"
+                  class="w-full h-full object-contain"
+                  />
+              }
+              @if (!userInfo?.avatar_url) {
+                <div
+                  class="w-full h-full bg-primary-100 flex items-center justify-center text-primary-600 text-2xl md:text-3xl font-bold"
+                  >
+                  {{ getInitials() }}
+                </div>
+              }
             </div>
+            <h3 class="text-lg font-semibold text-gray-900">
+              {{ userInfo?.first_name }} {{ userInfo?.last_name }}
+            </h3>
+            <p class="text-sm text-gray-500">{{ userInfo?.email }}</p>
           </div>
-          <h3 class="text-lg font-semibold text-gray-900">
-            {{ userInfo?.first_name }} {{ userInfo?.last_name }}
-          </h3>
-          <p class="text-sm text-gray-500">{{ userInfo?.email }}</p>
-        </div>
-
-        <!-- Información Personal — icon rows -->
-        <div class="space-y-2 mb-5">
-          <h4 class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider px-1">
-            Información Personal
-          </h4>
-          <div class="bg-gray-50 rounded-xl border border-gray-100 divide-y divide-gray-100">
-            <!-- Teléfono -->
-            <div class="flex items-center gap-3 px-4 py-3">
-              <app-icon name="phone" [size]="18" class="text-gray-400 flex-shrink-0"></app-icon>
-              <div class="min-w-0">
-                <p class="text-[11px] text-gray-400 leading-tight">Teléfono</p>
-                <p class="text-sm text-gray-900 truncate">{{ userInfo?.phone || 'No registrado' }}</p>
-              </div>
-            </div>
-            <!-- Documento -->
-            <div class="flex items-center gap-3 px-4 py-3">
-              <app-icon name="file-text" [size]="18" class="text-gray-400 flex-shrink-0"></app-icon>
-              <div class="min-w-0">
-                <p class="text-[11px] text-gray-400 leading-tight">Documento</p>
-                <p
-                  *ngIf="userInfo?.document_type && userInfo?.document_number"
-                  class="text-sm text-gray-900 truncate"
-                >
-                  {{ userInfo?.document_type | uppercase }} {{ userInfo?.document_number }}
-                </p>
-                <p
-                  *ngIf="!userInfo?.document_type || !userInfo?.document_number"
-                  class="text-sm text-gray-400 italic"
-                >
-                  No registrado
-                </p>
-              </div>
-            </div>
-            <!-- Miembro desde -->
-            <div class="flex items-center gap-3 px-4 py-3">
-              <app-icon name="calendar" [size]="18" class="text-gray-400 flex-shrink-0"></app-icon>
-              <div class="min-w-0">
-                <p class="text-[11px] text-gray-400 leading-tight">Miembro desde</p>
-                <p class="text-sm text-gray-900">{{ userInfo?.created_at | date: 'mediumDate' }}</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Dirección — compact card -->
-        <div class="space-y-2 mb-5">
-          <h4 class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider px-1">
-            Dirección
-          </h4>
-          <div class="bg-gray-50 rounded-xl border border-gray-100">
-            <div *ngIf="hasAddress; else noAddress">
-              <div class="flex items-start gap-3 px-4 py-3">
-                <app-icon name="map-pin" [size]="18" class="text-gray-400 flex-shrink-0 mt-0.5"></app-icon>
+          <!-- Información Personal — icon rows -->
+          <div class="space-y-2 mb-5">
+            <h4 class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider px-1">
+              Información Personal
+            </h4>
+            <div class="bg-gray-50 rounded-xl border border-gray-100 divide-y divide-gray-100">
+              <!-- Teléfono -->
+              <div class="flex items-center gap-3 px-4 py-3">
+                <app-icon name="phone" [size]="18" class="text-gray-400 flex-shrink-0"></app-icon>
                 <div class="min-w-0">
-                  <p class="text-sm text-gray-900">{{ addressInfo?.address_line_1 }}</p>
-                  <p *ngIf="addressInfo?.address_line_2" class="text-sm text-gray-500">
-                    {{ addressInfo?.address_line_2 }}
-                  </p>
-                  <p class="text-xs text-gray-400 mt-1">
-                    {{ addressInfo?.city }}<span *ngIf="addressInfo?.state">, {{ addressInfo?.state }}</span>
-                  </p>
-                  <p class="text-xs text-gray-400">
-                    {{ addressInfo?.country }}
-                    <span *ngIf="addressInfo?.postal_code"> · {{ addressInfo?.postal_code }}</span>
-                  </p>
+                  <p class="text-[11px] text-gray-400 leading-tight">Teléfono</p>
+                  <p class="text-sm text-gray-900 truncate">{{ userInfo?.phone || 'No registrado' }}</p>
+                </div>
+              </div>
+              <!-- Documento -->
+              <div class="flex items-center gap-3 px-4 py-3">
+                <app-icon name="file-text" [size]="18" class="text-gray-400 flex-shrink-0"></app-icon>
+                <div class="min-w-0">
+                  <p class="text-[11px] text-gray-400 leading-tight">Documento</p>
+                  @if (userInfo?.document_type && userInfo?.document_number) {
+                    <p
+                      class="text-sm text-gray-900 truncate"
+                      >
+                      {{ userInfo?.document_type | uppercase }} {{ userInfo?.document_number }}
+                    </p>
+                  }
+                  @if (!userInfo?.document_type || !userInfo?.document_number) {
+                    <p
+                      class="text-sm text-gray-400 italic"
+                      >
+                      No registrado
+                    </p>
+                  }
+                </div>
+              </div>
+              <!-- Miembro desde -->
+              <div class="flex items-center gap-3 px-4 py-3">
+                <app-icon name="calendar" [size]="18" class="text-gray-400 flex-shrink-0"></app-icon>
+                <div class="min-w-0">
+                  <p class="text-[11px] text-gray-400 leading-tight">Miembro desde</p>
+                  <p class="text-sm text-gray-900">{{ userInfo?.created_at | date: 'mediumDate' }}</p>
                 </div>
               </div>
             </div>
-            <ng-template #noAddress>
+          </div>
+          <!-- Dirección — compact card -->
+          <div class="space-y-2 mb-5">
+            <h4 class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider px-1">
+              Dirección
+            </h4>
+            <div class="bg-gray-50 rounded-xl border border-gray-100">
+              @if (hasAddress) {
+                <div>
+                  <div class="flex items-start gap-3 px-4 py-3">
+                    <app-icon name="map-pin" [size]="18" class="text-gray-400 flex-shrink-0 mt-0.5"></app-icon>
+                    <div class="min-w-0">
+                      <p class="text-sm text-gray-900">{{ addressInfo?.address_line_1 }}</p>
+                      @if (addressInfo?.address_line_2) {
+                        <p class="text-sm text-gray-500">
+                          {{ addressInfo?.address_line_2 }}
+                        </p>
+                      }
+                      <p class="text-xs text-gray-400 mt-1">
+                        {{ addressInfo?.city }}@if (addressInfo?.state) {
+                        <span>, {{ addressInfo?.state }}</span>
+                      }
+                    </p>
+                    <p class="text-xs text-gray-400">
+                      {{ addressInfo?.country }}
+                      @if (addressInfo?.postal_code) {
+                        <span> · {{ addressInfo?.postal_code }}</span>
+                      }
+                    </p>
+                  </div>
+                </div>
+              </div>
+            } @else {
               <div class="flex flex-col items-center py-6 px-4">
                 <app-icon name="map-pin" [size]="24" class="text-gray-300 mb-2"></app-icon>
                 <p class="text-sm text-gray-400 mb-2">No hay dirección registrada</p>
@@ -153,14 +161,13 @@ import { environment } from '../../../../environments/environment';
                   type="button"
                   class="text-sm font-medium text-primary-600 hover:text-primary-700"
                   (click)="enableEditMode()"
-                >
+                  >
                   Agregar dirección
                 </button>
               </div>
-            </ng-template>
+            }
           </div>
         </div>
-
         <!-- Cuenta — icon rows -->
         <div class="space-y-2 mb-2">
           <h4 class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider px-1">
@@ -182,253 +189,256 @@ import { environment } from '../../../../environments/environment';
                 class="flex items-center gap-3 text-sm font-medium w-full"
                 [class]="showPasswordSection ? 'text-gray-500' : 'text-primary-600 hover:text-primary-700'"
                 (click)="togglePasswordSection()"
-              >
+                >
                 <app-icon name="lock" [size]="18" class="flex-shrink-0"></app-icon>
-                <span *ngIf="!showPasswordSection">Cambiar contraseña</span>
-                <span *ngIf="showPasswordSection">Cancelar cambio</span>
+                @if (!showPasswordSection) {
+                  <span>Cambiar contraseña</span>
+                }
+                @if (showPasswordSection) {
+                  <span>Cancelar cambio</span>
+                }
               </button>
             </div>
           </div>
-
           <!-- Password form (expandable) -->
-          <div
-            *ngIf="showPasswordSection"
-            class="bg-white border border-gray-200 rounded-xl p-4"
-          >
-            <form
-              [formGroup]="passwordForm"
-              (ngSubmit)="onChangePassword()"
-              class="space-y-3"
-            >
-              <app-input
-                label="Contraseña Actual"
-                formControlName="current_password"
-                type="password"
-                placeholder="••••••"
-                [error]="getPasswordError('current_password')"
-              ></app-input>
-              <app-input
-                label="Nueva Contraseña"
-                formControlName="new_password"
-                type="password"
-                placeholder="••••••"
-                [error]="getPasswordError('new_password')"
-              ></app-input>
-              <app-input
-                label="Confirmar Contraseña"
-                formControlName="confirm_password"
-                type="password"
-                placeholder="••••••"
-                [error]="getPasswordError('confirm_password')"
-              ></app-input>
-              <div class="flex justify-end pt-1">
-                <app-button
-                  variant="primary"
-                  type="submit"
-                  [loading]="savingPassword"
-                  [disabled]="passwordForm.invalid"
+          @if (showPasswordSection) {
+            <div
+              class="bg-white border border-gray-200 rounded-xl p-4"
+              >
+              <form
+                [formGroup]="passwordForm"
+                (ngSubmit)="onChangePassword()"
+                class="space-y-3"
                 >
-                  Actualizar
-                </app-button>
-              </div>
-            </form>
-          </div>
+                <app-input
+                  label="Contraseña Actual"
+                  formControlName="current_password"
+                  type="password"
+                  placeholder="••••••"
+                  [error]="getPasswordError('current_password')"
+                ></app-input>
+                <app-input
+                  label="Nueva Contraseña"
+                  formControlName="new_password"
+                  type="password"
+                  placeholder="••••••"
+                  [error]="getPasswordError('new_password')"
+                ></app-input>
+                <app-input
+                  label="Confirmar Contraseña"
+                  formControlName="confirm_password"
+                  type="password"
+                  placeholder="••••••"
+                  [error]="getPasswordError('confirm_password')"
+                ></app-input>
+                <div class="flex justify-end pt-1">
+                  <app-button
+                    variant="primary"
+                    type="submit"
+                    [loading]="savingPassword"
+                    [disabled]="passwordForm.invalid"
+                    >
+                    Actualizar
+                  </app-button>
+                </div>
+              </form>
+            </div>
+          }
         </div>
       </div>
-
-      <!-- ═══ MODO EDICIÓN ═══ -->
-      <ng-template #editMode>
-        <form
-          [formGroup]="profileForm"
-          (ngSubmit)="onSubmit()"
-          class="space-y-5"
+    } @else {
+      <form
+        [formGroup]="profileForm"
+        (ngSubmit)="onSubmit()"
+        class="space-y-5"
         >
-          <!-- Foto de Perfil -->
-          <div class="flex flex-col items-center gap-3 sm:flex-row sm:items-start sm:gap-4">
-            <div
-              class="relative w-20 h-20 rounded-xl overflow-hidden border-2 border-primary-200 cursor-pointer group flex-shrink-0"
-              (click)="avatarInput.click()"
+        <!-- Foto de Perfil -->
+        <div class="flex flex-col items-center gap-3 sm:flex-row sm:items-start sm:gap-4">
+          <div
+            class="relative w-20 h-20 rounded-xl overflow-hidden border-2 border-primary-200 cursor-pointer group flex-shrink-0"
+            (click)="avatarInput.click()"
             >
+            @if (avatarPreview || userInfo?.avatar_url) {
               <img
-                *ngIf="avatarPreview || userInfo?.avatar_url"
                 [src]="avatarPreview || userInfo?.avatar_url"
                 alt="Avatar"
                 class="w-full h-full object-contain"
-              />
+                />
+            }
+            @if (!avatarPreview && !userInfo?.avatar_url) {
               <div
-                *ngIf="!avatarPreview && !userInfo?.avatar_url"
                 class="w-full h-full bg-primary-100 flex items-center justify-center text-primary-600 text-2xl font-bold"
-              >
+                >
                 {{ getInitials() }}
               </div>
-              <div class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                <app-icon name="camera" [size]="20" class="text-white"></app-icon>
-              </div>
+            }
+            <div class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+              <app-icon name="camera" [size]="20" class="text-white"></app-icon>
             </div>
-            <input
-              #avatarInput
-              type="file"
-              accept="image/*"
-              class="hidden"
-              (change)="onAvatarSelected($event)"
+          </div>
+          <input
+            #avatarInput
+            type="file"
+            accept="image/*"
+            class="hidden"
+            (change)="onAvatarSelected($event)"
             />
-            <div class="flex flex-col items-center sm:items-start gap-1">
-              <button
-                type="button"
-                class="text-primary-600 hover:text-primary-700 text-sm font-medium"
-                (click)="avatarInput.click()"
-                [disabled]="uploadingAvatar"
+          <div class="flex flex-col items-center sm:items-start gap-1">
+            <button
+              type="button"
+              class="text-primary-600 hover:text-primary-700 text-sm font-medium"
+              (click)="avatarInput.click()"
+              [disabled]="uploadingAvatar"
               >
-                {{ uploadingAvatar ? 'Subiendo...' : 'Cambiar foto' }}
-              </button>
-              <span class="text-xs text-gray-400">JPG, PNG o WebP. Máx 5MB</span>
+              {{ uploadingAvatar ? 'Subiendo...' : 'Cambiar foto' }}
+            </button>
+            <span class="text-xs text-gray-400">JPG, PNG o WebP. Máx 5MB</span>
+            @if (avatarPreview || userInfo?.avatar_url) {
               <button
-                *ngIf="avatarPreview || userInfo?.avatar_url"
                 type="button"
                 class="text-red-500 hover:text-red-600 text-xs font-medium"
                 (click)="removeAvatar()"
                 [disabled]="uploadingAvatar"
-              >
+                >
                 Eliminar foto
               </button>
-            </div>
+            }
           </div>
-
-          <div class="border-t border-gray-100"></div>
-
-          <!-- Información Personal -->
-          <div class="space-y-3">
-            <h4 class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">
-              Información Personal
-            </h4>
+        </div>
+        <div class="border-t border-gray-100"></div>
+        <!-- Información Personal -->
+        <div class="space-y-3">
+          <h4 class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">
+            Información Personal
+          </h4>
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <app-input
+              label="Nombre"
+              formControlName="first_name"
+              placeholder="Tu nombre"
+              [error]="getError('first_name')"
+            ></app-input>
+            <app-input
+              label="Apellido"
+              formControlName="last_name"
+              placeholder="Tu apellido"
+              [error]="getError('last_name')"
+            ></app-input>
+            <app-input
+              label="Email"
+              formControlName="email"
+              type="email"
+              [disabled]="true"
+              helperText="El email no se puede editar"
+            ></app-input>
+            <app-input
+              label="Teléfono"
+              formControlName="phone"
+              type="tel"
+              placeholder="+57 300 123 4567"
+              [error]="getError('phone')"
+            ></app-input>
+            <app-selector
+              [label]="'Tipo de Documento'"
+              formControlName="document_type"
+              [styleVariant]="'modern'"
+              [placeholder]="'Selecciona tipo'"
+              [options]="documentTypeOptions"
+            ></app-selector>
+            <app-input
+              [label]="'Número de Documento'"
+              formControlName="document_number"
+              [styleVariant]="'modern'"
+              [placeholder]="'12345678'"
+            ></app-input>
+          </div>
+        </div>
+        <div class="border-t border-gray-100"></div>
+        <!-- Dirección -->
+        <div formGroupName="address" class="space-y-3">
+          <h4 class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">
+            Dirección
+          </h4>
+          <div class="grid grid-cols-1 gap-3">
+            <app-input
+              label="Dirección (Calle y Número)"
+              formControlName="address_line_1"
+              placeholder="Calle Principal 123"
+              [error]="getAddressError('address_line_1')"
+            ></app-input>
+            <app-input
+              label="Detalles adicionales (Depto, Oficina)"
+              formControlName="address_line_2"
+              placeholder="Apto 4B"
+            ></app-input>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <app-input
-                label="Nombre"
-                formControlName="first_name"
-                placeholder="Tu nombre"
-                [error]="getError('first_name')"
-              ></app-input>
-              <app-input
-                label="Apellido"
-                formControlName="last_name"
-                placeholder="Tu apellido"
-                [error]="getError('last_name')"
-              ></app-input>
-              <app-input
-                label="Email"
-                formControlName="email"
-                type="email"
-                [disabled]="true"
-                helperText="El email no se puede editar"
-              ></app-input>
-              <app-input
-                label="Teléfono"
-                formControlName="phone"
-                type="tel"
-                placeholder="+57 300 123 4567"
-                [error]="getError('phone')"
-              ></app-input>
               <app-selector
-                [label]="'Tipo de Documento'"
-                formControlName="document_type"
+                [label]="'País'"
+                formControlName="country_code"
                 [styleVariant]="'modern'"
-                [placeholder]="'Selecciona tipo'"
-                [options]="documentTypeOptions"
+                [placeholder]="'Selecciona un país'"
+                [options]="countryOptions"
+                [errorText]="getAddressError('country_code')"
+              ></app-selector>
+              <app-selector
+                [label]="'Departamento'"
+                formControlName="state_province"
+                [styleVariant]="'modern'"
+                [placeholder]="'Selecciona un departamento'"
+                [options]="departmentOptions"
+                [errorText]="getAddressError('state_province')"
+              ></app-selector>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <app-selector
+                [label]="'Ciudad'"
+                formControlName="city"
+                [styleVariant]="'modern'"
+                [placeholder]="'Selecciona una ciudad'"
+                [options]="cityOptions"
+                [errorText]="getAddressError('city')"
               ></app-selector>
               <app-input
-                [label]="'Número de Documento'"
-                formControlName="document_number"
+                [label]="'Código Postal'"
+                formControlName="postal_code"
                 [styleVariant]="'modern'"
-                [placeholder]="'12345678'"
+                [placeholder]="'00000'"
+                [error]="getAddressError('postal_code')"
               ></app-input>
             </div>
           </div>
-
-          <div class="border-t border-gray-100"></div>
-
-          <!-- Dirección -->
-          <div formGroupName="address" class="space-y-3">
-            <h4 class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">
-              Dirección
-            </h4>
-            <div class="grid grid-cols-1 gap-3">
-              <app-input
-                label="Dirección (Calle y Número)"
-                formControlName="address_line_1"
-                placeholder="Calle Principal 123"
-                [error]="getAddressError('address_line_1')"
-              ></app-input>
-              <app-input
-                label="Detalles adicionales (Depto, Oficina)"
-                formControlName="address_line_2"
-                placeholder="Apto 4B"
-              ></app-input>
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <app-selector
-                  [label]="'País'"
-                  formControlName="country_code"
-                  [styleVariant]="'modern'"
-                  [placeholder]="'Selecciona un país'"
-                  [options]="countryOptions"
-                  [errorText]="getAddressError('country_code')"
-                ></app-selector>
-                <app-selector
-                  [label]="'Departamento'"
-                  formControlName="state_province"
-                  [styleVariant]="'modern'"
-                  [placeholder]="'Selecciona un departamento'"
-                  [options]="departmentOptions"
-                  [errorText]="getAddressError('state_province')"
-                ></app-selector>
-              </div>
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <app-selector
-                  [label]="'Ciudad'"
-                  formControlName="city"
-                  [styleVariant]="'modern'"
-                  [placeholder]="'Selecciona una ciudad'"
-                  [options]="cityOptions"
-                  [errorText]="getAddressError('city')"
-                ></app-selector>
-                <app-input
-                  [label]="'Código Postal'"
-                  formControlName="postal_code"
-                  [styleVariant]="'modern'"
-                  [placeholder]="'00000'"
-                  [error]="getAddressError('postal_code')"
-                ></app-input>
-              </div>
-            </div>
-          </div>
-        </form>
-      </ng-template>
-
-      <!-- ═══ FOOTER ═══ -->
-      <div slot="footer" class="grid gap-2 sm:flex sm:justify-end sm:gap-3 w-full">
-        <ng-container *ngIf="!isEditing">
-          <app-button class="order-1 sm:order-2" variant="primary" iconName="edit" [fullWidth]="true" (click)="enableEditMode()">
-            Editar Perfil
-          </app-button>
-          <app-button class="order-2 sm:order-1 sm:!w-auto" variant="secondary" [fullWidth]="true" (click)="onClose()">
-            Cerrar
-          </app-button>
-        </ng-container>
-        <ng-container *ngIf="isEditing">
-          <app-button class="order-1 sm:order-2" variant="primary" [fullWidth]="true" (click)="onSubmit()" [loading]="saving" [disabled]="profileForm.invalid">
-            Guardar Cambios
-          </app-button>
-          <app-button class="order-2 sm:order-1 sm:!w-auto" variant="secondary" [fullWidth]="true" (click)="cancelEditMode()">
-            Cancelar
-          </app-button>
-        </ng-container>
-      </div>
+        </div>
+      </form>
+    }
+    
+    <!-- ═══ MODO EDICIÓN ═══ -->
+    
+    <!-- ═══ FOOTER ═══ -->
+    <div slot="footer" class="grid gap-2 sm:flex sm:justify-end sm:gap-3 w-full">
+      @if (!isEditing) {
+        <app-button class="order-1 sm:order-2" variant="primary" iconName="edit" [fullWidth]="true" (click)="enableEditMode()">
+          Editar Perfil
+        </app-button>
+        <app-button class="order-2 sm:order-1 sm:!w-auto" variant="secondary" [fullWidth]="true" (click)="onClose()">
+          Cerrar
+        </app-button>
+      }
+      @if (isEditing) {
+        <app-button class="order-1 sm:order-2" variant="primary" [fullWidth]="true" (click)="onSubmit()" [loading]="saving" [disabled]="profileForm.invalid">
+          Guardar Cambios
+        </app-button>
+        <app-button class="order-2 sm:order-1 sm:!w-auto" variant="secondary" [fullWidth]="true" (click)="cancelEditMode()">
+          Cancelar
+        </app-button>
+      }
+    </div>
     </app-modal>
-  `,
+    `,
   styles: [],
 })
 export class ProfileModalComponent implements OnInit {
   @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
+  readonly isOpenChange = output<boolean>();
 
   private fb = inject(FormBuilder);
   private http = inject(HttpClient);

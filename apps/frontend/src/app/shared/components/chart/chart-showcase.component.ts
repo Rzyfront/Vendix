@@ -1,5 +1,5 @@
 import { Component } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   ChartComponent,
   CHART_THEMES,
@@ -9,12 +9,12 @@ import { EChartsOption } from 'echarts';
 @Component({
   selector: 'app-chart-showcase',
   standalone: true,
-  imports: [CommonModule, ChartComponent],
+  imports: [ChartComponent],
   template: `
     <div
       class="p-6 space-y-8"
       style="background-color: var(--color-background); min-height: 100vh;"
-    >
+      >
       <!-- Header -->
       <div class="text-center mb-8">
         <h1 class="text-4xl font-bold mb-4" style="color: var(--text);">
@@ -24,31 +24,32 @@ import { EChartsOption } from 'echarts';
           Beautiful, configurable charts for your application
         </p>
       </div>
-
+    
       <!-- Theme Selector -->
       <div class="flex justify-center gap-4 mb-8">
-        <button
-          *ngFor="let theme of themeKeys"
-          class="px-4 py-2 rounded-lg font-medium transition-all"
+        @for (theme of themeKeys; track theme) {
+          <button
+            class="px-4 py-2 rounded-lg font-medium transition-all"
           [style.background-color]="
             selectedTheme === theme ? 'var(--primary)' : 'var(--muted)'
           "
           [style.color]="
             selectedTheme === theme ? 'white' : 'var(--muted-foreground)'
           "
-          (click)="changeTheme(theme)"
-        >
-          {{ CHART_THEMES[theme].name }}
-        </button>
+            (click)="changeTheme(theme)"
+            >
+            {{ CHART_THEMES[theme].name }}
+          </button>
+        }
       </div>
-
+    
       <!-- Charts Grid -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
         <!-- Bar Chart -->
         <div
           class="rounded-xl shadow-sm border border-border p-6"
           style="background-color: var(--color-surface);"
-        >
+          >
           <h3 class="text-xl font-semibold mb-4" style="color: var(--text);">
             Bar Chart
           </h3>
@@ -59,15 +60,15 @@ import { EChartsOption } from 'echarts';
             [options]="barChartData"
             [theme]="currentTheme"
             size="medium"
-          >
+            >
           </app-chart>
         </div>
-
+    
         <!-- Line Chart -->
         <div
           class="rounded-xl shadow-sm border border-border p-6"
           style="background-color: var(--color-surface);"
-        >
+          >
           <h3 class="text-xl font-semibold mb-4" style="color: var(--text);">
             Line Chart
           </h3>
@@ -78,15 +79,15 @@ import { EChartsOption } from 'echarts';
             [options]="lineChartData"
             [theme]="currentTheme"
             size="medium"
-          >
+            >
           </app-chart>
         </div>
-
+    
         <!-- Area Chart -->
         <div
           class="rounded-xl shadow-sm border border-border p-6"
           style="background-color: var(--color-surface);"
-        >
+          >
           <h3 class="text-xl font-semibold mb-4" style="color: var(--text);">
             Area Chart
           </h3>
@@ -97,15 +98,15 @@ import { EChartsOption } from 'echarts';
             [options]="areaChartData"
             [theme]="currentTheme"
             size="medium"
-          >
+            >
           </app-chart>
         </div>
-
+    
         <!-- Doughnut Chart -->
         <div
           class="rounded-xl shadow-sm border border-border p-6"
           style="background-color: var(--color-surface);"
-        >
+          >
           <h3 class="text-xl font-semibold mb-4" style="color: var(--text);">
             Doughnut Chart
           </h3>
@@ -116,15 +117,15 @@ import { EChartsOption } from 'echarts';
             [options]="doughnutChartData"
             [theme]="currentTheme"
             size="medium"
-          >
+            >
           </app-chart>
         </div>
-
+    
         <!-- Pie Chart -->
         <div
           class="rounded-xl shadow-sm border border-border p-6"
           style="background-color: var(--color-surface);"
-        >
+          >
           <h3 class="text-xl font-semibold mb-4" style="color: var(--text);">
             Pie Chart
           </h3>
@@ -135,15 +136,15 @@ import { EChartsOption } from 'echarts';
             [options]="pieChartData"
             [theme]="currentTheme"
             size="medium"
-          >
+            >
           </app-chart>
         </div>
-
+    
         <!-- Radar Chart -->
         <div
           class="rounded-xl shadow-sm border border-border p-6"
           style="background-color: var(--color-surface);"
-        >
+          >
           <h3 class="text-xl font-semibold mb-4" style="color: var(--text);">
             Radar Chart
           </h3>
@@ -154,15 +155,15 @@ import { EChartsOption } from 'echarts';
             [options]="radarChartData"
             [theme]="currentTheme"
             size="medium"
-          >
+            >
           </app-chart>
         </div>
-
+    
         <!-- Polar Area Chart -->
         <div
           class="rounded-xl shadow-sm border border-border p-6"
           style="background-color: var(--color-surface);"
-        >
+          >
           <h3 class="text-xl font-semibold mb-4" style="color: var(--text);">
             Polar Area Chart
           </h3>
@@ -173,15 +174,15 @@ import { EChartsOption } from 'echarts';
             [options]="polarAreaChartData"
             [theme]="currentTheme"
             size="medium"
-          >
+            >
           </app-chart>
         </div>
-
+    
         <!-- Nightingale Rose Chart -->
         <div
           class="rounded-xl shadow-sm border border-border p-6"
           style="background-color: var(--color-surface);"
-        >
+          >
           <h3 class="text-xl font-semibold mb-4" style="color: var(--text);">
             Nightingale Rose Chart
           </h3>
@@ -192,15 +193,15 @@ import { EChartsOption } from 'echarts';
             [options]="nightingaleChartData"
             [theme]="currentTheme"
             size="medium"
-          >
+            >
           </app-chart>
         </div>
-
+    
         <!-- Gauge Chart -->
         <div
           class="rounded-xl shadow-sm border border-border p-6"
           style="background-color: var(--color-surface);"
-        >
+          >
           <h3 class="text-xl font-semibold mb-4" style="color: var(--text);">
             Gauge Chart
           </h3>
@@ -211,15 +212,15 @@ import { EChartsOption } from 'echarts';
             [options]="gaugeChartData"
             [theme]="currentTheme"
             size="medium"
-          >
+            >
           </app-chart>
         </div>
-
+    
         <!-- Scatter Chart -->
         <div
           class="rounded-xl shadow-sm border border-border p-6"
           style="background-color: var(--color-surface);"
-        >
+          >
           <h3 class="text-xl font-semibold mb-4" style="color: var(--text);">
             Scatter Chart
           </h3>
@@ -230,15 +231,15 @@ import { EChartsOption } from 'echarts';
             [options]="scatterChartData"
             [theme]="currentTheme"
             size="medium"
-          >
+            >
           </app-chart>
         </div>
-
+    
         <!-- Bubble Chart -->
         <div
           class="rounded-xl shadow-sm border border-border p-6"
           style="background-color: var(--color-surface);"
-        >
+          >
           <h3 class="text-xl font-semibold mb-4" style="color: var(--text);">
             Bubble Chart
           </h3>
@@ -249,16 +250,16 @@ import { EChartsOption } from 'echarts';
             [options]="bubbleChartData"
             [theme]="currentTheme"
             size="medium"
-          >
+            >
           </app-chart>
         </div>
       </div>
-
+    
       <!-- Interactive Features -->
       <div
         class="mt-12 rounded-xl shadow-sm border border-border p-6"
         style="background-color: var(--color-surface);"
-      >
+        >
         <h3 class="text-2xl font-semibold mb-6" style="color: var(--text);">
           Interactive Features
         </h3>
@@ -276,7 +277,7 @@ import { EChartsOption } from 'echarts';
                 "
                 [style.color]="'white'"
                 (click)="toggleLoading()"
-              >
+                >
                 {{ loading ? 'Stop Loading' : 'Show Loading' }}
               </button>
               <app-chart
@@ -284,11 +285,11 @@ import { EChartsOption } from 'echarts';
                 [theme]="currentTheme"
                 [loading]="loading"
                 size="small"
-              >
+                >
               </app-chart>
             </div>
           </div>
-
+    
           <!-- Events Chart -->
           <div>
             <h4 class="text-lg font-medium mb-4" style="color: var(--text);">
@@ -298,7 +299,7 @@ import { EChartsOption } from 'echarts';
               <div
                 class="p-4 rounded-lg"
                 style="background-color: var(--muted);"
-              >
+                >
                 <p class="text-sm font-medium" style="color: var(--text);">
                   Last Event:
                 </p>
@@ -312,14 +313,14 @@ import { EChartsOption } from 'echarts';
                 size="small"
                 (chartClick)="onChartClick($event)"
                 (chartHover)="onChartHover($event)"
-              >
+                >
               </app-chart>
             </div>
           </div>
         </div>
       </div>
     </div>
-  `,
+    `,
   styles: [
     `
       :host {

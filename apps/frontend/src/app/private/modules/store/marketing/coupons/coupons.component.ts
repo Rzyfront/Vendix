@@ -1,5 +1,5 @@
 import { Component, inject, OnInit, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { Store } from '@ngrx/store';
 import { StatsComponent } from '../../../../../shared/components/stats/stats.component';
 import { CardComponent } from '../../../../../shared/components/card/card.component';
@@ -31,7 +31,6 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
   selector: 'app-coupons',
   standalone: true,
   imports: [
-    CommonModule,
     StatsComponent,
     CardComponent,
     InputsearchComponent,
@@ -143,14 +142,15 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
       </app-card>
     </div>
 
-    <!-- Modal -->
-    <app-coupon-modal
-      [visible]="showModal()"
-      [coupon]="editingCoupon()"
-      [loading]="loading()"
-      (close)="closeModal()"
-      (save)="onSave($event)"
-    />
+    @defer (when showModal()) {
+      <app-coupon-modal
+        [visible]="showModal()"
+        [coupon]="editingCoupon()"
+        [loading]="loading()"
+        (close)="closeModal()"
+        (save)="onSave($event)"
+      />
+    }
   `,
   styles: [
     `

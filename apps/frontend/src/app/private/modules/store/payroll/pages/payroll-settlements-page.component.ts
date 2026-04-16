@@ -6,7 +6,7 @@ import {
   signal,
   computed,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { Subject } from 'rxjs';
 import { takeUntil } from 'rxjs/operators';
 
@@ -28,12 +28,11 @@ import { SettlementDetailComponent } from '../components/settlements/settlement-
   selector: 'vendix-payroll-settlements-page',
   standalone: true,
   imports: [
-    CommonModule,
     StatsComponent,
     SettlementListComponent,
     SettlementCreateComponent,
-    SettlementDetailComponent,
-  ],
+    SettlementDetailComponent
+],
   template: `
     <div class="w-full">
       <!-- Stats: Sticky on mobile, static on desktop -->

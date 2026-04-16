@@ -1,5 +1,5 @@
 import { Component, inject, OnInit } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   ReactiveFormsModule,
   FormBuilder,
@@ -37,14 +37,13 @@ interface RegistrationError {
   selector: 'app-register-owner',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     RouterLink,
     InputComponent,
     ButtonComponent,
     CardComponent,
-    IconComponent,
-  ],
+    IconComponent
+],
   template: `
     <div
       class="min-h-screen flex flex-col justify-center px-4 py-6 sm:px-6 sm:py-12 lg:px-8 bg-[var(--color-background)]"

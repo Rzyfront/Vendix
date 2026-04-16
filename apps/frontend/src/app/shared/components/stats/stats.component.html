@@ -1,4 +1,4 @@
-@if (loading) {
+@if (loading()) {
   <div class="stat-card stat-skeleton">
     <div class="skeleton-icon"></div>
     <div class="skeleton-content">
@@ -10,18 +10,18 @@
 } @else {
   <div
     class="stat-card"
-    [class.cursor-pointer]="clickable"
-    [class.hover:shadow-md]="clickable"
+    [class.cursor-pointer]="clickable()"
+    [class.hover:shadow-md]="clickable()"
   >
     <!-- Icon -->
-    <div class="stat-icon {{ iconBgColor }}">
-      <app-icon [name]="iconName" [size]="18" [class]="iconColor"></app-icon>
+    <div class="stat-icon {{ iconBgColor() }}">
+      <app-icon [name]="iconName()" [size]="18" [class]="iconColor()"></app-icon>
     </div>
 
     <!-- Content -->
     <div class="stat-content">
-      <p class="stat-title">{{ title }}</p>
-      <h3 class="stat-value">{{ value }}</h3>
+      <p class="stat-title">{{ title() }}</p>
+      <h3 class="stat-value">{{ value() }}</h3>
       @if (smallText) {
         <p class="stat-small">{{ smallText }}</p>
       }

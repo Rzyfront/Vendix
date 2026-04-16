@@ -1,4 +1,4 @@
-import { Injectable, inject, NgZone } from '@angular/core';
+import { Injectable, inject } from '@angular/core';
 import { Actions, createEffect, ofType, ROOT_EFFECTS_INIT } from '@ngrx/effects';
 import { Store } from '@ngrx/store';
 import {
@@ -24,8 +24,6 @@ export class NotificationsEffects {
   private actions$ = inject(Actions);
   private notificationsService = inject(NotificationsApiService);
   private store = inject(Store);
-  private ngZone = inject(NgZone);
-
   private pushService = inject(PushSubscriptionService);
   private eventSource: EventSource | null = null;
 
@@ -93,37 +91,31 @@ export class NotificationsEffects {
           this.eventSource = new EventSource(url);
 
           this.eventSource.onopen = () => {
-            this.ngZone.run(() => {
-              observer.next(NotificationsActions.sseConnected());
-            });
+            observer.next(NotificationsActions.sseConnected());
           };
 
           this.eventSource.onmessage = (event: MessageEvent) => {
-            this.ngZone.run(() => {
-              try {
-                const data = JSON.parse(event.data);
-                const notification: AppNotification = {
-                  id: data.id,
-                  type: data.type,
-                  title: data.title,
-                  body: data.body,
-                  data: data.data,
-                  is_read: false,
-                  created_at: data.created_at,
-                };
-                observer.next(
-                  NotificationsActions.receivedNotification({ notification }),
-                );
-              } catch {
-                // Ignore malformed SSE messages
-              }
-            });
+            try {
+              const data = JSON.parse(event.data);
+              const notification: AppNotification = {
+                id: data.id,
+                type: data.type,
+                title: data.title,
+                body: data.body,
+                data: data.data,
+                is_read: false,
+                created_at: data.created_at,
+              };
+              observer.next(
+                NotificationsActions.receivedNotification({ notification }),
+              );
+            } catch {
+              // Ignore malformed SSE messages
+            }
           };
 
           this.eventSource.onerror = () => {
-            this.ngZone.run(() => {
-              observer.next(NotificationsActions.sseDisconnected());
-            });
+            observer.next(NotificationsActions.sseDisconnected());
             // EventSource auto-reconnects — we don't complete the observable
           };
 

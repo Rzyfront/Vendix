@@ -6,7 +6,7 @@ import {
   OnDestroy,
   inject,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { Subject, takeUntil } from 'rxjs';
 
@@ -43,7 +43,6 @@ import { PurchaseOrderPrintService } from '../services/purchase-order-print.serv
   selector: 'app-purchase-order-list',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ResponsiveDataViewComponent,
     InputsearchComponent,
@@ -52,8 +51,8 @@ import { PurchaseOrderPrintService } from '../services/purchase-order-print.serv
     ButtonComponent,
     IconComponent,
     PaginationComponent,
-    CardComponent,
-  ],
+    CardComponent
+],
   templateUrl: './purchase-order-list.component.html',
   styleUrls: ['./purchase-order-list.component.scss'],
 })
@@ -381,6 +380,11 @@ export class PurchaseOrderListComponent implements OnInit, OnDestroy {
   onActionClick(action: string): void {
     switch (action) {
       case 'create':
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
         this.create.emit();
         break;
     }

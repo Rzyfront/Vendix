@@ -7,7 +7,7 @@ import {
   signal,
   computed,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { RouterModule } from '@angular/router';
 import { Subject, takeUntil, forkJoin } from 'rxjs';
 import { map } from 'rxjs/operators';
@@ -46,7 +46,6 @@ import {
   selector: 'app-shipping-dashboard',
   standalone: true,
   imports: [
-    CommonModule,
     RouterModule,
     StatsComponent,
     ButtonComponent,
@@ -65,7 +64,9 @@ import {
   template: `
     <div class="w-full md:space-y-4">
       <!-- Stats Cards (sticky on mobile, static on desktop) -->
-      <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
+      <div
+        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+      >
         <app-stats
           title="Métodos Activos"
           [value]="method_stats()?.enabled_methods ?? 0"
@@ -107,16 +108,23 @@ import {
       <!-- Content Card -->
       <app-card [responsive]="true" [padding]="false">
         <!-- Sticky search header -->
-        <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
+        <div
+          class="sticky top-[99px] z-10 bg-background px-2 py-1.5 md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
+        >
           <div class="flex items-center justify-between gap-3">
             <div class="flex items-center gap-3">
-              <h2 class="text-[13px] font-bold text-gray-600 md:text-lg md:font-semibold md:text-text-primary">
+              <h2
+                class="text-[13px] font-bold text-gray-600 md:text-lg md:font-semibold md:text-text-primary"
+              >
                 Métodos de Envío ({{ filtered_methods().length }})
               </h2>
             </div>
             <div class="flex items-center gap-2">
               @if (shipping_methods().length > 0) {
-                <app-inputsearch placeholder="Buscar método..." (searchChange)="onSearchChange($event)" />
+                <app-inputsearch
+                  placeholder="Buscar método..."
+                  (searchChange)="onSearchChange($event)"
+                />
               }
               <app-button (clicked)="openMethodsModal()">
                 <app-icon slot="icon" name="plus" [size]="16" />
@@ -132,13 +140,17 @@ import {
             @for (method of filtered_methods(); track method.id) {
               <app-expandable-card
                 [expanded]="expanded_method_id() === method.id"
-                (expandedChange)="onMethodExpand(method.id, $event)">
-
+                (expandedChange)="onMethodExpand(method.id, $event)"
+              >
                 <!-- Header slot -->
-                <div slot="header" class="flex items-center gap-3 md:gap-4 flex-1 min-w-0">
+                <div
+                  slot="header"
+                  class="flex items-center gap-3 md:gap-4 flex-1 min-w-0"
+                >
                   <div
                     class="w-10 h-10 md:w-11 md:h-11 rounded-[10px] flex items-center justify-center shrink-0"
-                    [style.background]="getMethodIconBg(method.type)">
+                    [style.background]="getMethodIconBg(method.type)"
+                  >
                     <app-icon
                       [name]="getMethodIcon(method.type)"
                       [size]="20"
@@ -147,22 +159,33 @@ import {
                   </div>
                   <div class="flex flex-col gap-0.5 min-w-0">
                     <div class="flex items-center gap-2 flex-wrap">
-                      <span class="font-semibold text-sm md:text-base text-text-primary capitalize">{{ method.name }}</span>
-                      <app-badge variant="primary" size="xs">{{ getTypeLabel(method.type) }}</app-badge>
+                      <span
+                        class="font-semibold text-sm md:text-base text-text-primary capitalize"
+                        >{{ method.name }}</span
+                      >
+                      <app-badge variant="primary" size="xs">{{
+                        getTypeLabel(method.type)
+                      }}</app-badge>
                     </div>
                     <div class="flex items-center gap-3 text-text-secondary">
                       <span class="flex items-center gap-1">
                         <app-icon name="clock" [size]="12" />
-                        <span class="text-xs">{{ formatDeliveryTime(method.min_days, method.max_days) }}</span>
+                        <span class="text-xs">{{
+                          formatDeliveryTime(method.min_days, method.max_days)
+                        }}</span>
                       </span>
                       <span class="flex items-center gap-1">
                         <app-icon name="map-pin" [size]="12" />
-                        <span class="text-xs font-medium">{{ getMethodZoneCount(method.id) }}</span>
+                        <span class="text-xs font-medium">{{
+                          getMethodZoneCount(method.id)
+                        }}</span>
                         <span class="text-xs hidden md:inline">zonas</span>
                       </span>
                       <span class="flex items-center gap-1">
                         <app-icon name="tag" [size]="12" />
-                        <span class="text-xs font-medium">{{ getMethodRateCount(method.id) }}</span>
+                        <span class="text-xs font-medium">{{
+                          getMethodRateCount(method.id)
+                        }}</span>
                         <span class="text-xs hidden md:inline">tarifas</span>
                       </span>
                     </div>
@@ -171,7 +194,10 @@ import {
 
                 <!-- Actions slot -->
                 <div slot="actions" class="flex items-center gap-2 shrink-0">
-                  <app-toggle [checked]="method.is_active" (toggled)="toggleMethod(method)" />
+                  <app-toggle
+                    [checked]="method.is_active"
+                    (toggled)="toggleMethod(method)"
+                  />
                 </div>
 
                 <!-- Expandable body -->
@@ -219,8 +245,7 @@ import {
         />
       }
 
-      <!-- Rate Wizard Modal -->
-      @if (show_rate_wizard() && rate_wizard_method_id()) {
+      @defer (when show_rate_wizard() && rate_wizard_method_id()) {
         <app-add-rate-wizard-modal
           [method_id]="rate_wizard_method_id()!"
           [existing_zones]="store_zones()"
@@ -360,7 +385,10 @@ export class ShippingDashboardComponent implements OnInit, OnDestroy {
       .subscribe({
         next: (stats) => this.zone_stats.set(stats),
         error: () =>
-          this.toastService.show({ variant: 'error', description: 'Error al cargar estadisticas de zonas' }),
+          this.toastService.show({
+            variant: 'error',
+            description: 'Error al cargar estadisticas de zonas',
+          }),
       });
   }
 
@@ -373,7 +401,11 @@ export class ShippingDashboardComponent implements OnInit, OnDestroy {
           this.store_zones.set(zones);
           this.loadAllMethodZonesInBackground();
         },
-        error: () => this.toastService.show({ variant: 'error', description: 'Error al cargar tus zonas' }),
+        error: () =>
+          this.toastService.show({
+            variant: 'error',
+            description: 'Error al cargar tus zonas',
+          }),
       });
   }
 
@@ -389,7 +421,8 @@ export class ShippingDashboardComponent implements OnInit, OnDestroy {
         error: (error: any) => {
           this.toastService.show({
             variant: 'error',
-            description: 'Error al cargar metodos disponibles: ' + error.message,
+            description:
+              'Error al cargar metodos disponibles: ' + error.message,
           });
           this.available_methods.set([]);
         },
@@ -424,7 +457,10 @@ export class ShippingDashboardComponent implements OnInit, OnDestroy {
                 ) {
                   message = `Metodo activado con ${copyStats.zones_copied} zonas y ${copyStats.rates_copied} tarifas copiadas`;
                 }
-                this.toastService.show({ variant: 'success', description: message });
+                this.toastService.show({
+                  variant: 'success',
+                  description: message,
+                });
 
                 // Reload all data and invalidate cache
                 this.method_zones_cache.set(new Map());
@@ -442,7 +478,8 @@ export class ShippingDashboardComponent implements OnInit, OnDestroy {
               error: (error: any) => {
                 this.toastService.show({
                   variant: 'error',
-                  description: 'Error al activar metodo de envio: ' + error.message,
+                  description:
+                    'Error al activar metodo de envio: ' + error.message,
                 });
                 this.is_enabling.set(false);
               },
@@ -458,7 +495,10 @@ export class ShippingDashboardComponent implements OnInit, OnDestroy {
         .pipe(takeUntil(this.destroy$))
         .subscribe({
           next: () => {
-            this.toastService.show({ variant: 'success', description: 'Metodo de envio desactivado' });
+            this.toastService.show({
+              variant: 'success',
+              description: 'Metodo de envio desactivado',
+            });
             this.loadShippingMethods();
             this.loadShippingMethodStats();
           },
@@ -475,7 +515,10 @@ export class ShippingDashboardComponent implements OnInit, OnDestroy {
         .pipe(takeUntil(this.destroy$))
         .subscribe({
           next: () => {
-            this.toastService.show({ variant: 'success', description: 'Metodo de envio activado' });
+            this.toastService.show({
+              variant: 'success',
+              description: 'Metodo de envio activado',
+            });
             this.loadShippingMethods();
             this.loadShippingMethodStats();
           },
@@ -555,13 +598,15 @@ export class ShippingDashboardComponent implements OnInit, OnDestroy {
 
     // For each zone, load rates and filter by methodId
     const rateRequests = zones.map((z) =>
-      this.shippingService.getStoreZoneRates(z.id).pipe(
-        map((rates) =>
-          rates
-            .filter((r) => r.shipping_method_id === methodId)
-            .map((rate) => ({ zone: z, rate })),
+      this.shippingService
+        .getStoreZoneRates(z.id)
+        .pipe(
+          map((rates) =>
+            rates
+              .filter((r) => r.shipping_method_id === methodId)
+              .map((rate) => ({ zone: z, rate })),
+          ),
         ),
-      ),
     );
 
     forkJoin(rateRequests)
@@ -609,7 +654,8 @@ export class ShippingDashboardComponent implements OnInit, OnDestroy {
     this.dialogService
       .confirm({
         title: 'Eliminar Tarifa',
-        message: 'Estas seguro de eliminar esta tarifa? Esta accion no se puede deshacer.',
+        message:
+          'Estas seguro de eliminar esta tarifa? Esta accion no se puede deshacer.',
         confirmText: 'Eliminar',
         cancelText: 'Cancelar',
         confirmVariant: 'danger',
@@ -621,7 +667,10 @@ export class ShippingDashboardComponent implements OnInit, OnDestroy {
             .pipe(takeUntil(this.destroy$))
             .subscribe({
               next: () => {
-                this.toastService.show({ variant: 'success', description: 'Tarifa eliminada correctamente' });
+                this.toastService.show({
+                  variant: 'success',
+                  description: 'Tarifa eliminada correctamente',
+                });
                 // Invalidate cache for the method that had this rate
                 this.invalidateCacheForRate(rate);
                 this.loadZoneStats();

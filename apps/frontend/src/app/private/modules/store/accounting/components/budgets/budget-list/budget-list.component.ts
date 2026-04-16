@@ -6,7 +6,7 @@ import {
   signal,
   computed,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { Router } from '@angular/router';
 import { Subject, takeUntil } from 'rxjs';
 
@@ -40,14 +40,13 @@ interface BudgetStats {
   selector: 'vendix-budget-list',
   standalone: true,
   imports: [
-    CommonModule,
     CardComponent,
     InputsearchComponent,
     StatsComponent,
     ResponsiveDataViewComponent,
     OptionsDropdownComponent,
-    BudgetCreateModalComponent,
-  ],
+    BudgetCreateModalComponent
+],
   templateUrl: './budget-list.component.html',
   styleUrls: ['./budget-list.component.scss'],
 })

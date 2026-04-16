@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { Subscription } from 'rxjs';
 import { Router, ActivatedRoute } from '@angular/router';
 
@@ -35,7 +35,6 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
   selector: 'app-products',
   standalone: true,
   imports: [
-    CommonModule,
     ProductListComponent,
     ProductCreateModalComponent,
     BulkUploadModalComponent,
@@ -46,7 +45,9 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
   template: `
     <div class="w-full">
       <!-- Stats Grid: sticky at top on mobile -->
-      <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
+      <div
+        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+      >
         <app-stats
           title="Productos Totales"
           [value]="stats.total_products"
@@ -103,23 +104,29 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
       ></app-product-list>
 
       <!-- Modals -->
-      <app-product-create-modal
-        [(isOpen)]="isCreateModalOpen"
-        [product]="null"
-        [isSubmitting]="isCreatingProduct"
-        (cancel)="onModalClose()"
-        (submit)="onSaveProduct($event)"
-      ></app-product-create-modal>
+      @defer (when isCreateModalOpen) {
+        <app-product-create-modal
+          [(isOpen)]="isCreateModalOpen"
+          [product]="null"
+          [isSubmitting]="isCreatingProduct"
+          (cancel)="onModalClose()"
+          (submit)="onSaveProduct($event)"
+        ></app-product-create-modal>
+      }
 
-      <app-bulk-upload-modal
-        [(isOpen)]="isBulkUploadModalOpen"
-        (uploadComplete)="onBulkUploadComplete()"
-      ></app-bulk-upload-modal>
+      @defer (when isBulkUploadModalOpen) {
+        <app-bulk-upload-modal
+          [(isOpen)]="isBulkUploadModalOpen"
+          (uploadComplete)="onBulkUploadComplete()"
+        ></app-bulk-upload-modal>
+      }
 
-      <app-bulk-image-upload-modal
-        [(isOpen)]="isBulkImageUploadModalOpen"
-        (uploadComplete)="onBulkImageUploadComplete()"
-      ></app-bulk-image-upload-modal>
+      @defer (when isBulkImageUploadModalOpen) {
+        <app-bulk-image-upload-modal
+          [(isOpen)]="isBulkImageUploadModalOpen"
+          (uploadComplete)="onBulkImageUploadComplete()"
+        ></app-bulk-image-upload-modal>
+      }
     </div>
   `,
 })
@@ -169,7 +176,7 @@ export class ProductsComponent implements OnInit, OnDestroy {
     private authFacade: AuthFacade,
     private router: Router,
     private route: ActivatedRoute,
-  ) { }
+  ) {}
 
   ngOnInit(): void {
     // Asegurar que la moneda esté cargada
@@ -247,16 +254,18 @@ export class ProductsComponent implements OnInit, OnDestroy {
   loadStats(): void {
     if (!this.storeId) return;
 
-    const sub = this.productsService.getProductStats(parseInt(this.storeId, 10)).subscribe({
-      next: (response: any) => {
-        if (response) this.stats = response;
-      },
-      error: (error: any) => {
-        console.error('Error loading stats:', error);
-        const message = extractApiErrorMessage(error);
-        this.toastService.error(message, 'Error al cargar estadísticas');
-      },
-    });
+    const sub = this.productsService
+      .getProductStats(parseInt(this.storeId, 10))
+      .subscribe({
+        next: (response: any) => {
+          if (response) this.stats = response;
+        },
+        error: (error: any) => {
+          console.error('Error loading stats:', error);
+          const message = extractApiErrorMessage(error);
+          this.toastService.error(message, 'Error al cargar estadísticas');
+        },
+      });
     this.subscriptions.push(sub);
   }
 
@@ -296,7 +305,7 @@ export class ProductsComponent implements OnInit, OnDestroy {
 
   navigateToEditPage(product: Product): void {
     this.router.navigate(['/admin/products/edit', product.id], {
-      queryParams: { fromPage: this.pagination.page }
+      queryParams: { fromPage: this.pagination.page },
     });
   }
 

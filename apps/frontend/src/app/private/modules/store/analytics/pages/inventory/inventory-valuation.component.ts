@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { RouterModule } from '@angular/router';
 import { Subject, takeUntil } from 'rxjs';
 
@@ -24,7 +24,6 @@ import { EChartsOption } from 'echarts';
   selector: 'vendix-inventory-valuation',
   standalone: true,
   imports: [
-    CommonModule,
     RouterModule,
     CardComponent,
     ChartComponent,
@@ -81,28 +80,47 @@ import { EChartsOption } from 'echarts';
       <!-- Content Grid -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <!-- Pie Chart -->
-        <app-card shadow="none" [padding]="false" overflow="hidden" [showHeader]="true">
+        <app-card
+          shadow="none"
+          [padding]="false"
+          overflow="hidden"
+          [showHeader]="true"
+        >
           <div slot="header" class="flex flex-col">
-            <span class="text-sm font-bold text-[var(--color-text-primary)]">Distribución por Ubicación</span>
+            <span class="text-sm font-bold text-[var(--color-text-primary)]"
+              >Distribución por Ubicación</span
+            >
           </div>
           <div class="p-4">
             @if (loading()) {
               <div class="h-64 flex items-center justify-center">
-                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                <div
+                  class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+                ></div>
               </div>
             } @else {
-              <app-chart
-                [options]="chartOptions()"
-                size="large"
-              ></app-chart>
+              @defer (on viewport) {
+                <app-chart [options]="chartOptions()" size="large"></app-chart>
+              } @placeholder {
+                <div
+                  class="h-64 bg-surface-secondary animate-pulse rounded-xl"
+                ></div>
+              }
             }
           </div>
         </app-card>
 
         <!-- Table -->
-        <app-card shadow="none" [padding]="false" overflow="hidden" [showHeader]="true">
+        <app-card
+          shadow="none"
+          [padding]="false"
+          overflow="hidden"
+          [showHeader]="true"
+        >
           <div slot="header" class="flex flex-col">
-            <span class="text-sm font-bold text-[var(--color-text-primary)]">Detalle por Ubicación</span>
+            <span class="text-sm font-bold text-[var(--color-text-primary)]"
+              >Detalle por Ubicación</span
+            >
           </div>
           <div class="p-4">
             <app-responsive-data-view

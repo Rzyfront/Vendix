@@ -1,6 +1,6 @@
 import {
   ApplicationConfig,
-  provideZoneChangeDetection,
+  provideZonelessChangeDetection,
   APP_INITIALIZER,
   isDevMode,
 } from '@angular/core';
@@ -73,7 +73,7 @@ export function initializeApp(
 
 export const appConfig: ApplicationConfig = {
   providers: [
-    provideZoneChangeDetection({ eventCoalescing: true }),
+    provideZonelessChangeDetection(),
     provideRouter(routes),
     provideClientHydration(),
     provideHttpClient(withFetch(), withInterceptorsFromDi()),
@@ -87,7 +87,7 @@ export const appConfig: ApplicationConfig = {
           strictActionImmutability: true,
           strictStateSerializability: false,
           strictActionSerializability: false,
-          strictActionWithinNgZone: true,
+          strictActionWithinNgZone: false, // Disabled for Zoneless migration
           strictActionTypeUniqueness: true,
         },
       },

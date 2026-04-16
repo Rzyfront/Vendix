@@ -1,5 +1,5 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input, output } from '@angular/core';
+
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 
@@ -26,22 +26,21 @@ const CONFIGURATION_TYPES: Array<{ value: TemplateConfigType; label: string }> =
   selector: 'app-template-create-modal',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
-    InputComponent,
-  ],
+    InputComponent
+],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
       title="Create New Template"
       subtitle="Configure a new template for the system"
-    >
+      >
       <form [formGroup]="templateForm" class="space-y-6">
         <!-- Template Name -->
         <app-input
@@ -51,7 +50,7 @@ const CONFIGURATION_TYPES: Array<{ value: TemplateConfigType; label: string }> =
           [required]="true"
           [control]="templateForm.get('template_name')"
         ></app-input>
-
+    
         <!-- Configuration Type -->
         <div class="space-y-2">
           <label class="block text-sm font-medium text-text-primary">
@@ -60,14 +59,16 @@ const CONFIGURATION_TYPES: Array<{ value: TemplateConfigType; label: string }> =
           <select
             formControlName="configuration_type"
             class="w-full px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary"
-          >
+            >
             <option value="">Select type...</option>
-            <option *ngFor="let type of configurationTypes" [value]="type.value">
-              {{ type.label }}
-            </option>
+            @for (type of configurationTypes; track type) {
+              <option [value]="type.value">
+                {{ type.label }}
+              </option>
+            }
           </select>
         </div>
-
+    
         <!-- Description -->
         <div class="space-y-2">
           <label class="block text-sm font-medium text-text-primary">
@@ -80,7 +81,7 @@ const CONFIGURATION_TYPES: Array<{ value: TemplateConfigType; label: string }> =
             placeholder="Describe what this template is for"
           ></textarea>
         </div>
-
+    
         <!-- Template Data (JSON) -->
         <div class="space-y-2">
           <label class="block text-sm font-medium text-text-primary">
@@ -93,14 +94,16 @@ const CONFIGURATION_TYPES: Array<{ value: TemplateConfigType; label: string }> =
             placeholder='{"key": "value"}'
             [class.invalid]="isJsonInvalid"
           ></textarea>
-          <p *ngIf="isJsonInvalid" class="text-sm text-red-500">
-            Invalid JSON format. Please check your syntax.
-          </p>
+          @if (isJsonInvalid) {
+            <p class="text-sm text-red-500">
+              Invalid JSON format. Please check your syntax.
+            </p>
+          }
           <p class="text-sm text-text-secondary">
             Enter valid JSON configuration for the template.
           </p>
         </div>
-
+    
         <!-- Is Active -->
         <div class="flex items-center gap-2">
           <input
@@ -108,13 +111,13 @@ const CONFIGURATION_TYPES: Array<{ value: TemplateConfigType; label: string }> =
             id="is_active"
             formControlName="is_active"
             class="w-4 h-4 text-primary border-border rounded focus:ring-primary"
-          />
+            />
           <label for="is_active" class="text-sm font-medium text-text-primary">
             Active
           </label>
         </div>
       </form>
-
+    
       <div slot="footer" class="flex justify-between items-center">
         <div class="text-sm text-text-secondary">
           <span class="text-red-500">*</span> Required fields
@@ -126,23 +129,23 @@ const CONFIGURATION_TYPES: Array<{ value: TemplateConfigType; label: string }> =
           <app-button
             variant="primary"
             (clicked)="onSubmit()"
-            [disabled]="templateForm.invalid || isJsonInvalid || isSubmitting"
-            [loading]="isSubmitting"
-          >
+            [disabled]="templateForm.invalid || isJsonInvalid || isSubmitting()"
+            [loading]="isSubmitting()"
+            >
             Create Template
           </app-button>
         </div>
       </div>
     </app-modal>
-  `,
+    `,
 })
 export class TemplateCreateModalComponent {
-  @Input() isOpen = false;
-  @Input() isSubmitting = false;
+  readonly isOpen = input(false);
+  readonly isSubmitting = input(false);
 
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() submit = new EventEmitter<CreateTemplateDto>();
-  @Output() cancel = new EventEmitter<void>();
+  readonly isOpenChange = output<boolean>();
+  readonly submit = output<CreateTemplateDto>();
+  readonly cancel = output<void>();
 
   templateForm!: FormGroup;
   configurationTypes = CONFIGURATION_TYPES;

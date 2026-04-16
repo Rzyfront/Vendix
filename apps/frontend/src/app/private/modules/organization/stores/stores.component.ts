@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   FormsModule,
   ReactiveFormsModule,
@@ -59,7 +59,6 @@ interface StatItem {
   selector: 'app-stores',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     StatsComponent,
@@ -71,39 +70,40 @@ interface StatItem {
     InputsearchComponent,
     IconComponent,
     ResponsiveDataViewComponent,
-    ButtonComponent,
-  ],
+    ButtonComponent
+],
   template: `
     <div class="space-y-4">
       <!-- Stats Cards -->
       <div class="stats-container">
-        <app-stats
-          *ngFor="let item of statsItems"
-          [title]="item.title"
-          [value]="item.value"
-          [smallText]="item.smallText"
-          [iconName]="item.iconName"
-          [iconBgColor]="item.iconBgColor"
-          [iconColor]="item.iconColor"
-        >
-        </app-stats>
+        @for (item of statsItems; track item) {
+          <app-stats
+            [title]="item.title"
+            [value]="item.value"
+            [smallText]="item.smallText"
+            [iconName]="item.iconName"
+            [iconBgColor]="item.iconBgColor"
+            [iconColor]="item.iconColor"
+            >
+          </app-stats>
+        }
       </div>
-
+    
       <!-- Stores List -->
       <div class="bg-surface rounded-card shadow-card border border-border">
         <div class="px-6 py-4 border-b border-border">
           <div
             class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
-          >
+            >
             <div class="flex-1 min-w-0">
               <h2 class="text-lg font-semibold text-text-primary">
                 Todas las tiendas ({{ stores.length }})
               </h2>
             </div>
-
+    
             <div
               class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto"
-            >
+              >
               <!-- Input de búsqueda compacto -->
               <app-inputsearch
                 class="w-full sm:w-64"
@@ -112,13 +112,13 @@ interface StatItem {
                 [debounceTime]="1000"
                 (searchChange)="onSearchChange($event)"
               ></app-inputsearch>
-
+    
               <!-- Filtro de tipo de tienda -->
               <select
                 class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
                 (change)="onStoreTypeChange($event)"
                 [value]="selectedStoreType"
-              >
+                >
                 <option value="">Todos los Tipos</option>
                 <option value="physical">Tienda Física</option>
                 <option value="online">Tienda Online</option>
@@ -126,18 +126,18 @@ interface StatItem {
                 <option value="popup">Tienda Temporal</option>
                 <option value="kiosko">Kiosko</option>
               </select>
-
+    
               <!-- Filtro de estado -->
               <select
                 class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
                 (change)="onStateChange($event)"
                 [value]="selectedState"
-              >
+                >
                 <option value="">Todos los Estados</option>
                 <option value="active">Activa</option>
                 <option value="inactive">Inactiva</option>
               </select>
-
+    
               <div class="flex gap-2 items-center">
                 <app-button
                   variant="outline"
@@ -145,7 +145,7 @@ interface StatItem {
                   (clicked)="refreshStores()"
                   [disabled]="isLoading"
                   title="Actualizar"
-                >
+                  >
                   <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
                 </app-button>
                 <app-button
@@ -153,7 +153,7 @@ interface StatItem {
                   size="sm"
                   (clicked)="openCreateStoreModal()"
                   title="Nueva Tienda"
-                >
+                  >
                   <app-icon name="plus" [size]="16" slot="icon"></app-icon>
                   <span class="hidden sm:inline">Nueva Tienda</span>
                 </app-button>
@@ -161,47 +161,52 @@ interface StatItem {
             </div>
           </div>
         </div>
-
+    
         <!-- Loading State -->
-        <div *ngIf="isLoading" class="p-8 text-center">
-          <div
-            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-          ></div>
-          <p class="mt-2 text-text-secondary">Cargando tiendas...</p>
-        </div>
-
+        @if (isLoading) {
+          <div class="p-8 text-center">
+            <div
+              class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            ></div>
+            <p class="mt-2 text-text-secondary">Cargando tiendas...</p>
+          </div>
+        }
+    
         <!-- Empty State -->
-        <app-empty-state
-          *ngIf="!isLoading && stores.length === 0"
-          icon="store"
-          [title]="getEmptyStateTitle()"
-          [description]="getEmptyStateDescription()"
-          actionButtonText="Crear Tienda"
-          [showRefreshButton]="hasFilters"
-          [showClearFilters]="hasFilters"
-          (actionClick)="openCreateStoreModal()"
-          (refreshClick)="refreshStores()"
-          (clearFiltersClick)="clearFilters()"
-        >
-        </app-empty-state>
-
+        @if (!isLoading && stores.length === 0) {
+          <app-empty-state
+            icon="store"
+            [title]="getEmptyStateTitle()"
+            [description]="getEmptyStateDescription()"
+            actionButtonText="Crear Tienda"
+            [showRefreshButton]="hasFilters"
+            [showClearFilters]="hasFilters"
+            (actionClick)="openCreateStoreModal()"
+            (refreshClick)="refreshStores()"
+            (clearFiltersClick)="clearFilters()"
+            >
+          </app-empty-state>
+        }
+    
         <!-- Stores Table -->
-        <div *ngIf="!isLoading && stores.length > 0" class="p-6">
-          <app-responsive-data-view
-            [data]="stores"
-            [columns]="tableColumns"
-            [cardConfig]="cardConfig"
-            [actions]="tableActions"
-            [loading]="isLoading"
-            emptyMessage="No hay tiendas registradas"
-            emptyIcon="store"
-            (sort)="onTableSort($event)"
-            (rowClick)="viewStore($event)"
-          >
-          </app-responsive-data-view>
-        </div>
+        @if (!isLoading && stores.length > 0) {
+          <div class="p-6">
+            <app-responsive-data-view
+              [data]="stores"
+              [columns]="tableColumns"
+              [cardConfig]="cardConfig"
+              [actions]="tableActions"
+              [loading]="isLoading"
+              emptyMessage="No hay tiendas registradas"
+              emptyIcon="store"
+              (sort)="onTableSort($event)"
+              (rowClick)="viewStore($event)"
+              >
+            </app-responsive-data-view>
+          </div>
+        }
       </div>
-
+    
       <!-- Create Store Modal -->
       <app-store-create-modal
         [(isOpen)]="isCreateModalOpen"
@@ -209,7 +214,7 @@ interface StatItem {
         (submit)="createStore($event)"
         (cancel)="onCreateModalCancel()"
       ></app-store-create-modal>
-
+    
       <!-- Edit Store Modal -->
       <app-store-edit-modal
         [(isOpen)]="isEditModalOpen"
@@ -218,7 +223,7 @@ interface StatItem {
         (submit)="updateStore($event)"
         (cancel)="onEditModalCancel()"
       ></app-store-edit-modal>
-
+    
       <!-- Settings Store Modal -->
       <app-store-configuration-modal
         [(isOpen)]="isSettingsModalOpen"
@@ -226,7 +231,7 @@ interface StatItem {
         [storeName]="selectedStoreForSettings?.name || ''"
         (settingsSaved)="onSettingsSaved($event)"
       ></app-store-configuration-modal>
-
+    
       <!-- Delete Store Confirmation Modal -->
       <app-store-delete-confirmation
         [(isOpen)]="isDeleteModalOpen"
@@ -235,7 +240,7 @@ interface StatItem {
         (cancel)="onDeleteModalCancel()"
       ></app-store-delete-confirmation>
     </div>
-  `,
+    `,
   styles: [
     `
       :host {

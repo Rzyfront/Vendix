@@ -1,13 +1,13 @@
 import {
   Component,
   Input,
-  Output,
-  EventEmitter,
   OnInit,
   OnDestroy,
   inject,
+  input,
+  output
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { FormBuilder, FormGroup } from '@angular/forms';
 import { Subscription } from 'rxjs';
@@ -37,7 +37,6 @@ import {
   selector: 'app-order-details',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     ModalComponent,
@@ -45,15 +44,15 @@ import {
     ButtonComponent,
     InputComponent,
     SelectorComponent,
-    TextareaComponent,
-  ],
+    TextareaComponent
+],
   templateUrl: './order-details.component.html',
 })
 export class OrderDetailsComponent implements OnInit, OnDestroy {
   private currencyService = inject(CurrencyFormatService);
   @Input() isOpen = false;
-  @Input() order?: OrderListItem;
-  @Output() isOpenChange = new EventEmitter<boolean>();
+  readonly order = input<OrderListItem>();
+  readonly isOpenChange = output<boolean>();
 
   orderDetails?: OrderDetails;
   isLoading = false;
@@ -94,7 +93,7 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
-    if (this.order) {
+    if (this.order()) {
       this.loadOrderDetails();
     }
   }
@@ -122,20 +121,20 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
   }
 
   ngOnChanges(): void {
-    if (this.order && this.isOpen) {
+    if (this.order() && this.isOpen) {
       this.loadOrderDetails();
     }
   }
 
   loadOrderDetails(): void {
-    if (!this.order) return;
+    if (!this.order()) return;
 
     this.isLoading = true;
 
     // TODO: Replace with actual API call
     // For now, generate mock data
     setTimeout(() => {
-      this.orderDetails = this.generateMockOrderDetails(this.order!);
+      this.orderDetails = this.generateMockOrderDetails(this.order()!);
       this.updateForm.patchValue({
         status: this.orderDetails.status,
         payment_status: this.orderDetails.payment_status,

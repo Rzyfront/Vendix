@@ -1,18 +1,18 @@
 import {
   Component,
   Input,
-  Output,
-  EventEmitter,
   forwardRef,
+  input,
+  output
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
 import { FormStyleVariant } from '../../types/form.types';
 
 @Component({
   selector: 'app-toggle',
   standalone: true,
-  imports: [CommonModule],
+  imports: [],
   providers: [
     {
       provide: NG_VALUE_ACCESSOR,
@@ -32,35 +32,36 @@ import { FormStyleVariant } from '../../types/form.types';
     <button
       type="button"
       [attr.aria-pressed]="checked"
-      [attr.aria-label]="ariaLabel || label || 'Toggle'"
+      [attr.aria-label]="ariaLabel() || label || 'Toggle'"
       [disabled]="disabled"
       (click)="onToggle()"
       [class]="buttonClasses"
       [class.bg-[var(--color-primary)]]="checked"
       [class.bg-[var(--color-muted)]]="!checked"
-    >
+      >
       <span
         class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-[var(--color-surface)] shadow ring-0 transition duration-200 ease-in-out"
         [class.translate-x-5]="checked"
         [class.translate-x-0]="!checked"
       ></span>
     </button>
-    <span
-      *ngIf="label"
-      [class]="labelClasses"
-      >{{ label }}</span
-    >
-  `,
+    @if (label) {
+      <span
+        [class]="labelClasses"
+        >{{ label }}</span
+        >
+      }
+    `,
 })
 export class ToggleComponent implements ControlValueAccessor {
   @Input() checked = false;
   @Input() disabled = false;
   @Input() label?: string;
-  @Input() ariaLabel?: string;
-  @Input() styleVariant: FormStyleVariant = 'modern';
+  readonly ariaLabel = input<string>();
+  readonly styleVariant = input<FormStyleVariant>('modern');
 
-  @Output() toggled = new EventEmitter<boolean>();
-  @Output() changed = new EventEmitter<boolean>();
+  readonly toggled = output<boolean>();
+  readonly changed = output<boolean>();
 
   private onChange: (value: boolean) => void = () => {};
   private onTouched: () => void = () => {};
@@ -107,7 +108,7 @@ export class ToggleComponent implements ControlValueAccessor {
       'focus:outline-none',
     ];
 
-    if (this.styleVariant === 'modern') {
+    if (this.styleVariant() === 'modern') {
       // Modern: shadow-based focus
       return [
         ...baseClasses,
@@ -127,7 +128,7 @@ export class ToggleComponent implements ControlValueAccessor {
   get labelClasses(): string {
     const baseClasses = ['ml-2', 'align-middle'];
 
-    if (this.styleVariant === 'modern') {
+    if (this.styleVariant() === 'modern') {
       return [
         ...baseClasses,
         'text-[11px]',

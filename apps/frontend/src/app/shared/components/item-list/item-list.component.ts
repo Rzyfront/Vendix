@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
+import { Component, Input, input, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { IconComponent } from '../icon/icon.component';
 import {
@@ -18,13 +18,16 @@ export class ItemListComponent {
   @Input() data: any[] = [];
   @Input() cardConfig!: ItemListCardConfig;
   @Input() actions?: TableAction[];
-  @Input() loading = false;
-  @Input() emptyMessage = 'No hay datos disponibles';
-  @Input() emptyIcon = 'inbox';
-  @Input() size: ItemListSize = 'md';
+  readonly loading = input(false);
+  readonly emptyMessage = input('No hay datos disponibles');
+  readonly emptyIcon = input('inbox');
+  readonly size = input<ItemListSize>('md');
 
-  @Output() itemClick = new EventEmitter<any>();
-  @Output() actionClick = new EventEmitter<{ action: TableAction; item: any }>();
+  readonly itemClick = output<any>();
+  readonly actionClick = output<{
+    action: TableAction;
+    item: any;
+}>();
 
   activeMenuIndex: number | null = null;
 
@@ -357,6 +360,6 @@ export class ItemListComponent {
       md: 'item-list-md',
       lg: 'item-list-lg',
     };
-    return sizeMap[this.size];
+    return sizeMap[this.size()];
   }
 }

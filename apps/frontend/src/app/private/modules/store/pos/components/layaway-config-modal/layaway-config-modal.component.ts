@@ -1,5 +1,5 @@
 import { Component, input, output, signal, computed } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import {
   ModalComponent,
@@ -21,12 +21,11 @@ export interface LayawayConfigResult {
   selector: 'app-layaway-config-modal',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ModalComponent,
     ButtonComponent,
-    IconComponent,
-  ],
+    IconComponent
+],
   template: `
     <app-modal
       [isOpen]="true"

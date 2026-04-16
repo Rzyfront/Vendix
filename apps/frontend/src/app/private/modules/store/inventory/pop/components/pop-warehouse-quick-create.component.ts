@@ -1,5 +1,5 @@
 import { Component, Input, Output, EventEmitter } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 
 import {
@@ -20,13 +20,12 @@ import { LocationType, CreateLocationDto } from '../../interfaces';
   selector: 'app-pop-warehouse-quick-create',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ModalComponent,
     ButtonComponent,
     InputComponent,
-    SelectorComponent,
-  ],
+    SelectorComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen"
@@ -34,12 +33,12 @@ import { LocationType, CreateLocationDto } from '../../interfaces';
       title="Crear Bodega Rápido"
       subtitle="Agrega una nueva bodega sin salir del punto de compra"
       (close)="onClose()"
-    >
+      >
       <form
         (ngSubmit)="onSubmit()"
         #warehouseForm="ngForm"
         class="h-full flex flex-col"
-      >
+        >
         <div class="space-y-4 flex-1">
           <!-- Name -->
           <app-input
@@ -49,7 +48,7 @@ import { LocationType, CreateLocationDto } from '../../interfaces';
             [required]="true"
             placeholder="Ej: Bodega Principal"
           ></app-input>
-
+    
           <!-- Code -->
           <app-input
             label="Código *"
@@ -58,7 +57,7 @@ import { LocationType, CreateLocationDto } from '../../interfaces';
             [required]="true"
             placeholder="Ej: BOD-001"
           ></app-input>
-
+    
           <!-- Type -->
           <app-selector
             label="Tipo de Ubicación"
@@ -68,7 +67,7 @@ import { LocationType, CreateLocationDto } from '../../interfaces';
             placeholder="Seleccionar tipo"
           ></app-selector>
         </div>
-
+    
         <!-- Footer Actions -->
         <div slot="footer" class="flex justify-end gap-3 mt-4">
           <app-button variant="outline" (clicked)="onClose()">
@@ -78,14 +77,18 @@ import { LocationType, CreateLocationDto } from '../../interfaces';
             variant="primary"
             type="submit"
             [disabled]="!isFormValid() || isLoading"
-          >
-            <span *ngIf="!isLoading">Crear Bodega</span>
-            <span *ngIf="isLoading">Creando...</span>
+            >
+            @if (!isLoading) {
+              <span>Crear Bodega</span>
+            }
+            @if (isLoading) {
+              <span>Creando...</span>
+            }
           </app-button>
         </div>
       </form>
     </app-modal>
-  `,
+    `,
   styles: [
     `
       :host {
@@ -142,6 +145,11 @@ export class PopWarehouseQuickCreateComponent {
           this.warehouseCreated.emit(response.data.id);
           this.resetForm();
           this.isOpenChange.emit(false);
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
           this.close.emit();
         }
         this.isLoading = false;
@@ -156,6 +164,11 @@ export class PopWarehouseQuickCreateComponent {
   onClose(): void {
     this.resetForm();
     this.isOpenChange.emit(false);
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.close.emit();
   }
 

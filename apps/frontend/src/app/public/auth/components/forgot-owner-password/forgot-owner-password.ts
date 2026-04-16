@@ -1,5 +1,5 @@
 import { Component, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { RouterModule, Router } from '@angular/router';
 import {
   FormBuilder,
@@ -19,14 +19,13 @@ import { IconComponent } from '../../../../shared/components';
   selector: 'app-forgot-owner-password',
   standalone: true,
   imports: [
-    CommonModule,
     RouterModule,
     ReactiveFormsModule,
     CardComponent,
     InputComponent,
     ButtonComponent,
-    IconComponent,
-  ],
+    IconComponent
+],
   template: `
     <!-- Container: Mobile-first con padding reducido en móvil -->
     <div

@@ -1,6 +1,16 @@
-import { Component, OnInit, OnDestroy, AfterViewInit, ViewChild, inject, ChangeDetectorRef } from '@angular/core';
+import {
+  Component,
+  OnInit,
+  ViewChild,
+  inject,
+  signal,
+  computed,
+  DestroyRef,
+  afterNextRender,
+} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
+import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   SidebarComponent,
   MenuItem,
@@ -15,8 +25,8 @@ import { TourModalComponent } from '../../../shared/components/tour/tour-modal/t
 import { TourService } from '../../../shared/components/tour/services/tour.service';
 import { POS_TOUR_CONFIG } from '../../../shared/components/tour/configs/pos-tour.config';
 import { MenuFilterService } from '../../../core/services/menu-filter.service';
-import { Observable, Subject, combineLatest } from 'rxjs';
-import { takeUntil, map, distinctUntilChanged, skip, pairwise } from 'rxjs/operators';
+import { combineLatest } from 'rxjs';
+import { map, distinctUntilChanged, skip } from 'rxjs/operators';
 
 @Component({
   selector: 'app-store-admin-layout',
@@ -35,16 +45,16 @@ import { takeUntil, map, distinctUntilChanged, skip, pairwise } from 'rxjs/opera
       <!-- Sidebar -->
       <app-sidebar
         #sidebarRef
-        [menuItems]="filteredMenuItems"
-        [title]="(storeName$ | async) || 'Cargando...'"
-        [logoUrl]="storeLogo$ | async"
+        [menuItems]="filteredMenuItems()"
+        [title]="storeName() || 'Cargando...'"
+        [logoUrl]="storeLogo()"
         subtitle="Administrador de Tienda"
-        [vlink]="(storeSlug$ | async) || 'slug'"
-        [domainHostname]="storeDomainHostname"
-        [isVendixDomain]="isVendixDomain"
-        [collapsed]="sidebarCollapsed"
+        [vlink]="storeSlug() || 'slug'"
+        [domainHostname]="storeDomainHostname()"
+        [isVendixDomain]="isVendixDomain()"
+        [collapsed]="sidebarCollapsed()"
         [showFooter]="true"
-        [shimmer]="sidebarShimmer"
+        [shimmer]="sidebarShimmer()"
         (expandSidebar)="toggleSidebar()"
       >
         <!-- Footer Content -->
@@ -58,7 +68,7 @@ import { takeUntil, map, distinctUntilChanged, skip, pairwise } from 'rxjs/opera
                     <span class="footer-info-label">Type</span>
                   </div>
                   <span class="footer-info-value">{{
-                    formatStoreType(storeType$ | async)
+                    formatStoreType(storeType())
                   }}</span>
                 </div>
               </div>
@@ -80,16 +90,14 @@ import { takeUntil, map, distinctUntilChanged, skip, pairwise } from 'rxjs/opera
       <!-- Main Content -->
       <div
         class="main-content flex-1 flex flex-col h-screen overflow-hidden transition-all duration-300 ease-in-out"
-        [class.margin-desktop]="sidebarReady && !sidebarRef?.isMobile"
+        [class.margin-desktop]="sidebarReady() && !sidebarRef?.isMobile()"
         [style.margin-left]="
-          sidebarReady && !sidebarRef?.isMobile ? (sidebarCollapsed ? '3.5rem' : '12.5rem') : '0'
+          sidebarReady() && !sidebarRef?.isMobile() ? (sidebarCollapsed() ? '3.5rem' : '12.5rem') : '0'
         "
-        [style.--sidebar-width-current]="sidebarCollapsed ? '3.5rem' : '12.5rem'"
+        [style.--sidebar-width-current]="sidebarCollapsed() ? '3.5rem' : '12.5rem'"
       >
         <!-- Header -->
         <app-header
-          [breadcrumb]="breadcrumb"
-          [user]="user"
           (toggleSidebar)="toggleSidebar()"
         >
         </app-header>
@@ -118,44 +126,48 @@ import { takeUntil, map, distinctUntilChanged, skip, pairwise } from 'rxjs/opera
   `,
   styleUrls: ['./store-admin-layout.component.scss'],
 })
-export class StoreAdminLayoutComponent implements OnInit, OnDestroy, AfterViewInit {
+export class StoreAdminLayoutComponent implements OnInit {
   @ViewChild('sidebarRef') sidebarRef!: SidebarComponent;
 
-  sidebarCollapsed = false;
-  sidebarReady = false;
-  currentPageTitle = 'Store Dashboard';
-  currentVlink = 'store-admin';
-
-  // Dynamic user data
-  storeName$: Observable<string | null>;
-  storeSlug$: Observable<string | null>;
-  organizationSlug$: Observable<string | null>;
-  storeDomainHostname$: Observable<string | null>;
-  storeDomainHostname: string | null = null;
-  storeType$: Observable<string | null>;
-  storeLogo$: Observable<string | null>;
-  isVendixDomain = false;
-
-  // Onboarding
-  showOnboardingModal = false; // Will be set in ngOnInit based on actual status
-  needsOnboarding = false;
-  private destroy$ = new Subject<void>();
-
-  // Tour
-  showTourModal = false;
-  private tourService = inject(TourService);
-  readonly posTourConfig = POS_TOUR_CONFIG;
-
-  // Sidebar shimmer effect on store type change
-  sidebarShimmer = false;
-
-  // Panel UI menu filtering
-  private cdr = inject(ChangeDetectorRef);
-  private menuFilterService = inject(MenuFilterService);
+  private authFacade = inject(AuthFacade);
   private configFacade = inject(ConfigFacade);
+  private onboardingWizardService = inject(OnboardingWizardService);
+  private tourService = inject(TourService);
+  private menuFilterService = inject(MenuFilterService);
+  private destroyRef = inject(DestroyRef);
 
+  // --- UI state signals ---
+  readonly sidebarCollapsed = signal(false);
+  readonly sidebarReady = signal(false);
+  readonly showOnboardingModal = signal(false);
+  readonly needsOnboarding = signal(false);
+  readonly showTourModal = signal(false);
+  readonly sidebarShimmer = signal(false);
+
+  // --- Facade data as signals ---
+  readonly storeName = toSignal(this.authFacade.userStoreName$, { initialValue: null });
+  readonly storeSlug = toSignal(this.authFacade.userStoreSlug$, { initialValue: null });
+  readonly storeType = toSignal(this.authFacade.userStoreType$, { initialValue: null });
+  readonly storeDomainHostname = toSignal(this.authFacade.userDomainHostname$, { initialValue: null });
+
+  // --- isVendixDomain: resolved once from config ---
+  readonly isVendixDomain = signal(
+    !!this.configFacade.getCurrentConfig()?.domainConfig?.isVendixDomain,
+  );
+
+  // --- storeLogo: computed from store$ + domainConfig ---
+  private readonly storeSignal = toSignal(this.authFacade.userStore$, { initialValue: null });
+
+  readonly storeLogo = computed(() => {
+    const store = this.storeSignal();
+    const domainConfig = this.configFacade.getCurrentConfig()?.domainConfig;
+    if (domainConfig?.isMainVendixDomain) return 'vlogo.png';
+    return store?.logo_url || null;
+  });
+
+  // --- Panel UI menu items ---
   // ALL possible menu items (constant)
-  private allMenuItems: MenuItem[] = [
+  private readonly allMenuItems: MenuItem[] = [
     {
       label: 'Panel Principal',
       icon: 'home',
@@ -256,11 +268,6 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy, AfterViewIn
           label: 'Reseñas',
           icon: 'circle',
           route: '/admin/customers/reviews',
-        },
-        {
-          label: 'Recolección de Datos',
-          icon: 'circle',
-          route: '/admin/data-collection',
         },
       ],
     },
@@ -523,81 +530,57 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy, AfterViewIn
     },
   ];
 
-  // Reactive menu items
-  menuItems$: Observable<MenuItem[]> = this.menuFilterService.filterMenuItems(
-    this.allMenuItems,
+  // Reactive menu items as signal via toSignal
+  readonly filteredMenuItems = toSignal(
+    this.menuFilterService.filterMenuItems(this.allMenuItems),
+    { initialValue: [] as MenuItem[] },
   );
-  filteredMenuItems: MenuItem[] = [];
 
-  constructor(
-    private authFacade: AuthFacade,
-    private onboardingWizardService: OnboardingWizardService,
-  ) {
-    this.storeName$ = this.authFacade.userStoreName$;
-    this.storeSlug$ = this.authFacade.userStoreSlug$;
-    this.organizationSlug$ = this.authFacade.userOrganizationSlug$;
-    this.storeDomainHostname$ = this.authFacade.userDomainHostname$;
-    this.storeType$ = this.authFacade.userStoreType$;
-    this.storeLogo$ = this.authFacade.userStore$.pipe(
-      map((store) => {
-        const domainConfig = this.configFacade.getCurrentConfig()?.domainConfig;
-        if (domainConfig?.isMainVendixDomain) return 'vlogo.png';
-        return store?.logo_url || null;
-      }),
-    );
-  }
+  readonly posTourConfig = POS_TOUR_CONFIG;
 
-  ngOnInit(): void {
-    // Check onboarding status when component initializes
-    this.checkOnboardingWithRoleValidation();
+  breadcrumb = {
+    parent: 'Tienda',
+    current: 'Panel Principal',
+  };
 
-    // Subscribe to onboarding needs and show modal instead of redirecting
-    this.authFacade.needsOnboarding$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe((needsOnboarding: any) => {
-        // this.needsOnboarding = needsOnboarding;
-        this.needsOnboarding = false; // Temporalmente deshabilitado hasta desarrollar workflow
-        this.updateOnboardingModal();
-      });
+  user = {
+    name: 'Jane Smith',
+    role: 'Administrador de Tienda',
+    initials: 'JS',
+  };
 
-    // Subscribe to filtered menu items based on panel_ui configuration
-    this.menuItems$.pipe(takeUntil(this.destroy$)).subscribe((items) => {
-      this.filteredMenuItems = items;
-      this.cdr.markForCheck();
+  constructor() {
+    // Mark sidebar as ready after first render
+    afterNextRender(() => {
+      this.sidebarReady.set(true);
     });
 
-    // Trigger shimmer animation when store_type changes (skip initial emission)
+    // Shimmer on store_type change (skip initial emission)
     combineLatest([
       this.authFacade.userStoreType$,
       this.authFacade.storeSettings$,
     ]).pipe(
       map(([loginType, settings]) => settings?.general?.store_type || loginType),
       distinctUntilChanged(),
-      skip(1), // Skip initial value — only react to actual changes
-      takeUntil(this.destroy$),
+      skip(1),
+      takeUntilDestroyed(this.destroyRef),
     ).subscribe(() => {
-      this.sidebarShimmer = true;
-      setTimeout(() => { this.sidebarShimmer = false; }, 950);
+      this.sidebarShimmer.set(true);
+      setTimeout(() => { this.sidebarShimmer.set(false); }, 950);
     });
 
-    // Subscribe to domain hostname for sidebar vlink
-    this.storeDomainHostname$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe((hostname) => {
-        this.storeDomainHostname = hostname;
+    // Onboarding needs subscription
+    this.authFacade.needsOnboarding$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        this.needsOnboarding.set(false); // Temporalmente deshabilitado hasta desarrollar workflow
+        this.updateOnboardingModal();
       });
-
-    // Resolve isVendixDomain for promotional tooltip
-    this.isVendixDomain =
-      !!this.configFacade.getCurrentConfig()?.domainConfig?.isVendixDomain;
-
-    // Check if should show POS first sale tour
-    this.checkAndStartPosTour();
   }
 
-  ngAfterViewInit(): void {
-    this.sidebarReady = true;
-    this.cdr.detectChanges();
+  ngOnInit(): void {
+    this.checkOnboardingWithRoleValidation();
+    this.checkAndStartPosTour();
   }
 
   /**
@@ -607,43 +590,36 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy, AfterViewIn
     const tourId = 'pos-first-sale';
     if (this.tourService.canShowTour(tourId)) {
       setTimeout(() => {
-        this.showTourModal = true;
+        this.showTourModal.set(true);
       }, 1500);
     }
   }
 
   private checkOnboardingWithRoleValidation(): void {
-    // Only proceed with onboarding logic if user is owner
     const isOwner = this.authFacade.isOwner();
     if (!isOwner) {
-      this.needsOnboarding = false;
-      this.showOnboardingModal = false;
+      this.needsOnboarding.set(false);
+      this.showOnboardingModal.set(false);
       return;
     }
 
-    // Check actual onboarding status from persistent data
-    const currentUser = this.authFacade.getCurrentUser();
-    const storeOnboarding = currentUser?.stores?.onboarding;
-
-    // this.needsOnboarding = !storeOnboarding;
-    this.needsOnboarding = false; // Temporalmente deshabilitado hasta desarrollar workflow
+    // this.needsOnboarding.set(!storeOnboarding);
+    this.needsOnboarding.set(false); // Temporalmente deshabilitado hasta desarrollar workflow
     this.updateOnboardingModal();
   }
 
   private updateOnboardingModal(): void {
-    // Double-check owner role before showing modal
     const isOwner = this.authFacade.isOwner();
     if (!isOwner) {
-      this.showOnboardingModal = false;
+      this.showOnboardingModal.set(false);
       return;
     }
 
-    // Verify onboarding status from current user data
     const currentUser = this.authFacade.getCurrentUser();
     const storeOnboarding = currentUser?.stores?.onboarding;
     const actuallyNeedsOnboarding = !storeOnboarding;
 
-    this.showOnboardingModal = actuallyNeedsOnboarding && this.needsOnboarding;
+    this.showOnboardingModal.set(actuallyNeedsOnboarding && this.needsOnboarding());
   }
 
   formatStoreType(type: string | null): string {
@@ -658,36 +634,16 @@ export class StoreAdminLayoutComponent implements OnInit, OnDestroy, AfterViewIn
     return typeMap[type] || type;
   }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  breadcrumb = {
-    parent: 'Tienda',
-    current: 'Panel Principal',
-  };
-
-  user = {
-    name: 'Jane Smith',
-    role: 'Administrador de Tienda',
-    initials: 'JS',
-  };
-
   toggleSidebar() {
-    // If mobile, delegate to sidebar component
-    if (this.sidebarRef?.isMobile) {
-      this.sidebarRef.toggleSidebar();
+    if (this.sidebarRef?.isMobile()) {
+      this.sidebarRef.toggleSidebarState();
     } else {
-      // Desktop: toggle collapsed state
-      this.sidebarCollapsed = !this.sidebarCollapsed;
+      this.sidebarCollapsed.update(v => !v);
     }
   }
 
   onOnboardingCompleted(event: any): void {
-    // Update auth state to reflect onboarding completion
     this.authFacade.setOnboardingCompleted(true);
-    // Reload user data to get updated organization/store info
     this.authFacade.loadUser();
   }
 }

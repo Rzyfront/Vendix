@@ -1,5 +1,5 @@
 import { Component, Input, Output, EventEmitter, signal, computed } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { SystemShippingMethod } from '../interfaces/shipping-methods.interface';
 import {
   ModalComponent,
@@ -12,12 +12,11 @@ import {
   selector: 'app-shipping-methods-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ModalComponent,
     InputsearchComponent,
     IconComponent,
-    ButtonComponent,
-  ],
+    ButtonComponent
+],
   template: `
     <app-modal [isOpen]="true" [showCloseButton]="true" size="md" (closed)="close.emit()" title="Agregar Método de Envío">
       <div class="flex flex-col gap-4">

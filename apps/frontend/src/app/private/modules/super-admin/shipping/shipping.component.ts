@@ -1,5 +1,5 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { ShippingMethodsComponent } from './components/shipping-methods/shipping-methods.component';
 import { ShippingZonesComponent } from './components/shipping-zones/shipping-zones.component';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
@@ -11,12 +11,11 @@ import { ShippingMethodStats, ShippingZoneStats } from './interfaces/shipping.in
   selector: 'app-superadmin-shipping-layout',
   standalone: true,
   imports: [
-    CommonModule,
     ShippingMethodsComponent,
     ShippingZonesComponent,
     StatsComponent,
-    DashboardTabsComponent,
-  ],
+    DashboardTabsComponent
+],
   template: `
     <div class="space-y-4 p-4 md:p-6">
       <!-- Stats consolidadas usando stats-container -->

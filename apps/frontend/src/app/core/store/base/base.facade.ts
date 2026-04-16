@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { Store } from '@ngrx/store';
-import { Observable } from 'rxjs';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { BaseState } from './base.reducer';
 import * as BaseActions from './base.actions';
 import { extractApiErrorMessage } from '../../utils/api-error-handler';
@@ -16,6 +16,12 @@ export class BaseFacade<T = any> {
   readonly lastUpdated$ = this.store.select(
     (state: BaseState<T>) => state.lastUpdated,
   );
+
+  // ─── Signal parallels (Angular 20 — backward compatible) ──────────────────
+  readonly data = toSignal(this.data$);
+  readonly loading = toSignal(this.loading$, { initialValue: false });
+  readonly error = toSignal(this.error$);
+  readonly lastUpdated = toSignal(this.lastUpdated$);
 
   // Actions
   loadData(id?: string, params?: any): void {
@@ -52,32 +58,22 @@ export class BaseFacade<T = any> {
 
   // Synchronous getters for templates
   getCurrentData(): T | null {
-    let result: T | null = null;
-    this.data$.subscribe((data) => (result = data)).unsubscribe();
-    return result;
+    return this.data() ?? null;
   }
 
   isLoading(): boolean {
-    let result = false;
-    this.loading$.subscribe((loading) => (result = loading)).unsubscribe();
-    return result;
+    return this.loading();
   }
 
   getCurrentError(): any {
-    let result: any = null;
-    this.error$
-      .subscribe((error) => {
-        if (error === null) {
-          result = null;
-        } else if (typeof error === 'string') {
-          result = error;
-        } else {
-          // Handle NormalizedApiPayload by extracting the message
-          result = extractApiErrorMessage(error);
-        }
-      })
-      .unsubscribe();
-    return result;
+    const error = this.error();
+    if (error === null || error === undefined) {
+      return null;
+    } else if (typeof error === 'string') {
+      return error;
+    } else {
+      return extractApiErrorMessage(error);
+    }
   }
 
   hasData(): boolean {

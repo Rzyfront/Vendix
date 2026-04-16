@@ -1,5 +1,5 @@
 import { Component, Input, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 
 // Import shared components
 import { StatsComponent } from '../../../../../shared/components/index';
@@ -10,7 +10,7 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 @Component({
   selector: 'app-pos-stats',
   standalone: true,
-  imports: [CommonModule, StatsComponent],
+  imports: [StatsComponent],
   template: `
     <div class="stats-container" style="margin-bottom:0">
       <!-- Productos en Carrito -->

@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { Subject, timer } from 'rxjs';
 import { takeUntil, map, catchError, filter } from 'rxjs/operators';
 import { of } from 'rxjs';
@@ -33,7 +33,6 @@ import {
   selector: 'app-monitoring',
   standalone: true,
   imports: [
-    CommonModule,
     StatsComponent,
     IconComponent,
     CardComponent,
@@ -42,8 +41,8 @@ import {
     StatusIndicatorComponent,
     ProcessInfoComponent,
     QueueStatsComponent,
-    SlowEndpointsComponent,
-  ],
+    SlowEndpointsComponent
+],
   providers: [MonitoringService],
   template: `
     <div style="background-color: var(--color-background);" class="space-y-6">
@@ -86,7 +85,7 @@ import {
           [loading]="loadingOverview"
         ></app-stats>
       </div>
-
+    
       <!-- Status bar -->
       <app-card [padding]="false" customClasses="!p-4 flex items-center justify-between flex-wrap gap-3">
         <div class="flex items-center gap-4">
@@ -103,7 +102,7 @@ import {
           Auto-refresh: 30s
         </span>
       </app-card>
-
+    
       <!-- EC2 Metrics Section -->
       <app-card [padding]="false" [showHeader]="true">
         <div slot="header"
@@ -156,7 +155,7 @@ import {
           ></app-metric-chart>
         </div>
       </app-card>
-
+    
       <!-- RDS Metrics Section -->
       <app-card [padding]="false" [showHeader]="true">
         <div slot="header"
@@ -212,7 +211,7 @@ import {
           ></app-metric-chart>
         </div>
       </app-card>
-
+    
       <!-- Performance Section -->
       <app-card [padding]="false" [showHeader]="true">
         <div slot="header"
@@ -225,49 +224,59 @@ import {
             <h3 class="text-lg font-semibold" style="color: var(--color-text-primary);">
               Performance
             </h3>
-            <span *ngIf="performanceSnapshot" class="text-xs font-mono px-2 py-0.5 rounded-full" style="background: var(--color-background); color: var(--color-text-muted);">
-              {{ performanceSnapshot.totalRecorded }} requests tracked
-            </span>
+            @if (performanceSnapshot) {
+              <span class="text-xs font-mono px-2 py-0.5 rounded-full" style="background: var(--color-background); color: var(--color-text-muted);">
+                {{ performanceSnapshot.totalRecorded }} requests tracked
+              </span>
+            }
           </div>
           <app-time-range-selector
             [selected]="performanceTimeRange"
             (rangeChange)="onPerformanceTimeRangeChange($event)"
           ></app-time-range-selector>
         </div>
-
+    
         <div class="p-6 space-y-6">
           <!-- Performance Stats Cards -->
           <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
             <app-card [padding]="false" customClasses="!p-3 !rounded-xl">
               <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Avg Response</p>
               <p class="text-xl font-bold font-mono" [class]="avgResponseTimeColor">{{ avgResponseTime }}</p>
-              <p class="text-[10px]" style="color: var(--color-text-muted);" *ngIf="performanceSnapshot">
-                p95: {{ performanceSnapshot.responseTime.p95.toFixed(0) }}ms
-              </p>
+              @if (performanceSnapshot) {
+                <p class="text-[10px]" style="color: var(--color-text-muted);">
+                  p95: {{ performanceSnapshot.responseTime.p95.toFixed(0) }}ms
+                </p>
+              }
             </app-card>
             <app-card [padding]="false" customClasses="!p-3 !rounded-xl">
               <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Requests/seg</p>
               <p class="text-xl font-bold font-mono text-blue-500">{{ reqPerSec }}</p>
-              <p class="text-[10px]" style="color: var(--color-text-muted);" *ngIf="performanceSnapshot">
-                {{ performanceSnapshot.activeRequests }} activos
-              </p>
+              @if (performanceSnapshot) {
+                <p class="text-[10px]" style="color: var(--color-text-muted);">
+                  {{ performanceSnapshot.activeRequests }} activos
+                </p>
+              }
             </app-card>
             <app-card [padding]="false" customClasses="!p-3 !rounded-xl">
               <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Error Rate (5m)</p>
               <p class="text-xl font-bold font-mono" [class]="errorRateColor">{{ errorRate }}</p>
-              <p class="text-[10px]" style="color: var(--color-text-muted);" *ngIf="performanceSnapshot">
-                {{ performanceSnapshot.errors.last5min.errors5xx }} errores 5xx
-              </p>
+              @if (performanceSnapshot) {
+                <p class="text-[10px]" style="color: var(--color-text-muted);">
+                  {{ performanceSnapshot.errors.last5min.errors5xx }} errores 5xx
+                </p>
+              }
             </app-card>
             <app-card [padding]="false" customClasses="!p-3 !rounded-xl">
               <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Event Loop p99</p>
               <p class="text-xl font-bold font-mono" [class]="eventLoopColor">{{ eventLoopP99 }}</p>
-              <p class="text-[10px]" style="color: var(--color-text-muted);" *ngIf="performanceSnapshot?.eventLoop?.current">
-                mean: {{ performanceSnapshot!.eventLoop!.current!.mean.toFixed(1) }}ms
-              </p>
+              @if (performanceSnapshot?.eventLoop?.current) {
+                <p class="text-[10px]" style="color: var(--color-text-muted);">
+                  mean: {{ performanceSnapshot!.eventLoop!.current!.mean.toFixed(1) }}ms
+                </p>
+              }
             </app-card>
           </div>
-
+    
           <!-- Charts Grid -->
           <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <app-metric-chart
@@ -291,13 +300,13 @@ import {
               [loading]="loadingPerformance"
             ></app-metric-chart>
           </div>
-
+    
           <!-- Slow Endpoints -->
           <app-slow-endpoints
             [endpoints]="performanceSnapshot?.slowestEndpoints ?? null"
             [loading]="loadingPerformance"
           ></app-slow-endpoints>
-
+    
           <!-- More Charts -->
           <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <app-metric-chart
@@ -320,7 +329,7 @@ import {
           </div>
         </div>
       </app-card>
-
+    
       <!-- Application Health Section -->
       <app-card [padding]="false" [showHeader]="true">
         <div slot="header"
@@ -335,103 +344,107 @@ import {
         </div>
         <div class="p-6 space-y-4">
           <!-- Server Memory Overview -->
-          <app-card *ngIf="serverInfo?.memory" [padding]="false" customClasses="!rounded-xl">
-            <div class="p-4">
-            <div class="flex items-center gap-2 mb-3">
-              <span class="w-5 h-5 rounded flex items-center justify-center bg-blue-500/10">
-                <app-icon name="memory-stick" [size]="12" class="text-blue-500"></app-icon>
-              </span>
-              <h4 class="text-sm font-semibold" style="color: var(--color-text-primary);">Memoria del Servidor</h4>
-            </div>
-            <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
-              <div class="p-3 rounded-lg text-center" style="background: var(--color-surface);">
-                <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Total</p>
-                <p class="font-mono text-sm font-bold" style="color: var(--color-text-primary);">{{ formatBytes(serverInfo!.memory.total) }}</p>
+          @if (serverInfo?.memory) {
+            <app-card [padding]="false" customClasses="!rounded-xl">
+              <div class="p-4">
+                <div class="flex items-center gap-2 mb-3">
+                  <span class="w-5 h-5 rounded flex items-center justify-center bg-blue-500/10">
+                    <app-icon name="memory-stick" [size]="12" class="text-blue-500"></app-icon>
+                  </span>
+                  <h4 class="text-sm font-semibold" style="color: var(--color-text-primary);">Memoria del Servidor</h4>
+                </div>
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+                  <div class="p-3 rounded-lg text-center" style="background: var(--color-surface);">
+                    <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Total</p>
+                    <p class="font-mono text-sm font-bold" style="color: var(--color-text-primary);">{{ formatBytes(serverInfo!.memory.total) }}</p>
+                  </div>
+                  <div class="p-3 rounded-lg text-center" style="background: var(--color-surface);">
+                    <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Usado</p>
+                    <p class="font-mono text-sm font-bold" style="color: var(--color-text-primary);">{{ formatBytes(serverInfo!.memory.used) }}</p>
+                  </div>
+                  <div class="p-3 rounded-lg text-center" style="background: var(--color-surface);">
+                    <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Libre</p>
+                    <p class="font-mono text-sm font-bold" style="color: var(--color-text-primary);">{{ formatBytes(serverInfo!.memory.free) }}</p>
+                  </div>
+                  <div class="p-3 rounded-lg text-center" style="background: var(--color-surface);">
+                    <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Uso</p>
+                    <p class="font-mono text-sm font-bold" [style.color]="serverInfo!.memory.usedPercent > 80 ? '#ef4444' : serverInfo!.memory.usedPercent > 60 ? '#eab308' : '#22c55e'">{{ serverInfo!.memory.usedPercent.toFixed(1) }}%</p>
+                  </div>
+                </div>
+                <div class="w-full h-2.5 rounded-full overflow-hidden" style="background: var(--color-border);">
+                  <div class="h-full rounded-full transition-all duration-500"
+                    [style.width.%]="serverInfo!.memory.usedPercent"
+                    [style.background]="serverInfo!.memory.usedPercent > 80 ? '#ef4444' : serverInfo!.memory.usedPercent > 60 ? '#eab308' : '#22c55e'">
+                  </div>
+                </div>
               </div>
-              <div class="p-3 rounded-lg text-center" style="background: var(--color-surface);">
-                <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Usado</p>
-                <p class="font-mono text-sm font-bold" style="color: var(--color-text-primary);">{{ formatBytes(serverInfo!.memory.used) }}</p>
-              </div>
-              <div class="p-3 rounded-lg text-center" style="background: var(--color-surface);">
-                <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Libre</p>
-                <p class="font-mono text-sm font-bold" style="color: var(--color-text-primary);">{{ formatBytes(serverInfo!.memory.free) }}</p>
-              </div>
-              <div class="p-3 rounded-lg text-center" style="background: var(--color-surface);">
-                <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Uso</p>
-                <p class="font-mono text-sm font-bold" [style.color]="serverInfo!.memory.usedPercent > 80 ? '#ef4444' : serverInfo!.memory.usedPercent > 60 ? '#eab308' : '#22c55e'">{{ serverInfo!.memory.usedPercent.toFixed(1) }}%</p>
-              </div>
-            </div>
-            <div class="w-full h-2.5 rounded-full overflow-hidden" style="background: var(--color-border);">
-              <div class="h-full rounded-full transition-all duration-500"
-                [style.width.%]="serverInfo!.memory.usedPercent"
-                [style.background]="serverInfo!.memory.usedPercent > 80 ? '#ef4444' : serverInfo!.memory.usedPercent > 60 ? '#eab308' : '#22c55e'">
-              </div>
-            </div>
-            </div>
-          </app-card>
-
+            </app-card>
+          }
+    
           <!-- Process Info -->
           <app-process-info
             [info]="appMetrics?.process ?? null"
             [loading]="loadingApp"
           ></app-process-info>
-
+    
           <!-- Queue Stats -->
           <app-queue-stats
             [queues]="appMetrics?.queues"
             [loading]="loadingApp"
           ></app-queue-stats>
-
+    
           <!-- Redis Info - Redesigned -->
-          <app-card *ngIf="appMetrics?.redis" [padding]="false" customClasses="!rounded-xl overflow-hidden">
-            <div slot="header" class="flex items-center gap-2" style="background: linear-gradient(135deg, rgba(239,68,68,0.05) 0%, transparent 100%);">
-              <span class="w-5 h-5 rounded flex items-center justify-center bg-red-500/10">
-                <svg class="w-3 h-3 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/>
-                </svg>
-              </span>
-              <h4 class="text-sm font-semibold" style="color: var(--color-text-primary);">Redis</h4>
-              <span class="ml-auto text-xs font-mono px-2 py-0.5 rounded-full bg-red-500/10 text-red-600">v{{ appMetrics!.redis!.redisVersion }}</span>
-            </div>
-            <div class="p-4">
-              <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
-                <div class="p-3 rounded-lg text-center" style="background: var(--color-surface);">
-                  <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Memoria</p>
-                  <p class="font-mono text-sm font-bold" style="color: var(--color-text-primary);">{{ appMetrics!.redis!.usedMemory }}</p>
+          @if (appMetrics?.redis) {
+            <app-card [padding]="false" customClasses="!rounded-xl overflow-hidden">
+              <div slot="header" class="flex items-center gap-2" style="background: linear-gradient(135deg, rgba(239,68,68,0.05) 0%, transparent 100%);">
+                <span class="w-5 h-5 rounded flex items-center justify-center bg-red-500/10">
+                  <svg class="w-3 h-3 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/>
+                  </svg>
+                </span>
+                <h4 class="text-sm font-semibold" style="color: var(--color-text-primary);">Redis</h4>
+                <span class="ml-auto text-xs font-mono px-2 py-0.5 rounded-full bg-red-500/10 text-red-600">v{{ appMetrics!.redis!.redisVersion }}</span>
+              </div>
+              <div class="p-4">
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-3">
+                  <div class="p-3 rounded-lg text-center" style="background: var(--color-surface);">
+                    <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Memoria</p>
+                    <p class="font-mono text-sm font-bold" style="color: var(--color-text-primary);">{{ appMetrics!.redis!.usedMemory }}</p>
+                  </div>
+                  <div class="p-3 rounded-lg text-center" style="background: var(--color-surface);">
+                    <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Clientes</p>
+                    <p class="font-mono text-sm font-bold" style="color: var(--color-text-primary);">{{ appMetrics!.redis!.connectedClients }}</p>
+                  </div>
+                  <div class="p-3 rounded-lg text-center" style="background: var(--color-surface);">
+                    <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Ops/seg</p>
+                    <p class="font-mono text-sm font-bold" style="color: var(--color-text-primary);">{{ appMetrics!.redis!.opsPerSec }}</p>
+                  </div>
+                  <div class="p-3 rounded-lg text-center" style="background: var(--color-surface);">
+                    <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Hit Rate</p>
+                    <p class="font-mono text-sm font-bold" style="color: var(--color-text-primary);">{{ hitRate }}%</p>
+                  </div>
                 </div>
-                <div class="p-3 rounded-lg text-center" style="background: var(--color-surface);">
-                  <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Clientes</p>
-                  <p class="font-mono text-sm font-bold" style="color: var(--color-text-primary);">{{ appMetrics!.redis!.connectedClients }}</p>
-                </div>
-                <div class="p-3 rounded-lg text-center" style="background: var(--color-surface);">
-                  <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Ops/seg</p>
-                  <p class="font-mono text-sm font-bold" style="color: var(--color-text-primary);">{{ appMetrics!.redis!.opsPerSec }}</p>
-                </div>
-                <div class="p-3 rounded-lg text-center" style="background: var(--color-surface);">
-                  <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Hit Rate</p>
-                  <p class="font-mono text-sm font-bold" style="color: var(--color-text-primary);">{{ hitRate }}%</p>
+                <div class="grid grid-cols-3 gap-3">
+                  <div class="p-2 rounded-lg text-center" style="background: var(--color-surface);">
+                    <p class="text-[9px] uppercase tracking-wider" style="color: var(--color-text-muted);">Max Memory</p>
+                    <p class="font-mono text-xs" style="color: var(--color-text-secondary);">{{ appMetrics!.redis!.maxMemory }}</p>
+                  </div>
+                  <div class="p-2 rounded-lg text-center" style="background: var(--color-surface);">
+                    <p class="text-[9px] uppercase tracking-wider" style="color: var(--color-text-muted);">Eviction</p>
+                    <p class="font-mono text-xs" style="color: var(--color-text-secondary);">{{ appMetrics!.redis!.evictionPolicy }}</p>
+                  </div>
+                  <div class="p-2 rounded-lg text-center" style="background: var(--color-surface);">
+                    <p class="text-[9px] uppercase tracking-wider" style="color: var(--color-text-muted);">Uptime</p>
+                    <p class="font-mono text-xs" style="color: var(--color-text-secondary);">{{ formatUptime(appMetrics!.redis!.uptimeInSeconds) }}</p>
+                  </div>
                 </div>
               </div>
-              <div class="grid grid-cols-3 gap-3">
-                <div class="p-2 rounded-lg text-center" style="background: var(--color-surface);">
-                  <p class="text-[9px] uppercase tracking-wider" style="color: var(--color-text-muted);">Max Memory</p>
-                  <p class="font-mono text-xs" style="color: var(--color-text-secondary);">{{ appMetrics!.redis!.maxMemory }}</p>
-                </div>
-                <div class="p-2 rounded-lg text-center" style="background: var(--color-surface);">
-                  <p class="text-[9px] uppercase tracking-wider" style="color: var(--color-text-muted);">Eviction</p>
-                  <p class="font-mono text-xs" style="color: var(--color-text-secondary);">{{ appMetrics!.redis!.evictionPolicy }}</p>
-                </div>
-                <div class="p-2 rounded-lg text-center" style="background: var(--color-surface);">
-                  <p class="text-[9px] uppercase tracking-wider" style="color: var(--color-text-muted);">Uptime</p>
-                  <p class="font-mono text-xs" style="color: var(--color-text-secondary);">{{ formatUptime(appMetrics!.redis!.uptimeInSeconds) }}</p>
-                </div>
-              </div>
-            </div>
-          </app-card>
+            </app-card>
+          }
         </div>
       </app-card>
     </div>
-  `,
+    `,
   styleUrls: ['./monitoring.component.css'],
 })
 export class MonitoringComponent implements OnInit, OnDestroy {

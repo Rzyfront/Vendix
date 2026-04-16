@@ -4,8 +4,15 @@ import { Router, ActivatedRoute } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
 
-import { loadInvoices, loadInvoiceStats, loadResolutions } from './state/actions/invoicing.actions';
-import { selectInvoices, selectInvoicesLoading } from './state/selectors/invoicing.selectors';
+import {
+  loadInvoices,
+  loadInvoiceStats,
+  loadResolutions,
+} from './state/actions/invoicing.actions';
+import {
+  selectInvoices,
+  selectInvoicesLoading,
+} from './state/selectors/invoicing.selectors';
 import { Invoice } from './interfaces/invoice.interface';
 
 import { InvoiceStatsComponent } from './components/invoice-stats/invoice-stats.component';
@@ -33,7 +40,9 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
   template: `
     <div class="w-full">
       <!-- Stats: Sticky on mobile, static on desktop -->
-      <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
+      <div
+        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+      >
         <vendix-invoice-stats></vendix-invoice-stats>
       </div>
 
@@ -45,14 +54,24 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
         >
           <div class="flex items-center gap-3">
             <div class="p-1.5 rounded-md bg-primary/10">
-              <app-icon name="shield" [size]="16" class="text-primary"></app-icon>
+              <app-icon
+                name="shield"
+                [size]="16"
+                class="text-primary"
+              ></app-icon>
             </div>
             <div class="text-left">
-              <span class="text-sm font-medium text-text-primary">Configuracion DIAN</span>
+              <span class="text-sm font-medium text-text-primary"
+                >Configuracion DIAN</span
+              >
               <p class="text-xs text-text-secondary">Facturacion electronica</p>
             </div>
           </div>
-          <app-icon name="chevron-right" [size]="16" class="text-text-secondary group-hover:text-primary transition-colors"></app-icon>
+          <app-icon
+            name="chevron-right"
+            [size]="16"
+            class="text-text-secondary group-hover:text-primary transition-colors"
+          ></app-icon>
         </button>
       </div>
 
@@ -66,28 +85,32 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
         (refresh)="refreshInvoices()"
       ></app-invoice-list>
 
-      <!-- Create Invoice Modal -->
-      <vendix-invoice-create
-        [(isOpen)]="isCreateModalOpen"
-      ></vendix-invoice-create>
+      @defer (when isCreateModalOpen) {
+        <vendix-invoice-create
+          [(isOpen)]="isCreateModalOpen"
+        ></vendix-invoice-create>
+      }
 
-      <!-- Invoice Detail Modal -->
-      <vendix-invoice-detail
-        [(isOpen)]="isDetailModalOpen"
-        [invoice]="selectedInvoice"
-        (creditNote)="openCreditNoteModal($event)"
-      ></vendix-invoice-detail>
+      @defer (when isDetailModalOpen) {
+        <vendix-invoice-detail
+          [(isOpen)]="isDetailModalOpen"
+          [invoice]="selectedInvoice"
+          (creditNote)="openCreditNoteModal($event)"
+        ></vendix-invoice-detail>
+      }
 
-      <!-- Credit/Debit Note Modal -->
-      <vendix-credit-note-create
-        [(isOpen)]="isCreditNoteModalOpen"
-        [sourceInvoice]="creditNoteSourceInvoice"
-      ></vendix-credit-note-create>
+      @defer (when isCreditNoteModalOpen) {
+        <vendix-credit-note-create
+          [(isOpen)]="isCreditNoteModalOpen"
+          [sourceInvoice]="creditNoteSourceInvoice"
+        ></vendix-credit-note-create>
+      }
 
-      <!-- Resolutions Modal -->
-      <vendix-resolutions
-        [(isOpen)]="isResolutionsModalOpen"
-      ></vendix-resolutions>
+      @defer (when isResolutionsModalOpen) {
+        <vendix-resolutions
+          [(isOpen)]="isResolutionsModalOpen"
+        ></vendix-resolutions>
+      }
     </div>
   `,
 })

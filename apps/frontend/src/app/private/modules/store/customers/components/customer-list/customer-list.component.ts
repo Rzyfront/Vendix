@@ -6,7 +6,7 @@ import {
   inject,
   OnInit,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import {
@@ -30,7 +30,6 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
   selector: 'app-customer-list',
   standalone: true,
   imports: [
-    CommonModule,
     CardComponent,
     ResponsiveDataViewComponent,
     InputsearchComponent,
@@ -38,8 +37,8 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
     IconComponent,
     ButtonComponent,
     FormsModule,
-    PaginationComponent,
-  ],
+    PaginationComponent
+],
   template: `
     <!-- Customer List Container - Mobile First -->
     <app-card [responsive]="true" [padding]="false">
@@ -284,9 +283,19 @@ export class CustomerListComponent implements OnInit {
   onActionClick(action: string): void {
     switch (action) {
       case 'create':
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
         this.create.emit();
         break;
       case 'bulk-upload':
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
+        // TODO: The 'emit' function requires a mandatory void argument
         this.bulkUpload.emit();
         break;
     }

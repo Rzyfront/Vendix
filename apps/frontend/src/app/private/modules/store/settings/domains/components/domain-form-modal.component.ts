@@ -8,7 +8,7 @@ import {
   OnChanges,
   SimpleChanges,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   ReactiveFormsModule,
   FormGroup,
@@ -35,14 +35,13 @@ import { environment } from '../../../../../../../environments/environment';
   selector: 'app-domain-form-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
     InputComponent,
     SelectorComponent,
-    IconComponent,
-  ],
+    IconComponent
+],
   templateUrl: './domain-form-modal.component.html',
   changeDetection: ChangeDetectionStrategy.OnPush,
 })

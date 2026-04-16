@@ -1,5 +1,5 @@
 import { Component, Input, Output, EventEmitter } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { StorePaymentMethod } from '../interfaces/payment-methods.interface';
 import {
   ButtonComponent,
@@ -13,7 +13,7 @@ import {
 @Component({
   selector: 'app-payment-methods-list',
   standalone: true,
-  imports: [CommonModule, ResponsiveDataViewComponent],
+  imports: [ResponsiveDataViewComponent],
   template: `
     <app-responsive-data-view
       [data]="payment_methods"

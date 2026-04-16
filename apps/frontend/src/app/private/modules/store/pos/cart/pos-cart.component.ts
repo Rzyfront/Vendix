@@ -38,14 +38,14 @@ import { PosApiService } from '../services/pos-api.service';
   template: `
     <div
       class="h-full flex flex-col bg-surface rounded-card shadow-card border border-border overflow-hidden"
-    >
+      >
       <!-- Cart Header & Summary Section (Fixed at top) -->
       <div class="flex-none bg-surface border-b border-border shadow-sm">
         <!-- Header Row -->
         <div class="px-5 py-3 border-b border-border/50">
           <h2
             class="text-base font-bold text-text-primary flex items-center gap-2"
-          >
+            >
             <app-icon
               name="shopping-cart"
               [size]="18"
@@ -54,7 +54,7 @@ import { PosApiService } from '../services/pos-api.service';
             Carrito ({{ (cartState$ | async)?.items?.length || 0 }})
           </h2>
         </div>
-
+    
         <!-- Totals Row (High Contrast) -->
         <div class="px-3 py-3 bg-muted/20">
           <div class="space-y-1.5 mb-4">
@@ -70,11 +70,11 @@ import { PosApiService } from '../services/pos-api.service';
                 formatCurrency((summary$ | async)?.taxAmount || 0)
               }}</span>
             </div>
-
+    
             <!-- Promotions & Coupons (hidden in quotation mode) -->
             @if (!isQuotationMode && !isLayawayMode) {
               <!-- Promotions Applied -->
-              <ng-container *ngIf="getPromotionDiscounts().length > 0">
+              @if (getPromotionDiscounts().length > 0) {
                 <div class="pt-1.5 border-t border-border/30">
                   <div class="flex items-center gap-1.5 mb-1">
                     <app-icon name="tag" [size]="12" class="text-green-600"></app-icon>
@@ -83,29 +83,34 @@ import { PosApiService } from '../services/pos-api.service';
                       {{ getPromotionDiscounts().length }}
                     </span>
                   </div>
-                  <div *ngFor="let disc of getPromotionDiscounts()" class="flex items-center justify-between text-[11px] py-0.5">
-                    <div class="flex items-center gap-1 min-w-0">
-                      <span class="text-green-700 truncate">{{ disc.description }}</span>
-                      <span *ngIf="disc.is_auto_applied" class="inline-flex items-center px-1 rounded text-[8px] font-medium bg-green-100 text-green-600">auto</span>
+                  @for (disc of getPromotionDiscounts(); track disc) {
+                    <div class="flex items-center justify-between text-[11px] py-0.5">
+                      <div class="flex items-center gap-1 min-w-0">
+                        <span class="text-green-700 truncate">{{ disc.description }}</span>
+                        @if (disc.is_auto_applied) {
+                          <span class="inline-flex items-center px-1 rounded text-[8px] font-medium bg-green-100 text-green-600">auto</span>
+                        }
+                      </div>
+                      <div class="flex items-center gap-1 shrink-0">
+                        <span class="font-medium text-green-700">-{{ formatCurrency(disc.amount) }}</span>
+                        @if (!disc.is_auto_applied) {
+                          <button
+                            (click)="removePromoDiscount(disc.id)"
+                            class="p-0.5 rounded text-text-secondary hover:text-destructive hover:bg-destructive/10 transition-colors"
+                            title="Eliminar promoción"
+                            >
+                            <app-icon name="x" [size]="10"></app-icon>
+                          </button>
+                        }
+                      </div>
                     </div>
-                    <div class="flex items-center gap-1 shrink-0">
-                      <span class="font-medium text-green-700">-{{ formatCurrency(disc.amount) }}</span>
-                      <button
-                        *ngIf="!disc.is_auto_applied"
-                        (click)="removePromoDiscount(disc.id)"
-                        class="p-0.5 rounded text-text-secondary hover:text-destructive hover:bg-destructive/10 transition-colors"
-                        title="Eliminar promoción"
-                      >
-                        <app-icon name="x" [size]="10"></app-icon>
-                      </button>
-                    </div>
-                  </div>
+                  }
                 </div>
-              </ng-container>
-
+              }
+    
               <!-- Coupon Code Input / Applied Coupon -->
               <div class="pt-1.5 border-t border-border/30">
-                <ng-container *ngIf="getAppliedCoupon() as coupon; else couponInput">
+                @if (getAppliedCoupon(); as coupon) {
                   <div class="flex items-center justify-between py-0.5">
                     <div class="flex items-center gap-1.5">
                       <app-icon name="ticket" [size]="12" class="text-primary"></app-icon>
@@ -117,13 +122,12 @@ import { PosApiService } from '../services/pos-api.service';
                         (click)="removeCoupon()"
                         class="p-0.5 rounded text-text-secondary hover:text-destructive hover:bg-destructive/10 transition-colors"
                         title="Eliminar cupón"
-                      >
+                        >
                         <app-icon name="x" [size]="10"></app-icon>
                       </button>
                     </div>
                   </div>
-                </ng-container>
-                <ng-template #couponInput>
+                } @else {
                   <div class="flex items-center gap-1.5">
                     <input
                       type="text"
@@ -131,29 +135,29 @@ import { PosApiService } from '../services/pos-api.service';
                       placeholder="Código de cupón"
                       class="flex-1 px-2 py-1.5 text-xs rounded-md border border-border bg-surface text-text-primary placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 uppercase"
                       (keydown.enter)="applyCoupon()"
-                    />
+                      />
                     <button
                       (click)="applyCoupon()"
                       [disabled]="!couponCode.trim() || couponLoading"
                       class="px-3 py-1.5 text-xs font-semibold rounded-md bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                    >
+                      >
                       {{ couponLoading ? '...' : 'Aplicar' }}
                     </button>
                   </div>
-                </ng-template>
+                }
               </div>
             }
-
+    
             <div
               class="pt-2 border-t border-border/50 flex justify-between items-center"
-            >
+              >
               <span class="font-bold text-text-primary text-base">Total</span>
               <span class="font-extrabold text-2xl text-primary tracking-tight">
                 {{ formatCurrency((summary$ | async)?.total || 0) }}
               </span>
             </div>
           </div>
-
+    
           <!-- Checkout Actions -->
           <div class="cart-actions">
             @if (isQuotationMode) {
@@ -163,7 +167,7 @@ import { PosApiService } from '../services/pos-api.service';
                 class="cart-btn checkout-btn"
                 (click)="quote.emit()"
                 [disabled]="(isEmpty$ | async) ?? false"
-              >
+                >
                 <app-icon name="file-text" [size]="18"></app-icon>
                 <span>Crear Cotización</span>
               </button>
@@ -174,7 +178,7 @@ import { PosApiService } from '../services/pos-api.service';
                 class="cart-btn checkout-btn"
                 (click)="layaway.emit()"
                 [disabled]="(isEmpty$ | async) ?? false"
-              >
+                >
                 <app-icon name="calendar" [size]="18"></app-icon>
                 <span>Crear Plan Separé</span>
               </button>
@@ -186,7 +190,7 @@ import { PosApiService } from '../services/pos-api.service';
                   class="cart-btn save-btn"
                   (click)="saveCart()"
                   [disabled]="(isEmpty$ | async) ?? false"
-                >
+                  >
                   <app-icon name="save" [size]="16"></app-icon>
                   <span>Guardar</span>
                 </button>
@@ -195,7 +199,7 @@ import { PosApiService } from '../services/pos-api.service';
                   class="cart-btn shipping-btn"
                   (click)="shipping.emit()"
                   [disabled]="(isEmpty$ | async) ?? false"
-                >
+                  >
                   <app-icon name="truck" [size]="16"></app-icon>
                   <span>Envío</span>
                 </button>
@@ -205,163 +209,168 @@ import { PosApiService } from '../services/pos-api.service';
                 class="cart-btn checkout-btn"
                 (click)="proceedToPayment()"
                 [disabled]="(isEmpty$ | async) ?? false"
-              >
+                >
                 <app-icon [name]="isEditMode ? 'check' : 'credit-card'" [size]="18"></app-icon>
                 <span>{{ isEditMode ? 'Actualizar Orden' : 'Cobrar' }}</span>
               </button>
             }
           </div>
         </div>
-
+    
         <!-- Customer Information (Compact) -->
-        <div
-          *ngIf="(cartState$ | async)?.customer"
-          class="px-5 py-2.5 bg-primary/5 border-t border-primary/10 flex items-center gap-3"
-        >
+        @if ((cartState$ | async)?.customer) {
           <div
-            class="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-primary"
-          >
-            <app-icon name="user" [size]="14"></app-icon>
-          </div>
-          <div class="flex-1 min-w-0">
-            <p
-              class="text-[11px] text-text-secondary font-medium leading-none mb-0.5"
+            class="px-5 py-2.5 bg-primary/5 border-t border-primary/10 flex items-center gap-3"
             >
-              Cliente
-            </p>
-            <p class="text-xs font-bold text-text-primary truncate">
-              {{ (cartState$ | async)?.customer?.name }}
-            </p>
+            <div
+              class="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-primary"
+              >
+              <app-icon name="user" [size]="14"></app-icon>
+            </div>
+            <div class="flex-1 min-w-0">
+              <p
+                class="text-[11px] text-text-secondary font-medium leading-none mb-0.5"
+                >
+                Cliente
+              </p>
+              <p class="text-xs font-bold text-text-primary truncate">
+                {{ (cartState$ | async)?.customer?.name }}
+              </p>
+            </div>
           </div>
-        </div>
+        }
       </div>
-
+    
       <!-- Cart Content (Scrollable Items) -->
       <div class="flex-1 overflow-y-auto p-4 bg-bg/30">
         <!-- Empty State -->
-        <div
-          *ngIf="isEmpty$ | async"
-          class="flex flex-col items-center pt-10 min-h-[200px] text-center opacity-60"
-        >
+        @if (isEmpty$ | async) {
           <div
-            class="w-12 h-12 bg-muted/20 rounded-full flex items-center justify-center mb-3"
-          >
-            <app-icon
-              name="shopping-cart"
-              [size]="24"
-              class="text-muted"
-            ></app-icon>
+            class="flex flex-col items-center pt-10 min-h-[200px] text-center opacity-60"
+            >
+            <div
+              class="w-12 h-12 bg-muted/20 rounded-full flex items-center justify-center mb-3"
+              >
+              <app-icon
+                name="shopping-cart"
+                [size]="24"
+                class="text-muted"
+              ></app-icon>
+            </div>
+            <h3 class="text-sm font-semibold text-text-primary mb-1">
+              Tu carrito está vacío
+            </h3>
+            <p class="text-[11px] text-text-secondary">
+              Selecciona productos en el panel izquierdo
+            </p>
           </div>
-          <h3 class="text-sm font-semibold text-text-primary mb-1">
-            Tu carrito está vacío
-          </h3>
-          <p class="text-[11px] text-text-secondary">
-            Selecciona productos en el panel izquierdo
-          </p>
-        </div>
-
+        }
+    
         <!-- Cart Items List -->
-        <div *ngIf="!(isEmpty$ | async)" class="space-y-2">
-          <div
-            *ngFor="
-              let item of (cartState$ | async)?.items;
-              trackBy: trackByItemId
-            "
-            class="group grid grid-cols-[40px_1fr_auto] gap-x-2.5 gap-y-1.5 p-2.5 rounded-md border border-border bg-surface hover:bg-muted/30 hover:border-primary/30 transition-all duration-200"
-          >
-            <!-- Product Image -->
-            <div
-              class="row-span-1 w-10 h-10 shrink-0 bg-muted rounded-md overflow-hidden relative border border-border/50"
-            >
-              <img
-                *ngIf="item.product.image_url || item.product.image"
-                [src]="item.product.image_url || item.product.image"
-                [alt]="item.product.name"
-                class="absolute inset-0 w-full h-full object-cover"
-                (error)="handleImageError($event)"
-              />
+        @if (!(isEmpty$ | async)) {
+          <div class="space-y-2">
+            @for (
+              item of (cartState$ | async)?.items; track trackByItemId($index,
+              item)) {
               <div
-                *ngIf="!item.product.image_url && !item.product.image"
-                class="absolute inset-0 flex items-center justify-center text-text-secondary"
-              >
-                <app-icon name="image" [size]="14"></app-icon>
-              </div>
-            </div>
-
-            <!-- Item Info -->
-            <div class="min-w-0 flex flex-col justify-center">
-              <h4 class="text-sm font-semibold text-text-primary truncate leading-tight">
-                {{ item.product.name }}
-              </h4>
-              <p
-                *ngIf="item.variant_display_name"
-                class="text-[10px] text-primary font-medium truncate leading-tight"
-              >
-                {{ item.variant_display_name }}
-              </p>
-              <div class="flex items-center gap-2 mt-0.5">
-                <span class="text-[10px] text-text-muted">
-                  Base: {{ formatCurrency(item.unitPrice) }}{{ item.is_weight_product ? '/' + (item.weight_unit || 'kg') : '' }}
-                </span>
-                <span
-                  *ngIf="item.is_weight_product && item.weight"
-                  class="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-semibold bg-blue-100 text-blue-800"
+                class="group grid grid-cols-[40px_1fr_auto] gap-x-2.5 gap-y-1.5 p-2.5 rounded-md border border-border bg-surface hover:bg-muted/30 hover:border-primary/30 transition-all duration-200"
                 >
-                  {{ item.weight }} {{ item.weight_unit || 'kg' }}
-                </span>
-                <span
-                  *ngIf="getItemTaxAmount(item) > 0"
-                  class="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-medium bg-orange-100 text-orange-800"
-                >
-                  +{{ formatCurrency(getItemTaxAmount(item)) }}
-                </span>
-              </div>
-            </div>
-
-            <!-- Remove Button -->
-            <button
-              (click)="removeFromCart(item.id)"
-              class="p-1 rounded-sm text-text-secondary hover:text-destructive hover:bg-destructive/10 transition-colors self-start"
-              title="Eliminar"
-            >
-              <app-icon name="trash-2" [size]="14"></app-icon>
-            </button>
-
-            <!-- Actions Row: Quantity + Total -->
-            <div
-              class="col-span-3 flex items-center justify-between pt-2 mt-1 border-t border-border/50"
-            >
-              <!-- Weight products: show clickable weight badge instead of quantity control -->
-              <ng-container *ngIf="item.is_weight_product; else unitQuantity">
+                <!-- Product Image -->
+                <div
+                  class="row-span-1 w-10 h-10 shrink-0 bg-muted rounded-md overflow-hidden relative border border-border/50"
+                  >
+                  @if (item.product.image_url || item.product.image) {
+                    <img
+                      [src]="item.product.image_url || item.product.image"
+                      [alt]="item.product.name"
+                      class="absolute inset-0 w-full h-full object-cover"
+                      (error)="handleImageError($event)"
+                      />
+                  }
+                  @if (!item.product.image_url && !item.product.image) {
+                    <div
+                      class="absolute inset-0 flex items-center justify-center text-text-secondary"
+                      >
+                      <app-icon name="image" [size]="14"></app-icon>
+                    </div>
+                  }
+                </div>
+                <!-- Item Info -->
+                <div class="min-w-0 flex flex-col justify-center">
+                  <h4 class="text-sm font-semibold text-text-primary truncate leading-tight">
+                    {{ item.product.name }}
+                  </h4>
+                  @if (item.variant_display_name) {
+                    <p
+                      class="text-[10px] text-primary font-medium truncate leading-tight"
+                      >
+                      {{ item.variant_display_name }}
+                    </p>
+                  }
+                  <div class="flex items-center gap-2 mt-0.5">
+                    <span class="text-[10px] text-text-muted">
+                      Base: {{ formatCurrency(item.unitPrice) }}{{ item.is_weight_product ? '/' + (item.weight_unit || 'kg') : '' }}
+                    </span>
+                    @if (item.is_weight_product && item.weight) {
+                      <span
+                        class="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-semibold bg-blue-100 text-blue-800"
+                        >
+                        {{ item.weight }} {{ item.weight_unit || 'kg' }}
+                      </span>
+                    }
+                    @if (getItemTaxAmount(item) > 0) {
+                      <span
+                        class="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-medium bg-orange-100 text-orange-800"
+                        >
+                        +{{ formatCurrency(getItemTaxAmount(item)) }}
+                      </span>
+                    }
+                  </div>
+                </div>
+                <!-- Remove Button -->
                 <button
-                  (click)="editWeight(item)"
-                  class="flex items-center gap-1.5 px-2 py-1 bg-blue-50 rounded-lg border border-blue-200 hover:bg-blue-100 hover:border-blue-300 transition-colors cursor-pointer"
-                  title="Editar peso"
-                >
-                  <app-icon name="scale" [size]="14" class="text-blue-600"></app-icon>
-                  <span class="text-xs font-bold text-blue-700">{{ item.weight }} {{ item.weight_unit || 'kg' }}</span>
-                  <app-icon name="edit" [size]="10" class="text-blue-400"></app-icon>
+                  (click)="removeFromCart(item.id)"
+                  class="p-1 rounded-sm text-text-secondary hover:text-destructive hover:bg-destructive/10 transition-colors self-start"
+                  title="Eliminar"
+                  >
+                  <app-icon name="trash-2" [size]="14"></app-icon>
                 </button>
-              </ng-container>
-              <ng-template #unitQuantity>
-                <app-quantity-control
-                  [value]="item.quantity"
-                  [min]="1"
-                  [max]="item.product.track_inventory !== false ? item.product.stock : 999"
-                  [editable]="true"
-                  [size]="'sm'"
-                  (valueChange)="updateQuantity(item.id, $event)"
-                ></app-quantity-control>
-              </ng-template>
-              <span class="text-sm font-extrabold text-primary">
-                {{ formatCurrency(item.totalPrice) }}
-              </span>
-            </div>
+                <!-- Actions Row: Quantity + Total -->
+                <div
+                  class="col-span-3 flex items-center justify-between pt-2 mt-1 border-t border-border/50"
+                  >
+                  <!-- Weight products: show clickable weight badge instead of quantity control -->
+                  @if (item.is_weight_product) {
+                    <button
+                      (click)="editWeight(item)"
+                      class="flex items-center gap-1.5 px-2 py-1 bg-blue-50 rounded-lg border border-blue-200 hover:bg-blue-100 hover:border-blue-300 transition-colors cursor-pointer"
+                      title="Editar peso"
+                      >
+                      <app-icon name="scale" [size]="14" class="text-blue-600"></app-icon>
+                      <span class="text-xs font-bold text-blue-700">{{ item.weight }} {{ item.weight_unit || 'kg' }}</span>
+                      <app-icon name="edit" [size]="10" class="text-blue-400"></app-icon>
+                    </button>
+                  } @else {
+                    <app-quantity-control
+                      [value]="item.quantity"
+                      [min]="1"
+                      [max]="item.product.track_inventory !== false ? item.product.stock : 999"
+                      [editable]="true"
+                      [size]="'sm'"
+                      (valueChange)="updateQuantity(item.id, $event)"
+                    ></app-quantity-control>
+                  }
+                  <span class="text-sm font-extrabold text-primary">
+                    {{ formatCurrency(item.totalPrice) }}
+                  </span>
+                </div>
+              </div>
+            }
           </div>
-        </div>
+        }
       </div>
     </div>
-  `,
+    `,
   styles: [
     `
       :host {
@@ -578,6 +587,11 @@ export class PosCartComponent implements OnInit, OnDestroy {
   }
 
   saveCart(): void {
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.saveDraft.emit();
   }
 
@@ -588,6 +602,11 @@ export class PosCartComponent implements OnInit, OnDestroy {
       return;
     }
 
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.checkout.emit();
   }
 

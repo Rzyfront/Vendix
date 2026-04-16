@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { debounceTime, distinctUntilChanged, Subject, takeUntil } from 'rxjs';
 import {
   Role,
@@ -42,7 +42,6 @@ import {
   selector: 'app-roles',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     RoleCreateModalComponent,
@@ -55,8 +54,8 @@ import {
     SelectorComponent,
     ResponsiveDataViewComponent,
     PaginationComponent,
-    CardComponent,
-  ],
+    CardComponent
+],
   templateUrl: './roles.component.html',
   styleUrls: ['./roles.component.css'],
 })

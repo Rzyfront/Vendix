@@ -1,11 +1,11 @@
 import {
-    Component,
-    Input,
-    Output,
-    EventEmitter,
-    forwardRef,
+  Component,
+  Input,
+  forwardRef,
+  input,
+  output
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
     ControlValueAccessor,
     NG_VALUE_ACCESSOR,
@@ -17,7 +17,7 @@ import { ToggleComponent } from '../toggle/toggle.component';
 @Component({
     selector: 'app-setting-toggle',
     standalone: true,
-    imports: [CommonModule, FormsModule, ReactiveFormsModule, ToggleComponent],
+    imports: [FormsModule, ReactiveFormsModule, ToggleComponent],
     providers: [
         {
             provide: NG_VALUE_ACCESSOR,
@@ -30,17 +30,21 @@ import { ToggleComponent } from '../toggle/toggle.component';
       class="flex items-center justify-between p-2 mt-3 bg-gray-50 border border-gray-100 rounded-xl transition-all hover:bg-gray-100/50 cursor-pointer select-none"
       [class.opacity-50]="disabled"
       [class.cursor-not-allowed]="disabled"
-      [class.new-highlight]="isNew"
+      [class.new-highlight]="isNew()"
       (click)="onToggle(!value)"
-    >
+      >
       <div class="flex-1 mr-4">
         <label class="text-xs font-semibold text-gray-700 block">
-          {{ label }}
-          <span *ngIf="isNew" class="new-badge">Nuevo</span>
+          {{ label() }}
+          @if (isNew()) {
+            <span class="new-badge">Nuevo</span>
+          }
         </label>
-        <p *ngIf="description" class="text-[10px] text-gray-500 leading-tight mt-0.5">
-          {{ description }}
-        </p>
+        @if (description) {
+          <p class="text-[10px] text-gray-500 leading-tight mt-0.5">
+            {{ description }}
+          </p>
+        }
       </div>
       <app-toggle
         class="shrink-0"
@@ -50,7 +54,7 @@ import { ToggleComponent } from '../toggle/toggle.component';
         (click)="$event.stopPropagation()"
       ></app-toggle>
     </div>
-  `,
+    `,
     styles: [`
       :host {
         cursor: pointer;
@@ -74,12 +78,12 @@ import { ToggleComponent } from '../toggle/toggle.component';
     `],
 })
 export class SettingToggleComponent implements ControlValueAccessor {
-    @Input() label: string = '';
+    readonly label = input<string>('');
     @Input() description?: string;
     @Input() disabled = false;
-    @Input() isNew = false;
+    readonly isNew = input(false);
 
-    @Output() changed = new EventEmitter<boolean>();
+    readonly changed = output<boolean>();
 
     value = false;
 

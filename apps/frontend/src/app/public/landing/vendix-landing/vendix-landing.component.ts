@@ -5,7 +5,7 @@ import {
   ElementRef,
   Renderer2,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { RouterModule } from '@angular/router';
 import { TenantFacade } from '../../../core/store/tenant/tenant.facade';
 import { takeUntil } from 'rxjs/operators';
@@ -17,7 +17,7 @@ import { IconComponent } from '../../../shared/components/icon/icon.component';
 @Component({
   selector: 'app-vendix-landing',
   standalone: true,
-  imports: [CommonModule, RouterModule, HeroCarouselComponent, IconComponent],
+  imports: [RouterModule, HeroCarouselComponent, IconComponent],
   templateUrl: './vendix-landing.component.html',
   styleUrls: ['./vendix-landing.component.scss'],
 })

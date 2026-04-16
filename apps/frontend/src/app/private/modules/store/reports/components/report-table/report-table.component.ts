@@ -1,11 +1,11 @@
 import { Component, input, computed } from '@angular/core';
-import { CommonModule, CurrencyPipe, DatePipe, DecimalPipe, PercentPipe } from '@angular/common';
+import { CurrencyPipe, DatePipe, DecimalPipe, PercentPipe } from '@angular/common';
 import { ReportColumn } from '../../interfaces/report.interface';
 
 @Component({
   selector: 'vendix-report-table',
   standalone: true,
-  imports: [CommonModule],
+  imports: [],
   providers: [CurrencyPipe, DatePipe, DecimalPipe, PercentPipe],
   templateUrl: './report-table.component.html',
   styleUrls: ['./report-table.component.scss'],

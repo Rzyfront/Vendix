@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { Subject, takeUntil } from 'rxjs';
 import { StoreRole, StoreRoleStats } from './interfaces/store-role.interface';
 import { StoreRolesService } from './services/store-roles.service';
@@ -21,7 +21,6 @@ import {
   selector: 'app-store-roles-settings',
   standalone: true,
   imports: [
-    CommonModule,
     StoreRoleCreateModalComponent,
     StoreRoleEditModalComponent,
     StoreRolePermissionsModalComponent,
@@ -89,16 +88,14 @@ import {
         (sort)="onSortChange($event)"
       ></app-store-roles-list>
 
-      <!-- Create Role Modal -->
-      @if (showCreateModal) {
+      @defer (when showCreateModal) {
         <app-store-role-create-modal
           [(isOpen)]="showCreateModal"
           (onRoleCreated)="onRoleCreated()"
         />
       }
 
-      <!-- Edit Role Modal -->
-      @if (showEditModal && currentRole) {
+      @defer (when showEditModal && currentRole) {
         <app-store-role-edit-modal
           [role]="currentRole"
           [(isOpen)]="showEditModal"
@@ -106,8 +103,7 @@ import {
         />
       }
 
-      <!-- Permissions Modal -->
-      @if (showPermissionsModal && permissionsRole) {
+      @defer (when showPermissionsModal && permissionsRole) {
         <app-store-role-permissions-modal
           [role]="permissionsRole"
           [(isOpen)]="showPermissionsModal"
@@ -204,7 +200,10 @@ export class StoreRolesSettingsComponent implements OnInit, OnDestroy {
     this.applyFilters();
   }
 
-  onSortChange(event: { column: string; direction: 'asc' | 'desc' | null }): void {
+  onSortChange(event: {
+    column: string;
+    direction: 'asc' | 'desc' | null;
+  }): void {
     if (!event.direction) return;
     this.filteredRoles = [...this.filteredRoles].sort((a: any, b: any) => {
       const valA = a[event.column];

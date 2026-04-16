@@ -1,5 +1,5 @@
 import { Component, OnInit, OnDestroy, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   ChartComponent,
   IconComponent,
@@ -17,7 +17,7 @@ import { takeUntil } from 'rxjs/operators';
 @Component({
   selector: 'app-organization-dashboard',
   standalone: true,
-  imports: [CommonModule, ChartComponent, IconComponent, StatsComponent],
+  imports: [ChartComponent, IconComponent, StatsComponent],
   templateUrl: './dashboard.component.html',
   styleUrls: ['./dashboard.component.scss'],
 })
