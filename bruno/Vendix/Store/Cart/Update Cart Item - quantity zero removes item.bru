@@ -1,0 +1,32 @@
+meta {
+  name: Update Cart Item - quantity zero removes item
+  type: http
+  seq: 1
+}
+
+put {
+  url: http://{{baseUrl}}/ecommerce/cart/items/{{cartItemId}}
+  body: json
+  headers: {
+    Authorization: Bearer {{customerToken}}
+    Content-Type: application/json
+  }
+}
+
+body:json {
+  {
+    "quantity": 0
+  }
+}
+
+tests {
+  test("update with quantity 0 removes item", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.equal(true);
+  });
+
+  test("removed item is not in cart", function() {
+    const itemIds = res.body.data.items.map(i => i.id);
+    expect(itemIds).to.not.include(parseInt(vars.get("cartItemId")));
+  });
+}

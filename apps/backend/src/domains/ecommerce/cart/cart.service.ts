@@ -172,6 +172,10 @@ export class CartService {
   }
 
   async updateItem(item_id: number, dto: UpdateCartItemDto) {
+    if (dto.quantity === 0) {
+      return this.removeItem(item_id);
+    }
+
     const cart = await this.prisma.carts.findFirst({});
 
     if (!cart) {
