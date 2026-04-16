@@ -348,12 +348,24 @@ export const ErrorCodes = {
   PROD_SVC_001: {
     code: 'PROD_SVC_001',
     httpStatus: 400,
-    devMessage: 'Los servicios no pueden tener atributos físicos (peso, dimensiones, inventario)',
+    devMessage:
+      'Los servicios no pueden tener atributos físicos (peso, dimensiones, inventario)',
   },
   PROD_SVC_002: {
     code: 'PROD_SVC_002',
     httpStatus: 400,
     devMessage: 'No se puede cambiar el tipo de un producto existente',
+  },
+  PROD_VALIDATE_002: {
+    code: 'PROD_VALIDATE_002',
+    httpStatus: 400,
+    devMessage:
+      'El producto debe tener un SKU configurado antes de activar variantes',
+  },
+  PROD_VALIDATE_003: {
+    code: 'PROD_VALIDATE_003',
+    httpStatus: 400,
+    devMessage: 'El SKU de la variante no puede estar vacío',
   },
 
   // Orders
@@ -1506,6 +1518,35 @@ export const ErrorCodes = {
     httpStatus: 500,
     devMessage: 'Failed to collect server metrics',
   },
+
+  // Metadata Fields
+  META_FIND_001: { code: 'META_FIND_001', httpStatus: 404, devMessage: 'Metadata field not found' },
+  META_CREATE_001: { code: 'META_CREATE_001', httpStatus: 400, devMessage: 'Error creating metadata field' },
+  META_DUP_001: { code: 'META_DUP_001', httpStatus: 409, devMessage: 'Duplicate metadata field key' },
+  META_VALIDATE_001: { code: 'META_VALIDATE_001', httpStatus: 400, devMessage: 'Invalid metadata value' },
+  META_DEL_001: { code: 'META_DEL_001', httpStatus: 409, devMessage: 'Metadata field is used in a template' },
+
+  // Data Collection
+  DCOL_FIND_001: { code: 'DCOL_FIND_001', httpStatus: 404, devMessage: 'Data collection template not found' },
+  DCOL_FIND_002: { code: 'DCOL_FIND_002', httpStatus: 404, devMessage: 'Submission not found' },
+  DCOL_TOKEN_001: { code: 'DCOL_TOKEN_001', httpStatus: 404, devMessage: 'Invalid or expired token' },
+  DCOL_TOKEN_002: { code: 'DCOL_TOKEN_002', httpStatus: 400, devMessage: 'Submission already completed' },
+  DCOL_CREATE_001: { code: 'DCOL_CREATE_001', httpStatus: 400, devMessage: 'Error creating submission' },
+  DCOL_DELETE_001: { code: 'DCOL_DELETE_001', httpStatus: 400, devMessage: 'Cannot delete template with existing submissions' },
+
+  // Customer History
+  CUST_HISTORY_001: { code: 'CUST_HISTORY_001', httpStatus: 404, devMessage: 'Customer history not found' },
+  CUST_HISTORY_002: { code: 'CUST_HISTORY_002', httpStatus: 404, devMessage: 'Booking not found in history' },
+  CUST_HISTORY_003: { code: 'CUST_HISTORY_003', httpStatus: 404, devMessage: 'Note not found' },
+
+  // Booking Confirmation
+  BOOK_CONFIRM_001: { code: 'BOOK_CONFIRM_001', httpStatus: 404, devMessage: 'Invalid or expired confirmation token' },
+  BOOK_CONFIRM_002: { code: 'BOOK_CONFIRM_002', httpStatus: 400, devMessage: 'Token already used' },
+  BOOK_CHECKIN_001: { code: 'BOOK_CHECKIN_001', httpStatus: 400, devMessage: 'Booking not in confirmed state' },
+  BOOK_CHECKIN_002: { code: 'BOOK_CHECKIN_002', httpStatus: 400, devMessage: 'Already checked in' },
+
+  // Email Templates
+  EMAIL_TPL_001: { code: 'EMAIL_TPL_001', httpStatus: 404, devMessage: 'Email template not found' },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
 export type ErrorCodeKey = keyof typeof ErrorCodes;

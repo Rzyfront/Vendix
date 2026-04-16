@@ -7,15 +7,15 @@ export class DashboardService {
 
   async getDashboardStats() {
     const now = new Date();
-    const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
-    const lastMonthStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const lastMonthEnd = new Date(now.getFullYear(), now.getMonth(), 0);
+    const currentMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
+    const lastMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
+    const lastMonthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0));
 
     // Start of current week (Monday)
-    const dayOfWeek = now.getDay();
+    const dayOfWeek = now.getUTCDay();
     const startOfWeek = new Date(now);
-    startOfWeek.setDate(now.getDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
-    startOfWeek.setHours(0, 0, 0, 0);
+    startOfWeek.setUTCDate(now.getUTCDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+    startOfWeek.setUTCHours(0, 0, 0, 0);
 
     // Get current stats and last month stats for growth calculation
     const [
@@ -130,11 +130,11 @@ export class DashboardService {
     const weeklyData = await Promise.all(
       weekDays.map(async (day, index) => {
         const dayDate = new Date(startOfWeek);
-        dayDate.setDate(startOfWeek.getDate() + index);
-        dayDate.setHours(0, 0, 0, 0);
+        dayDate.setUTCDate(startOfWeek.getUTCDate() + index);
+        dayDate.setUTCHours(0, 0, 0, 0);
 
         const nextDayDate = new Date(dayDate);
-        nextDayDate.setDate(dayDate.getDate() + 1);
+        nextDayDate.setUTCDate(dayDate.getUTCDate() + 1);
 
         const [dayOrgs, dayUsers, dayStores] = await Promise.all([
           this.prisma.organizations.count({

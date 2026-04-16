@@ -53,3 +53,46 @@ export const selectError = createSelector(
   selectReportsState,
   (state) => state.error,
 );
+
+export const selectIsSummary = createSelector(
+  selectReportsState,
+  (state) => state.isSummary,
+);
+
+export const selectSummaryData = createSelector(
+  selectReportsState,
+  (state) => state.summaryData,
+);
+
+export const selectCurrentPage = createSelector(
+  selectReportsState,
+  (state) => state.currentPage,
+);
+
+export const selectTotalPages = createSelector(
+  selectReportsState,
+  (state) => state.totalPages,
+);
+
+export const selectTotalItems = createSelector(
+  selectReportsState,
+  (state) => state.totalItems,
+);
+
+export const selectItemsPerPage = createSelector(
+  selectReportsState,
+  (state) => state.itemsPerPage,
+);
+
+export const selectPagination = createSelector(
+  selectCurrentPage,
+  selectTotalPages,
+  selectTotalItems,
+  selectItemsPerPage,
+  (currentPage, totalPages, totalItems, itemsPerPage) => ({
+    currentPage,
+    totalPages,
+    totalItems,
+    itemsPerPage,
+  }),
+);

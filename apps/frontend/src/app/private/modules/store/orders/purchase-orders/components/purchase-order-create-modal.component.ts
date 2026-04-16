@@ -2,6 +2,7 @@ import { Component, Input, Output, EventEmitter, OnInit, inject } from '@angular
 import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, FormArray, Validators, ReactiveFormsModule } from '@angular/forms';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
+import { toLocalDateString } from '../../../../../../shared/utils/date.util';
 
 // Shared Components
 import {
@@ -232,7 +233,7 @@ export class PurchaseOrderCreateModalComponent implements OnInit {
     return this.fb.group({
       supplier_id: [null, Validators.required],
       location_id: [null, Validators.required],
-      order_date: [new Date().toISOString().split('T')[0]],
+      order_date: [toLocalDateString()],
       expected_date: [''],
       shipping_cost: [0],
       notes: [''],

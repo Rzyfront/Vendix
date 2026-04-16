@@ -30,6 +30,7 @@ import {
   CreateStoreDocumentDto,
   UpdateStoreDocumentDto,
 } from '../../interfaces/store-legal-document.interface';
+import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
 
 @Component({
   selector: 'app-store-legal-document-modal',
@@ -307,6 +308,6 @@ export class StoreLegalDocumentModalComponent implements OnInit, OnChanges {
 
   private formatDateForInput(date?: Date | string): string | null {
     if (!date) return null;
-    return new Date(date).toISOString().split('T')[0];
+    return toUTCDateString(new Date(date));
   }
 }

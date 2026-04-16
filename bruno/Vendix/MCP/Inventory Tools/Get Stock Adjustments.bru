@@ -1,0 +1,45 @@
+meta {
+  name: Get Stock Adjustments
+  type: http
+  seq: 7
+}
+
+post {
+  url: {{baseUrl}}/mcp/tools/call
+  body: json {
+    "name": "get_stock_adjustments",
+    "arguments": {
+      "limit": 10
+    }
+  }
+  headers: {
+    Authorization: Bearer {{authToken}}
+    Content-Type: application/json
+  }
+}
+
+tests {
+  test("get_stock_adjustments returns success", function() {
+    expect(res.status).to.equal(200);
+    const parsed = JSON.parse(res.body.content[0].text);
+    expect(parsed).to.have.property('summary');
+    expect(parsed).to.have.property('data');
+    expect(parsed).to.have.property('total');
+    expect(parsed).to.have.property('has_more');
+  });
+
+  test("Each adjustment has required fields", function() {
+    const parsed = JSON.parse(res.body.content[0].text);
+    if (parsed.data.length > 0) {
+      const adj = parsed.data[0];
+      expect(adj).to.have.property('id');
+      expect(adj).to.have.property('product');
+      expect(adj).to.have.property('location');
+      expect(adj).to.have.property('type');
+      expect(adj).to.have.property('quantity_before');
+      expect(adj).to.have.property('quantity_after');
+      expect(adj).to.have.property('quantity_change');
+      expect(adj).to.have.property('status');
+    }
+  });
+}

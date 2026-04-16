@@ -47,6 +47,9 @@ import { CommissionsModule } from './commissions/commissions.module';
 import { PaymentLinksModule } from './payment-links/payment-links.module';
 import { CustomerQueueModule } from './customer-queue/customer-queue.module';
 import { InvoiceDataRequestsModule } from './invoicing/invoice-data-requests/invoice-data-requests.module';
+import { MetadataModule } from './metadata/metadata.module';
+import { DataCollectionModule } from './data-collection/data-collection.module';
+import { ConsultationsModule } from './consultations/consultations.module';
 
 @Module({
   imports: [
@@ -96,6 +99,9 @@ import { InvoiceDataRequestsModule } from './invoicing/invoice-data-requests/inv
     PaymentLinksModule,
     CustomerQueueModule,
     InvoiceDataRequestsModule,
+    MetadataModule,
+    DataCollectionModule,
+    ConsultationsModule,
   ],
   providers: [StorePrismaService],
   exports: [StorePrismaService],

@@ -9,6 +9,7 @@ import { ModalComponent } from '../../../../../../../shared/components/modal/mod
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
 import { SelectorComponent, SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
+import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
 
 @Component({
   selector: 'vendix-payroll-run-create',
@@ -109,8 +110,8 @@ export class PayrollRunCreateComponent {
     this.loading$ = this.store.select(selectPayrollRunsLoading);
 
     const today = new Date();
-    const firstDay = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
-    const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
+    const firstDay = toLocalDateString(new Date(today.getFullYear(), today.getMonth(), 1));
+    const lastDay = toLocalDateString(new Date(today.getFullYear(), today.getMonth() + 1, 0));
 
     this.payrollRunForm = this.fb.group({
       frequency: ['monthly', [Validators.required]],
@@ -145,8 +146,8 @@ export class PayrollRunCreateComponent {
 
   private resetForm(): void {
     const today = new Date();
-    const firstDay = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split('T')[0];
-    const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split('T')[0];
+    const firstDay = toLocalDateString(new Date(today.getFullYear(), today.getMonth(), 1));
+    const lastDay = toLocalDateString(new Date(today.getFullYear(), today.getMonth() + 1, 0));
 
     this.payrollRunForm.reset({
       frequency: 'monthly',

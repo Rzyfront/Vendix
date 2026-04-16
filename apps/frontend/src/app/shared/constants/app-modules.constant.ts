@@ -201,6 +201,11 @@ export const APP_MODULES: { [key: string]: AppModule[]; ORG_ADMIN: AppModule[]; 
           label: 'Rese\u00f1as',
           description: 'Rese\u00f1as de clientes',
         },
+        {
+          key: 'customers_data_collection',
+          label: 'Recolección de Datos',
+          description: 'Campos personalizados y formularios de preconsulta',
+        },
       ],
     },
 

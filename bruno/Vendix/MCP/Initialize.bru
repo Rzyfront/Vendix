@@ -1,0 +1,25 @@
+meta {
+  name: MCP Initialize
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/mcp/initialize
+  body: none
+  headers: {
+    Authorization: Bearer {{authToken}}
+    Content-Type: application/json
+  }
+}
+
+tests {
+  test("MCP server initializes correctly", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('protocolVersion', '2024-11-05');
+    expect(res.body).to.have.property('capabilities');
+    expect(res.body.capabilities).to.have.property('tools');
+    expect(res.body.capabilities).to.have.property('resources');
+    expect(res.body.serverInfo).to.have.property('name', 'vendix-mcp-server');
+  });
+}

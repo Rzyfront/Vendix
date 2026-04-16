@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
+import { Component, Input, Output, EventEmitter, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { TimeRange } from '../../interfaces';
 
@@ -6,10 +6,11 @@ import { TimeRange } from '../../interfaces';
   selector: 'app-time-range-selector',
   standalone: true,
   imports: [CommonModule],
+  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="inline-flex rounded-lg overflow-hidden" style="border: 1px solid var(--color-border);">
       <button
-        *ngFor="let option of options"
+        *ngFor="let option of options; trackBy: trackByValue"
         (click)="select(option.value)"
         class="px-3 py-1.5 text-xs font-medium transition-colors duration-150"
         [style.background]="selected === option.value ? 'var(--color-primary)' : 'var(--color-surface)'"
@@ -31,6 +32,10 @@ export class TimeRangeSelectorComponent {
     { label: '24h', value: '24h' },
     { label: '7d', value: '7d' },
   ];
+
+  trackByValue(index: number, option: { label: string; value: TimeRange }): string {
+    return option.value;
+  }
 
   select(value: TimeRange): void {
     this.rangeChange.emit(value);

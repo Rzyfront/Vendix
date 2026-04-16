@@ -6,8 +6,10 @@ import {
   inject,
   ChangeDetectorRef,
 } from '@angular/core';
+import { HttpClient } from '@angular/common/http';
 import { CommonModule } from '@angular/common';
 import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { map } from 'rxjs/operators';
 import { RouterModule, ActivatedRoute, Router, Params } from '@angular/router';
 import {
   FormBuilder,
@@ -34,6 +36,7 @@ import {
   StickyHeaderComponent,
   StickyHeaderActionButton,
   BadgeComponent,
+  TooltipComponent,
 } from '../../../../../../shared/components';
 import {
   CurrencyPipe,
@@ -59,9 +62,14 @@ import { BrandQuickCreateComponent } from '../../components/brand-quick-create.c
 import { TaxQuickCreateComponent } from '../../components/tax-quick-create.component';
 import { AdjustmentCreateModalComponent } from '../../../inventory/operations/components/adjustment-create-modal.component';
 import { InventoryService } from '../../../inventory/services/inventory.service';
-import { BatchCreateAdjustmentsRequest, PreselectedProduct } from '../../../inventory/interfaces';
+import {
+  BatchCreateAdjustmentsRequest,
+  PreselectedProduct,
+} from '../../../inventory/interfaces';
 import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
+import { ProductUtils } from '../../utils/product.utils';
 import { PromotionsService } from '../../../marketing/promotions/services/promotions.service';
+import { environment } from '../../../../../../../environments/environment';
 
 interface VariantAttribute {
   name: string;
@@ -108,6 +116,7 @@ interface GeneratedVariant {
     StickyHeaderComponent,
     CurrencyPipe,
     BadgeComponent,
+    TooltipComponent,
   ],
   templateUrl: './product-create-page.component.html',
   styles: [
@@ -333,6 +342,14 @@ export class ProductCreatePageComponent implements OnInit {
   private cdr = inject(ChangeDetectorRef);
   private promotionsService = inject(PromotionsService);
   private reservationsService = inject(ReservationsService);
+  private http = inject(HttpClient);
+
+  // Data Collection Templates (for consultation configuration)
+  dataCollectionTemplates: { id: number; name: string; productIds: number[] }[] = [];
+
+  get templateSelectorOptions(): SelectorOption[] {
+    return this.dataCollectionTemplates.map(t => ({ value: t.id, label: t.name }));
+  }
 
   // Provider assignment (for services with requires_booking)
   assignedProviders = signal<ServiceProvider[]>([]);
@@ -398,6 +415,17 @@ export class ProductCreatePageComponent implements OnInit {
     return this.productForm.get('product_type')?.value === 'service';
   }
 
+  get hasDuplicateSkus(): boolean {
+    const skus = this.generatedVariants
+      .map((v) => v.sku?.trim())
+      .filter((s) => s && s.length > 0);
+    return new Set(skus).size !== skus.length;
+  }
+
+  get hasVariantEdits(): boolean {
+    return this.generatedVariants.length > 0;
+  }
+
   onProductTypeChange(value: string): void {
     if (value === 'service') {
       this.productForm.patchValue({
@@ -417,6 +445,10 @@ export class ProductCreatePageComponent implements OnInit {
         booking_mode: null,
         is_recurring: false,
         service_instructions: '',
+        is_consultation: false,
+        send_preconsultation: false,
+        consultation_template_id: null,
+        preconsultation_template_id: null,
       });
     }
     this.cdr.detectChanges();
@@ -428,6 +460,7 @@ export class ProductCreatePageComponent implements OnInit {
   generatedVariants: GeneratedVariant[] = [];
   removedVariantKeys = new Set<string>();
   expandedVariantIndex = signal<number | null>(null);
+  stockTransferMode: 'first' | 'distribute' | 'reset' = 'reset';
 
   // New Attribute Input
   newAttributeName = '';
@@ -479,6 +512,7 @@ export class ProductCreatePageComponent implements OnInit {
     // Asegurar que la moneda esté cargada
     this.currencyService.loadCurrency();
     this.loadCategoriesAndBrands();
+    this.loadDataCollectionTemplates();
 
     // Verificar draft del modal de creación rápida
     const navState = history.state;
@@ -514,15 +548,13 @@ export class ProductCreatePageComponent implements OnInit {
   }
 
   loadPromotionOptions(): void {
-    this.promotionsService
-      .getPromotions({ limit: 200 })
-      .subscribe((res) => {
-        this.promotionOptions = res.data.map((p: any) => ({
-          value: p.id,
-          label: p.name,
-          description: `${p.type === 'percentage' ? p.value + '%' : '$' + p.value} — ${p.state}`,
-        }));
-      });
+    this.promotionsService.getPromotions({ limit: 200 }).subscribe((res) => {
+      this.promotionOptions = res.data.map((p: any) => ({
+        value: p.id,
+        label: p.name,
+        description: `${p.type === 'percentage' ? p.value + '%' : '$' + p.value} — ${p.state}`,
+      }));
+    });
   }
 
   loadProductPromotions(productId: number): void {
@@ -545,6 +577,21 @@ export class ProductCreatePageComponent implements OnInit {
           this.toastService.error('Error al actualizar promociones');
         },
       });
+  }
+
+  private loadDataCollectionTemplates(): void {
+    this.http.get<any>(`${environment.apiUrl}/store/data-collection/templates`).pipe(
+      map((r: any) => r.data || [])
+    ).subscribe({
+      next: (templates: any[]) => {
+        this.dataCollectionTemplates = templates.map((t: any) => ({
+          id: t.id,
+          name: t.name,
+          productIds: (t.products || []).map((p: any) => p.product_id || p.product?.id),
+        }));
+      },
+      error: () => {}, // Silently fail — not critical
+    });
   }
 
   private createForm(): FormGroup {
@@ -587,6 +634,10 @@ export class ProductCreatePageComponent implements OnInit {
       booking_mode: [null],
       is_recurring: [false],
       service_instructions: [''],
+      is_consultation: [false],
+      send_preconsultation: [false],
+      consultation_template_id: [null],
+      preconsultation_template_id: [null],
     });
 
     this.setupPriceCalculations(form);
@@ -665,7 +716,9 @@ export class ProductCreatePageComponent implements OnInit {
         return { name: taxCat.name, rate, amount: basePrice * rate };
       })
       .filter(
-        (entry: { name: string; rate: number; amount: number } | null): entry is { name: string; rate: number; amount: number } =>
+        (
+          entry: { name: string; rate: number; amount: number } | null,
+        ): entry is { name: string; rate: number; amount: number } =>
           entry !== null,
       );
   }
@@ -724,6 +777,10 @@ export class ProductCreatePageComponent implements OnInit {
       booking_mode: product.booking_mode || null,
       is_recurring: product.is_recurring || false,
       service_instructions: product.service_instructions || '',
+      is_consultation: product.is_consultation || false,
+      send_preconsultation: product.send_preconsultation || false,
+      consultation_template_id: product.consultation_template_id || null,
+      preconsultation_template_id: (product as any).preconsultation_template_id || null,
       weight: product.weight || 0,
       dimensions: {
         length: product.dimensions?.length || 0,
@@ -863,28 +920,79 @@ export class ProductCreatePageComponent implements OnInit {
   }
 
   toggleVariants(isChecked: boolean): void {
-    const currentStock = this.productForm.get('stock_quantity')?.value || 0;
+    if (isChecked) {
+      const currentSku = this.productForm.get('sku')?.value;
+      if (!currentSku || currentSku.trim() === '') {
+        this.dialogService
+          .confirm({
+            title: 'SKU requerido',
+            message:
+              'Para activar variantes necesitas configurar un SKU para el producto. Las variantes generan sus SKUs a partir del SKU del producto.',
+            confirmText: 'Entendido',
+            cancelText: 'Cancelar',
+            confirmVariant: 'primary',
+          })
+          .then(() => {});
+        return;
+      }
 
-    // If enabling variants in edit mode with existing stock, show warning
-    if (isChecked && this.isEditMode() && currentStock > 0) {
-      this.dialogService
-        .confirm({
-          title: 'Activar variantes',
-          message: `Al activar variantes, el stock actual (${currentStock} unidades) será reiniciado a 0. Deberás asignar stock a cada variante individualmente.`,
-          confirmText: 'Activar variantes',
-          cancelText: 'Cancelar',
-          confirmVariant: 'danger',
-        })
-        .then((confirmed: boolean) => {
-          if (confirmed) {
+      const currentStock = this.productForm.get('stock_quantity')?.value || 0;
+      if (this.isEditMode() && currentStock > 0) {
+        this.showStockTransferDialog(currentStock);
+        return;
+      }
+
+      this.stockTransferMode = 'reset';
+      this.applyVariantToggle(true);
+    } else {
+      if (this.isEditMode() && this.generatedVariants.length > 0) {
+        const totalVariantStock = this.totalVariantStock;
+        this.dialogService
+          .confirm({
+            title: 'Desactivar variantes',
+            message: `Al desactivar variantes, el stock de todas las variantes (${totalVariantStock} unidades) se transferirá al stock base del producto. Las variantes serán eliminadas.`,
+            confirmText: 'Desactivar variantes',
+            cancelText: 'Cancelar',
+            confirmVariant: 'danger',
+          })
+          .then((confirmed: boolean) => {
+            if (confirmed) {
+              this.applyVariantToggle(false);
+            }
+          });
+        return;
+      }
+      this.applyVariantToggle(false);
+    }
+  }
+
+  private showStockTransferDialog(currentStock: number): void {
+    this.dialogService
+      .confirm({
+        title: 'Transferir stock a variantes',
+        message: `El producto tiene ${currentStock} unidades en stock. ¿Cómo deseas manejar el stock al activar variantes?`,
+        confirmText: 'Asignar todo a la primera variante',
+        cancelText: 'Cancelar',
+        confirmVariant: 'primary',
+      })
+      .then(async (result: boolean) => {
+        if (!result) {
+          const distribute = await this.dialogService.confirm({
+            title: 'Distribuir stock',
+            message: `¿Deseas distribuir las ${currentStock} unidades equitativamente entre todas las variantes?`,
+            confirmText: 'Distribuir equitativamente',
+            cancelText: 'Cancelar',
+            confirmVariant: 'primary',
+          });
+          if (distribute) {
+            this.stockTransferMode = 'distribute';
             this.applyVariantToggle(true);
           }
-          // If not confirmed, don't change hasVariants
-        });
-      return;
-    }
-
-    this.applyVariantToggle(isChecked);
+          return;
+        }
+        this.stockTransferMode = 'first';
+        this.applyVariantToggle(true);
+      });
   }
 
   private applyVariantToggle(isChecked: boolean): void {
@@ -910,7 +1018,11 @@ export class ProductCreatePageComponent implements OnInit {
   // Variant Attribute Management
   addQuickAttribute(name: string): void {
     // Don't add if an attribute with the same name already exists
-    if (this.variantAttributes.some(a => a.name.toLowerCase() === name.toLowerCase())) {
+    if (
+      this.variantAttributes.some(
+        (a) => a.name.toLowerCase() === name.toLowerCase(),
+      )
+    ) {
       this.toastService.warning(`El atributo "${name}" ya existe`);
       return;
     }
@@ -923,8 +1035,8 @@ export class ProductCreatePageComponent implements OnInit {
 
   removeAttribute(index: number): void {
     this.variantAttributes.splice(index, 1);
-    this.removedVariantKeys.clear();
-    this.generateVariants();
+    // Auto-reconcile when attributes change
+    this.reconcileVariants();
   }
 
   addAttributeValue(attrIndex: number, event: any): void {
@@ -932,8 +1044,8 @@ export class ProductCreatePageComponent implements OnInit {
     if (value) {
       if (!this.variantAttributes[attrIndex].values.includes(value)) {
         this.variantAttributes[attrIndex].values.push(value);
-        this.removedVariantKeys.clear();
-        this.generateVariants();
+        // Auto-generate variants when attributes change
+        this.reconcileVariants();
       }
       event.target.value = '';
     }
@@ -941,12 +1053,20 @@ export class ProductCreatePageComponent implements OnInit {
 
   removeAttributeValue(attrIndex: number, valueIndex: number): void {
     this.variantAttributes[attrIndex].values.splice(valueIndex, 1);
-    this.removedVariantKeys.clear();
-    this.generateVariants();
+    // Auto-reconcile when values change
+    this.reconcileVariants();
   }
 
   generateVariants(showToast = false): void {
-    // Filter incomplete attributes
+    // Auto-generation: just reconcile variants from current attributes
+    this.reconcileVariants();
+  }
+
+  /**
+   * Non-destructive variant reconciliation.
+   * Matches existing variants by sorted attribute key, preserving custom edits.
+   */
+  private reconcileVariants(): void {
     const validAttributes = this.variantAttributes.filter(
       (attr) => attr.name && attr.values.length > 0,
     );
@@ -956,63 +1076,69 @@ export class ProductCreatePageComponent implements OnInit {
       return;
     }
 
-    // Validate: warn if any attribute has a name but no values
-    const incomplete = this.variantAttributes.filter(a => a.name && a.values.length === 0);
-    if (incomplete.length > 0 && showToast) {
-      this.toastService.warning(`El atributo "${incomplete[0].name}" no tiene valores`);
-      return;
-    }
-
-    // Generate Cartesian product
     const combinations = this.cartesian(validAttributes.map((a) => a.values));
-
     const basePrice = this.productForm.get('base_price')?.value || 0;
     const baseCost = this.productForm.get('cost_price')?.value || 0;
     const baseMargin = this.productForm.get('profit_margin')?.value || 0;
     const baseSku = this.productForm.get('sku')?.value || '';
 
-    this.generatedVariants = combinations
-      .map((combo) => {
-        const attributes: Record<string, string> = {};
-        let nameSuffix = '';
-        let skuSuffix = '';
+    // Build a lookup of existing variants by stable key
+    const existingMap = new Map<string, GeneratedVariant>();
+    for (const v of this.generatedVariants) {
+      const key = ProductUtils.getVariantKey(v.attributes);
+      existingMap.set(key, v);
+    }
 
-        validAttributes.forEach((attr, index) => {
-          const value = combo[index];
-          attributes[attr.name] = value;
-          nameSuffix += ` ${value}`; // e.g. " Red L"
-          skuSuffix += `-${value.toUpperCase().substring(0, 3)}`; // e.g. "-RED-L"
-        });
+    const newVariants: GeneratedVariant[] = [];
 
-        // Skip variants that were manually removed by the user
-        const key = JSON.stringify(attributes);
-        if (this.removedVariantKeys.has(key)) {
-          return null;
-        }
+    for (const combo of combinations) {
+      const attributes: Record<string, string> = {};
+      let nameSuffix = '';
+      let skuSuffix = '';
 
-        // Check if this variant already exists to preserve custom values
-        const existing = this.generatedVariants.find(
-          (v) => JSON.stringify(v.attributes) === JSON.stringify(attributes),
-        );
+      validAttributes.forEach((attr, index) => {
+        const value = combo[index];
+        attributes[attr.name] = value;
+        nameSuffix += ` ${value}`;
+        skuSuffix += `-${value.toUpperCase().substring(0, 3)}`;
+      });
 
-        if (existing) return existing;
+      const key = ProductUtils.getVariantKey(attributes);
 
-        return {
-          name: `${this.productForm.get('name')?.value || 'Product'}${nameSuffix}`,
-          sku: baseSku ? `${baseSku}${skuSuffix}` : '',
-          price: basePrice,
-          cost_price: baseCost,
-          profit_margin: baseMargin,
-          is_on_sale: false,
-          sale_price: 0,
-          stock: 0,
-          attributes,
-        };
-      })
-      .filter(Boolean) as GeneratedVariant[];
+      // Skip manually removed variants
+      if (this.removedVariantKeys.has(key)) continue;
 
-    if (showToast && this.generatedVariants.length > 0) {
-      this.toastService.success(`Se generaron ${this.generatedVariants.length} variantes`);
+      // Reuse existing variant if attributes match
+      const existing = existingMap.get(key);
+      if (existing) {
+        newVariants.push(existing);
+        continue;
+      }
+
+      // New variant
+      newVariants.push({
+        name: `${this.productForm.get('name')?.value || 'Product'}${nameSuffix}`,
+        sku: baseSku ? `${baseSku}${skuSuffix}` : '',
+        price: basePrice,
+        cost_price: baseCost,
+        profit_margin: baseMargin,
+        is_on_sale: false,
+        sale_price: 0,
+        stock: 0,
+        attributes,
+      });
+    }
+
+    this.generatedVariants = newVariants;
+  }
+
+  onAttributeNameBlur(attrIndex: number): void {
+    const attr = this.variantAttributes[attrIndex];
+    if (!attr || !attr.name.trim()) return;
+
+    // Only reconcile if there are values to generate variants with
+    if (attr.values.length > 0) {
+      this.reconcileVariants();
     }
   }
 
@@ -1108,34 +1234,47 @@ export class ProductCreatePageComponent implements OnInit {
       (attr) => attr.name && attr.values.length > 0,
     );
     if (validAttributes.length === 0) return 0;
-    return validAttributes.reduce((total, attr) => total * attr.values.length, 1);
+    return validAttributes.reduce(
+      (total, attr) => total * attr.values.length,
+      1,
+    );
   }
 
   applyBasePriceToAll(): void {
     const basePrice = Number(this.productForm.get('base_price')?.value || 0);
     const baseCost = Number(this.productForm.get('cost_price')?.value || 0);
-    const baseMargin = Number(this.productForm.get('profit_margin')?.value || 0);
-    this.generatedVariants.forEach(v => {
+    const baseMargin = Number(
+      this.productForm.get('profit_margin')?.value || 0,
+    );
+    this.generatedVariants.forEach((v) => {
       v.price = basePrice;
       v.cost_price = baseCost;
       v.profit_margin = baseMargin;
     });
-    this.toastService.success(`Precio base aplicado a ${this.generatedVariants.length} variantes`);
+    this.toastService.success(
+      `Precio base aplicado a ${this.generatedVariants.length} variantes`,
+    );
   }
 
   applyBaseCostToAll(): void {
     const baseCost = Number(this.productForm.get('cost_price')?.value || 0);
-    const baseMargin = Number(this.productForm.get('profit_margin')?.value || 0);
-    this.generatedVariants.forEach(v => {
+    const baseMargin = Number(
+      this.productForm.get('profit_margin')?.value || 0,
+    );
+    this.generatedVariants.forEach((v) => {
       v.cost_price = baseCost;
       v.profit_margin = baseMargin;
       v.price = Number((baseCost * (1 + baseMargin / 100)).toFixed(2));
     });
-    this.toastService.success(`Costo base aplicado a ${this.generatedVariants.length} variantes`);
+    this.toastService.success(
+      `Costo base aplicado a ${this.generatedVariants.length} variantes`,
+    );
   }
 
   toggleVariantExpand(idx: number): void {
-    this.expandedVariantIndex.update(current => current === idx ? null : idx);
+    this.expandedVariantIndex.update((current) =>
+      current === idx ? null : idx,
+    );
   }
 
   async removeVariant(idx: number): Promise<void> {
@@ -1164,7 +1303,9 @@ export class ProductCreatePageComponent implements OnInit {
 
     // Track removed key so generateVariants() won't recreate it on blur
     if (variant.attributes && Object.keys(variant.attributes).length > 0) {
-      this.removedVariantKeys.add(JSON.stringify(variant.attributes));
+      this.removedVariantKeys.add(
+        ProductUtils.getVariantKey(variant.attributes),
+      );
     }
     this.generatedVariants.splice(idx, 1);
 
@@ -1250,7 +1391,8 @@ export class ProductCreatePageComponent implements OnInit {
   /** Stock total en inventario (disponible + reservado) */
   get totalStockOnHand(): number {
     return (this.product?.stock_levels || []).reduce(
-      (sum, sl: any) => sum + (sl.quantity_available || 0) + (sl.quantity_reserved || 0),
+      (sum, sl: any) =>
+        sum + (sl.quantity_available || 0) + (sl.quantity_reserved || 0),
       0,
     );
   }
@@ -1274,7 +1416,8 @@ export class ProductCreatePageComponent implements OnInit {
   /** Ubicaciones con stock activo (al menos 1 unidad) */
   get activeLocationCount(): number {
     return (this.product?.stock_levels || []).filter(
-      (sl: any) => (sl.quantity_available || 0) + (sl.quantity_reserved || 0) > 0,
+      (sl: any) =>
+        (sl.quantity_available || 0) + (sl.quantity_reserved || 0) > 0,
     ).length;
   }
 
@@ -1304,20 +1447,22 @@ export class ProductCreatePageComponent implements OnInit {
     if (!confirmed) return;
 
     this.isReleasingReservations = true;
-    this.inventoryService.releaseReservationsByProduct(this.product.id).subscribe({
-      next: (response) => {
-        const data = response.data;
-        this.toastService.success(
-          `${data.released_count} reserva(s) liberadas (${data.total_quantity} unidades)`,
-        );
-        this.loadProduct(this.productId!);
-        this.isReleasingReservations = false;
-      },
-      error: (error) => {
-        this.toastService.error('Error al liberar reservas: ' + error);
-        this.isReleasingReservations = false;
-      },
-    });
+    this.inventoryService
+      .releaseReservationsByProduct(this.product.id)
+      .subscribe({
+        next: (response) => {
+          const data = response.data;
+          this.toastService.success(
+            `${data.released_count} reserva(s) liberadas (${data.total_quantity} unidades)`,
+          );
+          this.loadProduct(this.productId!);
+          this.isReleasingReservations = false;
+        },
+        error: (error) => {
+          this.toastService.error('Error al liberar reservas: ' + error);
+          this.isReleasingReservations = false;
+        },
+      });
   }
 
   triggerFileUpload(): void {
@@ -1494,6 +1639,39 @@ export class ProductCreatePageComponent implements OnInit {
       return;
     }
 
+    // Variant-specific validations
+    if (this.hasVariants) {
+      // Must have at least one variant
+      if (this.generatedVariants.length === 0) {
+        this.toastService.error(
+          'Debes crear al menos una variante. Agrega atributos con valores para generar variantes automáticamente.',
+          'Variantes requeridas',
+        );
+        return;
+      }
+
+      // Check for duplicate SKUs
+      if (this.hasDuplicateSkus) {
+        this.toastService.error(
+          'Hay SKUs duplicados entre las variantes. Cada variante debe tener un SKU único.',
+          'SKUs duplicados',
+        );
+        return;
+      }
+
+      // Check for empty SKUs in variants
+      const emptySkuVariants = this.generatedVariants.filter(
+        (v) => !v.sku || v.sku.trim() === '',
+      );
+      if (emptySkuVariants.length > 0) {
+        this.toastService.error(
+          `${emptySkuVariants.length} variante(s) no tienen SKU configurado. Cada variante necesita un SKU único.`,
+          'SKU requerido',
+        );
+        return;
+      }
+    }
+
     this.isSubmitting.set(true);
     const formValue = this.productForm.value;
 
@@ -1545,6 +1723,10 @@ export class ProductCreatePageComponent implements OnInit {
         booking_mode: formValue.booking_mode || undefined,
         is_recurring: !!formValue.is_recurring,
         service_instructions: formValue.service_instructions || undefined,
+        is_consultation: !!formValue.is_consultation,
+        send_preconsultation: !!formValue.send_preconsultation,
+        consultation_template_id: formValue.consultation_template_id || null,
+        preconsultation_template_id: formValue.preconsultation_template_id || null,
       }),
       images: images.length > 0 ? images : undefined,
       weight: isServiceType
@@ -1552,19 +1734,18 @@ export class ProductCreatePageComponent implements OnInit {
         : formValue.weight > 0
           ? Number(formValue.weight)
           : undefined,
-      dimensions:
-        isServiceType
-          ? undefined
-          : formValue.dimensions &&
-              (formValue.dimensions.length > 0 ||
-                formValue.dimensions.width > 0 ||
-                formValue.dimensions.height > 0)
-            ? {
-                length: Number(formValue.dimensions.length),
-                width: Number(formValue.dimensions.width),
-                height: Number(formValue.dimensions.height),
-              }
-            : undefined,
+      dimensions: isServiceType
+        ? undefined
+        : formValue.dimensions &&
+            (formValue.dimensions.length > 0 ||
+              formValue.dimensions.width > 0 ||
+              formValue.dimensions.height > 0)
+          ? {
+              length: Number(formValue.dimensions.length),
+              width: Number(formValue.dimensions.width),
+              height: Number(formValue.dimensions.height),
+            }
+          : undefined,
     };
 
     // Add Variants - ALWAYS send the array so the backend can handle the toggle
@@ -1581,6 +1762,7 @@ export class ProductCreatePageComponent implements OnInit {
         sale_price: Number(v.sale_price),
         stock_quantity: formValue.track_inventory ? Number(v.stock) : undefined,
         attributes: v.attributes,
+        image_id: v.image_id ?? undefined,
         variant_image_url: v.image_url?.startsWith('data:')
           ? v.image_url
           : undefined,
@@ -1596,13 +1778,17 @@ export class ProductCreatePageComponent implements OnInit {
       productData.variants = [];
     }
 
+    if (this.isEditMode()) {
+      productData.stock_transfer_mode = this.stockTransferMode;
+    }
+
     const request$ =
       this.isEditMode() && this.productId
         ? this.productsService.updateProduct(this.productId, productData)
         : this.productsService.createProduct(productData);
 
     request$.subscribe({
-      next: () => {
+      next: (savedProduct: Product) => {
         this.toastService.success(
           this.isEditMode()
             ? 'Producto actualizado correctamente'
@@ -1703,7 +1889,11 @@ export class ProductCreatePageComponent implements OnInit {
 
   get adjustmentPreselectedProduct(): PreselectedProduct | null {
     if (!this.product) return null;
-    return { id: this.product.id, name: this.product.name, sku: this.product.sku ?? null };
+    return {
+      id: this.product.id,
+      name: this.product.name,
+      sku: this.product.sku ?? null,
+    };
   }
 
   // Adjustment Modal
@@ -1713,7 +1903,10 @@ export class ProductCreatePageComponent implements OnInit {
       this.inventoryService.getLocations().subscribe({
         next: (response) => {
           const locations = response.data || [];
-          this.adjustmentLocationOptions = locations.map((l: any) => ({ value: l.id, label: l.name }));
+          this.adjustmentLocationOptions = locations.map((l: any) => ({
+            value: l.id,
+            label: l.name,
+          }));
         },
         error: () => {},
       });
@@ -1740,7 +1933,9 @@ export class ProductCreatePageComponent implements OnInit {
     this.isAdjusting = true;
     this.inventoryService.batchCreateAdjustments(dto).subscribe({
       next: () => {
-        this.toastService.success('Ajustes de inventario creados como borrador');
+        this.toastService.success(
+          'Ajustes de inventario creados como borrador',
+        );
         this.isAdjusting = false;
         this.closeAdjustmentModal();
         if (this.productId) {
@@ -1800,7 +1995,9 @@ export class ProductCreatePageComponent implements OnInit {
       .then((confirmed: boolean) => {
         if (!confirmed) {
           // Revert: el formControl ya cambió vía CVA, restaurar al valor previo
-          this.productForm.get('state')?.setValue(previousState, { emitEvent: false });
+          this.productForm
+            .get('state')
+            ?.setValue(previousState, { emitEvent: false });
           this.cdr.detectChanges();
         }
       });
@@ -1856,28 +2053,32 @@ export class ProductCreatePageComponent implements OnInit {
   addProviderToService(providerIdStr: string | number): void {
     const providerId = Number(providerIdStr);
     if (!providerId || !this.productId) return;
-    this.reservationsService.assignServiceToProvider(providerId, this.productId).subscribe({
-      next: () => {
-        this.toastService.success('Proveedor asignado al servicio');
-        this.loadProviders(this.productId!);
-      },
-      error: () => {
-        this.toastService.error('Error al asignar proveedor');
-      },
-    });
+    this.reservationsService
+      .assignServiceToProvider(providerId, this.productId)
+      .subscribe({
+        next: () => {
+          this.toastService.success('Proveedor asignado al servicio');
+          this.loadProviders(this.productId!);
+        },
+        error: () => {
+          this.toastService.error('Error al asignar proveedor');
+        },
+      });
   }
 
   removeProviderFromService(providerId: number): void {
     if (!this.productId) return;
-    this.reservationsService.removeServiceFromProvider(providerId, this.productId).subscribe({
-      next: () => {
-        this.toastService.success('Proveedor removido del servicio');
-        this.loadProviders(this.productId!);
-      },
-      error: () => {
-        this.toastService.error('Error al remover proveedor');
-      },
-    });
+    this.reservationsService
+      .removeServiceFromProvider(providerId, this.productId)
+      .subscribe({
+        next: () => {
+          this.toastService.success('Proveedor removido del servicio');
+          this.loadProviders(this.productId!);
+        },
+        error: () => {
+          this.toastService.error('Error al remover proveedor');
+        },
+      });
   }
 
   getProviderInitials(provider: ServiceProvider): string {

@@ -246,17 +246,11 @@ export interface PayrollSettlement {
 }
 
 export interface SettlementStats {
-  by_status: {
-    draft: number;
-    calculated: number;
-    approved: number;
-    paid: number;
-    cancelled: number;
-  };
-  totals: {
-    total_gross: number;
-    total_net: number;
-  };
+  by_status: Record<string, { count: number; total_net: number }>;
+  total_gross: number;
+  total_net: number;
+  total_deductions: number;
+  total_count: number;
 }
 
 export interface CreateSettlementDto {

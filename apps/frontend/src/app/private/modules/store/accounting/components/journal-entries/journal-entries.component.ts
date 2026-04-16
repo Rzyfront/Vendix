@@ -28,6 +28,7 @@ import {
   DropdownAction,
   FilterValues,
 } from '../../../../../../shared/components/index';
+import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
 
 interface EntryStats {
   total: number;
@@ -235,7 +236,7 @@ export class JournalEntriesComponent implements OnInit {
       label: 'Fecha',
       sortable: true,
       priority: 1,
-      transform: (val: any) => (val ? new Date(val).toLocaleDateString() : ''),
+      transform: (val: any) => (val ? formatDateOnlyUTC(val) : ''),
     },
     { key: 'entry_type', label: 'Tipo', priority: 2 },
     { key: 'description', label: 'Descripción', sortable: true, priority: 2 },
@@ -291,7 +292,7 @@ export class JournalEntriesComponent implements OnInit {
         label: 'Fecha',
         icon: 'calendar',
         transform: (val: any) =>
-          val ? new Date(val).toLocaleDateString() : '-',
+          val ? formatDateOnlyUTC(val) : '-',
       },
       { key: 'entry_type', label: 'Tipo', icon: 'tag' },
     ],

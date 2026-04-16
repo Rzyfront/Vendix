@@ -10,6 +10,7 @@ import { DataRetentionJob } from './data-retention.job';
 import { CertificateExpiryAlertJob } from './certificate-expiry-alert.job';
 import { InvoiceRetryJob } from './invoice-retry.job';
 import { BookingRemindersJob } from './booking-reminders.job';
+import { BookingConfirmationJob } from './booking-confirmation.job';
 import { EmbeddingSyncJob } from './embedding-sync.job';
 import { ArAgingUpdateJob } from './ar-aging-update.job';
 import { ApAgingUpdateJob } from './ap-aging-update.job';
@@ -33,6 +34,7 @@ import { PrismaModule } from '../prisma/prisma.module';
     CertificateExpiryAlertJob,
     InvoiceRetryJob,
     BookingRemindersJob,
+    BookingConfirmationJob,
     EmbeddingSyncJob,
     ArAgingUpdateJob,
     ApAgingUpdateJob,

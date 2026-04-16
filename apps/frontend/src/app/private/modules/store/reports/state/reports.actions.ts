@@ -14,9 +14,13 @@ export const ReportsActions = createActionGroup({
     'Set Date Range': props<{ dateRange: DateRangeFilter }>(),
     'Set Fiscal Period': props<{ fiscalPeriodId: number | null }>(),
 
+    // Pagination
+    'Set Page': props<{ page: number }>(),
+    'Set Items Per Page': props<{ itemsPerPage: number }>(),
+
     // Load report data
     'Load Report Data': emptyProps(),
-    'Load Report Data Success': props<{ data: any[]; meta?: Record<string, any> }>(),
+    'Load Report Data Success': props<{ data: any[]; meta?: Record<string, any>; isSummary?: boolean; summaryData?: Record<string, any> }>(),
     'Load Report Data Failure': props<{ error: string }>(),
 
     // Export

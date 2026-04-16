@@ -28,6 +28,7 @@ import {
 } from '../../../../shared/components/index';
 import { ConfirmationModalComponent } from '../../../../shared/components/confirmation-modal/confirmation-modal.component';
 import { CardComponent } from '../../../../shared/components';
+import { formatDateOnlyUTC } from '../../../../shared/utils/date.util';
 
 @Component({
   selector: 'app-legal-documents',
@@ -297,7 +298,7 @@ export class LegalDocumentsComponent implements OnInit {
       key: 'effective_date',
       label: 'Fecha Efectiva',
       width: '15%',
-      transform: (val) => new Date(val).toLocaleDateString(),
+      transform: (val) => formatDateOnlyUTC(val),
     },
   ];
 
@@ -338,7 +339,7 @@ export class LegalDocumentsComponent implements OnInit {
       {
         key: 'effective_date',
         label: 'Fecha Efectiva',
-        transform: (val: string) => new Date(val).toLocaleDateString(),
+        transform: (val: string) => formatDateOnlyUTC(val),
       },
     ],
   };

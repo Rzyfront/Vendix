@@ -5,13 +5,14 @@ import { InventoryAnalyticsService } from './services/inventory-analytics.servic
 import { ProductsAnalyticsService } from './services/products-analytics.service';
 import { OverviewAnalyticsService } from './services/overview-analytics.service';
 import { CustomersAnalyticsService } from './services/customers-analytics.service';
+import { FinancialAnalyticsService } from './services/financial-analytics.service';
 import { ResponseModule } from '../../../common/responses/response.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
 
 @Module({
   imports: [ResponseModule, PrismaModule],
   controllers: [AnalyticsController],
-  providers: [SalesAnalyticsService, InventoryAnalyticsService, ProductsAnalyticsService, OverviewAnalyticsService, CustomersAnalyticsService],
-  exports: [SalesAnalyticsService, InventoryAnalyticsService, ProductsAnalyticsService, OverviewAnalyticsService, CustomersAnalyticsService],
+  providers: [SalesAnalyticsService, InventoryAnalyticsService, ProductsAnalyticsService, OverviewAnalyticsService, CustomersAnalyticsService, FinancialAnalyticsService],
+  exports: [SalesAnalyticsService, InventoryAnalyticsService, ProductsAnalyticsService, OverviewAnalyticsService, CustomersAnalyticsService, FinancialAnalyticsService],
 })
 export class AnalyticsModule {}

@@ -63,4 +63,19 @@ export class ProductUtils {
     const quantity = product.stock_quantity || 0;
     return quantity * product.base_price;
   }
+
+  /**
+   * Generate a stable key from variant attributes, sorted by key name.
+   * Unlike JSON.stringify(), this is order-independent.
+   */
+  static getVariantKey(attributes: Record<string, string>): string {
+    return JSON.stringify(
+      Object.keys(attributes)
+        .sort()
+        .reduce((sorted, key) => {
+          sorted[key] = attributes[key];
+          return sorted;
+        }, {} as Record<string, string>)
+    );
+  }
 }

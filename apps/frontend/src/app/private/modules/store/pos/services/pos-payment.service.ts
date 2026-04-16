@@ -341,6 +341,7 @@ export class PosPaymentService {
       update_inventory: true,
       coupon_id: cartState.appliedCoupon?.id,
       coupon_code: cartState.appliedCoupon?.code,
+      booking_ids: cartState.pendingBookings?.map(b => b.id) || [],
     };
 
     // For anonymous sales, use "Consumidor Final" as customer name
@@ -479,6 +480,7 @@ export class PosPaymentService {
       update_inventory: true,
       coupon_id: cartState.appliedCoupon?.id,
       coupon_code: cartState.appliedCoupon?.code,
+      booking_ids: cartState.pendingBookings?.map(b => b.id) || [],
     };
 
     if (creditConfig) {
@@ -597,6 +599,7 @@ export class PosPaymentService {
       update_inventory: true,
       coupon_id: cartState.appliedCoupon?.id,
       coupon_code: cartState.appliedCoupon?.code,
+      booking_ids: cartState.pendingBookings?.map(b => b.id) || [],
     };
 
     return this.http.post<any>(this.apiUrl, credit_data).pipe(
@@ -690,6 +693,7 @@ export class PosPaymentService {
       update_inventory: true,
       coupon_id: cartState.appliedCoupon?.id,
       coupon_code: cartState.appliedCoupon?.code,
+      booking_ids: cartState.pendingBookings?.map(b => b.id) || [],
       installment_terms: {
         num_installments: creditConfig.num_installments,
         frequency: creditConfig.frequency,

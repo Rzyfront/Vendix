@@ -7,21 +7,24 @@ import {
   ElementRef,
   OnDestroy,
   AfterViewInit,
+  ChangeDetectionStrategy,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Chart, registerables } from 'chart.js';
 import 'chartjs-adapter-date-fns';
 import { TimeSeriesPoint } from '../../interfaces';
 import { formatBytes } from '../../../../../../core/utils/format.utils';
+import { CardComponent } from '../../../../../../shared/components/card/card.component';
 
 Chart.register(...registerables);
 
 @Component({
   selector: 'app-metric-chart',
   standalone: true,
-  imports: [CommonModule],
+  imports: [CommonModule, CardComponent],
+  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
-    <div class="rounded-lg p-4" style="background: var(--color-background); border: 1px solid var(--color-border);">
+    <app-card [padding]="false" customClasses="!p-4">
       <div class="flex items-center justify-between mb-3">
         <span class="text-sm font-semibold" style="color: var(--color-text-primary);">{{ label }}</span>
         <span *ngIf="latestValue !== null" class="text-xs font-mono px-2 py-0.5 rounded"
@@ -34,7 +37,7 @@ Chart.register(...registerables);
       <div class="h-52 w-full" [class.hidden]="loading">
         <canvas #chartCanvas></canvas>
       </div>
-    </div>
+    </app-card>
   `,
 })
 export class MetricChartComponent
@@ -78,8 +81,8 @@ export class MetricChartComponent
 
   ngOnChanges(changes: SimpleChanges): void {
     if (this.viewReady && !this.loading) {
-      // Use setTimeout to ensure the canvas is visible in the DOM after [class.hidden] updates
-      setTimeout(() => this.createOrUpdateChart(), 0);
+      // Use requestAnimationFrame to ensure the canvas is visible in the DOM after [class.hidden] updates
+      requestAnimationFrame(() => this.createOrUpdateChart());
     }
   }
 

@@ -1,23 +1,27 @@
-import { Component, input, output, signal, computed, inject, ChangeDetectionStrategy } from '@angular/core';
+import { Component, input, output, signal, computed, inject, effect, ChangeDetectionStrategy } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { ModalComponent, IconComponent, SpinnerComponent } from '../../../../../../shared/components';
+import { Router } from '@angular/router';
+import { ModalComponent, IconComponent, SpinnerComponent, TooltipComponent } from '../../../../../../shared/components';
 import { ToastService } from '../../../../../../shared/components';
 import { ReservationsService } from '../../services/reservations.service';
+import { DataCollectionSubmissionsService } from '../../../data-collection/services/data-collection-submissions.service';
 import { Booking, BookingStatus, AvailabilitySlot } from '../../interfaces/reservation.interface';
 import { finalize } from 'rxjs';
 
 @Component({
   selector: 'app-booking-detail-modal',
   standalone: true,
-  imports: [CommonModule, FormsModule, ModalComponent, IconComponent, SpinnerComponent],
+  imports: [CommonModule, FormsModule, ModalComponent, IconComponent, SpinnerComponent, TooltipComponent],
   templateUrl: './booking-detail-modal.component.html',
   styleUrls: ['./booking-detail-modal.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class BookingDetailModalComponent {
   private reservationsService = inject(ReservationsService);
+  private submissionsService = inject(DataCollectionSubmissionsService);
   private toastService = inject(ToastService);
+  private router = inject(Router);
 
   readonly isOpen = input<boolean>(false);
   readonly booking = input<Booking | null>(null);
@@ -30,6 +34,14 @@ export class BookingDetailModalComponent {
   readonly started = output<Booking>();
   readonly rescheduled = output<void>();
   readonly notesUpdated = output<void>();
+
+  // Image fallback tracking
+  imageErrors = signal<Record<number, boolean>>({});
+
+  // Data collection & prediagnosis
+  submission = signal<any>(null);
+  showIntakeData = signal(false);
+  prediagnosisHtml = signal('');
 
   // Edit mode — single toggle for notes
   editing = signal(false);
@@ -75,14 +87,14 @@ export class BookingDetailModalComponent {
   statusAccent = computed(() => {
     const status = this.booking()?.status;
     const map: Record<BookingStatus, string> = {
-      pending: '#f59e0b',
-      confirmed: '#3b82f6',
-      in_progress: '#6366f1',
-      completed: '#10b981',
-      cancelled: '#ef4444',
-      no_show: '#9ca3af',
+      pending: 'var(--color-warning)',
+      confirmed: 'var(--color-info)',
+      in_progress: 'var(--color-primary)',
+      completed: 'var(--color-success)',
+      cancelled: 'var(--color-error)',
+      no_show: 'var(--color-neutral)',
     };
-    return status ? map[status] ?? '#6366f1' : '#6366f1';
+    return status ? map[status] ?? 'var(--color-primary)' : 'var(--color-primary)';
   });
 
   channelLabel = computed(() => {
@@ -117,6 +129,32 @@ export class BookingDetailModalComponent {
   canReschedule = computed(() => {
     const status = this.booking()?.status;
     return status === 'pending' || status === 'confirmed';
+  });
+
+  isConsultation = computed(() => {
+    return !!this.booking()?.product?.is_consultation;
+  });
+
+  showConsultationButton = computed(() => {
+    const status = this.booking()?.status;
+    return this.isConsultation() && (status === 'confirmed' || status === 'in_progress' || status === 'completed');
+  });
+
+  consultationButtonLabel = computed(() => {
+    const status = this.booking()?.status;
+    if (status === 'in_progress') return 'Atender Consulta';
+    if (status === 'completed') return 'Ver Consulta';
+    return 'Iniciar Consulta';
+  });
+
+  private bookingEffect = effect(() => {
+    const b = this.booking();
+    if (b?.id) {
+      this.loadSubmission(b.id);
+    } else {
+      this.submission.set(null);
+      this.prediagnosisHtml.set('');
+    }
   });
 
   onOpen(): void {
@@ -241,6 +279,43 @@ export class BookingDetailModalComponent {
           this.toastService.error('Error al reagendar. El horario no está disponible.');
         },
       });
+  }
+
+  // --- Consultation Navigation ---
+
+  goToConsultation(): void {
+    const b = this.booking();
+    if (!b) return;
+    this.closed.emit();
+    this.router.navigate(['/admin/consultations', b.id, 'attend']);
+  }
+
+  // --- Data Collection ---
+
+  private loadSubmission(bookingId: number) {
+    this.submissionsService.getByBooking(bookingId).subscribe({
+      next: (data) => {
+        this.submission.set(data);
+        if (data?.ai_prediagnosis) {
+          this.prediagnosisHtml.set(data.ai_prediagnosis);
+        }
+      },
+      error: () => this.submission.set(null),
+    });
+  }
+
+  copyIntakeLink() {
+    const token = this.submission()?.token;
+    if (token) {
+      const url = `${window.location.origin}/preconsulta/${token}`;
+      navigator.clipboard.writeText(url);
+    }
+  }
+
+  // --- Image fallback ---
+
+  onImageError(productId: number): void {
+    this.imageErrors.update(errors => ({ ...errors, [productId]: true }));
   }
 
   // --- Formatters ---

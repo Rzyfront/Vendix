@@ -5,6 +5,7 @@ import { takeUntil, map, catchError, filter } from 'rxjs/operators';
 import { of } from 'rxjs';
 import { StatsComponent } from '../../../../shared/components';
 import { IconComponent } from '../../../../shared/components/icon/icon.component';
+import { CardComponent } from '../../../../shared/components/card/card.component';
 import { formatBytes as _formatBytes } from '../../../../core/utils/format.utils';
 import { MonitoringService } from './services';
 import {
@@ -35,6 +36,7 @@ import {
     CommonModule,
     StatsComponent,
     IconComponent,
+    CardComponent,
     MetricChartComponent,
     TimeRangeSelectorComponent,
     StatusIndicatorComponent,
@@ -86,10 +88,7 @@ import {
       </div>
 
       <!-- Status bar -->
-      <div
-        class="rounded-card shadow-card p-4 flex items-center justify-between flex-wrap gap-3"
-        style="background: var(--color-surface); border: 1px solid var(--color-border);"
-      >
+      <app-card [padding]="false" customClasses="!p-4 flex items-center justify-between flex-wrap gap-3">
         <div class="flex items-center gap-4">
           <app-status-indicator
             [status]="overallStatus"
@@ -103,17 +102,13 @@ import {
         <span class="text-xs font-mono px-2 py-1 rounded-full" style="background: var(--color-background); color: var(--color-text-muted);">
           Auto-refresh: 30s
         </span>
-      </div>
+      </app-card>
 
       <!-- EC2 Metrics Section -->
-      <div
-        class="rounded-card shadow-card"
-        style="background: var(--color-surface); border: 1px solid var(--color-border);"
-      >
-        <div
-          class="flex justify-between items-center p-6"
-          style="border-bottom: 1px solid var(--color-border); background: linear-gradient(135deg, rgba(249,115,22,0.05) 0%, transparent 100%);"
-        >
+      <app-card [padding]="false" [showHeader]="true">
+        <div slot="header"
+          class="flex justify-between items-center"
+          style="background: linear-gradient(135deg, rgba(249,115,22,0.05) 0%, transparent 100%);">
           <div class="flex items-center gap-3">
             <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-orange-500/10">
               <app-icon name="server" [size]="16" class="text-orange-500"></app-icon>
@@ -160,17 +155,13 @@ import {
             [loading]="loadingEc2"
           ></app-metric-chart>
         </div>
-      </div>
+      </app-card>
 
       <!-- RDS Metrics Section -->
-      <div
-        class="rounded-card shadow-card"
-        style="background: var(--color-surface); border: 1px solid var(--color-border);"
-      >
-        <div
-          class="flex justify-between items-center p-6"
-          style="border-bottom: 1px solid var(--color-border); background: linear-gradient(135deg, rgba(16,185,129,0.05) 0%, transparent 100%);"
-        >
+      <app-card [padding]="false" [showHeader]="true">
+        <div slot="header"
+          class="flex justify-between items-center"
+          style="background: linear-gradient(135deg, rgba(16,185,129,0.05) 0%, transparent 100%);">
           <div class="flex items-center gap-3">
             <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-emerald-500/10">
               <app-icon name="database" [size]="16" class="text-emerald-500"></app-icon>
@@ -220,17 +211,13 @@ import {
             [loading]="loadingRds"
           ></app-metric-chart>
         </div>
-      </div>
+      </app-card>
 
       <!-- Performance Section -->
-      <div
-        class="rounded-card shadow-card"
-        style="background: var(--color-surface); border: 1px solid var(--color-border);"
-      >
-        <div
-          class="flex justify-between items-center p-6"
-          style="border-bottom: 1px solid var(--color-border); background: linear-gradient(135deg, rgba(168,85,247,0.05) 0%, transparent 100%);"
-        >
+      <app-card [padding]="false" [showHeader]="true">
+        <div slot="header"
+          class="flex justify-between items-center"
+          style="background: linear-gradient(135deg, rgba(168,85,247,0.05) 0%, transparent 100%);">
           <div class="flex items-center gap-3">
             <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-purple-500/10">
               <app-icon name="zap" [size]="16" class="text-purple-500"></app-icon>
@@ -251,34 +238,34 @@ import {
         <div class="p-6 space-y-6">
           <!-- Performance Stats Cards -->
           <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div class="p-3 rounded-xl text-center" style="background: var(--color-background); border: 1px solid var(--color-border);">
+            <app-card [padding]="false" customClasses="!p-3 !rounded-xl">
               <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Avg Response</p>
               <p class="text-xl font-bold font-mono" [class]="avgResponseTimeColor">{{ avgResponseTime }}</p>
               <p class="text-[10px]" style="color: var(--color-text-muted);" *ngIf="performanceSnapshot">
                 p95: {{ performanceSnapshot.responseTime.p95.toFixed(0) }}ms
               </p>
-            </div>
-            <div class="p-3 rounded-xl text-center" style="background: var(--color-background); border: 1px solid var(--color-border);">
+            </app-card>
+            <app-card [padding]="false" customClasses="!p-3 !rounded-xl">
               <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Requests/seg</p>
               <p class="text-xl font-bold font-mono text-blue-500">{{ reqPerSec }}</p>
               <p class="text-[10px]" style="color: var(--color-text-muted);" *ngIf="performanceSnapshot">
                 {{ performanceSnapshot.activeRequests }} activos
               </p>
-            </div>
-            <div class="p-3 rounded-xl text-center" style="background: var(--color-background); border: 1px solid var(--color-border);">
+            </app-card>
+            <app-card [padding]="false" customClasses="!p-3 !rounded-xl">
               <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Error Rate (5m)</p>
               <p class="text-xl font-bold font-mono" [class]="errorRateColor">{{ errorRate }}</p>
               <p class="text-[10px]" style="color: var(--color-text-muted);" *ngIf="performanceSnapshot">
                 {{ performanceSnapshot.errors.last5min.errors5xx }} errores 5xx
               </p>
-            </div>
-            <div class="p-3 rounded-xl text-center" style="background: var(--color-background); border: 1px solid var(--color-border);">
+            </app-card>
+            <app-card [padding]="false" customClasses="!p-3 !rounded-xl">
               <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Event Loop p99</p>
               <p class="text-xl font-bold font-mono" [class]="eventLoopColor">{{ eventLoopP99 }}</p>
               <p class="text-[10px]" style="color: var(--color-text-muted);" *ngIf="performanceSnapshot?.eventLoop?.current">
                 mean: {{ performanceSnapshot!.eventLoop!.current!.mean.toFixed(1) }}ms
               </p>
-            </div>
+            </app-card>
           </div>
 
           <!-- Charts Grid -->
@@ -332,17 +319,13 @@ import {
             ></app-metric-chart>
           </div>
         </div>
-      </div>
+      </app-card>
 
       <!-- Application Health Section -->
-      <div
-        class="rounded-card shadow-card"
-        style="background: var(--color-surface); border: 1px solid var(--color-border);"
-      >
-        <div
-          class="flex items-center gap-3 p-6"
-          style="border-bottom: 1px solid var(--color-border); background: linear-gradient(135deg, rgba(6,182,212,0.05) 0%, transparent 100%);"
-        >
+      <app-card [padding]="false" [showHeader]="true">
+        <div slot="header"
+          class="flex items-center gap-3"
+          style="background: linear-gradient(135deg, rgba(6,182,212,0.05) 0%, transparent 100%);">
           <div class="w-8 h-8 rounded-lg flex items-center justify-center bg-cyan-500/10">
             <app-icon name="heart-pulse" [size]="16" class="text-cyan-500"></app-icon>
           </div>
@@ -352,7 +335,8 @@ import {
         </div>
         <div class="p-6 space-y-4">
           <!-- Server Memory Overview -->
-          <div *ngIf="serverInfo?.memory" class="rounded-xl p-4" style="background: var(--color-background); border: 1px solid var(--color-border);">
+          <app-card *ngIf="serverInfo?.memory" [padding]="false" customClasses="!rounded-xl">
+            <div class="p-4">
             <div class="flex items-center gap-2 mb-3">
               <span class="w-5 h-5 rounded flex items-center justify-center bg-blue-500/10">
                 <app-icon name="memory-stick" [size]="12" class="text-blue-500"></app-icon>
@@ -383,7 +367,8 @@ import {
                 [style.background]="serverInfo!.memory.usedPercent > 80 ? '#ef4444' : serverInfo!.memory.usedPercent > 60 ? '#eab308' : '#22c55e'">
               </div>
             </div>
-          </div>
+            </div>
+          </app-card>
 
           <!-- Process Info -->
           <app-process-info
@@ -398,10 +383,8 @@ import {
           ></app-queue-stats>
 
           <!-- Redis Info - Redesigned -->
-          <div *ngIf="appMetrics?.redis"
-            class="rounded-xl overflow-hidden"
-            style="background: var(--color-background); border: 1px solid var(--color-border);">
-            <div class="px-4 py-3 flex items-center gap-2" style="border-bottom: 1px solid var(--color-border); background: linear-gradient(135deg, rgba(239,68,68,0.05) 0%, transparent 100%);">
+          <app-card *ngIf="appMetrics?.redis" [padding]="false" customClasses="!rounded-xl overflow-hidden">
+            <div slot="header" class="flex items-center gap-2" style="background: linear-gradient(135deg, rgba(239,68,68,0.05) 0%, transparent 100%);">
               <span class="w-5 h-5 rounded flex items-center justify-center bg-red-500/10">
                 <svg class="w-3 h-3 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                   <path stroke-linecap="round" stroke-linejoin="round" d="M4 7v10c0 2.21 3.582 4 8 4s8-1.79 8-4V7M4 7c0 2.21 3.582 4 8 4s8-1.79 8-4M4 7c0-2.21 3.582-4 8-4s8 1.79 8 4"/>
@@ -444,9 +427,9 @@ import {
                 </div>
               </div>
             </div>
-          </div>
+          </app-card>
         </div>
-      </div>
+      </app-card>
     </div>
   `,
   styleUrls: ['./monitoring.component.css'],

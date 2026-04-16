@@ -72,6 +72,39 @@
                             }
                         </div>
 
+                        <!-- Status badges & action buttons -->
+                        <div class="card-extra-actions">
+                            @if (booking.checked_in_at) {
+                                <span class="text-xs px-2 py-0.5 rounded-full" style="background: #dcfce7; color: #166534">
+                                    Check-in registrado
+                                </span>
+                            }
+
+                            @if (booking.confirmation_requested_at && booking.status === 'pending') {
+                                <span class="text-xs px-2 py-0.5 rounded-full" style="background: #fef3c7; color: #92400e">
+                                    Confirmación pendiente
+                                </span>
+                            }
+
+                            @if (booking.status === 'confirmed' && !booking.checked_in_at && isToday(booking.date)) {
+                                <button class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium text-white"
+                                        style="background: #22c55e"
+                                        (click)="checkIn(booking.id)">
+                                    <app-icon name="map-pin" [size]="14"></app-icon>
+                                    Ya llegué
+                                </button>
+                            }
+
+                            @if (booking.data_collection_submissions?.length && booking.data_collection_submissions![0].status === 'pending') {
+                                <a [routerLink]="['/preconsulta', booking.data_collection_submissions![0].token]"
+                                   class="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium"
+                                   style="color: var(--color-primary); border: 1px solid var(--color-primary)">
+                                    <app-icon name="clipboard-list" [size]="14"></app-icon>
+                                    Completar formulario
+                                </a>
+                            }
+                        </div>
+
                         @if (canModify(booking)) {
                             <div class="card-actions">
                                 <button class="action-btn reschedule" (click)="openRescheduleDialog(booking)">

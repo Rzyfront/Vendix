@@ -224,8 +224,19 @@ export class GeneralSettingsComponent implements OnInit {
         await Promise.all(uploads);
       }
 
+      // Only send sections managed by this component to prevent legacy/unknown properties from round-tripping
+      const knownSections: (keyof StoreSettings)[] = [
+        'general', 'inventory', 'checkout', 'notifications', 'pos', 'receipts', 'app',
+      ];
+      const sanitizedSettings = knownSections.reduce((acc, key) => {
+        if (this.settings[key] !== undefined) {
+          (acc as any)[key] = this.settings[key];
+        }
+        return acc;
+      }, {} as Partial<StoreSettings>);
+
       // Save all settings
-      this.settings_service.saveSettingsNow(this.settings).subscribe({
+      this.settings_service.saveSettingsNow(sanitizedSettings).subscribe({
         next: () => {
           this.isSaving.set(false);
           this.hasUnsavedChanges.set(false);

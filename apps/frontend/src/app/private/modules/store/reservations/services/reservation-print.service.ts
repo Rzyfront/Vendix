@@ -66,7 +66,7 @@ export class ReservationPrintService {
     const fmt = (n: number) => this.currencyService.format(n);
 
     const createdAt = new Date(booking.created_at).toLocaleDateString('es-CO');
-    const bookingDate = new Date(booking.date + 'T00:00:00').toLocaleDateString('es-CO');
+    const bookingDate = new Date(booking.date).toLocaleDateString('es-CO', { timeZone: 'UTC' });
     const startTime = booking.start_time.substring(0, 5);
     const endTime = booking.end_time.substring(0, 5);
     const statusLabel = statusLabels[booking.status] || booking.status;

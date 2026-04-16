@@ -43,12 +43,25 @@ export interface CartSummary {
   totalItems: number;
 }
 
+export interface PendingBooking {
+  id: number;
+  booking_number: string;
+  product_id: number;
+  product_name: string;
+  customer_id: number;
+  date: string;
+  start_time: string;
+  end_time: string;
+  provider_name?: string;
+}
+
 export interface CartState {
   items: CartItem[];
   customer: PosCustomer | null;
   notes: string;
   appliedDiscounts: CartDiscount[];
   appliedCoupon?: { id: number; code: string; discount_type: string; discount_value: number };
+  pendingBookings: PendingBooking[];
   summary: CartSummary;
   createdAt: Date;
   updatedAt: Date;

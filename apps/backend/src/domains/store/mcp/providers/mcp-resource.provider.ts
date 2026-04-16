@@ -85,6 +85,7 @@ export class McpResourceProvider {
           name: true,
           base_price: true,
           sku: true,
+          state: true,
         },
         take: 100,
       });

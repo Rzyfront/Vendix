@@ -1,5 +1,6 @@
 import { DateRangeFilter } from '../../../interfaces/analytics.interface';
 import { SalesSummary, SalesTrend } from '../../../interfaces/sales-analytics.interface';
+import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../../shared/utils/date.util';
 
 export interface SalesSummaryState {
   summary: SalesSummary | null;
@@ -28,13 +29,3 @@ export const initialSalesSummaryState: SalesSummaryState = {
   exporting: false,
   error: null,
 };
-
-function getDefaultStartDate(): string {
-  const date = new Date();
-  date.setDate(1);
-  return date.toISOString().split('T')[0];
-}
-
-function getDefaultEndDate(): string {
-  return new Date().toISOString().split('T')[0];
-}

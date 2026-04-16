@@ -30,6 +30,7 @@ import {
   CardComponent,
 } from '../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
+import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
 
 @Component({
   selector: 'app-expenses-list',
@@ -83,6 +84,7 @@ export class ExpensesListComponent {
         { value: 'paid', label: 'Pagado' },
         { value: 'rejected', label: 'Rechazado' },
         { value: 'cancelled', label: 'Cancelado' },
+        { value: 'refunded', label: 'Reembolsado' },
       ],
     },
   ];
@@ -125,7 +127,7 @@ export class ExpensesListComponent {
       sortable: true,
       align: 'center',
       priority: 2,
-      transform: (val: any) => (val ? new Date(val).toLocaleDateString() : ''),
+      transform: (val: any) => (val ? formatDateOnlyUTC(val) : ''),
     },
     {
       key: 'expense_categories.name',
@@ -138,14 +140,17 @@ export class ExpensesListComponent {
       label: 'Estado',
       align: 'center',
       priority: 1,
+      badge: true,
       badgeConfig: {
         type: 'status',
+        size: 'sm',
         colorMap: {
           pending: 'warn',
           approved: 'success',
           rejected: 'danger',
           paid: 'info',
           cancelled: 'default',
+          refunded: 'warn',
         },
       },
       transform: (val: any) => this.getStateLabel(val),
@@ -172,14 +177,14 @@ export class ExpensesListComponent {
     footerKey: 'amount',
     footerLabel: 'Monto',
     footerStyle: 'prominent',
-    footerTransform: (val: any) => this.currencyService.format(Number(val) || 0),
+    footerTransform: (val: any) =>
+      this.currencyService.format(Number(val) || 0),
     detailKeys: [
       {
         key: 'expense_date',
         label: 'Fecha',
         icon: 'calendar',
-        transform: (val: any) =>
-          val ? new Date(val).toLocaleDateString() : '-',
+        transform: (val: any) => (val ? formatDateOnlyUTC(val) : '-'),
       },
     ],
   };
@@ -229,6 +234,7 @@ export class ExpensesListComponent {
       rejected: 'Rechazado',
       paid: 'Pagado',
       cancelled: 'Cancelado',
+      refunded: 'Reembolsado',
     };
     return labels[state] || state;
   }

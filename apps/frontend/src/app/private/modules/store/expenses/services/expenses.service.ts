@@ -42,24 +42,49 @@ export class ExpensesService {
     return this.http.post<ApiResponse<Expense>>(this.getApiUrl(''), expense);
   }
 
-  updateExpense(id: number, expense: UpdateExpenseDto): Observable<ApiResponse<Expense>> {
-    return this.http.put<ApiResponse<Expense>>(this.getApiUrl(`${id}`), expense);
+  updateExpense(
+    id: number,
+    expense: UpdateExpenseDto,
+  ): Observable<ApiResponse<Expense>> {
+    return this.http.put<ApiResponse<Expense>>(
+      this.getApiUrl(`${id}`),
+      expense,
+    );
   }
 
   approveExpense(id: number): Observable<ApiResponse<Expense>> {
-    return this.http.post<ApiResponse<Expense>>(this.getApiUrl(`${id}/approve`), {});
+    return this.http.post<ApiResponse<Expense>>(
+      this.getApiUrl(`${id}/approve`),
+      {},
+    );
   }
 
   rejectExpense(id: number): Observable<ApiResponse<Expense>> {
-    return this.http.post<ApiResponse<Expense>>(this.getApiUrl(`${id}/reject`), {});
+    return this.http.post<ApiResponse<Expense>>(
+      this.getApiUrl(`${id}/reject`),
+      {},
+    );
   }
 
   payExpense(id: number): Observable<ApiResponse<Expense>> {
-    return this.http.post<ApiResponse<Expense>>(this.getApiUrl(`${id}/pay`), {});
+    return this.http.post<ApiResponse<Expense>>(
+      this.getApiUrl(`${id}/pay`),
+      {},
+    );
   }
 
   cancelExpense(id: number): Observable<ApiResponse<Expense>> {
-    return this.http.post<ApiResponse<Expense>>(this.getApiUrl(`${id}/cancel`), {});
+    return this.http.post<ApiResponse<Expense>>(
+      this.getApiUrl(`${id}/cancel`),
+      {},
+    );
+  }
+
+  refundExpense(id: number, reason: string): Observable<ApiResponse<Expense>> {
+    return this.http.post<ApiResponse<Expense>>(
+      this.getApiUrl(`${id}/refund`),
+      { reason },
+    );
   }
 
   deleteExpense(id: number): Observable<ApiResponse<null>> {
@@ -68,7 +93,9 @@ export class ExpensesService {
 
   // NgRx is the cache — no manual cache needed
   getExpensesSummary(): Observable<ApiResponse<ExpenseSummary>> {
-    return this.http.get<ApiResponse<ExpenseSummary>>(this.getApiUrl('summary'));
+    return this.http.get<ApiResponse<ExpenseSummary>>(
+      this.getApiUrl('summary'),
+    );
   }
 
   // Upload receipt
@@ -109,6 +136,8 @@ export class ExpensesService {
   }
 
   deleteExpenseCategory(id: number): Observable<ApiResponse<null>> {
-    return this.http.delete<ApiResponse<null>>(this.getApiUrl(`categories/${id}`));
+    return this.http.delete<ApiResponse<null>>(
+      this.getApiUrl(`categories/${id}`),
+    );
   }
 }

@@ -170,11 +170,11 @@ export class SuperAdminAuditService {
     const daysToLookBack = 30;
     for (let i = daysToLookBack - 1; i >= 0; i--) {
       const date = new Date();
-      date.setDate(date.getDate() - i);
-      date.setHours(0, 0, 0, 0);
+      date.setUTCDate(date.getUTCDate() - i);
+      date.setUTCHours(0, 0, 0, 0);
 
       const nextDate = new Date(date);
-      nextDate.setDate(nextDate.getDate() + 1);
+      nextDate.setUTCDate(nextDate.getUTCDate() + 1);
 
       const count = await this.prismaService.audit_logs.count({
         where: {

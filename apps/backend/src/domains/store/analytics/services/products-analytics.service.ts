@@ -4,10 +4,10 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { RequestContextService } from '@common/context/request-context.service';
 import {
   ProductsAnalyticsQueryDto,
-  DatePreset,
   Granularity,
 } from '../dto/analytics-query.dto';
 import { fillTimeSeries } from '../utils/fill-time-series.util';
+import { formatPeriodFromDate, parseDateRange, getPreviousPeriod, getDateTruncInterval } from '../utils/date.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
@@ -17,8 +17,8 @@ export class ProductsAnalyticsService {
   private readonly COMPLETED_STATES = ['delivered', 'finished'];
 
   async getProductsSummary(query: ProductsAnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
-    const { previousStartDate, previousEndDate } = this.getPreviousPeriod(
+    const { startDate, endDate } = parseDateRange(query);
+    const { previousStartDate, previousEndDate } = getPreviousPeriod(
       startDate,
       endDate,
     );
@@ -84,7 +84,7 @@ export class ProductsAnalyticsService {
   }
 
   async getTopSellingProducts(query: ProductsAnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
+    const { startDate, endDate } = parseDateRange(query);
 
     const results = await this.prisma.order_items.groupBy({
       by: ['product_id'],
@@ -163,7 +163,7 @@ export class ProductsAnalyticsService {
   }
 
   async getProductsTable(query: ProductsAnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
+    const { startDate, endDate } = parseDateRange(query);
     const page = query.page || 1;
     const limit = query.limit || 20;
     const search = query.search?.trim();
@@ -321,7 +321,7 @@ export class ProductsAnalyticsService {
   }
 
   async getProductsForExport(query: ProductsAnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
+    const { startDate, endDate } = parseDateRange(query);
 
     // Get all active products
     const products = await this.prisma.products.findMany({
@@ -403,7 +403,7 @@ export class ProductsAnalyticsService {
   }
 
   async getProductsTrends(query: ProductsAnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
+    const { startDate, endDate } = parseDateRange(query);
     const granularity = query.granularity || Granularity.DAY;
     const context = RequestContextService.getContext();
 
@@ -412,7 +412,7 @@ export class ProductsAnalyticsService {
     }
     const storeId = context.store_id;
 
-    const truncSql = Prisma.raw(`'${this.getDateTruncInterval(granularity)}'`);
+    const truncSql = Prisma.raw(`'${getDateTruncInterval(granularity)}'`);
 
     const results = await (this.prisma.withoutScope() as any).$queryRaw<
       Array<{
@@ -436,7 +436,7 @@ export class ProductsAnalyticsService {
     `;
 
     const mapped = results.map((r) => ({
-      period: this.formatPeriodFromDate(new Date(r.period), granularity),
+      period: formatPeriodFromDate(new Date(r.period), granularity),
       units_sold: Number(r.units_sold),
       revenue: Number(r.revenue),
     }));
@@ -447,113 +447,292 @@ export class ProductsAnalyticsService {
       endDate,
       granularity,
       { units_sold: 0, revenue: 0 },
-      this.formatPeriodFromDate.bind(this),
+      formatPeriodFromDate,
     );
   }
 
-  private getDateTruncInterval(granularity: Granularity): string {
-    switch (granularity) {
-      case Granularity.HOUR:
-        return 'hour';
-      case Granularity.DAY:
-        return 'day';
-      case Granularity.WEEK:
-        return 'week';
-      case Granularity.MONTH:
-        return 'month';
-      case Granularity.YEAR:
-        return 'year';
-      default:
-        return 'day';
+  async getProductPerformance(query: ProductsAnalyticsQueryDto) {
+    const { startDate, endDate } = parseDateRange(query);
+
+    const completedItems = await this.prisma.order_items.groupBy({
+      by: ['product_id'],
+      where: {
+        orders: {
+          state: { in: this.COMPLETED_STATES },
+          created_at: { gte: startDate, lte: endDate },
+        },
+        product_id: { not: null },
+      },
+      _sum: {
+        quantity: true,
+        total_price: true,
+      },
+      _count: {
+        id: true,
+      },
+    });
+
+    // Get refunded quantities per product via refunds -> refund_items relation
+    const refundsWithItems = await this.prisma.refunds.findMany({
+      where: {
+        state: { in: ['completed', 'approved'] as any },
+        created_at: { gte: startDate, lte: endDate },
+      },
+      select: {
+        refund_items: {
+          select: {
+            order_item_id: true,
+            quantity: true,
+            refund_amount: true,
+          },
+        },
+      },
+    });
+
+    // Collect all order_item_ids from refund_items
+    const refundedOrderItemIds = refundsWithItems
+      .flatMap((r) => r.refund_items.map((ri) => ri.order_item_id))
+      .filter(Boolean);
+
+    const refundedOrderItems = refundedOrderItemIds.length > 0
+      ? await this.prisma.order_items.findMany({
+          where: { id: { in: refundedOrderItemIds } },
+          select: { id: true, product_id: true },
+        })
+      : [];
+
+    const refundByProduct = new Map<number | null, { quantity: number; amount: number }>();
+    for (const refund of refundsWithItems) {
+      for (const ri of refund.refund_items) {
+        const oi = refundedOrderItems.find((o) => o.id === ri.order_item_id);
+        if (!oi?.product_id) continue;
+        const existing = refundByProduct.get(oi.product_id) || { quantity: 0, amount: 0 };
+        existing.quantity += Number(ri.quantity || 0);
+        existing.amount += Number(ri.refund_amount || 0);
+        refundByProduct.set(oi.product_id, existing);
+      }
     }
-  }
 
-  private formatPeriodFromDate(date: Date, granularity: Granularity): string {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
+    const productIds = completedItems
+      .map((r) => r.product_id)
+      .filter((id): id is number => id !== null);
 
-    switch (granularity) {
-      case Granularity.HOUR:
-        return `${y}-${m}-${d}T${String(date.getHours()).padStart(2, '0')}:00`;
-      case Granularity.DAY:
-        return `${y}-${m}-${d}`;
-      case Granularity.WEEK:
-        return `${y}-${m}-${d}`;
-      case Granularity.MONTH:
-        return `${y}-${m}`;
-      case Granularity.YEAR:
-        return `${y}`;
-      default:
-        return `${y}-${m}-${d}`;
-    }
-  }
+    const products = (await this.prisma.products.findMany({
+      where: { id: { in: productIds } },
+      select: {
+        id: true,
+        name: true,
+        sku: true,
+        product_images: { select: { image_url: true }, take: 1 },
+      },
+    })) as {
+      id: number;
+      name: string;
+      sku: string | null;
+      product_images: { image_url: string }[];
+    }[];
+    const productMap = new Map(products.map((p) => [p.id, p]));
 
-  // Helper methods (duplicated from SalesAnalyticsService to keep services independent)
-  private parseDateRange(query: ProductsAnalyticsQueryDto): {
-    startDate: Date;
-    endDate: Date;
-  } {
-    if (query.date_from && query.date_to) {
-      const endDate = new Date(query.date_to);
-      endDate.setUTCHours(23, 59, 59, 999);
+    const allResults = completedItems
+      .filter((r) => r.product_id !== null)
+      .map((r) => {
+        const product = productMap.get(r.product_id!);
+        const unitsSold = Number(r._sum.quantity || 0);
+        const revenue = Number(r._sum.total_price || 0);
+        const orderCount = r._count.id || 0;
+        const refunds = refundByProduct.get(r.product_id!) || { quantity: 0, amount: 0 };
+        const returnRate = unitsSold > 0 ? (refunds.quantity / unitsSold) * 100 : 0;
+
+        return {
+          product_id: r.product_id,
+          product_name: product?.name || 'Desconocido',
+          sku: product?.sku || '',
+          image_url: product?.product_images?.[0]?.image_url || null,
+          units_sold: unitsSold,
+          revenue,
+          order_count: orderCount,
+          avg_units_per_order: orderCount > 0 ? unitsSold / orderCount : 0,
+          refunded_units: refunds.quantity,
+          refunded_amount: refunds.amount,
+          return_rate: Number(returnRate.toFixed(2)),
+        };
+      })
+      .sort((a, b) => b.revenue - a.revenue);
+
+    const isPaginated = query.page !== undefined && query.limit !== undefined;
+    if (isPaginated) {
+      const page = query.page!;
+      const limit = query.limit!;
+      const totalCount = allResults.length;
+      const data = allResults.slice((page - 1) * limit, page * limit);
+
       return {
-        startDate: new Date(query.date_from),
-        endDate,
+        data,
+        meta: {
+          pagination: {
+            total: totalCount,
+            page,
+            limit,
+            total_pages: Math.ceil(totalCount / limit),
+          },
+        },
       };
     }
 
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    return allResults.slice(0, query.limit || 20);
+  }
 
-    switch (query.date_preset) {
-      case DatePreset.TODAY:
-        return { startDate: today, endDate: now };
-      case DatePreset.YESTERDAY:
-        const yesterday = new Date(today);
-        yesterday.setDate(yesterday.getDate() - 1);
-        return { startDate: yesterday, endDate: today };
-      case DatePreset.THIS_WEEK:
-        const weekStart = new Date(today);
-        weekStart.setDate(weekStart.getDate() - weekStart.getDay());
-        return { startDate: weekStart, endDate: now };
-      case DatePreset.LAST_WEEK:
-        const lastWeekEnd = new Date(today);
-        lastWeekEnd.setDate(lastWeekEnd.getDate() - lastWeekEnd.getDay());
-        const lastWeekStart = new Date(lastWeekEnd);
-        lastWeekStart.setDate(lastWeekStart.getDate() - 7);
-        return { startDate: lastWeekStart, endDate: lastWeekEnd };
-      case DatePreset.LAST_MONTH:
-        const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
-        const lastMonthStart = new Date(
-          today.getFullYear(),
-          today.getMonth() - 1,
-          1,
-        );
-        return { startDate: lastMonthStart, endDate: lastMonthEnd };
-      case DatePreset.THIS_YEAR:
-        return { startDate: new Date(today.getFullYear(), 0, 1), endDate: now };
-      case DatePreset.LAST_YEAR:
+  async getProductProfitability(query: ProductsAnalyticsQueryDto) {
+    const { startDate, endDate } = parseDateRange(query);
+
+    const items = await this.prisma.order_items.groupBy({
+      by: ['product_id'],
+      where: {
+        orders: {
+          state: { in: this.COMPLETED_STATES },
+          created_at: { gte: startDate, lte: endDate },
+        },
+        product_id: { not: null },
+      },
+      _sum: {
+        quantity: true,
+        total_price: true,
+        cost_price: true,
+      },
+    });
+
+    const productIds = items
+      .map((r) => r.product_id)
+      .filter((id): id is number => id !== null);
+
+    const products = (await this.prisma.products.findMany({
+      where: { id: { in: productIds } },
+      select: {
+        id: true,
+        name: true,
+        sku: true,
+        base_price: true,
+        cost_price: true,
+        product_categories: {
+          select: { categories: { select: { name: true } } },
+        },
+      },
+    })) as {
+      id: number;
+      name: string;
+      sku: string | null;
+      base_price: any;
+      cost_price: any;
+      product_categories: { categories: { name: string } }[];
+    }[];
+    const productMap = new Map(products.map((p) => [p.id, p]));
+
+    const results = items
+      .filter((r) => r.product_id !== null)
+      .map((r) => {
+        const product = productMap.get(r.product_id!);
+        const revenue = Number(r._sum.total_price || 0);
+        const totalCost = Number(r._sum.cost_price || 0) * Number(r._sum.quantity || 0);
+        const unitsSold = Number(r._sum.quantity || 0);
+        const profit = revenue - totalCost;
+        const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
+        const markup = totalCost > 0 ? (profit / totalCost) * 100 : 0;
+        const basePrice = product ? Number(product.base_price || 0) : 0;
+        const catalogCostPrice = product ? Number(product.cost_price || 0) : 0;
+        const catalogMargin =
+          catalogCostPrice > 0 && basePrice > 0
+            ? ((basePrice - catalogCostPrice) / basePrice) * 100
+            : null;
+
         return {
-          startDate: new Date(today.getFullYear() - 1, 0, 1),
-          endDate: new Date(today.getFullYear() - 1, 11, 31),
+          product_id: r.product_id,
+          product_name: product?.name || 'Desconocido',
+          sku: product?.sku || '',
+          category: product?.product_categories?.[0]?.categories?.name || null,
+          revenue,
+          total_cost: totalCost,
+          profit,
+          margin: Number(margin.toFixed(2)),
+          markup: Number(markup.toFixed(2)),
+          units_sold: unitsSold,
+          avg_selling_price: unitsSold > 0 ? revenue / unitsSold : 0,
+          catalog_base_price: basePrice,
+          catalog_cost_price: catalogCostPrice,
+          catalog_margin: catalogMargin !== null ? Number(catalogMargin.toFixed(2)) : null,
         };
-      case DatePreset.THIS_MONTH:
-      default:
-        return {
-          startDate: new Date(today.getFullYear(), today.getMonth(), 1),
-          endDate: now,
-        };
+      })
+      .sort((a, b) => b.profit - a.profit);
+
+    const totalRevenue = results.reduce((sum, r) => sum + r.revenue, 0);
+    const totalProfit = results.reduce((sum, r) => sum + r.profit, 0);
+    const totalCost = results.reduce((sum, r) => sum + r.total_cost, 0);
+
+    const summary = {
+      total_products: results.length,
+      total_revenue: totalRevenue,
+      total_cost: totalCost,
+      total_profit: totalProfit,
+      overall_margin: totalRevenue > 0 ? Number(((totalProfit / totalRevenue) * 100).toFixed(2)) : 0,
+    };
+
+    const isPaginated = query.page !== undefined && query.limit !== undefined;
+    if (isPaginated) {
+      const page = query.page!;
+      const limit = query.limit!;
+      const totalCount = results.length;
+      const data = results.slice((page - 1) * limit, page * limit);
+
+      return {
+        data,
+        summary,
+        meta: {
+          pagination: {
+            total: totalCount,
+            page,
+            limit,
+            total_pages: Math.ceil(totalCount / limit),
+          },
+        },
+      };
     }
+
+    return {
+      products: results.slice(0, query.limit || 50),
+      summary,
+    };
   }
 
-  private getPreviousPeriod(
-    startDate: Date,
-    endDate: Date,
-  ): { previousStartDate: Date; previousEndDate: Date } {
-    const duration = endDate.getTime() - startDate.getTime();
-    const previousEndDate = new Date(startDate.getTime() - 1);
-    const previousStartDate = new Date(previousEndDate.getTime() - duration);
-    return { previousStartDate, previousEndDate };
+  async getProductPerformanceForExport(query: ProductsAnalyticsQueryDto) {
+    const exportQuery = { ...query, page: undefined, limit: 10000 };
+    const result = await this.getProductPerformance(exportQuery);
+    const rows = Array.isArray(result) ? result : (result as any).data || [];
+    return rows.map((r: any) => ({
+      'Producto': r.product_name,
+      'SKU': r.sku,
+      'Unidades Vendidas': r.units_sold,
+      'Ingresos': r.revenue,
+      'Devoluciones': r.refunded_units,
+      'Monto Devuelto': r.refunded_amount,
+      'Tasa Devolución (%)': r.return_rate,
+      'Órdenes': r.order_count,
+    }));
   }
+
+  async getProductProfitabilityForExport(query: ProductsAnalyticsQueryDto) {
+    const exportQuery = { ...query, page: undefined, limit: 10000 };
+    const result = await this.getProductProfitability(exportQuery);
+    const rows = (result as any).products || (result as any).data || [];
+    return rows.map((r: any) => ({
+      'Producto': r.product_name,
+      'SKU': r.sku,
+      'Categoría': r.category || '',
+      'Unidades Vendidas': r.units_sold,
+      'Ingresos': r.revenue,
+      'Costo Total': r.total_cost,
+      'Ganancia': r.profit,
+      'Margen (%)': r.margin,
+      'Markup (%)': r.markup,
+    }));
+  }
+
 }

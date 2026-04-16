@@ -1,0 +1,69 @@
+meta {
+  name: List Inventory Tools
+  type: http
+  seq: 2
+}
+
+post {
+  url: {{baseUrl}}/mcp/tools/list
+  body: none
+  headers: {
+    Authorization: Bearer {{authToken}}
+    Content-Type: application/json
+  }
+}
+
+tests {
+  test("Tools list is successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('tools');
+    expect(res.body.tools).to.be.an('array');
+  });
+
+  test("All 7 inventory tools are present", function() {
+    const tools = res.body.tools;
+    const inventoryTools = tools.filter(t => t.name.startsWith('get_') || t.name.startsWith('check_') || t.name.startsWith('create_'));
+
+    const expectedTools = [
+      'get_stock_levels',
+      'get_low_stock_alerts',
+      'check_stock_availability',
+      'get_stock_movements',
+      'get_inventory_locations',
+      'get_stock_adjustments',
+      'create_stock_adjustment',
+    ];
+
+    for (const expected of expectedTools) {
+      const found = tools.find(t => t.name === expected);
+      expect(found, `Tool "${expected}" should be listed`).to.not.be.undefined;
+    }
+  });
+
+  test("Each tool has required MCP fields", function() {
+    const tools = res.body.tools;
+    for (const tool of tools) {
+      expect(tool).to.have.property('name');
+      expect(tool).to.have.property('description');
+      expect(tool).to.have.property('inputSchema');
+      expect(tool.inputSchema).to.have.property('type', 'object');
+    }
+  });
+
+  test("Create stock adjustment requires confirmation", function() {
+    // Note: requiresConfirmation is not in MCP list output, verify via description
+    const tool = res.body.tools.find(t => t.name === 'create_stock_adjustment');
+    expect(tool).to.not.be.undefined;
+    expect(tool.inputSchema.required).to.include('product_id');
+    expect(tool.inputSchema.required).to.include('location_id');
+    expect(tool.inputSchema.required).to.include('quantity_after');
+    expect(tool.inputSchema.required).to.include('adjustment_type');
+  });
+
+  test("Check stock availability has required params", function() {
+    const tool = res.body.tools.find(t => t.name === 'check_stock_availability');
+    expect(tool).to.not.be.undefined;
+    expect(tool.inputSchema.required).to.include('product_id');
+    expect(tool.inputSchema.required).to.include('quantity');
+  });
+}

@@ -55,12 +55,20 @@ export interface Product {
   product_type?: 'physical' | 'service';
   service_duration_minutes?: number;
   service_modality?: 'in_person' | 'virtual' | 'hybrid';
-  service_pricing_type?: 'per_hour' | 'per_session' | 'package' | 'subscription';
+  service_pricing_type?:
+    | 'per_hour'
+    | 'per_session'
+    | 'package'
+    | 'subscription';
   requires_booking?: boolean;
   booking_mode?: 'provider_required' | 'free_booking';
   buffer_minutes?: number;
   is_recurring?: boolean;
   service_instructions?: string;
+  is_consultation?: boolean;
+  send_preconsultation?: boolean;
+  consultation_template_id?: number;
+  preconsultation_template_id?: number | null;
   final_price: number;
   created_at: Date;
   updated_at: Date;
@@ -213,18 +221,27 @@ export interface CreateProductDto {
   product_type?: 'physical' | 'service';
   service_duration_minutes?: number;
   service_modality?: 'in_person' | 'virtual' | 'hybrid';
-  service_pricing_type?: 'per_hour' | 'per_session' | 'package' | 'subscription';
+  service_pricing_type?:
+    | 'per_hour'
+    | 'per_session'
+    | 'package'
+    | 'subscription';
   requires_booking?: boolean;
   booking_mode?: 'provider_required' | 'free_booking';
   buffer_minutes?: number;
   is_recurring?: boolean;
   service_instructions?: string;
+  is_consultation?: boolean;
+  send_preconsultation?: boolean;
+  consultation_template_id?: number | null;
+  preconsultation_template_id?: number | null;
   brand_id?: number | null;
   category_ids?: number[];
   tax_category_ids?: number[];
   images?: CreateProductImageDto[];
   variants?: CreateProductVariantDto[];
   stock_by_location?: StockByLocationDto[];
+  stock_transfer_mode?: 'first' | 'distribute' | 'reset';
 }
 
 export interface UpdateProductDto {
@@ -251,18 +268,27 @@ export interface UpdateProductDto {
   product_type?: 'physical' | 'service';
   service_duration_minutes?: number;
   service_modality?: 'in_person' | 'virtual' | 'hybrid';
-  service_pricing_type?: 'per_hour' | 'per_session' | 'package' | 'subscription';
+  service_pricing_type?:
+    | 'per_hour'
+    | 'per_session'
+    | 'package'
+    | 'subscription';
   requires_booking?: boolean;
   booking_mode?: 'provider_required' | 'free_booking';
   buffer_minutes?: number;
   is_recurring?: boolean;
   service_instructions?: string;
+  is_consultation?: boolean;
+  send_preconsultation?: boolean;
+  consultation_template_id?: number | null;
+  preconsultation_template_id?: number | null;
   brand_id?: number | null;
   category_ids?: number[];
   tax_category_ids?: number[];
   images?: CreateProductImageDto[];
   variants?: CreateProductVariantDto[];
   stock_by_location?: StockByLocationDto[];
+  stock_transfer_mode?: 'first' | 'distribute' | 'reset';
 }
 
 export interface CreateProductVariantDto {

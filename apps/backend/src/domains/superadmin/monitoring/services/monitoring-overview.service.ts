@@ -3,7 +3,7 @@ import { CACHE_MANAGER } from '@nestjs/cache-manager';
 import type { Cache } from 'cache-manager';
 import { CloudWatchService } from './cloudwatch.service';
 import { ServerMetricsService } from './server-metrics.service';
-import { MONITORING_CACHE_TTL } from '../constants/cloudwatch.constants';
+import { CACHE_TTL_OVERVIEW } from '../constants/cloudwatch.constants';
 
 @Injectable()
 export class MonitoringOverviewService {
@@ -24,9 +24,10 @@ export class MonitoringOverviewService {
     const startTime = new Date(now.getTime() - 10 * 60 * 1000); // last 10 min
     const period = 300; // 5 min granularity
 
-    const [ec2Results, rdsResults, serverInfo] = await Promise.all([
+    const [allResults, serverInfo] = await Promise.all([
       this.cloudWatchService.getMultipleMetrics(
         [
+          // EC2 metrics
           {
             id: 'ec2_cpu',
             metricName: 'CPUUtilization',
@@ -39,13 +40,7 @@ export class MonitoringOverviewService {
             namespace: 'AWS/EC2',
             dimensions: [{ Name: 'InstanceId', Value: this.cloudWatchService.ec2InstanceId }],
           },
-        ],
-        startTime,
-        now,
-        period,
-      ),
-      this.cloudWatchService.getMultipleMetrics(
-        [
+          // RDS metrics
           {
             id: 'rds_cpu',
             metricName: 'CPUUtilization',
@@ -83,7 +78,7 @@ export class MonitoringOverviewService {
         now,
         period,
       ),
-      Promise.resolve(this.serverMetricsService.getServerInfo()),
+      this.serverMetricsService.getServerInfo(),
     ]);
 
     const getLatest = (
@@ -95,8 +90,8 @@ export class MonitoringOverviewService {
       return data.values[data.values.length - 1];
     };
 
-    const ec2Cpu = getLatest(ec2Results, 'ec2_cpu');
-    const ec2StatusFailed = getLatest(ec2Results, 'ec2_status');
+    const ec2Cpu = getLatest(allResults, 'ec2_cpu');
+    const ec2StatusFailed = getLatest(allResults, 'ec2_status');
 
     const determineStatus = (
       cpu: number,
@@ -113,11 +108,11 @@ export class MonitoringOverviewService {
         status: determineStatus(ec2Cpu, ec2StatusFailed),
       },
       rds: {
-        cpuUtilization: getLatest(rdsResults, 'rds_cpu'),
-        connections: getLatest(rdsResults, 'rds_connections'),
+        cpuUtilization: getLatest(allResults, 'rds_cpu'),
+        connections: getLatest(allResults, 'rds_connections'),
         freeStorageGB:
-          getLatest(rdsResults, 'rds_storage') / (1024 * 1024 * 1024),
-        freeMemoryMB: getLatest(rdsResults, 'rds_memory') / (1024 * 1024),
+          getLatest(allResults, 'rds_storage') / (1024 * 1024 * 1024),
+        freeMemoryMB: getLatest(allResults, 'rds_memory') / (1024 * 1024),
       },
       server: {
         uptime: serverInfo.uptime,
@@ -131,7 +126,7 @@ export class MonitoringOverviewService {
       timestamp: new Date().toISOString(),
     };
 
-    await this.cache.set(cacheKey, result, MONITORING_CACHE_TTL);
+    await this.cache.set(cacheKey, result, CACHE_TTL_OVERVIEW);
 
     return result;
   }

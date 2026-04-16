@@ -184,6 +184,12 @@ export class CreatePosPaymentDto {
   promotion_ids?: number[];
 
   @IsOptional()
+  @IsArray()
+  @IsInt({ each: true })
+  @Type(() => Number)
+  booking_ids?: number[];
+
+  @IsOptional()
   @IsInt()
   @Type(() => Number)
   coupon_id?: number;

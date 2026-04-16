@@ -1,5 +1,6 @@
 import {
   IsString,
+  IsNotEmpty,
   IsEmail,
   IsOptional,
   MinLength,
@@ -27,6 +28,7 @@ export class RegisterStaffDto {
     description: 'Correo electrónico del staff',
   })
   @IsEmail()
+  @IsNotEmpty({ message: 'El email es requerido' })
   @MaxLength(255)
   email: string;
 

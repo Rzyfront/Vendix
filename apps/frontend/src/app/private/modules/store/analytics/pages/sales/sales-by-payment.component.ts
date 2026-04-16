@@ -18,6 +18,7 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
 import { AnalyticsService } from '../../services/analytics.service';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
+import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
 import {
   SalesByPaymentMethod,
   SalesAnalyticsQueryDto,
@@ -129,8 +130,8 @@ export class SalesByPaymentComponent implements OnInit, OnDestroy {
   data = signal<SalesByPaymentMethod[]>([]);
   chartOptions = signal<EChartsOption>({});
   dateRange = signal<DateRangeFilter>({
-    start_date: this.getDefaultStartDate(),
-    end_date: this.getDefaultEndDate(),
+    start_date: getDefaultStartDate(),
+    end_date: getDefaultEndDate(),
     preset: 'thisMonth',
   });
 
@@ -294,13 +295,4 @@ export class SalesByPaymentComponent implements OnInit, OnDestroy {
     return this.currencyService.format(value, 0);
   }
 
-  private getDefaultStartDate(): string {
-    const date = new Date();
-    date.setDate(1);
-    return date.toISOString().split('T')[0];
-  }
-
-  private getDefaultEndDate(): string {
-    return new Date().toISOString().split('T')[0];
-  }
 }

@@ -1,0 +1,27 @@
+meta {
+  name: Wishlist - Validacion Min(1) product_id
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{url}}/ecommerce/wishlist
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "product_id": 0
+  }
+}
+
+tests {
+  test("Debe fallar con product_id = 0", function() {
+    expect(res.status).to.equal(400);
+  });
+  
+  test("Error debe mencionar validation error", function() {
+    expect(res.body.message).to.include("validation");
+  });
+}

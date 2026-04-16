@@ -1,0 +1,16 @@
+meta {
+  name: Get Payment Methods
+  type: http
+  seq: 1
+}
+
+get {
+  url: {{url}}/ecommerce/checkout/payment-methods
+  auth: inherit
+}
+
+tests {
+  test("Debe retornar metodos de pago", function() {
+    expect(res.status).to.equal(200);
+  });
+}

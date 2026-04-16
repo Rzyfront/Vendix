@@ -1,7 +1,7 @@
 import { Injectable, Logger, Inject, forwardRef, Optional } from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
-import { RequestContextService } from '@common/context/request-context.service';
+import { StoreContextRunner } from '@common/context/store-context-runner.service';
 import { WebhookEvent } from '../interfaces';
 import { OrderFlowService } from '../../orders/order-flow/order-flow.service';
 import { PaymentLinksService } from '../../payment-links/payment-links.service';
@@ -13,33 +13,12 @@ export class WebhookHandlerService {
   constructor(
     private prisma: StorePrismaService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly storeContextRunner: StoreContextRunner,
     @Inject(forwardRef(() => OrderFlowService))
     private orderFlowService: OrderFlowService,
     @Optional() @Inject(forwardRef(() => PaymentLinksService))
     private readonly paymentLinksService?: PaymentLinksService,
   ) {}
-
-  /**
-   * Execute a callback within a store's tenant context.
-   * Allows scoped services (OrderFlowService) to work from webhook handlers.
-   */
-  private async runInStoreContext<T>(storeId: number, callback: () => Promise<T>): Promise<T> {
-    const client = this.prisma.withoutScope();
-    const store = await client.stores.findUnique({
-      where: { id: storeId },
-      select: { organization_id: true },
-    });
-
-    return RequestContextService.run(
-      {
-        store_id: storeId,
-        organization_id: store?.organization_id,
-        is_super_admin: false,
-        is_owner: false,
-      },
-      callback,
-    );
-  }
 
   async handleWebhook(event: WebhookEvent): Promise<void> {
     try {
@@ -207,7 +186,7 @@ export class WebhookHandlerService {
       if (totalPaid >= Number(order.grand_total)) {
         if (order.state === 'pending_payment') {
           // Usar OrderFlowService con contexto de store (maneja pagos, eventos, auditoría)
-          await this.runInStoreContext(order.store_id, async () => {
+          await this.storeContextRunner.runInStoreContext(order.store_id, async () => {
             await this.orderFlowService.confirmPayment(orderId);
           });
           this.logger.log(`Order ${orderId} payment confirmed via OrderFlowService`);
@@ -258,7 +237,7 @@ export class WebhookHandlerService {
                 });
                 if (order && ['created', 'pending_payment', 'processing'].includes(order.state)) {
                   // Usar OrderFlowService con contexto (libera stock, cancela pagos, auditoría)
-                  await this.runInStoreContext(order.store_id, async () => {
+                  await this.storeContextRunner.runInStoreContext(order.store_id, async () => {
                     await this.orderFlowService.cancelOrder(payment.order_id, {
                       reason: `Pago rechazado por Wompi: ${txn.status}`,
                     });

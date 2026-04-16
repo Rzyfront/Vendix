@@ -14,6 +14,7 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 import { OptionsDropdownComponent } from '../../../../shared/components/options-dropdown/options-dropdown.component';
 import { FilterConfig, FilterValues } from '../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 
+import { toLocalDateString, getDefaultStartDate, getDefaultEndDate, formatChartPeriod } from '../../../../shared/utils/date.util';
 import { AnalyticsService } from '../analytics/services/analytics.service';
 import { DateRangeFilter } from '../analytics/interfaces/analytics.interface';
 import {
@@ -342,8 +343,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
   });
 
   dateRange = signal<DateRangeFilter>({
-    start_date: this.getMonthStartDate(),
-    end_date: this.getMonthEndDate(),
+    start_date: getDefaultStartDate(),
+    end_date: getDefaultEndDate(),
     preset: 'thisMonth',
   });
 
@@ -449,8 +450,9 @@ export class DashboardComponent implements OnInit, OnDestroy {
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (response) => {
-          this.trends.set(response.data);
-          this.updateTrendChart(response.data);
+          const data = response.data || [];
+          this.trends.set(data);
+          this.updateTrendChart(data);
           this.loadingTrends.set(false);
         },
         error: () => this.loadingTrends.set(false),
@@ -462,8 +464,9 @@ export class DashboardComponent implements OnInit, OnDestroy {
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (response) => {
-          this.channels.set(response.data);
-          this.updateChannelChart(response.data);
+          const data = response.data || [];
+          this.channels.set(data);
+          this.updateChannelChart(data);
           this.loadingChannels.set(false);
         },
         error: () => this.loadingChannels.set(false),
@@ -498,7 +501,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   // ── Chart Builders ───────────────────────────────────────
 
   private updateTrendChart(trends: SalesTrend[]): void {
-    if (!trends.length) return;
+    if (!trends?.length) return;
 
     const style = getComputedStyle(document.documentElement);
     const primaryColor = style.getPropertyValue('--color-primary').trim() || '#2ecc71';
@@ -506,9 +509,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     const mutedColor = style.getPropertyValue('--color-muted-foreground').trim() || '#6b7280';
     const borderColor = style.getPropertyValue('--color-border').trim() || '#e5e7eb';
 
-    const labels = trends.map((t) =>
-      new Date(t.period).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' }),
-    );
+    const labels = trends.map((t) => formatChartPeriod(t.period, 'day'));
     const revenues = trends.map((t) => t.revenue);
     const orders = trends.map((t) => t.orders);
 
@@ -586,7 +587,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   private updateChannelChart(channels: SalesByChannel[]): void {
-    if (!channels.length) return;
+    if (!channels?.length) return;
 
     const style = getComputedStyle(document.documentElement);
     const mutedColor = style.getPropertyValue('--color-muted-foreground').trim() || '#6b7280';
@@ -704,19 +705,10 @@ export class DashboardComponent implements OnInit, OnDestroy {
         return null;
     }
     return {
-      start_date: start.toISOString().split('T')[0],
-      end_date: end.toISOString().split('T')[0],
+      start_date: toLocalDateString(start),
+      end_date: toLocalDateString(end),
       preset: preset as any,
     };
   }
 
-  private getMonthStartDate(): string {
-    const date = new Date();
-    date.setDate(1);
-    return date.toISOString().split('T')[0];
-  }
-
-  private getMonthEndDate(): string {
-    return new Date().toISOString().split('T')[0];
-  }
 }

@@ -31,6 +31,7 @@ import {
   CardComponent,
 } from '../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
+import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
 
 @Component({
   selector: 'app-invoice-list',
@@ -155,7 +156,7 @@ export class InvoiceListComponent {
       sortable: true,
       align: 'center',
       priority: 2,
-      transform: (val: any) => (val ? new Date(val).toLocaleDateString() : ''),
+      transform: (val: any) => (val ? formatDateOnlyUTC(val) : ''),
     },
     {
       key: 'status',
@@ -206,7 +207,7 @@ export class InvoiceListComponent {
         label: 'Fecha',
         icon: 'calendar',
         transform: (val: any) =>
-          val ? new Date(val).toLocaleDateString() : '-',
+          val ? formatDateOnlyUTC(val) : '-',
       },
       {
         key: 'invoice_type',

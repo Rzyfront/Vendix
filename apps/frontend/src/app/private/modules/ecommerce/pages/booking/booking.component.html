@@ -1,310 +1,418 @@
 <!-- Loading state -->
 @if (loading()) {
-    <div class="booking-page">
-        <div class="booking-container">
-            <div class="loading-state">
-                <div class="spinner"></div>
-                <p>Cargando servicio...</p>
-            </div>
-        </div>
+  <div class="booking-page">
+    <div class="booking-container">
+      <div class="loading-state">
+        <div class="spinner"></div>
+        <p>Cargando servicio...</p>
+      </div>
     </div>
+  </div>
 } @else if (bookingResult()) {
-    <!-- Confirmation Screen -->
-    <div class="booking-page">
-        <div class="booking-container">
-            <div class="confirmation-screen">
-                <div class="confirmation-icon">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"
-                        stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
-                        <polyline points="22 4 12 14.01 9 11.01"></polyline>
-                    </svg>
-                </div>
-                <h2>Reserva Confirmada</h2>
-                <p class="confirmation-number">N.° {{ bookingResult().booking_number }}</p>
-
-                <div class="confirmation-details">
-                    <div class="detail-row">
-                        <span class="detail-label">Servicio</span>
-                        <span class="detail-value">{{ product()?.name }}</span>
-                    </div>
-                    <div class="detail-row">
-                        <span class="detail-label">Fecha</span>
-                        <span class="detail-value">{{ formatDateDisplay(bookingResult().date) }}</span>
-                    </div>
-                    <div class="detail-row">
-                        <span class="detail-label">Horario</span>
-                        <span class="detail-value">{{ formatTime(bookingResult().start_time) }} - {{ formatTime(bookingResult().end_time) }}</span>
-                    </div>
-                </div>
-
-                <div class="confirmation-actions">
-                    <app-button (clicked)="goToMyReservations()">Ver mis reservas</app-button>
-                    <app-button (clicked)="goBack()" variant="outline">Volver al inicio</app-button>
-                </div>
-            </div>
+  <!-- Confirmation Screen -->
+  <div class="booking-page">
+    <div class="booking-container">
+      <div class="confirmation-screen">
+        <div class="confirmation-icon">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path>
+            <polyline points="22 4 12 14.01 9 11.01"></polyline>
+          </svg>
         </div>
+        <h2>Reserva Confirmada</h2>
+        <p class="confirmation-number">
+          N.° {{ bookingResult().booking_number }}
+        </p>
+
+        <div class="confirmation-details">
+          <div class="detail-row">
+            <span class="detail-label">Servicio</span>
+            <span class="detail-value">{{ product()?.name }}</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-label">Fecha</span>
+            <span class="detail-value">{{
+              formatDateDisplay(bookingResult().date)
+            }}</span>
+          </div>
+          <div class="detail-row">
+            <span class="detail-label">Horario</span>
+            <span class="detail-value"
+              >{{ formatTime(bookingResult().start_time) }} -
+              {{ formatTime(bookingResult().end_time) }}</span
+            >
+          </div>
+        </div>
+
+        <div class="confirmation-actions">
+          <app-button (clicked)="goToMyReservations()"
+            >Ver mis reservas</app-button
+          >
+          <app-button (clicked)="goBack()" variant="outline"
+            >Volver al inicio</app-button
+          >
+        </div>
+      </div>
     </div>
+  </div>
 } @else {
-    <!-- Booking Flow -->
-    <div class="booking-page">
-        <div class="booking-container">
-            <!-- Header -->
-            <div class="booking-header">
-                <button class="back-button" (click)="goBack()">
-                    <app-icon name="arrow-left" [size]="20" />
+  <!-- Booking Flow -->
+  <div class="booking-page">
+    <div class="booking-container">
+      <!-- Header -->
+      <div class="booking-header">
+        <button class="back-button" (click)="goBack()">
+          <app-icon name="arrow-left" [size]="20" />
+        </button>
+        <div class="header-info">
+          <h1>{{ product()?.name || "Reservar" }}</h1>
+          @if (product(); as p) {
+            <p class="service-meta">
+              {{ p.final_price | currency }}
+              @if (p.service_duration_minutes) {
+                <span class="duration"
+                  >{{ p.service_duration_minutes }} min</span
+                >
+              }
+            </p>
+          }
+        </div>
+      </div>
+
+      <!-- Steps indicator -->
+      <app-steps-line
+        [steps]="steps"
+        [currentStep]="currentStep()"
+        [clickable]="true"
+        (stepClicked)="goToStep($event)"
+        size="sm"
+      />
+
+      <!-- Step 1: Calendar -->
+      @if (currentStep() === 0) {
+        <div class="step-content">
+          <h2 class="step-title">Selecciona una fecha</h2>
+
+          <!-- Month navigation -->
+          <div class="month-nav">
+            <button class="nav-btn" (click)="prevMonth()">
+              <app-icon name="chevron-left" [size]="20" />
+            </button>
+            <span class="month-label">{{ monthLabel() }}</span>
+            <button class="nav-btn" (click)="nextMonth()">
+              <app-icon name="chevron-right" [size]="20" />
+            </button>
+          </div>
+
+          <!-- Calendar grid -->
+          <div class="calendar">
+            <div class="calendar-header">
+              <span>Dom</span>
+              <span>Lun</span>
+              <span>Mar</span>
+              <span>Mié</span>
+              <span>Jue</span>
+              <span>Vie</span>
+              <span>Sáb</span>
+            </div>
+            <div class="calendar-grid">
+              @for (day of calendarDays(); track day.date) {
+                <button
+                  class="calendar-day"
+                  [class.other-month]="!day.isCurrentMonth"
+                  [class.has-availability]="
+                    day.hasAvailability ||
+                    (isFreeBooking() &&
+                      day.isCurrentMonth &&
+                      !isPastDate(day.date))
+                  "
+                  [class.no-availability]="
+                    day.isCurrentMonth &&
+                    !day.hasAvailability &&
+                    !isFreeBooking()
+                  "
+                  [class.today]="isToday(day.date)"
+                  [class.past]="isPastDate(day.date)"
+                  [class.selected]="selectedDate() === day.date"
+                  [disabled]="
+                    (!day.hasAvailability && !isFreeBooking()) ||
+                    !day.isCurrentMonth ||
+                    isPastDate(day.date)
+                  "
+                  (click)="selectDate(day.date)"
+                >
+                  {{ day.day }}
                 </button>
-                <div class="header-info">
-                    <h1>{{ product()?.name || 'Reservar' }}</h1>
-                    @if (product(); as p) {
-                        <p class="service-meta">
-                            {{ p.final_price | currency }}
-                            @if (p.service_duration_minutes) {
-                                <span class="duration">{{ p.service_duration_minutes }} min</span>
-                            }
-                        </p>
-                    }
+              }
+            </div>
+          </div>
+
+          @if (loadingSlots()) {
+            <div class="loading-inline">
+              <div class="spinner-sm"></div>
+              <span>Cargando disponibilidad...</span>
+            </div>
+          }
+        </div>
+      }
+
+      <!-- Step 2: Time Slots -->
+      @if (currentStep() === 1) {
+        <div class="step-content">
+          <h2 class="step-title">Selecciona un horario</h2>
+          <p class="selected-date-label">
+            {{ formatDateDisplay(selectedDate()!) }}
+          </p>
+
+          @if (isFreeBooking()) {
+            <div class="slot-group">
+              <h3 class="slot-group-label">
+                <app-icon name="clock" [size]="16" />
+                Horarios disponibles
+              </h3>
+              <div class="slot-list">
+                @for (slot of freeBookingSlots(); track slot.time) {
+                  <button
+                    class="slot-btn"
+                    [class.selected]="freeBookingTime() === slot.time"
+                    (click)="selectFreeBookingTime(slot)"
+                  >
+                    <span class="slot-time">{{ formatTime(slot.time) }}</span>
+                    <span class="slot-availability">{{
+                      formatTime(slot.endTime)
+                    }}</span>
+                  </button>
+                }
+              </div>
+            </div>
+          } @else if (!hasGroupedSlots()) {
+            <div class="empty-slots">
+              <app-icon name="clock" [size]="32" />
+              <p>No hay horarios disponibles para esta fecha</p>
+              <app-button (clicked)="goToStep(0)" variant="outline" size="sm"
+                >Elegir otra fecha</app-button
+              >
+            </div>
+          } @else {
+            <!-- Morning -->
+            @if (groupedSlots().morning.length > 0) {
+              <div class="slot-group">
+                <h3 class="slot-group-label">
+                  <app-icon name="sunrise" [size]="16" />
+                  Mañana
+                </h3>
+                <div class="slot-list">
+                  @for (slot of groupedSlots().morning; track slot.start_time) {
+                    <button
+                      class="slot-btn"
+                      [class.selected]="
+                        selectedSlot()?.start_time === slot.start_time &&
+                        selectedSlot()?.date === slot.date
+                      "
+                      (click)="selectSlot(slot)"
+                    >
+                      <span class="slot-time">{{
+                        formatTime(slot.start_time)
+                      }}</span>
+                      <span class="slot-availability"
+                        >{{ slot.available }}
+                        {{ slot.available === 1 ? "cupo" : "cupos" }}</span
+                      >
+                    </button>
+                  }
                 </div>
+              </div>
+            }
+
+            <!-- Afternoon -->
+            @if (groupedSlots().afternoon.length > 0) {
+              <div class="slot-group">
+                <h3 class="slot-group-label">
+                  <app-icon name="sun" [size]="16" />
+                  Tarde
+                </h3>
+                <div class="slot-list">
+                  @for (
+                    slot of groupedSlots().afternoon;
+                    track slot.start_time
+                  ) {
+                    <button
+                      class="slot-btn"
+                      [class.selected]="
+                        selectedSlot()?.start_time === slot.start_time &&
+                        selectedSlot()?.date === slot.date
+                      "
+                      (click)="selectSlot(slot)"
+                    >
+                      <span class="slot-time">{{
+                        formatTime(slot.start_time)
+                      }}</span>
+                      <span class="slot-availability"
+                        >{{ slot.available }}
+                        {{ slot.available === 1 ? "cupo" : "cupos" }}</span
+                      >
+                    </button>
+                  }
+                </div>
+              </div>
+            }
+
+            <!-- Evening -->
+            @if (groupedSlots().evening.length > 0) {
+              <div class="slot-group">
+                <h3 class="slot-group-label">
+                  <app-icon name="moon" [size]="16" />
+                  Noche
+                </h3>
+                <div class="slot-list">
+                  @for (slot of groupedSlots().evening; track slot.start_time) {
+                    <button
+                      class="slot-btn"
+                      [class.selected]="
+                        selectedSlot()?.start_time === slot.start_time &&
+                        selectedSlot()?.date === slot.date
+                      "
+                      (click)="selectSlot(slot)"
+                    >
+                      <span class="slot-time">{{
+                        formatTime(slot.start_time)
+                      }}</span>
+                      <span class="slot-availability"
+                        >{{ slot.available }}
+                        {{ slot.available === 1 ? "cupo" : "cupos" }}</span
+                      >
+                    </button>
+                  }
+                </div>
+              </div>
+            }
+          }
+
+          <div class="step-actions">
+            <app-button (clicked)="goToStep(0)" variant="outline" size="sm"
+              >Cambiar fecha</app-button
+            >
+          </div>
+        </div>
+      }
+
+      <!-- Step 3: Confirm -->
+      @if (currentStep() === 2) {
+        <div class="step-content">
+          <h2 class="step-title">Confirmar reserva</h2>
+
+          <!-- Summary card -->
+          <div class="summary-card">
+            <div class="summary-row">
+              <span class="summary-label">Servicio</span>
+              <span class="summary-value">{{ product()?.name }}</span>
+            </div>
+            <div class="summary-row">
+              <span class="summary-label">Fecha</span>
+              <span class="summary-value">{{
+                formatDateDisplay(selectedDate()!)
+              }}</span>
+            </div>
+            <div class="summary-row">
+              <span class="summary-label">Horario</span>
+              <span class="summary-value"
+                >{{
+                  formatTime(
+                    isFreeBooking()
+                      ? freeBookingTime()!
+                      : selectedSlot()!.start_time
+                  )
+                }}
+                -
+                {{
+                  formatTime(
+                    isFreeBooking()
+                      ? freeBookingEndTime()!
+                      : selectedSlot()!.end_time
+                  )
+                }}</span
+              >
+            </div>
+            @if (product(); as p) {
+              <div class="summary-row summary-price">
+                <span class="summary-label">Precio</span>
+                <span class="summary-value price">{{
+                  p.final_price | currency
+                }}</span>
+              </div>
+            }
+          </div>
+
+          <!-- Auth check -->
+          @if (!isLoggedIn()) {
+            <div class="login-prompt">
+              <app-icon name="user" [size]="24" />
+              <p>Inicia sesión para completar tu reserva</p>
+              <app-button (clicked)="goToLogin()" size="sm"
+                >Iniciar sesión</app-button
+              >
+            </div>
+          } @else {
+            <!-- Customer info (pre-filled) -->
+            <div class="customer-info">
+              <h3>Tus datos</h3>
+              <div class="info-row">
+                <app-icon name="user" [size]="16" />
+                <span>{{ guestName() }}</span>
+              </div>
+              <div class="info-row">
+                <app-icon name="mail" [size]="16" />
+                <span>{{ guestEmail() }}</span>
+              </div>
+              @if (guestPhone()) {
+                <div class="info-row">
+                  <app-icon name="phone" [size]="16" />
+                  <span>{{ guestPhone() }}</span>
+                </div>
+              }
             </div>
 
-            <!-- Steps indicator -->
-            <app-steps-line
-                [steps]="steps"
-                [currentStep]="currentStep()"
-                [clickable]="true"
-                (stepClicked)="goToStep($event)"
-                size="sm"
-            />
+            <!-- Notes -->
+            <div class="notes-field">
+              <label for="booking-notes">Notas (opcional)</label>
+              <textarea
+                id="booking-notes"
+                [ngModel]="bookingNotes()"
+                (ngModelChange)="bookingNotes.set($event)"
+                placeholder="Alguna indicación especial..."
+                rows="3"
+              ></textarea>
+            </div>
 
-            <!-- Step 1: Calendar -->
-            @if (currentStep() === 0) {
-                <div class="step-content">
-                    <h2 class="step-title">Selecciona una fecha</h2>
-
-                    <!-- Month navigation -->
-                    <div class="month-nav">
-                        <button class="nav-btn" (click)="prevMonth()">
-                            <app-icon name="chevron-left" [size]="20" />
-                        </button>
-                        <span class="month-label">{{ monthLabel() }}</span>
-                        <button class="nav-btn" (click)="nextMonth()">
-                            <app-icon name="chevron-right" [size]="20" />
-                        </button>
-                    </div>
-
-                    <!-- Calendar grid -->
-                    <div class="calendar">
-                        <div class="calendar-header">
-                            <span>Dom</span>
-                            <span>Lun</span>
-                            <span>Mar</span>
-                            <span>Mié</span>
-                            <span>Jue</span>
-                            <span>Vie</span>
-                            <span>Sáb</span>
-                        </div>
-                        <div class="calendar-grid">
-                            @for (day of calendarDays(); track day.date) {
-                                <button
-                                    class="calendar-day"
-                                    [class.other-month]="!day.isCurrentMonth"
-                                    [class.has-availability]="day.hasAvailability"
-                                    [class.no-availability]="day.isCurrentMonth && !day.hasAvailability"
-                                    [class.today]="isToday(day.date)"
-                                    [class.past]="isPastDate(day.date)"
-                                    [class.selected]="selectedDate() === day.date"
-                                    [disabled]="!day.hasAvailability || !day.isCurrentMonth"
-                                    (click)="selectDate(day.date)"
-                                >
-                                    {{ day.day }}
-                                </button>
-                            }
-                        </div>
-                    </div>
-
-                    @if (loadingSlots()) {
-                        <div class="loading-inline">
-                            <div class="spinner-sm"></div>
-                            <span>Cargando disponibilidad...</span>
-                        </div>
-                    }
-                </div>
+            @if (errorMessage()) {
+              <div class="error-message">
+                <app-icon name="alert-circle" [size]="16" />
+                {{ errorMessage() }}
+              </div>
             }
 
-            <!-- Step 2: Time Slots -->
-            @if (currentStep() === 1) {
-                <div class="step-content">
-                    <h2 class="step-title">Selecciona un horario</h2>
-                    <p class="selected-date-label">{{ formatDateDisplay(selectedDate()!) }}</p>
-
-                    @if (!hasGroupedSlots()) {
-                        <div class="empty-slots">
-                            <app-icon name="clock" [size]="32" />
-                            <p>No hay horarios disponibles para esta fecha</p>
-                            <app-button (clicked)="goToStep(0)" variant="outline" size="sm">Elegir otra fecha</app-button>
-                        </div>
-                    } @else {
-                        <!-- Morning -->
-                        @if (groupedSlots().morning.length > 0) {
-                            <div class="slot-group">
-                                <h3 class="slot-group-label">
-                                    <app-icon name="sunrise" [size]="16" />
-                                    Mañana
-                                </h3>
-                                <div class="slot-list">
-                                    @for (slot of groupedSlots().morning; track slot.start_time) {
-                                        <button
-                                            class="slot-btn"
-                                            [class.selected]="selectedSlot()?.start_time === slot.start_time && selectedSlot()?.date === slot.date"
-                                            (click)="selectSlot(slot)"
-                                        >
-                                            <span class="slot-time">{{ formatTime(slot.start_time) }}</span>
-                                            <span class="slot-availability">{{ slot.available }} {{ slot.available === 1 ? 'cupo' : 'cupos' }}</span>
-                                        </button>
-                                    }
-                                </div>
-                            </div>
-                        }
-
-                        <!-- Afternoon -->
-                        @if (groupedSlots().afternoon.length > 0) {
-                            <div class="slot-group">
-                                <h3 class="slot-group-label">
-                                    <app-icon name="sun" [size]="16" />
-                                    Tarde
-                                </h3>
-                                <div class="slot-list">
-                                    @for (slot of groupedSlots().afternoon; track slot.start_time) {
-                                        <button
-                                            class="slot-btn"
-                                            [class.selected]="selectedSlot()?.start_time === slot.start_time && selectedSlot()?.date === slot.date"
-                                            (click)="selectSlot(slot)"
-                                        >
-                                            <span class="slot-time">{{ formatTime(slot.start_time) }}</span>
-                                            <span class="slot-availability">{{ slot.available }} {{ slot.available === 1 ? 'cupo' : 'cupos' }}</span>
-                                        </button>
-                                    }
-                                </div>
-                            </div>
-                        }
-
-                        <!-- Evening -->
-                        @if (groupedSlots().evening.length > 0) {
-                            <div class="slot-group">
-                                <h3 class="slot-group-label">
-                                    <app-icon name="moon" [size]="16" />
-                                    Noche
-                                </h3>
-                                <div class="slot-list">
-                                    @for (slot of groupedSlots().evening; track slot.start_time) {
-                                        <button
-                                            class="slot-btn"
-                                            [class.selected]="selectedSlot()?.start_time === slot.start_time && selectedSlot()?.date === slot.date"
-                                            (click)="selectSlot(slot)"
-                                        >
-                                            <span class="slot-time">{{ formatTime(slot.start_time) }}</span>
-                                            <span class="slot-availability">{{ slot.available }} {{ slot.available === 1 ? 'cupo' : 'cupos' }}</span>
-                                        </button>
-                                    }
-                                </div>
-                            </div>
-                        }
-                    }
-
-                    <div class="step-actions">
-                        <app-button (clicked)="goToStep(0)" variant="outline" size="sm">Cambiar fecha</app-button>
-                    </div>
-                </div>
-            }
-
-            <!-- Step 3: Confirm -->
-            @if (currentStep() === 2) {
-                <div class="step-content">
-                    <h2 class="step-title">Confirmar reserva</h2>
-
-                    <!-- Summary card -->
-                    <div class="summary-card">
-                        <div class="summary-row">
-                            <span class="summary-label">Servicio</span>
-                            <span class="summary-value">{{ product()?.name }}</span>
-                        </div>
-                        <div class="summary-row">
-                            <span class="summary-label">Fecha</span>
-                            <span class="summary-value">{{ formatDateDisplay(selectedDate()!) }}</span>
-                        </div>
-                        <div class="summary-row">
-                            <span class="summary-label">Horario</span>
-                            <span class="summary-value">{{ formatTime(selectedSlot()!.start_time) }} - {{ formatTime(selectedSlot()!.end_time) }}</span>
-                        </div>
-                        @if (product(); as p) {
-                            <div class="summary-row summary-price">
-                                <span class="summary-label">Precio</span>
-                                <span class="summary-value price">{{ p.final_price | currency }}</span>
-                            </div>
-                        }
-                    </div>
-
-                    <!-- Auth check -->
-                    @if (!isLoggedIn()) {
-                        <div class="login-prompt">
-                            <app-icon name="user" [size]="24" />
-                            <p>Inicia sesión para completar tu reserva</p>
-                            <app-button (clicked)="goToLogin()" size="sm">Iniciar sesión</app-button>
-                        </div>
-                    } @else {
-                        <!-- Customer info (pre-filled) -->
-                        <div class="customer-info">
-                            <h3>Tus datos</h3>
-                            <div class="info-row">
-                                <app-icon name="user" [size]="16" />
-                                <span>{{ guestName() }}</span>
-                            </div>
-                            <div class="info-row">
-                                <app-icon name="mail" [size]="16" />
-                                <span>{{ guestEmail() }}</span>
-                            </div>
-                            @if (guestPhone()) {
-                                <div class="info-row">
-                                    <app-icon name="phone" [size]="16" />
-                                    <span>{{ guestPhone() }}</span>
-                                </div>
-                            }
-                        </div>
-
-                        <!-- Notes -->
-                        <div class="notes-field">
-                            <label for="booking-notes">Notas (opcional)</label>
-                            <textarea
-                                id="booking-notes"
-                                [ngModel]="bookingNotes()"
-                                (ngModelChange)="bookingNotes.set($event)"
-                                placeholder="Alguna indicación especial..."
-                                rows="3"
-                            ></textarea>
-                        </div>
-
-                        @if (errorMessage()) {
-                            <div class="error-message">
-                                <app-icon name="alert-circle" [size]="16" />
-                                {{ errorMessage() }}
-                            </div>
-                        }
-
-                        <div class="step-actions">
-                            <app-button
-                                (clicked)="goToStep(1)"
-                                variant="outline"
-                                size="sm"
-                            >Cambiar horario</app-button>
-                            <app-button
-                                (clicked)="confirmBooking()"
-                                [loading]="submitting()"
-                                [disabled]="submitting()"
-                            >Confirmar Reserva</app-button>
-                        </div>
-                    }
-                </div>
-            }
+            <div class="step-actions">
+              <app-button (clicked)="goToStep(1)" variant="outline" size="sm"
+                >Cambiar horario</app-button
+              >
+              <app-button
+                (clicked)="confirmBooking()"
+                [loading]="submitting()"
+                [disabled]="submitting()"
+                >Confirmar Reserva</app-button
+              >
+            </div>
+          }
         </div>
+      }
     </div>
+  </div>
 }

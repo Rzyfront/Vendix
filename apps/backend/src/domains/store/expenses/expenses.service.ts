@@ -330,6 +330,7 @@ export class ExpensesService {
       rejected: 0,
       paid: 0,
       cancelled: 0,
+      refunded: 0,
     };
     for (const row of countsByState) {
       if (row.state) {

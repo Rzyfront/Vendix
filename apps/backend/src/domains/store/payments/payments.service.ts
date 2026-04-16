@@ -1001,6 +1001,22 @@ export class PaymentsService {
           },
         });
 
+        // Link pending bookings to this order
+        if (dto.booking_ids?.length) {
+          await tx.bookings.updateMany({
+            where: {
+              id: { in: dto.booking_ids },
+              store_id: dto.store_id,
+              order_id: null,
+              status: { in: ['pending', 'confirmed'] },
+            },
+            data: {
+              order_id: order.id,
+              updated_at: new Date(),
+            },
+          });
+        }
+
         return order;
       } catch (error) {
         if (

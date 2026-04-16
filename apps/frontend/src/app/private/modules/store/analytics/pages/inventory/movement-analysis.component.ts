@@ -24,6 +24,7 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
 
 import { AnalyticsService } from '../../services/analytics.service';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
+import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
 import {
   StockMovementReport,
   MovementSummaryItem,
@@ -252,8 +253,8 @@ export class MovementAnalysisComponent implements OnInit, OnDestroy {
   // Filters
   granularity = signal<string>('day');
   dateRange = signal<DateRangeFilter>({
-    start_date: this.getDefaultStartDate(),
-    end_date: this.getDefaultEndDate(),
+    start_date: getDefaultStartDate(),
+    end_date: getDefaultEndDate(),
     preset: 'thisMonth',
   });
 
@@ -625,13 +626,4 @@ export class MovementAnalysisComponent implements OnInit, OnDestroy {
       });
   }
 
-  private getDefaultStartDate(): string {
-    const date = new Date();
-    date.setDate(1);
-    return date.toISOString().split('T')[0];
-  }
-
-  private getDefaultEndDate(): string {
-    return new Date().toISOString().split('T')[0];
-  }
 }

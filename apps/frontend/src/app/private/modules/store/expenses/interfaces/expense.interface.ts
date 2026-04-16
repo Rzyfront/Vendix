@@ -7,12 +7,21 @@ export interface Expense {
   currency?: string;
   description?: string;
   expense_date: Date;
-  state: 'pending' | 'approved' | 'rejected' | 'paid' | 'cancelled';
+  state:
+    | 'pending'
+    | 'approved'
+    | 'rejected'
+    | 'paid'
+    | 'cancelled'
+    | 'refunded';
   receipt_url?: string;
   notes?: string;
   created_by_user_id?: number;
   approved_by_user_id?: number;
   approved_at?: Date;
+  refunded_at?: Date;
+  refunded_by_user_id?: number;
+  refund_reason?: string;
   created_at: Date;
   updated_at: Date;
 
@@ -24,6 +33,11 @@ export interface Expense {
     last_name?: string;
   };
   approved_by_user?: {
+    id: number;
+    first_name?: string;
+    last_name?: string;
+  };
+  refunded_by_user?: {
     id: number;
     first_name?: string;
     last_name?: string;
@@ -82,6 +96,7 @@ export interface ExpenseSummary {
     rejected: number;
     paid: number;
     cancelled: number;
+    refunded: number;
   };
   category_breakdown: Array<{
     category_id: number;

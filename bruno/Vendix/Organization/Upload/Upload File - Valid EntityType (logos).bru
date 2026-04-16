@@ -1,0 +1,24 @@
+meta {
+  name: Upload File - Valid EntityType (logos)
+  type: http
+  seq: 3
+}
+
+post {
+  url: {{url}}/upload
+  body: multipartForm
+  auth: inherit
+}
+
+body:multipartForm {
+  entityType: logos
+  file: ./../../../test-files/test-image.png
+}
+
+tests {
+  test("Accepts valid entityType", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('key');
+    expect(res.body).to.have.property('url');
+  });
+}

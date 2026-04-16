@@ -4,10 +4,10 @@ import { StorePrismaService } from '../../../../prisma/services/store-prisma.ser
 import { RequestContextService } from '@common/context/request-context.service';
 import {
   SalesAnalyticsQueryDto,
-  DatePreset,
   Granularity,
 } from '../dto/analytics-query.dto';
 import { fillTimeSeries } from '../utils/fill-time-series.util';
+import { formatPeriodFromDate, parseDateRange, getPreviousPeriod, getDateTruncInterval } from '../utils/date.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
@@ -18,8 +18,8 @@ export class SalesAnalyticsService {
   private readonly COMPLETED_STATES = ['delivered', 'finished'];
 
   async getSalesSummary(query: SalesAnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
-    const { previousStartDate, previousEndDate } = this.getPreviousPeriod(
+    const { startDate, endDate } = parseDateRange(query);
+    const { previousStartDate, previousEndDate } = getPreviousPeriod(
       startDate,
       endDate,
     );
@@ -119,29 +119,120 @@ export class SalesAnalyticsService {
   }
 
   async getSalesByProduct(query: SalesAnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
+    const { startDate, endDate } = parseDateRange(query);
 
-    const results = await this.prisma.order_items.groupBy({
-      by: ['product_id'],
-      where: {
-        orders: {
-          state: { in: this.COMPLETED_STATES },
-          ...(query.channel && { channel: query.channel }),
-          created_at: {
-            gte: startDate,
-            lte: endDate,
-          },
+    const groupWhere: any = {
+      orders: {
+        state: { in: this.COMPLETED_STATES },
+        ...(query.channel && { channel: query.channel }),
+        created_at: {
+          gte: startDate,
+          lte: endDate,
         },
-        ...(query.category_id && {
-          products: {
-            product_categories: {
-              some: {
-                category_id: query.category_id,
-              },
+      },
+      ...(query.category_id && {
+        products: {
+          product_categories: {
+            some: {
+              category_id: query.category_id,
             },
           },
-        }),
-      },
+        },
+      }),
+    };
+
+    const isPaginated = query.page !== undefined && query.limit !== undefined;
+
+    if (isPaginated) {
+      const page = query.page!;
+      const limit = query.limit!;
+
+      // Count distinct product groups
+      const countGroups = await this.prisma.order_items.groupBy({
+        by: ['product_id'],
+        where: groupWhere,
+      });
+      const totalCount = countGroups.length;
+
+      const results = await this.prisma.order_items.groupBy({
+        by: ['product_id'],
+        where: groupWhere,
+        _sum: {
+          quantity: true,
+          total_price: true,
+        },
+        orderBy: {
+          _sum: {
+            total_price: 'desc',
+          },
+        },
+        skip: (page - 1) * limit,
+        take: limit,
+      });
+
+      const productIds = results
+        .map((r) => r.product_id)
+        .filter(Boolean) as number[];
+      const products = (await this.prisma.products.findMany({
+        where: { id: { in: productIds } },
+        select: {
+          id: true,
+          name: true,
+          sku: true,
+          product_images: { select: { image_url: true }, take: 1 },
+          base_price: true,
+          cost_price: true,
+        },
+      })) as {
+        id: number;
+        name: string;
+        sku: string | null;
+        product_images: { image_url: string }[];
+        base_price: any;
+        cost_price: any;
+      }[];
+      const productMap = new Map(products.map((p) => [p.id, p]));
+
+      const data = results.map((r) => {
+        const product = productMap.get(r.product_id as number);
+        const revenue = Number(r._sum.total_price || 0);
+        const units = Number(r._sum.quantity || 0);
+        const costPrice = product ? Number(product.cost_price || 0) : 0;
+        const avgPrice = units > 0 ? revenue / units : 0;
+        const profitMargin =
+          costPrice > 0 && avgPrice > 0
+            ? ((avgPrice - costPrice) / avgPrice) * 100
+            : null;
+
+        return {
+          product_id: r.product_id,
+          product_name: product?.name || 'Unknown',
+          sku: product?.sku || '',
+          image_url: product?.product_images?.[0]?.image_url || null,
+          units_sold: units,
+          revenue: revenue,
+          average_price: avgPrice,
+          profit_margin: profitMargin,
+        };
+      });
+
+      return {
+        data,
+        meta: {
+          pagination: {
+            total: totalCount,
+            page,
+            limit,
+            total_pages: Math.ceil(totalCount / limit),
+          },
+        },
+      };
+    }
+
+    // Non-paginated (retrocompatible)
+    const results = await this.prisma.order_items.groupBy({
+      by: ['product_id'],
+      where: groupWhere,
       _sum: {
         quantity: true,
         total_price: true,
@@ -211,7 +302,7 @@ export class SalesAnalyticsService {
   }
 
   async getSalesByCategory(query: SalesAnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
+    const { startDate, endDate } = parseDateRange(query);
 
     // Step 1: Aggregate order_items by product_id at DB level
     const productAggregates = await this.prisma.order_items.groupBy({
@@ -298,7 +389,7 @@ export class SalesAnalyticsService {
       }
     }
 
-    return Array.from(categoryMap.entries())
+    const allResults = Array.from(categoryMap.entries())
       .map(([id, data]) => ({
         category_id: id,
         category_name: data.name,
@@ -308,10 +399,32 @@ export class SalesAnalyticsService {
           totalRevenue > 0 ? (data.revenue / totalRevenue) * 100 : 0,
       }))
       .sort((a, b) => b.revenue - a.revenue);
+
+    const isPaginated = query.page !== undefined && query.limit !== undefined;
+    if (isPaginated) {
+      const page = query.page!;
+      const limit = query.limit!;
+      const totalCount = allResults.length;
+      const data = allResults.slice((page - 1) * limit, page * limit);
+
+      return {
+        data,
+        meta: {
+          pagination: {
+            total: totalCount,
+            page,
+            limit,
+            total_pages: Math.ceil(totalCount / limit),
+          },
+        },
+      };
+    }
+
+    return allResults;
   }
 
   async getSalesByPaymentMethod(query: SalesAnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
+    const { startDate, endDate } = parseDateRange(query);
 
     const payments = await this.prisma.payments.findMany({
       where: {
@@ -325,9 +438,9 @@ export class SalesAnalyticsService {
         state: 'succeeded',
       },
       include: {
-        store_payment_methods: {
+        store_payment_method: {
           include: {
-            system_payment_methods: true,
+            system_payment_method: true,
           },
         },
       },
@@ -344,11 +457,11 @@ export class SalesAnalyticsService {
       totalAmount += amount;
 
       const methodName =
-        payment.store_payment_methods?.system_payment_methods?.name ||
+        payment.store_payment_method?.system_payment_method?.name ||
         'unknown';
       const displayName =
-        payment.store_payment_methods?.display_name ||
-        payment.store_payment_methods?.system_payment_methods?.display_name ||
+        payment.store_payment_method?.display_name ||
+        payment.store_payment_method?.system_payment_method?.display_name ||
         'Desconocido';
 
       const existing = methodMap.get(methodName) || {
@@ -361,7 +474,7 @@ export class SalesAnalyticsService {
       methodMap.set(methodName, existing);
     }
 
-    return Array.from(methodMap.entries())
+    const allResults = Array.from(methodMap.entries())
       .map(([method, data]) => ({
         payment_method: method,
         display_name: data.displayName,
@@ -370,10 +483,32 @@ export class SalesAnalyticsService {
         percentage: totalAmount > 0 ? (data.amount / totalAmount) * 100 : 0,
       }))
       .sort((a, b) => b.total_amount - a.total_amount);
+
+    const isPaginated = query.page !== undefined && query.limit !== undefined;
+    if (isPaginated) {
+      const page = query.page!;
+      const limit = query.limit!;
+      const totalCount = allResults.length;
+      const data = allResults.slice((page - 1) * limit, page * limit);
+
+      return {
+        data,
+        meta: {
+          pagination: {
+            total: totalCount,
+            page,
+            limit,
+            total_pages: Math.ceil(totalCount / limit),
+          },
+        },
+      };
+    }
+
+    return allResults;
   }
 
   async getSalesTrends(query: SalesAnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
+    const { startDate, endDate } = parseDateRange(query);
     const granularity = query.granularity || Granularity.DAY;
     const context = RequestContextService.getContext();
 
@@ -385,7 +520,7 @@ export class SalesAnalyticsService {
     // Map granularity to PostgreSQL DATE_TRUNC interval
     // Use Prisma.raw() so the interval is inlined as a SQL literal
     // instead of parameterized (avoids GROUP BY mismatch with SELECT)
-    const truncSql = Prisma.raw(`'${this.getDateTruncInterval(granularity)}'`);
+    const truncSql = Prisma.raw(`'${getDateTruncInterval(granularity)}'`);
 
     // withoutScope() needed: $queryRaw is not available on the scoped client.
     // storeId is validated above and used in the WHERE clause.
@@ -417,7 +552,7 @@ export class SalesAnalyticsService {
       const revenue = Number(r.revenue);
       const orders = Number(r.order_count);
       return {
-        period: this.formatPeriodFromDate(new Date(r.period), granularity),
+        period: formatPeriodFromDate(new Date(r.period), granularity),
         revenue,
         orders,
         units_sold: Number(r.units_sold),
@@ -431,77 +566,93 @@ export class SalesAnalyticsService {
       endDate,
       granularity,
       { revenue: 0, orders: 0, units_sold: 0, average_order_value: 0 },
-      this.formatPeriodFromDate.bind(this),
+      formatPeriodFromDate,
     );
   }
 
-  private getDateTruncInterval(granularity: Granularity): string {
-    switch (granularity) {
-      case Granularity.HOUR:
-        return 'hour';
-      case Granularity.DAY:
-        return 'day';
-      case Granularity.WEEK:
-        return 'week';
-      case Granularity.MONTH:
-        return 'month';
-      case Granularity.YEAR:
-        return 'year';
-      default:
-        return 'day';
-    }
-  }
-
-  private formatPeriodFromDate(date: Date, granularity: Granularity): string {
-    const y = date.getFullYear();
-    const m = String(date.getMonth() + 1).padStart(2, '0');
-    const d = String(date.getDate()).padStart(2, '0');
-
-    switch (granularity) {
-      case Granularity.HOUR:
-        return `${y}-${m}-${d}T${String(date.getHours()).padStart(2, '0')}:00`;
-      case Granularity.DAY:
-        return `${y}-${m}-${d}`;
-      case Granularity.WEEK:
-        return `${y}-${m}-${d}`;
-      case Granularity.MONTH:
-        return `${y}-${m}`;
-      case Granularity.YEAR:
-        return `${y}`;
-      default:
-        return `${y}-${m}-${d}`;
-    }
-  }
-
   async getSalesByCustomer(query: SalesAnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
+    const { startDate, endDate } = parseDateRange(query);
 
+    const where = {
+      state: { in: this.COMPLETED_STATES },
+      customer_id: { not: null },
+      created_at: { gte: startDate, lte: endDate },
+    };
+
+    const isPaginated = query.page !== undefined && query.limit !== undefined;
+
+    if (isPaginated) {
+      const page = query.page!;
+      const limit = query.limit!;
+
+      const countGroups = await this.prisma.orders.groupBy({
+        by: ['customer_id'],
+        where,
+      });
+      const totalCount = countGroups.length;
+
+      const results = await this.prisma.orders.groupBy({
+        by: ['customer_id'],
+        where,
+        _sum: { grand_total: true },
+        _count: { id: true },
+        _max: { created_at: true },
+        orderBy: { _sum: { grand_total: 'desc' } },
+        skip: (page - 1) * limit,
+        take: limit,
+      });
+
+      const customerIds = results
+        .map((r) => r.customer_id)
+        .filter(Boolean) as number[];
+      const customers = await this.prisma.users.findMany({
+        where: { id: { in: customerIds } },
+        select: { id: true, username: true, first_name: true, last_name: true, email: true },
+      });
+      const customerMap = new Map(customers.map((c) => [c.id, c]));
+
+      const data = results.map((r) => {
+        const customer = customerMap.get(r.customer_id as number);
+        const totalSpent = Number(r._sum.grand_total || 0);
+        const totalOrders = r._count.id || 0;
+        const customerName = customer
+          ? `${customer.first_name || ''} ${customer.last_name || ''}`.trim() ||
+            customer.username ||
+            'Cliente'
+          : 'Cliente';
+
+        return {
+          customer_id: r.customer_id,
+          customer_name: customerName,
+          email: customer?.email || '',
+          total_orders: totalOrders,
+          total_spent: totalSpent,
+          average_order_value: totalOrders > 0 ? totalSpent / totalOrders : 0,
+          last_order_date: r._max.created_at?.toISOString() || null,
+        };
+      });
+
+      return {
+        data,
+        meta: {
+          pagination: {
+            total: totalCount,
+            page,
+            limit,
+            total_pages: Math.ceil(totalCount / limit),
+          },
+        },
+      };
+    }
+
+    // Non-paginated (retrocompatible)
     const results = await this.prisma.orders.groupBy({
       by: ['customer_id'],
-      where: {
-        state: { in: this.COMPLETED_STATES },
-        customer_id: {
-          not: null,
-        },
-        created_at: {
-          gte: startDate,
-          lte: endDate,
-        },
-      },
-      _sum: {
-        grand_total: true,
-      },
-      _count: {
-        id: true,
-      },
-      _max: {
-        created_at: true,
-      },
-      orderBy: {
-        _sum: {
-          grand_total: 'desc',
-        },
-      },
+      where,
+      _sum: { grand_total: true },
+      _count: { id: true },
+      _max: { created_at: true },
+      orderBy: { _sum: { grand_total: 'desc' } },
       take: query.limit || 50,
     });
 
@@ -509,28 +660,15 @@ export class SalesAnalyticsService {
       .map((r) => r.customer_id)
       .filter(Boolean) as number[];
     const customers = await this.prisma.users.findMany({
-      where: {
-        id: {
-          in: customerIds,
-        },
-      },
-      select: {
-        id: true,
-        username: true,
-        first_name: true,
-        last_name: true,
-        email: true,
-      },
+      where: { id: { in: customerIds } },
+      select: { id: true, username: true, first_name: true, last_name: true, email: true },
     });
-
     const customerMap = new Map(customers.map((c) => [c.id, c]));
 
     return results.map((r) => {
       const customer = customerMap.get(r.customer_id as number);
       const totalSpent = Number(r._sum.grand_total || 0);
       const totalOrders = r._count.id || 0;
-
-      // Build customer display name: prefer "First Last", fallback to username, then default
       const customerName = customer
         ? `${customer.first_name || ''} ${customer.last_name || ''}`.trim() ||
           customer.username ||
@@ -550,7 +688,7 @@ export class SalesAnalyticsService {
   }
 
   async getSalesByChannel(query: SalesAnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
+    const { startDate, endDate } = parseDateRange(query);
 
     const results = await this.prisma.orders.groupBy({
       by: ['channel'],
@@ -582,7 +720,7 @@ export class SalesAnalyticsService {
       0,
     );
 
-    return results
+    const allResults = results
       .map((r) => ({
         channel: r.channel,
         display_name: labels[r.channel] || r.channel,
@@ -592,10 +730,32 @@ export class SalesAnalyticsService {
           total > 0 ? (Number(r._sum.grand_total || 0) / total) * 100 : 0,
       }))
       .sort((a, b) => b.revenue - a.revenue);
+
+    const isPaginated = query.page !== undefined && query.limit !== undefined;
+    if (isPaginated) {
+      const page = query.page!;
+      const limit = query.limit!;
+      const totalCount = allResults.length;
+      const data = allResults.slice((page - 1) * limit, page * limit);
+
+      return {
+        data,
+        meta: {
+          pagination: {
+            total: totalCount,
+            page,
+            limit,
+            total_pages: Math.ceil(totalCount / limit),
+          },
+        },
+      };
+    }
+
+    return allResults;
   }
 
   async getOrdersForExport(query: SalesAnalyticsQueryDto) {
-    const { startDate, endDate } = this.parseDateRange(query);
+    const { startDate, endDate } = parseDateRange(query);
 
     const orders = await this.prisma.orders.findMany({
       where: {
@@ -661,104 +821,4 @@ export class SalesAnalyticsService {
     });
   }
 
-  // Helper methods
-  private parseDateRange(query: SalesAnalyticsQueryDto): {
-    startDate: Date;
-    endDate: Date;
-  } {
-    if (query.date_from && query.date_to) {
-      // date_to comes as 'YYYY-MM-DD' which parses to midnight UTC.
-      // Set to end-of-day so orders created during that day are included.
-      const endDate = new Date(query.date_to);
-      endDate.setUTCHours(23, 59, 59, 999);
-      return {
-        startDate: new Date(query.date_from),
-        endDate,
-      };
-    }
-
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-
-    switch (query.date_preset) {
-      case DatePreset.TODAY:
-        return { startDate: today, endDate: now };
-      case DatePreset.YESTERDAY:
-        const yesterday = new Date(today);
-        yesterday.setDate(yesterday.getDate() - 1);
-        return { startDate: yesterday, endDate: today };
-      case DatePreset.THIS_WEEK:
-        const weekStart = new Date(today);
-        weekStart.setDate(weekStart.getDate() - weekStart.getDay());
-        return { startDate: weekStart, endDate: now };
-      case DatePreset.LAST_WEEK:
-        const lastWeekEnd = new Date(today);
-        lastWeekEnd.setDate(lastWeekEnd.getDate() - lastWeekEnd.getDay());
-        const lastWeekStart = new Date(lastWeekEnd);
-        lastWeekStart.setDate(lastWeekStart.getDate() - 7);
-        return { startDate: lastWeekStart, endDate: lastWeekEnd };
-      case DatePreset.LAST_MONTH:
-        const lastMonthEnd = new Date(today.getFullYear(), today.getMonth(), 0);
-        const lastMonthStart = new Date(
-          today.getFullYear(),
-          today.getMonth() - 1,
-          1,
-        );
-        return { startDate: lastMonthStart, endDate: lastMonthEnd };
-      case DatePreset.THIS_YEAR:
-        return { startDate: new Date(today.getFullYear(), 0, 1), endDate: now };
-      case DatePreset.LAST_YEAR:
-        return {
-          startDate: new Date(today.getFullYear() - 1, 0, 1),
-          endDate: new Date(today.getFullYear() - 1, 11, 31),
-        };
-      case DatePreset.THIS_MONTH:
-      default:
-        return {
-          startDate: new Date(today.getFullYear(), today.getMonth(), 1),
-          endDate: now,
-        };
-    }
-  }
-
-  private getPreviousPeriod(
-    startDate: Date,
-    endDate: Date,
-  ): { previousStartDate: Date; previousEndDate: Date } {
-    const duration = endDate.getTime() - startDate.getTime();
-    const previousEndDate = new Date(startDate.getTime() - 1);
-    const previousStartDate = new Date(previousEndDate.getTime() - duration);
-    return { previousStartDate, previousEndDate };
-  }
-
-  private getPeriodKey(date: Date, granularity: Granularity): string {
-    const d = new Date(date);
-
-    switch (granularity) {
-      case Granularity.HOUR:
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}T${String(d.getHours()).padStart(2, '0')}:00`;
-      case Granularity.DAY:
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-      case Granularity.WEEK:
-        // ISO-8601 week number calculation
-        const target = new Date(d.valueOf());
-        target.setDate(target.getDate() + 3 - ((target.getDay() + 6) % 7));
-        const yearStart = new Date(target.getFullYear(), 0, 4);
-        const weekNo =
-          1 +
-          Math.round(
-            ((target.getTime() - yearStart.getTime()) / 86400000 -
-              3 +
-              ((yearStart.getDay() + 6) % 7)) /
-              7,
-          );
-        return `${target.getFullYear()}-W${String(weekNo).padStart(2, '0')}`;
-      case Granularity.MONTH:
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-      case Granularity.YEAR:
-        return `${d.getFullYear()}`;
-      default:
-        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    }
-  }
 }

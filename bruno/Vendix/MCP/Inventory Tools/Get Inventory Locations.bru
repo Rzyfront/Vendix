@@ -1,0 +1,39 @@
+meta {
+  name: Get Inventory Locations
+  type: http
+  seq: 6
+}
+
+post {
+  url: {{baseUrl}}/mcp/tools/call
+  body: json {
+    "name": "get_inventory_locations",
+    "arguments": {}
+  }
+  headers: {
+    Authorization: Bearer {{authToken}}
+    Content-Type: application/json
+  }
+}
+
+tests {
+  test("get_inventory_locations returns success", function() {
+    expect(res.status).to.equal(200);
+    const parsed = JSON.parse(res.body.content[0].text);
+    expect(parsed).to.have.property('summary');
+    expect(parsed).to.have.property('data');
+    expect(parsed.data).to.be.an('array');
+  });
+
+  test("Each location has required fields", function() {
+    const parsed = JSON.parse(res.body.content[0].text);
+    if (parsed.data.length > 0) {
+      const loc = parsed.data[0];
+      expect(loc).to.have.property('id');
+      expect(loc).to.have.property('name');
+      expect(loc).to.have.property('code');
+      expect(loc).to.have.property('type');
+      expect(loc).to.have.property('is_active', true);
+    }
+  });
+}

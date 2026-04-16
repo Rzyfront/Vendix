@@ -103,7 +103,7 @@
             <button *ngFor="let action of getVisibleActions(item).slice(0, 2)"
               class="footer-action-btn"
               [ngClass]="[getActionVariant(action, item), isActionDisabled(action, item) ? 'action-disabled' : '']"
-              [disabled]="isActionDisabled(action, item)" [title]="getActionLabel(action, item)"
+              [disabled]="isActionDisabled(action, item)" [title]="getActionTooltip(action, item)"
               (click)="executeAction(action, item, $event)">
               <app-icon [name]="getActionIcon(action, item) || 'circle'" [size]="18"></app-icon>
             </button>

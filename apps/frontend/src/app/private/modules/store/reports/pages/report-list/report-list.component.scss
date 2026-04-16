@@ -18,28 +18,6 @@
   }
 }
 
-// Header
-.page-header {
-  margin-bottom: 1.5rem;
-}
-
-.page-title {
-  font-size: var(--fs-xl);
-  font-weight: var(--fw-bold);
-  color: var(--color-text-primary);
-  margin: 0;
-
-  @media (min-width: 768px) {
-    font-size: var(--fs-2xl);
-  }
-}
-
-.page-subtitle {
-  font-size: var(--fs-sm);
-  color: var(--color-text-secondary);
-  margin: 0.25rem 0 0;
-}
-
 // Filters
 .filters-section {
   display: flex;

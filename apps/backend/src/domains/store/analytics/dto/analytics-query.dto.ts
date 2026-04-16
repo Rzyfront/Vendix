@@ -42,12 +42,12 @@ export class AnalyticsQueryDto {
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  page?: number = 1;
+  page?: number;
 
   @IsOptional()
   @Type(() => Number)
   @IsNumber()
-  limit?: number = 50;
+  limit?: number;
 
   @IsOptional()
   @IsString()

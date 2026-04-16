@@ -6,6 +6,7 @@ import { Observable } from 'rxjs';
 
 import { PayrollRun } from '../../../interfaces/payroll.interface';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
+import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
 import * as PayrollActions from '../../../state/actions/payroll.actions';
 import {
   selectPayrollRunSearch,
@@ -120,9 +121,9 @@ export class PayrollRunListComponent {
       sortable: true,
       priority: 1,
       transform: (val: any, row: any) => {
-        const start = val ? new Date(val).toLocaleDateString('es-CO') : '';
+        const start = val ? formatDateOnlyUTC(val) : '';
         const end = row.period_end
-          ? new Date(row.period_end).toLocaleDateString('es-CO')
+          ? formatDateOnlyUTC(row.period_end)
           : '';
         return `${start} - ${end}`;
       },
@@ -162,10 +163,10 @@ export class PayrollRunListComponent {
     titleKey: 'payroll_number',
     subtitleTransform: (item: any) => {
       const start = item.period_start
-        ? new Date(item.period_start).toLocaleDateString('es-CO')
+        ? formatDateOnlyUTC(item.period_start)
         : '';
       const end = item.period_end
-        ? new Date(item.period_end).toLocaleDateString('es-CO')
+        ? formatDateOnlyUTC(item.period_end)
         : '';
       return `${start} - ${end}`;
     },

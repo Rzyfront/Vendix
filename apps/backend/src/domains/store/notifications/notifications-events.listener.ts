@@ -694,6 +694,171 @@ export class NotificationsEventsListener {
     );
   }
 
+  // ==========================================
+  // DATA COLLECTION & CONSULTATION EVENTS
+  // ==========================================
+
+  @OnEvent('data_collection.submission_created')
+  async handleSubmissionCreated(event: {
+    store_id: number;
+    submission_id: number;
+    token: string;
+    booking_id?: number;
+    customer_id?: number;
+  }) {
+    // 1. In-app notification to staff
+    await this.notifications_service.createAndBroadcast(
+      event.store_id,
+      'data_collection_created',
+      'Formulario de Preconsulta Creado',
+      `Se ha generado un formulario de preconsulta${event.booking_id ? ` para la reserva #${event.booking_id}` : ''}`,
+      { submission_id: event.submission_id, booking_id: event.booking_id },
+    );
+
+    // 2. Send email to customer with form link
+    if (event.customer_id && event.token) {
+      try {
+        const customer = await this.global_prisma.users.findUnique({
+          where: { id: event.customer_id },
+          select: { email: true, first_name: true, last_name: true },
+        });
+
+        if (customer?.email) {
+          const formUrl = await this.buildPublicFormUrl(event.store_id, event.token);
+          const customerName = `${customer.first_name || ''} ${customer.last_name || ''}`.trim() || 'cliente';
+
+          // Look up store name for branding
+          const store = await this.global_prisma.stores.findUnique({
+            where: { id: event.store_id },
+            select: { name: true },
+          });
+          const storeName = store?.name || 'la tienda';
+
+          await this.email_service.sendEmail(
+            customer.email,
+            `Completa tu formulario de preconsulta - ${storeName}`,
+            `
+              <div style="font-family: 'Inter', sans-serif; max-width: 600px; margin: 0 auto; padding: 24px;">
+                <h2 style="color: #1a1a1a; margin-bottom: 8px;">Formulario de Preconsulta</h2>
+                <p style="color: #444; line-height: 1.6;">
+                  Hola ${customerName},
+                </p>
+                <p style="color: #444; line-height: 1.6;">
+                  Te hemos preparado un formulario de preconsulta para tu próxima cita en <strong>${storeName}</strong>.
+                  Por favor, complétalo antes de tu visita para que podamos brindarte una mejor atención.
+                </p>
+                <div style="text-align: center; margin: 32px 0;">
+                  <a href="${formUrl}"
+                     style="display: inline-block; background-color: #7ED7A5; color: #fff; text-decoration: none; padding: 14px 32px; border-radius: 8px; font-weight: 600; font-size: 16px;">
+                    Completar Formulario
+                  </a>
+                </div>
+                <p style="color: #888; font-size: 13px; line-height: 1.5;">
+                  Si el botón no funciona, copia y pega este enlace en tu navegador:<br/>
+                  <a href="${formUrl}" style="color: #7ED7A5; word-break: break-all;">${formUrl}</a>
+                </p>
+                <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;" />
+                <p style="color: #999; font-size: 12px;">
+                  Este correo fue enviado por ${storeName}. Si no solicitaste este formulario, puedes ignorar este mensaje.
+                </p>
+              </div>
+            `,
+          );
+          this.logger.log(`Preconsulta email sent to ${customer.email} for submission ${event.submission_id}`);
+        }
+      } catch (error) {
+        this.logger.error(`Failed to send preconsulta email: ${error.message}`);
+      }
+    }
+  }
+
+  @OnEvent('data_collection.submitted')
+  async handleSubmissionSubmitted(event: {
+    store_id: number;
+    submission_id: number;
+    booking_id?: number;
+    customer_id?: number;
+  }) {
+    await this.notifications_service.createAndBroadcast(
+      event.store_id,
+      'data_collection_submitted',
+      'Formulario de Preconsulta Completado',
+      `Un cliente ha completado su formulario de preconsulta${event.booking_id ? ` para la reserva #${event.booking_id}` : ''}`,
+      { submission_id: event.submission_id, booking_id: event.booking_id },
+    );
+  }
+
+  @OnEvent('data_collection.prediagnosis_ready')
+  async handlePrediagnosisReady(event: {
+    submission_id: number;
+    store_id?: number;
+  }) {
+    if (!event.store_id) return;
+    await this.notifications_service.createAndBroadcast(
+      event.store_id,
+      'data_collection_prediagnosis_ready',
+      'Prediagnóstico IA Listo',
+      `El prediagnóstico IA está listo para revisión`,
+      { submission_id: event.submission_id },
+    );
+  }
+
+  @OnEvent('booking.checked_in')
+  async handleBookingCheckedIn(event: {
+    store_id: number;
+    booking_id: number;
+    booking_number: string;
+    customer_name: string;
+    service_name: string;
+    provider_id?: number;
+    source: string;
+  }) {
+    await this.notifications_service.createAndBroadcast(
+      event.store_id,
+      'booking_check_in',
+      'Check-in Registrado',
+      `${event.customer_name} llegó para ${event.service_name} (${event.booking_number})`,
+      { booking_id: event.booking_id, provider_id: event.provider_id, source: event.source },
+    );
+  }
+
+  @OnEvent('booking.confirmation_request')
+  async handleBookingConfirmationRequest(event: {
+    store_id: number;
+    booking_id: number;
+    booking_number: string;
+    customer_name: string;
+    service_name: string;
+    booking_date: any;
+    booking_time: string;
+  }) {
+    await this.notifications_service.createAndBroadcast(
+      event.store_id,
+      'booking_confirmation_request',
+      'Solicitud de Confirmación Enviada',
+      `Se solicitó confirmación a ${event.customer_name} para ${event.service_name} (${event.booking_number})`,
+      { booking_id: event.booking_id },
+    );
+  }
+
+  @OnEvent('booking.auto_cancelled')
+  async handleBookingAutoCancelled(event: {
+    store_id: number;
+    booking_id: number;
+    booking_number: string;
+    customer_name: string;
+    service_name: string;
+    reason: string;
+  }) {
+    await this.notifications_service.createAndBroadcast(
+      event.store_id,
+      'booking_auto_cancelled',
+      'Reserva Cancelada Automáticamente',
+      `La reserva ${event.booking_number} de ${event.customer_name} fue cancelada por no confirmación`,
+      { booking_id: event.booking_id, reason: event.reason },
+    );
+  }
+
   // ─── Private Helpers ─────────────────────────────────────────────
 
   private formatDate(date: Date): string {
@@ -702,5 +867,35 @@ export class NotificationsEventsListener {
     const month = String(d.getMonth() + 1).padStart(2, '0');
     const year = d.getFullYear();
     return `${day}/${month}/${year}`;
+  }
+
+  /**
+   * Build public form URL using the store's ecommerce domain.
+   * Pattern from customer-queue QR generation.
+   */
+  private async buildPublicFormUrl(storeId: number, token: string): Promise<string> {
+    try {
+      // Prefer STORE_ECOMMERCE domain
+      const ecommerceDomain = await this.global_prisma.domain_settings.findFirst({
+        where: { store_id: storeId, app_type: 'STORE_ECOMMERCE' },
+        select: { hostname: true },
+      });
+      if (ecommerceDomain?.hostname) {
+        return `https://${ecommerceDomain.hostname}/preconsulta/${token}`;
+      }
+
+      // Fallback to primary domain
+      const primaryDomain = await this.global_prisma.domain_settings.findFirst({
+        where: { store_id: storeId, is_primary: true },
+        select: { hostname: true },
+      });
+      if (primaryDomain?.hostname) {
+        return `https://${primaryDomain.hostname}/preconsulta/${token}`;
+      }
+    } catch {
+      // Fallback silently
+    }
+
+    return `https://vendix.com/preconsulta/${token}`;
   }
 }

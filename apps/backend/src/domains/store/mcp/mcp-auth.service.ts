@@ -4,12 +4,14 @@ import * as jwt from 'jsonwebtoken';
 import Redis from 'ioredis';
 import { REDIS_CLIENT } from '../../../common/redis/redis.module';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
+import { GlobalPrismaService } from '../../../prisma/services/global-prisma.service';
 
 export interface McpTokenPayload {
   user_id: number;
   organization_id: number;
   store_id: number;
   roles: string[];
+  permissions: string[];
   type: 'mcp';
 }
 
@@ -19,6 +21,7 @@ export class McpAuthService {
 
   constructor(
     private readonly configService: ConfigService,
+    private readonly prismaService: GlobalPrismaService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
   ) {}
 
@@ -36,14 +39,45 @@ export class McpAuthService {
       }
       const decoded = jwt.verify(token, secret) as any;
 
+      const userId = decoded.user_id || decoded.sub;
+
+      // Fetch roles and permissions from DB (same as JwtStrategy)
+      const user = await this.prismaService.users.findUnique({
+        where: { id: parseInt(userId.toString()) },
+        include: {
+          user_roles: {
+            include: {
+              roles: {
+                include: {
+                  role_permissions: {
+                    include: {
+                      permissions: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      });
+
+      const roles = user?.user_roles?.map((ur) => ur.roles?.name || '') || [];
+      const permissions =
+        user?.user_roles?.flatMap(
+          (ur) =>
+            ur.roles?.role_permissions?.map((rp) => rp.permissions?.name || '') || [],
+        ) || [];
+
       return {
-        user_id: decoded.user_id || decoded.sub,
+        user_id: userId,
         organization_id: decoded.organization_id,
         store_id: decoded.store_id,
-        roles: decoded.roles || [],
+        roles,
+        permissions,
         type: 'mcp',
       };
     } catch (error: any) {
+      if (error instanceof VendixHttpException) throw error;
       this.logger.warn(`MCP token validation failed: ${error.message}`);
       throw new VendixHttpException(
         ErrorCodes.AI_MCP_001,

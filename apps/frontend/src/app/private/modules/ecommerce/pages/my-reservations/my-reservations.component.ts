@@ -10,6 +10,7 @@ import {
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
+import { HttpClient } from '@angular/common/http';
 import { Subject, takeUntil } from 'rxjs';
 
 import {
@@ -21,6 +22,7 @@ import {
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
+import { environment } from '../../../../../../environments/environment';
 
 type BookingStatus = CustomerBooking['status'];
 
@@ -49,6 +51,7 @@ const STATUS_MAP: Record<BookingStatus, StatusConfig> = {
 })
 export class MyReservationsComponent implements OnInit, OnDestroy {
     private bookingService = inject(EcommerceBookingService);
+    private http = inject(HttpClient);
     private toast = inject(ToastService);
     private router = inject(Router);
     private destroy$ = new Subject<void>();
@@ -277,6 +280,25 @@ export class MyReservationsComponent implements OnInit, OnDestroy {
         const m = String(date.getMonth() + 1).padStart(2, '0');
         const d = String(date.getDate()).padStart(2, '0');
         return `${y}-${m}-${d}`;
+    }
+
+    isToday(date: string): boolean {
+        const bookingDate = new Date(date + 'T12:00:00');
+        const today = new Date();
+        return bookingDate.toDateString() === today.toDateString();
+    }
+
+    checkIn(bookingId: number): void {
+        this.http.post<any>(`${environment.apiUrl}/ecommerce/reservations/${bookingId}/check-in`, {}).subscribe({
+            next: () => {
+                this.toast.success('Check-in registrado', 'Listo');
+                this.loadBookings();
+            },
+            error: (err: any) => {
+                const msg = err?.error?.message || 'Error al registrar el check-in';
+                this.toast.error(msg, 'Error');
+            },
+        });
     }
 
     goBack(): void {

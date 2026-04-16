@@ -35,8 +35,9 @@ export class McpAuthGuard implements CanActivate {
       organization_id: payload.organization_id,
       store_id: payload.store_id,
       roles: payload.roles,
-      is_super_admin: false,
-      is_owner: false,
+      permissions: payload.permissions,
+      is_super_admin: payload.roles.includes('super_admin'),
+      is_owner: payload.roles.includes('owner'),
     };
 
     return true;

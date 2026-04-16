@@ -16,11 +16,17 @@ export interface Booking {
   created_at: string;
   updated_at: string;
   customer?: { id: number; first_name: string; last_name: string; email: string; phone?: string };
-  product?: { id: number; name: string; service_duration_minutes?: number; image_url?: string; base_price?: number };
+  product?: { id: number; name: string; service_duration_minutes?: number; image_url?: string; base_price?: number; is_consultation?: boolean };
   created_by?: { id: number; first_name: string; last_name: string };
   order?: { id: number; order_number: string };
   provider_id?: number;
   provider?: { id: number; display_name?: string; avatar_url?: string; employee?: { first_name: string; last_name: string } };
+  checked_in_at?: string;
+  confirmation_requested_at?: string;
+  confirmation_deadline?: string;
+  data_collection_submissions?: any[];
+  metadata_snapshot?: any;
+  consultation_notes?: any[];
 }
 
 export type BookingStatus = 'pending' | 'confirmed' | 'in_progress' | 'completed' | 'cancelled' | 'no_show';
@@ -65,6 +71,7 @@ export interface CreateBookingDto {
   notes?: string;
   provider_id?: number;
   skip_availability_check?: boolean;
+  skip_order_creation?: boolean;
 }
 
 export interface RescheduleBookingDto {

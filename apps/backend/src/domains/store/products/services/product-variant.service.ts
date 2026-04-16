@@ -16,6 +16,7 @@ import { Prisma } from '@prisma/client';
 import { LocationsService } from '../../inventory/locations/locations.service';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
 import { S3Service } from '@common/services/s3.service';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
 export class ProductVariantService {
@@ -90,18 +91,21 @@ export class ProductVariantService {
         throw new BadRequestException('Producto no encontrado o inactivo');
       }
 
-      // Verificar que el SKU sea único dentro del producto (skip para SKU vacío)
-      if (createVariantDto.sku && createVariantDto.sku.trim() !== '') {
-        const existingSku = await prisma.product_variants.findFirst({
-          where: {
-            sku: createVariantDto.sku,
-            product_id: product_id,
-          },
-        });
+      // Verificar que el SKU no esté vacío
+      if (!createVariantDto.sku || createVariantDto.sku.trim() === '') {
+        throw new VendixHttpException(ErrorCodes.PROD_VALIDATE_003);
+      }
 
-        if (existingSku) {
-          throw new ConflictException('El SKU de la variante ya está en uso');
-        }
+      // Verificar que el SKU sea único dentro del producto
+      const existingSku = await prisma.product_variants.findFirst({
+        where: {
+          sku: createVariantDto.sku,
+          product_id: product_id,
+        },
+      });
+
+      if (existingSku) {
+        throw new ConflictException('El SKU de la variante ya está en uso');
       }
 
       if (tx) {
@@ -256,22 +260,28 @@ export class ProductVariantService {
     existingVariant: any,
     user_id?: number,
   ) {
-    const { stock_quantity, attributes, ...variantData } = updateVariantDto;
+    const { stock_quantity, ...variantData } = updateVariantDto;
 
     // Actualizar variante
     const variant = await prisma.product_variants.update({
       where: { id: variantId },
       data: {
         ...variantData,
-        price_override: variantData.price_override || updateVariantDto.price,
-        attributes: attributes !== undefined ? attributes : undefined,
+        price_override:
+          variantData.price_override ?? variantData.price ?? undefined,
         updated_at: new Date(),
       } as any,
     });
 
     // Si cambió el stock, actualizar stock levels
     if (stock_quantity !== undefined) {
-      const stockDifference = stock_quantity - existingVariant.stock_quantity;
+      // Get actual current stock from stock_levels (source of truth)
+      const currentStock = await prisma.stock_levels.aggregate({
+        where: { product_variant_id: variantId },
+        _sum: { quantity_available: true },
+      });
+      const currentStockQuantity = currentStock._sum.quantity_available ?? 0;
+      const stockDifference = stock_quantity - currentStockQuantity;
 
       if (stockDifference !== 0) {
         const defaultLocation =
@@ -287,7 +297,7 @@ export class ProductVariantService {
             quantity_change: stockDifference,
             movement_type: 'adjustment',
             reason: 'Stock quantity updated from variant edit',
-            user_id: user_id!, // Non-null assertion safe because we checked above
+            user_id: user_id!,
             create_movement: true,
             validate_availability: false,
           },
@@ -297,6 +307,43 @@ export class ProductVariantService {
     }
 
     return variant;
+  }
+
+  private async cleanupVariantForeignKeys(
+    prisma: any,
+    variantId: number,
+  ): Promise<void> {
+    await prisma.order_items.updateMany({
+      where: { product_variant_id: variantId },
+      data: { product_variant_id: null },
+    });
+    await prisma.invoice_items.updateMany({
+      where: { product_variant_id: variantId },
+      data: { product_variant_id: null },
+    });
+    await prisma.quotation_items.updateMany({
+      where: { product_variant_id: variantId },
+      data: { product_variant_id: null },
+    });
+    await prisma.layaway_items.updateMany({
+      where: { product_variant_id: variantId },
+      data: { product_variant_id: null },
+    });
+    await prisma.dispatch_note_items.updateMany({
+      where: { product_variant_id: variantId },
+      data: { product_variant_id: null },
+    });
+    await prisma.inventory_adjustments.updateMany({
+      where: { product_variant_id: variantId },
+      data: { product_variant_id: null },
+    });
+    await prisma.inventory_transactions.updateMany({
+      where: { product_variant_id: variantId },
+      data: { product_variant_id: null },
+    });
+    await prisma.stock_levels.deleteMany({
+      where: { product_variant_id: variantId },
+    });
   }
 
   async removeVariant(variantId: number) {
@@ -309,27 +356,10 @@ export class ProductVariantService {
       throw new NotFoundException('Variante no encontrada');
     }
 
-    // Use withoutScope() to bypass tenant scoping — FK cleanup needs
-    // unrestricted access to cross-domain tables like inventory_transactions.
     const unscopedPrisma = this.prisma.withoutScope() as any;
 
     return await unscopedPrisma.$transaction(async (prisma: any) => {
-      // Limpiar FK constraints que bloquean la eliminación
-      await prisma.order_items.updateMany({
-        where: { product_variant_id: variantId },
-        data: { product_variant_id: null },
-      });
-      await prisma.inventory_adjustments.updateMany({
-        where: { product_variant_id: variantId },
-        data: { product_variant_id: null },
-      });
-      await prisma.inventory_transactions.updateMany({
-        where: { product_variant_id: variantId },
-        data: { product_variant_id: null },
-      });
-      await prisma.stock_levels.deleteMany({
-        where: { product_variant_id: variantId },
-      });
+      await this.cleanupVariantForeignKeys(prisma, variantId);
 
       // Limpiar imagen de variante (DB + S3)
       if (existingVariant.image_id) {
@@ -346,9 +376,11 @@ export class ProductVariantService {
           where: { id: variantId },
           data: { image_id: null },
         });
-        await prisma.product_images.delete({
-          where: { id: existingVariant.image_id },
-        }).catch(() => {});
+        await prisma.product_images
+          .delete({
+            where: { id: existingVariant.image_id },
+          })
+          .catch(() => {});
       }
 
       return await prisma.product_variants.delete({

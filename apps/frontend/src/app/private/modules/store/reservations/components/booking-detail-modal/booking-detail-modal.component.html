@@ -30,7 +30,10 @@
             <app-icon name="user" [size]="18"></app-icon>
           </div>
           <div class="info-card-content">
-            <span class="info-label">Cliente</span>
+            <span class="info-label">
+              Cliente
+              <app-tooltip size="sm" position="top">Información del cliente asociado a esta reserva</app-tooltip>
+            </span>
             <span class="info-value">{{ b.customer?.first_name }} {{ b.customer?.last_name }}</span>
             @if (b.customer?.phone) {
               <span class="info-meta">{{ b.customer?.phone }}</span>
@@ -41,14 +44,17 @@
         <!-- Service card -->
         <div class="info-card">
           <div class="info-card-icon">
-            @if (b.product?.image_url) {
-              <img [src]="b.product?.image_url" [alt]="b.product?.name" class="service-img">
+            @if (b.product?.image_url && !imageErrors()[b.product!.id]) {
+              <img [src]="b.product?.image_url" [alt]="b.product?.name" class="service-img" (error)="onImageError(b.product!.id)">
             } @else {
               <app-icon name="briefcase" [size]="18"></app-icon>
             }
           </div>
           <div class="info-card-content">
-            <span class="info-label">Servicio</span>
+            <span class="info-label">
+              Servicio
+              <app-tooltip size="sm" position="top">Detalles del servicio reservado</app-tooltip>
+            </span>
             <span class="info-value">{{ b.product?.name }}</span>
             <span class="info-meta">
               @if (b.product?.service_duration_minutes) { {{ b.product?.service_duration_minutes }} min }
@@ -105,6 +111,66 @@
         </div>
       </div>
 
+      <!-- Data Collection & Prediagnosis -->
+      @if (submission()) {
+        <div class="border rounded-lg p-4 mb-4" style="border-color: var(--color-border)">
+          <div class="flex items-center justify-between mb-3">
+            <div class="flex items-center gap-2">
+              <app-icon name="clipboard-list" [size]="16"></app-icon>
+              <span class="font-semibold text-sm" style="color: var(--color-text)">Datos de Preconsulta</span>
+              <app-tooltip size="sm" position="top">Formularios de recolección de datos asociados</app-tooltip>
+              @if (submission()?.ai_prediagnosis) {
+                <span class="text-xs px-2 py-0.5 rounded-full" style="background: #f3e8ff; color: #7c3aed">IA</span>
+              }
+            </div>
+            <span class="text-xs" style="color: var(--color-text-muted)">
+              {{ submission()?.status === 'pending' ? 'Pendiente' : submission()?.status === 'completed' ? 'Completado' : submission()?.status }}
+            </span>
+          </div>
+
+          @if (submission()?.ai_prediagnosis) {
+            <div class="mb-3 p-3 rounded-lg" style="background: var(--color-surface-secondary)">
+              <div class="flex items-center gap-1.5 mb-2">
+                <app-icon name="brain" [size]="14" color="#7c3aed"></app-icon>
+                <span class="text-xs font-semibold" style="color: #7c3aed">Prediagnóstico IA</span>
+              </div>
+              <div class="prose prose-sm text-sm" style="color: var(--color-text)" [innerHTML]="prediagnosisHtml()"></div>
+            </div>
+          }
+
+          @if (submission()?.status !== 'pending' && submission()?.responses?.length) {
+            <button class="text-xs flex items-center gap-1" style="color: var(--color-primary)"
+                    (click)="showIntakeData.set(!showIntakeData())">
+              <app-icon [name]="showIntakeData() ? 'chevron-up' : 'chevron-down'" [size]="12"></app-icon>
+              {{ showIntakeData() ? 'Ocultar datos' : 'Ver datos del formulario' }}
+            </button>
+            @if (showIntakeData()) {
+              <div class="mt-2 space-y-2">
+                @for (entry of submission()?.responses; track entry.id) {
+                  <div class="flex flex-col">
+                    <span class="text-xs font-medium" style="color: var(--color-text-muted)">{{ entry.field?.label }}</span>
+                    <span class="text-sm" style="color: var(--color-text)">
+                      {{ entry.value_text || entry.value_number || entry.value_bool || entry.value_date || '-' }}
+                    </span>
+                  </div>
+                }
+              </div>
+            }
+          }
+
+          @if (submission()?.status === 'pending') {
+            <div class="flex items-center gap-2 mt-2">
+              <button class="flex items-center gap-1.5 px-3 py-1.5 border rounded-lg text-xs font-medium transition-colors"
+                      style="border-color: var(--color-border); color: var(--color-text)"
+                      (click)="copyIntakeLink()">
+                <app-icon name="link" [size]="14"></app-icon>
+                Copiar link
+              </button>
+            </div>
+          }
+        </div>
+      }
+
       <!-- Notes section -->
       <div class="notes-section">
         @if (editing()) {
@@ -114,6 +180,7 @@
               <label class="note-label">
                 <app-icon name="file-text" [size]="13"></app-icon>
                 Notas del cliente
+                <app-tooltip size="sm" position="top">Notas internas visibles solo para el equipo</app-tooltip>
               </label>
               <textarea
                 class="notes-textarea"
@@ -250,6 +317,12 @@
             <app-icon name="check-circle" [size]="14"></app-icon>
             Reserva finalizada
           </span>
+          @if (showConsultationButton()) {
+            <button class="btn-footer primary" (click)="goToConsultation()">
+              <app-icon name="stethoscope" [size]="15"></app-icon>
+              {{ consultationButtonLabel() }}
+            </button>
+          }
           <button class="btn-footer ghost" (click)="closed.emit()">Cerrar</button>
         } @else if (f.status === 'pending') {
           <button class="btn-footer ghost" (click)="closed.emit()">Cerrar</button>
@@ -283,12 +356,25 @@
               Reagendar
             </button>
           }
-          <button class="btn-footer primary" (click)="started.emit(f)">
-            <app-icon name="play" [size]="15"></app-icon>
-            Iniciar
-          </button>
+          @if (isConsultation()) {
+            <button class="btn-footer primary" (click)="goToConsultation()">
+              <app-icon name="stethoscope" [size]="15"></app-icon>
+              {{ consultationButtonLabel() }}
+            </button>
+          } @else {
+            <button class="btn-footer primary" (click)="started.emit(f)">
+              <app-icon name="play" [size]="15"></app-icon>
+              Iniciar
+            </button>
+          }
         } @else if (f.status === 'in_progress') {
           <button class="btn-footer ghost" (click)="closed.emit()">Cerrar</button>
+          @if (isConsultation()) {
+            <button class="btn-footer primary" (click)="goToConsultation()">
+              <app-icon name="stethoscope" [size]="15"></app-icon>
+              {{ consultationButtonLabel() }}
+            </button>
+          }
           <button class="btn-footer success" (click)="completed.emit(f)">
             <app-icon name="check-circle" [size]="15"></app-icon>
             Completar
