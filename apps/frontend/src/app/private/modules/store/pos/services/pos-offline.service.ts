@@ -1,6 +1,7 @@
 import { Injectable } from '@angular/core';
-import { Observable, of, BehaviorSubject, fromEvent } from 'rxjs';
+import { Observable, of, fromEvent } from 'rxjs';
 import { map } from 'rxjs/operators';
+import { signal, toObservable } from '@angular/core';
 
 export interface OfflineData {
   products: any[];
@@ -36,11 +37,11 @@ export class PosOfflineService {
   private readonly SYNC_QUEUE_KEY = 'pos_sync_queue';
   private readonly SETTINGS_KEY = 'pos_offline_settings';
 
-  private isOnlineSubject = new BehaviorSubject<boolean>(navigator.onLine);
-  private syncQueueSubject = new BehaviorSubject<SyncOperation[]>([]);
+  readonly isOnline = signal<boolean>(navigator.onLine);
+  readonly syncQueue = signal<SyncOperation[]>([]);
 
-  public isOnline$ = this.isOnlineSubject.asObservable();
-  public syncQueue$ = this.syncQueueSubject.asObservable();
+  public isOnline$ = toObservable(this.isOnline);
+  public syncQueue$ = toObservable(this.syncQueue);
 
   constructor() {
     this.initializeOfflineMode();
@@ -55,12 +56,12 @@ export class PosOfflineService {
 
   private setupNetworkListeners(): void {
     fromEvent(window, 'online').subscribe(() => {
-      this.isOnlineSubject.next(true);
+      this.isOnline.set(true);
       this.attemptSync();
     });
 
     fromEvent(window, 'offline').subscribe(() => {
-      this.isOnlineSubject.next(false);
+      this.isOnline.set(false);
     });
   }
 
@@ -170,7 +171,7 @@ export class PosOfflineService {
     if (this.isLocalStorageAvailable()) {
       try {
         localStorage.setItem(this.SYNC_QUEUE_KEY, JSON.stringify(queue));
-        this.syncQueueSubject.next(queue);
+        this.syncQueue.set(queue);
       } catch (error) {
         console.error('Error guardando cola de sincronización:', error);
       }
@@ -179,7 +180,7 @@ export class PosOfflineService {
 
   private loadSyncQueue(): void {
     const queue = this.getSyncQueue();
-    this.syncQueueSubject.next(queue);
+    this.syncQueue.set(queue);
   }
 
   attemptSync(): Observable<boolean> {
@@ -256,7 +257,7 @@ export class PosOfflineService {
       map(() => {
         if (this.isLocalStorageAvailable()) {
           localStorage.removeItem(this.SYNC_QUEUE_KEY);
-          this.syncQueueSubject.next([]);
+          this.syncQueue.set([]);
         }
         return true;
       }),
@@ -327,7 +328,7 @@ export class PosOfflineService {
           localStorage.removeItem(this.STORAGE_KEY);
           localStorage.removeItem(this.SYNC_QUEUE_KEY);
           localStorage.removeItem(this.SETTINGS_KEY);
-          this.syncQueueSubject.next([]);
+          this.syncQueue.set([]);
         }
         return true;
       }),

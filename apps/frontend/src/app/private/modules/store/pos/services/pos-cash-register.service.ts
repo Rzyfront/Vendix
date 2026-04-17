@@ -1,7 +1,8 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { BehaviorSubject, Observable, of } from 'rxjs';
+import { Observable, of } from 'rxjs';
 import { map, tap, catchError } from 'rxjs/operators';
+import { signal, toObservable } from '@angular/core';
 import { environment } from '../../../../../../environments/environment';
 
 export interface AIStreamEvent {
@@ -65,7 +66,8 @@ export interface CashRegisterMovement {
 })
 export class PosCashRegisterService {
   private readonly baseUrl = `${environment.apiUrl}/store/cash-registers`;
-  private activeSession$ = new BehaviorSubject<CashRegisterSession | null>(null);
+  readonly activeSession = signal<CashRegisterSession | null>(null);
+  readonly activeSession$ = toObservable(this.activeSession);
   private featureEnabled = false;
 
   constructor(private http: HttpClient) {}
@@ -82,12 +84,12 @@ export class PosCashRegisterService {
 
   /** Get observable of the active session */
   getActiveSession$(): Observable<CashRegisterSession | null> {
-    return this.activeSession$.asObservable();
+    return this.activeSession$;
   }
 
   /** Get the current active session value */
   getActiveSessionSnapshot(): CashRegisterSession | null {
-    return this.activeSession$.value;
+    return this.activeSession();
   }
 
   /**
@@ -97,7 +99,7 @@ export class PosCashRegisterService {
    */
   getRegisterId(): string | null {
     if (this.featureEnabled) {
-      const session = this.activeSession$.value;
+      const session = this.activeSession();
       return session?.register?.code || null;
     }
     return localStorage.getItem('pos_register_id');
@@ -106,7 +108,7 @@ export class PosCashRegisterService {
   /** Check if the user has an active session (for sales validation) */
   hasActiveSession(): boolean {
     if (!this.featureEnabled) return true; // No validation when disabled
-    return this.activeSession$.value !== null;
+    return this.activeSession() !== null;
   }
 
   // --- API calls ---
@@ -124,9 +126,9 @@ export class PosCashRegisterService {
       .get<any>(`${this.baseUrl}/sessions/active`)
       .pipe(
         map((res) => res.data || null),
-        tap((session) => this.activeSession$.next(session)),
+        tap((session) => this.activeSession.set(session)),
         catchError(() => {
-          this.activeSession$.next(null);
+          this.activeSession.set(null);
           return of(null);
         }),
       );
@@ -141,7 +143,7 @@ export class PosCashRegisterService {
       })
       .pipe(
         map((res) => res.data),
-        tap((session) => this.activeSession$.next(session)),
+        tap((session) => this.activeSession.set(session)),
       );
   }
 
@@ -154,7 +156,7 @@ export class PosCashRegisterService {
       })
       .pipe(
         map((res) => res.data),
-        tap(() => this.activeSession$.next(null)),
+        tap(() => this.activeSession.set(null)),
       );
   }
 
@@ -164,7 +166,7 @@ export class PosCashRegisterService {
       .post<any>(`${this.baseUrl}/sessions/${session_id}/suspend`, {})
       .pipe(
         map((res) => res.data),
-        tap(() => this.activeSession$.next(null)),
+        tap(() => this.activeSession.set(null)),
       );
   }
 
@@ -254,7 +256,7 @@ export class PosCashRegisterService {
 
   /** Clear cached session (on logout or feature disable) */
   clearSession(): void {
-    this.activeSession$.next(null);
+    this.activeSession.set(null);
   }
 
   /** Helper: get access token from vendix_auth_state */

@@ -1,5 +1,5 @@
-import { Injectable } from '@angular/core';
-import { BehaviorSubject, Observable, of, throwError } from 'rxjs';
+import { Injectable, signal } from '@angular/core';
+import { Observable, of, throwError, toObservable } from 'rxjs';
 import { map, tap, catchError } from 'rxjs/operators';
 import {
   LotInfo,
@@ -55,15 +55,15 @@ const INITIAL_STATE: PopCartState = {
   providedIn: 'root',
 })
 export class PopCartService {
-  private _cartState = new BehaviorSubject<PopCartState>(INITIAL_STATE);
-  private _loading = new BehaviorSubject<boolean>(false);
-  public cartState$ = this._cartState.asObservable();
-  public loading$ = this._loading.asObservable();
+  private _cartState = signal<PopCartState>(INITIAL_STATE);
+  private _loading = signal<boolean>(false);
+  public cartState$ = toObservable(this._cartState);
+  public loading$ = toObservable(this._loading);
 
   constructor() { }
 
   get currentState(): PopCartState {
-    return this._cartState.getValue();
+    return this._cartState();
   }
 
   // Observable getters for convenience
@@ -83,16 +83,16 @@ export class PopCartService {
    * Add product to cart
    */
   addToCart(request: AddToPopCartRequest): Observable<PopCartState> {
-    this._loading.next(true);
+    this._loading.set(true);
 
     return of(request).pipe(
       map((req) => this.processAddToCart(req)),
       tap((newState) => {
-        this._cartState.next(newState);
-        this._loading.next(false);
+        this._cartState.set(newState);
+        this._loading.set(false);
       }),
       catchError((error) => {
-        this._loading.next(false);
+        this._loading.set(false);
         return throwError(() => error);
       }),
     );
@@ -102,16 +102,16 @@ export class PopCartService {
    * Update cart item
    */
   updateCartItem(request: UpdatePopCartItemRequest): Observable<PopCartState> {
-    this._loading.next(true);
+    this._loading.set(true);
 
     return of(request).pipe(
       map((req) => this.processUpdateCartItem(req)),
       tap((newState) => {
-        this._cartState.next(newState);
-        this._loading.next(false);
+        this._cartState.set(newState);
+        this._loading.set(false);
       }),
       catchError((error) => {
-        this._loading.next(false);
+        this._loading.set(false);
         return throwError(() => error);
       }),
     );
@@ -121,16 +121,16 @@ export class PopCartService {
    * Remove item from cart by ID
    */
   removeFromCart(itemId: string): Observable<PopCartState> {
-    this._loading.next(true);
+    this._loading.set(true);
 
     return of(itemId).pipe(
       map((id) => this.processRemoveFromCart(id)),
       tap((newState) => {
-        this._cartState.next(newState);
-        this._loading.next(false);
+        this._cartState.set(newState);
+        this._loading.set(false);
       }),
       catchError((error) => {
-        this._loading.next(false);
+        this._loading.set(false);
         return throwError(() => error);
       }),
     );
@@ -149,7 +149,7 @@ export class PopCartService {
    * Clear entire cart
    */
   clearCart(): Observable<PopCartState> {
-    this._loading.next(true);
+    this._loading.set(true);
 
     return of(null).pipe(
       map(() => ({
@@ -159,8 +159,8 @@ export class PopCartService {
         updatedAt: new Date(),
       })),
       tap((newState) => {
-        this._cartState.next(newState);
-        this._loading.next(false);
+        this._cartState.set(newState);
+        this._loading.set(false);
       }),
     );
   }

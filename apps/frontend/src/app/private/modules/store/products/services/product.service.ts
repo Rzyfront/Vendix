@@ -1,6 +1,6 @@
-import { Injectable, inject } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, BehaviorSubject } from 'rxjs';
+import { Observable, toObservable } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
 import {
   Product,
@@ -20,20 +20,20 @@ export class ProductService {
   private readonly http = inject(HttpClient);
   private readonly API_URL = `${environment.apiUrl}/store/products`;
 
-  // BehaviorSubject for real-time updates
-  private productsSubject = new BehaviorSubject<Product[]>([]);
-  private loadingSubject = new BehaviorSubject<boolean>(false);
-  private paginationSubject = new BehaviorSubject<any>(null);
+  // Signals for real-time updates
+  private products = signal<Product[]>([]);
+  private loading = signal<boolean>(false);
+  private pagination = signal<any>(null);
 
-  products$ = this.productsSubject.asObservable();
-  loading$ = this.loadingSubject.asObservable();
-  pagination$ = this.paginationSubject.asObservable();
+  products$ = toObservable(this.products);
+  loading$ = toObservable(this.loading);
+  pagination$ = toObservable(this.pagination);
 
   /**
    * Get products with pagination and filtering
    */
   getProducts(query: ProductQueryDto): Observable<PaginatedResponse<Product>> {
-    this.loadingSubject.next(true);
+    this.loading.set(true);
 
     return this.http.get<PaginatedResponse<Product>>(this.API_URL, {
       params: this.buildQueryParams(query),
@@ -206,28 +206,28 @@ export class ProductService {
    * Update local products array (for real-time updates)
    */
   updateLocalProducts(products: Product[]): void {
-    this.productsSubject.next(products);
+    this.products.set(products);
   }
 
   /**
    * Add product to local array
    */
   addLocalProduct(product: Product): void {
-    const currentProducts = this.productsSubject.value;
-    this.productsSubject.next([...currentProducts, product]);
+    const currentProducts = this.products();
+    this.products.set([...currentProducts, product]);
   }
 
   /**
    * Update product in local array
    */
   updateLocalProduct(updatedProduct: Product): void {
-    const currentProducts = this.productsSubject.value;
+    const currentProducts = this.products();
     const index = currentProducts.findIndex((p) => p.id === updatedProduct.id);
 
     if (index !== -1) {
       const updatedProducts = [...currentProducts];
       updatedProducts[index] = updatedProduct;
-      this.productsSubject.next(updatedProducts);
+      this.products.set(updatedProducts);
     }
   }
 
@@ -235,23 +235,23 @@ export class ProductService {
    * Remove product from local array
    */
   removeLocalProduct(productId: number): void {
-    const currentProducts = this.productsSubject.value;
+    const currentProducts = this.products();
     const filteredProducts = currentProducts.filter((p) => p.id !== productId);
-    this.productsSubject.next(filteredProducts);
+    this.products.set(filteredProducts);
   }
 
   /**
    * Set loading state
    */
   setLoading(loading: boolean): void {
-    this.loadingSubject.next(loading);
+    this.loading.set(loading);
   }
 
   /**
    * Set pagination data
    */
   setPagination(pagination: any): void {
-    this.paginationSubject.next(pagination);
+    this.pagination.set(pagination);
   }
 
   /**

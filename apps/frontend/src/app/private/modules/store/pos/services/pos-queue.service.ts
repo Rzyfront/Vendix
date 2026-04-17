@@ -1,7 +1,8 @@
 import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { BehaviorSubject, Observable, of } from 'rxjs';
+import { Observable, of } from 'rxjs';
 import { map, tap, catchError } from 'rxjs/operators';
+import { signal, toObservable } from '@angular/core';
 import { environment } from '../../../../../../environments/environment';
 
 export interface QueueEntry {
@@ -25,29 +26,32 @@ export interface QueueEntry {
 })
 export class PosQueueService {
   private readonly apiUrl = `${environment.apiUrl}/store/customer-queue`;
-  private readonly queue$ = new BehaviorSubject<QueueEntry[]>([]);
-  private readonly queueCount$ = new BehaviorSubject<number>(0);
+  readonly queue = signal<QueueEntry[]>([]);
+  readonly queueCount = signal<number>(0);
+
+  readonly queue$ = toObservable(this.queue);
+  readonly queueCount$ = toObservable(this.queueCount);
 
   constructor(private http: HttpClient) {}
 
   get queueEntries(): Observable<QueueEntry[]> {
-    return this.queue$.asObservable();
+    return this.queue$;
   }
 
   get waitingCount(): Observable<number> {
-    return this.queueCount$.asObservable();
+    return this.queueCount$;
   }
 
   loadQueue(): Observable<QueueEntry[]> {
     return this.http.get<any>(this.apiUrl).pipe(
       map((res) => res.data || []),
       tap((entries) => {
-        this.queue$.next(entries);
-        this.queueCount$.next(entries.filter((e: QueueEntry) => e.status === 'waiting').length);
+        this.queue.set(entries);
+        this.queueCount.set(entries.filter((e: QueueEntry) => e.status === 'waiting').length);
       }),
       catchError(() => {
-        this.queue$.next([]);
-        this.queueCount$.next(0);
+        this.queue.set([]);
+        this.queueCount.set(0);
         return of([]);
       }),
     );
