@@ -1,7 +1,6 @@
 import { Component, inject, DestroyRef, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
-import { Subject } from 'rxjs';
-import { takeUntil } from 'rxjs/operators';
 
 import { PayrollService } from '../services/payroll.service';
 import { EmployeeAdvance, AdvanceStats } from '../interfaces/payroll.interface';
@@ -91,16 +90,13 @@ import { AdvanceDetailComponent } from '../components/advances/advance-detail/ad
         (updated)="onAdvanceUpdated()"
       ></app-advance-detail>
     </div>
-  `,
-})
+  ` })
 export class PayrollAdvancesPageComponent {
   private payrollService = inject(PayrollService);
   private currencyService = inject(CurrencyFormatService);
   private toastService = inject(ToastService);
   private destroyRef = inject(DestroyRef);
-  private destroy$ = new Subject<void>();
-
-  // State
+// State
   advances = signal<EmployeeAdvance[]>([]);
   stats = signal<AdvanceStats | null>(null);
   loading = signal(false);
@@ -120,8 +116,6 @@ export class PayrollAdvancesPageComponent {
     this.loadStats();
 
     this.destroyRef.onDestroy(() => {
-      this.destroy$.next();
-      this.destroy$.complete();
     });
   }
 
@@ -132,7 +126,7 @@ export class PayrollAdvancesPageComponent {
     if (this.statusFilter) query['status'] = this.statusFilter;
 
     this.payrollService.getAdvances(query)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.advances.set(res.data || []);
@@ -141,16 +135,14 @@ export class PayrollAdvancesPageComponent {
         error: () => {
           this.loading.set(false);
           this.toastService.show({ variant: 'error', description: 'Error cargando adelantos' });
-        },
-      });
+        } });
   }
 
   loadStats(): void {
     this.payrollService.getAdvanceStats()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (res) => this.stats.set(res.data),
-      });
+        next: (res) => this.stats.set(res.data) });
   }
 
   onSearch(term: string): void {
@@ -171,10 +163,9 @@ export class PayrollAdvancesPageComponent {
     this.selectedAdvance = advance;
     this.isDetailModalOpen = true;
     this.payrollService.getAdvance(advance.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (res) => this.selectedAdvance = res.data,
-      });
+        next: (res) => this.selectedAdvance = res.data });
   }
 
   onAdvanceCreated(): void {
@@ -189,26 +180,24 @@ export class PayrollAdvancesPageComponent {
 
   onQuickApprove(advance: EmployeeAdvance): void {
     this.payrollService.approveAdvance(advance.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.show({ variant: 'success', description: 'Adelanto aprobado' });
           this.onAdvanceUpdated();
         },
-        error: () => this.toastService.show({ variant: 'error', description: 'Error al aprobar' }),
-      });
+        error: () => this.toastService.show({ variant: 'error', description: 'Error al aprobar' }) });
   }
 
   onQuickReject(advance: EmployeeAdvance): void {
     this.payrollService.rejectAdvance(advance.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.show({ variant: 'success', description: 'Adelanto rechazado' });
           this.onAdvanceUpdated();
         },
-        error: () => this.toastService.show({ variant: 'error', description: 'Error al rechazar' }),
-      });
+        error: () => this.toastService.show({ variant: 'error', description: 'Error al rechazar' }) });
   }
 
   formatCurrency(value: number): string {

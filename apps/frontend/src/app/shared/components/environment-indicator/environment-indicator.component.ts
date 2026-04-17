@@ -1,7 +1,8 @@
 import { Component, inject, DestroyRef } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NgClass } from '@angular/common';
-import { Subject } from 'rxjs';
-import { takeUntil } from 'rxjs/operators';
+
+
 import { EnvironmentContextService } from '../../../core/services/environment-context.service';
 import { AppEnvironment } from '../../../core/models/domain-config.interface';
 
@@ -141,14 +142,11 @@ import { AppEnvironment } from '../../../core/models/domain-config.interface';
         }
       }
     `,
-  ],
-})
+  ] })
 export class EnvironmentIndicatorComponent {
   private environmentContextService = inject(EnvironmentContextService);
   private destroyRef = inject(DestroyRef);
-  private destroy$ = new Subject<void>();
-
-  context: any = null;
+context: any = null;
   environmentClass = '';
   environmentIcon = 'fas fa-question';
   environmentLabel = 'Entorno Desconocido';
@@ -158,15 +156,13 @@ export class EnvironmentIndicatorComponent {
   constructor() {
     this.loadEnvironmentContext();
     this.destroyRef.onDestroy(() => {
-      this.destroy$.next();
-      this.destroy$.complete();
     });
   }
 
   private loadEnvironmentContext(): void {
     this.environmentContextService
       .getCurrentEnvironmentContext()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((context) => {
         this.context = context;
         this.updateEnvironmentDisplay(context);
@@ -213,8 +209,7 @@ export class EnvironmentIndicatorComponent {
 
     // Opcional: disparar un evento personalizado
     const event = new CustomEvent('switchEnvironment', {
-      detail: { context: this.context },
-    });
+      detail: { context: this.context } });
     window.dispatchEvent(event);
   }
 }

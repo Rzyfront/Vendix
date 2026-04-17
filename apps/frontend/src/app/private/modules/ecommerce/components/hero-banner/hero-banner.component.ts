@@ -1,4 +1,4 @@
-import { Component, inject, input, DestroyRef } from '@angular/core';
+import { Component, ChangeDetectionStrategy, inject, input, DestroyRef } from '@angular/core';
 
 import { RouterModule, Router } from '@angular/router';
 import { TenantFacade } from '../../../../../../app/core/store';

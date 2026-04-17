@@ -1,27 +1,24 @@
-import {
-  Component,
+import {Component,
   input,
   output,
   model,
-  OnDestroy,
   inject,
-} from '@angular/core';
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   ReactiveFormsModule,
   FormBuilder,
   FormGroup,
-  Validators,
-} from '@angular/forms';
+  Validators} from '@angular/forms';
 import {
   InputComponent,
   ButtonComponent,
   ModalComponent,
-  ToastService,
-} from '../../../../../../shared/components/index';
+  ToastService} from '../../../../../../shared/components/index';
 import { StoreUsersManagementService } from '../services/store-users-management.service';
 import { CreateStoreUserDto } from '../interfaces/store-user.interface';
-import { Subject, takeUntil } from 'rxjs';
+
 
 @Component({
   selector: 'app-store-user-create-modal',
@@ -118,18 +115,16 @@ import { Subject, takeUntil } from 'rxjs';
         display: block;
       }
     `,
-  ],
-})
-export class StoreUserCreateModalComponent implements OnDestroy {
+  ]})
+export class StoreUserCreateModalComponent implements {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = model<boolean>(false);
   readonly isOpenChange = output<boolean>();
   readonly onUserCreated = output<void>();
 
   userForm: FormGroup;
   isCreating: boolean = false;
-  private destroy$ = new Subject<void>();
-
-  private storeUsersService = inject(StoreUsersManagementService);
+private storeUsersService = inject(StoreUsersManagementService);
   private toastService = inject(ToastService);
 
   constructor(private fb: FormBuilder) {
@@ -157,16 +152,9 @@ export class StoreUserCreateModalComponent implements OnDestroy {
             /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/,
           ),
         ],
-      ],
-    });
+      ]});
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  onSubmit(): void {
+onSubmit(): void {
     if (this.userForm.invalid || this.isCreating) {
       Object.keys(this.userForm.controls).forEach((key) => {
         this.userForm.get(key)?.markAsTouched();
@@ -184,7 +172,7 @@ export class StoreUserCreateModalComponent implements OnDestroy {
 
     this.storeUsersService
       .createUser(userData)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.isCreating = false;
@@ -203,8 +191,7 @@ export class StoreUserCreateModalComponent implements OnDestroy {
           console.error('Error creating store user:', error);
           const message = error?.error?.message || 'Error al crear el usuario';
           this.toastService.error(message);
-        },
-      });
+        }});
   }
 
   onCancel(): void {
@@ -218,7 +205,6 @@ export class StoreUserCreateModalComponent implements OnDestroy {
       last_name: '',
       username: '',
       email: '',
-      password: '',
-    });
+      password: ''});
   }
 }

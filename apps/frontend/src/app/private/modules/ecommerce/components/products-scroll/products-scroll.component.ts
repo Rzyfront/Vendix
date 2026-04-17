@@ -1,4 +1,4 @@
-import { Component, inject, AfterViewInit, DestroyRef, ElementRef, ViewChild, input, output, signal } from '@angular/core';
+import { Component, ChangeDetectionStrategy, inject, AfterViewInit, DestroyRef, ElementRef, ViewChild, input, output, signal } from '@angular/core';
 
 import { ProductCardComponent } from '../product-card/product-card.component';
 import { EcommerceProduct } from '../../services/catalog.service';

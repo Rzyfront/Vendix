@@ -1,7 +1,8 @@
-import { Injectable } from '@angular/core';
+import { DestroyRef, Injectable, inject, signal } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { BehaviorSubject, Observable, Subject } from 'rxjs';
+import { Observable, Subject } from 'rxjs';
 import { tap } from 'rxjs/operators';
+import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
 import { CatalogService, EcommerceProduct } from './catalog.service';
 import { environment } from '../../../../../environments/environment';
@@ -59,13 +60,17 @@ export class CartService {
   private api_url = `${environment.apiUrl}/ecommerce/cart`;
   private local_storage_key = 'vendix_cart';
 
-  private cart_subject = new BehaviorSubject<Cart | null>(null);
-  cart$ = this.cart_subject.asObservable();
+  // Estado del carrito como signal (zoneless-friendly).
+  readonly cart = signal<Cart | null>(null);
+  // Adaptador observable para consumidores legacy (cart$).
+  readonly cart$ = toObservable(this.cart);
 
-  private item_added_subject = new Subject<void>();
-  itemAdded$ = this.item_added_subject.asObservable();
+  // Evento pub/sub de "item agregado" — Subject legitimo (skill: event bus local).
+  private readonly item_added_subject = new Subject<void>();
+  readonly itemAdded$ = this.item_added_subject.asObservable();
 
   private is_authenticated = false;
+  private readonly destroy_ref = inject(DestroyRef);
 
   constructor(
     private http: HttpClient,
@@ -78,20 +83,22 @@ export class CartService {
   }
 
   private initializeCart() {
-    this.auth_facade.isAuthenticated$.subscribe((isAuthenticated) => {
-      this.is_authenticated = isAuthenticated;
+    this.auth_facade.isAuthenticated$
+      .pipe(takeUntilDestroyed(this.destroy_ref))
+      .subscribe((isAuthenticated) => {
+        this.is_authenticated = isAuthenticated;
 
-      if (isAuthenticated) {
-        const localItems = this.getLocalCart();
-        if (localItems.length > 0) {
-          this.syncFromLocalStorage().subscribe();
+        if (isAuthenticated) {
+          const localItems = this.getLocalCart();
+          if (localItems.length > 0) {
+            this.syncFromLocalStorage().subscribe();
+          } else {
+            this.getCart().subscribe();
+          }
         } else {
-          this.getCart().subscribe();
+          this.loadLocalCart();
         }
-      } else {
-        this.loadLocalCart();
-      }
-    });
+      });
   }
 
   private getHeaders(): HttpHeaders {
@@ -166,7 +173,7 @@ export class CartService {
                 item_count: cartItems.reduce((sum, i) => sum + i.quantity, 0),
                 items: cartItems,
               };
-              this.cart_subject.next(cart);
+              this.cart.set(cart);
             },
             error: () => this.emitEmptyCart(),
           });
@@ -187,7 +194,7 @@ export class CartService {
       item_count: 0,
       items: [],
     };
-    this.cart_subject.next(cart);
+    this.cart.set(cart);
   }
 
   private getLocalCart(): LocalCartItem[] {
@@ -291,7 +298,7 @@ export class CartService {
       .pipe(
         tap((response: any) => {
           if (response.success) {
-            this.cart_subject.next(response.data);
+            this.cart.set(response.data);
           }
         }),
       );
@@ -311,7 +318,7 @@ export class CartService {
       .pipe(
         tap((response: any) => {
           if (response.success) {
-            this.cart_subject.next(response.data);
+            this.cart.set(response.data);
             this.item_added_subject.next();
           }
         }),
@@ -328,7 +335,7 @@ export class CartService {
       .pipe(
         tap((response: any) => {
           if (response.success) {
-            this.cart_subject.next(response.data);
+            this.cart.set(response.data);
           }
         }),
       );
@@ -342,7 +349,7 @@ export class CartService {
       .pipe(
         tap((response: any) => {
           if (response.success) {
-            this.cart_subject.next(response.data);
+            this.cart.set(response.data);
           }
         }),
       );
@@ -365,7 +372,7 @@ export class CartService {
       .pipe(
         tap((response: any) => {
           if (response.success) {
-            this.cart_subject.next(response.data);
+            this.cart.set(response.data);
             // Limpiar localStorage INMEDIATAMENTE después de sincronizar
             localStorage.removeItem(this.local_storage_key);
           }
@@ -454,28 +461,28 @@ export class CartService {
 
   /** Returns true if the cart contains at least one physical product */
   hasPhysicalItems(): boolean {
-    const cart = this.cart_subject.value;
+    const cart = this.cart();
     if (!cart) return false;
     return cart.items.some((item) => item.product.product_type !== 'service');
   }
 
   /** Returns true if the cart contains only service items */
   hasOnlyServices(): boolean {
-    const cart = this.cart_subject.value;
+    const cart = this.cart();
     if (!cart || cart.items.length === 0) return false;
     return cart.items.every((item) => item.product.product_type === 'service');
   }
 
   /** Returns true if the cart contains at least one service item */
   hasServiceItems(): boolean {
-    const cart = this.cart_subject.value;
+    const cart = this.cart();
     if (!cart) return false;
     return cart.items.some((item) => item.product.product_type === 'service');
   }
 
   /** Returns true if the cart contains at least one item that requires booking */
   hasBookableServices(): boolean {
-    const cart = this.cart_subject.value;
+    const cart = this.cart();
     if (!cart?.items) return false;
     return cart.items.some(
       (item: CartItem) => item.product?.requires_booking === true,
@@ -484,7 +491,7 @@ export class CartService {
 
   /** Returns the cart items that require booking */
   getBookableItems(): CartItem[] {
-    const cart = this.cart_subject.value;
+    const cart = this.cart();
     if (!cart?.items) return [];
     return cart.items.filter(
       (item: CartItem) => item.product?.requires_booking === true,
@@ -498,7 +505,7 @@ export class CartService {
     city?: string;
     postal_code?: string;
   }): Observable<any[]> {
-    const cart = this.cart_subject.value;
+    const cart = this.cart();
     if (!cart || cart.items.length === 0) {
       return new Observable((observer) => {
         observer.next([]);

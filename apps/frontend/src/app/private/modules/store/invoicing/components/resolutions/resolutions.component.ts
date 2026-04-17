@@ -161,9 +161,14 @@ export class ResolutionsComponent {
 
   private store = inject(Store);
 
-  resolutions$: Observable<InvoiceResolution[]> =
+  private resolutions$: Observable<InvoiceResolution[]> =
     this.store.select(selectResolutions);
-  loading$: Observable<boolean> = this.store.select(selectResolutionsLoading);
+  private loading$: Observable<boolean> = this.store.select(selectResolutionsLoading);
+
+  readonly resolutions = toSignal(this.resolutions$, {
+    initialValue: [] as InvoiceResolution[],
+  });
+  readonly loading = toSignal(this.loading$, { initialValue: false });
 
   readonly isCreateModalOpen = signal(false);
   readonly selectedResolution = signal<InvoiceResolution | null>(null);

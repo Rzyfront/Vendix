@@ -4,6 +4,7 @@ import {
   inject,
   ElementRef,
   computed,
+  signal,
 } from '@angular/core';
 import { Router } from '@angular/router';
 import { IconComponent } from '../icon/icon.component';
@@ -17,13 +18,13 @@ import {
   standalone: true,
   imports: [IconComponent],
   template: `
-    <div class="notif-dropdown-container" [class.open]="isOpen">
+    <div class="notif-dropdown-container" [class.open]="isOpen()">
       <!-- Bell trigger button -->
       <button
         class="notif-trigger"
         (click)="toggleDropdown($event)"
         [attr.aria-label]="'Notificaciones'"
-        [attr.aria-expanded]="isOpen"
+        [attr.aria-expanded]="isOpen()"
       >
         <app-icon name="bell" [size]="18"></app-icon>
         @if (unreadCount(); as count) {
@@ -34,7 +35,7 @@ import {
       </button>
 
       <!-- Dropdown panel -->
-      <div class="notif-panel" [class.show]="isOpen">
+      <div class="notif-panel" [class.show]="isOpen()">
         <div class="notif-header">
           <span class="notif-title">Notificaciones</span>
           @if (unreadCount()! > 0) {
@@ -70,7 +71,7 @@ import {
             </div>
           }
 
-          @if (notifications()?.length === 0) {
+          @if (notifications().length === 0) {
             <div class="notif-empty">
               <app-icon
                 name="bell"
@@ -91,7 +92,7 @@ export class NotificationsDropdownComponent {
   private elementRef = inject(ElementRef);
   private router = inject(Router);
 
-  isOpen = false;
+  readonly isOpen = signal(false);
 
   // Signal-based properties from facade
   readonly notifications = this.notifFacade.notifications;
@@ -100,18 +101,18 @@ export class NotificationsDropdownComponent {
   @HostListener('document:click', ['$event'])
   onClickOutside(event: MouseEvent) {
     if (!this.elementRef.nativeElement.contains(event.target)) {
-      this.isOpen = false;
+      this.isOpen.set(false);
     }
   }
 
   @HostListener('keydown.escape')
   onEscape() {
-    this.isOpen = false;
+    this.isOpen.set(false);
   }
 
   toggleDropdown(event: MouseEvent) {
     event.stopPropagation();
-    this.isOpen = !this.isOpen;
+    this.isOpen.update((v) => !v);
   }
 
   markAllRead(event: MouseEvent) {
@@ -123,7 +124,7 @@ export class NotificationsDropdownComponent {
     if (!n.is_read) {
       this.notifFacade.markRead(n.id);
     }
-    this.isOpen = false;
+    this.isOpen.set(false);
 
     const route = this.getRouteForNotification(n);
     if (route) {

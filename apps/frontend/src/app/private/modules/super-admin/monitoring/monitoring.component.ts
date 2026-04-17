@@ -1,7 +1,10 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import {Component, OnInit, OnDestroy,
+  DestroyRef,
+  inject} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
-import { Subject, timer } from 'rxjs';
-import { takeUntil, map, catchError, filter } from 'rxjs/operators';
+import { timer } from 'rxjs';
+import { map, catchError, filter } from 'rxjs/operators';
 import { of } from 'rxjs';
 import { StatsComponent } from '../../../../shared/components';
 import { IconComponent } from '../../../../shared/components/icon/icon.component';
@@ -14,8 +17,7 @@ import {
   StatusIndicatorComponent,
   ProcessInfoComponent,
   QueueStatsComponent,
-  SlowEndpointsComponent,
-} from './components';
+  SlowEndpointsComponent } from './components';
 import {
   MonitoringOverview,
   Ec2MetricsResponse,
@@ -26,8 +28,7 @@ import {
   MetricStatus,
   PerformanceSnapshot,
   PerformanceHistory,
-  TimeSeriesPoint,
-} from './interfaces';
+  TimeSeriesPoint } from './interfaces';
 
 @Component({
   selector: 'app-monitoring',
@@ -741,9 +742,9 @@ import {
       </app-card>
     </div>
   `,
-  styleUrls: ['./monitoring.component.css'],
-})
+  styleUrls: ['./monitoring.component.css'] })
 export class MonitoringComponent implements OnInit, OnDestroy {
+  private destroyRef = inject(DestroyRef);
   overview: MonitoringOverview | null = null;
   ec2Metrics: Ec2MetricsResponse | null = null;
   rdsMetrics: RdsMetricsResponse | null = null;
@@ -762,9 +763,7 @@ export class MonitoringComponent implements OnInit, OnDestroy {
 
   ec2TimeRange: TimeRange = '1h';
   rdsTimeRange: TimeRange = '1h';
-
-  private destroy$ = new Subject<void>();
-  private paused = false;
+private paused = false;
   private visibilityHandler = () => this.onVisibilityChange();
 
   constructor(private readonly monitoringService: MonitoringService) {}
@@ -924,56 +923,49 @@ export class MonitoringComponent implements OnInit, OnDestroy {
     return (
       this.performanceHistory?.responseTimes?.map((r) => ({
         timestamp: r.timestamp,
-        value: r.p50,
-      })) || []
+        value: r.p50 })) || []
     );
   }
   get rtP95Points(): TimeSeriesPoint[] {
     return (
       this.performanceHistory?.responseTimes?.map((r) => ({
         timestamp: r.timestamp,
-        value: r.p95,
-      })) || []
+        value: r.p95 })) || []
     );
   }
   get rtP99Points(): TimeSeriesPoint[] {
     return (
       this.performanceHistory?.responseTimes?.map((r) => ({
         timestamp: r.timestamp,
-        value: r.p99,
-      })) || []
+        value: r.p99 })) || []
     );
   }
   get throughputPoints(): TimeSeriesPoint[] {
     return (
       this.performanceHistory?.throughput?.map((t) => ({
         timestamp: t.timestamp,
-        value: t.requestsPerSecond,
-      })) || []
+        value: t.requestsPerSecond })) || []
     );
   }
   get errors4xxPoints(): TimeSeriesPoint[] {
     return (
       this.performanceHistory?.errors?.map((e) => ({
         timestamp: e.timestamp,
-        value: e.errors4xx,
-      })) || []
+        value: e.errors4xx })) || []
     );
   }
   get errors5xxPoints(): TimeSeriesPoint[] {
     return (
       this.performanceHistory?.errors?.map((e) => ({
         timestamp: e.timestamp,
-        value: e.errors5xx,
-      })) || []
+        value: e.errors5xx })) || []
     );
   }
   get eventLoopLagPoints(): TimeSeriesPoint[] {
     return (
       this.performanceHistory?.eventLoopLag?.map((e) => ({
         timestamp: e.timestamp,
-        value: e.p99,
-      })) || []
+        value: e.p99 })) || []
     );
   }
 
@@ -997,7 +989,7 @@ export class MonitoringComponent implements OnInit, OnDestroy {
       .pipe(
         map((res) => res.data),
         catchError(() => of(null)),
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((data) => (this.serverInfo = data));
 
@@ -1005,7 +997,7 @@ export class MonitoringComponent implements OnInit, OnDestroy {
     timer(0, 30000)
       .pipe(
         filter(() => !this.paused),
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
       )
       .subscribe(() => {
         this.fetchOverview();
@@ -1018,7 +1010,7 @@ export class MonitoringComponent implements OnInit, OnDestroy {
     timer(0, 60000)
       .pipe(
         filter(() => !this.paused),
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
       )
       .subscribe(() => {
         this.fetchEc2Metrics();
@@ -1027,9 +1019,8 @@ export class MonitoringComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-    document.removeEventListener('visibilitychange', this.visibilityHandler);
+
+document.removeEventListener('visibilitychange', this.visibilityHandler);
   }
 
   // -- Time range changes --
@@ -1093,7 +1084,7 @@ export class MonitoringComponent implements OnInit, OnDestroy {
       .pipe(
         map((res) => res.data),
         catchError(() => of(null)),
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((data) => {
         this.overview = data;
@@ -1108,7 +1099,7 @@ export class MonitoringComponent implements OnInit, OnDestroy {
       .pipe(
         map((res) => res.data),
         catchError(() => of(null)),
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((data) => {
         this.ec2Metrics = data;
@@ -1123,7 +1114,7 @@ export class MonitoringComponent implements OnInit, OnDestroy {
       .pipe(
         map((res) => res.data),
         catchError(() => of(null)),
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((data) => {
         this.rdsMetrics = data;
@@ -1137,7 +1128,7 @@ export class MonitoringComponent implements OnInit, OnDestroy {
       .pipe(
         map((res) => res.data),
         catchError(() => of(null)),
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((data) => {
         this.performanceSnapshot = data;
@@ -1151,7 +1142,7 @@ export class MonitoringComponent implements OnInit, OnDestroy {
       .pipe(
         map((res) => res.data),
         catchError(() => of(null)),
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((data) => {
         this.performanceHistory = data;
@@ -1164,7 +1155,7 @@ export class MonitoringComponent implements OnInit, OnDestroy {
       .pipe(
         map((res) => res.data),
         catchError(() => of(null)),
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((data) => {
         this.appMetrics = data;

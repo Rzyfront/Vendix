@@ -5,16 +5,15 @@ import {
   inject,
   effect,
   DestroyRef,
-  signal,
-} from '@angular/core';
+  signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   FormsModule,
   FormBuilder,
   FormGroup,
   Validators,
-  ReactiveFormsModule,
-} from '@angular/forms';
-import { Subject, takeUntil, debounceTime, distinctUntilChanged } from 'rxjs';
+  ReactiveFormsModule } from '@angular/forms';
+import { Subject, debounceTime, distinctUntilChanged } from 'rxjs';
 
 
 import {
@@ -24,15 +23,13 @@ import {
   SelectorComponent,
   IconComponent,
   InputsearchComponent,
-  DialogService,
-} from '../../../../../shared/components';
+  DialogService } from '../../../../../shared/components';
 import { PosCustomerService } from '../services/pos-customer.service';
 import { PosQueueService, QueueEntry } from '../services/pos-queue.service';
 import {
   PosCustomer,
   CreatePosCustomerRequest,
-  PaginatedCustomersResponse,
-} from '../models/customer.model';
+  PaginatedCustomersResponse } from '../models/customer.model';
 import { StoreContextService } from '../../../../../core/services/store-context.service';
 
 @Component({
@@ -523,9 +520,9 @@ import { StoreContextService } from '../../../../../core/services/store-context.
         </div>
       }
     </app-modal>
-    `,
-})
+    ` })
 export class PosCustomerModalComponent {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = input<boolean>(false);
   readonly customer = input<PosCustomer | null>(null);
   readonly openInQueueMode = input<boolean>(false);
@@ -560,9 +557,7 @@ export class PosCustomerModalComponent {
   readonly lookupResult = signal<PosCustomer | null>(null);
   readonly lookupPerformed = signal(false);
   readonly lookupLoading = signal(false);
-
-  private destroy$ = new Subject<void>();
-  private searchSubject$ = new Subject<string>();
+private searchSubject$ = new Subject<string>();
   private dialogService = inject(DialogService);
   private fb = inject(FormBuilder);
   private customerService = inject(PosCustomerService);
@@ -571,13 +566,7 @@ export class PosCustomerModalComponent {
 
   constructor() {
     this.customerForm = this.createCustomerForm();
-
-    inject(DestroyRef).onDestroy(() => {
-      this.destroy$.next();
-      this.destroy$.complete();
-    });
-
-    this.setupFormListeners();
+this.setupFormListeners();
     this.setupSearchSubscription();
 
     // If customer is provided, populate form for editing
@@ -602,15 +591,14 @@ export class PosCustomerModalComponent {
       lastName: ['', [Validators.required, Validators.minLength(2)]],
       phone: [''],
       documentType: [''],
-      documentNumber: ['', [Validators.required]],
-    });
+      documentNumber: ['', [Validators.required]] });
   }
 
   private setupFormListeners(): void {
     // Auto-validate document number when document type changes
     this.customerForm
       .get('documentType')
-      ?.valueChanges.pipe(takeUntil(this.destroy$))
+      ?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((documentType) => {
         const documentNumberControl = this.customerForm.get('documentNumber');
         if (documentType && documentNumberControl) {
@@ -625,7 +613,7 @@ export class PosCustomerModalComponent {
 
   private setupSearchSubscription(): void {
     this.searchSubject$
-      .pipe(debounceTime(300), distinctUntilChanged(), takeUntil(this.destroy$))
+      .pipe(debounceTime(300), distinctUntilChanged(), takeUntilDestroyed(this.destroyRef))
       .subscribe((query) => {
         if (query.trim()) {
           this.performSearch(query);
@@ -644,7 +632,7 @@ export class PosCustomerModalComponent {
     this.loading.set(true);
     this.customerService
       .searchCustomers({ query: query, limit: 10 })
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           this.searchResults.set(response.data || []);
@@ -655,8 +643,7 @@ export class PosCustomerModalComponent {
           this.loading.set(false);
           this.searchResults.set([]);
           this.searchPerformed.set(true);
-        },
-      });
+        } });
   }
 
   selectCustomer(customer: PosCustomer): void {
@@ -677,7 +664,7 @@ export class PosCustomerModalComponent {
 
     this.customerService
       .lookupByDocument(this.documentLookupQuery.trim())
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (result) => {
           this.lookupResult.set(result);
@@ -688,15 +675,13 @@ export class PosCustomerModalComponent {
           this.lookupResult.set(null);
           this.lookupPerformed.set(true);
           this.lookupLoading.set(false);
-        },
-      });
+        } });
   }
 
   createFromLookup(): void {
     this.currentStep = 'create';
     this.customerForm.patchValue({
-      documentNumber: this.documentLookupQuery,
-    });
+      documentNumber: this.documentLookupQuery });
   }
 
   private populateFormForEdit(): void {
@@ -707,8 +692,7 @@ export class PosCustomerModalComponent {
         lastName: this.customer()!.last_name,
         phone: this.customer()!.phone || '',
         documentType: this.customer()!.document_type || '',
-        documentNumber: this.customer()!.document_number || '',
-      });
+        documentNumber: this.customer()!.document_number || '' });
     }
   }
 
@@ -766,14 +750,13 @@ export class PosCustomerModalComponent {
       last_name: formData.lastName || undefined,
       phone: formData.phone || undefined,
       document_type: formData.documentType,
-      document_number: formData.documentNumber,
-    };
+      document_number: formData.documentNumber };
 
     if (this.customer()) {
       // Update existing customer
       this.customerService
         .updateCustomer(this.customer()!.id, customerData)
-        .pipe(takeUntil(this.destroy$))
+        .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: (updatedCustomer) => {
             this.loading.set(false);
@@ -782,13 +765,12 @@ export class PosCustomerModalComponent {
           },
           error: (error) => {
             this.loading.set(false);
-          },
-        });
+          } });
     } else {
       // Create new customer
       this.customerService
         .createCustomer(customerData)
-        .pipe(takeUntil(this.destroy$))
+        .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: (newCustomer) => {
             this.loading.set(false);
@@ -797,8 +779,7 @@ export class PosCustomerModalComponent {
           },
           error: (error) => {
             this.loading.set(false);
-          },
-        });
+          } });
     }
   }
 
@@ -820,7 +801,7 @@ export class PosCustomerModalComponent {
 
   private loadQueueData(): void {
     this.queueLoading.set(true);
-    this.queueService.loadQueue().pipe(takeUntil(this.destroy$)).subscribe({
+    this.queueService.loadQueue().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (entries) => {
         this.queueEntries.set(entries);
         this.queueLoading.set(false);
@@ -828,19 +809,17 @@ export class PosCustomerModalComponent {
       error: () => {
         this.queueEntries.set([]);
         this.queueLoading.set(false);
-      },
-    });
+      } });
 
     if (!this.queueQrData()) {
-      this.queueService.getQrCode().pipe(takeUntil(this.destroy$)).subscribe({
+      this.queueService.getQrCode().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (data) => this.queueQrData.set(data),
-        error: () => {},
-      });
+        error: () => {} });
     }
   }
 
   onSelectFromQueue(entry: QueueEntry): void {
-    this.queueService.selectEntry(entry.id).pipe(takeUntil(this.destroy$)).subscribe({
+    this.queueService.selectEntry(entry.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (selected) => {
         // Map queue entry to PosCustomer format and emit
         const customer: PosCustomer = {
@@ -855,20 +834,17 @@ export class PosCustomerModalComponent {
           created_at: new Date(),
           updated_at: new Date(),
           queueEntryId: entry.id,
-          fromQueue: true,
-        };
+          fromQueue: true };
         this.customerSelected.emit(customer);
         this.onModalClosed();
       },
-      error: () => {},
-    });
+      error: () => {} });
   }
 
   onReleaseFromQueue(entry: QueueEntry): void {
-    this.queueService.releaseEntry(entry.id).pipe(takeUntil(this.destroy$)).subscribe({
+    this.queueService.releaseEntry(entry.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => this.loadQueueData(),
-      error: () => {},
-    });
+      error: () => {} });
   }
 
   printQueueQr(): void {

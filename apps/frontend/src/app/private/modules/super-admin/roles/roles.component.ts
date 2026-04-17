@@ -1,18 +1,18 @@
-import { Component, OnInit, OnDestroy, inject } from '@angular/core';
+import {Component, OnInit, inject, signal,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
-import { debounceTime, distinctUntilChanged, Subject, takeUntil } from 'rxjs';
+import { debounceTime, distinctUntilChanged, Subject } from 'rxjs';
 import {
   Role,
   RoleQueryDto,
   RoleStats,
-  PaginatedRolesResponse,
-} from './interfaces/role.interface';
+  PaginatedRolesResponse} from './interfaces/role.interface';
 import { RolesService } from './services/roles.service';
 import {
   RoleCreateModalComponent,
   RoleEditModalComponent,
-  RolePermissionsModalComponent,
-} from './components/index';
+  RolePermissionsModalComponent} from './components/index';
 
 // Import components from shared
 import {
@@ -28,15 +28,13 @@ import {
   ItemListCardConfig,
   PaginationComponent,
   EmptyStateComponent,
-  CardComponent,
-} from '../../../../shared/components/index';
+  CardComponent} from '../../../../shared/components/index';
 
 import {
   FormsModule,
   ReactiveFormsModule,
   FormBuilder,
-  FormGroup,
-} from '@angular/forms';
+  FormGroup} from '@angular/forms';
 
 @Component({
   selector: 'app-roles',
@@ -54,33 +52,30 @@ import {
     SelectorComponent,
     ResponsiveDataViewComponent,
     PaginationComponent,
-    CardComponent
-],
+    CardComponent,
+  ],
   templateUrl: './roles.component.html',
-  styleUrls: ['./roles.component.css'],
-})
-export class RolesComponent implements OnInit, OnDestroy {
-  roles: Role[] = [];
-  roleStats: RoleStats = {
+  styleUrls: ['./roles.component.css']})
+export class RolesComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
+  roles = signal<Role[]>([]);
+  roleStats = signal<RoleStats>({
     totalRoles: 0,
     systemRoles: 0,
     customRoles: 0,
-    totalPermissions: 0,
-  };
-  isLoading = false;
-  currentRole: Role | null = null;
+    totalPermissions: 0});
+  isLoading = signal(false);
+  currentRole = signal<Role | null>(null);
 
-  // Modals state
-  showCreateModal = false;
-  showEditModal = false;
-  showPermissionsModal = false;
+  showCreateModal = signal(false);
+  showEditModal = signal(false);
+  showPermissionsModal = signal(false);
 
-  isCreatingRole = false;
-  isUpdatingRole = false;
-  isUpdatingPermissions = false;
+  isCreatingRole = signal(false);
+  isUpdatingRole = signal(false);
+  isUpdatingPermissions = signal(false);
 
-  // Pagination
-  pagination = { page: 1, limit: 10, total: 0, totalPages: 0 };
+  pagination = signal({ page: 1, limit: 10, total: 0, totalPages: 0 });
 
   // Filter states
   filterForm: FormGroup;
@@ -95,9 +90,7 @@ export class RolesComponent implements OnInit, OnDestroy {
   private fb = inject(FormBuilder);
   private dialogService = inject(DialogService);
   private toastService = inject(ToastService);
-
-  private destroy$ = new Subject<void>();
-  searchSubject = new Subject<string>();
+searchSubject = new Subject<string>();
 
   // Table configuration
   tableColumns: TableColumn[] = [
@@ -115,17 +108,14 @@ export class RolesComponent implements OnInit, OnDestroy {
         colorMap: {
           true: '#3b82f6', // Blue for system roles
           false: '#10b981', // Green for custom roles
-        },
-      },
-      transform: (value: boolean) => (value ? 'Sistema' : 'Personalizado'),
-    },
+        }},
+      transform: (value: boolean) => (value ? 'Sistema' : 'Personalizado')},
     {
       key: '_count.user_roles',
       label: 'Usuarios',
       sortable: true,
       defaultValue: '0',
-      priority: 3,
-    },
+      priority: 3},
     {
       key: 'permissions',
       label: 'Permisos',
@@ -138,15 +128,13 @@ export class RolesComponent implements OnInit, OnDestroy {
         return permissions.length === 1
           ? permissions[0]
           : `${permissions.length} permisos`;
-      },
-    },
+      }},
     {
       key: 'created_at',
       label: 'Fecha Creación',
       sortable: true,
       priority: 3,
-      transform: (value: string) => this.formatDate(value),
-    },
+      transform: (value: string) => this.formatDate(value)},
   ];
 
   // Card configuration for mobile
@@ -160,57 +148,50 @@ export class RolesComponent implements OnInit, OnDestroy {
       colorMap: {
         true: '#3b82f6', // Blue for system roles
         false: '#10b981', // Green for custom roles
-      },
-    },
+      }},
     badgeTransform: (value: boolean) => (value ? 'Sistema' : 'Personalizado'),
     detailKeys: [
       { key: '_count.user_roles', label: 'Usuarios', icon: 'users' },
       {
         key: 'created_at',
         label: 'Fecha',
-        transform: (v) => this.formatDate(v),
-      },
-    ],
-  };
+        transform: (v) => this.formatDate(v)},
+    ]};
 
   tableActions: TableAction[] = [
     {
       label: 'Editar',
       icon: 'edit',
       action: (role: Role) => this.editRole(role),
-      variant: 'info',
-    },
+      variant: 'info'},
     {
       label: 'Permisos',
       icon: 'settings',
       action: (role: Role) => this.openPermissionsModal(role),
-      variant: 'ghost',
-    },
+      variant: 'ghost'},
     {
       label: 'Eliminar',
       icon: 'trash-2',
       action: (role: Role) => this.confirmDelete(role),
       variant: 'danger',
       disabled: (role: Role) =>
-        role.is_system_role || (role._count?.user_roles ?? 0) > 0,
-    },
+        role.is_system_role || (role._count?.user_roles ?? 0) > 0},
   ];
 
   constructor() {
     this.filterForm = this.fb.group({
       search: [''],
-      is_system_role: [''],
-    });
+      is_system_role: ['']});
 
     // Setup search debounce
     this.searchSubject
-      .pipe(debounceTime(300), distinctUntilChanged(), takeUntil(this.destroy$))
+      .pipe(debounceTime(300), distinctUntilChanged(), takeUntilDestroyed(this.destroyRef))
       .subscribe((searchTerm: string) => {
         this.filterForm.patchValue(
           { search: searchTerm },
           { emitEvent: false },
         );
-        this.pagination.page = 1;
+        this.pagination.update((p) => ({ ...p, page: 1 }));
         this.loadRoles();
       });
   }
@@ -219,83 +200,75 @@ export class RolesComponent implements OnInit, OnDestroy {
     this.loadRoles();
     this.loadRoleStats();
 
-    // Subscribe to form changes
     this.filterForm
       .get('is_system_role')
-      ?.valueChanges.pipe(takeUntil(this.destroy$))
+      ?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => {
-        this.pagination.page = 1;
+        this.pagination.update((p) => ({ ...p, page: 1 }));
         this.loadRoles();
       });
 
-    // Subscribe to service loading states
     this.rolesService.isCreatingRole
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((isCreating) => {
-        this.isCreatingRole = isCreating || false;
+        this.isCreatingRole.set(isCreating || false);
       });
 
     this.rolesService.isUpdatingRole
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((isUpdating) => {
-        this.isUpdatingRole = isUpdating || false;
+        this.isUpdatingRole.set(isUpdating || false);
       });
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  loadRoles(): void {
-    this.isLoading = true;
+loadRoles(): void {
+    this.isLoading.set(true);
     const filters = this.filterForm.value;
+    const pag = this.pagination();
     const query: RoleQueryDto = {
-      page: this.pagination.page,
-      limit: this.pagination.limit,
+      page: pag.page,
+      limit: pag.limit,
       search: filters.search || undefined,
       is_system_role:
         filters.is_system_role && filters.is_system_role !== ''
           ? filters.is_system_role === 'true'
-          : undefined,
-    };
+          : undefined};
 
     this.rolesService
       .getRoles(query)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: PaginatedRolesResponse) => {
-          this.roles = response.data || [];
+          this.roles.set(response.data || []);
           if (response.pagination) {
-            this.pagination.total = response.pagination.total || 0;
-            this.pagination.totalPages =
-              response.pagination.total_pages ||
-              Math.ceil(this.pagination.total / this.pagination.limit);
+            this.pagination.update((p) => ({
+              ...p,
+              total: response.pagination!.total || 0,
+              totalPages:
+                response.pagination!.total_pages ||
+                Math.ceil((response.pagination!.total || 0) / p.limit)}));
           }
         },
         error: (error) => {
           console.error('Error loading roles:', error);
-          this.roles = [];
+          this.roles.set([]);
           this.toastService.error('Error al cargar roles');
-        },
-      })
+        }})
       .add(() => {
-        this.isLoading = false;
+        this.isLoading.set(false);
       });
   }
 
   loadRoleStats(): void {
     this.rolesService
       .getRolesStats()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (stats: RoleStats) => {
-          this.roleStats = stats;
+          this.roleStats.set(stats);
         },
         error: (error) => {
           console.error('Error loading role stats:', error);
-        },
-      });
+        }});
   }
 
   onSearchChange(searchTerm: string): void {
@@ -303,7 +276,7 @@ export class RolesComponent implements OnInit, OnDestroy {
   }
 
   onPageChange(page: number): void {
-    this.pagination.page = page;
+    this.pagination.update((p) => ({ ...p, page }));
     this.loadRoles();
   }
 
@@ -321,12 +294,12 @@ export class RolesComponent implements OnInit, OnDestroy {
   }
 
   createRole(): void {
-    this.showCreateModal = true;
+    this.showCreateModal.set(true);
   }
 
   editRole(role: Role): void {
-    this.currentRole = role;
-    this.showEditModal = true;
+    this.currentRole.set(role);
+    this.showEditModal.set(true);
   }
 
   confirmDelete(role: Role): void {
@@ -342,8 +315,7 @@ export class RolesComponent implements OnInit, OnDestroy {
         message: `¿Estás seguro de que deseas eliminar el rol "${role.name}"? Esta acción no se puede deshacer.`,
         confirmText: 'Eliminar',
         cancelText: 'Cancelar',
-        confirmVariant: 'danger',
-      })
+        confirmVariant: 'danger'})
       .then((confirmed) => {
         if (confirmed) {
           this.deleteRole(role.id);
@@ -361,8 +333,7 @@ export class RolesComponent implements OnInit, OnDestroy {
       error: (error) => {
         console.error('Error deleting role:', error);
         this.toastService.error('Error al eliminar el rol');
-      },
-    });
+      }});
   }
 
   // === Modal Outputs === //
@@ -370,7 +341,7 @@ export class RolesComponent implements OnInit, OnDestroy {
   onRoleCreated(roleData: any): void {
     this.rolesService.createRole(roleData).subscribe({
       next: () => {
-        this.showCreateModal = false;
+        this.showCreateModal.set(false);
         this.loadRoles();
         this.loadRoleStats();
         this.toastService.success('Rol creado exitosamente');
@@ -378,17 +349,17 @@ export class RolesComponent implements OnInit, OnDestroy {
       error: (error) => {
         console.error('Error creating role:', error);
         this.toastService.error('Error al crear el rol');
-      },
-    });
+      }});
   }
 
   onRoleUpdated(roleData: any): void {
-    if (!this.currentRole) return;
+    const role = this.currentRole();
+    if (!role) return;
 
-    this.rolesService.updateRole(this.currentRole.id, roleData).subscribe({
+    this.rolesService.updateRole(role.id, roleData).subscribe({
       next: () => {
-        this.showEditModal = false;
-        this.currentRole = null;
+        this.showEditModal.set(false);
+        this.currentRole.set(null);
         this.loadRoles();
         this.loadRoleStats();
         this.toastService.success('Rol actualizado exitosamente');
@@ -396,31 +367,21 @@ export class RolesComponent implements OnInit, OnDestroy {
       error: (error) => {
         console.error('Error updating role:', error);
         this.toastService.error('Error al actualizar el rol');
-      },
-    });
+      }});
   }
 
-  // === Permissions === //
-
   openPermissionsModal(role: Role): void {
-    this.currentRole = role;
-    this.showPermissionsModal = true;
+    this.currentRole.set(role);
+    this.showPermissionsModal.set(true);
   }
 
   onPermissionsUpdated(permissionData: any): void {
-    if (!this.currentRole) return;
+    const role = this.currentRole();
+    if (!role) return;
 
-    this.isUpdatingPermissions = true;
+    this.isUpdatingPermissions.set(true);
 
-    // Delegate logic to service or handle here
-    // For simplicity, we can do simpler logic than the original component's massive parallel block if the backend supports bulk assign
-    // The original code calculated diffs. Let's see if we can just assign the new set if the API supports it.
-    // The Service has assignPermissionsToRole and removePermissionsFromRole. It seems we need to calc diffs.
-
-    // NOTE: Keep original logic logic or Refactor?
-    // I'll keep the diff logic but cleaner.
-
-    this.rolesService.getRolePermissions(this.currentRole.id).subscribe({
+    this.rolesService.getRolePermissions(role.id).subscribe({
       next: (currentPermissionIds) => {
         const newPermissionIds = permissionData.permission_ids || [];
 
@@ -432,30 +393,24 @@ export class RolesComponent implements OnInit, OnDestroy {
         );
 
         if (toAdd.length === 0 && toRemove.length === 0) {
-          this.isUpdatingPermissions = false;
-          this.showPermissionsModal = false;
-          this.currentRole = null;
+          this.isUpdatingPermissions.set(false);
+          this.showPermissionsModal.set(false);
+          this.currentRole.set(null);
           this.toastService.info('No hay cambios en los permisos');
           return;
         }
 
-        const requests = [];
+        const requests: any[] = [];
         if (toAdd.length)
           requests.push(
-            this.rolesService.assignPermissionsToRole(this.currentRole!.id, {
-              permission_ids: toAdd,
-            }),
+            this.rolesService.assignPermissionsToRole(role.id, {
+              permission_ids: toAdd}),
           );
         if (toRemove.length)
           requests.push(
-            this.rolesService.removePermissionsFromRole(this.currentRole!.id, {
-              permission_ids: toRemove,
-            }),
+            this.rolesService.removePermissionsFromRole(role.id, {
+              permission_ids: toRemove}),
           );
-
-        // Execute sequentially or parallel.
-        // Using forkJoin or similar would be better but let's stick to simple promise/subscribe chain or just parallel.
-        // I will use a simple counter for now as RxJS forkJoin needs import
 
         let completed = 0;
         let errors = 0;
@@ -463,11 +418,11 @@ export class RolesComponent implements OnInit, OnDestroy {
         const checkDone = () => {
           completed++;
           if (completed === requests.length) {
-            this.isUpdatingPermissions = false;
-            this.showPermissionsModal = false;
-            this.currentRole = null;
+            this.isUpdatingPermissions.set(false);
+            this.showPermissionsModal.set(false);
+            this.currentRole.set(null);
             this.loadRoles();
-            this.loadRoleStats(); // Stats might change (total permissions)
+            this.loadRoleStats();
             if (errors === 0) {
               this.toastService.success('Permisos actualizados exitosamente');
             } else {
@@ -485,15 +440,13 @@ export class RolesComponent implements OnInit, OnDestroy {
               console.error(e);
               errors++;
               checkDone();
-            },
-          });
+            }});
         });
       },
       error: (err) => {
-        this.isUpdatingPermissions = false;
+        this.isUpdatingPermissions.set(false);
         this.toastService.error('Error al obtener permisos actuales');
-      },
-    });
+      }});
   }
 
   getEmptyStateTitle(): string {
@@ -519,7 +472,6 @@ export class RolesComponent implements OnInit, OnDestroy {
       month: '2-digit',
       year: 'numeric',
       hour: '2-digit',
-      minute: '2-digit',
-    });
+      minute: '2-digit'});
   }
 }

@@ -1,4 +1,4 @@
-import { Component, inject } from '@angular/core';
+import { Component, inject, signal } from '@angular/core';
 import { Router, ActivatedRoute } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
@@ -93,7 +93,7 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
       @defer (when isDetailModalOpen) {
         <vendix-invoice-detail
           [(isOpen)]="isDetailModalOpen"
-          [invoice]="selectedInvoice"
+          [invoice]="selectedInvoice()"
           (creditNote)="openCreditNoteModal($event)"
         ></vendix-invoice-detail>
       }
@@ -101,7 +101,7 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
       @defer (when isCreditNoteModalOpen) {
         <vendix-credit-note-create
           [(isOpen)]="isCreditNoteModalOpen"
-          [sourceInvoice]="creditNoteSourceInvoice"
+          [sourceInvoice]="creditNoteSourceInvoice()"
         ></vendix-credit-note-create>
       }
 

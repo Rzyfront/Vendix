@@ -5,6 +5,7 @@ import {
   ElementRef,
   input,
   output,
+  signal,
   viewChild,
 } from '@angular/core';
 
@@ -46,7 +47,7 @@ export type InputSize = 'sm' | 'md' | 'lg';
       <!-- Label -->
       @if (label()) {
         <label
-          [for]="inputId"
+          [for]="inputId()"
           [class]="labelClasses"
           class="label-with-tooltip"
         >
@@ -94,7 +95,7 @@ export type InputSize = 'sm' | 'md' | 'lg';
           [placeholder]="placeholder()"
           [disabled]="isDisabled()"
           [readonly]="readonly()"
-          [value]="value"
+          [value]="value()"
           [step]="step()"
           [min]="min()"
           [max]="max()"
@@ -119,7 +120,7 @@ export type InputSize = 'sm' | 'md' | 'lg';
             tabindex="-1"
           >
             <!-- Eye icon (show password) -->
-            @if (!showPassword) {
+            @if (!showPassword()) {
               <svg
                 class="h-5 w-5"
                 fill="none"
@@ -140,7 +141,7 @@ export type InputSize = 'sm' | 'md' | 'lg';
               </svg>
             }
             <!-- Eye-off icon (hide password) -->
-            @if (showPassword) {
+            @if (showPassword()) {
               <svg
                 class="h-5 w-5"
                 fill="none"
@@ -294,9 +295,9 @@ export class InputComponent implements ControlValueAccessor {
   readonly inputBlur = output<void>();
   readonly suffixClick = output<void>();
 
-  value = '';
-  inputId = `input-${Math.random().toString(36).substr(2, 9)}`;
-  showPassword = false;
+  value = signal('');
+  inputId = signal(`input-${Math.random().toString(36).substr(2, 9)}`);
+  showPassword = signal(false);
 
   readonly inputRef =
     viewChild.required<ElementRef<HTMLInputElement>>('inputRef');
@@ -313,10 +314,10 @@ export class InputComponent implements ControlValueAccessor {
     if (this.currency()) {
       this.currencyRawValue = value != null ? Number(value) : null;
       if (!this.isCurrencyFocused) {
-        this.value = this.currencyFormatForDisplay(this.currencyRawValue);
+        this.value.set(this.currencyFormatForDisplay(this.currencyRawValue));
       }
     } else {
-      this.value = value || '';
+      this.value.set(value || '');
     }
   }
 
@@ -533,7 +534,7 @@ export class InputComponent implements ControlValueAccessor {
         cursorPos,
       );
 
-      this.value = formatted;
+      this.value.set(formatted);
       target.value = formatted;
       target.setSelectionRange(newCursorPos, newCursorPos);
 
@@ -546,16 +547,16 @@ export class InputComponent implements ControlValueAccessor {
     if (this.type() === 'tel') {
       target.value = target.value.replace(/[^\d+#*\s()-]/g, '');
     }
-    this.value = target.value;
-    this.onChange(this.value);
-    this.inputChange.emit(this.value);
+    this.value.set(target.value);
+    this.onChange(this.value());
+    this.inputChange.emit(this.value());
   }
 
   onBlur(): void {
     if (this.currency()) {
       this.isCurrencyFocused = false;
       const formatted = this.currencyFormatForDisplay(this.currencyRawValue);
-      this.value = formatted;
+      this.value.set(formatted);
       const inputRef = this.inputRef();
       if (inputRef?.nativeElement) {
         inputRef.nativeElement.value = formatted;
@@ -587,7 +588,7 @@ export class InputComponent implements ControlValueAccessor {
       return 'text';
     }
     const type = this.type();
-    if (type === 'password' && this.showPassword) {
+    if (type === 'password' && this.showPassword()) {
       return 'text';
     }
     return type;
@@ -595,7 +596,7 @@ export class InputComponent implements ControlValueAccessor {
 
   togglePasswordVisibility(): void {
     if (!this.disabled) {
-      this.showPassword = !this.showPassword;
+      this.showPassword.set(!this.showPassword());
     }
   }
 
@@ -665,7 +666,7 @@ export class InputComponent implements ControlValueAccessor {
     const sanitized = this.currencySanitize(merged);
     const formatted = this.currencyFormatLive(sanitized);
 
-    this.value = formatted;
+    this.value.set(formatted);
     input.value = formatted;
     this.currencyRawValue = this.currencyParse(sanitized);
     this.onChange(this.currencyRawValue);

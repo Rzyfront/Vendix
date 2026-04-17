@@ -5,6 +5,7 @@ import {
   effect,
   untracked,
   inject,
+  signal,
 } from '@angular/core';
 import { DatePipe } from '@angular/common';
 import {
@@ -58,7 +59,7 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
           <h2 class="text-lg font-semibold text-text-primary">Cerrar Caja</h2>
           <p class="text-sm text-text-secondary">
             {{ session()?.register?.name || 'Caja' }} — Abierta
-            {{ session()?.opened_at | date : 'shortTime' }}
+            {{ session()?.opened_at | date: 'shortTime' }}
           </p>
         </div>
       </div>
@@ -77,7 +78,7 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
                 Monto Apertura
               </p>
               <p class="text-xl font-bold text-text-primary">
-                {{ session()!.opening_amount | currency:0 }}
+                {{ session()!.opening_amount | currency: 0 }}
               </p>
             </div>
             <div
@@ -97,57 +98,95 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
         }
 
         <!-- Movements Summary -->
-        @if (movementsSummary) {
+        @if (movementsSummary()) {
           <div class="border border-border rounded-xl p-4 space-y-2">
-            <p class="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-2">
+            <p
+              class="text-xs font-semibold text-text-secondary uppercase tracking-wider mb-2"
+            >
               Resumen de Movimientos
             </p>
             <div class="space-y-1.5 text-sm">
               <div class="flex justify-between">
                 <span class="text-text-secondary">Apertura</span>
-                <span class="font-medium text-text-primary">{{ movementsSummary.opening | currency:0 }}</span>
+                <span class="font-medium text-text-primary">{{
+                  movementsSummary().opening | currency: 0
+                }}</span>
               </div>
 
-              @if (movementsSummary.salesByMethod.length > 0) {
-                <p class="text-[10px] font-semibold text-text-secondary uppercase tracking-wider pt-1">Ventas por metodo</p>
-                @for (entry of movementsSummary.salesByMethod; track entry.method) {
+              @if (movementsSummary().salesByMethod.length > 0) {
+                <p
+                  class="text-[10px] font-semibold text-text-secondary uppercase tracking-wider pt-1"
+                >
+                  Ventas por metodo
+                </p>
+                @for (
+                  entry of movementsSummary().salesByMethod;
+                  track entry.method
+                ) {
                   <div class="flex justify-between">
-                    <span [class]="entry.method === 'cash' ? 'text-green-600' : 'text-slate-500'">
+                    <span
+                      [class]="
+                        entry.method === 'cash'
+                          ? 'text-green-600'
+                          : 'text-slate-500'
+                      "
+                    >
                       + {{ entry.label }} ({{ entry.count }})
                     </span>
-                    <span class="font-medium" [class]="entry.method === 'cash' ? 'text-green-600' : 'text-slate-500'">
-                      {{ entry.total | currency:0 }}
+                    <span
+                      class="font-medium"
+                      [class]="
+                        entry.method === 'cash'
+                          ? 'text-green-600'
+                          : 'text-slate-500'
+                      "
+                    >
+                      {{ entry.total | currency: 0 }}
                     </span>
                   </div>
                 }
               }
 
-              @if (movementsSummary.cashIn > 0) {
+              @if (movementsSummary().cashIn > 0) {
                 <div class="flex justify-between">
                   <span class="text-blue-600">+ Entradas de efectivo</span>
-                  <span class="font-medium text-blue-600">{{ movementsSummary.cashIn | currency:0 }}</span>
+                  <span class="font-medium text-blue-600">{{
+                    movementsSummary().cashIn | currency: 0
+                  }}</span>
                 </div>
               }
-              @if (movementsSummary.cashRefunds > 0) {
+              @if (movementsSummary().cashRefunds > 0) {
                 <div class="flex justify-between">
                   <span class="text-red-600">- Reembolsos (efectivo)</span>
-                  <span class="font-medium text-red-600">{{ movementsSummary.cashRefunds | currency:0 }}</span>
+                  <span class="font-medium text-red-600">{{
+                    movementsSummary().cashRefunds | currency: 0
+                  }}</span>
                 </div>
               }
-              @if (movementsSummary.cashOut > 0) {
+              @if (movementsSummary().cashOut > 0) {
                 <div class="flex justify-between">
                   <span class="text-amber-600">- Salidas de efectivo</span>
-                  <span class="font-medium text-amber-600">{{ movementsSummary.cashOut | currency:0 }}</span>
+                  <span class="font-medium text-amber-600">{{
+                    movementsSummary().cashOut | currency: 0
+                  }}</span>
                 </div>
               }
               <div class="border-t border-border pt-2 flex justify-between">
-                <span class="font-semibold text-text-primary">Efectivo Esperado en Caja</span>
-                <span class="font-bold text-text-primary">{{ movementsSummary.expectedCashTotal | currency:0 }}</span>
+                <span class="font-semibold text-text-primary"
+                  >Efectivo Esperado en Caja</span
+                >
+                <span class="font-bold text-text-primary">{{
+                  movementsSummary().expectedCashTotal | currency: 0
+                }}</span>
               </div>
-              @if (movementsSummary.nonCashTotal > 0) {
+              @if (movementsSummary().nonCashTotal > 0) {
                 <div class="flex justify-between text-xs pt-1">
-                  <span class="text-text-secondary">Ventas por otros medios</span>
-                  <span class="text-text-secondary">{{ movementsSummary.nonCashTotal | currency:0 }}</span>
+                  <span class="text-text-secondary"
+                    >Ventas por otros medios</span
+                  >
+                  <span class="text-text-secondary">{{
+                    movementsSummary().nonCashTotal | currency: 0
+                  }}</span>
                 </div>
               }
             </div>
@@ -179,30 +218,33 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
         </form>
 
         <!-- Difference indicator (shown after closing) -->
-        @if (difference !== null) {
+        @if (difference() !== null) {
           <div
             class="p-4 rounded-xl flex items-center gap-3 border"
             [class]="
-              difference >= 0
+              difference() >= 0
                 ? 'bg-green-50 text-green-700 border-green-200'
                 : 'bg-red-50 text-red-700 border-red-200'
             "
           >
             <div
               class="w-9 h-9 rounded-full flex items-center justify-center"
-              [class]="difference >= 0 ? 'bg-green-100' : 'bg-red-100'"
+              [class]="difference() >= 0 ? 'bg-green-100' : 'bg-red-100'"
             >
               <app-icon
-                [name]="difference >= 0 ? 'trending-up' : 'trending-down'"
+                [name]="difference() >= 0 ? 'trending-up' : 'trending-down'"
                 [size]="18"
               ></app-icon>
             </div>
             <div>
               <p class="text-xs font-medium opacity-70">
-                {{ difference >= 0 ? 'Sobrante' : 'Faltante' }}
+                {{ difference() >= 0 ? 'Sobrante' : 'Faltante' }}
               </p>
               <p class="text-lg font-bold">
-                {{ (difference >= 0 ? difference : -difference) | currency:0 }}
+                {{
+                  (difference() >= 0 ? difference() : -difference())
+                    | currency: 0
+                }}
               </p>
             </div>
           </div>
@@ -218,10 +260,10 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
           variant="primary"
           size="md"
           (clicked)="onClose()"
-          [disabled]="!form.valid || submitting"
+          [disabled]="!form.valid || submitting()"
         >
           <app-icon name="lock" [size]="16" slot="icon"></app-icon>
-          @if (submitting) {
+          @if (submitting()) {
             Cerrando...
           } @else {
             Cerrar Caja
@@ -237,13 +279,18 @@ export class PosSessionCloseModalComponent {
   readonly isOpenChange = output<boolean>();
   readonly sessionClosed = output<any>();
 
-  submitting = false;
-  difference: number | null = null;
-  movementsSummary: {
+  readonly submitting = signal(false);
+  readonly difference = signal<number | null>(null);
+  readonly movementsSummary = signal<{
     opening: number;
     sales: number;
     salesCount: number;
-    salesByMethod: { method: string; label: string; count: number; total: number }[];
+    salesByMethod: {
+      method: string;
+      label: string;
+      count: number;
+      total: number;
+    }[];
     cashSales: number;
     refunds: number;
     cashRefunds: number;
@@ -251,7 +298,7 @@ export class PosSessionCloseModalComponent {
     cashOut: number;
     expectedCashTotal: number;
     nonCashTotal: number;
-  } | null = null;
+  } | null>(null);
 
   form: FormGroup;
 
@@ -268,8 +315,8 @@ export class PosSessionCloseModalComponent {
     effect(() => {
       if (this.isOpen()) {
         untracked(() => {
-          this.difference = null;
-          this.movementsSummary = null;
+          this.difference.set(null);
+          this.movementsSummary.set(null);
           this.form.reset({ actual_closing_amount: 0, closing_notes: '' });
           this.loadMovementsSummary();
         });
@@ -336,7 +383,7 @@ export class PosSessionCloseModalComponent {
           .filter((m) => m.type === 'cash_out')
           .reduce((s, m) => s + Number(m.amount), 0);
 
-        this.movementsSummary = {
+        this.movementsSummary.set({
           opening,
           sales: salesTotal,
           salesCount: sales.length,
@@ -346,12 +393,13 @@ export class PosSessionCloseModalComponent {
           cashRefunds,
           cashIn,
           cashOut,
-          expectedCashTotal: opening + cashSales + cashIn - cashRefunds - cashOut,
+          expectedCashTotal:
+            opening + cashSales + cashIn - cashRefunds - cashOut,
           nonCashTotal: salesTotal - cashSales,
-        };
+        });
       },
       error: () => {
-        this.movementsSummary = null;
+        this.movementsSummary.set(null);
       },
     });
   }
@@ -371,7 +419,7 @@ export class PosSessionCloseModalComponent {
 
   onClose() {
     if (!this.form.valid || !this.session()) return;
-    this.submitting = true;
+    this.submitting.set(true);
 
     const { actual_closing_amount, closing_notes } = this.form.value;
 
@@ -379,14 +427,14 @@ export class PosSessionCloseModalComponent {
       .closeSession(this.session()!.id, actual_closing_amount, closing_notes)
       .subscribe({
         next: (closedSession) => {
-          this.submitting = false;
-          this.difference = Number(closedSession.difference || 0);
+          this.submitting.set(false);
+          this.difference.set(Number(closedSession.difference || 0));
           this.toastService.success('Caja cerrada correctamente');
           this.sessionClosed.emit(closedSession);
           this.isOpenChange.emit(false);
         },
         error: (err) => {
-          this.submitting = false;
+          this.submitting.set(false);
           this.toastService.error(
             err.error?.message || 'Error al cerrar la caja',
           );

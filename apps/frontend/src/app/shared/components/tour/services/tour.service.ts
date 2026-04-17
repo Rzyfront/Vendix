@@ -1,5 +1,6 @@
-import { Injectable, inject } from '@angular/core';
-import { BehaviorSubject, Observable } from 'rxjs';
+import { Injectable, inject, signal } from '@angular/core';
+import { toObservable } from '@angular/core/rxjs-interop';
+import { Observable } from 'rxjs';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 
 export interface TourStep {
@@ -60,8 +61,8 @@ export class TourService {
     skippedTours: [],
   };
 
-  private stateSubject = new BehaviorSubject<TourState>(this.activeTourState);
-  public state$ = this.stateSubject.asObservable();
+  readonly state = signal<TourState>(this.activeTourState);
+  public state$ = toObservable(this.state);
 
   constructor() {}
 
@@ -273,6 +274,6 @@ export class TourService {
    * Notify subscribers of state change
    */
   private notifyStateChange(): void {
-    this.stateSubject.next({ ...this.activeTourState });
+    this.state.set({ ...this.activeTourState });
   }
 }

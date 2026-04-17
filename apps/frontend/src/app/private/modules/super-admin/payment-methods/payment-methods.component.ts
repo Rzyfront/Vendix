@@ -1,6 +1,13 @@
-import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
+import {
+  Component,
+  OnInit,
+  inject,
+  signal,
+  DestroyRef,
+} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
-import { debounceTime, distinctUntilChanged, Subject, takeUntil } from 'rxjs';
+import { debounceTime, distinctUntilChanged, Subject } from 'rxjs';
 import {
   PaymentMethod,
   PaymentMethodQueryDto,
@@ -53,11 +60,12 @@ import {
     SelectorComponent,
     IconComponent,
     ButtonComponent,
-    CardComponent
-],
+    CardComponent,
+  ],
   templateUrl: './payment-methods.component.html',
 })
-export class PaymentMethodsComponent implements OnInit, OnDestroy {
+export class PaymentMethodsComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private readonly paymentMethodsService = inject(
     SuperAdminPaymentMethodsService,
   );
@@ -65,22 +73,21 @@ export class PaymentMethodsComponent implements OnInit, OnDestroy {
   private readonly dialogService = inject(DialogService);
   private readonly toastService = inject(ToastService);
 
-  paymentMethods: PaymentMethod[] = [];
-  paymentMethodStats: PaymentMethodStats = {
+  paymentMethods = signal<PaymentMethod[]>([]);
+  paymentMethodStats = signal<PaymentMethodStats>({
     total_methods: 0,
     active_methods: 0,
     inactive_methods: 0,
     methods_requiring_config: 0,
     total_stores_using_methods: 0,
-  };
-  isLoading = false;
-  currentPaymentMethod: PaymentMethod | null = null;
-  showCreateModal = false;
-  showEditModal = false;
-  isCreatingPaymentMethod = false;
-  isUpdatingPaymentMethod = false;
+  });
+  isLoading = signal(false);
+  currentPaymentMethod = signal<PaymentMethod | null>(null);
+  showCreateModal = signal(false);
+  showEditModal = signal(false);
+  isCreatingPaymentMethod = signal(false);
+  isUpdatingPaymentMethod = signal(false);
 
-  private destroy$ = new Subject<void>();
   private searchSubject = new Subject<string>();
 
   // Form for filters
@@ -236,36 +243,40 @@ export class PaymentMethodsComponent implements OnInit, OnDestroy {
 
     // Subscribe to form changes
     this.filterForm.valueChanges
-      .pipe(debounceTime(300), distinctUntilChanged(), takeUntil(this.destroy$))
+      .pipe(
+        debounceTime(300),
+        distinctUntilChanged(),
+        takeUntilDestroyed(this.destroyRef),
+      )
       .subscribe(() => {
         this.loadPaymentMethods();
       });
 
     // Subscribe to service loading states
     this.paymentMethodsService.isLoading$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe((loading) => (this.isLoading = loading));
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((loading) => this.isLoading.set(loading));
 
     this.paymentMethodsService.isCreatingPaymentMethod$
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((isCreating) => {
-        this.isCreatingPaymentMethod = isCreating || false;
+        this.isCreatingPaymentMethod.set(isCreating || false);
       });
 
     this.paymentMethodsService.isUpdatingPaymentMethod$
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((isUpdating) => {
-        this.isUpdatingPaymentMethod = isUpdating || false;
+        this.isUpdatingPaymentMethod.set(isUpdating || false);
+      });
+
+    this.paymentMethodsService.isUpdatingPaymentMethod$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((isUpdating) => {
+        this.isUpdatingPaymentMethod.set(isUpdating || false);
       });
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
   loadPaymentMethods(): void {
-    this.isLoading = true;
+    this.isLoading.set(true);
     const filters = this.filterForm.value;
     const query: PaymentMethodQueryDto = {
       search: filters.search || undefined,
@@ -277,32 +288,32 @@ export class PaymentMethodsComponent implements OnInit, OnDestroy {
       .getPaymentMethods(query)
       .subscribe({
         next: (response) => {
-          this.paymentMethods = response || [];
+          this.paymentMethods.set(response || []);
         },
         error: (error) => {
           console.error('Error loading payment methods:', error);
-          this.paymentMethods = [];
+          this.paymentMethods.set([]);
         },
       })
       .add(() => {
-        this.isLoading = false;
+        this.isLoading.set(false);
       });
   }
 
   loadPaymentMethodStats(): void {
     this.paymentMethodsService.getPaymentMethodsStats().subscribe({
       next: (stats: PaymentMethodStats) => {
-        this.paymentMethodStats = stats;
+        this.paymentMethodStats.set(stats);
       },
       error: (error: any) => {
         console.error('Error loading payment method stats:', error);
-        this.paymentMethodStats = {
+        this.paymentMethodStats.set({
           total_methods: 0,
           active_methods: 0,
           inactive_methods: 0,
           methods_requiring_config: 0,
           total_stores_using_methods: 0,
-        };
+        });
       },
     });
   }
@@ -324,7 +335,7 @@ export class PaymentMethodsComponent implements OnInit, OnDestroy {
   }
 
   createPaymentMethod(): void {
-    this.showCreateModal = true;
+    this.showCreateModal.set(true);
   }
 
   onPaymentMethodCreated(paymentMethodData: CreatePaymentMethodDto): void {
@@ -332,7 +343,7 @@ export class PaymentMethodsComponent implements OnInit, OnDestroy {
       .createPaymentMethod(paymentMethodData)
       .subscribe({
         next: () => {
-          this.showCreateModal = false;
+          this.showCreateModal.set(false);
           this.loadPaymentMethods();
           this.loadPaymentMethodStats();
           this.toastService.success('Método de pago creado exitosamente');
@@ -345,19 +356,20 @@ export class PaymentMethodsComponent implements OnInit, OnDestroy {
   }
 
   editPaymentMethod(paymentMethod: PaymentMethod): void {
-    this.currentPaymentMethod = paymentMethod;
-    this.showEditModal = true;
+    this.currentPaymentMethod.set(paymentMethod);
+    this.showEditModal.set(true);
   }
 
   onPaymentMethodUpdated(paymentMethodData: UpdatePaymentMethodDto): void {
-    if (!this.currentPaymentMethod) return;
+    const pm = this.currentPaymentMethod();
+    if (!pm) return;
 
     this.paymentMethodsService
-      .updatePaymentMethod(this.currentPaymentMethod.id, paymentMethodData)
+      .updatePaymentMethod(pm.id, paymentMethodData)
       .subscribe({
         next: () => {
-          this.showEditModal = false;
-          this.currentPaymentMethod = null;
+          this.showEditModal.set(false);
+          this.currentPaymentMethod.set(null);
           this.loadPaymentMethods();
           this.loadPaymentMethodStats();
           this.toastService.success('Método de pago actualizado exitosamente');

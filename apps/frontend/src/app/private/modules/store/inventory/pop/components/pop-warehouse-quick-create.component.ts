@@ -1,4 +1,4 @@
-import { Component, input, output } from '@angular/core';
+import { Component, input, output, signal } from '@angular/core';
 
 import { FormsModule } from '@angular/forms';
 
@@ -24,8 +24,8 @@ import { LocationType, CreateLocationDto } from '../../interfaces';
     ModalComponent,
     ButtonComponent,
     InputComponent,
-    SelectorComponent
-],
+    SelectorComponent,
+  ],
   template: `
     <app-modal
       [isOpen]="isOpen()"
@@ -33,12 +33,12 @@ import { LocationType, CreateLocationDto } from '../../interfaces';
       title="Crear Bodega Rápido"
       subtitle="Agrega una nueva bodega sin salir del punto de compra"
       (close)="onClose()"
-      >
+    >
       <form
         (ngSubmit)="onSubmit()"
         #warehouseForm="ngForm"
         class="h-full flex flex-col"
-        >
+      >
         <div class="space-y-4 flex-1">
           <!-- Name -->
           <app-input
@@ -48,7 +48,7 @@ import { LocationType, CreateLocationDto } from '../../interfaces';
             [required]="true"
             placeholder="Ej: Bodega Principal"
           ></app-input>
-    
+
           <!-- Code -->
           <app-input
             label="Código *"
@@ -57,7 +57,7 @@ import { LocationType, CreateLocationDto } from '../../interfaces';
             [required]="true"
             placeholder="Ej: BOD-001"
           ></app-input>
-    
+
           <!-- Type -->
           <app-selector
             label="Tipo de Ubicación"
@@ -67,7 +67,7 @@ import { LocationType, CreateLocationDto } from '../../interfaces';
             placeholder="Seleccionar tipo"
           ></app-selector>
         </div>
-    
+
         <!-- Footer Actions -->
         <div slot="footer" class="flex justify-end gap-3 mt-4">
           <app-button variant="outline" (clicked)="onClose()">
@@ -77,7 +77,7 @@ import { LocationType, CreateLocationDto } from '../../interfaces';
             variant="primary"
             type="submit"
             [disabled]="!isFormValid() || isLoading"
-            >
+          >
             @if (!isLoading) {
               <span>Crear Bodega</span>
             }
@@ -88,7 +88,7 @@ import { LocationType, CreateLocationDto } from '../../interfaces';
         </div>
       </form>
     </app-modal>
-    `,
+  `,
   styles: [
     `
       :host {
@@ -103,7 +103,7 @@ export class PopWarehouseQuickCreateComponent {
   readonly close = output<void>();
   readonly warehouseCreated = output<number>();
 
-  isLoading = false;
+  isLoading = signal(false);
 
   typeOptions = [
     { value: 'warehouse', label: 'Almacén / Bodega' },
@@ -112,11 +112,11 @@ export class PopWarehouseQuickCreateComponent {
     { value: 'transit', label: 'En Tránsito' },
   ];
 
-  form = {
+  form = signal({
     name: '',
     code: '',
     type: 'warehouse',
-  };
+  });
 
   constructor(private inventoryService: InventoryService) {}
 
@@ -129,14 +129,14 @@ export class PopWarehouseQuickCreateComponent {
       return;
     }
 
-    this.isLoading = true;
+    this.isLoading.set(true);
 
+    const f = this.form();
     const createDto: CreateLocationDto = {
-      name: this.form.name,
-      code: this.form.code,
-      type: this.form.type as LocationType,
+      name: f.name,
+      code: f.code,
+      type: f.type as LocationType,
       is_active: true,
-      // No address for simple create
     };
 
     this.inventoryService.createLocation(createDto).subscribe({
@@ -147,11 +147,11 @@ export class PopWarehouseQuickCreateComponent {
           this.isOpenChange.emit(false);
           this.close.emit();
         }
-        this.isLoading = false;
+        this.isLoading.set(false);
       },
       error: (error) => {
         console.error('Error creating warehouse:', error);
-        this.isLoading = false;
+        this.isLoading.set(false);
       },
     });
   }
@@ -163,14 +163,15 @@ export class PopWarehouseQuickCreateComponent {
   }
 
   public isFormValid(): boolean {
-    return !!(this.form.name && this.form.code && this.form.type);
+    const f = this.form();
+    return !!(f.name && f.code && f.type);
   }
 
   private resetForm(): void {
-    this.form = {
+    this.form.set({
       name: '',
       code: '',
       type: 'warehouse',
-    };
+    });
   }
 }

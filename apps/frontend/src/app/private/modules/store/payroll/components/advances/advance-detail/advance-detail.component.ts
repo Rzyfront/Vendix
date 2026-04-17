@@ -1,8 +1,8 @@
 import { Component, input, output, model, inject, signal, effect, DestroyRef } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DatePipe } from '@angular/common';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
-import { Subject } from 'rxjs';
-import { takeUntil } from 'rxjs/operators';
+
 
 import { PayrollService } from '../../../services/payroll.service';
 import { EmployeeAdvance, AdvanceApproveDto, AdvanceManualPaymentDto, AdvanceInstallment } from '../../../interfaces/payroll.interface';
@@ -380,9 +380,9 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
         </div>
       </div>
     </app-modal>
-    `,
-})
+    ` })
 export class AdvanceDetailComponent {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = model<boolean>(false);
   readonly advanceInput = input<EmployeeAdvance | null>(null);
   readonly updated = output<void>();
@@ -393,11 +393,7 @@ export class AdvanceDetailComponent {
   private payrollService = inject(PayrollService);
   private toastService = inject(ToastService);
   private currencyService = inject(CurrencyFormatService);
-  private destroy$ = new Subject<void>();
-
-  constructor() {
-    inject(DestroyRef).onDestroy(() => this.destroy$.next());
-    effect(() => { this.advance.set(this.advanceInput()); });
+constructor() {
   }
 
   actionLoading = false;
@@ -406,8 +402,7 @@ export class AdvanceDetailComponent {
   paymentForm: FormGroup = this.fb.group({
     amount: [null, [Validators.required, Validators.min(1)]],
     payment_date: [toLocalDateString(), [Validators.required]],
-    notes: [''],
-  });
+    notes: [''] });
 
   formatNumber(value: number): string {
     return this.currencyService.format(Number(value) || 0);
@@ -418,7 +413,7 @@ export class AdvanceDetailComponent {
     if (!adv) return;
     this.actionLoading = true;
     this.payrollService.approveAdvance(adv.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.advance.set(res.data);
@@ -429,8 +424,7 @@ export class AdvanceDetailComponent {
         error: () => {
           this.actionLoading = false;
           this.toastService.show({ variant: 'error', description: 'Error al aprobar' });
-        },
-      });
+        } });
   }
 
   onReject(): void {
@@ -438,7 +432,7 @@ export class AdvanceDetailComponent {
     if (!adv) return;
     this.actionLoading = true;
     this.payrollService.rejectAdvance(adv.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.advance.set(res.data);
@@ -449,8 +443,7 @@ export class AdvanceDetailComponent {
         error: () => {
           this.actionLoading = false;
           this.toastService.show({ variant: 'error', description: 'Error al rechazar' });
-        },
-      });
+        } });
   }
 
   onCancel(): void {
@@ -458,7 +451,7 @@ export class AdvanceDetailComponent {
     if (!adv) return;
     this.actionLoading = true;
     this.payrollService.cancelAdvance(adv.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.advance.set(res.data);
@@ -469,8 +462,7 @@ export class AdvanceDetailComponent {
         error: () => {
           this.actionLoading = false;
           this.toastService.show({ variant: 'error', description: 'Error al cancelar' });
-        },
-      });
+        } });
   }
 
   onRegisterPayment(): void {
@@ -482,26 +474,23 @@ export class AdvanceDetailComponent {
     const dto: AdvanceManualPaymentDto = {
       amount: val.amount,
       payment_date: val.payment_date,
-      notes: val.notes || undefined,
-    };
+      notes: val.notes || undefined };
 
     this.payrollService.registerAdvancePayment(adv.id, dto)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.advance.set(res.data);
           this.paymentLoading = false;
           this.paymentForm.reset({
-            payment_date: toLocalDateString(),
-          });
+            payment_date: toLocalDateString() });
           this.toastService.show({ variant: 'success', description: 'Pago registrado' });
           this.updated.emit();
         },
         error: () => {
           this.paymentLoading = false;
           this.toastService.show({ variant: 'error', description: 'Error al registrar pago' });
-        },
-      });
+        } });
   }
 
   onClose(): void {
@@ -515,8 +504,7 @@ export class AdvanceDetailComponent {
       repaying: 'En Pago',
       paid: 'Pagado',
       rejected: 'Rechazado',
-      cancelled: 'Cancelado',
-    };
+      cancelled: 'Cancelado' };
     return labels[status] || status;
   }
 
@@ -527,8 +515,7 @@ export class AdvanceDetailComponent {
       repaying: 'bg-purple-100 text-purple-800',
       paid: 'bg-green-100 text-green-800',
       rejected: 'bg-red-100 text-red-800',
-      cancelled: 'bg-gray-100 text-gray-800',
-    };
+      cancelled: 'bg-gray-100 text-gray-800' };
     return classes[status] || 'bg-gray-100 text-gray-800';
   }
 
@@ -536,8 +523,7 @@ export class AdvanceDetailComponent {
     const labels: Record<string, string> = {
       monthly: 'Mensual',
       biweekly: 'Quincenal',
-      weekly: 'Semanal',
-    };
+      weekly: 'Semanal' };
     return labels[frequency] || frequency || '-';
   }
 
@@ -558,8 +544,7 @@ export class AdvanceDetailComponent {
       pending: 'Pendiente',
       paid: 'Pagada',
       overdue: 'Vencida',
-      cancelled: 'Cancelada',
-    };
+      cancelled: 'Cancelada' };
     return labels[status] || status;
   }
 
@@ -569,8 +554,7 @@ export class AdvanceDetailComponent {
       pending: 'bg-gray-100 text-gray-700',
       paid: 'bg-green-100 text-green-800',
       overdue: 'bg-red-100 text-red-800',
-      cancelled: 'bg-gray-100 text-gray-500',
-    };
+      cancelled: 'bg-gray-100 text-gray-500' };
     return `${base} ${colors[status] || 'bg-gray-100 text-gray-700'}`;
   }
 
@@ -581,11 +565,10 @@ export class AdvanceDetailComponent {
 
     const dto: AdvanceManualPaymentDto = {
       amount: installment.amount,
-      payment_date: toLocalDateString(),
-    };
+      payment_date: toLocalDateString() };
 
     this.payrollService.markInstallmentPaid(adv.id, installment.id, dto)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.advance.set(res.data);
@@ -596,7 +579,6 @@ export class AdvanceDetailComponent {
         error: () => {
           this.paymentLoading = false;
           this.toastService.show({ variant: 'error', description: 'Error al pagar cuota' });
-        },
-      });
+        } });
   }
 }

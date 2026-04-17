@@ -1,15 +1,16 @@
-import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
+import {Component, OnInit, inject, signal,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { Subject, takeUntil } from 'rxjs';
+
 
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import {
   SelectorComponent,
-  SelectorOption,
-} from '../../../../../../shared/components/selector/selector.component';
+  SelectorOption} from '../../../../../../shared/components/selector/selector.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
@@ -21,12 +22,10 @@ import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import {
   getDefaultStartDate,
   getDefaultEndDate,
-  formatChartPeriod,
-} from '../../../../../../shared/utils/date.util';
+  formatChartPeriod} from '../../../../../../shared/utils/date.util';
 import {
   SalesTrend,
-  SalesAnalyticsQueryDto,
-} from '../../interfaces/sales-analytics.interface';
+  SalesAnalyticsQueryDto} from '../../interfaces/sales-analytics.interface';
 
 import { EChartsOption } from 'echarts';
 
@@ -168,15 +167,13 @@ import { EChartsOption } from 'echarts';
         </app-card>
       </div>
     </div>
-  `,
-})
-export class SalesTrendsComponent implements OnInit, OnDestroy {
+  `})
+export class SalesTrendsComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private analyticsService = inject(AnalyticsService);
   private toastService = inject(ToastService);
   private currencyService = inject(CurrencyFormatService);
-  private destroy$ = new Subject<void>();
-
-  loading = signal(true);
+loading = signal(true);
   exporting = signal(false);
   data = signal<SalesTrend[]>([]);
   granularity = signal<'day' | 'week' | 'month'>('day');
@@ -185,8 +182,7 @@ export class SalesTrendsComponent implements OnInit, OnDestroy {
   dateRange = signal<DateRangeFilter>({
     start_date: getDefaultStartDate(),
     end_date: getDefaultEndDate(),
-    preset: 'thisMonth',
-  });
+    preset: 'thisMonth'});
 
   granularityOptions: SelectorOption[] = [
     { value: 'day', label: 'Diario' },
@@ -198,13 +194,7 @@ export class SalesTrendsComponent implements OnInit, OnDestroy {
     this.currencyService.loadCurrency();
     this.loadData();
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  onDateRangeChange(range: DateRangeFilter): void {
+onDateRangeChange(range: DateRangeFilter): void {
     this.dateRange.set(range);
     this.loadData();
   }
@@ -218,12 +208,11 @@ export class SalesTrendsComponent implements OnInit, OnDestroy {
     this.loading.set(true);
     const query: SalesAnalyticsQueryDto = {
       date_range: this.dateRange(),
-      granularity: this.granularity(),
-    };
+      granularity: this.granularity()};
 
     this.analyticsService
       .getSalesTrends(query)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           this.data.set(response.data);
@@ -233,8 +222,7 @@ export class SalesTrendsComponent implements OnInit, OnDestroy {
         error: () => {
           this.toastService.error('Error al cargar tendencias');
           this.loading.set(false);
-        },
-      });
+        }});
   }
 
   private updateCharts(data: SalesTrend[]): void {
@@ -249,26 +237,22 @@ export class SalesTrendsComponent implements OnInit, OnDestroy {
     this.combinedChartOptions.set({
       tooltip: {
         trigger: 'axis',
-        axisPointer: { type: 'cross' },
-      },
+        axisPointer: { type: 'cross' }},
       legend: {
         data: ['Ingresos', 'Órdenes'],
         top: 0,
-        textStyle: { color: '#6b7280' },
-      },
+        textStyle: { color: '#6b7280' }},
       grid: {
         left: '3%',
         right: '4%',
         bottom: '3%',
         top: '15%',
-        containLabel: true,
-      },
+        containLabel: true},
       xAxis: {
         type: 'category',
         data: labels,
         axisLine: { lineStyle: { color: '#e5e7eb' } },
-        axisLabel: { color: '#6b7280' },
-      },
+        axisLabel: { color: '#6b7280' }},
       yAxis: [
         {
           type: 'value',
@@ -278,18 +262,15 @@ export class SalesTrendsComponent implements OnInit, OnDestroy {
           axisLabel: {
             color: '#6b7280',
             formatter: (value: number) =>
-              this.currencyService.formatChartAxis(value),
-          },
-          splitLine: { lineStyle: { color: '#f3f4f6' } },
-        },
+              this.currencyService.formatChartAxis(value)},
+          splitLine: { lineStyle: { color: '#f3f4f6' } }},
         {
           type: 'value',
           name: 'Órdenes',
           position: 'right',
           axisLine: { show: false },
           axisLabel: { color: '#6b7280' },
-          splitLine: { show: false },
-        },
+          splitLine: { show: false }},
       ],
       series: [
         {
@@ -310,10 +291,7 @@ export class SalesTrendsComponent implements OnInit, OnDestroy {
               colorStops: [
                 { offset: 0, color: 'rgba(34, 197, 94, 0.2)' },
                 { offset: 1, color: 'rgba(34, 197, 94, 0)' },
-              ],
-            },
-          },
-        },
+              ]}}},
         {
           name: 'Órdenes',
           type: 'bar',
@@ -321,11 +299,8 @@ export class SalesTrendsComponent implements OnInit, OnDestroy {
           yAxisIndex: 1,
           itemStyle: {
             color: '#3b82f6',
-            borderRadius: [4, 4, 0, 0],
-          },
-        },
-      ],
-    });
+            borderRadius: [4, 4, 0, 0]}},
+      ]});
 
     // AOV Chart
     this.aovChartOptions.set({
@@ -334,30 +309,25 @@ export class SalesTrendsComponent implements OnInit, OnDestroy {
         formatter: (params: any) => {
           const d = params[0];
           return `${d.name}<br/>Ticket Promedio: ${this.formatCurrency(d.value)}`;
-        },
-      },
+        }},
       grid: {
         left: '3%',
         right: '4%',
         bottom: '3%',
-        containLabel: true,
-      },
+        containLabel: true},
       xAxis: {
         type: 'category',
         data: labels,
         axisLine: { lineStyle: { color: '#e5e7eb' } },
-        axisLabel: { color: '#6b7280' },
-      },
+        axisLabel: { color: '#6b7280' }},
       yAxis: {
         type: 'value',
         axisLine: { show: false },
         axisLabel: {
           color: '#6b7280',
           formatter: (value: number) =>
-            this.currencyService.formatChartAxis(value),
-        },
-        splitLine: { lineStyle: { color: '#f3f4f6' } },
-      },
+            this.currencyService.formatChartAxis(value)},
+        splitLine: { lineStyle: { color: '#f3f4f6' } }},
       series: [
         {
           name: 'Ticket Promedio',
@@ -376,12 +346,8 @@ export class SalesTrendsComponent implements OnInit, OnDestroy {
               colorStops: [
                 { offset: 0, color: 'rgba(139, 92, 246, 0.2)' },
                 { offset: 1, color: 'rgba(139, 92, 246, 0)' },
-              ],
-            },
-          },
-        },
-      ],
-    });
+              ]}}},
+      ]});
   }
 
   exportReport(): void {
@@ -389,9 +355,8 @@ export class SalesTrendsComponent implements OnInit, OnDestroy {
     this.analyticsService
       .exportSalesAnalytics({
         date_range: this.dateRange(),
-        granularity: this.granularity(),
-      })
-      .pipe(takeUntil(this.destroy$))
+        granularity: this.granularity()})
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (blob) => {
           const url = window.URL.createObjectURL(blob);
@@ -405,8 +370,7 @@ export class SalesTrendsComponent implements OnInit, OnDestroy {
         error: () => {
           this.toastService.error('Error al exportar');
           this.exporting.set(false);
-        },
-      });
+        }});
   }
 
   formatCurrency(value: number): string {

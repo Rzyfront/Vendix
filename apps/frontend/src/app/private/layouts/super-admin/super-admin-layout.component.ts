@@ -3,6 +3,7 @@ import {
   ViewChild,
   inject,
   signal,
+  computed,
   DestroyRef,
 } from '@angular/core';
 import { RouterModule, Router, NavigationEnd } from '@angular/router';
@@ -13,8 +14,8 @@ import {
 import { HeaderComponent } from '../../../shared/components/header/header.component';
 import { AuthFacade } from '../../../core/store/auth/auth.facade';
 import { SupportService } from '../../modules/super-admin/support/services/support.service';
-import { BehaviorSubject, timer, combineLatest, of } from 'rxjs';
-import { map, switchMap, startWith, filter } from 'rxjs/operators';
+import { timer } from 'rxjs';
+import { switchMap, filter } from 'rxjs/operators';
 import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 @Component({
@@ -86,26 +87,21 @@ export class SuperAdminLayoutComponent {
   readonly sidebarCollapsed = signal(false);
 
   // --- Support tickets open count ---
-  private readonly openTicketsCount$ = new BehaviorSubject<number>(0);
+  private readonly openTicketsCount = signal(0);
 
   // --- Dynamic menu items with support badge ---
-  readonly menuItems = toSignal(
-    combineLatest([of(this.baseMenuItems), this.openTicketsCount$]).pipe(
-      map(([items, openCount]) =>
-        items.map((item) => {
-          if (item.label === 'Soporte') {
-            return {
-              ...item,
-              badge: openCount > 0 ? openCount.toString() : undefined,
-            };
-          }
-          return item;
-        }),
-      ),
-      startWith(this.baseMenuItems),
-    ),
-    { initialValue: this.baseMenuItems },
-  );
+  readonly menuItems = computed<MenuItem[]>(() => {
+    const openCount = this.openTicketsCount();
+    return this.baseMenuItems.map((item) => {
+      if (item.label === 'Soporte') {
+        return {
+          ...item,
+          badge: openCount > 0 ? openCount.toString() : undefined,
+        };
+      }
+      return item;
+    });
+  });
 
   // --- Breadcrumb signal ---
   readonly breadcrumb = signal({
@@ -307,7 +303,7 @@ export class SuperAdminLayoutComponent {
             (stats.by_status?.['OPEN'] || 0) +
             (stats.by_status?.['IN_PROGRESS'] || 0) +
             (stats.by_status?.['WAITING_RESPONSE'] || 0);
-          this.openTicketsCount$.next(openCount);
+          this.openTicketsCount.set(openCount);
         },
         error: (err) => {
           console.error('Error loading support stats:', err);

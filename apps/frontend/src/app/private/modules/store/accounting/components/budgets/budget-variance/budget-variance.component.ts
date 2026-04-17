@@ -1,14 +1,13 @@
-import {
-  Component,
-  OnDestroy,
+import {Component,
   inject,
   signal,
   computed,
-} from '@angular/core';
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { ActivatedRoute, Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { Subject, takeUntil } from 'rxjs';
+
 
 import { AccountingService } from '../../../services/accounting.service';
 import { Budget, VarianceRow, VarianceAlert } from '../../../interfaces/accounting.interface';
@@ -17,8 +16,7 @@ import {
   ToastService,
   SelectorComponent,
   SelectorOption,
-  IconComponent,
-} from '../../../../../../../shared/components/index';
+  IconComponent} from '../../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 
 @Component({
@@ -31,11 +29,10 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
     IconComponent
 ],
   templateUrl: './budget-variance.component.html',
-  styleUrls: ['./budget-variance.component.scss'],
-})
-export class BudgetVarianceComponent implements OnDestroy {
-  private destroy$ = new Subject<void>();
-  private route = inject(ActivatedRoute);
+  styleUrls: ['./budget-variance.component.scss']})
+export class BudgetVarianceComponent implements {
+  private destroyRef = inject(DestroyRef);
+private route = inject(ActivatedRoute);
   private router = inject(Router);
   private accounting_service = inject(AccountingService);
   private toast_service = inject(ToastService);
@@ -47,7 +44,8 @@ export class BudgetVarianceComponent implements OnDestroy {
   loading = signal(false);
   selected_month = signal<number | null>(null);
 
-  month_options: SelectorOption[] = [
+  // ✅ Migrated to readonly signal (Section 9 — antipatrón variables planas)
+  readonly monthOptions = signal<SelectorOption[]>([
     { value: null as any, label: 'Acumulado YTD' },
     { value: 1, label: 'Enero' },
     { value: 2, label: 'Febrero' },
@@ -61,15 +59,14 @@ export class BudgetVarianceComponent implements OnDestroy {
     { value: 10, label: 'Octubre' },
     { value: 11, label: 'Noviembre' },
     { value: 12, label: 'Diciembre' },
-  ];
+  ]);
 
   totals = computed(() => {
     const rows = this.variance_rows();
     return {
       budgeted: rows.reduce((s, r) => s + r.budgeted, 0),
       actual: rows.reduce((s, r) => s + r.actual, 0),
-      variance: rows.reduce((s, r) => s + r.variance, 0),
-    };
+      variance: rows.reduce((s, r) => s + r.variance, 0)};
   });
 
   private budget_id = 0;
@@ -84,19 +81,12 @@ export class BudgetVarianceComponent implements OnDestroy {
     this.loadVariance();
     this.loadAlerts();
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  private loadBudget(): void {
+private loadBudget(): void {
     this.accounting_service
       .getBudget(this.budget_id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (res) => this.budget.set(res.data),
-      });
+        next: (res) => this.budget.set(res.data)});
   }
 
   loadVariance(): void {
@@ -104,7 +94,7 @@ export class BudgetVarianceComponent implements OnDestroy {
     const month = this.selected_month() ?? undefined;
     this.accounting_service
       .getBudgetVariance(this.budget_id, month)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.variance_rows.set(res.data || []);
@@ -113,17 +103,15 @@ export class BudgetVarianceComponent implements OnDestroy {
         error: () => {
           this.loading.set(false);
           this.toast_service.show({ variant: 'error', description: 'Error al cargar varianza' });
-        },
-      });
+        }});
   }
 
   private loadAlerts(): void {
     this.accounting_service
       .getBudgetAlerts(this.budget_id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (res) => this.alerts.set(res.data || []),
-      });
+        next: (res) => this.alerts.set(res.data || [])});
   }
 
   onMonthChange(value: any): void {

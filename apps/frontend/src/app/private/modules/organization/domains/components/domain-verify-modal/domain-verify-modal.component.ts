@@ -1,10 +1,10 @@
 import {
   Component,
-  Input,
   OnChanges,
   SimpleChanges,
   input,
   output,
+  signal,
 } from '@angular/core';
 
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
@@ -264,7 +264,10 @@ import {
               <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
                 <h5 class="font-medium text-yellow-900 mb-2">Sugerencias</h5>
                 <ul class="list-disc list-inside space-y-1">
-                  @for (fix of verificationResult()?.suggested_fixes ?? []; track fix) {
+                  @for (
+                    fix of verificationResult()?.suggested_fixes ?? [];
+                    track fix
+                  ) {
                     <li class="text-sm text-yellow-800">
                       {{ fix }}
                     </li>
@@ -288,13 +291,13 @@ import {
       </div>
 
       <div slot="footer" class="flex justify-between items-center">
-        @if (copiedText) {
+        @if (copiedText()) {
           <div class="text-sm text-green-600">
             <app-icon name="check" [size]="14" class="inline mr-1"></app-icon>
             Copiado al portapapeles
           </div>
         }
-        @if (!copiedText) {
+        @if (!copiedText()) {
           <div></div>
         }
         <div class="flex gap-3">
@@ -334,11 +337,11 @@ export class DomainVerifyModalComponent implements OnChanges {
   readonly verify = output<string>();
   readonly cancel = output<void>();
 
-  copiedText = false;
+  copiedText = signal(false);
 
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['isOpen'] && !this.isOpen()) {
-      this.copiedText = false;
+      this.copiedText.set(false);
     }
   }
 
@@ -384,9 +387,9 @@ export class DomainVerifyModalComponent implements OnChanges {
     if (!text) return;
 
     navigator.clipboard.writeText(text).then(() => {
-      this.copiedText = true;
+      this.copiedText.set(true);
       setTimeout(() => {
-        this.copiedText = false;
+        this.copiedText.set(false);
       }, 2000);
     });
   }

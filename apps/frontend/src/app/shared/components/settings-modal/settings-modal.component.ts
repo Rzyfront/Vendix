@@ -51,7 +51,7 @@ import { APP_MODULES } from '../../constants/app-modules.constant';
       (closed)="onClose()"
       (opened)="onOpen()"
     >
-      @if (!loading) {
+      @if (!loading()) {
         <form
           [formGroup]="settingsForm"
           (ngSubmit)="onSubmit()"

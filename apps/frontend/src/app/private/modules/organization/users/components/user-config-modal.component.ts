@@ -1,30 +1,27 @@
-import {
-  Component,
+import {Component,
   OnInit,
-  OnDestroy,
   inject,
   OnChanges,
   input,
   output,
   model,
-} from '@angular/core';
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   ReactiveFormsModule,
   FormBuilder,
   FormGroup,
-  Validators,
-} from '@angular/forms';
+  Validators} from '@angular/forms';
 import {
   ButtonComponent,
   ModalComponent,
   InputComponent,
-  TextareaComponent,
-} from '../../../../../shared/components/index';
+  TextareaComponent} from '../../../../../shared/components/index';
 import { UsersService } from '../services/users.service';
 import { User } from '../interfaces/user.interface';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
-import { Subject, takeUntil } from 'rxjs';
+
 
 @Component({
   selector: 'app-user-config-modal',
@@ -215,9 +212,9 @@ import { Subject, takeUntil } from 'rxjs';
         display: block;
       }
     `,
-  ],
-})
-export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
+  ]})
+export class UserConfigModalComponent implements OnInit, OnChanges {
+  private destroyRef = inject(DestroyRef);
   readonly user = input<User | null>(null);
   readonly isOpen = model<boolean>(false);
   readonly isOpenChange = output<boolean>();
@@ -227,10 +224,7 @@ export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
   isSaving: boolean = false;
   activeTab: 'general' | 'roles' | 'stores' | 'panel_ui' = 'general';
   jsonError: string | null = null;
-
-  private destroy$ = new Subject<void>();
-
-  constructor(
+constructor(
     private fb: FormBuilder,
     private usersService: UsersService,
     private authFacade: AuthFacade,
@@ -239,13 +233,12 @@ export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
       app: ['VENDIX_LANDING'],
       rolesInput: [''],
       storesInput: [''],
-      panelUiInput: ['{}'],
-    });
+      panelUiInput: ['{}']});
 
     // Validate JSON on change
     this.configForm
       .get('panelUiInput')
-      ?.valueChanges.pipe(takeUntil(this.destroy$))
+      ?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((value) => {
         try {
           JSON.parse(value);
@@ -268,13 +261,7 @@ export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
       this.loadConfiguration();
     }
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  loadConfiguration(): void {
+loadConfiguration(): void {
     const user = this.user();
     if (!user) return;
 
@@ -294,8 +281,7 @@ export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
         orders: true,
         expenses: true,
         accounting: true,
-        payroll: true,
-      },
+        payroll: true},
       STORE_ADMIN: {
         dashboard: true,
         pos: true,
@@ -361,46 +347,39 @@ export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
         settings_domains: false,
         settings_users: true,
         settings_roles: true,
-        settings_cash_registers: false,
-      },
+        settings_cash_registers: false},
       STORE_ECOMMERCE: {
         profile: true,
         history: true,
         dashboard: true,
         favorites: true,
         orders: true,
-        settings: true,
-      },
-    };
+        settings: true}};
 
     // Reset form first
     this.configForm.reset({
       app: 'VENDIX_LANDING',
       rolesInput: '',
       storesInput: '',
-      panelUiInput: JSON.stringify(defaultPanelUi, null, 2),
-    });
+      panelUiInput: JSON.stringify(defaultPanelUi, null, 2)});
 
     this.usersService
       .getUserConfiguration(user.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (config: any) => {
           // Merge with defaults to ensure all keys exist
           const mergedPanelUi = {
             ...defaultPanelUi,
-            ...(config.panel_ui || {}),
-          };
+            ...(config.panel_ui || {})};
 
           this.configForm.patchValue({
             app: config.app,
             rolesInput: (config.roles || []).join(', '),
             storesInput: (config.store_ids || []).join(', '),
-            panelUiInput: JSON.stringify(mergedPanelUi, null, 2),
-          });
+            panelUiInput: JSON.stringify(mergedPanelUi, null, 2)});
         },
-        error: (err: any) => console.error(err),
-      });
+        error: (err: any) => console.error(err)});
   }
 
   onSubmit(): void {
@@ -424,12 +403,11 @@ export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
       app: formVal.app,
       roles,
       store_ids,
-      panel_ui: JSON.parse(formVal.panelUiInput),
-    };
+      panel_ui: JSON.parse(formVal.panelUiInput)};
 
     this.usersService
       .updateUserConfiguration(user.id, payload)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.isSaving = false;
@@ -445,10 +423,7 @@ export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
                 ...currentUserSettings?.config,
                 panel_ui: {
                   ...currentUserSettings?.config?.panel_ui,
-                  [payload.app]: payload.panel_ui,
-                },
-              },
-            };
+                  [payload.app]: payload.panel_ui}}};
             this.authFacade.updateUserSettings(updatedSettings);
           }
 
@@ -462,7 +437,6 @@ export class UserConfigModalComponent implements OnInit, OnDestroy, OnChanges {
         error: (err: any) => {
           console.error('Failed to save config', err);
           this.isSaving = false;
-        },
-      });
+        }});
   }
 }

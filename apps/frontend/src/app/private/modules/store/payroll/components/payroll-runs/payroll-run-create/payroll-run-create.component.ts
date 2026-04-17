@@ -1,6 +1,11 @@
-import { Component, output, input, inject } from '@angular/core';
+import { Component, output, input, inject, signal } from '@angular/core';
 
-import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
+import {
+  FormBuilder,
+  FormGroup,
+  Validators,
+  ReactiveFormsModule,
+} from '@angular/forms';
 import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
 import { createPayrollRun } from '../../../state/actions/payroll.actions';
@@ -8,7 +13,10 @@ import { selectPayrollRunsLoading } from '../../../state/selectors/payroll.selec
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
-import { SelectorComponent, SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
+import {
+  SelectorComponent,
+  SelectorOption,
+} from '../../../../../../../shared/components/selector/selector.component';
 import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
 
 @Component({
@@ -19,8 +27,8 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
     ModalComponent,
     ButtonComponent,
     InputComponent,
-    SelectorComponent
-],
+    SelectorComponent,
+  ],
   template: `
     <app-modal
       [isOpen]="isOpen()"
@@ -30,8 +38,11 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
       size="md"
     >
       <div class="p-4">
-        <form [formGroup]="payrollRunForm" (ngSubmit)="onSubmit()" class="space-y-4">
-
+        <form
+          [formGroup]="payrollRunForm"
+          (ngSubmit)="onSubmit()"
+          class="space-y-4"
+        >
           <app-selector
             label="Frecuencia"
             formControlName="frequency"
@@ -63,30 +74,30 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
             formControlName="payment_date"
             [control]="payrollRunForm.get('payment_date')"
           ></app-input>
-
         </form>
       </div>
 
       <!-- Footer -->
       <div slot="footer">
-        <div class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
-          <app-button
-            variant="outline"
-            (clicked)="onClose()">
+        <div
+          class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100"
+        >
+          <app-button variant="outline" (clicked)="onClose()">
             Cancelar
           </app-button>
 
           <app-button
             variant="primary"
             (clicked)="onSubmit()"
-            [disabled]="payrollRunForm.invalid || submitting"
-            [loading]="submitting">
+            [disabled]="payrollRunForm.invalid || submitting()"
+            [loading]="submitting()"
+          >
             Crear Nomina
           </app-button>
         </div>
       </div>
     </app-modal>
-  `
+  `,
 })
 export class PayrollRunCreateComponent {
   readonly isOpen = input<boolean>(false);
@@ -94,9 +105,9 @@ export class PayrollRunCreateComponent {
 
   payrollRunForm: FormGroup;
   loading$: Observable<boolean>;
-  submitting = false;
+  readonly submitting = signal(false);
 
-  frequencyOptions: SelectorOption[] = [
+  readonly frequencyOptions: SelectorOption[] = [
     { label: 'Mensual', value: 'monthly' },
     { label: 'Quincenal', value: 'biweekly' },
     { label: 'Semanal', value: 'weekly' },
@@ -104,13 +115,17 @@ export class PayrollRunCreateComponent {
 
   constructor(
     private fb: FormBuilder,
-    private store: Store
+    private store: Store,
   ) {
     this.loading$ = this.store.select(selectPayrollRunsLoading);
 
     const today = new Date();
-    const firstDay = toLocalDateString(new Date(today.getFullYear(), today.getMonth(), 1));
-    const lastDay = toLocalDateString(new Date(today.getFullYear(), today.getMonth() + 1, 0));
+    const firstDay = toLocalDateString(
+      new Date(today.getFullYear(), today.getMonth(), 1),
+    );
+    const lastDay = toLocalDateString(
+      new Date(today.getFullYear(), today.getMonth() + 1, 0),
+    );
 
     this.payrollRunForm = this.fb.group({
       frequency: ['monthly', [Validators.required]],
@@ -126,27 +141,33 @@ export class PayrollRunCreateComponent {
       return;
     }
 
-    this.submitting = true;
+    this.submitting.set(true);
     const formValue = this.payrollRunForm.value;
 
-    this.store.dispatch(createPayrollRun({
-      payrollRun: {
-        frequency: formValue.frequency,
-        period_start: formValue.period_start,
-        period_end: formValue.period_end,
-        payment_date: formValue.payment_date || undefined,
-      }
-    }));
+    this.store.dispatch(
+      createPayrollRun({
+        payrollRun: {
+          frequency: formValue.frequency,
+          period_start: formValue.period_start,
+          period_end: formValue.period_end,
+          payment_date: formValue.payment_date || undefined,
+        },
+      }),
+    );
 
-    this.submitting = false;
+    this.submitting.set(false);
     this.resetForm();
     this.onClose();
   }
 
   private resetForm(): void {
     const today = new Date();
-    const firstDay = toLocalDateString(new Date(today.getFullYear(), today.getMonth(), 1));
-    const lastDay = toLocalDateString(new Date(today.getFullYear(), today.getMonth() + 1, 0));
+    const firstDay = toLocalDateString(
+      new Date(today.getFullYear(), today.getMonth(), 1),
+    );
+    const lastDay = toLocalDateString(
+      new Date(today.getFullYear(), today.getMonth() + 1, 0),
+    );
 
     this.payrollRunForm.reset({
       frequency: 'monthly',

@@ -1,7 +1,8 @@
-import { Component, OnDestroy, inject, signal, computed } from '@angular/core';
+import {Component, inject, signal, computed,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DatePipe } from '@angular/common';
-import { Subject } from 'rxjs';
-import { takeUntil } from 'rxjs/operators';
+
 
 import { CarteraService } from '../../services/cartera.service';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
@@ -10,13 +11,11 @@ import {
   AgingReport,
   AgingBucket,
   AccountReceivable,
-  AccountPayable,
-} from '../../interfaces/cartera.interface';
+  AccountPayable} from '../../interfaces/cartera.interface';
 import {
   CardComponent,
   IconComponent,
-  StatsComponent,
-} from '../../../../../../shared/components/index';
+  StatsComponent} from '../../../../../../shared/components/index';
 
 @Component({
   selector: 'vendix-cartera-dashboard',
@@ -27,11 +26,10 @@ import {
     IconComponent,
     StatsComponent,
   ],
-  templateUrl: './cartera-dashboard.component.html',
-})
-export class CarteraDashboardComponent implements OnDestroy {
-  private destroy$ = new Subject<void>();
-  private carteraService = inject(CarteraService);
+  templateUrl: './cartera-dashboard.component.html'})
+export class CarteraDashboardComponent implements {
+  private destroyRef = inject(DestroyRef);
+private carteraService = inject(CarteraService);
   private currencyService = inject(CurrencyFormatService);
 
   // Data
@@ -46,13 +44,7 @@ export class CarteraDashboardComponent implements OnDestroy {
   constructor() {
     this.loadAll();
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  private loadAll(): void {
+private loadAll(): void {
     this.is_loading.set(true);
     let pending = 6;
     const done = () => {
@@ -62,32 +54,32 @@ export class CarteraDashboardComponent implements OnDestroy {
 
     this.carteraService
       .getArDashboard()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({ next: (r) => { this.ar_dashboard.set(r.data); done(); }, error: done });
 
     this.carteraService
       .getApDashboard()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({ next: (r) => { this.ap_dashboard.set(r.data); done(); }, error: done });
 
     this.carteraService
       .getArAging()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({ next: (r) => { this.ar_aging.set(r.data); done(); }, error: done });
 
     this.carteraService
       .getApAging()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({ next: (r) => { this.ap_aging.set(r.data); done(); }, error: done });
 
     this.carteraService
       .getArUpcoming(7)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({ next: (r) => { this.ar_upcoming.set(r.data); done(); }, error: done });
 
     this.carteraService
       .getApUpcoming(7)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({ next: (r) => { this.ap_upcoming.set(r.data); done(); }, error: done });
   }
 

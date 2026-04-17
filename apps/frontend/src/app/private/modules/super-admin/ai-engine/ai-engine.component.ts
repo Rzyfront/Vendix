@@ -1,19 +1,19 @@
-import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
+import {Component, OnInit, inject, signal,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
-import { Subject, takeUntil } from 'rxjs';
+
 import {
   AIEngineConfig,
   AIConfigQueryDto,
   AIEngineStats,
   AIEngineApp,
   AIAppQueryDto,
-  AIAppStats,
-} from './interfaces';
+  AIAppStats} from './interfaces';
 import { AIEngineService } from './services/ai-engine.service';
 import {
   AIEngineConfigModalComponent,
-  AIEngineAppModalComponent,
-} from './components/index';
+  AIEngineAppModalComponent} from './components/index';
 
 import {
   TableColumn,
@@ -29,16 +29,14 @@ import {
   ItemListCardConfig,
   PaginationComponent,
   EmptyStateComponent,
-  CardComponent,
-} from '../../../../shared/components/index';
+  CardComponent} from '../../../../shared/components/index';
 import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler';
 
 import {
   FormsModule,
   ReactiveFormsModule,
   FormBuilder,
-  FormGroup,
-} from '@angular/forms';
+  FormGroup} from '@angular/forms';
 
 type ActiveTab = 'configs' | 'apps';
 
@@ -60,9 +58,9 @@ type ActiveTab = 'configs' | 'apps';
     CardComponent
 ],
   templateUrl: './ai-engine.component.html',
-  styleUrls: ['./ai-engine.component.css'],
-})
-export class AIEngineComponent implements OnInit, OnDestroy {
+  styleUrls: ['./ai-engine.component.css']})
+export class AIEngineComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private aiEngineService = inject(AIEngineService);
   private fb = inject(FormBuilder);
   private dialogService = inject(DialogService);
@@ -90,20 +88,15 @@ export class AIEngineComponent implements OnInit, OnDestroy {
   showAppModal = signal<boolean>(false);
   isSubmittingApp = signal<boolean>(false);
   appPagination = { page: 1, limit: 10, total: 0, totalPages: 0 };
-
-  private destroy$ = new Subject<void>();
-
-  // Config filters
+// Config filters
   filterForm: FormGroup = this.fb.group({
     search: [''],
-    sdk_type: [''],
-  });
+    sdk_type: ['']});
 
   // App filters
   appFilterForm: FormGroup = this.fb.group({
     search: [''],
-    output_format: [''],
-  });
+    output_format: ['']});
 
   // --- Config Table ---
   tableColumns: TableColumn[] = [
@@ -114,8 +107,7 @@ export class AIEngineComponent implements OnInit, OnDestroy {
       sortable: true,
       priority: 2,
       badge: true,
-      badgeConfig: { type: 'status', size: 'sm' },
-    },
+      badgeConfig: { type: 'status', size: 'sm' }},
     {
       key: 'sdk_type',
       label: 'SDK',
@@ -123,8 +115,7 @@ export class AIEngineComponent implements OnInit, OnDestroy {
       priority: 3,
       badge: true,
       badgeConfig: { type: 'status', size: 'sm' },
-      transform: (value: string) => this.formatSdkType(value),
-    },
+      transform: (value: string) => this.formatSdkType(value)},
     { key: 'model_id', label: 'Modelo', sortable: true, priority: 2 },
     {
       key: 'is_active',
@@ -133,14 +124,12 @@ export class AIEngineComponent implements OnInit, OnDestroy {
       priority: 2,
       badge: true,
       badgeConfig: { type: 'status', size: 'sm' },
-      transform: (value: boolean) => (value ? 'Activo' : 'Inactivo'),
-    },
+      transform: (value: boolean) => (value ? 'Activo' : 'Inactivo')},
     {
       key: 'is_default',
       label: 'Default',
       priority: 3,
-      transform: (value: boolean) => (value ? 'Si' : 'No'),
-    },
+      transform: (value: boolean) => (value ? 'Si' : 'No')},
     {
       key: 'last_test_ok',
       label: 'Test',
@@ -148,8 +137,7 @@ export class AIEngineComponent implements OnInit, OnDestroy {
       badge: true,
       badgeConfig: { type: 'status', size: 'sm' },
       transform: (value: boolean | null) =>
-        value === null ? 'Sin test' : value ? 'OK' : 'Fallo',
-    },
+        value === null ? 'Sin test' : value ? 'OK' : 'Fallo'},
   ];
 
   cardConfig: ItemListCardConfig = {
@@ -161,28 +149,24 @@ export class AIEngineComponent implements OnInit, OnDestroy {
     detailKeys: [
       { key: 'model_id', label: 'Modelo' },
       { key: 'sdk_type', label: 'SDK' },
-    ],
-  };
+    ]};
 
   tableActions: TableAction[] = [
     {
       label: 'Probar',
       icon: 'zap',
       action: (config: AIEngineConfig) => this.testConnection(config),
-      variant: 'primary',
-    },
+      variant: 'primary'},
     {
       label: 'Editar',
       icon: 'edit',
       action: (config: AIEngineConfig) => this.editConfig(config),
-      variant: 'info',
-    },
+      variant: 'info'},
     {
       label: 'Eliminar',
       icon: 'trash-2',
       action: (config: AIEngineConfig) => this.confirmDelete(config),
-      variant: 'danger',
-    },
+      variant: 'danger'},
   ];
 
   sdkTypeOptions: SelectorOption[] = [
@@ -199,22 +183,19 @@ export class AIEngineComponent implements OnInit, OnDestroy {
       label: 'Key',
       sortable: true,
       priority: 2,
-      transform: (value: string) => value,
-    },
+      transform: (value: string) => value},
     {
       key: 'config',
       label: 'Configuracion',
       priority: 2,
-      transform: (value: any) => (value ? `${value.label}` : 'Default'),
-    },
+      transform: (value: any) => (value ? `${value.label}` : 'Default')},
     {
       key: 'output_format',
       label: 'Formato',
       priority: 3,
       badge: true,
       badgeConfig: { type: 'status', size: 'sm' },
-      transform: (value: string) => value.toUpperCase(),
-    },
+      transform: (value: string) => value.toUpperCase()},
     {
       key: 'is_active',
       label: 'Estado',
@@ -222,8 +203,7 @@ export class AIEngineComponent implements OnInit, OnDestroy {
       priority: 2,
       badge: true,
       badgeConfig: { type: 'status', size: 'sm' },
-      transform: (value: boolean) => (value ? 'Activo' : 'Inactivo'),
-    },
+      transform: (value: boolean) => (value ? 'Activo' : 'Inactivo')},
   ];
 
   appCardConfig: ItemListCardConfig = {
@@ -235,28 +215,24 @@ export class AIEngineComponent implements OnInit, OnDestroy {
     detailKeys: [
       { key: 'output_format', label: 'Formato' },
       { key: 'description', label: 'Descripcion' },
-    ],
-  };
+    ]};
 
   appTableActions: TableAction[] = [
     {
       label: 'Probar',
       icon: 'zap',
       action: (app: AIEngineApp) => this.testAppExecution(app),
-      variant: 'primary',
-    },
+      variant: 'primary'},
     {
       label: 'Editar',
       icon: 'edit',
       action: (app: AIEngineApp) => this.editApp(app),
-      variant: 'info',
-    },
+      variant: 'info'},
     {
       label: 'Eliminar',
       icon: 'trash-2',
       action: (app: AIEngineApp) => this.confirmDeleteApp(app),
-      variant: 'danger',
-    },
+      variant: 'danger'},
   ];
 
   outputFormatOptions: SelectorOption[] = [
@@ -271,26 +247,20 @@ export class AIEngineComponent implements OnInit, OnDestroy {
     this.refreshData();
 
     this.filterForm.valueChanges
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => {
         this.configPagination.page = 1;
         this.loadConfigs();
       });
 
     this.appFilterForm.valueChanges
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => {
         this.appPagination.page = 1;
         this.loadApps();
       });
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  switchTab(tab: ActiveTab): void {
+switchTab(tab: ActiveTab): void {
     this.activeTab.set(tab);
     if (tab === 'apps' && this.apps().length === 0) {
       this.loadApps();
@@ -309,12 +279,11 @@ export class AIEngineComponent implements OnInit, OnDestroy {
       page: this.configPagination.page,
       limit: this.configPagination.limit,
       search: filters.search || undefined,
-      sdk_type: filters.sdk_type || undefined,
-    };
+      sdk_type: filters.sdk_type || undefined};
 
     this.aiEngineService
       .getConfigs(query)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: any) => {
           const data = response.data || [];
@@ -332,8 +301,7 @@ export class AIEngineComponent implements OnInit, OnDestroy {
           console.error('Error loading AI configs:', error);
           this.configs.set([]);
           this.toastService.error('Error al cargar configuraciones de IA');
-        },
-      })
+        }})
       .add(() => {
         this.isLoading.set(false);
       });
@@ -342,7 +310,7 @@ export class AIEngineComponent implements OnInit, OnDestroy {
   loadStats(): void {
     this.aiEngineService
       .getStats()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: any) => {
           if (response.success && response.data) {
@@ -351,8 +319,7 @@ export class AIEngineComponent implements OnInit, OnDestroy {
         },
         error: (error) => {
           console.error('Error loading AI stats:', error);
-        },
-      });
+        }});
   }
 
   refreshData(): void {
@@ -393,7 +360,7 @@ export class AIEngineComponent implements OnInit, OnDestroy {
       : this.aiEngineService.createConfig(data);
 
     operation
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.showConfigModal.set(false);
@@ -408,8 +375,7 @@ export class AIEngineComponent implements OnInit, OnDestroy {
         error: (error) => {
           console.error('Error saving AI config:', error);
           this.toastService.error(extractApiErrorMessage(error));
-        },
-      })
+        }})
       .add(() => {
         this.isSubmitting.set(false);
       });
@@ -419,7 +385,7 @@ export class AIEngineComponent implements OnInit, OnDestroy {
     this.isTesting.set(config.id);
     this.aiEngineService
       .testConnection(config.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: any) => {
           const result = response.data || response;
@@ -433,8 +399,7 @@ export class AIEngineComponent implements OnInit, OnDestroy {
         error: (error) => {
           console.error('Error testing connection:', error);
           this.toastService.error(extractApiErrorMessage(error));
-        },
-      })
+        }})
       .add(() => {
         this.isTesting.set(null);
       });
@@ -447,8 +412,7 @@ export class AIEngineComponent implements OnInit, OnDestroy {
         message: `Estas seguro de que deseas eliminar "${config.label}"? Esta accion no se puede deshacer.`,
         confirmText: 'Eliminar',
         cancelText: 'Cancelar',
-        confirmVariant: 'danger',
-      })
+        confirmVariant: 'danger'})
       .then((confirmed) => {
         if (confirmed) {
           this.deleteConfig(config.id);
@@ -459,7 +423,7 @@ export class AIEngineComponent implements OnInit, OnDestroy {
   deleteConfig(id: number): void {
     this.aiEngineService
       .deleteConfig(id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.refreshData();
@@ -468,8 +432,7 @@ export class AIEngineComponent implements OnInit, OnDestroy {
         error: (error) => {
           console.error('Error deleting AI config:', error);
           this.toastService.error(extractApiErrorMessage(error));
-        },
-      });
+        }});
   }
 
   // ═══════════════════════════════════════
@@ -483,12 +446,11 @@ export class AIEngineComponent implements OnInit, OnDestroy {
       page: this.appPagination.page,
       limit: this.appPagination.limit,
       search: filters.search || undefined,
-      output_format: filters.output_format || undefined,
-    };
+      output_format: filters.output_format || undefined};
 
     this.aiEngineService
       .getApps(query)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: any) => {
           const data = response.data || [];
@@ -504,8 +466,7 @@ export class AIEngineComponent implements OnInit, OnDestroy {
           console.error('Error loading AI apps:', error);
           this.apps.set([]);
           this.toastService.error('Error al cargar aplicaciones de IA');
-        },
-      })
+        }})
       .add(() => {
         this.isLoadingApps.set(false);
       });
@@ -514,7 +475,7 @@ export class AIEngineComponent implements OnInit, OnDestroy {
   loadAppStats(): void {
     this.aiEngineService
       .getAppStats()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: any) => {
           if (response.success && response.data) {
@@ -523,8 +484,7 @@ export class AIEngineComponent implements OnInit, OnDestroy {
         },
         error: (error) => {
           console.error('Error loading app stats:', error);
-        },
-      });
+        }});
   }
 
   onAppSearchChange(searchTerm: string): void {
@@ -555,7 +515,7 @@ export class AIEngineComponent implements OnInit, OnDestroy {
       : this.aiEngineService.createApp(data);
 
     operation
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.showAppModal.set(false);
@@ -571,8 +531,7 @@ export class AIEngineComponent implements OnInit, OnDestroy {
         error: (error) => {
           console.error('Error saving AI app:', error);
           this.toastService.error(extractApiErrorMessage(error));
-        },
-      })
+        }})
       .add(() => {
         this.isSubmittingApp.set(false);
       });
@@ -582,7 +541,7 @@ export class AIEngineComponent implements OnInit, OnDestroy {
     this.isTestingApp.set(app.id);
     this.aiEngineService
       .testApp(app.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: any) => {
           const result = response.data || response;
@@ -597,8 +556,7 @@ export class AIEngineComponent implements OnInit, OnDestroy {
         error: (error) => {
           console.error('Error testing app:', error);
           this.toastService.error(extractApiErrorMessage(error));
-        },
-      })
+        }})
       .add(() => {
         this.isTestingApp.set(null);
       });
@@ -611,8 +569,7 @@ export class AIEngineComponent implements OnInit, OnDestroy {
         message: `Estas seguro de que deseas eliminar "${app.name}"? Esta accion no se puede deshacer.`,
         confirmText: 'Eliminar',
         cancelText: 'Cancelar',
-        confirmVariant: 'danger',
-      })
+        confirmVariant: 'danger'})
       .then((confirmed) => {
         if (confirmed) {
           this.deleteApp(app.id);
@@ -623,7 +580,7 @@ export class AIEngineComponent implements OnInit, OnDestroy {
   deleteApp(id: number): void {
     this.aiEngineService
       .deleteApp(id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.loadApps();
@@ -633,8 +590,7 @@ export class AIEngineComponent implements OnInit, OnDestroy {
         error: (error) => {
           console.error('Error deleting AI app:', error);
           this.toastService.error(extractApiErrorMessage(error));
-        },
-      });
+        }});
   }
 
   // ═══════════════════════════════════════
@@ -644,8 +600,7 @@ export class AIEngineComponent implements OnInit, OnDestroy {
   formatSdkType(sdkType: string): string {
     const map: Record<string, string> = {
       openai_compatible: 'OpenAI',
-      anthropic_compatible: 'Anthropic',
-    };
+      anthropic_compatible: 'Anthropic'};
     return map[sdkType] || sdkType;
   }
 }

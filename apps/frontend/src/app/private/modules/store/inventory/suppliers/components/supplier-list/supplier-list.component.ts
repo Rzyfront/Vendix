@@ -1,4 +1,4 @@
-import { Component, input, output } from '@angular/core';
+import { Component, input, output, signal } from '@angular/core';
 
 import { FormsModule } from '@angular/forms';
 
@@ -35,8 +35,8 @@ import { Supplier } from '../../../interfaces';
     ResponsiveDataViewComponent,
     PaginationComponent,
     EmptyStateComponent,
-    CardComponent
-],
+    CardComponent,
+  ],
   templateUrl: './supplier-list.component.html',
 })
 export class SupplierListComponent {
@@ -53,11 +53,14 @@ export class SupplierListComponent {
   readonly create = output<void>();
   readonly edit = output<Supplier>();
   readonly delete = output<Supplier>();
-  readonly sort = output<{ column: string; direction: 'asc' | 'desc' | null }>();
+  readonly sort = output<{
+    column: string;
+    direction: 'asc' | 'desc' | null;
+  }>();
   readonly pageChange = output<number>();
 
-  searchTerm = '';
-  selectedStatus = '';
+  searchTerm = signal('');
+  selectedStatus = signal('');
 
   // Filter configuration for the options dropdown
   filterConfigs: FilterConfig[] = [
@@ -151,19 +154,19 @@ export class SupplierListComponent {
 
   // Event Handlers
   onSearchChange(term: string): void {
-    this.searchTerm = term;
+    this.searchTerm.set(term);
     this.search.emit(term);
   }
 
   onFilterChange(values: FilterValues): void {
     this.filterValues = values;
-    this.selectedStatus = (values['is_active'] as string) || '';
+    this.selectedStatus.set((values['is_active'] as string) || '');
     this.filter.emit(values);
   }
 
   clearFilters(): void {
-    this.searchTerm = '';
-    this.selectedStatus = '';
+    this.searchTerm.set('');
+    this.selectedStatus.set('');
     this.filterValues = {};
     this.search.emit('');
     this.filter.emit({});
@@ -194,6 +197,6 @@ export class SupplierListComponent {
   }
 
   get hasFilters(): boolean {
-    return !!(this.searchTerm || this.selectedStatus);
+    return !!(this.searchTerm() || this.selectedStatus());
   }
 }

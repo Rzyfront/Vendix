@@ -1,14 +1,13 @@
-import {
-  Component,
+import {Component,
   OnInit,
-  OnDestroy,
   inject,
   signal,
   computed,
-} from '@angular/core';
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { Router } from '@angular/router';
-import { Subject, takeUntil } from 'rxjs';
+
 
 import { AccountingService } from '../../../services/accounting.service';
 import { Budget, FiscalPeriod } from '../../../interfaces/accounting.interface';
@@ -26,8 +25,7 @@ import {
   FilterConfig,
   FilterValues,
   ToastService,
-  ButtonComponent,
-} from '../../../../../../../shared/components/index';
+  ButtonComponent} from '../../../../../../../shared/components/index';
 
 interface BudgetStats {
   total: number;
@@ -48,11 +46,10 @@ interface BudgetStats {
     BudgetCreateModalComponent
 ],
   templateUrl: './budget-list.component.html',
-  styleUrls: ['./budget-list.component.scss'],
-})
-export class BudgetListComponent implements OnDestroy {
-  private destroy$ = new Subject<void>();
-  private accounting_service = inject(AccountingService);
+  styleUrls: ['./budget-list.component.scss']})
+export class BudgetListComponent implements {
+  private destroyRef = inject(DestroyRef);
+private accounting_service = inject(AccountingService);
   private router = inject(Router);
   private toast_service = inject(ToastService);
 
@@ -61,7 +58,8 @@ export class BudgetListComponent implements OnDestroy {
   search_term = signal('');
   filter_values = signal<FilterValues>({});
 
-  is_create_modal_open = false;
+  // ✅ Migrated to model() for two-way binding (Section 2 — model API)
+  readonly isCreateModalOpen = signal(false);
 
   stats = computed<BudgetStats>(() => {
     const items = this.budgets();
@@ -71,8 +69,7 @@ export class BudgetListComponent implements OnDestroy {
       active: items.filter(
         (b) => b.status === 'active' || b.status === 'approved',
       ).length,
-      closed: items.filter((b) => b.status === 'closed').length,
-    };
+      closed: items.filter((b) => b.status === 'closed').length};
   });
 
   filtered_budgets = computed(() => {
@@ -107,8 +104,7 @@ export class BudgetListComponent implements OnDestroy {
         { value: 'approved', label: 'Aprobado' },
         { value: 'active', label: 'Activo' },
         { value: 'closed', label: 'Cerrado' },
-      ],
-    },
+      ]},
   ];
 
   dropdown_actions: DropdownAction[] = [
@@ -116,8 +112,7 @@ export class BudgetListComponent implements OnDestroy {
       label: 'Nuevo Presupuesto',
       icon: 'plus',
       action: 'create',
-      variant: 'primary',
-    },
+      variant: 'primary'},
   ];
 
   table_actions: TableAction[] = [
@@ -125,8 +120,7 @@ export class BudgetListComponent implements OnDestroy {
       label: 'Editar',
       icon: 'edit',
       variant: 'info',
-      action: (row: Budget) => this.onEdit(row),
-    },
+      action: (row: Budget) => this.onEdit(row)},
     {
       label: 'Varianza',
       icon: 'bar-chart-2',
@@ -135,15 +129,13 @@ export class BudgetListComponent implements OnDestroy {
       show: (row: Budget) =>
         row.status === 'active' ||
         row.status === 'approved' ||
-        row.status === 'closed',
-    },
+        row.status === 'closed'},
     {
       label: 'Eliminar',
       icon: 'trash-2',
       variant: 'danger',
       action: (row: Budget) => this.onDelete(row),
-      show: (row: Budget) => row.status === 'draft',
-    },
+      show: (row: Budget) => row.status === 'draft'},
   ];
 
   columns: TableColumn[] = [
@@ -153,8 +145,7 @@ export class BudgetListComponent implements OnDestroy {
       label: 'Periodo Fiscal',
       sortable: false,
       priority: 2,
-      transform: (val: FiscalPeriod | undefined) => val?.name || '-',
-    },
+      transform: (val: FiscalPeriod | undefined) => val?.name || '-'},
     {
       key: 'status',
       label: 'Estado',
@@ -162,24 +153,21 @@ export class BudgetListComponent implements OnDestroy {
       priority: 1,
       badge: true,
       badgeConfig: { type: 'status' },
-      transform: (val: string) => this.getStatusLabel(val),
-    },
+      transform: (val: string) => this.getStatusLabel(val)},
     {
       key: 'variance_threshold',
       label: 'Umbral %',
       align: 'right',
       priority: 2,
       transform: (val: number | undefined) =>
-        val !== undefined && val !== null ? `${val}%` : '-',
-    },
+        val !== undefined && val !== null ? `${val}%` : '-'},
     {
       key: 'created_at',
       label: 'Creado',
       sortable: true,
       priority: 2,
       transform: (val: string) =>
-        val ? new Date(val).toLocaleDateString() : '-',
-    },
+        val ? new Date(val).toLocaleDateString() : '-'},
   ];
 
   card_config: ItemListCardConfig = {
@@ -192,41 +180,30 @@ export class BudgetListComponent implements OnDestroy {
         draft: 'warn',
         approved: 'info',
         active: 'success',
-        closed: 'neutral',
-      },
-    },
+        closed: 'neutral'}},
     badgeTransform: (val: string) => this.getStatusLabel(val),
     detailKeys: [
       {
         key: 'fiscal_period',
         label: 'Periodo',
         icon: 'calendar',
-        transform: (val: FiscalPeriod | undefined) => val?.name || '-',
-      },
+        transform: (val: FiscalPeriod | undefined) => val?.name || '-'},
       {
         key: 'variance_threshold',
         label: 'Umbral',
         icon: 'percent',
         transform: (val: number | undefined) =>
-          val !== undefined && val !== null ? `${val}%` : '-',
-      },
-    ],
-  };
+          val !== undefined && val !== null ? `${val}%` : '-'},
+    ]};
 
   constructor() {
     this.loadBudgets();
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  loadBudgets(): void {
+loadBudgets(): void {
     this.loading.set(true);
     this.accounting_service
       .getBudgets()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.budgets.set(res.data || []);
@@ -234,8 +211,7 @@ export class BudgetListComponent implements OnDestroy {
         },
         error: () => {
           this.loading.set(false);
-        },
-      });
+        }});
   }
 
   onSearchChange(term: string): void {
@@ -248,7 +224,7 @@ export class BudgetListComponent implements OnDestroy {
 
   onActionClick(action: string): void {
     if (action === 'create') {
-      this.is_create_modal_open = true;
+      this.isCreateModalOpen.set(true);
     }
   }
 
@@ -272,26 +248,23 @@ export class BudgetListComponent implements OnDestroy {
     if (!confirm(`Eliminar presupuesto "${budget.name}"?`)) return;
     this.accounting_service
       .deleteBudget(budget.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toast_service.show({
             variant: 'success',
-            description: 'Presupuesto eliminado',
-          });
+            description: 'Presupuesto eliminado'});
           this.loadBudgets();
         },
         error: () => {
           this.toast_service.show({
             variant: 'error',
-            description: 'Error al eliminar presupuesto',
-          });
-        },
-      });
+            description: 'Error al eliminar presupuesto'});
+        }});
   }
 
   onBudgetCreated(): void {
-    this.is_create_modal_open = false;
+    this.isCreateModalOpen.set(false);
     this.loadBudgets();
   }
 
@@ -300,8 +273,7 @@ export class BudgetListComponent implements OnDestroy {
       draft: 'Borrador',
       approved: 'Aprobado',
       active: 'Activo',
-      closed: 'Cerrado',
-    };
+      closed: 'Cerrado'};
     return labels[status] || status;
   }
 }

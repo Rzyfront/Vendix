@@ -3,11 +3,11 @@ import {
   input,
   output,
   inject,
-  DestroyRef,
-} from '@angular/core';
+  DestroyRef } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Subject, takeUntil } from 'rxjs';
+
 import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../shared/components/input/input.component';
@@ -170,9 +170,9 @@ import { ScaleConnectionStatus } from '../../../../../core/models/store-settings
     .manual-fallback {
       padding-top: 0.5rem;
     }
-  `],
-})
+  `] })
 export class PosScaleWeightModalComponent {
+  private destroyRef = inject(DestroyRef);
   readonly title = input<string>('Lectura de Báscula');
   readonly message = input<string>('');
   readonly weightUnit = input<string>('kg');
@@ -189,26 +189,19 @@ export class PosScaleWeightModalComponent {
   isStable = false;
   connectionStatus: ScaleConnectionStatus = 'disconnected';
   manualWeight = '';
-
-  private destroy$ = new Subject<void>();
-  private scaleService = inject(PosScaleService);
+private scaleService = inject(PosScaleService);
 
   constructor() {
-    inject(DestroyRef).onDestroy(() => {
-      this.destroy$.next();
-      this.destroy$.complete();
-    });
-
-    this.scaleService.weight$
-      .pipe(takeUntil(this.destroy$))
+this.scaleService.weight$
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(w => this.currentWeight = w);
 
     this.scaleService.stable$
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(s => this.isStable = s);
 
     this.scaleService.status$
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(st => this.connectionStatus = st);
   }
 

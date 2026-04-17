@@ -1,19 +1,19 @@
-import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
+import {Component, OnInit, inject, signal,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
-import { debounceTime, distinctUntilChanged, Subject, takeUntil } from 'rxjs';
+import { debounceTime, distinctUntilChanged, Subject } from 'rxjs';
 import {
   User,
   UserQueryDto,
   UserStats,
   UserState,
-  PaginatedUsersResponse,
-} from './interfaces/user.interface';
+  PaginatedUsersResponse} from './interfaces/user.interface';
 import { UsersService } from './services/users.service';
 import {
   UserStatsComponent,
   UserCreateModalComponent,
-  UserEditModalComponent,
-} from './components/index';
+  UserEditModalComponent} from './components/index';
 
 // Import components from shared
 import {
@@ -29,14 +29,12 @@ import {
   ItemListCardConfig,
   PaginationComponent,
   EmptyStateComponent,
-  CardComponent,
-} from '../../../../shared/components/index';
+  CardComponent} from '../../../../shared/components/index';
 import {
   FormsModule,
   ReactiveFormsModule,
   FormBuilder,
-  FormGroup,
-} from '@angular/forms';
+  FormGroup} from '@angular/forms';
 
 @Component({
   selector: 'app-users',
@@ -57,9 +55,9 @@ import {
     CardComponent,
   ],
   templateUrl: './users.component.html',
-  styleUrls: ['./users.component.css'],
-})
-export class UsersComponent implements OnInit, OnDestroy {
+  styleUrls: ['./users.component.css']})
+export class UsersComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   // Services
   private usersService = inject(UsersService);
   private fb = inject(FormBuilder);
@@ -75,15 +73,12 @@ export class UsersComponent implements OnInit, OnDestroy {
   readonly showEditModal = signal(false);
 
   private searchSubject = new Subject<string>();
-  private destroy$ = new Subject<void>();
-
-  // Form for filters
+// Form for filters
   filterForm: FormGroup = this.fb.group({
     search: [''],
     state: [''],
     organization_id: [''],
-    include_non_production: [''],
-  });
+    include_non_production: ['']});
 
   // Table configuration
   tableColumns: TableColumn[] = [
@@ -99,17 +94,14 @@ export class UsersComponent implements OnInit, OnDestroy {
       priority: 1,
       badgeConfig: {
         type: 'status',
-        size: 'sm',
-      },
-      transform: (value: UserState) => this.getStateDisplay(value).text,
-    },
+        size: 'sm'},
+      transform: (value: UserState) => this.getStateDisplay(value).text},
     {
       key: 'created_at',
       label: 'Fecha Creación',
       sortable: true,
       priority: 3,
-      transform: (value: string) => this.formatDate(value),
-    },
+      transform: (value: string) => this.formatDate(value)},
   ];
 
   tableActions: TableAction[] = [
@@ -117,14 +109,12 @@ export class UsersComponent implements OnInit, OnDestroy {
       label: 'Editar',
       icon: 'edit',
       action: (user: User) => this.editUser(user),
-      variant: 'info',
-    },
+      variant: 'info'},
     {
       label: 'Eliminar',
       icon: 'trash-2',
       action: (user: User) => this.confirmDelete(user),
-      variant: 'danger',
-    },
+      variant: 'danger'},
   ];
 
   // Pagination
@@ -132,8 +122,7 @@ export class UsersComponent implements OnInit, OnDestroy {
     page: 1,
     limit: 10,
     total: 0,
-    totalPages: 0,
-  };
+    totalPages: 0};
 
   // Org mode filter options
   orgModes = [
@@ -148,8 +137,7 @@ export class UsersComponent implements OnInit, OnDestroy {
     { value: UserState.INACTIVE, label: 'Inactivo' },
     {
       value: UserState.PENDING_VERIFICATION,
-      label: 'Pendiente',
-    },
+      label: 'Pendiente'},
     { value: UserState.SUSPENDED, label: 'Suspendido' },
     { value: UserState.ARCHIVED, label: 'Archivado' },
   ];
@@ -167,15 +155,13 @@ export class UsersComponent implements OnInit, OnDestroy {
       {
         key: 'created_at',
         label: 'Registro',
-        transform: (v) => this.formatDate(v),
-      },
-    ],
-  };
+        transform: (v) => this.formatDate(v)},
+    ]};
 
   constructor() {
     // Setup search debounce
     this.searchSubject
-      .pipe(debounceTime(400), distinctUntilChanged(), takeUntil(this.destroy$))
+      .pipe(debounceTime(400), distinctUntilChanged(), takeUntilDestroyed(this.destroyRef))
       .subscribe((searchTerm: string) => {
         this.filterForm.patchValue(
           { search: searchTerm },
@@ -192,19 +178,13 @@ export class UsersComponent implements OnInit, OnDestroy {
 
     // Subscribe to form changes
     this.filterForm.valueChanges
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => {
         this.pagination.page = 1;
         this.loadUsers();
       });
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  loadUsers(): void {
+loadUsers(): void {
     this.isLoading.set(true);
     const filters = this.filterForm.value;
     const query: UserQueryDto = {
@@ -214,12 +194,11 @@ export class UsersComponent implements OnInit, OnDestroy {
       state: filters.state || undefined,
       organization_id: filters.organization_id || undefined,
       include_non_production:
-        filters.include_non_production === 'all' ? true : undefined,
-    };
+        filters.include_non_production === 'all' ? true : undefined};
 
     this.usersService
       .getUsers(query)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: PaginatedUsersResponse) => {
           this.users.set(response.data || []);
@@ -228,16 +207,14 @@ export class UsersComponent implements OnInit, OnDestroy {
               page: response.pagination.page || 1,
               limit: response.pagination.limit || 10,
               total: response.pagination.total || 0,
-              totalPages: response.pagination.total_pages || 0,
-            };
+              totalPages: response.pagination.total_pages || 0};
           }
         },
         error: (error) => {
           console.error('Error loading users:', error);
           this.users.set([]);
           this.toastService.error('Error al cargar usuarios');
-        },
-      })
+        }})
       .add(() => {
         this.isLoading.set(false);
       });
@@ -246,15 +223,14 @@ export class UsersComponent implements OnInit, OnDestroy {
   loadUserStats(): void {
     this.usersService
       .getUsersStats()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (stats: UserStats) => {
           this.userStats.set(stats);
         },
         error: (error) => {
           console.error('Error loading user stats:', error);
-        },
-      });
+        }});
   }
 
   onSearchChange(searchTerm: string): void {
@@ -283,8 +259,7 @@ export class UsersComponent implements OnInit, OnDestroy {
         message:
           '¿Sincronizar las configuraciones de módulos visibles para todos los usuarios admin/owner? Se agregarán los módulos nuevos sin eliminar personalizaciones existentes.',
         confirmText: 'Sincronizar',
-        cancelText: 'Cancelar',
-      })
+        cancelText: 'Cancelar'})
       .then((confirmed: boolean) => {
         if (!confirmed) return;
         this.isLoading.set(true);
@@ -299,8 +274,7 @@ export class UsersComponent implements OnInit, OnDestroy {
             this.isLoading.set(false);
             console.error('Error syncing panel UI:', error);
             this.toastService.error('Error al sincronizar Panel UI');
-          },
-        });
+          }});
       });
   }
 
@@ -332,8 +306,7 @@ export class UsersComponent implements OnInit, OnDestroy {
         message: `¿Estás seguro de que deseas eliminar al usuario "${user.first_name} ${user.last_name}"? Esta acción no se puede deshacer.`,
         confirmText: 'Eliminar',
         cancelText: 'Cancelar',
-        confirmVariant: 'danger',
-      })
+        confirmVariant: 'danger'})
       .then((confirmed) => {
         if (confirmed) {
           this.deleteUser(user.id);
@@ -350,8 +323,7 @@ export class UsersComponent implements OnInit, OnDestroy {
       error: (error) => {
         console.error('Error deleting user:', error);
         this.toastService.error('Error al eliminar el usuario');
-      },
-    });
+      }});
   }
 
   toggleUserStatus(user: User): void {
@@ -364,8 +336,7 @@ export class UsersComponent implements OnInit, OnDestroy {
         message: `¿Estás seguro de que deseas ${actionText} al usuario "${user.first_name} ${user.last_name}"?`,
         confirmText: action === 'archive' ? 'Archivar' : 'Reactivar',
         cancelText: 'Cancelar',
-        confirmVariant: action === 'archive' ? 'danger' : 'primary',
-      })
+        confirmVariant: action === 'archive' ? 'danger' : 'primary'})
       .then((confirmed) => {
         if (confirmed) {
           const obs =
@@ -383,8 +354,7 @@ export class UsersComponent implements OnInit, OnDestroy {
             error: (error) => {
               console.error(`Error ${action} user:`, error);
               this.toastService.error(`Error al ${actionText} el usuario`);
-            },
-          });
+            }});
         }
       });
   }
@@ -414,8 +384,7 @@ export class UsersComponent implements OnInit, OnDestroy {
       month: '2-digit',
       year: 'numeric',
       hour: '2-digit',
-      minute: '2-digit',
-    });
+      minute: '2-digit'});
   }
 
   getEmptyStateTitle(): string {

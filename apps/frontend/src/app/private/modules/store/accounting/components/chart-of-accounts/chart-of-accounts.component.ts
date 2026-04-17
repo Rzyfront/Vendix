@@ -154,7 +154,7 @@ interface AccountStats {
                 <p class="mt-4 text-base">No se encontraron cuentas</p>
                 <p class="text-sm">
                   {{
-                    searchTerm
+                    searchTerm()
                       ? 'Intenta con otro término de búsqueda.'
                       : 'Crea tu primera cuenta para comenzar.'
                   }}
@@ -179,7 +179,7 @@ interface AccountStats {
       <!-- Account Create/Edit Modal -->
       <vendix-account-create
         [(isOpen)]="is_create_modal_open"
-        [editAccount]="selected_account"
+        [editAccount]="selected_account()"
         [accounts]="accounts() || []"
       ></vendix-account-create>
     </div>

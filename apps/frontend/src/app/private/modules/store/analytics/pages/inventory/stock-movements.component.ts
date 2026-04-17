@@ -1,19 +1,19 @@
-import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
+import {Component, OnInit, inject, signal,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { Subject, takeUntil } from 'rxjs';
+
 
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { TableColumn } from '../../../../../../shared/components/table/table.component';
 import {
   ResponsiveDataViewComponent,
-  ItemListCardConfig,
-} from '../../../../../../shared/components/index';
+  ItemListCardConfig} from '../../../../../../shared/components/index';
 import {
   SelectorComponent,
-  SelectorOption,
-} from '../../../../../../shared/components/selector/selector.component';
+  SelectorOption} from '../../../../../../shared/components/selector/selector.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
@@ -24,8 +24,7 @@ import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
 import {
   StockMovementReport,
-  InventoryAnalyticsQueryDto,
-} from '../../interfaces/inventory-analytics.interface';
+  InventoryAnalyticsQueryDto} from '../../interfaces/inventory-analytics.interface';
 
 @Component({
   selector: 'vendix-stock-movements',
@@ -118,22 +117,19 @@ import {
         </div>
       </app-card>
     </div>
-  `,
-})
-export class StockMovementsComponent implements OnInit, OnDestroy {
+  `})
+export class StockMovementsComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private analyticsService = inject(AnalyticsService);
   private toastService = inject(ToastService);
-  private destroy$ = new Subject<void>();
-
-  loading = signal(true);
+loading = signal(true);
   exporting = signal(false);
   data = signal<StockMovementReport[]>([]);
   typeFilter = signal<string>('');
   dateRange = signal<DateRangeFilter>({
     start_date: getDefaultStartDate(),
     end_date: getDefaultEndDate(),
-    preset: 'thisMonth',
-  });
+    preset: 'thisMonth'});
 
   typeOptions: SelectorOption[] = [
     { value: '', label: 'Todos' },
@@ -153,8 +149,7 @@ export class StockMovementsComponent implements OnInit, OnDestroy {
       sortable: true,
       priority: 1,
       width: '120px',
-      transform: (val) => new Date(val).toLocaleDateString('es-CO'),
-    },
+      transform: (val) => new Date(val).toLocaleDateString('es-CO')},
     { key: 'product_name', label: 'Producto', sortable: true, priority: 1 },
     { key: 'sku', label: 'SKU', sortable: true, priority: 2, width: '100px' },
     {
@@ -173,39 +168,32 @@ export class StockMovementsComponent implements OnInit, OnDestroy {
           transfer: 'info',
           adjustment: 'default',
           damage: 'danger',
-          expiration: 'danger',
-        },
-      },
-    },
+          expiration: 'danger'}}},
     {
       key: 'quantity',
       label: 'Cantidad',
       sortable: true,
       align: 'right',
       priority: 1,
-      width: '100px',
-    },
+      width: '100px'},
     {
       key: 'from_location',
       label: 'Origen',
       priority: 2,
       width: '120px',
-      transform: (val) => val || '-',
-    },
+      transform: (val) => val || '-'},
     {
       key: 'to_location',
       label: 'Destino',
       priority: 2,
       width: '120px',
-      transform: (val) => val || '-',
-    },
+      transform: (val) => val || '-'},
     {
       key: 'user_name',
       label: 'Usuario',
       priority: 2,
       width: '120px',
-      transform: (val) => val || '-',
-    },
+      transform: (val) => val || '-'},
   ];
 
   cardConfig: ItemListCardConfig = {
@@ -221,34 +209,23 @@ export class StockMovementsComponent implements OnInit, OnDestroy {
         return: 'warn',
         transfer: 'info',
         adjustment: 'default',
-        damage: 'danger',
-      },
-    },
+        damage: 'danger'}},
     detailKeys: [
       {
         key: 'quantity',
         label: 'Cantidad',
-        transform: (val: any) => `${val} uds`,
-      },
+        transform: (val: any) => `${val} uds`},
       {
         key: 'date',
         label: 'Fecha',
         icon: 'calendar',
-        transform: (val: any) => new Date(val).toLocaleDateString('es-CO'),
-      },
-    ],
-  };
+        transform: (val: any) => new Date(val).toLocaleDateString('es-CO')},
+    ]};
 
   ngOnInit(): void {
     this.loadData();
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  onDateRangeChange(range: DateRangeFilter): void {
+onDateRangeChange(range: DateRangeFilter): void {
     this.dateRange.set(range);
     this.loadData();
   }
@@ -263,12 +240,11 @@ export class StockMovementsComponent implements OnInit, OnDestroy {
     const query: InventoryAnalyticsQueryDto = {
       date_range: this.dateRange(),
       movement_type: this.typeFilter() || undefined,
-      limit: 100,
-    };
+      limit: 100};
 
     this.analyticsService
       .getStockMovements(query)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           this.data.set(response.data);
@@ -277,8 +253,7 @@ export class StockMovementsComponent implements OnInit, OnDestroy {
         error: () => {
           this.toastService.error('Error al cargar movimientos');
           this.loading.set(false);
-        },
-      });
+        }});
   }
 
   exportReport(): void {
@@ -286,9 +261,8 @@ export class StockMovementsComponent implements OnInit, OnDestroy {
     this.analyticsService
       .exportInventoryAnalytics({
         date_range: this.dateRange(),
-        movement_type: this.typeFilter() || undefined,
-      })
-      .pipe(takeUntil(this.destroy$))
+        movement_type: this.typeFilter() || undefined})
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (blob) => {
           const url = window.URL.createObjectURL(blob);
@@ -302,8 +276,7 @@ export class StockMovementsComponent implements OnInit, OnDestroy {
         error: () => {
           this.toastService.error('Error al exportar');
           this.exporting.set(false);
-        },
-      });
+        }});
   }
 
 }

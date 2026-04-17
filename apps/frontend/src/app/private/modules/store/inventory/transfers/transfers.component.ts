@@ -1,6 +1,8 @@
-import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
+import {Component, OnInit, inject, signal,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
-import { Subject, takeUntil } from 'rxjs';
+
 import { HttpClient } from '@angular/common/http';
 import { map } from 'rxjs/operators';
 import { StatsComponent } from '../../../../../shared/components/stats/stats.component';
@@ -17,8 +19,7 @@ import {
   TransferStats,
   TransferQuery,
   CreateTransferRequest,
-  CompleteTransferItem,
-} from './interfaces';
+  CompleteTransferItem} from './interfaces';
 
 @Component({
   selector: 'app-transfers',
@@ -113,9 +114,9 @@ import {
         ></app-transfer-detail-modal>
       }
     </div>
-  `,
-})
-export class TransfersComponent implements OnInit, OnDestroy {
+  `})
+export class TransfersComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private transfersService = inject(TransfersService);
   private toastService = inject(ToastService);
   private dialogService = inject(DialogService);
@@ -126,8 +127,7 @@ export class TransfersComponent implements OnInit, OnDestroy {
     draft: 0,
     in_transit: 0,
     completed: 0,
-    cancelled: 0,
-  });
+    cancelled: 0});
   transfers = signal<StockTransfer[]>([]);
   loading = signal(false);
   statsLoading = signal(false);
@@ -140,25 +140,16 @@ export class TransfersComponent implements OnInit, OnDestroy {
 
   searchTerm = '';
   statusFilter = '';
-
-  private destroy$ = new Subject<void>();
-
-  ngOnInit(): void {
+ngOnInit(): void {
     this.loadStats();
     this.loadTransfers();
     this.loadLocations();
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  loadStats(): void {
+loadStats(): void {
     this.statsLoading.set(true);
     this.transfersService
       .getStats()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (s) => {
           this.stats.set(s);
@@ -167,20 +158,18 @@ export class TransfersComponent implements OnInit, OnDestroy {
         error: () => {
           this.toastService.error('Error al cargar estadísticas');
           this.statsLoading.set(false);
-        },
-      });
+        }});
   }
 
   loadTransfers(): void {
     this.loading.set(true);
     const query: TransferQuery = {
       ...(this.searchTerm && { search: this.searchTerm }),
-      ...(this.statusFilter && { status: this.statusFilter as any }),
-    };
+      ...(this.statusFilter && { status: this.statusFilter as any })};
 
     this.transfersService
       .getAll(query)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (data) => {
           this.transfers.set(Array.isArray(data) ? data : []);
@@ -189,8 +178,7 @@ export class TransfersComponent implements OnInit, OnDestroy {
         error: () => {
           this.toastService.error('Error al cargar transferencias');
           this.loading.set(false);
-        },
-      });
+        }});
   }
 
   loadLocations(): void {
@@ -198,7 +186,7 @@ export class TransfersComponent implements OnInit, OnDestroy {
       .get<any>(`${environment.apiUrl}/store/inventory/locations`)
       .pipe(
         map((r) => r.data || r),
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
       )
       .subscribe({
         next: (locations: any[]) => {
@@ -207,8 +195,7 @@ export class TransfersComponent implements OnInit, OnDestroy {
             arr.map((l) => ({ value: l.id, label: l.name })),
           );
         },
-        error: () => {},
-      });
+        error: () => {}});
   }
 
   onSearch(term: string): void {
@@ -241,7 +228,7 @@ export class TransfersComponent implements OnInit, OnDestroy {
     this.isSubmitting.set(true);
     this.transfersService
       .create(dto)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.success('Transferencia creada exitosamente');
@@ -254,15 +241,14 @@ export class TransfersComponent implements OnInit, OnDestroy {
             err.message || 'Error al crear transferencia',
           );
           this.isSubmitting.set(false);
-        },
-      });
+        }});
   }
 
   onCreateAndComplete(dto: CreateTransferRequest): void {
     this.isSubmitting.set(true);
     this.transfersService
       .createAndComplete(dto)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.success(
@@ -277,8 +263,7 @@ export class TransfersComponent implements OnInit, OnDestroy {
             err.message || 'Error al crear y completar transferencia',
           );
           this.isSubmitting.set(false);
-        },
-      });
+        }});
   }
 
   async onApprove(transfer: StockTransfer): Promise<void> {
@@ -286,14 +271,13 @@ export class TransfersComponent implements OnInit, OnDestroy {
       title: 'Aprobar transferencia',
       message: `¿Aprobar la transferencia ${transfer.transfer_number}? El stock será reservado en la ubicación de origen.`,
       confirmText: 'Aprobar',
-      cancelText: 'Cancelar',
-    });
+      cancelText: 'Cancelar'});
     if (!confirmed) return;
 
     this.isSubmitting.set(true);
     this.transfersService
       .approve(transfer.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.success('Transferencia aprobada');
@@ -304,8 +288,7 @@ export class TransfersComponent implements OnInit, OnDestroy {
         error: (err) => {
           this.toastService.error(err.message || 'Error al aprobar');
           this.isSubmitting.set(false);
-        },
-      });
+        }});
   }
 
   onStartComplete(transfer: StockTransfer): void {
@@ -320,7 +303,7 @@ export class TransfersComponent implements OnInit, OnDestroy {
     this.isSubmitting.set(true);
     this.transfersService
       .complete(transfer.id, items)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.success('Transferencia completada');
@@ -331,8 +314,7 @@ export class TransfersComponent implements OnInit, OnDestroy {
         error: (err) => {
           this.toastService.error(err.message || 'Error al completar');
           this.isSubmitting.set(false);
-        },
-      });
+        }});
   }
 
   async onCancel(transfer: StockTransfer): Promise<void> {
@@ -341,13 +323,12 @@ export class TransfersComponent implements OnInit, OnDestroy {
       message: `¿Cancelar la transferencia ${transfer.transfer_number}?${transfer.status === 'in_transit' ? ' El stock reservado será liberado.' : ''}`,
       confirmText: 'Cancelar transferencia',
       cancelText: 'Volver',
-      confirmVariant: 'danger',
-    });
+      confirmVariant: 'danger'});
     if (!confirmed) return;
 
     this.transfersService
       .cancel(transfer.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.success('Transferencia cancelada');
@@ -355,8 +336,7 @@ export class TransfersComponent implements OnInit, OnDestroy {
           this.refresh();
         },
         error: (err) =>
-          this.toastService.error(err.message || 'Error al cancelar'),
-      });
+          this.toastService.error(err.message || 'Error al cancelar')});
   }
 
   async onDelete(transfer: StockTransfer): Promise<void> {
@@ -365,21 +345,19 @@ export class TransfersComponent implements OnInit, OnDestroy {
       message: `¿Eliminar la transferencia ${transfer.transfer_number}? Esta acción no se puede deshacer.`,
       confirmText: 'Eliminar',
       cancelText: 'Cancelar',
-      confirmVariant: 'danger',
-    });
+      confirmVariant: 'danger'});
     if (!confirmed) return;
 
     this.transfersService
       .delete(transfer.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.success('Transferencia eliminada');
           this.refresh();
         },
         error: (err) =>
-          this.toastService.error(err.message || 'Error al eliminar'),
-      });
+          this.toastService.error(err.message || 'Error al eliminar')});
   }
 
   private refresh(): void {

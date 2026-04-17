@@ -1,34 +1,32 @@
-import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
+import {Component, OnInit, inject, signal,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   ChartComponent,
   IconComponent,
   StatsComponent,
-  CHART_THEMES,
-} from '../../../../shared/components';
+  CHART_THEMES} from '../../../../shared/components';
 import { EChartsOption } from 'echarts';
 import { OrganizationDashboardService } from './services/organization-dashboard.service';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency/currency.pipe';
 import { ActivatedRoute } from '@angular/router';
 import { GlobalFacade } from '../../../../core/store/global.facade';
-import { Subject } from 'rxjs';
-import { takeUntil } from 'rxjs/operators';
+
 
 @Component({
   selector: 'app-organization-dashboard',
   standalone: true,
   imports: [ChartComponent, IconComponent, StatsComponent],
   templateUrl: './dashboard.component.html',
-  styleUrls: ['./dashboard.component.scss'],
-})
-export class DashboardComponent implements OnInit, OnDestroy {
+  styleUrls: ['./dashboard.component.scss']})
+export class DashboardComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private currencyService = inject(CurrencyFormatService);
   private organizationDashboardService = inject(OrganizationDashboardService);
   private route = inject(ActivatedRoute);
   private globalFacade = inject(GlobalFacade);
-
-  private destroy$ = new Subject<void>();
-  readonly isLoading = signal(false);
+readonly isLoading = signal(false);
   readonly organizationId = signal<string>('');
   readonly dashboardStats = signal<any | null>(null);
   readonly selectedPeriod = signal<string>('6m');
@@ -79,7 +77,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       // Fallback to user context observable
 
       this.globalFacade.userContext$
-        .pipe(takeUntil(this.destroy$))
+        .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe((context) => {
           const orgId =
             context?.organization?.id || context?.user?.organization_id;
@@ -90,13 +88,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
         });
     }
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  private loadDashboardData(): void {
+private loadDashboardData(): void {
     if (!this.organizationId()) {
       return;
     }
@@ -105,7 +97,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
     this.organizationDashboardService
       .getDashboardStats(this.organizationId(), this.selectedPeriod())
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (data) => {
           this.dashboardStats.set(data);
@@ -116,8 +108,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
         error: (error) => {
           console.error('Error loading organization dashboard data:', error);
           this.isLoading.set(false);
-        },
-      });
+        }});
   }
 
   onPeriodChange(period: string): void {
@@ -166,35 +157,27 @@ export class DashboardComponent implements OnInit, OnDestroy {
           axisPointer: {
             type: 'cross',
             label: {
-              backgroundColor: '#6a7985',
-            },
-          },
-        },
+              backgroundColor: '#6a7985'}}},
         legend: {
           data: ['Ganancia', 'Costos', 'Ganancia Neta'],
-          bottom: 0,
-        },
+          bottom: 0},
         grid: {
           left: '3%',
           right: '4%',
           bottom: '10%',
-          containLabel: true,
-        },
+          containLabel: true},
         xAxis: [
           {
             type: 'category',
             boundaryGap: false,
-            data: labels,
-          },
+            data: labels},
         ],
         yAxis: [
           {
             type: 'value',
             axisLabel: {
               formatter: (value: any) =>
-                this.currencyService.formatChartAxis(value),
-            },
-          },
+                this.currencyService.formatChartAxis(value)}},
         ],
         series: [
           {
@@ -204,8 +187,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
             areaStyle: { opacity: 0.1 },
             emphasis: { focus: 'series' },
             data: revenue,
-            itemStyle: { color: '#3b82f6' },
-          },
+            itemStyle: { color: '#3b82f6' }},
           {
             name: 'Costos',
             type: 'line',
@@ -213,8 +195,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
             areaStyle: { opacity: 0.1 },
             emphasis: { focus: 'series' },
             data: costs,
-            itemStyle: { color: '#ef4444' },
-          },
+            itemStyle: { color: '#ef4444' }},
           {
             name: 'Ganancia Neta',
             type: 'line',
@@ -223,10 +204,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
             emphasis: { focus: 'series' },
             data: profit,
             itemStyle: { color: '#22c55e' },
-            label: { show: true, position: 'top' },
-          },
-        ],
-      };
+            label: { show: true, position: 'top' }},
+        ]});
     }
   }
   private updateStoreDistributionChart(data: any): void {
@@ -247,8 +226,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
           formatter: '{b}: {c} ({d}%)', // Name: Value (Percent)
         },
         legend: {
-          show: false,
-        },
+          show: false},
         series: [
           {
             name: 'Distribución de ventas',
@@ -258,22 +236,17 @@ export class DashboardComponent implements OnInit, OnDestroy {
             itemStyle: {
               borderRadius: 10,
               borderColor: '#fff',
-              borderWidth: 2,
-            },
+              borderWidth: 2},
             label: {
               show: false,
-              position: 'center',
-            },
+              position: 'center'},
             emphasis: {
               label: {
                 show: true,
                 fontSize: 20,
-                fontWeight: 'bold',
-              },
-            },
+                fontWeight: 'bold'}},
             labelLine: {
-              show: false,
-            },
+              show: false},
             data: data.store_distribution.map((item: any, index: number) => ({
               value: item.revenue || 0,
               name: item.type.charAt(0).toUpperCase() + item.type.slice(1),
@@ -281,12 +254,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
                 color:
                   this.storeDistributionColors[
                     index % this.storeDistributionColors.length
-                  ],
-              },
-            })),
-          },
-        ],
-      });
+                  ]}}))},
+        ]});
 
       // Update the display values in the legend
       this.storeDistributionLegend.set(data.store_distribution.map(
@@ -294,8 +263,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
           type: item.type.charAt(0).toUpperCase() + item.type.slice(1),
           value: this.formatCurrency(item.revenue || 0),
           percentage:
-            total > 0 ? (((item.revenue || 0) / total) * 100).toFixed(1) : '0',
-        }),
+            total > 0 ? (((item.revenue || 0) / total) * 100).toFixed(1) : '0'}),
       ));
     }
   }

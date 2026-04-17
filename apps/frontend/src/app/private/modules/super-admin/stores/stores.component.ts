@@ -1,34 +1,31 @@
-import {
-  Component,
+import {Component,
   OnInit,
-  OnDestroy,
   OnChanges,
   SimpleChanges,
   inject,
   signal,
   computed,
-} from '@angular/core';
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { RouterModule, Router } from '@angular/router';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { Subject, Subscription } from 'rxjs';
-import { debounceTime, distinctUntilChanged, takeUntil } from 'rxjs/operators';
+import { debounceTime, distinctUntilChanged } from 'rxjs/operators';
 
 import { StoresService } from './services/stores.service';
 import {
   StoreListItem,
   StoreState,
   StoreType,
-  CreateStoreDto,
-} from './interfaces/store.interface';
+  CreateStoreDto} from './interfaces/store.interface';
 
 // Import new components
 import {
   StoreStatsComponent,
   StoreCreateModalComponent,
-  StoreEditModalComponent,
-} from './components/index';
+  StoreEditModalComponent} from './components/index';
 
 import { StoreSettingsModalComponent } from './components/store-settings-modal.component';
 
@@ -46,8 +43,7 @@ import {
   TableAction,
   PaginationComponent,
   EmptyStateComponent,
-  CardComponent,
-} from '../../../../shared/components/index';
+  CardComponent} from '../../../../shared/components/index';
 
 // Import styles (CSS instead of SCSS to avoid loader issues)
 import './stores.component.css';
@@ -73,9 +69,9 @@ import './stores.component.css';
     CardComponent,
   ],
   providers: [StoresService],
-  templateUrl: './stores.component.html',
-})
-export class StoresComponent implements OnInit, OnDestroy, OnChanges {
+  templateUrl: './stores.component.html'})
+export class StoresComponent implements OnInit, OnChanges {
+  private destroyRef = inject(DestroyRef);
   // Dependencies
   private readonly storesService = inject(StoresService);
   private readonly fb = inject(FormBuilder);
@@ -117,8 +113,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       label: 'Nombre',
       sortable: true,
       width: '160px',
-      priority: 1,
-    },
+      priority: 1},
     { key: 'slug', label: 'Slug', sortable: true, width: '120px', priority: 3 },
     {
       key: 'organizations.name',
@@ -126,8 +121,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       sortable: true,
       width: '140px',
       defaultValue: 'N/A',
-      priority: 2,
-    },
+      priority: 2},
     {
       key: 'addresses',
       label: 'Dirección',
@@ -141,8 +135,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
           return `${primaryAddress.city}, ${primaryAddress.state_province}`;
         }
         return `${value[0].city}, ${value[0].state_province}`;
-      },
-    },
+      }},
     {
       key: 'store_type',
       label: 'Tipo',
@@ -159,11 +152,8 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
           online: '#3b82f6',
           hybrid: '#8b5cf6',
           popup: '#f59e0b',
-          kiosko: '#ef4444',
-        },
-      },
-      transform: (value: StoreType) => this.formatStoreType(value),
-    },
+          kiosko: '#ef4444'}},
+      transform: (value: StoreType) => this.formatStoreType(value)},
     {
       key: '_count.store_users',
       label: 'Usuarios',
@@ -171,8 +161,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       width: '80px',
       align: 'center',
       defaultValue: '0',
-      priority: 3,
-    },
+      priority: 3},
     {
       key: 'is_active',
       label: 'Estado',
@@ -183,10 +172,8 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       priority: 1,
       badgeConfig: {
         type: 'status',
-        size: 'sm',
-      },
-      transform: (value: boolean) => this.formatActiveStatus(value),
-    },
+        size: 'sm'},
+      transform: (value: boolean) => this.formatActiveStatus(value)},
   ];
 
   // Card configuration for mobile
@@ -202,9 +189,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
         online: '#3b82f6',
         hybrid: '#8b5cf6',
         popup: '#f59e0b',
-        kiosko: '#ef4444',
-      },
-    },
+        kiosko: '#ef4444'}},
     badgeTransform: (value: StoreType) => this.formatStoreType(value),
     detailKeys: [
       { key: 'slug', label: 'Slug' },
@@ -214,33 +199,28 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
         transform: (v) => {
           if (!v || v.length === 0) return 'N/A';
           return v[0].city || 'N/A';
-        },
-      },
+        }},
       { key: '_count.store_users', label: 'Usuarios', icon: 'users' },
     ],
     footerKey: 'is_active',
-    footerTransform: (val) => (val ? 'Activo' : 'Inactivo'),
-  };
+    footerTransform: (val) => (val ? 'Activo' : 'Inactivo')};
 
   tableActions: TableAction[] = [
     {
       label: 'Editar',
       icon: 'edit',
       action: (store) => this.editStore(store),
-      variant: 'info',
-    },
+      variant: 'info'},
     {
       label: 'Configuración',
       icon: 'settings',
       action: (store) => this.openSettingsModal(store),
-      variant: 'ghost',
-    },
+      variant: 'ghost'},
     {
       label: 'Eliminar',
       icon: 'trash-2',
       action: (store) => this.deleteStore(store),
-      variant: 'danger',
-    },
+      variant: 'danger'},
   ];
 
   readonly stats = signal({
@@ -251,8 +231,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
     draft_stores: 0,
     total_revenue: 0,
     total_orders: 0,
-    total_products: 0,
-  });
+    total_products: 0});
 
   // Modal state
   readonly isCreateModalOpen = signal(false);
@@ -268,17 +247,14 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
   readonly isSettingsModalOpen = signal(false);
   readonly isUpdatingSettings = signal(false);
   selectedStoreForSettings?: StoreListItem;
-
-  private destroy$ = new Subject<void>();
-  private searchSubject = new Subject<string>();
+private searchSubject = new Subject<string>();
 
   constructor() {
     this.filterForm = this.fb.group({
       search: [''],
       store_type: [''],
       is_active: [''],
-      include_non_production: [''],
-    });
+      include_non_production: ['']});
     this.initializeCreateForm();
   }
 
@@ -288,7 +264,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
 
     // Set up search debounce
     this.searchSubject
-      .pipe(debounceTime(300), distinctUntilChanged(), takeUntil(this.destroy$))
+      .pipe(debounceTime(300), distinctUntilChanged(), takeUntilDestroyed(this.destroyRef))
       .subscribe((searchTerm) => {
         this.searchTerm = searchTerm;
         this.pagination.page = 1;
@@ -297,15 +273,15 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
 
     // Subscribe to loading states from service
     this.storesService.isLoading$
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((loading) => this.isLoading.set(loading));
 
     this.storesService.isCreatingStore$
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((loading) => this.isCreatingStore.set(loading));
 
     this.storesService.isUpdatingStore$
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((loading) => {
         this.isUpdatingStore.set(loading);
         this.isUpdatingSettings.set(loading);
@@ -313,7 +289,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
 
     // Subscribe to filter changes
     this.filterForm.valueChanges
-      .pipe(debounceTime(300), distinctUntilChanged(), takeUntil(this.destroy$))
+      .pipe(debounceTime(300), distinctUntilChanged(), takeUntilDestroyed(this.destroyRef))
       .subscribe(() => {
         this.pagination.page = 1;
         this.loadStores();
@@ -324,13 +300,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
     if (changes['stores'] && !changes['stores'].firstChange) {
     }
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  private initializeCreateForm(): void {
+private initializeCreateForm(): void {
     this.createStoreForm = this.fb.group({
       name: ['', [Validators.required, Validators.minLength(2)]],
       slug: ['', [Validators.required, Validators.minLength(2)]],
@@ -342,8 +312,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       city: [''],
       country: [''],
       organization_id: [null, [Validators.required]],
-      state: ['active'],
-    });
+      state: ['active']});
   }
 
   get hasFilters(): boolean {
@@ -369,8 +338,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       city: '',
       country: '',
       organization_id: null,
-      state: 'active',
-    });
+      state: 'active'});
   }
 
   onCreateModalChange(isOpen: boolean): void {
@@ -408,13 +376,12 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
         country: formData.country || undefined,
         organization_id: formData.organization_id,
         is_active: formData.state === 'active' ? true : false,
-        store_type: StoreType.PHYSICAL,
-      };
+        store_type: StoreType.PHYSICAL};
     }
 
     this.storesService
       .createStore(storeData as CreateStoreDto)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           if (response.success && response.data) {
@@ -428,8 +395,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
         },
         error: (error) => {
           this.toastService.error('Error al crear la tienda');
-        },
-      });
+        }});
   }
 
   loadStores(): void {
@@ -439,22 +405,17 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       limit: this.pagination.limit,
       ...(filters.search && { search: filters.search }),
       ...(filters.is_active && {
-        is_active: filters.is_active === 'true',
-      }),
+        is_active: filters.is_active === 'true'}),
       ...(filters.store_type && {
-        store_type: filters.store_type as StoreType,
-      }),
+        store_type: filters.store_type as StoreType}),
       ...(this.selectedOrganization && {
-        organization_id: parseInt(this.selectedOrganization),
-      }),
+        organization_id: parseInt(this.selectedOrganization)}),
       ...(filters.include_non_production === 'all' && {
-        include_non_production: true,
-      }),
-    };
+        include_non_production: true})};
 
     this.storesService
       .getStores(query)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: any) => {
           if (response.meta) {
@@ -481,15 +442,12 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
                 organizations: store.organizations || {
                   id: store.organization_id,
                   name: 'Unknown',
-                  slug: 'unknown',
-                },
+                  slug: 'unknown'},
                 addresses: store.addresses || [],
                 _count: store._count || {
                   products: 0,
                   orders: 0,
-                  store_users: 0,
-                },
-              })),
+                  store_users: 0}})),
             );
           } else {
             this.stores.set([]);
@@ -498,14 +456,13 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
         error: (error) => {
           console.error('Error loading stores:', error);
           this.toastService.error('Error al cargar las tiendas');
-        },
-      });
+        }});
   }
 
   loadStats(): void {
     this.storesService
       .getStoreStatsList()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           if (response.success && response.data) {
@@ -517,16 +474,14 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
               draft_stores: 0,
               total_revenue: 0,
               total_orders: 0,
-              total_products: 0,
-            });
+              total_products: 0});
           } else {
             this.updateStats();
           }
         },
         error: (error) => {
           this.updateStats();
-        },
-      });
+        }});
   }
 
   updateStats(): void {
@@ -537,8 +492,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       active_stores: list.filter((store) => store.is_active === true).length,
       inactive_stores: list.filter((store) => store.is_active === false).length,
       suspended_stores: 0,
-      draft_stores: 0,
-    }));
+      draft_stores: 0}));
   }
 
   refreshStores(): void {
@@ -550,8 +504,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       search: '',
       store_type: '',
       is_active: '',
-      include_non_production: '',
-    });
+      include_non_production: ''});
     this.selectedOrganization = '';
   }
 
@@ -585,7 +538,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
 
     this.storesService
       .updateStoreSettings(this.selectedStoreForSettings.id, settingsData)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           if (response.success && response.data) {
@@ -600,8 +553,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
         },
         error: (error) => {
           this.toastService.error('Error al actualizar la configuración');
-        },
-      });
+        }});
   }
 
   onSearchChange(searchTerm: string): void {
@@ -626,8 +578,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       inactive: 'Inactivo',
       draft: 'Borrador',
       suspended: 'Suspendido',
-      archived: 'Archivado',
-    };
+      archived: 'Archivado'};
     return statusMap[status] || status;
   }
 
@@ -637,8 +588,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       [StoreType.ONLINE]: 'Online',
       [StoreType.HYBRID]: 'Híbrida',
       [StoreType.POPUP]: 'Temporal',
-      [StoreType.KIOSKO]: 'Kiosco',
-    };
+      [StoreType.KIOSKO]: 'Kiosco'};
     return typeMap[type] || type;
   }
 
@@ -650,8 +600,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
     return new Date(dateString).toLocaleDateString('es-ES', {
       year: 'numeric',
       month: 'short',
-      day: 'numeric',
-    });
+      day: 'numeric'});
   }
 
   deleteStore(store: StoreListItem): void {
@@ -661,13 +610,12 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
         message: `¿Estás seguro de que deseas eliminar la tienda "${store.name}"? Esta acción no se puede deshacer.`,
         confirmText: 'Eliminar',
         cancelText: 'Cancelar',
-        confirmVariant: 'danger',
-      })
+        confirmVariant: 'danger'})
       .then((confirmed) => {
         if (confirmed) {
           this.storesService
             .deleteStore(store.id)
-            .pipe(takeUntil(this.destroy$))
+            .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe({
               next: (response) => {
                 if (response.success) {
@@ -681,8 +629,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
               },
               error: (error) => {
                 this.toastService.error('Error al eliminar la tienda');
-              },
-            });
+              }});
         }
       });
   }
@@ -720,12 +667,11 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       city: storeData.city,
       country: storeData.country,
       is_active: storeData.state === 'active' ? true : false,
-      store_type: storeData.store_type || StoreType.PHYSICAL,
-    };
+      store_type: storeData.store_type || StoreType.PHYSICAL};
 
     this.storesService
       .updateStore(this.selectedStore.id, updateData)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           if (response.success && response.data) {
@@ -742,8 +688,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
         },
         error: (error) => {
           this.toastService.error('Error al actualizar la tienda');
-        },
-      });
+        }});
   }
 
   getEmptyStateTitle(): string {

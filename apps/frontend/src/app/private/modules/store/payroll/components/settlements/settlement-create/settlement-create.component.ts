@@ -1,16 +1,33 @@
-import { Component, input, output, DestroyRef, inject } from '@angular/core';
+import {
+  Component,
+  input,
+  output,
+  DestroyRef,
+  inject,
+  signal,
+} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
-import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
-import { Subject } from 'rxjs';
-import { takeUntil } from 'rxjs/operators';
+import {
+  FormBuilder,
+  FormGroup,
+  Validators,
+  ReactiveFormsModule,
+} from '@angular/forms';
 
 import { PayrollService } from '../../../services/payroll.service';
-import { Employee, CreateSettlementDto } from '../../../interfaces/payroll.interface';
+import {
+  Employee,
+  CreateSettlementDto,
+} from '../../../interfaces/payroll.interface';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
-import { SelectorComponent, SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
+import {
+  SelectorComponent,
+  SelectorOption,
+} from '../../../../../../../shared/components/selector/selector.component';
 
 @Component({
   selector: 'app-settlement-create',
@@ -20,8 +37,8 @@ import { SelectorComponent, SelectorOption } from '../../../../../../../shared/c
     ModalComponent,
     ButtonComponent,
     InputComponent,
-    SelectorComponent
-],
+    SelectorComponent,
+  ],
   template: `
     <app-modal
       [isOpen]="isOpen()"
@@ -32,11 +49,10 @@ import { SelectorComponent, SelectorOption } from '../../../../../../../shared/c
     >
       <div class="p-4">
         <form [formGroup]="form" (ngSubmit)="onSubmit()" class="space-y-4">
-
           <app-selector
             label="Empleado"
             formControlName="employee_id"
-            [options]="employeeOptions"
+            [options]="employeeOptions()"
             [required]="true"
             placeholder="Seleccionar empleado..."
           ></app-selector>
@@ -65,7 +81,9 @@ import { SelectorComponent, SelectorOption } from '../../../../../../../shared/c
           ></app-input>
 
           <div>
-            <label class="block text-sm font-medium text-text-primary mb-1">Notas</label>
+            <label class="block text-sm font-medium text-text-primary mb-1"
+              >Notas</label
+            >
             <textarea
               formControlName="notes"
               rows="3"
@@ -75,21 +93,22 @@ import { SelectorComponent, SelectorOption } from '../../../../../../../shared/c
               placeholder="Observaciones opcionales..."
             ></textarea>
           </div>
-
         </form>
       </div>
 
       <!-- Footer -->
       <div slot="footer">
-        <div class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
+        <div
+          class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100"
+        >
           <app-button variant="outline" (clicked)="onClose()">
             Cancelar
           </app-button>
           <app-button
             variant="primary"
             (clicked)="onSubmit()"
-            [disabled]="form.invalid || submitting"
-            [loading]="submitting"
+            [disabled]="form.invalid || submitting()"
+            [loading]="submitting()"
           >
             Crear Liquidacion
           </app-button>
@@ -107,12 +126,10 @@ export class SettlementCreateComponent {
   private payrollService = inject(PayrollService);
   private toastService = inject(ToastService);
   private destroyRef = inject(DestroyRef);
-  private destroy$ = new Subject<void>();
+  readonly submitting = signal(false);
+  readonly employeeOptions = signal<SelectorOption[]>([]);
 
-  submitting = false;
-  employeeOptions: SelectorOption[] = [];
-
-  reasonOptions: SelectorOption[] = [
+  readonly reasonOptions: SelectorOption[] = [
     { label: 'Renuncia Voluntaria', value: 'voluntary_resignation' },
     { label: 'Despido con Justa Causa', value: 'just_cause' },
     { label: 'Despido sin Justa Causa', value: 'without_just_cause' },
@@ -133,21 +150,21 @@ export class SettlementCreateComponent {
   constructor() {
     this.loadEmployees();
 
-    this.destroyRef.onDestroy(() => {
-      this.destroy$.next();
-      this.destroy$.complete();
-    });
+    this.destroyRef.onDestroy(() => {});
   }
 
   private loadEmployees(): void {
-    this.payrollService.getEmployees({ status: 'active', limit: 500 })
-      .pipe(takeUntil(this.destroy$))
+    this.payrollService
+      .getEmployees({ status: 'active', limit: 500 })
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
-          this.employeeOptions = (res.data || []).map((emp: Employee) => ({
-            label: `${emp.first_name} ${emp.last_name} (${emp.document_number})`,
-            value: emp.id,
-          }));
+          this.employeeOptions.set(
+            (res.data || []).map((emp: Employee) => ({
+              label: `${emp.first_name} ${emp.last_name} (${emp.document_number})`,
+              value: emp.id,
+            })),
+          );
         },
       });
   }
@@ -158,7 +175,7 @@ export class SettlementCreateComponent {
       return;
     }
 
-    this.submitting = true;
+    this.submitting.set(true);
     const val = this.form.value;
 
     const dto: CreateSettlementDto = {
@@ -169,19 +186,26 @@ export class SettlementCreateComponent {
       pending_salary_days: val.pending_salary_days || undefined,
     };
 
-    this.payrollService.createSettlement(dto)
-      .pipe(takeUntil(this.destroy$))
+    this.payrollService
+      .createSettlement(dto)
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
-          this.toastService.show({ variant: 'success', description: 'Liquidacion creada y calculada' });
-          this.submitting = false;
+          this.toastService.show({
+            variant: 'success',
+            description: 'Liquidacion creada y calculada',
+          });
+          this.submitting.set(false);
           this.form.reset();
           this.created.emit();
           this.onClose();
         },
         error: () => {
-          this.toastService.show({ variant: 'error', description: 'Error al crear la liquidacion' });
-          this.submitting = false;
+          this.toastService.show({
+            variant: 'error',
+            description: 'Error al crear la liquidacion',
+          });
+          this.submitting.set(false);
         },
       });
   }

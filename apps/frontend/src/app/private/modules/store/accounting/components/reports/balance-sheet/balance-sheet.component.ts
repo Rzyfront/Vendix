@@ -1,7 +1,6 @@
-import { Component, inject, effect } from '@angular/core';
+import { Component, inject, effect, signal, computed } from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import { Store } from '@ngrx/store';
-import { Observable, first } from 'rxjs';
 import { toSignal } from '@angular/core/rxjs-interop';
 
 import {
@@ -56,7 +55,7 @@ import {
             </h2>
             <div class="flex items-center gap-2 w-full md:w-auto">
               <app-selector
-                [options]="period_options"
+                [options]="periodOptions()"
                 placeholder="Seleccionar periodo..."
                 (selectionChange)="onPeriodChange($event)"
                 class="flex-1 md:w-48"
@@ -280,30 +279,31 @@ export class BalanceSheetComponent {
     initialValue: [] as FiscalPeriod[],
   });
 
-  period_options: { value: any; label: string }[] = [];
-  selected_period_id: number | null = null;
+  // ✅ Migrated to signals (Section 9 — antipatrón variables planas)
+  readonly selectedPeriodId = signal<number | null>(null);
+  readonly periodOptions = computed(() =>
+    this.periods().map((p) => ({
+      value: p.id,
+      label: p.name,
+    }))
+  );
 
   constructor() {
-    // Initialize period options when periods are loaded
-    effect(() => {
-      const periods = this.periods();
-      this.period_options = periods.map((p) => ({
-        value: p.id,
-        label: p.name,
-      }));
-    });
+    // Auto-update period options when periods change (via computed)
+    // Effect no longer needed — computed handles it
   }
 
   onPeriodChange(value: any): void {
-    this.selected_period_id = value;
+    this.selectedPeriodId.set(value);
     this.loadReport();
   }
 
   loadReport(): void {
-    if (this.selected_period_id) {
+    const periodId = this.selectedPeriodId();
+    if (periodId) {
       this.store.dispatch(
         loadBalanceSheet({
-          query: { fiscal_period_id: this.selected_period_id },
+          query: { fiscal_period_id: periodId },
         }),
       );
     }

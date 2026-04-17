@@ -1,15 +1,15 @@
-import {
-  Component,
+import {Component,
   OnInit,
   OnDestroy,
   inject,
   signal,
-  computed,
-} from '@angular/core';
+  computed,,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { RouterModule, ActivatedRoute } from '@angular/router';
-import { Subject } from 'rxjs';
-import { takeUntil } from 'rxjs/operators';
+
+
 import { AccountService, OrderDetail } from '../../../services/account.service';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
@@ -20,9 +20,9 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
   standalone: true,
   imports: [CommonModule, RouterModule, IconComponent, CurrencyPipe],
   templateUrl: './order-detail.component.html',
-  styleUrls: ['./order-detail.component.scss'],
-})
+  styleUrls: ['./order-detail.component.scss'] })
 export class OrderDetailComponent implements OnInit, OnDestroy {
+  private destroyRef = inject(DestroyRef);
   readonly order = signal<OrderDetail | null>(null);
   readonly is_loading = signal(true);
   readonly is_new_order = signal(false);
@@ -74,8 +74,7 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
     return 'Te notificaremos cuando esté en camino.';
   });
   private wompiPollTimer: ReturnType<typeof setInterval> | null = null;
-  private destroy$ = new Subject<void>();
-  private toast = inject(ToastService);
+private toast = inject(ToastService);
 
   constructor(
     private account_service: AccountService,
@@ -88,7 +87,7 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
 
     // Handle Wompi payment callback
     this.route.queryParams
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((params) => {
         if (params['wompi_callback'] === 'true' && !this.wompiPaymentVerified) {
           this.verifyingWompiPayment.set(true);
@@ -100,9 +99,8 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-    if (this.wompiPollTimer) {
+
+if (this.wompiPollTimer) {
       clearInterval(this.wompiPollTimer);
     }
   }
@@ -174,8 +172,7 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
               this.wompiPollTimer = null;
             }
           }
-        },
-      });
+        } });
     }, 5000); // Poll every 5 seconds
   }
 
@@ -190,8 +187,7 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
       },
       error: () => {
         this.is_loading.set(false);
-      },
-    });
+      } });
   }
 
   getVariantLabel(item: any): string {
@@ -213,8 +209,7 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
       shipped: 'Enviado',
       delivered: 'Entregado',
       completed: 'Completado',
-      cancelled: 'Cancelado',
-    };
+      cancelled: 'Cancelado' };
     return labels[state] || state;
   }
 
@@ -226,8 +221,7 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
       shipped: 'info',
       delivered: 'success',
       completed: 'success',
-      cancelled: 'error',
-    };
+      cancelled: 'error' };
     return classes[state] || 'default';
   }
 
@@ -239,8 +233,7 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
       shipped: 'truck',
       delivered: 'package-check',
       completed: 'check-circle',
-      cancelled: 'circle-x',
-    };
+      cancelled: 'circle-x' };
     return icons[state] || 'circle';
   }
 
@@ -250,8 +243,7 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
       cash: 'Efectivo',
       card: 'Tarjeta',
       transfer: 'Transferencia',
-      cash_on_delivery: 'Contra entrega',
-    };
+      cash_on_delivery: 'Contra entrega' };
     return labels[method] || method;
   }
 
@@ -261,8 +253,7 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
       cash: 'banknote',
       card: 'credit-card',
       transfer: 'send',
-      cash_on_delivery: 'coins',
-    };
+      cash_on_delivery: 'coins' };
     return icons[method] || 'credit-card';
   }
 
@@ -282,8 +273,7 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
       confirmed: 'Confirmada',
       completed: 'Completada',
       cancelled: 'Cancelada',
-      no_show: 'No asistió',
-    };
+      no_show: 'No asistió' };
     return labels[status] || status;
   }
 
@@ -293,8 +283,7 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
       confirmed: 'info',
       completed: 'success',
       cancelled: 'error',
-      no_show: 'error',
-    };
+      no_show: 'error' };
     return classes[status] || 'default';
   }
 

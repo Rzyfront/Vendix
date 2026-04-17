@@ -1,9 +1,10 @@
-import { Component, OnInit, OnDestroy, signal } from '@angular/core';
+import { Component, ChangeDetectionStrategy, OnInit, DestroyRef, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import { Subject } from 'rxjs';
-import { takeUntil, debounceTime, distinctUntilChanged } from 'rxjs/operators';
+import { debounceTime, distinctUntilChanged } from 'rxjs/operators';
 import {
   CatalogService,
   EcommerceProduct,
@@ -40,8 +41,9 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
   ],
   templateUrl: './catalog.component.html',
   styleUrls: ['./catalog.component.scss'],
+  changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class CatalogComponent implements OnInit, OnDestroy {
+export class CatalogComponent implements OnInit {
   readonly products = signal<EcommerceProduct[]>([]);
   readonly categories = signal<Category[]>([]);
   readonly brands = signal<Brand[]>([]);
@@ -50,18 +52,18 @@ export class CatalogComponent implements OnInit, OnDestroy {
   readonly search_term = signal('');
   readonly selected_category_id = signal<number | null>(null);
   readonly selected_brand_id = signal<number | null>(null);
-  min_price: number | null = null;
-  max_price: number | null = null;
-  sort_by: 'name' | 'price_asc' | 'price_desc' | 'newest' | 'oldest' = 'newest';
+  readonly min_price = signal<number | null>(null);
+  readonly max_price = signal<number | null>(null);
+  readonly sort_by = signal<'name' | 'price_asc' | 'price_desc' | 'newest' | 'oldest'>('newest');
 
   // Pagination
   readonly current_page = signal(1);
   readonly total_pages = signal(1);
   readonly total_products = signal(0);
-  limit = 12;
+  readonly limit = signal(12);
 
   readonly is_loading = signal(false);
-  show_filters = false;
+  readonly show_filters = signal(false);
 
   // Quick View Modal
   readonly quickViewOpen = signal(false);
@@ -71,7 +73,7 @@ export class CatalogComponent implements OnInit, OnDestroy {
   readonly shareModalOpen = signal(false);
   readonly shareProduct = signal<EcommerceProduct | null>(null);
 
-  private destroy$ = new Subject<void>();
+  private destroyRef = inject(DestroyRef);
   private search_subject = new Subject<string>();
 
   // Wishlist state
@@ -96,7 +98,7 @@ export class CatalogComponent implements OnInit, OnDestroy {
 
     // Handle search debounce
     this.search_subject
-      .pipe(debounceTime(400), distinctUntilChanged(), takeUntil(this.destroy$))
+      .pipe(debounceTime(400), distinctUntilChanged(), takeUntilDestroyed(this.destroyRef))
       .subscribe(() => {
         this.current_page.set(1);
         this.loadProducts();
@@ -106,7 +108,7 @@ export class CatalogComponent implements OnInit, OnDestroy {
     const routeData = this.route.snapshot.data;
     if (routeData['defaultFilters']) {
       const defaults = routeData['defaultFilters'];
-      if (defaults.sort_by) this.sort_by = defaults.sort_by;
+      if (defaults.sort_by) this.sort_by.set(defaults.sort_by);
       if (defaults.has_discount !== undefined) {
         // We'll use a special flag for this if needed,
         // for now let's assume we pass it to loadProducts
@@ -114,7 +116,7 @@ export class CatalogComponent implements OnInit, OnDestroy {
     }
 
     this.route.queryParams
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((params) => {
         // Siempre actualizar search_term (vacío si no existe)
         this.search_term.set(params['search'] || '');
@@ -130,7 +132,7 @@ export class CatalogComponent implements OnInit, OnDestroy {
 
     // Subscribe to authentication state
     this.auth_facade.isAuthenticated$
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((is_auth) => {
         this.is_authenticated = is_auth;
         if (is_auth) {
@@ -144,17 +146,12 @@ export class CatalogComponent implements OnInit, OnDestroy {
 
     // Subscribe to wishlist changes
     this.wishlist_service.wishlist$
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((wishlist) => {
         this.wishlist_product_ids.set(
           new Set(wishlist?.items.map((item) => item.product_id) || []),
         );
       });
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
   }
 
   loadProducts(): void {
@@ -165,16 +162,16 @@ export class CatalogComponent implements OnInit, OnDestroy {
 
     const query: CatalogQuery = {
       page: this.current_page(),
-      limit: this.limit,
-      sort_by: this.sort_by,
+      limit: this.limit(),
+      sort_by: this.sort_by(),
     };
 
     if (this.search_term()) query.search = this.search_term();
     if (this.selected_category_id())
       query.category_id = this.selected_category_id()!;
     if (this.selected_brand_id()) query.brand_id = this.selected_brand_id()!;
-    if (this.min_price) query.min_price = this.min_price;
-    if (this.max_price) query.max_price = this.max_price;
+    if (this.min_price()) query.min_price = this.min_price()!;
+    if (this.max_price()) query.max_price = this.max_price()!;
 
     // Merge with default filters from route data
     if (defaults.has_discount) query.has_discount = true;
@@ -246,16 +243,16 @@ export class CatalogComponent implements OnInit, OnDestroy {
     this.search_term.set('');
     this.selected_category_id.set(null);
     this.selected_brand_id.set(null);
-    this.min_price = null;
-    this.max_price = null;
-    this.sort_by = 'newest';
+    this.min_price.set(null);
+    this.max_price.set(null);
+    this.sort_by.set('newest');
     this.current_page.set(1);
     this.updateUrl();
     this.loadProducts();
   }
 
   toggleFilters(): void {
-    this.show_filters = !this.show_filters;
+    this.show_filters.set(!this.show_filters());
   }
 
   goToPage(page: number): void {

@@ -1,20 +1,20 @@
-import { Component, OnInit, OnDestroy, signal, model, inject } from '@angular/core';
+import {Component, OnInit, signal, model, inject,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
-import { debounceTime, distinctUntilChanged, Subject, takeUntil } from 'rxjs';
+import { debounceTime, distinctUntilChanged, Subject } from 'rxjs';
 import {
   User,
   UserQueryDto,
   UserStats,
   UserState,
-  PaginatedUsersResponse,
-} from './interfaces/user.interface';
+  PaginatedUsersResponse} from './interfaces/user.interface';
 import { UsersService } from './services/users.service';
 
 import {
   UserCreateModalComponent,
   UserEditModalComponent,
-  UserConfigModalComponent,
-} from './components/index';
+  UserConfigModalComponent} from './components/index';
 
 // Import components from shared
 import {
@@ -29,14 +29,12 @@ import {
   InputsearchComponent,
   ResponsiveDataViewComponent,
   ItemListCardConfig,
-  EmptyStateComponent,
-} from '../../../../shared/components/index';
+  EmptyStateComponent} from '../../../../shared/components/index';
 import {
   FormsModule,
   ReactiveFormsModule,
   FormBuilder,
-  FormGroup,
-} from '@angular/forms';
+  FormGroup} from '@angular/forms';
 
 interface StatItem {
   title: string;
@@ -64,9 +62,9 @@ interface StatItem {
     ButtonComponent
 ],
   templateUrl: './users.component.html',
-  styleUrls: ['./users.component.css'],
-})
-export class UsersComponent implements OnInit, OnDestroy {
+  styleUrls: ['./users.component.css']})
+export class UsersComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private usersService = inject(UsersService);
   private fb = inject(FormBuilder);
   private dialogService = inject(DialogService);
@@ -85,9 +83,7 @@ export class UsersComponent implements OnInit, OnDestroy {
   readonly showDeleteModal = signal(false);
   readonly viewMode = signal<'table' | 'cards'>('table');
   searchSubject = new Subject<string>();
-  private destroy$ = new Subject<void>();
-
-  // Form for filters
+// Form for filters
   filterForm: FormGroup;
 
   // Table configuration
@@ -97,29 +93,25 @@ export class UsersComponent implements OnInit, OnDestroy {
       label: 'Nombre',
       sortable: true,
       width: '120px',
-      priority: 1,
-    },
+      priority: 1},
     {
       key: 'last_name',
       label: 'Apellido',
       sortable: true,
       width: '120px',
-      priority: 1,
-    },
+      priority: 1},
     {
       key: 'username',
       label: 'Usuario',
       sortable: true,
       width: '140px',
-      priority: 2,
-    },
+      priority: 2},
     {
       key: 'email',
       label: 'Email',
       sortable: true,
       width: '180px',
-      priority: 2,
-    },
+      priority: 2},
     {
       key: 'state',
       label: 'Estado',
@@ -130,42 +122,36 @@ export class UsersComponent implements OnInit, OnDestroy {
       priority: 1,
       badgeConfig: {
         type: 'status',
-        size: 'sm',
-      },
-      transform: (value: UserState) => this.getStateDisplay(value).text,
-    },
+        size: 'sm'},
+      transform: (value: UserState) => this.getStateDisplay(value).text},
     {
       key: 'app',
       label: 'Aplicación',
       sortable: false,
       width: '120px',
       defaultValue: 'N/A',
-      priority: 3,
-    },
+      priority: 3},
     {
       key: 'last_login',
       label: 'Último Acceso',
       sortable: true,
       width: '140px',
       priority: 3,
-      transform: (value: string) => (value ? this.formatDate(value) : 'Nunca'),
-    },
+      transform: (value: string) => (value ? this.formatDate(value) : 'Nunca')},
     {
       key: 'created_at',
       label: 'Fecha Creación',
       sortable: true,
       width: '140px',
       priority: 3,
-      transform: (value: string) => this.formatDate(value),
-    },
+      transform: (value: string) => this.formatDate(value)},
     {
       key: 'created_at',
       label: 'Fecha Creación',
       sortable: true,
       width: '140px',
       priority: 3,
-      transform: (value: string) => this.formatDate(value),
-    },
+      transform: (value: string) => this.formatDate(value)},
   ];
 
   // Card configuration for mobile
@@ -176,8 +162,7 @@ export class UsersComponent implements OnInit, OnDestroy {
     badgeKey: 'state',
     badgeConfig: {
       type: 'status',
-      size: 'sm',
-    },
+      size: 'sm'},
     badgeTransform: (value: UserState) => this.getStateDisplay(value).text,
     detailKeys: [
       { key: 'username', label: 'Usuario', icon: 'user' },
@@ -185,24 +170,20 @@ export class UsersComponent implements OnInit, OnDestroy {
       {
         key: 'created_at',
         label: 'Fecha',
-        transform: (v) => this.formatDate(v),
-      },
-    ],
-  };
+        transform: (v) => this.formatDate(v)},
+    ]};
 
   tableActions: TableAction[] = [
     {
       label: 'Editar',
       icon: 'edit',
       action: (user: User) => this.editUser(user),
-      variant: 'info',
-    },
+      variant: 'info'},
     {
       label: 'Eliminar',
       icon: 'trash-2',
       action: (user: User) => this.confirmDelete(user),
-      variant: 'danger',
-    },
+      variant: 'danger'},
   ];
 
   // Pagination
@@ -210,8 +191,7 @@ export class UsersComponent implements OnInit, OnDestroy {
     page: 1,
     limit: 10,
     total: 0,
-    totalPages: 0,
-  };
+    totalPages: 0};
 
   // Filter states
   userStates = [
@@ -220,8 +200,7 @@ export class UsersComponent implements OnInit, OnDestroy {
     { value: UserState.INACTIVE, label: 'Inactivo' },
     {
       value: UserState.PENDING_VERIFICATION,
-      label: 'Pendiente de Verificación',
-    },
+      label: 'Pendiente de Verificación'},
     { value: UserState.SUSPENDED, label: 'Suspendido' },
     { value: UserState.ARCHIVED, label: 'Archivado' },
   ];
@@ -229,12 +208,11 @@ export class UsersComponent implements OnInit, OnDestroy {
   constructor() {
     this.filterForm = this.fb.group({
       search: [''],
-      state: [''],
-    });
+      state: ['']});
 
     // Setup search debounce
     this.searchSubject
-      .pipe(debounceTime(300), distinctUntilChanged(), takeUntil(this.destroy$))
+      .pipe(debounceTime(300), distinctUntilChanged(), takeUntilDestroyed(this.destroyRef))
       .subscribe((searchTerm: string) => {
         this.filterForm.patchValue(
           { search: searchTerm },
@@ -251,27 +229,20 @@ export class UsersComponent implements OnInit, OnDestroy {
 
     // Subscribe to form changes
     this.filterForm.valueChanges
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => {
         this.pagination.page = 1;
         this.loadUsers();
       });
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  loadUsers(): void {
+loadUsers(): void {
     this.isLoading.set(true);
     const filters = this.filterForm.value;
     const query: UserQueryDto = {
       page: this.pagination.page,
       limit: this.pagination.limit,
       search: filters.search || undefined,
-      state: filters.state || undefined,
-    };
+      state: filters.state || undefined};
 
     this.usersService
       .getUsers(query)
@@ -285,16 +256,14 @@ export class UsersComponent implements OnInit, OnDestroy {
               page: response.pagination.page || 1,
               limit: response.pagination.limit || 10,
               total: response.pagination.total || 0,
-              totalPages: response.pagination.total_pages || 0,
-            };
+              totalPages: response.pagination.total_pages || 0};
           } else {
             // Si no hay paginación, mantener valores por defecto
             this.pagination = {
               page: 1,
               limit: 10,
               total: this.users().length,
-              totalPages: 1,
-            };
+              totalPages: 1};
           }
         },
         error: (error) => {
@@ -305,11 +274,9 @@ export class UsersComponent implements OnInit, OnDestroy {
             page: 1,
             limit: 10,
             total: 0,
-            totalPages: 0,
-          };
+            totalPages: 0};
           // Handle error - show toast or notification
-        },
-      })
+        }})
       .add(() => {
         this.isLoading.set(false); // Asegurar que el estado de carga se resetee
       });
@@ -334,8 +301,7 @@ export class UsersComponent implements OnInit, OnDestroy {
         this.userStats.set(stats);
         this.updateStatsItems();
       },
-      error: (err) => console.error('Error loading user stats', err),
-    });
+      error: (err) => console.error('Error loading user stats', err)});
   }
 
   private updateStatsItems(): void {
@@ -347,8 +313,7 @@ export class UsersComponent implements OnInit, OnDestroy {
       inactivos: 0,
       suspendidos: 0,
       email_verificado: 0,
-      archivados: 0,
-    };
+      archivados: 0};
     const total = s.total_usuarios || 0;
 
     this.statsItems.set([
@@ -358,64 +323,56 @@ export class UsersComponent implements OnInit, OnDestroy {
         smallText: 'en la organización',
         iconName: 'users',
         iconBgColor: 'bg-primary/10',
-        iconColor: 'text-primary',
-      },
+        iconColor: 'text-primary'},
       {
         title: 'Activos',
         value: s.activos || 0,
         smallText: `${this.calculatePercentage(s.activos || 0, total)}% del total`,
         iconName: 'check-circle',
         iconBgColor: 'bg-green-100',
-        iconColor: 'text-green-600',
-      },
+        iconColor: 'text-green-600'},
       {
         title: 'Pendientes',
         value: s.pendientes || 0,
         smallText: `${this.calculatePercentage(s.pendientes || 0, total)}% del total`,
         iconName: 'clock',
         iconBgColor: 'bg-yellow-100',
-        iconColor: 'text-yellow-600',
-      },
+        iconColor: 'text-yellow-600'},
       {
         title: 'Con 2FA',
         value: s.con_2fa || 0,
         smallText: `${this.calculatePercentage(s.con_2fa || 0, total)}% del total`,
         iconName: 'shield',
         iconBgColor: 'bg-purple-100',
-        iconColor: 'text-purple-600',
-      },
+        iconColor: 'text-purple-600'},
       {
         title: 'Inactivos',
         value: s.inactivos || 0,
         smallText: `${this.calculatePercentage(s.inactivos || 0, total)}% del total`,
         iconName: 'user-x',
         iconBgColor: 'bg-gray-100',
-        iconColor: 'text-gray-600',
-      },
+        iconColor: 'text-gray-600'},
       {
         title: 'Suspendidos',
         value: s.suspendidos || 0,
         smallText: `${this.calculatePercentage(s.suspendidos || 0, total)}% del total`,
         iconName: 'alert-triangle',
         iconBgColor: 'bg-red-100',
-        iconColor: 'text-red-600',
-      },
+        iconColor: 'text-red-600'},
       {
         title: 'Email Verificado',
         value: s.email_verificado || 0,
         smallText: `${this.calculatePercentage(s.email_verificado || 0, total)}% del total`,
         iconName: 'mail-check',
         iconBgColor: 'bg-emerald-100',
-        iconColor: 'text-emerald-600',
-      },
+        iconColor: 'text-emerald-600'},
       {
         title: 'Archivados',
         value: s.archivados || 0,
         smallText: `${this.calculatePercentage(s.archivados || 0, total)}% del total`,
         iconName: 'archive',
         iconBgColor: 'bg-red-100',
-        iconColor: 'text-red-600',
-      },
+        iconColor: 'text-red-600'},
     ]);
   }
 
@@ -484,8 +441,7 @@ export class UsersComponent implements OnInit, OnDestroy {
         message: `¿Estás seguro de que deseas eliminar al usuario "${user.first_name} ${user.last_name}"? Esta acción no se puede deshacer.`,
         confirmText: 'Eliminar',
         cancelText: 'Cancelar',
-        confirmVariant: 'danger',
-      })
+        confirmVariant: 'danger'})
       .then((confirmed) => {
         if (confirmed) {
           this.deleteUser();
@@ -506,8 +462,7 @@ export class UsersComponent implements OnInit, OnDestroy {
       error: (error) => {
         console.error('Error deleting user:', error);
         this.toastService.error('Error al eliminar el usuario');
-      },
-    });
+      }});
   }
 
   toggleUserStatus(user: User): void {
@@ -520,8 +475,7 @@ export class UsersComponent implements OnInit, OnDestroy {
         message: `¿Estás seguro de que deseas ${actionText} al usuario "${user.first_name} ${user.last_name}"?`,
         confirmText: action === 'archive' ? 'Archivar' : 'Reactivar',
         cancelText: 'Cancelar',
-        confirmVariant: 'danger',
-      })
+        confirmVariant: 'danger'})
       .then((confirmed) => {
         if (confirmed) {
           if (action === 'archive') {
@@ -534,8 +488,7 @@ export class UsersComponent implements OnInit, OnDestroy {
               error: (error) => {
                 console.error('Error archiving user:', error);
                 this.toastService.error('Error al archivar el usuario');
-              },
-            });
+              }});
           } else {
             this.usersService.reactivateUser(user.id).subscribe({
               next: () => {
@@ -546,8 +499,7 @@ export class UsersComponent implements OnInit, OnDestroy {
               error: (error) => {
                 console.error('Error reactivating user:', error);
                 this.toastService.error('Error al reactivar el usuario');
-              },
-            });
+              }});
           }
         }
       });
@@ -577,8 +529,7 @@ export class UsersComponent implements OnInit, OnDestroy {
       month: '2-digit',
       year: 'numeric',
       hour: '2-digit',
-      minute: '2-digit',
-    });
+      minute: '2-digit'});
   }
 
   getRelativeTime(dateString: string): string {

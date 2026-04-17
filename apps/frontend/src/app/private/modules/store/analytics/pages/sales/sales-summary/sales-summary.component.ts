@@ -1,9 +1,10 @@
-import { Component, OnInit, OnDestroy, inject } from '@angular/core';
+import {Component, OnInit, OnDestroy, inject,
+  DestroyRef} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { Store } from '@ngrx/store';
-import { Observable, Subject, combineLatest, takeUntil } from 'rxjs';
-import { toSignal } from '@angular/core/rxjs-interop';
+import { Observable, combineLatest } from 'rxjs';
+import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
 
 import { CardComponent } from '../../../../../../../shared/components/card/card.component';
 import { StatsComponent } from '../../../../../../../shared/components/stats/stats.component';
@@ -12,19 +13,16 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
 import { OptionsDropdownComponent } from '../../../../../../../shared/components/options-dropdown/options-dropdown.component';
 import {
   FilterConfig,
-  FilterValues,
-} from '../../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
+  FilterValues } from '../../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import {
   CurrencyPipe,
-  CurrencyFormatService,
-} from '../../../../../../../shared/pipes/currency/currency.pipe';
+  CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { ExportButtonComponent } from '../../../components/export-button/export-button.component';
 
 import { DateRangeFilter } from '../../../interfaces/analytics.interface';
 import {
   SalesSummary,
-  SalesTrend,
-} from '../../../interfaces/sales-analytics.interface';
+  SalesTrend } from '../../../interfaces/sales-analytics.interface';
 
 import * as SalesActions from '../state/sales-summary.actions';
 import * as SalesSelectors from '../state/sales-summary.selectors';
@@ -47,14 +45,12 @@ import { getDefaultStartDate, getDefaultEndDate, formatChartPeriod } from '../..
     CurrencyPipe,
   ],
   templateUrl: './sales-summary.component.html',
-  styleUrls: ['./sales-summary.component.scss'],
-})
+  styleUrls: ['./sales-summary.component.scss'] })
 export class SalesSummaryComponent implements OnInit, OnDestroy {
+  private destroyRef = inject(DestroyRef);
   private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
-  private destroy$ = new Subject<void>();
-
-  // Observables from store
+// Observables from store
   summary$: Observable<SalesSummary | null> = this.store.select(
     SalesSelectors.selectSummary,
   );
@@ -94,14 +90,12 @@ export class SalesSummaryComponent implements OnInit, OnDestroy {
       key: 'date_from',
       label: 'Desde',
       type: 'date',
-      defaultValue: getDefaultStartDate(),
-    },
+      defaultValue: getDefaultStartDate() },
     {
       key: 'date_to',
       label: 'Hasta',
       type: 'date',
-      defaultValue: getDefaultEndDate(),
-    },
+      defaultValue: getDefaultEndDate() },
     {
       key: 'granularity',
       label: 'Granularidad',
@@ -114,8 +108,7 @@ export class SalesSummaryComponent implements OnInit, OnDestroy {
         { value: 'year', label: 'Por Año' },
       ],
       placeholder: 'Seleccionar',
-      defaultValue: 'day',
-    },
+      defaultValue: 'day' },
     {
       key: 'channel',
       label: 'Canal',
@@ -128,8 +121,7 @@ export class SalesSummaryComponent implements OnInit, OnDestroy {
         { value: 'whatsapp', label: 'WhatsApp' },
         { value: 'marketplace', label: 'Marketplace' },
       ],
-      placeholder: 'Todos los Canales',
-    },
+      placeholder: 'Todos los Canales' },
   ];
 
   filterValues: FilterValues = {};
@@ -143,28 +135,26 @@ export class SalesSummaryComponent implements OnInit, OnDestroy {
 
     // Sync store state → filterValues for the options dropdown
     combineLatest([this.dateRange$, this.granularity$, this.channel$])
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(([dateRange, granularity, channel]) => {
         this.filterValues = {
           date_from: dateRange.start_date || null,
           date_to: dateRange.end_date || null,
           granularity: granularity || 'day',
-          channel: channel || null,
-        };
+          channel: channel || null };
       });
 
     // Subscribe to trends to build chart options
     combineLatest([this.trends$, this.granularity$])
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(([trends, granularity]) => {
         this.updateCharts(trends, granularity);
       });
   }
 
   ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-    this.store.dispatch(SalesActions.clearSalesSummaryState());
+
+this.store.dispatch(SalesActions.clearSalesSummaryState());
   }
 
   onFilterChange(values: FilterValues): void {
@@ -184,9 +174,7 @@ export class SalesSummaryComponent implements OnInit, OnDestroy {
           dateRange: {
             start_date: dateFrom || '',
             end_date: dateTo || '',
-            preset: 'custom',
-          },
-        }),
+            preset: 'custom' } }),
       );
     }
 
@@ -209,9 +197,7 @@ export class SalesSummaryComponent implements OnInit, OnDestroy {
         dateRange: {
           start_date: getDefaultStartDate(),
           end_date: getDefaultEndDate(),
-          preset: 'thisMonth',
-        },
-      }),
+          preset: 'thisMonth' } }),
     );
     this.store.dispatch(SalesActions.setGranularity({ granularity: 'day' }));
     this.store.dispatch(SalesActions.setChannel({ channel: '' }));
@@ -249,29 +235,24 @@ export class SalesSummaryComponent implements OnInit, OnDestroy {
         formatter: (params: any) => {
           const data = params[0];
           return `${data.name}<br/>Ingresos: ${this.currencyService.format(data.value)}`;
-        },
-      },
+        } },
       grid: {
         left: '3%',
         right: '4%',
         bottom: '3%',
-        containLabel: true,
-      },
+        containLabel: true },
       xAxis: {
         type: 'category',
         data: labels,
         axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary },
-      },
+        axisLabel: { color: textSecondary } },
       yAxis: {
         type: 'value',
         axisLine: { show: false },
         axisLabel: {
           color: textSecondary,
-          formatter: (value: number) => this.currencyService.format(value, 0),
-        },
-        splitLine: { lineStyle: { color: borderColor } },
-      },
+          formatter: (value: number) => this.currencyService.format(value, 0) },
+        splitLine: { lineStyle: { color: borderColor } } },
       series: [
         {
           name: 'Ingresos',
@@ -288,14 +269,10 @@ export class SalesSummaryComponent implements OnInit, OnDestroy {
               colorStops: [
                 { offset: 0, color: `${successColor}4D` },
                 { offset: 1, color: `${successColor}0D` },
-              ],
-            },
-          },
+              ] } },
           lineStyle: { color: successColor, width: 2 },
-          itemStyle: { color: successColor },
-        },
-      ],
-    };
+          itemStyle: { color: successColor } },
+      ] };
   }
 
 }

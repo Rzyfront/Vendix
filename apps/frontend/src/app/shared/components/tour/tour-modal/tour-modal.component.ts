@@ -5,7 +5,9 @@ import {
   effect,
   input,
   model,
-  output
+  output,
+  signal,
+  viewChild,
 } from '@angular/core';
 
 import { ButtonComponent } from '../../button/button.component';
@@ -35,7 +37,7 @@ interface SpotlightPosition {
         [style.height.px]="spotlight.height"
       ></div>
     }
-    
+
     <!-- Tour Tooltip - Different design for mobile and desktop -->
     @if (isOpen()) {
       <div
@@ -46,7 +48,7 @@ interface SpotlightPosition {
         [attr.data-position-mode]="isMobile ? 'compact' : 'absolute'"
         [style.top.px]="tooltipPosition.top"
         [style.left.px]="tooltipPosition.left"
-        >
+      >
         <div class="tooltip-header">
           <h3 class="tooltip-title">{{ currentStep?.title }}</h3>
           <!-- Minimize button for mobile -->
@@ -55,7 +57,7 @@ interface SpotlightPosition {
               class="minimize-btn"
               (click)="toggleMinimize()"
               [attr.aria-label]="isMinimized ? 'Expandir' : 'Minimizar'"
-              >
+            >
               <svg
                 [class.rotated]="isMinimized"
                 width="16"
@@ -64,7 +66,7 @@ interface SpotlightPosition {
                 fill="none"
                 stroke="currentColor"
                 stroke-width="2"
-                >
+              >
                 <polyline points="6 9 12 15 18 9"></polyline>
               </svg>
             </button>
@@ -73,9 +75,7 @@ interface SpotlightPosition {
         <div class="tooltip-content" [class.expanded]="!isMinimized">
           <p class="tooltip-description">{{ currentStep?.description }}</p>
           @if (currentStep?.action) {
-            <p class="tooltip-action">
-              👆 {{ currentStep?.action }}
-            </p>
+            <p class="tooltip-action">👆 {{ currentStep?.action }}</p>
           }
         </div>
         <!-- Footer Navigation -->
@@ -86,7 +86,7 @@ interface SpotlightPosition {
               [size]="isMobile ? 'xsm' : 'xsm'"
               (clicked)="skipTour()"
               class="skip-btn"
-              >
+            >
               Saltar
             </app-button>
           </div>
@@ -105,14 +105,14 @@ interface SpotlightPosition {
               (clicked)="nextStep()"
               [disabled]="isProcessing"
               class="next-btn"
-              >
+            >
               {{ nextButtonText }}
             </app-button>
           </div>
         </div>
       </div>
     }
-    `,
+  `,
   styles: [
     `
       :host {
@@ -682,60 +682,57 @@ export class TourModalComponent {
 
   private setupClickListener(): void {
     this.clickListener = async (e: Event) => {
-        if (!this.isOpen() || !this.currentStep || this.isProcessing) return;
+      if (!this.isOpen() || !this.currentStep || this.isProcessing) return;
 
-        // Skip click detection for first and last steps
-        if (this.currentIndex === 0 || this.isLastStep) return;
+      // Skip click detection for first and last steps
+      if (this.currentIndex === 0 || this.isLastStep) return;
 
-        // Check both target (for spotlight) and autoAdvanceTarget (for click detection only)
-        const target = this.getDeviceSelector(this.currentStep.target || '');
-        const autoAdvanceTarget = this.getDeviceAutoAdvanceTarget();
+      // Check both target (for spotlight) and autoAdvanceTarget (for click detection only)
+      const target = this.getDeviceSelector(this.currentStep.target || '');
+      const autoAdvanceTarget = this.getDeviceAutoAdvanceTarget();
 
-        if (!target && !autoAdvanceTarget) return;
+      if (!target && !autoAdvanceTarget) return;
 
-        const clickedElement = e.target as HTMLElement;
-        if (!clickedElement) return;
+      const clickedElement = e.target as HTMLElement;
+      if (!clickedElement) return;
 
-        // Combine selectors from both target and autoAdvanceTarget
-        const allSelectors = [];
-        if (target)
-          allSelectors.push(...target.split(',').map((s) => s.trim()));
-        if (autoAdvanceTarget)
-          allSelectors.push(
-            ...autoAdvanceTarget.split(',').map((s) => s.trim()),
-          );
+      // Combine selectors from both target and autoAdvanceTarget
+      const allSelectors = [];
+      if (target) allSelectors.push(...target.split(',').map((s) => s.trim()));
+      if (autoAdvanceTarget)
+        allSelectors.push(...autoAdvanceTarget.split(',').map((s) => s.trim()));
 
-        let isTargetClicked = false;
+      let isTargetClicked = false;
 
-        for (const sel of allSelectors) {
-          // Check if the clicked element or any of its parents match the selector
-          const matched = clickedElement.closest(sel);
-          if (matched) {
-            isTargetClicked = true;
-            break;
-          }
+      for (const sel of allSelectors) {
+        // Check if the clicked element or any of its parents match the selector
+        const matched = clickedElement.closest(sel);
+        if (matched) {
+          isTargetClicked = true;
+          break;
+        }
+      }
+
+      if (isTargetClicked) {
+        // Mobile: Close sidebar after clicking sidebar link
+        if (this.isMobile && target?.includes('app-sidebar')) {
+          setTimeout(() => this.closeMobileSidebarForTour(), 100);
         }
 
-        if (isTargetClicked) {
-          // Mobile: Close sidebar after clicking sidebar link
-          if (this.isMobile && target?.includes('app-sidebar')) {
-            setTimeout(() => this.closeMobileSidebarForTour(), 100);
-          }
+        // Wait a moment for the action to take effect
+        await new Promise((resolve) => setTimeout(resolve, 200));
 
-          // Wait a moment for the action to take effect
-          await new Promise((resolve) => setTimeout(resolve, 200));
-
-          // Validate and advance if valid
-          this.validateCurrentStep().then((isValid) => {
-            if (isValid) {
-              if (this.isLastStep) {
-                this.completeTour();
-              } else {
-                this.loadStep(this.currentIndex + 1);
-              }
+        // Validate and advance if valid
+        this.validateCurrentStep().then((isValid) => {
+          if (isValid) {
+            if (this.isLastStep) {
+              this.completeTour();
+            } else {
+              this.loadStep(this.currentIndex + 1);
             }
-          });
-        }
+          }
+        });
+      }
     };
 
     // Use capture phase to catch clicks before they're handled by other components

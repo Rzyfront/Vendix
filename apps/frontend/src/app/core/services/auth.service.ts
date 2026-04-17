@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, map, mergeMap, take } from 'rxjs';
+import { Observable, map, mergeMap } from 'rxjs';
 import { AuthFacade } from '../store/auth/auth.facade';
 import { TenantFacade } from '../store/tenant/tenant.facade';
 import { environment } from '../../../environments/environment';
@@ -303,7 +303,6 @@ export class AuthService {
           },
           { headers },
         )
-        .pipe(take(1))
         .subscribe({
           error: () => {
             // Silently fail - backend logout signaling is not critical

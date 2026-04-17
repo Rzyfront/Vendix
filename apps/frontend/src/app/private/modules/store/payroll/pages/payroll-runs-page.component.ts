@@ -1,21 +1,19 @@
 import { Component, inject, DestroyRef } from '@angular/core';
-import { toSignal } from '@angular/core/rxjs-interop';
+import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import { Store } from '@ngrx/store';
 import { Actions, ofType } from '@ngrx/effects';
-import { Observable, Subject } from 'rxjs';
-import { takeUntil, filter } from 'rxjs/operators';
+import { Observable } from 'rxjs';
+import { filter } from 'rxjs/operators';
 
 import {
   loadPayrollRuns,
   loadPayrollRunStats,
   loadPayrollRun,
-  cancelPayrollRunSuccess,
-} from '../state/actions/payroll.actions';
+  cancelPayrollRunSuccess } from '../state/actions/payroll.actions';
 import {
   selectPayrollRuns,
   selectPayrollRunsLoading,
-  selectCurrentPayrollRun,
-} from '../state/selectors/payroll.selectors';
+  selectCurrentPayrollRun } from '../state/selectors/payroll.selectors';
 import { PayrollRun } from '../interfaces/payroll.interface';
 
 import { PayrollStatsComponent } from '../components/payroll-stats/payroll-stats.component';
@@ -58,18 +56,14 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
         [payrollRun]="selectedPayrollRun"
       ></vendix-payroll-run-detail>
     </div>
-  `,
-})
+  ` })
 export class PayrollRunsPageComponent {
   private store = inject(Store);
   private actions$ = inject(Actions);
   private currencyService = inject(CurrencyFormatService);
   private destroyRef = inject(DestroyRef);
-  private destroy$ = new Subject<void>();
-
-  readonly payrollRuns = toSignal(this.store.select(selectPayrollRuns), {
-    initialValue: [] as PayrollRun[],
-  });
+readonly payrollRuns = toSignal(this.store.select(selectPayrollRuns), {
+    initialValue: [] as PayrollRun[] });
   readonly payrollRunsLoading = toSignal(
     this.store.select(selectPayrollRunsLoading),
     { initialValue: false },
@@ -87,7 +81,7 @@ export class PayrollRunsPageComponent {
     this.store
       .select(selectCurrentPayrollRun)
       .pipe(
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
         filter((run): run is PayrollRun => run !== null),
       )
       .subscribe((run) => {
@@ -100,14 +94,12 @@ export class PayrollRunsPageComponent {
       });
 
     this.actions$
-      .pipe(ofType(cancelPayrollRunSuccess), takeUntil(this.destroy$))
+      .pipe(ofType(cancelPayrollRunSuccess), takeUntilDestroyed(this.destroyRef))
       .subscribe(() => {
         this.isPayrollRunDetailModalOpen = false;
       });
 
     this.destroyRef.onDestroy(() => {
-      this.destroy$.next();
-      this.destroy$.complete();
     });
   }
 

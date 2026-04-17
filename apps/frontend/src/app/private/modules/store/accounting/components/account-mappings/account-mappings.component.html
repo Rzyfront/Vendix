@@ -55,7 +55,7 @@
         </div>
       }
 
-      @if (mapping_groups.length === 0 && !(loading())) {
+      @if (mapping_groups.length === 0 && !loading()) {
         <app-empty-state
           icon="link"
           title="No hay mapeos configurados"
@@ -66,35 +66,45 @@
         ></app-empty-state>
       }
 
-      @for (group of mapping_groups; track group.key) {
+      @for (group of mapping_groups(); track group.key) {
         <div class="mb-4 last:mb-0">
           <!-- Group Header -->
-          <div class="flex items-center justify-between gap-2 px-2 py-2 md:px-4 md:py-3 bg-gray-50 rounded-lg mb-1">
+          <div
+            class="flex items-center justify-between gap-2 px-2 py-2 md:px-4 md:py-3 bg-gray-50 rounded-lg mb-1"
+          >
             <div class="flex items-center gap-2">
               <app-icon
                 [name]="group.icon"
                 [size]="16"
-                [ngClass]="isFlowEnabled(group.key) ? 'text-gray-500' : 'text-gray-300'"
+                [ngClass]="
+                  isFlowEnabled(group.key) ? 'text-gray-500' : 'text-gray-300'
+                "
               ></app-icon>
               <h3
                 class="text-xs font-semibold uppercase tracking-wider"
-                [ngClass]="isFlowEnabled(group.key) ? 'text-gray-500' : 'text-gray-300 line-through'"
+                [ngClass]="
+                  isFlowEnabled(group.key)
+                    ? 'text-gray-500'
+                    : 'text-gray-300 line-through'
+                "
               >
                 {{ group.label }}
               </h3>
               @if (!isFlowEnabled(group.key)) {
-                <span class="text-[10px] text-amber-500 font-medium bg-amber-50 px-1.5 py-0.5 rounded">
+                <span
+                  class="text-[10px] text-amber-500 font-medium bg-amber-50 px-1.5 py-0.5 rounded"
+                >
                   Desactivado
                 </span>
               }
             </div>
-            @if (flows_loaded) {
+            @if (flows_loaded()) {
               <button
                 type="button"
                 class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary/30"
                 [ngClass]="{
                   'bg-emerald-500 border-emerald-500': isFlowEnabled(group.key),
-                  'bg-gray-300 border-gray-300': !isFlowEnabled(group.key)
+                  'bg-gray-300 border-gray-300': !isFlowEnabled(group.key),
                 }"
                 (click)="toggleFlow(group.key)"
                 [attr.aria-label]="'Toggle ' + group.label"
@@ -103,7 +113,7 @@
                   class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md ring-0 transition duration-200 ease-in-out"
                   [ngClass]="{
                     'translate-x-5': isFlowEnabled(group.key),
-                    'translate-x-0': !isFlowEnabled(group.key)
+                    'translate-x-0': !isFlowEnabled(group.key),
                   }"
                 ></span>
               </button>
@@ -111,17 +121,67 @@
           </div>
 
           <!-- Mapping Rows -->
-          <div [ngClass]="isFlowEnabled(group.key) ? '' : 'opacity-40 pointer-events-none'">
-          @for (mapping of group.mappings; track mapping.mapping_key) {
-            <!-- Mobile Card -->
-            <div
-              class="md:hidden p-3 mx-2 my-1 bg-surface rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.07)]"
-            >
-              <div class="flex flex-col gap-2">
-                <div class="flex items-center justify-between">
-                  <span class="text-[15px] font-bold text-text-primary">{{
-                    getLabel(mapping.mapping_key)
-                  }}</span>
+          <div
+            [ngClass]="
+              isFlowEnabled(group.key) ? '' : 'opacity-40 pointer-events-none'
+            "
+          >
+            @for (mapping of group.mappings; track mapping.mapping_key) {
+              <!-- Mobile Card -->
+              <div
+                class="md:hidden p-3 mx-2 my-1 bg-surface rounded-2xl shadow-[0_2px_8px_rgba(0,0,0,0.07)]"
+              >
+                <div class="flex flex-col gap-2">
+                  <div class="flex items-center justify-between">
+                    <span class="text-[15px] font-bold text-text-primary">{{
+                      getLabel(mapping.mapping_key)
+                    }}</span>
+                    <span
+                      class="source-badge"
+                      [ngClass]="{
+                        'bg-gray-100 text-gray-500':
+                          mapping.source === 'default',
+                        'bg-blue-50 text-blue-600':
+                          mapping.source === 'organization',
+                        'bg-emerald-50 text-emerald-600':
+                          mapping.source === 'store',
+                      }"
+                    >
+                      {{ getSourceLabel(mapping.source) }}
+                    </span>
+                  </div>
+                  <div class="text-xs text-gray-400 font-mono">
+                    {{ mapping.account_code }} - {{ mapping.description }}
+                  </div>
+                  <select
+                    class="mapping-select"
+                    [value]="getSelectedAccountId(mapping)"
+                    (change)="onAccountChange(mapping.mapping_key, $event)"
+                  >
+                    <option value="">-- Seleccionar cuenta --</option>
+                    @for (account of leaf_accounts(); track account.id) {
+                      <option [value]="account.id">
+                        {{ account.code }} - {{ account.name }}
+                      </option>
+                    }
+                  </select>
+                </div>
+              </div>
+
+              <!-- Desktop Row -->
+              <div
+                class="hidden md:grid md:grid-cols-12 gap-2 px-4 py-2.5 items-center hover:bg-gray-50 transition-colors border-b border-border/50 last:border-b-0"
+              >
+                <div class="col-span-3 text-sm font-medium text-text-primary">
+                  {{ getLabel(mapping.mapping_key) }}
+                </div>
+                <div class="col-span-2 text-xs text-gray-500 font-mono">
+                  {{ mapping.account_code }}
+                </div>
+                <div class="col-span-2 text-xs text-gray-400 truncate">
+                  {{ mapping.description }}
+                </div>
+                <div class="col-span-1 text-center">
                   <span
                     class="source-badge"
                     [ngClass]="{
@@ -135,67 +195,22 @@
                     {{ getSourceLabel(mapping.source) }}
                   </span>
                 </div>
-                <div class="text-xs text-gray-400 font-mono">
-                  {{ mapping.account_code }} - {{ mapping.description }}
+                <div class="col-span-4">
+                  <select
+                    class="mapping-select"
+                    [value]="getSelectedAccountId(mapping)"
+                    (change)="onAccountChange(mapping.mapping_key, $event)"
+                  >
+                    <option value="">-- Seleccionar cuenta --</option>
+                    @for (account of leaf_accounts(); track account.id) {
+                      <option [value]="account.id">
+                        {{ account.code }} - {{ account.name }}
+                      </option>
+                    }
+                  </select>
                 </div>
-                <select
-                  class="mapping-select"
-                  [value]="getSelectedAccountId(mapping)"
-                  (change)="onAccountChange(mapping.mapping_key, $event)"
-                >
-                  <option value="">-- Seleccionar cuenta --</option>
-                  @for (account of leaf_accounts; track account.id) {
-                    <option [value]="account.id">
-                      {{ account.code }} - {{ account.name }}
-                    </option>
-                  }
-                </select>
               </div>
-            </div>
-
-            <!-- Desktop Row -->
-            <div
-              class="hidden md:grid md:grid-cols-12 gap-2 px-4 py-2.5 items-center hover:bg-gray-50 transition-colors border-b border-border/50 last:border-b-0"
-            >
-              <div class="col-span-3 text-sm font-medium text-text-primary">
-                {{ getLabel(mapping.mapping_key) }}
-              </div>
-              <div class="col-span-2 text-xs text-gray-500 font-mono">
-                {{ mapping.account_code }}
-              </div>
-              <div class="col-span-2 text-xs text-gray-400 truncate">
-                {{ mapping.description }}
-              </div>
-              <div class="col-span-1 text-center">
-                <span
-                  class="source-badge"
-                  [ngClass]="{
-                    'bg-gray-100 text-gray-500': mapping.source === 'default',
-                    'bg-blue-50 text-blue-600':
-                      mapping.source === 'organization',
-                    'bg-emerald-50 text-emerald-600':
-                      mapping.source === 'store',
-                  }"
-                >
-                  {{ getSourceLabel(mapping.source) }}
-                </span>
-              </div>
-              <div class="col-span-4">
-                <select
-                  class="mapping-select"
-                  [value]="getSelectedAccountId(mapping)"
-                  (change)="onAccountChange(mapping.mapping_key, $event)"
-                >
-                  <option value="">-- Seleccionar cuenta --</option>
-                  @for (account of leaf_accounts; track account.id) {
-                    <option [value]="account.id">
-                      {{ account.code }} - {{ account.name }}
-                    </option>
-                  }
-                </select>
-              </div>
-            </div>
-          }
+            }
           </div>
         </div>
       }

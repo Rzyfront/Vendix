@@ -1,20 +1,13 @@
 import { Component, output, inject, DestroyRef } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import {
-  Subject,
-  debounceTime,
-  distinctUntilChanged,
-  takeUntil,
-  Observable,
-} from 'rxjs';
-import { toSignal } from '@angular/core/rxjs-interop';
+import { Subject, debounceTime, distinctUntilChanged, Observable } from 'rxjs';
+import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import {
   PosProductService,
   SearchFilters,
   Product,
   Category,
-  Brand,
-} from '../services/pos-product.service';
+  Brand } from '../services/pos-product.service';
 
 @Component({
   selector: 'app-pos-product-search',
@@ -437,9 +430,9 @@ import {
         }
       }
     `,
-  ],
-})
+  ] })
 export class PosProductSearchComponent {
+  private destroyRef = inject(DestroyRef);
   readonly search = output<SearchFilters>();
   readonly productSelected = output<Product>();
 
@@ -455,31 +448,21 @@ export class PosProductSearchComponent {
     maxPrice: undefined,
     inStock: false,
     sortBy: undefined,
-    sortOrder: 'asc',
-  };
+    sortOrder: 'asc' };
 
   private searchSubject = new Subject<string>();
-  private destroy$ = new Subject<void>();
-  private productService = inject(PosProductService);
+private productService = inject(PosProductService);
 
   readonly categories = toSignal(this.productService.getCategories(), {
-    initialValue: [] as Category[],
-  });
+    initialValue: [] as Category[] });
   readonly brands = toSignal(this.productService.getBrands(), {
-    initialValue: [] as Brand[],
-  });
+    initialValue: [] as Brand[] });
   readonly suggestions = toSignal(this.productService.getSearchHistory(), {
-    initialValue: [] as string[],
-  });
+    initialValue: [] as string[] });
 
   constructor() {
-    inject(DestroyRef).onDestroy(() => {
-      this.destroy$.next();
-      this.destroy$.complete();
-    });
-
-    this.searchSubject
-      .pipe(debounceTime(300), distinctUntilChanged(), takeUntil(this.destroy$))
+this.searchSubject
+      .pipe(debounceTime(300), distinctUntilChanged(), takeUntilDestroyed(this.destroyRef))
       .subscribe((query) => {
         this.filters.query = query;
         this.performSearch();
@@ -525,8 +508,7 @@ export class PosProductSearchComponent {
       maxPrice: undefined,
       inStock: false,
       sortBy: undefined,
-      sortOrder: 'asc',
-    };
+      sortOrder: 'asc' };
     this.performSearch();
   }
 

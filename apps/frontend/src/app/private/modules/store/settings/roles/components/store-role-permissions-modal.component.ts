@@ -1,23 +1,21 @@
-import {
-  Component,
+import {Component,
   input,
   output,
   model,
-  OnDestroy,
   OnChanges,
   inject,
-} from '@angular/core';
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import {
   ButtonComponent,
   IconComponent,
   InputsearchComponent,
   ModalComponent,
-  ToastService,
-} from '../../../../../../shared/components/index';
+  ToastService} from '../../../../../../shared/components/index';
 import { StoreRolesService } from '../services/store-roles.service';
 import { StoreRole, StorePermission } from '../interfaces/store-role.interface';
-import { Subject, takeUntil, forkJoin } from 'rxjs';
+import { forkJoin } from 'rxjs';
 
 interface PermissionGroup {
   module: string;
@@ -52,8 +50,7 @@ const MODULE_LABELS: Record<string, { label: string; icon: string }> = {
   taxes: { label: 'Impuestos', icon: 'percent' },
   transfers: { label: 'Transferencias', icon: 'arrow-left-right' },
   users: { label: 'Usuarios', icon: 'user-cog' },
-  general: { label: 'General', icon: 'layout-grid' },
-};
+  general: { label: 'General', icon: 'layout-grid' }};
 
 const ACTION_LABELS: Record<string, string> = {
   create: 'Crear',
@@ -75,8 +72,7 @@ const ACTION_LABELS: Record<string, string> = {
   send: 'Enviar',
   receive: 'Recibir',
   transfer: 'Transferir',
-  configure: 'Configurar',
-};
+  configure: 'Configurar'};
 
 @Component({
   selector: 'app-store-role-permissions-modal',
@@ -290,11 +286,11 @@ const ACTION_LABELS: Record<string, string> = {
         display: block;
       }
     `,
-  ],
-})
+  ]})
 export class StoreRolePermissionsModalComponent
-  implements OnDestroy, OnChanges
+  implements, OnChanges
 {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = model<boolean>(false);
   readonly role = model<StoreRole | null>(null);
   readonly isOpenChange = output<boolean>();
@@ -311,17 +307,9 @@ export class StoreRolePermissionsModalComponent
 
   isLoadingPermissions: boolean = false;
   isSaving: boolean = false;
-  private destroy$ = new Subject<void>();
-
-  private storeRolesService = inject(StoreRolesService);
+private storeRolesService = inject(StoreRolesService);
   private toastService = inject(ToastService);
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  ngOnChanges(): void {
+ngOnChanges(): void {
     if (this.isOpen() && this.role()) {
       this.searchTerm = '';
       this.moduleFilter = '';
@@ -337,9 +325,8 @@ export class StoreRolePermissionsModalComponent
 
     forkJoin({
       available: this.storeRolesService.getAvailablePermissions(),
-      current: this.storeRolesService.getRolePermissions(currentRole.id),
-    })
-      .pipe(takeUntil(this.destroy$))
+      current: this.storeRolesService.getRolePermissions(currentRole.id)})
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: ({ available, current }) => {
           this.allPermissions = available;
@@ -362,8 +349,7 @@ export class StoreRolePermissionsModalComponent
           console.error('Error loading permissions:', error);
           this.isLoadingPermissions = false;
           this.toastService.error('Error al cargar los permisos');
-        },
-      });
+        }});
   }
 
   private groupPermissions(permissions: StorePermission[]): PermissionGroup[] {
@@ -410,8 +396,7 @@ export class StoreRolePermissionsModalComponent
             (p) =>
               (p.description && p.description.toLowerCase().includes(term)) ||
               p.name.toLowerCase().includes(term),
-          ),
-        }))
+          )}))
         .filter((g) => g.permissions.length > 0);
     }
 
@@ -540,7 +525,7 @@ export class StoreRolePermissionsModalComponent
     }
 
     forkJoin(operations)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.isSaving = false;
@@ -559,8 +544,7 @@ export class StoreRolePermissionsModalComponent
           const message =
             error?.error?.message || 'Error al actualizar los permisos';
           this.toastService.error(message);
-        },
-      });
+        }});
   }
 
   onCancel(): void {

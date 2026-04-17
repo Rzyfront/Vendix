@@ -1,17 +1,17 @@
-import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
+import {Component, OnInit, inject, signal,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { RouterModule } from '@angular/router';
-import { Subject, takeUntil } from 'rxjs';
+
 
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import {
   TableColumn,
-  TableAction,
-} from '../../../../../../shared/components/table/table.component';
+  TableAction} from '../../../../../../shared/components/table/table.component';
 import {
   ResponsiveDataViewComponent,
-  ItemListCardConfig,
-} from '../../../../../../shared/components/index';
+  ItemListCardConfig} from '../../../../../../shared/components/index';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
@@ -23,8 +23,7 @@ import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
 import {
   SalesByProduct,
-  SalesAnalyticsQueryDto,
-} from '../../interfaces/sales-analytics.interface';
+  SalesAnalyticsQueryDto} from '../../interfaces/sales-analytics.interface';
 
 @Component({
   selector: 'vendix-sales-by-product',
@@ -106,22 +105,19 @@ import {
         </div>
       </app-card>
     </div>
-  `,
-})
-export class SalesByProductComponent implements OnInit, OnDestroy {
+  `})
+export class SalesByProductComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private analyticsService = inject(AnalyticsService);
   private toastService = inject(ToastService);
   private currencyService = inject(CurrencyFormatService);
-  private destroy$ = new Subject<void>();
-
-  loading = signal(true);
+loading = signal(true);
   exporting = signal(false);
   data = signal<SalesByProduct[]>([]);
   dateRange = signal<DateRangeFilter>({
     start_date: getDefaultStartDate(),
     end_date: getDefaultEndDate(),
-    preset: 'thisMonth',
-  });
+    preset: 'thisMonth'});
 
   columns: TableColumn[] = [
     {
@@ -130,8 +126,7 @@ export class SalesByProductComponent implements OnInit, OnDestroy {
       width: '50px',
       align: 'center',
       priority: 1,
-      type: 'image',
-    },
+      type: 'image'},
     { key: 'product_name', label: 'Producto', sortable: true, priority: 1 },
     { key: 'sku', label: 'SKU', sortable: true, priority: 2, width: '120px' },
     {
@@ -140,8 +135,7 @@ export class SalesByProductComponent implements OnInit, OnDestroy {
       sortable: true,
       align: 'right',
       priority: 1,
-      width: '100px',
-    },
+      width: '100px'},
     {
       key: 'revenue',
       label: 'Ingresos',
@@ -149,8 +143,7 @@ export class SalesByProductComponent implements OnInit, OnDestroy {
       align: 'right',
       priority: 1,
       width: '140px',
-      transform: (val) => this.formatCurrency(val),
-    },
+      transform: (val) => this.formatCurrency(val)},
     {
       key: 'average_price',
       label: 'Precio Prom.',
@@ -158,8 +151,7 @@ export class SalesByProductComponent implements OnInit, OnDestroy {
       align: 'right',
       priority: 2,
       width: '120px',
-      transform: (val) => this.formatCurrency(val),
-    },
+      transform: (val) => this.formatCurrency(val)},
     {
       key: 'profit_margin',
       label: 'Margen',
@@ -167,8 +159,7 @@ export class SalesByProductComponent implements OnInit, OnDestroy {
       align: 'right',
       priority: 2,
       width: '100px',
-      transform: (val) => (val ? `${val.toFixed(1)}%` : '-'),
-    },
+      transform: (val) => (val ? `${val.toFixed(1)}%` : '-')},
   ];
 
   cardConfig: ItemListCardConfig = {
@@ -179,27 +170,18 @@ export class SalesByProductComponent implements OnInit, OnDestroy {
       {
         key: 'units_sold',
         label: 'Unidades',
-        transform: (val: any) => `${val} uds`,
-      },
+        transform: (val: any) => `${val} uds`},
       {
         key: 'revenue',
         label: 'Ingresos',
-        transform: (val: any) => this.formatCurrency(val),
-      },
-    ],
-  };
+        transform: (val: any) => this.formatCurrency(val)},
+    ]};
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
     this.loadData();
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  onDateRangeChange(range: DateRangeFilter): void {
+onDateRangeChange(range: DateRangeFilter): void {
     this.dateRange.set(range);
     this.loadData();
   }
@@ -208,12 +190,11 @@ export class SalesByProductComponent implements OnInit, OnDestroy {
     this.loading.set(true);
     const query: SalesAnalyticsQueryDto = {
       date_range: this.dateRange(),
-      limit: 100,
-    };
+      limit: 100};
 
     this.analyticsService
       .getSalesByProduct(query)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           this.data.set(response.data);
@@ -222,15 +203,14 @@ export class SalesByProductComponent implements OnInit, OnDestroy {
         error: () => {
           this.toastService.error('Error al cargar ventas por producto');
           this.loading.set(false);
-        },
-      });
+        }});
   }
 
   exportReport(): void {
     this.exporting.set(true);
     this.analyticsService
       .exportSalesAnalytics({ date_range: this.dateRange() })
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (blob) => {
           const url = window.URL.createObjectURL(blob);
@@ -244,8 +224,7 @@ export class SalesByProductComponent implements OnInit, OnDestroy {
         error: () => {
           this.toastService.error('Error al exportar');
           this.exporting.set(false);
-        },
-      });
+        }});
   }
 
   formatCurrency(value: number): string {

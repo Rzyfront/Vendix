@@ -3,17 +3,14 @@ import {
   inject,
   DestroyRef,
   signal,
-  computed,
-} from '@angular/core';
+  computed } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
-import { Subject } from 'rxjs';
-import { takeUntil } from 'rxjs/operators';
 
 import { PayrollService } from '../services/payroll.service';
 import {
   PayrollSettlement,
-  SettlementStats,
-} from '../interfaces/payroll.interface';
+  SettlementStats } from '../interfaces/payroll.interface';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { StatsComponent } from '../../../../../shared/components/stats/stats.component';
@@ -101,16 +98,13 @@ import { SettlementDetailComponent } from '../components/settlements/settlement-
         (updated)="onSettlementUpdated()"
       ></app-settlement-detail>
     </div>
-  `,
-})
+  ` })
 export class PayrollSettlementsPageComponent {
   private payrollService = inject(PayrollService);
   protected currencyService = inject(CurrencyFormatService);
   private toastService = inject(ToastService);
   private destroyRef = inject(DestroyRef);
-  private destroy$ = new Subject<void>();
-
-  // State
+// State
   settlements = signal<PayrollSettlement[]>([]);
   stats = signal<SettlementStats | null>(null);
   loading = signal(false);
@@ -136,8 +130,6 @@ export class PayrollSettlementsPageComponent {
     this.loadStats();
 
     this.destroyRef.onDestroy(() => {
-      this.destroy$.next();
-      this.destroy$.complete();
     });
   }
 
@@ -149,7 +141,7 @@ export class PayrollSettlementsPageComponent {
 
     this.payrollService
       .getSettlements(query)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.settlements.set(res.data || []);
@@ -159,19 +151,16 @@ export class PayrollSettlementsPageComponent {
           this.loading.set(false);
           this.toastService.show({
             variant: 'error',
-            description: 'Error cargando liquidaciones',
-          });
-        },
-      });
+            description: 'Error cargando liquidaciones' });
+        } });
   }
 
   loadStats(): void {
     this.payrollService
       .getSettlementStats()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (res) => this.stats.set(res.data),
-      });
+        next: (res) => this.stats.set(res.data) });
   }
 
   onSearch(term: string): void {
@@ -193,10 +182,9 @@ export class PayrollSettlementsPageComponent {
     this.isDetailModalOpen = true;
     this.payrollService
       .getSettlement(settlement.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (res) => (this.selectedSettlement = res.data),
-      });
+        next: (res) => (this.selectedSettlement = res.data) });
   }
 
   onSettlementCreated(): void {
@@ -212,60 +200,51 @@ export class PayrollSettlementsPageComponent {
   onApprove(settlement: PayrollSettlement): void {
     this.payrollService
       .approveSettlement(settlement.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.show({
             variant: 'success',
-            description: 'Liquidacion aprobada',
-          });
+            description: 'Liquidacion aprobada' });
           this.onSettlementUpdated();
         },
         error: () =>
           this.toastService.show({
             variant: 'error',
-            description: 'Error al aprobar',
-          }),
-      });
+            description: 'Error al aprobar' }) });
   }
 
   onPay(settlement: PayrollSettlement): void {
     this.payrollService
       .paySettlement(settlement.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.show({
             variant: 'success',
-            description: 'Liquidacion pagada',
-          });
+            description: 'Liquidacion pagada' });
           this.onSettlementUpdated();
         },
         error: () =>
           this.toastService.show({
             variant: 'error',
-            description: 'Error al pagar',
-          }),
-      });
+            description: 'Error al pagar' }) });
   }
 
   onCancel(settlement: PayrollSettlement): void {
     this.payrollService
       .cancelSettlement(settlement.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.show({
             variant: 'success',
-            description: 'Liquidacion cancelada',
-          });
+            description: 'Liquidacion cancelada' });
           this.onSettlementUpdated();
         },
         error: () =>
           this.toastService.show({
             variant: 'error',
-            description: 'Error al cancelar',
-          }),
-      });
+            description: 'Error al cancelar' }) });
   }
 }

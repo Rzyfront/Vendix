@@ -1,25 +1,25 @@
-import { Component, OnInit, OnDestroy, inject } from '@angular/core';
+import {Component, OnInit, inject,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { RouterModule, Router } from '@angular/router';
 import {
   FormBuilder,
   FormGroup,
   Validators,
-  ReactiveFormsModule,
-} from '@angular/forms';
+  ReactiveFormsModule} from '@angular/forms';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
 import { ConfigFacade } from '../../../../core/store/config';
-import { takeUntil } from 'rxjs/operators';
-import { Subject } from 'rxjs';
+
+
 import { ToastService } from '../../../../shared/components/toast/toast.service';
 import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler';
 import {
   InputComponent,
   ButtonComponent,
   CardComponent,
-  IconComponent,
-} from '../../../../shared/components';
+  IconComponent} from '../../../../shared/components';
 
 export type LoginState =
   | 'idle'
@@ -459,9 +459,9 @@ export interface OrganizationCandidate {
         }
       }
     `,
-  ],
-})
-export class ContextualLoginComponent implements OnInit, OnDestroy {
+  ]})
+export class ContextualLoginComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   loginForm: FormGroup;
   loginState: LoginState = 'idle';
   loginError: LoginError | null = null;
@@ -474,9 +474,7 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
   // Disambiguation state
   showDisambiguationModal = false;
   disambiguationCandidates: OrganizationCandidate[] = [];
-
-  private destroy$ = new Subject<void>();
-  private toast = inject(ToastService);
+private toast = inject(ToastService);
   private appConfigFacade = inject(ConfigFacade);
 
   constructor(
@@ -487,8 +485,7 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
     this.loginForm = this.fb.group({
       vlink: [''],
       email: ['', [Validators.required, Validators.email]],
-      password: ['', [Validators.required, Validators.minLength(6)]],
-    });
+      password: ['', [Validators.required, Validators.minLength(6)]]});
   }
 
   ngOnInit(): void {
@@ -501,12 +498,12 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
     }, 3000);
 
     this.authFacade.loading$
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((loading) => {
         if (loading) this.loginState = 'loading';
       });
 
-    this.authFacade.error$.pipe(takeUntil(this.destroy$)).subscribe((error) => {
+    this.authFacade.error$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((error) => {
       if (error) {
         // Check for disambiguation required (HTTP 300)
         if (this.isDisambiguationError(error)) {
@@ -522,7 +519,7 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
     });
 
     this.authFacade.isAuthenticated$
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((isAuth) => {
         if (isAuth) {
           const welcomeMessage = this.getWelcomeMessage();
@@ -531,13 +528,7 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
         }
       });
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  private loadAuthContext(): void {
+private loadAuthContext(): void {
     const appConfig = this.appConfigFacade.getCurrentConfig();
     if (!appConfig) {
       return;

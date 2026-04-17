@@ -1,12 +1,14 @@
-import { Component, OnDestroy, input, output, model } from '@angular/core';
+import {Component, input, output, model,
+  DestroyRef,
+  inject} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   FormsModule,
   ReactiveFormsModule,
   FormControl,
-  Validators,
-} from '@angular/forms';
-import { Subject } from 'rxjs';
+  Validators} from '@angular/forms';
+
 
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
@@ -25,9 +27,9 @@ import { StoreListItem } from '../../interfaces/store.interface';
     IconComponent,
   ],
   templateUrl: './store-delete-confirmation.component.html',
-  styleUrl: './store-delete-confirmation.component.scss',
-})
-export class StoreDeleteConfirmationComponent implements OnDestroy {
+  styleUrl: './store-delete-confirmation.component.scss'})
+export class StoreDeleteConfirmationComponent implements {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = model<boolean>(false);
   readonly store = input<StoreListItem | null>(null);
 
@@ -37,25 +39,15 @@ export class StoreDeleteConfirmationComponent implements OnDestroy {
 
   slugInput = new FormControl('', {
     validators: [Validators.required],
-    nonNullable: true,
-  });
-
-  private destroy$ = new Subject<void>();
-
-  constructor() {
+    nonNullable: true});
+constructor() {
     this.slugInput.valueChanges.subscribe(() => {
       if (this.showError && this.isSlugValid) {
         this.showError = false;
       }
     });
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  get placeholderText(): string {
+get placeholderText(): string {
     const store = this.store();
     return store ? `Escribe '${store.slug}' para confirmar` : '';
   }

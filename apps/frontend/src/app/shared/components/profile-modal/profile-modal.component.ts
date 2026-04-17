@@ -547,10 +547,10 @@ export class ProfileModalComponent {
   profileForm: FormGroup;
   passwordForm: FormGroup;
 
-  loading = false;
+  readonly loading = signal(false);
   readonly saving = signal(false);
   readonly savingPassword = signal(false);
-  isInitialLoad = true; // Flag to track initial profile load
+  readonly isInitialLoad = signal(true); // Flag to track initial profile load
 
   readonly isEditing = signal(false);
   readonly showPasswordSection = signal(false);
@@ -757,7 +757,7 @@ export class ProfileModalComponent {
 
   loadProfile() {
     // Prevent concurrent loads
-    if (this.loading) {
+    if (this.loading()) {
       return;
     }
 
@@ -766,13 +766,13 @@ export class ProfileModalComponent {
       return;
     }
 
-    this.loading = true;
+    this.loading.set(true);
     this.authService
       .getProfile()
       .pipe(
         finalize(() => {
-          this.loading = false;
-          this.isInitialLoad = false; // Mark initial load as complete
+          this.loading.set(false);
+          this.isInitialLoad.set(false); // Mark initial load as complete
         }),
       )
       .subscribe({
@@ -784,7 +784,7 @@ export class ProfileModalComponent {
           console.error('Error loading profile:', err);
 
           // Durante carga inicial, no mostrar toasts para evitar molestar al usuario al cargar la página
-          if (this.isInitialLoad) {
+          if (this.isInitialLoad()) {
             // Solo loggear el error, no mostrar toast
             return;
           }

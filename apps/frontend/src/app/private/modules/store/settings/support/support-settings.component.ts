@@ -1,14 +1,15 @@
-import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
+import {Component, OnInit, inject, signal,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
-import { Subject, takeUntil, finalize } from 'rxjs';
+import { finalize } from 'rxjs';
 import { TicketListComponent, CreateTicketModalComponent } from './components';
 import { StatsComponent } from '../../../../../shared/components/stats/stats.component';
 import { SupportService } from './services/support.service';
 import {
   Ticket,
   TicketStats,
-  CreateTicketRequest,
-} from './models/ticket.model';
+  CreateTicketRequest} from './models/ticket.model';
 import { ToastService } from '../../../../../shared/components';
 import { Router, ActivatedRoute } from '@angular/router';
 import { FilterValues } from '../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
@@ -82,9 +83,9 @@ import { FilterValues } from '../../../../../shared/components/options-dropdown/
         ></app-create-ticket-modal>
       }
     </div>
-  `,
-})
-export class SupportSettingsComponent implements OnInit, OnDestroy {
+  `})
+export class SupportSettingsComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private supportService = inject(SupportService);
   private toastService = inject(ToastService);
   private router = inject(Router);
@@ -105,23 +106,14 @@ export class SupportSettingsComponent implements OnInit, OnDestroy {
 
   // Modal
   isCreateModalOpen = false;
-
-  private destroy$ = new Subject<void>();
-
-  ngOnInit(): void {
+ngOnInit(): void {
     this.loadStats();
     this.loadTickets();
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  loadStats() {
+loadStats() {
     this.supportService
       .getTicketStats()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (statsData: any) => {
           // Service already returns data unwrapped
@@ -140,15 +132,13 @@ export class SupportSettingsComponent implements OnInit, OnDestroy {
               (byStatus.IN_PROGRESS || 0),
             resolved: (byStatus.RESOLVED || 0) + (byStatus.CLOSED || 0),
             pending: byStatus.WAITING_RESPONSE || 0,
-            my_tickets: 0,
-          };
+            my_tickets: 0};
           this.stats.set(computedStats);
         },
         error: (error: any) => {
           console.error('Error loading stats:', error);
           this.toastService.error('Error al cargar estadísticas');
-        },
-      });
+        }});
   }
 
   loadTickets() {
@@ -160,10 +150,9 @@ export class SupportSettingsComponent implements OnInit, OnDestroy {
         search: this.searchQuery || undefined,
         status: (this.filters['status'] as string) || undefined,
         priority: (this.filters['priority'] as string) || undefined,
-        category: (this.filters['category'] as string) || undefined,
-      })
+        category: (this.filters['category'] as string) || undefined})
       .pipe(
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
         finalize(() => this.loading.set(false)),
       )
       .subscribe({
@@ -174,8 +163,7 @@ export class SupportSettingsComponent implements OnInit, OnDestroy {
         error: (err: any) => {
           console.error(err);
           this.toastService.error('Error al cargar tickets');
-        },
-      });
+        }});
   }
 
   onSearch(query: string) {
@@ -209,7 +197,7 @@ export class SupportSettingsComponent implements OnInit, OnDestroy {
     this.supportService
       .createTicket(data)
       .pipe(
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
         finalize(() => (this.actionLoading = false)),
       )
       .subscribe({
@@ -224,8 +212,7 @@ export class SupportSettingsComponent implements OnInit, OnDestroy {
         error: (err) => {
           console.error(err);
           this.toastService.error('Error al crear ticket. Intenta nuevamente.');
-        },
-      });
+        }});
   }
 
   openTicketDetail(ticket: Ticket) {

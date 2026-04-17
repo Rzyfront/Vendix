@@ -1,13 +1,13 @@
-import { Component, model, input, output, inject } from '@angular/core';
+import { Component, model, input, output, inject, signal } from '@angular/core';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
-import { CommonModule } from '@angular/common';
+import { CurrencyPipe } from '@angular/common';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { EcommerceProduct } from '../../services/catalog.service';
 
 @Component({
   selector: 'app-share-modal',
   standalone: true,
-  imports: [CommonModule, IconComponent],
+  imports: [CurrencyPipe, IconComponent],
   template: `
     @if (isOpen() && product()) {
       <div class="modal-backdrop" (click)="close()">
@@ -71,7 +71,7 @@ import { EcommerceProduct } from '../../services/catalog.service';
           </div>
 
           <!-- Copied feedback -->
-          @if (showCopied) {
+          @if (showCopied()) {
             <div class="copied-feedback">
               <app-icon name="check" [size]="16"></app-icon>
               ¡Enlace copiado!
@@ -279,7 +279,7 @@ export class ShareModalComponent {
   readonly closed = output<void>();
 
   private toast = inject(ToastService);
-  showCopied = false;
+  readonly showCopied = signal(false);
 
   get productUrl(): string {
     if (!this.product()) return '';
@@ -293,16 +293,16 @@ export class ShareModalComponent {
 
   close(): void {
     this.isOpen.set(false);
-    this.showCopied = false;
+    this.showCopied.set(false);
     this.closed.emit();
   }
 
   async copyLink(): Promise<void> {
     try {
       await navigator.clipboard.writeText(this.productUrl);
-      this.showCopied = true;
+      this.showCopied.set(true);
       setTimeout(() => {
-        this.showCopied = false;
+        this.showCopied.set(false);
       }, 2000);
     } catch (err) {
       console.error('Error copying link:', err);
@@ -315,7 +315,7 @@ export class ShareModalComponent {
   }
 
   async shareEmail(): Promise<void> {
-    const subject = `¡Mira este producto! ${this.product?.name}`;
+    const subject = `¡Mira este producto! ${this.product()?.name}`;
     const text = this.shareText;
     const url = this.productUrl;
 

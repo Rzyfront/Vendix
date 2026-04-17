@@ -1,16 +1,15 @@
-import {
-  Component,
+import {Component,
   OnInit,
-  OnDestroy,
   inject,
   signal,
   computed,
-} from '@angular/core';
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { RouterModule } from '@angular/router';
 import { TenantFacade } from '../../../core/store/tenant/tenant.facade';
-import { takeUntil } from 'rxjs/operators';
-import { Subject } from 'rxjs';
+
+
 import { HttpClient } from '@angular/common/http';
 import { HeroCarouselComponent } from './components/hero-carousel/hero-carousel.component';
 import { IconComponent } from '../../../shared/components/icon/icon.component';
@@ -20,12 +19,10 @@ import { IconComponent } from '../../../shared/components/icon/icon.component';
   standalone: true,
   imports: [RouterModule, HeroCarouselComponent, IconComponent],
   templateUrl: './vendix-landing.component.html',
-  styleUrls: ['./vendix-landing.component.scss'],
-})
-export class VendixLandingComponent implements OnInit, OnDestroy {
-  private destroy$ = new Subject<void>();
-
-  // Signals para estado de UI (Zoneless-compatible)
+  styleUrls: ['./vendix-landing.component.scss']})
+export class VendixLandingComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
+// Signals para estado de UI (Zoneless-compatible)
   readonly tenantConfig = signal<any>(null);
   readonly mobileMenuOpen = signal(false);
   readonly plans = signal<any[]>([]);
@@ -75,30 +72,21 @@ export class VendixLandingComponent implements OnInit, OnDestroy {
       branding: {
         name: 'Vendix',
         logo: {
-          url: 'assets/images/logo.png',
-        },
-      },
-    });
+          url: 'assets/images/logo.png'}}});
 
     // Always use default content for landing page
     this.initializeDefaultContent();
 
     // Subscribe to tenant configuration (includes branding and domain config)
     this.tenantFacade.tenantConfig$
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((tenantConfig) => {
         if (tenantConfig) {
           this.tenantConfig.set(tenantConfig);
         }
       });
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  getBackgroundGradient(): string {
+getBackgroundGradient(): string {
     // This will now use the CSS variables if they are set, otherwise it will use the defaults from :root
     return `linear-gradient(to bottom right, var(--color-background) 0%, var(--color-secondary) 100%)`;
   }
@@ -112,8 +100,7 @@ export class VendixLandingComponent implements OnInit, OnDestroy {
       subtitle:
         'Transforma tu negocio con IA integrada, ventas omnicanal y automatización total.',
       cta_primary: 'Comenzar Transformación',
-      cta_secondary: 'Ver Demo en Vivo',
-    });
+      cta_secondary: 'Ver Demo en Vivo'});
 
     // PLANS ARRAY - COMMENTED OUT FOR EARLY ACCESS (all features are currently free)
     // this.plans.set([
@@ -125,56 +112,47 @@ export class VendixLandingComponent implements OnInit, OnDestroy {
         icon: '🤖',
         title: 'IA Predictiva',
         description:
-          'Inteligencia artificial que anticipa demanda, optimiza precios y personaliza experiencias de compra.',
-      },
+          'Inteligencia artificial que anticipa demanda, optimiza precios y personaliza experiencias de compra.'},
       {
         icon: '🏪',
         title: 'POS Inteligente',
         description:
-          'Sistema de punto de venta con reconocimiento de productos, análisis de comportamiento y pagos sin contacto.',
-      },
+          'Sistema de punto de venta con reconocimiento de productos, análisis de comportamiento y pagos sin contacto.'},
       {
         icon: '📦',
         title: 'Inventario Automatizado',
         description:
-          'Gestión predictiva con reposición automática, optimización de stock y alertas inteligentes.',
-      },
+          'Gestión predictiva con reposición automática, optimización de stock y alertas inteligentes.'},
       {
         icon: '🛒',
         title: 'E-commerce Híbrido',
         description:
-          'Ventas online con click-and-collect, experiencia omnicanal y sincronización en tiempo real.',
-      },
+          'Ventas online con click-and-collect, experiencia omnicanal y sincronización en tiempo real.'},
       {
         icon: '📊',
         title: 'Analytics en Vivo',
         description:
-          'Dashboard con métricas en tiempo real, predicciones de ventas y insights accionables con IA.',
-      },
+          'Dashboard con métricas en tiempo real, predicciones de ventas y insights accionables con IA.'},
       {
         icon: '🎯',
         title: 'Marketing Inteligente',
         description:
-          'Segmentación automática, campañas personalizadas y recomendaciones basadas en comportamiento.',
-      },
+          'Segmentación automática, campañas personalizadas y recomendaciones basadas en comportamiento.'},
       {
         icon: '🔄',
         title: 'Automatización Total',
         description:
-          'Flujos de trabajo inteligentes, notificaciones automáticas y procesos sin intervención manual.',
-      },
+          'Flujos de trabajo inteligentes, notificaciones automáticas y procesos sin intervención manual.'},
       {
         icon: '🌐',
         title: 'Multi-tenant Avanzado',
         description:
-          'Gestión de múltiples organizaciones con configuración independiente y seguridad por capas.',
-      },
+          'Gestión de múltiples organizaciones con configuración independiente y seguridad por capas.'},
       {
         icon: '💬',
         title: 'Chatbots IA',
         description:
-          'Asistentes virtuales 24/7 para atención al cliente, ventas y soporte técnico personalizado.',
-      },
+          'Asistentes virtuales 24/7 para atención al cliente, ventas y soporte técnico personalizado.'},
     ]);
 
     this.footer.set({
@@ -188,10 +166,8 @@ export class VendixLandingComponent implements OnInit, OnDestroy {
           'Contacto',
           'Estado del Sistema',
         ],
-        company: ['Acerca de', 'Blog', 'Carreras', 'Prensa'],
-      },
-      copyright: '© 2025 Vendix. Todos los derechos reservados.',
-    });
+        company: ['Acerca de', 'Blog', 'Carreras', 'Prensa']},
+      copyright: '© 2025 Vendix. Todos los derechos reservados.'});
   }
 
   scrollToPlans() {

@@ -1,7 +1,8 @@
-import { Injectable } from '@angular/core';
+import { Injectable, signal } from '@angular/core';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { BehaviorSubject, Observable, Subject } from 'rxjs';
+import { Observable, Subject } from 'rxjs';
 import { tap } from 'rxjs/operators';
+import { toObservable } from '@angular/core/rxjs-interop';
 import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
 import { environment } from '../../../../../environments/environment';
 
@@ -40,14 +41,16 @@ export interface Wishlist {
 export class WishlistService {
     private api_url = `${environment.apiUrl}/ecommerce/wishlist`;
 
-    private wishlist_subject = new BehaviorSubject<Wishlist | null>(null);
-    wishlist$ = this.wishlist_subject.asObservable();
+    // Estado del wishlist como signal (zoneless-friendly).
+    readonly wishlist = signal<Wishlist | null>(null);
+    // Adaptador observable para consumidores legacy (wishlist$).
+    readonly wishlist$ = toObservable(this.wishlist);
 
-    // Event subjects for UI feedback (animations, toasts, etc.)
-    private item_added_subject = new Subject<void>();
-    private item_removed_subject = new Subject<void>();
-    itemAdded$ = this.item_added_subject.asObservable();
-    itemRemoved$ = this.item_removed_subject.asObservable();
+    // Eventos pub/sub para feedback UI (animaciones, toasts) — Subject legitimo.
+    private readonly item_added_subject = new Subject<void>();
+    private readonly item_removed_subject = new Subject<void>();
+    readonly itemAdded$ = this.item_added_subject.asObservable();
+    readonly itemRemoved$ = this.item_removed_subject.asObservable();
 
     constructor(
         private http: HttpClient,
@@ -66,7 +69,7 @@ export class WishlistService {
         return this.http.get(this.api_url, { headers: this.getHeaders() }).pipe(
             tap((response: any) => {
                 if (response.success) {
-                    this.wishlist_subject.next(response.data);
+                    this.wishlist.set(response.data);
                 }
             }),
         );
@@ -74,7 +77,7 @@ export class WishlistService {
 
     addItem(product_id: number, product_variant_id?: number): Observable<any> {
         // Optimistic update: agregar al principio de la lista local inmediatamente (modo pila/LIFO)
-        const current = this.wishlist_subject.value;
+        const current = this.wishlist();
         if (current) {
             const tempItem: WishlistItem = {
                 id: Date.now(), // ID temporal
@@ -98,7 +101,7 @@ export class WishlistService {
                 item_count: current.item_count + 1,
                 items: [tempItem, ...current.items], // Agregar al principio (stack/push)
             };
-            this.wishlist_subject.next(updated);
+            this.wishlist.set(updated);
         }
 
         return this.http
@@ -107,7 +110,7 @@ export class WishlistService {
                 tap((response: any) => {
                     if (response.success) {
                         // Reemplazar con datos reales del backend
-                        this.wishlist_subject.next(response.data);
+                        this.wishlist.set(response.data);
                         // Emit event for UI feedback
                         this.item_added_subject.next();
                     }
@@ -119,7 +122,7 @@ export class WishlistService {
         return this.http.delete(`${this.api_url}/${product_id}`, { headers: this.getHeaders() }).pipe(
             tap((response: any) => {
                 if (response.success) {
-                    this.wishlist_subject.next(response.data);
+                    this.wishlist.set(response.data);
                     // Emit event for UI feedback
                     this.item_removed_subject.next();
                 }

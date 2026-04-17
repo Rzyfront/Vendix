@@ -1,20 +1,20 @@
-import { Component, OnInit, OnDestroy, inject, signal, computed } from '@angular/core';
+import {Component, OnInit, inject, signal, computed,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   FormBuilder,
   FormGroup,
   Validators,
-  ReactiveFormsModule,
-} from '@angular/forms';
+  ReactiveFormsModule} from '@angular/forms';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
-import { Subject, interval, takeUntil, switchMap } from 'rxjs';
+import { interval, switchMap } from 'rxjs';
 import { environment } from '../../../../../environments/environment';
 import {
   ButtonComponent,
   InputComponent,
   SelectorComponent,
-  IconComponent,
-} from '../../../../shared/components';
+  IconComponent} from '../../../../shared/components';
 import { TenantFacade } from '../../../../core/store';
 
 @Component({
@@ -136,9 +136,9 @@ import { TenantFacade } from '../../../../core/store';
         }
       </div>
     </div>
-    `,
-})
-export class QueueRegisterComponent implements OnInit, OnDestroy {
+    `})
+export class QueueRegisterComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   form: FormGroup;
 
   // Signals para estado de UI (Zoneless-compatible)
@@ -157,9 +157,7 @@ export class QueueRegisterComponent implements OnInit, OnDestroy {
     { value: 'PP', label: 'Pasaporte' },
     { value: 'TI', label: 'Tarjeta de Identidad' },
   ];
-
-  private destroy$ = new Subject<void>();
-  private readonly apiUrl = `${environment.apiUrl}/ecommerce/customer-queue`;
+private readonly apiUrl = `${environment.apiUrl}/ecommerce/customer-queue`;
 
   private fb = inject(FormBuilder);
   private http = inject(HttpClient);
@@ -172,18 +170,11 @@ export class QueueRegisterComponent implements OnInit, OnDestroy {
       document_type: ['CC', [Validators.required]],
       document_number: ['', [Validators.required, Validators.minLength(5)]],
       email: [''],
-      phone: [''],
-    });
+      phone: ['']});
   }
 
   ngOnInit(): void {}
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  private getHeaders(): HttpHeaders {
+private getHeaders(): HttpHeaders {
     const storeId = this.tenantFacade.getCurrentStoreId();
     return new HttpHeaders({ 'x-store-id': storeId?.toString() || '' });
   }
@@ -201,7 +192,7 @@ export class QueueRegisterComponent implements OnInit, OnDestroy {
 
     this.http
       .post<any>(`${this.apiUrl}/register`, data, { headers: this.getHeaders() })
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.submitting.set(false);
@@ -227,8 +218,7 @@ export class QueueRegisterComponent implements OnInit, OnDestroy {
           } else {
             this.errorMessage.set('Error al registrarse. Intente nuevamente.');
           }
-        },
-      });
+        }});
   }
 
   private startPolling(): void {
@@ -236,7 +226,7 @@ export class QueueRegisterComponent implements OnInit, OnDestroy {
 
     interval(15000)
       .pipe(
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
         switchMap(() =>
           this.http.get<any>(
             `${this.apiUrl}/status/${this.registrationToken()}`,
@@ -252,7 +242,6 @@ export class QueueRegisterComponent implements OnInit, OnDestroy {
             this.queueStatus.set(data.status || '');
           }
         },
-        error: () => {},
-      });
+        error: () => {}});
   }
 }

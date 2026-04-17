@@ -55,7 +55,7 @@ import {
             </h2>
             <div class="flex items-center gap-2 w-full md:w-auto">
               <app-selector
-                [options]="period_options"
+                [options]="periodOptions()"
                 placeholder="Seleccionar periodo..."
                 (selectionChange)="onPeriodChange($event)"
                 class="flex-1 md:w-48"
@@ -210,27 +210,26 @@ export class TrialBalanceComponent {
     initialValue: [] as FiscalPeriod[],
   });
 
-  readonly period_options = computed(() =>
+  // ✅ Signals properly configured (already migrated, cleanup unused effect)
+  readonly periodOptions = computed(() =>
     this.periods().map((p) => ({
       value: p.id,
       label: p.name,
     })),
   );
-  readonly selected_period_id = signal<number | null>(null);
+  readonly selectedPeriodId = signal<number | null>(null);
 
   constructor() {
-    effect(() => {
-      const options = this.period_options();
-    });
+    // ✅ Removed unused effect — computed handles reactivity automatically
   }
 
   onPeriodChange(value: any): void {
-    this.selected_period_id.set(value);
+    this.selectedPeriodId.set(value);
     this.loadReport();
   }
 
   loadReport(): void {
-    const periodId = this.selected_period_id();
+    const periodId = this.selectedPeriodId();
     if (periodId) {
       this.store.dispatch(
         loadTrialBalance({

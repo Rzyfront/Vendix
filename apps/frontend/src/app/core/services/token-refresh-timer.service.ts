@@ -1,6 +1,6 @@
 import { Injectable, inject, DestroyRef } from '@angular/core';
 import { Subscription, timer, EMPTY } from 'rxjs';
-import { tap, catchError, take } from 'rxjs/operators';
+import { tap, catchError } from 'rxjs/operators';
 import { AuthService } from './auth.service';
 import { Store } from '@ngrx/store';
 import * as AuthActions from '../store/auth/auth.actions';
@@ -75,7 +75,6 @@ export class TokenRefreshTimerService {
     this.authService
       .refreshToken()
       .pipe(
-        take(1),
         tap((response) => {
           this.isRefreshing = false;
 
@@ -121,5 +120,4 @@ export class TokenRefreshTimerService {
       this.timerSubscription = undefined;
     }
   }
-
 }

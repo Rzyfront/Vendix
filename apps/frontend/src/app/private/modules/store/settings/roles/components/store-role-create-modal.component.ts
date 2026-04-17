@@ -1,27 +1,24 @@
-import {
-  Component,
+import {Component,
   input,
   output,
   model,
-  OnDestroy,
   inject,
-} from '@angular/core';
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   ReactiveFormsModule,
   FormBuilder,
   FormGroup,
-  Validators,
-} from '@angular/forms';
+  Validators} from '@angular/forms';
 import {
   InputComponent,
   ButtonComponent,
   ModalComponent,
-  ToastService,
-} from '../../../../../../shared/components/index';
+  ToastService} from '../../../../../../shared/components/index';
 import { StoreRolesService } from '../services/store-roles.service';
 import { CreateStoreRoleDto } from '../interfaces/store-role.interface';
-import { Subject, takeUntil } from 'rxjs';
+
 
 @Component({
   selector: 'app-store-role-create-modal',
@@ -87,18 +84,16 @@ import { Subject, takeUntil } from 'rxjs';
         display: block;
       }
     `,
-  ],
-})
-export class StoreRoleCreateModalComponent implements OnDestroy {
+  ]})
+export class StoreRoleCreateModalComponent implements {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = model<boolean>(false);
   readonly isOpenChange = output<boolean>();
   readonly onRoleCreated = output<void>();
 
   roleForm: FormGroup;
   isCreating: boolean = false;
-  private destroy$ = new Subject<void>();
-
-  private storeRolesService = inject(StoreRolesService);
+private storeRolesService = inject(StoreRolesService);
   private toastService = inject(ToastService);
 
   constructor(private fb: FormBuilder) {
@@ -111,16 +106,9 @@ export class StoreRoleCreateModalComponent implements OnDestroy {
           Validators.maxLength(50),
         ],
       ],
-      description: [''],
-    });
+      description: ['']});
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  onSubmit(): void {
+onSubmit(): void {
     if (this.roleForm.invalid || this.isCreating) {
       Object.keys(this.roleForm.controls).forEach((key) => {
         this.roleForm.get(key)?.markAsTouched();
@@ -138,7 +126,7 @@ export class StoreRoleCreateModalComponent implements OnDestroy {
 
     this.storeRolesService
       .createRole(roleData)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.isCreating = false;
@@ -157,8 +145,7 @@ export class StoreRoleCreateModalComponent implements OnDestroy {
           console.error('Error creating store role:', error);
           const message = error?.error?.message || 'Error al crear el rol';
           this.toastService.error(message);
-        },
-      });
+        }});
   }
 
   onCancel(): void {
@@ -169,7 +156,6 @@ export class StoreRoleCreateModalComponent implements OnDestroy {
   resetForm(): void {
     this.roleForm.reset({
       name: '',
-      description: '',
-    });
+      description: ''});
   }
 }

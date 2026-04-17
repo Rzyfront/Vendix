@@ -4,17 +4,16 @@ import {
   output,
   inject,
   effect,
-  DestroyRef,
-} from '@angular/core';
-import { Subject, takeUntil, take, filter } from 'rxjs';
+  DestroyRef } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { take, filter } from 'rxjs';
 
 
 import {
   ButtonComponent,
   ModalComponent,
   IconComponent,
-  ToastService,
-} from '../../../../../shared/components';
+  ToastService } from '../../../../../shared/components';
 import { PosPaymentService } from '../services/pos-payment.service';
 import { PosTicketService } from '../services/pos-ticket.service';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
@@ -260,9 +259,9 @@ import * as InvoicingActions from '../../invoicing/state/actions/invoicing.actio
         }
       }
     `,
-  ],
-})
+  ] })
 export class PosOrderConfirmationComponent {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = input<boolean>(false);
   readonly orderData = input<any>(null);
   readonly closed = output<void>();
@@ -286,9 +285,7 @@ export class PosOrderConfirmationComponent {
   orderTax = 0;
   orderTotal = 0;
   paymentInfo: any = null;
-
-  private destroy$ = new Subject<void>();
-  private authFacade = inject(AuthFacade);
+private authFacade = inject(AuthFacade);
   private toastService = inject(ToastService);
   private ticketService = inject(PosTicketService);
   private currencyService = inject(CurrencyFormatService);
@@ -299,13 +296,7 @@ export class PosOrderConfirmationComponent {
     const user = this.authFacade.getCurrentUser();
     this.cashierName = user ? `${user.first_name} ${user.last_name}` : 'Cajero';
     this.currencyService.loadCurrency();
-
-    inject(DestroyRef).onDestroy(() => {
-      this.destroy$.next();
-      this.destroy$.complete();
-    });
-
-    effect(() => {
+effect(() => {
       if (this.orderData()) {
         this.loadOrderData();
       }
@@ -341,8 +332,7 @@ export class PosOrderConfirmationComponent {
         tax,
         weight,
         weight_unit,
-        is_weight_product,
-      };
+        is_weight_product };
     });
 
     this.orderSubtotal = Number(data.subtotal || 0);
@@ -353,13 +343,11 @@ export class PosOrderConfirmationComponent {
     if (data.payment) {
       this.paymentInfo = {
         method: data.payment.payment_method || data.payment.method || 'Pago',
-        amount: Number(data.payment.amount || this.orderTotal),
-      };
+        amount: Number(data.payment.amount || this.orderTotal) };
     } else if (data.isCreditSale) {
       this.paymentInfo = {
         method: 'Venta a Crédito',
-        amount: this.orderTotal,
-      };
+        amount: this.orderTotal };
     }
   }
 
@@ -386,8 +374,7 @@ export class PosOrderConfirmationComponent {
         discount: 0,
         tax: item.tax,
         weight: item.weight || undefined,
-        weight_unit: item.weight_unit || undefined,
-      })),
+        weight_unit: item.weight_unit || undefined })),
       subtotal: this.orderSubtotal,
       tax: this.orderTax,
       discount: this.orderDiscount,
@@ -399,8 +386,7 @@ export class PosOrderConfirmationComponent {
         name: this.customerName,
         email: this.customerEmail,
         phone: '',
-        taxId: this.customerTaxId,
-      } : undefined,
+        taxId: this.customerTaxId } : undefined,
       store: {
         name: 'Vendix Store',
         address: '123 Main St, City, State 12345',
@@ -408,17 +394,14 @@ export class PosOrderConfirmationComponent {
         email: 'info@vendix.com',
         taxId: 'TAX-123456789',
         id: 1,
-        logo: '',
-      },
+        logo: '' },
       organization: {
         name: 'Vendix',
-        taxId: 'ORG-123',
-      },
+        taxId: 'ORG-123' },
       cashier: this.cashierName,
       transactionId: this.orderNumber,
       invoiceDataToken: this.orderData()?.invoiceDataToken,
-      invoiceDataQrUrl: this.orderData()?.invoiceDataQrUrl,
-    };
+      invoiceDataQrUrl: this.orderData()?.invoiceDataQrUrl };
 
     this.ticketService.printTicket(ticketData, { printReceipt: true }).subscribe({
       next: (success: boolean) => {
@@ -433,8 +416,7 @@ export class PosOrderConfirmationComponent {
         this.printing = false;
         console.error('Error al imprimir ticket:', error);
         this.toastService.error('Error al imprimir ticket');
-      },
-    });
+      } });
   }
 
   emailReceipt(): void {
@@ -468,7 +450,7 @@ export class PosOrderConfirmationComponent {
     this.actions$.pipe(
       ofType(InvoicingActions.createFromOrderSuccess, InvoicingActions.createFromOrderFailure),
       take(1),
-      takeUntil(this.destroy$),
+      takeUntilDestroyed(this.destroyRef),
     ).subscribe((action) => {
       this.creatingInvoice = false;
       if (action.type === InvoicingActions.createFromOrderSuccess.type) {

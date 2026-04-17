@@ -1,7 +1,7 @@
 import { Component, input, output, signal, DestroyRef, inject } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DatePipe } from '@angular/common';
-import { Subject } from 'rxjs';
-import { takeUntil } from 'rxjs/operators';
+
 
 import { PayrollService } from '../../../services/payroll.service';
 import { PayrollSettlement } from '../../../interfaces/payroll.interface';
@@ -278,8 +278,7 @@ import type { StepsLineItem } from '../../../../../../../shared/components';
         </div>
       </div>
     </app-modal>
-    `,
-})
+    ` })
 export class SettlementDetailComponent {
   readonly isOpen = input(false);
   readonly settlement = input<PayrollSettlement | null>(null);
@@ -290,9 +289,7 @@ export class SettlementDetailComponent {
   private toastService = inject(ToastService);
   private currencyService = inject(CurrencyFormatService);
   private destroyRef = inject(DestroyRef);
-  private destroy$ = new Subject<void>();
-
-  actionLoading = signal(false);
+actionLoading = signal(false);
   downloadLoading = signal(false);
   cancelConfirmStep: 0 | 1 | 2 = 0;
 
@@ -312,8 +309,6 @@ export class SettlementDetailComponent {
 
   constructor() {
     this.destroyRef.onDestroy(() => {
-      this.destroy$.next();
-      this.destroy$.complete();
     });
   }
 
@@ -325,7 +320,7 @@ export class SettlementDetailComponent {
     if (!this.settlement()) return;
     this.actionLoading.set(true);
     this.payrollService.recalculateSettlement(this.settlement()!.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.actionLoading.set(false);
@@ -335,15 +330,14 @@ export class SettlementDetailComponent {
         error: () => {
           this.actionLoading.set(false);
           this.toastService.show({ variant: 'error', description: 'Error al recalcular' });
-        },
-      });
+        } });
   }
 
   onApprove(): void {
     if (!this.settlement()) return;
     this.actionLoading.set(true);
     this.payrollService.approveSettlement(this.settlement()!.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.actionLoading.set(false);
@@ -353,15 +347,14 @@ export class SettlementDetailComponent {
         error: () => {
           this.actionLoading.set(false);
           this.toastService.show({ variant: 'error', description: 'Error al aprobar' });
-        },
-      });
+        } });
   }
 
   onPay(): void {
     if (!this.settlement()) return;
     this.actionLoading.set(true);
     this.payrollService.paySettlement(this.settlement()!.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.actionLoading.set(false);
@@ -371,15 +364,14 @@ export class SettlementDetailComponent {
         error: () => {
           this.actionLoading.set(false);
           this.toastService.show({ variant: 'error', description: 'Error al pagar' });
-        },
-      });
+        } });
   }
 
   onCancel(): void {
     if (!this.settlement()) return;
     this.actionLoading.set(true);
     this.payrollService.cancelSettlement(this.settlement()!.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.actionLoading.set(false);
@@ -389,15 +381,14 @@ export class SettlementDetailComponent {
         error: () => {
           this.actionLoading.set(false);
           this.toastService.show({ variant: 'error', description: 'Error al cancelar' });
-        },
-      });
+        } });
   }
 
   onDownloadPdf(): void {
     if (!this.settlement()) return;
     this.downloadLoading.set(true);
     this.payrollService.getSettlementPayslip(this.settlement()!.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (blob) => {
           const url = window.URL.createObjectURL(blob);
@@ -411,8 +402,7 @@ export class SettlementDetailComponent {
         error: () => {
           this.downloadLoading.set(false);
           this.toastService.show({ variant: 'error', description: 'Error al descargar PDF' });
-        },
-      });
+        } });
   }
 
   onClose(): void {
@@ -426,8 +416,7 @@ export class SettlementDetailComponent {
       calculated: 'Calculada',
       approved: 'Aprobada',
       paid: 'Pagada',
-      cancelled: 'Cancelada',
-    };
+      cancelled: 'Cancelada' };
     return labels[status] || status;
   }
 
@@ -437,8 +426,7 @@ export class SettlementDetailComponent {
       calculated: 'bg-blue-100 text-blue-800',
       approved: 'bg-yellow-100 text-yellow-800',
       paid: 'bg-green-100 text-green-800',
-      cancelled: 'bg-gray-100 text-gray-800',
-    };
+      cancelled: 'bg-gray-100 text-gray-800' };
     return classes[status] || 'bg-gray-100 text-gray-800';
   }
 
@@ -450,8 +438,7 @@ export class SettlementDetailComponent {
       mutual_agreement: 'Mutuo Acuerdo',
       contract_expiry: 'Vencimiento Contrato',
       retirement: 'Jubilacion',
-      death: 'Muerte del Trabajador',
-    };
+      death: 'Muerte del Trabajador' };
     return labels[reason] || reason || '-';
   }
 
@@ -460,8 +447,7 @@ export class SettlementDetailComponent {
       indefinite: 'Indefinido',
       fixed_term: 'Termino Fijo',
       service: 'Prestacion de Servicios',
-      apprentice: 'Aprendizaje',
-    };
+      apprentice: 'Aprendizaje' };
     return labels[type] || type || '-';
   }
 }

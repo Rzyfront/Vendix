@@ -1,13 +1,12 @@
 import { Component, input, output, inject, DestroyRef } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { Observable, Subject } from 'rxjs';
-import { takeUntil, map, distinctUntilChanged, skip } from 'rxjs/operators';
-import { toSignal } from '@angular/core/rxjs-interop';
+import { Observable } from 'rxjs';
+import { map, distinctUntilChanged, skip } from 'rxjs/operators';
+import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import {
   PosCartService,
   CartState,
-  CartItem,
-} from '../services/pos-cart.service';
+  CartItem } from '../services/pos-cart.service';
 import { CartDiscount } from '../models/cart.model';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
@@ -486,11 +485,10 @@ import { PosApiService } from '../services/pos-api.service';
         opacity: 1;
       }
     `,
-  ],
-})
+  ] })
 export class PosCartComponent {
-  private destroy$ = new Subject<void>();
-  private cartService = inject(PosCartService);
+  private destroyRef = inject(DestroyRef);
+private cartService = inject(PosCartService);
   private toastService = inject(ToastService);
   private dialogService = inject(DialogService);
   private currencyService = inject(CurrencyFormatService);
@@ -499,8 +497,7 @@ export class PosCartComponent {
 
   readonly cartState = toSignal(this.cartService.cartState);
   readonly isEmpty = toSignal(this.cartService.isEmpty, {
-    initialValue: false,
-  });
+    initialValue: false });
   readonly summary = toSignal(this.cartService.summary);
 
   activePromotions: any[] = [];
@@ -517,15 +514,10 @@ export class PosCartComponent {
   readonly layaway = output<void>();
 
   constructor() {
-    inject(DestroyRef).onDestroy(() => {
-      this.destroy$.next();
-      this.destroy$.complete();
-    });
-
-    // Load active promotions
+// Load active promotions
     this.posApiService
       .getActivePromotions()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           this.activePromotions = response?.data || response || [];
@@ -533,8 +525,7 @@ export class PosCartComponent {
         error: () => {
           // Silently fail - promotions are not critical
           this.activePromotions = [];
-        },
-      });
+        } });
 
     // Re-apply promotions when cart items change (use item count to avoid infinite loops)
     this.cartService.cartState
@@ -544,19 +535,18 @@ export class PosCartComponent {
             state.items.map((i) => ({
               id: i.product.id,
               qty: i.quantity,
-              vid: i.variant_id,
-            })),
+              vid: i.variant_id })),
           ),
         ),
         distinctUntilChanged(),
         skip(1), // Skip initial emission
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
       )
       .subscribe(() => {
         if (this.activePromotions.length > 0) {
           this.cartService
             .applyPromotions(this.activePromotions)
-            .pipe(takeUntil(this.destroy$))
+            .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe();
         }
       });
@@ -574,21 +564,20 @@ export class PosCartComponent {
 
     this.cartService
       .updateCartItem({ itemId, quantity })
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {},
         error: (error) => {
           this.toastService.error(
             error.message || 'Error al actualizar cantidad',
           );
-        },
-      });
+        } });
   }
 
   removeFromCart(itemId: string): void {
     this.cartService
       .removeFromCart(itemId)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.success('Producto eliminado del carrito');
@@ -597,8 +586,7 @@ export class PosCartComponent {
           this.toastService.error(
             error.message || 'Error al eliminar producto',
           );
-        },
-      });
+        } });
   }
 
   async clearCart(): Promise<void> {
@@ -608,21 +596,19 @@ export class PosCartComponent {
         '¿Estás seguro de que quieres vaciar todos los productos del carrito?',
       confirmText: 'Vaciar',
       cancelText: 'Cancelar',
-      confirmVariant: 'danger',
-    });
+      confirmVariant: 'danger' });
 
     if (confirm) {
       this.cartService
         .clearCart()
-        .pipe(takeUntil(this.destroy$))
+        .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: () => {
             this.toastService.success('Carrito vaciado');
           },
           error: (error) => {
             this.toastService.error(error.message || 'Error al vaciar carrito');
-          },
-        });
+          } });
     }
   }
 
@@ -649,8 +635,7 @@ export class PosCartComponent {
         title: 'Editar Peso',
         message: `${item.product.name}\nPrecio: ${this.formatCurrency(item.unitPrice)}/${unit}`,
         weightUnit: unit,
-        allowManualFallback: true,
-      });
+        allowManualFallback: true });
       if (scaleWeight === undefined) return;
       newWeight = scaleWeight;
     } else {
@@ -662,8 +647,7 @@ export class PosCartComponent {
           defaultValue: item.weight?.toString() || '1.0',
           confirmText: 'Actualizar',
           cancelText: 'Cancelar',
-          inputType: 'number',
-        },
+          inputType: 'number' },
         { size: 'sm' },
       );
 
@@ -682,15 +666,14 @@ export class PosCartComponent {
 
     this.cartService
       .updateCartItemWeight(item.id, newWeight)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.success(`Peso actualizado: ${newWeight} ${unit}`);
         },
         error: (error) => {
           this.toastService.error(error.message || 'Error al actualizar peso');
-        },
-      });
+        } });
   }
 
   getPromotionDiscounts(): CartDiscount[] {
@@ -702,7 +685,7 @@ export class PosCartComponent {
   removePromoDiscount(discountId: string): void {
     this.cartService
       .removeDiscount(discountId)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.success('Promoción eliminada');
@@ -711,8 +694,7 @@ export class PosCartComponent {
           this.toastService.error(
             error.message || 'Error al eliminar promoción',
           );
-        },
-      });
+        } });
   }
 
   applyCoupon(): void {
@@ -730,14 +712,14 @@ export class PosCartComponent {
     this.couponLoading = true;
     this.posApiService
       .validateCoupon(code, subtotal, customerId, productIds)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           const validation = response?.data || response;
           if (validation?.valid) {
             this.cartService
               .applyCouponDiscount(validation)
-              .pipe(takeUntil(this.destroy$))
+              .pipe(takeUntilDestroyed(this.destroyRef))
               .subscribe({
                 next: () => {
                   this.toastService.success(`Cupón "${code}" aplicado`);
@@ -749,8 +731,7 @@ export class PosCartComponent {
                     error.message || 'Error al aplicar cupón',
                   );
                   this.couponLoading = false;
-                },
-              });
+                } });
           } else {
             this.toastService.error(validation?.message || 'Cupón no válido');
             this.couponLoading = false;
@@ -761,22 +742,20 @@ export class PosCartComponent {
             error?.error?.message || 'Cupón no válido o expirado',
           );
           this.couponLoading = false;
-        },
-      });
+        } });
   }
 
   removeCoupon(): void {
     this.cartService
       .removeCoupon()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.success('Cupón eliminado');
         },
         error: (error) => {
           this.toastService.error(error.message || 'Error al eliminar cupón');
-        },
-      });
+        } });
   }
 
   getAppliedCoupon(): { coupon_id: number; coupon_code: string } | null {

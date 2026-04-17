@@ -1,4 +1,6 @@
-import { Component, OnInit, inject, OnDestroy, signal } from '@angular/core';
+import {Component, OnInit, inject, signal,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ConfigFacade } from '../../../../core/store/config';
 
 import { RouterModule, Router, ActivatedRoute } from '@angular/router';
@@ -6,10 +8,9 @@ import {
   FormBuilder,
   FormGroup,
   Validators,
-  ReactiveFormsModule,
-} from '@angular/forms';
-import { Subject } from 'rxjs';
-import { takeUntil } from 'rxjs/operators';
+  ReactiveFormsModule} from '@angular/forms';
+
+
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import { ToastService } from '../../../../shared/components/toast/toast.service';
 import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler';
@@ -169,9 +170,9 @@ import { IconComponent } from '../../../../shared/components';
       </div>
     </div>
     `,
-  styleUrls: [],
-})
-export class EmailVerificationComponent implements OnInit, OnDestroy {
+  styleUrls: []})
+export class EmailVerificationComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   readonly verificationStatus = signal<'pending' | 'success' | 'error'>('pending');
   readonly isLoading = signal(true);
   error: string | null = null;
@@ -183,16 +184,8 @@ export class EmailVerificationComponent implements OnInit, OnDestroy {
   private configFacade = inject(ConfigFacade);
   private route = inject(ActivatedRoute);
   private router = inject(Router);
-  private destroy$ = new Subject<void>();
-
-  constructor(private authFacade: AuthFacade) {}
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  ngOnInit(): void {
+constructor(private authFacade: AuthFacade) {}
+ngOnInit(): void {
     // Load branding logo
     const appConfig = this.configFacade.getCurrentConfig();
     if (appConfig) {
@@ -220,12 +213,12 @@ export class EmailVerificationComponent implements OnInit, OnDestroy {
     this.authFacade.verifyEmail(this.token!);
 
     this.authFacade.loading$
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((isLoading) => {
         this.isLoading.set(isLoading);
       });
 
-    this.authFacade.error$.pipe(takeUntil(this.destroy$)).subscribe((error) => {
+    this.authFacade.error$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((error) => {
       if (error) {
         // Normalize error to handle both string and NormalizedApiPayload types
         const errorMessage =
@@ -274,12 +267,12 @@ export class EmailVerificationComponent implements OnInit, OnDestroy {
     this.authFacade.resendVerification(email);
 
     this.authFacade.loading$
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((isLoading) => {
         this.resendLoading.set(isLoading);
       });
 
-    this.authFacade.error$.pipe(takeUntil(this.destroy$)).subscribe((error) => {
+    this.authFacade.error$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((error) => {
       if (error) {
         // Normalize error to handle both string and NormalizedApiPayload types
         const errorMessage =

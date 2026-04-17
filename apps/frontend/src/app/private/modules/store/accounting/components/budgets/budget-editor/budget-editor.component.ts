@@ -1,14 +1,13 @@
-import {
-  Component,
-  OnDestroy,
+import {Component,
   inject,
   signal,
   computed,
-} from '@angular/core';
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { ActivatedRoute, Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { Subject, takeUntil } from 'rxjs';
+
 
 import { AccountingService } from '../../../services/accounting.service';
 import { Budget, BudgetLine, ChartAccount } from '../../../interfaces/accounting.interface';
@@ -17,8 +16,7 @@ import {
   ToastService,
   SelectorComponent,
   SelectorOption,
-  IconComponent,
-} from '../../../../../../../shared/components/index';
+  IconComponent} from '../../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 
 const MONTH_KEYS = [
@@ -51,11 +49,10 @@ interface EditorLine {
     IconComponent
 ],
   templateUrl: './budget-editor.component.html',
-  styleUrls: ['./budget-editor.component.scss'],
-})
-export class BudgetEditorComponent implements OnDestroy {
-  private destroy$ = new Subject<void>();
-  private route = inject(ActivatedRoute);
+  styleUrls: ['./budget-editor.component.scss']})
+export class BudgetEditorComponent implements {
+  private destroyRef = inject(DestroyRef);
+private route = inject(ActivatedRoute);
   private router = inject(Router);
   private accounting_service = inject(AccountingService);
   private toast_service = inject(ToastService);
@@ -83,8 +80,7 @@ export class BudgetEditorComponent implements OnDestroy {
       draft: 'Borrador',
       approved: 'Aprobado',
       active: 'Activo',
-      closed: 'Cerrado',
-    };
+      closed: 'Cerrado'};
     return labels[b.status] || b.status;
   });
 
@@ -114,17 +110,11 @@ export class BudgetEditorComponent implements OnDestroy {
     this.loadBudget();
     this.loadAccounts();
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  private loadBudget(): void {
+private loadBudget(): void {
     this.loading.set(true);
     this.accounting_service
       .getBudget(this.budget_id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           const b = res.data;
@@ -136,14 +126,13 @@ export class BudgetEditorComponent implements OnDestroy {
           this.toast_service.show({ variant: 'error', description: 'Error al cargar presupuesto' });
           this.loading.set(false);
           this.router.navigate(['/store/accounting/budgets']);
-        },
-      });
+        }});
   }
 
   private loadAccounts(): void {
     this.accounting_service
       .getChartOfAccounts()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           const flat = this.flattenAccounts(res.data || []);
@@ -152,11 +141,9 @@ export class BudgetEditorComponent implements OnDestroy {
           this.account_options.set(
             entry_accounts.map((a) => ({
               value: a.id,
-              label: `${a.code} - ${a.name}`,
-            })),
+              label: `${a.code} - ${a.name}`})),
           );
-        },
-      });
+        }});
   }
 
   private flattenAccounts(accounts: ChartAccount[]): ChartAccount[] {
@@ -178,8 +165,7 @@ export class BudgetEditorComponent implements OnDestroy {
       account_code: l.account?.code || '',
       account_name: l.account?.name || '',
       months: MONTH_KEYS.map((k) => Number(l[k]) || 0),
-      total: Number(l.total_budgeted) || 0,
-    }));
+      total: Number(l.total_budgeted) || 0}));
   }
 
   addLine(): void {
@@ -200,8 +186,7 @@ export class BudgetEditorComponent implements OnDestroy {
       account_code: account.code,
       account_name: account.name,
       months: new Array(12).fill(0),
-      total: 0,
-    };
+      total: 0};
 
     this.lines.update((prev) => [...prev, new_line]);
     this.selected_account_id.set(null);
@@ -230,8 +215,7 @@ export class BudgetEditorComponent implements OnDestroy {
     this.saving.set(true);
     const payload = this.lines().map((l) => {
       const line_data: Record<string, any> = {
-        account_id: l.account_id,
-      };
+        account_id: l.account_id};
       if (l.id) line_data['id'] = l.id;
       MONTH_KEYS.forEach((k, i) => {
         line_data[k] = l.months[i] || 0;
@@ -241,7 +225,7 @@ export class BudgetEditorComponent implements OnDestroy {
 
     this.accounting_service
       .updateBudgetLines(this.budget_id, payload as any)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.toast_service.show({ variant: 'success', description: 'Lineas guardadas' });
@@ -255,15 +239,14 @@ export class BudgetEditorComponent implements OnDestroy {
         error: () => {
           this.toast_service.show({ variant: 'error', description: 'Error al guardar lineas' });
           this.saving.set(false);
-        },
-      });
+        }});
   }
 
   approveBudget(): void {
     if (!this.budget_id) return;
     this.accounting_service
       .approveBudget(this.budget_id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.budget.set(res.data);
@@ -271,15 +254,14 @@ export class BudgetEditorComponent implements OnDestroy {
         },
         error: () => {
           this.toast_service.show({ variant: 'error', description: 'Error al aprobar' });
-        },
-      });
+        }});
   }
 
   activateBudget(): void {
     if (!this.budget_id) return;
     this.accounting_service
       .activateBudget(this.budget_id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.budget.set(res.data);
@@ -287,15 +269,14 @@ export class BudgetEditorComponent implements OnDestroy {
         },
         error: () => {
           this.toast_service.show({ variant: 'error', description: 'Error al activar' });
-        },
-      });
+        }});
   }
 
   closeBudget(): void {
     if (!this.budget_id) return;
     this.accounting_service
       .closeBudget(this.budget_id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.budget.set(res.data);
@@ -303,8 +284,7 @@ export class BudgetEditorComponent implements OnDestroy {
         },
         error: () => {
           this.toast_service.show({ variant: 'error', description: 'Error al cerrar' });
-        },
-      });
+        }});
   }
 
   goBack(): void {

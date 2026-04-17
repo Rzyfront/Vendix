@@ -5,7 +5,7 @@
       type="text"
       class="search-input"
       placeholder="Buscar productos..."
-      [value]="search_query"
+      [value]="search_query()"
       (input)="onSearchInput($event)"
       (keydown)="onKeyDown($event)"
     />

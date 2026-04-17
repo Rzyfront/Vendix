@@ -1,4 +1,4 @@
-import { Component, input, output, inject } from '@angular/core';
+import { Component, input, output, inject, signal } from '@angular/core';
 
 import {
   FormsModule,
@@ -29,8 +29,8 @@ import { SuppliersService } from '../../services/suppliers.service';
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
-    InputComponent
-],
+    InputComponent,
+  ],
   template: `
     <app-modal
       [isOpen]="isOpen()"
@@ -140,7 +140,7 @@ export class PopSupplierQuickCreateComponent {
   private toastService = inject(ToastService);
 
   supplierForm!: FormGroup;
-  isLoading = false;
+  isLoading = signal(false);
 
   constructor() {
     this.initForm();
@@ -167,7 +167,7 @@ export class PopSupplierQuickCreateComponent {
       return;
     }
 
-    this.isLoading = true;
+    this.isLoading.set(true);
 
     // Clean data: remove empty strings and only send valid fields
     const formValues = this.supplierForm.value;
@@ -196,12 +196,11 @@ export class PopSupplierQuickCreateComponent {
             response.message || 'Error al crear el proveedor',
           );
         }
-        this.isLoading = false;
+        this.isLoading.set(false);
       },
       error: (error: any) => {
         console.error('Error creating supplier:', error);
 
-        // Handle backend validation errors
         let errorMessage = 'Error al crear el proveedor';
 
         if (error.error?.message) {
@@ -215,7 +214,7 @@ export class PopSupplierQuickCreateComponent {
         }
 
         this.toastService.error(errorMessage);
-        this.isLoading = false;
+        this.isLoading.set(false);
       },
     });
   }

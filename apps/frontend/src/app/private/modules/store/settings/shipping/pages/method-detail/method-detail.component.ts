@@ -1,23 +1,21 @@
-import {
-  Component,
+import {Component,
   ChangeDetectionStrategy,
   OnInit,
-  OnDestroy,
   inject,
   signal,
   computed,
-} from '@angular/core';
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { RouterModule, ActivatedRoute, Router } from '@angular/router';
-import { Subject, takeUntil, forkJoin, of } from 'rxjs';
+import { forkJoin, of } from 'rxjs';
 import { switchMap, map } from 'rxjs/operators';
 import { ShippingMethodsService } from '../../services/shipping-methods.service';
 import { StoreShippingMethod } from '../../interfaces/shipping-methods.interface';
 import {
   ShippingZone,
   ShippingRate,
-  ZoneWithRates,
-} from '../../interfaces/shipping-zones.interface';
+  ZoneWithRates} from '../../interfaces/shipping-zones.interface';
 import {
   StickyHeaderComponent,
   StickyHeaderActionButton,
@@ -28,12 +26,10 @@ import {
   BadgeComponent,
   ResponsiveDataViewComponent,
   ToastService,
-  DialogService,
-} from '../../../../../../../shared/components/index';
+  DialogService} from '../../../../../../../shared/components/index';
 import {
   TableColumn,
-  TableAction,
-} from '../../../../../../../shared/components/table/table.component';
+  TableAction} from '../../../../../../../shared/components/table/table.component';
 import { ItemListCardConfig } from '../../../../../../../shared/components/item-list/item-list.interfaces';
 import { AddRateWizardModalComponent } from '../../components/index';
 
@@ -187,17 +183,15 @@ import { AddRateWizardModalComponent } from '../../components/index';
         }
       }
     `,
-  ],
-})
-export class MethodDetailComponent implements OnInit, OnDestroy {
+  ]})
+export class MethodDetailComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private shippingService = inject(ShippingMethodsService);
   private toastService = inject(ToastService);
   private dialogService = inject(DialogService);
-  private destroy$ = new Subject<void>();
-
-  // ─── State ───
+// ─── State ───
   method = signal<StoreShippingMethod | null>(null);
   zones_with_rates = signal<ZoneWithRates[]>([]);
   all_store_zones = signal<ShippingZone[]>([]);
@@ -229,14 +223,12 @@ export class MethodDetailComponent implements OnInit, OnDestroy {
         id: 'configure',
         label: 'Configurar',
         variant: 'outline' as const,
-        icon: 'settings',
-      },
+        icon: 'settings'},
       {
         id: 'toggle',
         label: m.is_active ? 'Desactivar' : 'Activar',
         variant: (m.is_active ? 'outline-danger' : 'primary') as any,
-        icon: m.is_active ? 'pause' : 'play',
-      },
+        icon: m.is_active ? 'pause' : 'play'},
     ];
   });
 
@@ -250,8 +242,7 @@ export class MethodDetailComponent implements OnInit, OnDestroy {
       free_threshold_display: zr.rate.free_shipping_threshold
         ? `$${Number(zr.rate.free_shipping_threshold).toLocaleString('es-CO')}`
         : '—',
-      status_label: zr.rate.is_active ? 'Activa' : 'Inactiva',
-    }));
+      status_label: zr.rate.is_active ? 'Activa' : 'Inactiva'}));
   });
 
   // ─── Table Configuration ───
@@ -269,10 +260,7 @@ export class MethodDetailComponent implements OnInit, OnDestroy {
           'Por peso': '#F59E0B',
           'Por precio': '#6366F1',
           Calculado: '#6B7280',
-          Gratis: '#10B981',
-        },
-      },
-    },
+          Gratis: '#10B981'}}},
     { key: 'cost_display', label: 'Costo' },
     { key: 'free_threshold_display', label: 'Envio Gratis' },
     {
@@ -283,10 +271,7 @@ export class MethodDetailComponent implements OnInit, OnDestroy {
         type: 'custom',
         colorMap: {
           Activa: '#10B981',
-          Inactiva: '#F59E0B',
-        },
-      },
-    },
+          Inactiva: '#F59E0B'}}},
   ];
 
   tableActions: TableAction[] = [
@@ -294,15 +279,13 @@ export class MethodDetailComponent implements OnInit, OnDestroy {
       label: 'Editar',
       icon: 'pencil',
       variant: 'info',
-      action: (item: any) => this.editRate(item),
-    },
+      action: (item: any) => this.editRate(item)},
     {
       label: 'Eliminar',
       icon: 'trash-2',
       variant: 'danger',
       action: (item: any) =>
-        this.confirmDeleteRate(item._original as ZoneWithRates),
-    },
+        this.confirmDeleteRate(item._original as ZoneWithRates)},
   ];
 
   cardConfig: ItemListCardConfig = {
@@ -317,26 +300,19 @@ export class MethodDetailComponent implements OnInit, OnDestroy {
       { key: 'status_label', label: 'Estado' },
     ],
     footerKey: 'free_threshold_display',
-    footerLabel: 'Envio gratis desde',
-  };
+    footerLabel: 'Envio gratis desde'};
 
   // ─── Lifecycle ───
 
   ngOnInit(): void {
-    this.route.params.pipe(takeUntil(this.destroy$)).subscribe((params) => {
+    this.route.params.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
       const methodId = Number(params['methodId']);
       if (methodId) {
         this.loadMethodData(methodId);
       }
     });
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  // ─── Data Loading ───
+// ─── Data Loading ───
 
   loadMethodData(methodId: number): void {
     this.is_loading.set(true);
@@ -344,17 +320,15 @@ export class MethodDetailComponent implements OnInit, OnDestroy {
     // Load method details
     this.shippingService
       .getShippingMethod(methodId)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (method) => this.method.set(method),
         error: () => {
           this.toastService.show({
             variant: 'error',
-            description: 'Error al cargar el metodo',
-          });
+            description: 'Error al cargar el metodo'});
           this.router.navigate(['/admin/settings/shipping']);
-        },
-      });
+        }});
 
     // Load zones and their rates for this method
     this.shippingService
@@ -377,15 +351,14 @@ export class MethodDetailComponent implements OnInit, OnDestroy {
             ),
           ).pipe(map((results) => results.flat()));
         }),
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
       )
       .subscribe({
         next: (zonesWithRates) => {
           this.zones_with_rates.set(zonesWithRates);
           this.is_loading.set(false);
         },
-        error: () => this.is_loading.set(false),
-      });
+        error: () => this.is_loading.set(false)});
   }
 
   // ─── Header Actions ───
@@ -405,8 +378,7 @@ export class MethodDetailComponent implements OnInit, OnDestroy {
       title: `${m.is_active ? 'Desactivar' : 'Activar'} metodo`,
       message: `¿Estas seguro de ${action} el metodo "${m.name}"?`,
       confirmText: m.is_active ? 'Desactivar' : 'Activar',
-      confirmVariant: m.is_active ? 'danger' : 'primary',
-    });
+      confirmVariant: m.is_active ? 'danger' : 'primary'});
 
     if (!confirmed) return;
 
@@ -414,21 +386,18 @@ export class MethodDetailComponent implements OnInit, OnDestroy {
       ? this.shippingService.disableShippingMethod(m.id)
       : this.shippingService.enableStoreShippingMethod(m.id);
 
-    request$.pipe(takeUntil(this.destroy$)).subscribe({
+    request$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (updated) => {
         this.method.set(updated);
         this.toastService.show({
           variant: 'success',
-          description: `Metodo ${m.is_active ? 'desactivado' : 'activado'} correctamente`,
-        });
+          description: `Metodo ${m.is_active ? 'desactivado' : 'activado'} correctamente`});
       },
       error: () => {
         this.toastService.show({
           variant: 'error',
-          description: `Error al ${action} el metodo`,
-        });
-      },
-    });
+          description: `Error al ${action} el metodo`});
+      }});
   }
 
   // ─── Table Actions ───
@@ -451,30 +420,26 @@ export class MethodDetailComponent implements OnInit, OnDestroy {
       title: 'Eliminar tarifa',
       message: `¿Estas seguro de eliminar la tarifa de la zona "${zr.zone.name}"? Esta accion no se puede deshacer.`,
       confirmText: 'Eliminar',
-      confirmVariant: 'danger',
-    });
+      confirmVariant: 'danger'});
 
     if (!confirmed) return;
 
     this.shippingService
       .deleteRate(zr.rate.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.show({
             variant: 'success',
-            description: 'Tarifa eliminada correctamente',
-          });
+            description: 'Tarifa eliminada correctamente'});
           const m = this.method();
           if (m) this.loadMethodData(m.id);
         },
         error: () => {
           this.toastService.show({
             variant: 'error',
-            description: 'Error al eliminar la tarifa',
-          });
-        },
-      });
+            description: 'Error al eliminar la tarifa'});
+        }});
   }
 
   // ─── Rate Wizard ───
@@ -534,8 +499,7 @@ export class MethodDetailComponent implements OnInit, OnDestroy {
       PE: 'Peru',
       PA: 'Panama',
       PR: 'Puerto Rico',
-      ES: 'Espana',
-    };
+      ES: 'Espana'};
     const mapped = countries.map((c) => names[c] || c);
     if (mapped.length <= 2) return mapped.join(', ');
     return `${mapped.slice(0, 2).join(', ')} +${mapped.length - 2}`;

@@ -386,7 +386,6 @@ export class PurchaseOrderListComponent {
   }
 
 
-
   // Get empty state title based on filters
   getEmptyStateTitle(): string {
     if (this.hasFilters) {

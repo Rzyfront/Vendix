@@ -1,28 +1,25 @@
-import {
-  Component,
+import {Component,
   ChangeDetectionStrategy,
   OnInit,
-  OnDestroy,
   inject,
   signal,
   computed,
-} from '@angular/core';
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { RouterModule } from '@angular/router';
-import { Subject, takeUntil, forkJoin } from 'rxjs';
+import { forkJoin } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { ShippingMethodsService } from '../../services/shipping-methods.service';
 import {
   ShippingMethodStats,
   StoreShippingMethod,
-  SystemShippingMethod,
-} from '../../interfaces/shipping-methods.interface';
+  SystemShippingMethod} from '../../interfaces/shipping-methods.interface';
 import {
   ShippingZone,
   ShippingRate,
   ZoneStats,
-  ZoneWithRates,
-} from '../../interfaces/shipping-zones.interface';
+  ZoneWithRates} from '../../interfaces/shipping-zones.interface';
 import {
   ToastService,
   DialogService,
@@ -34,13 +31,11 @@ import {
   EmptyStateComponent,
   ToggleComponent,
   ExpandableCardComponent,
-  CardComponent,
-} from '../../../../../../../shared/components/index';
+  CardComponent} from '../../../../../../../shared/components/index';
 import { ShippingMethodsModalComponent } from '../../components/shipping-methods-modal.component';
 import {
   MethodZonesInlineComponent,
-  AddRateWizardModalComponent,
-} from '../../components/index';
+  AddRateWizardModalComponent} from '../../components/index';
 
 @Component({
   selector: 'app-shipping-dashboard',
@@ -276,15 +271,13 @@ import {
         min-width: auto;
       }
     }
-  `,
-})
-export class ShippingDashboardComponent implements OnInit, OnDestroy {
+  `})
+export class ShippingDashboardComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private shippingService = inject(ShippingMethodsService);
   private toastService = inject(ToastService);
   private dialogService = inject(DialogService);
-  private destroy$ = new Subject<void>();
-
-  // ===== DATA =====
+// ===== DATA =====
   shipping_methods = signal<StoreShippingMethod[]>([]);
   available_methods = signal<SystemShippingMethod[]>([]);
   method_stats = signal<ShippingMethodStats | null>(null);
@@ -322,13 +315,7 @@ export class ShippingDashboardComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.loadAll();
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  // ===== DATA LOADING =====
+// ===== DATA LOADING =====
 
   loadAll(): void {
     this.is_loading.set(true);
@@ -342,7 +329,7 @@ export class ShippingDashboardComponent implements OnInit, OnDestroy {
   loadShippingMethods(): void {
     this.shippingService
       .getStoreShippingMethods()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: any) => {
           this.shipping_methods.set(response.data || response);
@@ -352,18 +339,16 @@ export class ShippingDashboardComponent implements OnInit, OnDestroy {
         error: (error: any) => {
           this.toastService.show({
             variant: 'error',
-            description: 'Error al cargar metodos de envio: ' + error.message,
-          });
+            description: 'Error al cargar metodos de envio: ' + error.message});
           this.shipping_methods.set([]);
           this.is_loading.set(false);
-        },
-      });
+        }});
   }
 
   loadShippingMethodStats(): void {
     this.shippingService
       .getShippingMethodStats()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (stats: any) => {
           this.method_stats.set(stats.data || stats);
@@ -371,31 +356,27 @@ export class ShippingDashboardComponent implements OnInit, OnDestroy {
         error: (error: any) => {
           this.toastService.show({
             variant: 'error',
-            description: 'Error al cargar estadisticas: ' + error.message,
-          });
+            description: 'Error al cargar estadisticas: ' + error.message});
           this.method_stats.set(null);
-        },
-      });
+        }});
   }
 
   loadZoneStats(): void {
     this.shippingService
       .getZoneStats()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (stats) => this.zone_stats.set(stats),
         error: () =>
           this.toastService.show({
             variant: 'error',
-            description: 'Error al cargar estadisticas de zonas',
-          }),
-      });
+            description: 'Error al cargar estadisticas de zonas'})});
   }
 
   loadStoreZones(): void {
     this.shippingService
       .getStoreZones()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (zones) => {
           this.store_zones.set(zones);
@@ -404,15 +385,13 @@ export class ShippingDashboardComponent implements OnInit, OnDestroy {
         error: () =>
           this.toastService.show({
             variant: 'error',
-            description: 'Error al cargar tus zonas',
-          }),
-      });
+            description: 'Error al cargar tus zonas'})});
   }
 
   loadAvailableShippingMethods(): void {
     this.shippingService
       .getAvailableShippingMethods()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (methods: any) => {
           const methods_data = methods.data || methods;
@@ -422,11 +401,9 @@ export class ShippingDashboardComponent implements OnInit, OnDestroy {
           this.toastService.show({
             variant: 'error',
             description:
-              'Error al cargar metodos disponibles: ' + error.message,
-          });
+              'Error al cargar metodos disponibles: ' + error.message});
           this.available_methods.set([]);
-        },
-      });
+        }});
   }
 
   // ===== METHOD OPERATIONS =====
@@ -438,14 +415,13 @@ export class ShippingDashboardComponent implements OnInit, OnDestroy {
         message: `Al activar "${method.name}", se copiaran automaticamente las zonas y tarifas preconfiguradas del sistema. Continuar?`,
         confirmText: 'Activar',
         cancelText: 'Cancelar',
-        confirmVariant: 'primary',
-      })
+        confirmVariant: 'primary'})
       .then((confirmed) => {
         if (confirmed) {
           this.is_enabling.set(true);
           this.shippingService
             .enableShippingMethod(method.id, { name: method.name })
-            .pipe(takeUntil(this.destroy$))
+            .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe({
               next: (result: any) => {
                 const data = result.data || result;
@@ -459,8 +435,7 @@ export class ShippingDashboardComponent implements OnInit, OnDestroy {
                 }
                 this.toastService.show({
                   variant: 'success',
-                  description: message,
-                });
+                  description: message});
 
                 // Reload all data and invalidate cache
                 this.method_zones_cache.set(new Map());
@@ -479,11 +454,9 @@ export class ShippingDashboardComponent implements OnInit, OnDestroy {
                 this.toastService.show({
                   variant: 'error',
                   description:
-                    'Error al activar metodo de envio: ' + error.message,
-                });
+                    'Error al activar metodo de envio: ' + error.message});
                 this.is_enabling.set(false);
-              },
-            });
+              }});
         }
       });
   }
@@ -492,43 +465,37 @@ export class ShippingDashboardComponent implements OnInit, OnDestroy {
     if (method.is_active) {
       this.shippingService
         .disableShippingMethod(method.id)
-        .pipe(takeUntil(this.destroy$))
+        .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: () => {
             this.toastService.show({
               variant: 'success',
-              description: 'Metodo de envio desactivado',
-            });
+              description: 'Metodo de envio desactivado'});
             this.loadShippingMethods();
             this.loadShippingMethodStats();
           },
           error: (error: any) => {
             this.toastService.show({
               variant: 'error',
-              description: 'Error al desactivar metodo: ' + error.message,
-            });
-          },
-        });
+              description: 'Error al desactivar metodo: ' + error.message});
+          }});
     } else {
       this.shippingService
         .enableStoreShippingMethod(method.id)
-        .pipe(takeUntil(this.destroy$))
+        .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: () => {
             this.toastService.show({
               variant: 'success',
-              description: 'Metodo de envio activado',
-            });
+              description: 'Metodo de envio activado'});
             this.loadShippingMethods();
             this.loadShippingMethodStats();
           },
           error: (error: any) => {
             this.toastService.show({
               variant: 'error',
-              description: 'Error al activar metodo: ' + error.message,
-            });
-          },
-        });
+              description: 'Error al activar metodo: ' + error.message});
+          }});
     }
   }
 
@@ -539,19 +506,17 @@ export class ShippingDashboardComponent implements OnInit, OnDestroy {
         message: `Estas seguro de eliminar "${method.name}"? Se eliminaran tambien todas sus zonas y tarifas.`,
         confirmText: 'Eliminar',
         cancelText: 'Cancelar',
-        confirmVariant: 'danger',
-      })
+        confirmVariant: 'danger'})
       .then((confirmed) => {
         if (confirmed) {
           this.shippingService
             .deleteShippingMethod(method.id)
-            .pipe(takeUntil(this.destroy$))
+            .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe({
               next: () => {
                 this.toastService.show({
                   variant: 'success',
-                  description: 'Metodo de envio eliminado correctamente',
-                });
+                  description: 'Metodo de envio eliminado correctamente'});
                 this.method_zones_cache.set(new Map());
                 this.loadShippingMethods();
                 this.loadShippingMethodStats();
@@ -562,10 +527,8 @@ export class ShippingDashboardComponent implements OnInit, OnDestroy {
               error: (error: any) => {
                 this.toastService.show({
                   variant: 'error',
-                  description: 'Error al eliminar metodo: ' + error.message,
-                });
-              },
-            });
+                  description: 'Error al eliminar metodo: ' + error.message});
+              }});
         }
       });
   }
@@ -610,7 +573,7 @@ export class ShippingDashboardComponent implements OnInit, OnDestroy {
     );
 
     forkJoin(rateRequests)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (results) => {
           const zonesWithRates: ZoneWithRates[] = results.flat();
@@ -619,8 +582,7 @@ export class ShippingDashboardComponent implements OnInit, OnDestroy {
           this.method_zones_cache.set(newCache);
           this.loading_zones_for.set(null);
         },
-        error: () => this.loading_zones_for.set(null),
-      });
+        error: () => this.loading_zones_for.set(null)});
   }
 
   getZonesForMethod(methodId: number): ZoneWithRates[] {
@@ -658,19 +620,17 @@ export class ShippingDashboardComponent implements OnInit, OnDestroy {
           'Estas seguro de eliminar esta tarifa? Esta accion no se puede deshacer.',
         confirmText: 'Eliminar',
         cancelText: 'Cancelar',
-        confirmVariant: 'danger',
-      })
+        confirmVariant: 'danger'})
       .then((confirmed) => {
         if (confirmed) {
           this.shippingService
             .deleteRate(rate.id)
-            .pipe(takeUntil(this.destroy$))
+            .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe({
               next: () => {
                 this.toastService.show({
                   variant: 'success',
-                  description: 'Tarifa eliminada correctamente',
-                });
+                  description: 'Tarifa eliminada correctamente'});
                 // Invalidate cache for the method that had this rate
                 this.invalidateCacheForRate(rate);
                 this.loadZoneStats();
@@ -679,10 +639,8 @@ export class ShippingDashboardComponent implements OnInit, OnDestroy {
               error: (error: any) => {
                 this.toastService.show({
                   variant: 'error',
-                  description: 'Error al eliminar tarifa: ' + error.message,
-                });
-              },
-            });
+                  description: 'Error al eliminar tarifa: ' + error.message});
+              }});
         }
       });
   }
@@ -743,8 +701,7 @@ export class ShippingDashboardComponent implements OnInit, OnDestroy {
       pickup: 'Recogida',
       own_fleet: 'Flota propia',
       carrier: 'Transportadora',
-      third_party_provider: 'Externo',
-    };
+      third_party_provider: 'Externo'};
     return label_map[type] || type;
   }
 
@@ -761,8 +718,7 @@ export class ShippingDashboardComponent implements OnInit, OnDestroy {
       pickup: 'store',
       own_fleet: 'truck',
       carrier: 'send',
-      third_party_provider: 'globe',
-    };
+      third_party_provider: 'globe'};
     return icon_map[type] || 'truck';
   }
 
@@ -772,8 +728,7 @@ export class ShippingDashboardComponent implements OnInit, OnDestroy {
       pickup: '#ECFDF5',
       own_fleet: '#EFF6FF',
       carrier: '#FFF7ED',
-      third_party_provider: '#F5F3FF',
-    };
+      third_party_provider: '#F5F3FF'};
     return bg_map[type] || '#F1F5F9';
   }
 
@@ -783,8 +738,7 @@ export class ShippingDashboardComponent implements OnInit, OnDestroy {
       pickup: '#10B981',
       own_fleet: '#3B82F6',
       carrier: '#F59E0B',
-      third_party_provider: '#8B5CF6',
-    };
+      third_party_provider: '#8B5CF6'};
     return color_map[type] || '#64748B';
   }
 

@@ -1,17 +1,17 @@
-import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
+import {Component, OnInit, inject, signal,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
-import { Subject, takeUntil } from 'rxjs';
+
 import {
   Currency,
   CurrencyQueryDto,
   CurrencyStats,
-  CurrencyState,
-} from './interfaces';
+  CurrencyState} from './interfaces';
 import { CurrenciesService } from './services/currencies.service';
 import {
   CurrencyCreateModalComponent,
-  CurrencyEditModalComponent,
-} from './components/index';
+  CurrencyEditModalComponent} from './components/index';
 
 // Import components from shared
 import {
@@ -29,15 +29,13 @@ import {
   ItemListCardConfig,
   PaginationComponent,
   EmptyStateComponent,
-  CardComponent,
-} from '../../../../shared/components/index';
+  CardComponent} from '../../../../shared/components/index';
 
 import {
   FormsModule,
   ReactiveFormsModule,
   FormBuilder,
-  FormGroup,
-} from '@angular/forms';
+  FormGroup} from '@angular/forms';
 
 @Component({
   selector: 'app-currencies',
@@ -57,9 +55,9 @@ import {
     CardComponent
 ],
   templateUrl: './currencies.component.html',
-  styleUrls: ['./currencies.component.css'],
-})
-export class CurrenciesComponent implements OnInit, OnDestroy {
+  styleUrls: ['./currencies.component.css']})
+export class CurrenciesComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   // Services
   private currenciesService = inject(CurrenciesService);
   private fb = inject(FormBuilder);
@@ -79,14 +77,10 @@ export class CurrenciesComponent implements OnInit, OnDestroy {
 
   // Pagination
   pagination = { page: 1, limit: 10, total: 0, totalPages: 0 };
-
-  private destroy$ = new Subject<void>();
-
-  // Form for filters
+// Form for filters
   filterForm: FormGroup = this.fb.group({
     search: [''],
-    state: [''],
-  });
+    state: ['']});
 
   // Table configuration
   tableColumns: TableColumn[] = [
@@ -103,11 +97,9 @@ export class CurrenciesComponent implements OnInit, OnDestroy {
         const map: Record<string, string> = {
           'comma_dot': '1,234.56',
           'dot_comma': '1.234,56',
-          'space_comma': '1 234,56',
-        };
+          'space_comma': '1 234,56'};
         return map[value] || value;
-      },
-    },
+      }},
     {
       key: 'state',
       label: 'Estado',
@@ -116,10 +108,8 @@ export class CurrenciesComponent implements OnInit, OnDestroy {
       priority: 2,
       badgeConfig: {
         type: 'status',
-        size: 'sm',
-      },
-      transform: (value: string) => this.formatState(value),
-    },
+        size: 'sm'},
+      transform: (value: string) => this.formatState(value)},
   ];
 
   // Card configuration for mobile
@@ -132,22 +122,19 @@ export class CurrenciesComponent implements OnInit, OnDestroy {
     detailKeys: [
       { key: 'symbol', label: 'Símbolo' },
       { key: 'decimal_places', label: 'Decimales' },
-    ],
-  };
+    ]};
 
   tableActions: TableAction[] = [
     {
       label: 'Editar',
       icon: 'edit',
       action: (currency: Currency) => this.editCurrency(currency),
-      variant: 'info',
-    },
+      variant: 'info'},
     {
       label: 'Eliminar',
       icon: 'trash-2',
       action: (currency: Currency) => this.confirmDelete(currency),
-      variant: 'danger',
-    },
+      variant: 'danger'},
   ];
 
   // Selector options mapping
@@ -165,31 +152,24 @@ export class CurrenciesComponent implements OnInit, OnDestroy {
 
     // Subscribe to form changes
     this.filterForm.valueChanges
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => {
         this.pagination.page = 1;
         this.loadCurrencies();
       });
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  loadCurrencies(): void {
+loadCurrencies(): void {
     this.isLoading.set(true);
     const filters = this.filterForm.value;
     const query: CurrencyQueryDto = {
       page: this.pagination.page,
       limit: this.pagination.limit,
       search: filters.search || undefined,
-      state: filters.state || undefined,
-    };
+      state: filters.state || undefined};
 
     this.currenciesService
       .getCurrencies(query)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           this.currencies.set(response.data || []);
@@ -204,8 +184,7 @@ export class CurrenciesComponent implements OnInit, OnDestroy {
           console.error('Error loading currencies:', error);
           this.currencies.set([]);
           this.toastService.error('Error al cargar monedas');
-        },
-      })
+        }})
       .add(() => {
         this.isLoading.set(false);
       });
@@ -214,7 +193,7 @@ export class CurrenciesComponent implements OnInit, OnDestroy {
   loadCurrencyStats(): void {
     this.currenciesService
       .getCurrencyStats()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: any) => {
           if (response.success && response.data) {
@@ -223,8 +202,7 @@ export class CurrenciesComponent implements OnInit, OnDestroy {
         },
         error: (error) => {
           console.error('Error loading currency stats:', error);
-        },
-      });
+        }});
   }
 
   onSearchChange(searchTerm: string): void {
@@ -255,7 +233,7 @@ export class CurrenciesComponent implements OnInit, OnDestroy {
     this.isSubmitting.set(true);
     this.currenciesService
       .createCurrency(currencyData)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.showCreateModal.set(false);
@@ -267,8 +245,7 @@ export class CurrenciesComponent implements OnInit, OnDestroy {
           this.toastService.error(
             error.error?.message || 'Error al crear la moneda',
           );
-        },
-      })
+        }})
       .add(() => {
         this.isSubmitting.set(false);
       });
@@ -286,7 +263,7 @@ export class CurrenciesComponent implements OnInit, OnDestroy {
     this.isSubmitting.set(true);
     this.currenciesService
       .updateCurrency(currentCurrency.code, currencyData)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.showEditModal.set(false);
@@ -299,8 +276,7 @@ export class CurrenciesComponent implements OnInit, OnDestroy {
           this.toastService.error(
             error.error?.message || 'Error al actualizar la moneda',
           );
-        },
-      })
+        }})
       .add(() => {
         this.isSubmitting.set(false);
       });
@@ -313,8 +289,7 @@ export class CurrenciesComponent implements OnInit, OnDestroy {
         message: `¿Estás seguro de que deseas eliminar la moneda "${currency.code}"? Esta acción no se puede deshacer.`,
         confirmText: 'Eliminar',
         cancelText: 'Cancelar',
-        confirmVariant: 'danger',
-      })
+        confirmVariant: 'danger'})
       .then((confirmed) => {
         if (confirmed) {
           this.deleteCurrency(currency.code);
@@ -325,7 +300,7 @@ export class CurrenciesComponent implements OnInit, OnDestroy {
   deleteCurrency(code: string): void {
     this.currenciesService
       .deleteCurrency(code)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.refreshCurrencies();
@@ -336,16 +311,14 @@ export class CurrenciesComponent implements OnInit, OnDestroy {
           this.toastService.error(
             error.error?.message || 'Error al eliminar la moneda',
           );
-        },
-      });
+        }});
   }
 
   formatState(state: string): string {
     const stateMap: Record<string, string> = {
       [CurrencyState.ACTIVE]: 'Activa',
       [CurrencyState.INACTIVE]: 'Inactiva',
-      [CurrencyState.DEPRECATED]: 'Obsoleta',
-    };
+      [CurrencyState.DEPRECATED]: 'Obsoleta'};
     return stateMap[state] || state;
   }
 }

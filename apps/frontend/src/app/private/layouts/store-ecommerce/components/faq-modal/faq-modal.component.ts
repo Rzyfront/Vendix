@@ -1,4 +1,4 @@
-import { Component, input, output } from '@angular/core';
+import { Component, input, output, signal } from '@angular/core';
 
 import { IconComponent } from '../../../../../shared/components';
 
@@ -51,13 +51,13 @@ export interface FaqItem {
                 class="w-full flex items-center justify-between p-4 text-left hover:bg-gray-50 transition-colors">
                 <span class="font-medium text-gray-900 pr-4">{{ item.question }}</span>
                 <app-icon
-                  [name]="expandedIndex === i ? 'chevron-up' : 'chevron-down'"
+                  [name]="expandedIndex() === i ? 'chevron-up' : 'chevron-down'"
                   [size]="20"
                   class="text-gray-500 flex-shrink-0 transition-transform duration-200"></app-icon>
               </button>
 
               <!-- Answer (Accordion Content) -->
-              @if (expandedIndex === i) {
+              @if (expandedIndex() === i) {
               <div class="px-4 pb-4 animate-in fade-in slide-in-from-top-1 duration-150">
                 <div class="pt-2 border-t border-gray-100">
                   <p class="text-gray-600 leading-relaxed whitespace-pre-wrap">{{ item.answer }}</p>
@@ -96,10 +96,10 @@ export class FaqModalComponent {
   readonly items = input<FaqItem[]>([]);
   readonly closed = output<void>();
 
-  expandedIndex: number | null = 0;
+  readonly expandedIndex = signal<number | null>(0);
 
   toggleItem(index: number): void {
-    this.expandedIndex = this.expandedIndex === index ? null : index;
+    this.expandedIndex.update((current) => (current === index ? null : index));
   }
 
   close(): void {

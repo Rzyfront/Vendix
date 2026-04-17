@@ -1,8 +1,11 @@
-import { Component, OnInit, OnDestroy, signal } from '@angular/core';
+import {Component, OnInit, signal,
+  DestroyRef,
+  inject} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { SuperAdminDashboardService } from './services/super-admin-dashboard.service';
-import { Subject } from 'rxjs';
-import { takeUntil } from 'rxjs/operators';
+
+
 import { StatsComponent } from '../../../../shared/components';
 
 interface StatCard {
@@ -485,17 +488,15 @@ interface ChartData {
           </div>
         </div>
     `,
-  styles: [],
-})
-export class DashboardComponent implements OnInit, OnDestroy {
-  private destroy$ = new Subject<void>();
-  readonly isLoading = signal(false);
+  styles: []})
+export class DashboardComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
+readonly isLoading = signal(false);
 
   readonly statsData = signal<StatCard[]>([]);
   readonly chartData = signal<ChartData>({
     labels: [],
-    datasets: [],
-  });
+    datasets: []});
   readonly recentActivities = signal<ActivityItem[]>([]);
   readonly topOrganizations = signal<any[]>([]);
 
@@ -504,18 +505,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
   ngOnInit(): void {
     this.loadDashboardData();
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  private loadDashboardData(): void {
+private loadDashboardData(): void {
     this.isLoading.set(true);
 
     this.superAdminDashboardService
       .getDashboardStats()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (data) => {
           this.updateStatsData(data);
@@ -527,8 +522,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
         error: (error) => {
           console.error('Error loading dashboard data:', error);
           this.isLoading.set(false);
-        },
-      });
+        }});
   }
 
   private updateStatsData(data: any): void {
@@ -539,32 +533,28 @@ export class DashboardComponent implements OnInit, OnDestroy {
         change: data.organizationGrowth || 0,
         icon: 'building',
         iconBgColor: 'bg-green-100',
-        iconColor: 'text-green-600',
-      },
+        iconColor: 'text-green-600'},
       {
         title: 'Total de Usuarios',
         value: data.totalUsers?.toLocaleString() || '0',
         change: data.userGrowth || 0,
         icon: 'users',
         iconBgColor: 'bg-cyan-100',
-        iconColor: 'text-cyan-600',
-      },
+        iconColor: 'text-cyan-600'},
       {
         title: 'Tiendas Activas',
         value: data.activeStores?.toLocaleString() || '0',
         change: data.storeGrowth || 0,
         icon: 'store',
         iconBgColor: 'bg-emerald-100',
-        iconColor: 'text-emerald-600',
-      },
+        iconColor: 'text-emerald-600'},
       {
         title: 'Crecimiento de la Plataforma',
         value: `${data.platformGrowth || 0}%`,
         change: data.platformGrowth || 0,
         icon: 'trending-up',
         iconBgColor: 'bg-purple-100',
-        iconColor: 'text-purple-600',
-      },
+        iconColor: 'text-purple-600'},
     ]);
   }
 
@@ -577,10 +567,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
             label: 'Nuevas Organizaciones',
             data: data.weeklyData.map((item: any) => item.organizations),
             borderColor: '#3b82f6',
-            backgroundColor: '#3b82f6',
-          },
-        ],
-      });
+            backgroundColor: '#3b82f6'},
+        ]});
     }
   }
 
@@ -593,8 +581,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
         description: activity.entityName,
         timestamp: this.formatTimestamp(activity.timestamp),
         icon: this.getActivityIcon(activity.type),
-        color: this.getActivityColor(activity.type),
-      })) || [],
+        color: this.getActivityColor(activity.type)})) || [],
     );
   }
 
@@ -623,8 +610,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       organization: 'fa-building',
       user: 'fa-user',
       store: 'fa-store',
-      domain: 'fa-globe',
-    };
+      domain: 'fa-globe'};
     return icons[type as keyof typeof icons] || 'fa-info-circle';
   }
 
@@ -633,8 +619,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       organization: '#7ed7a5',
       user: '#06b6d4',
       store: '#10b981',
-      domain: '#f59e0b',
-    };
+      domain: '#f59e0b'};
     return colors[type as keyof typeof colors] || '#6b7280';
   }
 

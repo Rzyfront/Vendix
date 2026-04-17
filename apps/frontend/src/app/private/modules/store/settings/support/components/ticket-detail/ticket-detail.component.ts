@@ -1,7 +1,9 @@
-import { Component, OnInit, OnDestroy, inject, signal, computed } from '@angular/core';
+import {Component, OnInit, inject, signal, computed,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
-import { Subject, takeUntil, finalize } from 'rxjs';
+import { finalize } from 'rxjs';
 import {
   IconComponent,
   ModalComponent,
@@ -10,8 +12,7 @@ import {
   ButtonComponent,
   StickyHeaderComponent,
   StickyHeaderActionButton,
-  StickyHeaderBadgeColor,
-} from '../../../../../../../shared/components';
+  StickyHeaderBadgeColor} from '../../../../../../../shared/components';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { SupportService } from '../../services/support.service';
 import { AuthFacade } from '../../../../../../../core/store/auth/auth.facade';
@@ -20,8 +21,7 @@ import {
   TicketComment,
   TicketAttachment,
   TicketStatus,
-  TicketPriority,
-} from '../../models/ticket.model';
+  TicketPriority} from '../../models/ticket.model';
 
 @Component({
   selector: 'app-ticket-detail',
@@ -306,7 +306,8 @@ import {
     }
   `]
 })
-export class TicketDetailComponent implements OnInit, OnDestroy {
+export class TicketDetailComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private supportService = inject(SupportService);
@@ -328,9 +329,7 @@ export class TicketDetailComponent implements OnInit, OnDestroy {
 
   commentForm: FormGroup;
   closeForm: FormGroup;
-
-  private destroy$ = new Subject<void>();
-  private ticketId = signal<number | null>(null);
+private ticketId = signal<number | null>(null);
 
   // Only SUPER_ADMIN can close tickets
   isSuperAdmin = computed(() => {
@@ -340,16 +339,14 @@ export class TicketDetailComponent implements OnInit, OnDestroy {
 
   constructor() {
     this.commentForm = this.fb.group({
-      content: ['', Validators.required],
-    });
+      content: ['', Validators.required]});
 
     this.closeForm = this.fb.group({
-      resolution_summary: [''],
-    });
+      resolution_summary: ['']});
   }
 
   ngOnInit(): void {
-    this.route.paramMap.pipe(takeUntil(this.destroy$)).subscribe((params: any) => {
+    this.route.paramMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params: any) => {
       const id = params.get('id');
       if (id) {
         this.ticketId.set(+id);
@@ -358,18 +355,12 @@ export class TicketDetailComponent implements OnInit, OnDestroy {
       }
     });
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  loadTicket(id: number) {
+loadTicket(id: number) {
     this.loading.set(true);
     this.supportService
       .getTicketById(id)
       .pipe(
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
         finalize(() => this.loading.set(false)),
       )
       .subscribe({
@@ -380,20 +371,18 @@ export class TicketDetailComponent implements OnInit, OnDestroy {
           console.error('Error loading ticket:', err);
           this.toastService.error('Error al cargar el ticket');
           this.goBack();
-        },
-      });
+        }});
   }
 
   loadComments(id: number) {
-    this.supportService.getComments(id).pipe(takeUntil(this.destroy$)).subscribe({
+    this.supportService.getComments(id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (comments: TicketComment[]) => {
         this.comments.set(comments);
       },
       error: (err: any) => {
         console.error('Error loading comments:', err);
         this.toastService.error('Error al cargar comentarios');
-      },
-    });
+      }});
   }
 
   submitComment() {
@@ -413,7 +402,7 @@ export class TicketDetailComponent implements OnInit, OnDestroy {
     this.supportService
       .addComment(this.ticketId()!, content.trim(), false)
       .pipe(
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
         finalize(() => this.sendingComment.set(false)),
       )
       .subscribe({
@@ -426,8 +415,7 @@ export class TicketDetailComponent implements OnInit, OnDestroy {
         error: (err: any) => {
           console.error('Error adding comment:', err);
           this.toastService.error('Error al agregar comentario');
-        },
-      });
+        }});
   }
 
   openCloseModal() {
@@ -447,7 +435,7 @@ export class TicketDetailComponent implements OnInit, OnDestroy {
     this.supportService
       .closeTicket(this.ticketId()!, resolution_summary)
       .pipe(
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
         finalize(() => {
           this.closingTicket.set(false);
           this.showCloseModal.set(false);
@@ -461,14 +449,13 @@ export class TicketDetailComponent implements OnInit, OnDestroy {
         error: (err: any) => {
           console.error('Error closing ticket:', err);
           this.toastService.error('Error al cerrar ticket');
-        },
-      });
+        }});
   }
 
   reopenTicket() {
     if (!this.ticketId()) return;
 
-    this.supportService.reopenTicket(this.ticketId()!).pipe(takeUntil(this.destroy$)).subscribe({
+    this.supportService.reopenTicket(this.ticketId()!).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.toastService.success('Ticket reabierto');
         this.loadTicket(this.ticketId()!);
@@ -476,8 +463,7 @@ export class TicketDetailComponent implements OnInit, OnDestroy {
       error: (err: any) => {
         console.error('Error reopening ticket:', err);
         this.toastService.error('Error al reabrir ticket');
-      },
-    });
+      }});
   }
 
   openLightbox(index: number) {
@@ -567,8 +553,7 @@ export class TicketDetailComponent implements OnInit, OnDestroy {
       WAITING_RESPONSE: 'yellow',
       RESOLVED: 'green',
       CLOSED: 'gray',
-      REOPENED: 'red',
-    };
+      REOPENED: 'red'};
     return colorMap[status as TicketStatus || TicketStatus.NEW] || 'blue';
   });
 
@@ -580,8 +565,7 @@ export class TicketDetailComponent implements OnInit, OnDestroy {
         id: 'close',
         label: 'Cerrar Ticket',
         variant: 'primary',
-        icon: 'check-circle',
-      });
+        icon: 'check-circle'});
     }
 
     if (this.canReopenTicket()) {
@@ -589,8 +573,7 @@ export class TicketDetailComponent implements OnInit, OnDestroy {
         id: 'reopen',
         label: 'Reabrir',
         variant: 'secondary',
-        icon: 'rotate-ccw',
-      });
+        icon: 'rotate-ccw'});
     }
 
     return actions;
@@ -619,8 +602,7 @@ export class TicketDetailComponent implements OnInit, OnDestroy {
       WAITING_RESPONSE: 'Esperando',
       RESOLVED: 'Resuelto',
       CLOSED: 'Cerrado',
-      REOPENED: 'Reabierto',
-    };
+      REOPENED: 'Reabierto'};
     return labels[status] || status;
   }
 
@@ -633,8 +615,7 @@ export class TicketDetailComponent implements OnInit, OnDestroy {
       WAITING_RESPONSE: 'bg-orange-100 text-orange-700 border-orange-200',
       RESOLVED: 'bg-teal-100 text-teal-700 border-teal-200',
       CLOSED: 'bg-gray-100 text-gray-700 border-gray-200',
-      REOPENED: 'bg-red-100 text-red-700 border-red-200',
-    };
+      REOPENED: 'bg-red-100 text-red-700 border-red-200'};
     return classes[status] || 'bg-gray-100 text-gray-700 border-gray-200';
   }
 
@@ -645,8 +626,7 @@ export class TicketDetailComponent implements OnInit, OnDestroy {
       P1: 'Urgente',
       P2: 'Alta',
       P3: 'Normal',
-      P4: 'Baja',
-    };
+      P4: 'Baja'};
     return labels[priority] || priority;
   }
 
@@ -657,8 +637,7 @@ export class TicketDetailComponent implements OnInit, OnDestroy {
       P1: 'bg-orange-100 text-orange-700 border-orange-200',
       P2: 'bg-yellow-100 text-yellow-700 border-yellow-200',
       P3: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-      P4: 'bg-gray-100 text-gray-700 border-gray-200',
-    };
+      P4: 'bg-gray-100 text-gray-700 border-gray-200'};
     return classes[priority] || 'bg-gray-100 text-gray-700 border-gray-200';
   }
 
@@ -669,8 +648,7 @@ export class TicketDetailComponent implements OnInit, OnDestroy {
       'SERVICE_REQUEST': 'Solicitud de Servicio',
       'PROBLEM': 'Problema',
       'CHANGE': 'Cambio',
-      'QUESTION': 'Consulta',
-    };
+      'QUESTION': 'Consulta'};
     return labels[category] || category;
   }
 
@@ -682,8 +660,7 @@ export class TicketDetailComponent implements OnInit, OnDestroy {
       month: 'short',
       year: 'numeric',
       hour: '2-digit',
-      minute: '2-digit',
-    });
+      minute: '2-digit'});
   }
 
   formatCommentDate(dateString?: string): string {
@@ -706,7 +683,6 @@ export class TicketDetailComponent implements OnInit, OnDestroy {
 
     return date.toLocaleDateString('es-ES', {
       day: '2-digit',
-      month: 'short',
-    });
+      month: 'short'});
   }
 }

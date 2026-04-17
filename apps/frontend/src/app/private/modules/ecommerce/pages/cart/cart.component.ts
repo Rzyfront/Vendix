@@ -1,9 +1,7 @@
-import { Component, OnInit, OnDestroy, inject, signal, DestroyRef } from '@angular/core';
+import { Component, OnInit, DestroyRef, inject, signal, ChangeDetectionStrategy } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router } from '@angular/router';
-import { Subject } from 'rxjs';
-import { takeUntil } from 'rxjs/operators';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CartService, Cart, CartItem } from '../../services/cart.service';
 import { CheckoutService, WhatsappCheckoutResponse } from '../../services/checkout.service';
 import { AuthFacade } from '../../../../../core/store';
@@ -25,8 +23,9 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
   imports: [CommonModule, RouterModule, IconComponent, QuantityControlComponent, ButtonComponent, ProductCarouselComponent, ProductQuickViewModalComponent, CurrencyPipe],
   templateUrl: './cart.component.html',
   styleUrls: ['./cart.component.scss'],
+  changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class CartComponent implements OnInit, OnDestroy {
+export class CartComponent implements OnInit {
   readonly cart = signal<Cart | null>(null);
   readonly is_loading = signal(true);
   readonly is_authenticated = signal(false);
@@ -44,7 +43,6 @@ export class CartComponent implements OnInit, OnDestroy {
     return !!config?.customConfig?.ecommerce?.checkout?.whatsapp_checkout;
   }
 
-  private destroy$ = new Subject<void>();
   private catalogService = inject(CatalogService);
   private checkoutService = inject(CheckoutService);
   private tenantFacade = inject(TenantFacade);
@@ -63,7 +61,7 @@ export class CartComponent implements OnInit, OnDestroy {
     // Asegurar que la moneda esté cargada para mostrar precios correctamente
     this.currencyService.loadCurrency();
 
-    this.auth_facade.isAuthenticated$.pipe(takeUntil(this.destroy$)).subscribe((is_auth: boolean) => {
+    this.auth_facade.isAuthenticated$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((is_auth: boolean) => {
       this.is_authenticated.set(is_auth);
       if (is_auth) {
         this.loadCart();
@@ -73,11 +71,6 @@ export class CartComponent implements OnInit, OnDestroy {
     });
 
     this.loadRecommendations();
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
   }
 
   private extractErrorMessage(err: any): string {
@@ -99,13 +92,13 @@ export class CartComponent implements OnInit, OnDestroy {
       },
     });
 
-    this.cart_service.cart$.pipe(takeUntil(this.destroy$)).subscribe((cart) => {
+    this.cart_service.cart$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((cart) => {
       this.cart.set(cart);
     });
   }
 
   loadLocalCart(): void {
-    this.cart_service.cart$.pipe(takeUntil(this.destroy$)).subscribe((cart) => {
+    this.cart_service.cart$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((cart) => {
       this.cart.set(cart);
       this.is_loading.set(false);
     });
@@ -208,7 +201,7 @@ export class CartComponent implements OnInit, OnDestroy {
       quantity: i.quantity,
     }));
 
-    this.checkoutService.whatsappCheckout(undefined, items).pipe(takeUntil(this.destroy$)).subscribe({
+    this.checkoutService.whatsappCheckout(undefined, items).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         this.is_whatsapp_loading.set(false);
         // Clear local cart for guests

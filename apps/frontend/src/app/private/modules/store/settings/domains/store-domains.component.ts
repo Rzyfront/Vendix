@@ -1,16 +1,15 @@
-import {
-  Component,
+import {Component,
   OnInit,
-  OnDestroy,
   ViewChild,
   TemplateRef,
   AfterViewInit,
   signal,
-} from '@angular/core';
+  DestroyRef,
+  inject} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
-import { Subject } from 'rxjs';
-import { takeUntil } from 'rxjs/operators';
+
 
 import {
   ButtonComponent,
@@ -26,16 +25,14 @@ import {
   FilterConfig,
   DropdownAction,
   FilterValues,
-  CardComponent,
-} from '../../../../../shared/components/index';
+  CardComponent} from '../../../../../shared/components/index';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { StoreDomainsService } from './store-domains.service';
 import {
   StoreDomain,
   CreateStoreDomainDto,
   UpdateStoreDomainDto,
-  StoreDomainQueryDto,
-} from './domain.interface';
+  StoreDomainQueryDto} from './domain.interface';
 import { environment } from '../../../../../../environments/environment';
 import { DomainFormModalComponent } from './components/domain-form-modal.component';
 
@@ -227,15 +224,13 @@ import { DomainFormModalComponent } from './components/domain-form-modal.compone
         background-color: var(--background);
       }
     `,
-  ],
-})
-export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
+  ]})
+export class StoreDomainsComponent implements OnInit, AfterViewInit {
+  private destroyRef = inject(DestroyRef);
   @ViewChild('hostnameTemplate') hostnameTemplate!: TemplateRef<any>;
 
   protected readonly environment = environment;
-  private destroy$ = new Subject<void>();
-
-  readonly domains = signal<StoreDomain[]>([]);
+readonly domains = signal<StoreDomain[]>([]);
   readonly is_loading = signal(false);
   is_modal_open = false;
   is_delete_modal_open = false;
@@ -258,22 +253,18 @@ export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
       {
         key: 'is_primary',
         label: 'Principal',
-        transform: (val: boolean) => (val ? 'Sí' : 'No'),
-      },
+        transform: (val: boolean) => (val ? 'Sí' : 'No')},
       {
         key: 'ownership',
         label: 'Propiedad',
-        transform: (val: string) => this.getOwnershipLabel(val),
-      },
-    ],
-  };
+        transform: (val: string) => this.getOwnershipLabel(val)},
+    ]};
 
   readonly stats = signal<{ total: number; active: number; pending: number; primary: string }>({
     total: 0,
     active: 0,
     pending: 0,
-    primary: 'Ninguno',
-  });
+    primary: 'Ninguno'});
 
   filterConfigs: FilterConfig[] = [
     {
@@ -286,8 +277,7 @@ export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
         { value: 'pending_dns', label: 'Pendiente DNS' },
         { value: 'pending_ssl', label: 'Pendiente SSL' },
         { value: 'disabled', label: 'Deshabilitado' },
-      ],
-    },
+      ]},
     {
       key: 'domain_type',
       label: 'Tipo',
@@ -297,8 +287,7 @@ export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
         { value: 'store', label: 'Tienda' },
         { value: 'ecommerce', label: 'E-commerce' },
         { value: 'organization', label: 'Organización' },
-      ],
-    },
+      ]},
   ];
 
   filterValues: FilterValues = {};
@@ -308,44 +297,37 @@ export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
       label: 'Nuevo Dominio',
       icon: 'plus',
       action: 'create',
-      variant: 'primary',
-    },
+      variant: 'primary'},
   ];
 
   table_columns: TableColumn[] = [
     {
       key: 'hostname',
       label: 'Hostname',
-      sortable: true,
-    },
+      sortable: true},
     {
       key: 'domain_type',
       label: 'Tipo',
       sortable: true,
-      transform: (value: string) => this.getDomainTypeLabel(value),
-    },
+      transform: (value: string) => this.getDomainTypeLabel(value)},
     {
       key: 'status',
       label: 'Estado',
       sortable: true,
       badge: true,
       badgeConfig: {
-        type: 'status',
-      },
-      transform: (value: string) => this.getStatusLabel(value),
-    },
+        type: 'status'},
+      transform: (value: string) => this.getStatusLabel(value)},
     {
       key: 'is_primary',
       label: 'Principal',
       sortable: false,
-      transform: (value: boolean) => (value ? 'Sí' : 'No'),
-    },
+      transform: (value: boolean) => (value ? 'Sí' : 'No')},
     {
       key: 'ownership',
       label: 'Propiedad',
       sortable: true,
-      transform: (value: string) => this.getOwnershipLabel(value),
-    },
+      transform: (value: string) => this.getOwnershipLabel(value)},
   ];
 
   table_actions: TableAction[] = [
@@ -353,28 +335,24 @@ export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
       label: 'Abrir',
       icon: 'external-link',
       variant: 'ghost',
-      action: (item: StoreDomain) => this.openDomainInNewTab(item),
-    },
+      action: (item: StoreDomain) => this.openDomainInNewTab(item)},
     {
       label: 'Editar',
       icon: 'edit',
       variant: 'info',
-      action: (item: StoreDomain) => this.openEditModal(item),
-    },
+      action: (item: StoreDomain) => this.openEditModal(item)},
     {
       label: 'Establecer Principal',
       icon: 'star',
       variant: 'ghost',
       action: (item: StoreDomain) => this.setAsPrimary(item),
-      disabled: (row: StoreDomain) => row.is_primary,
-    },
+      disabled: (row: StoreDomain) => row.is_primary},
     {
       label: 'Eliminar',
       icon: 'trash',
       action: (item: StoreDomain) => this.openDeleteModal(item),
       variant: 'danger',
-      disabled: (row: StoreDomain) => row.is_primary,
-    },
+      disabled: (row: StoreDomain) => row.is_primary},
   ];
 
   constructor(
@@ -386,7 +364,7 @@ export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
     this.loadDomains();
 
     this.domains_service.is_loading$
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((loading) => this.is_loading.set(loading));
   }
 
@@ -401,16 +379,10 @@ export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
       }
     }
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  loadDomains(query?: StoreDomainQueryDto): void {
+loadDomains(query?: StoreDomainQueryDto): void {
     this.domains_service
       .getDomains(query || { page: 1, limit: 50 })
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           if (response.success) {
@@ -420,8 +392,7 @@ export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
         },
         error: (error) => {
           this.toast_service.error('Error al cargar los dominios');
-        },
-      });
+        }});
   }
 
   calculateStats(): void {
@@ -437,8 +408,7 @@ export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
       total,
       active,
       pending,
-      primary: primaryDomain ? primaryDomain.hostname : 'Ninguno',
-    });
+      primary: primaryDomain ? primaryDomain.hostname : 'Ninguno'});
   }
 
   onSearch(term: string): void {
@@ -487,7 +457,7 @@ export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
     if (this.editing_domain) {
       this.domains_service
         .updateDomain(this.editing_domain.id, dto as UpdateStoreDomainDto)
-        .pipe(takeUntil(this.destroy$))
+        .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: () => {
             this.toast_service.success('Dominio actualizado correctamente');
@@ -498,12 +468,11 @@ export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
           error: () => {
             this.toast_service.error('Error al actualizar el dominio');
             this.is_saving.set(false);
-          },
-        });
+          }});
     } else {
       this.domains_service
         .createDomain(dto)
-        .pipe(takeUntil(this.destroy$))
+        .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: () => {
             this.toast_service.success('Dominio creado correctamente');
@@ -514,15 +483,14 @@ export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
           error: () => {
             this.toast_service.error('Error al crear el dominio');
             this.is_saving.set(false);
-          },
-        });
+          }});
     }
   }
 
   setAsPrimary(domain: StoreDomain): void {
     this.domains_service
       .setAsPrimary(domain.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toast_service.success('Dominio establecido como principal');
@@ -532,8 +500,7 @@ export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
           this.toast_service.error(
             'Error al establecer dominio como principal',
           );
-        },
-      });
+        }});
   }
 
   openDeleteModal(domain: StoreDomain): void {
@@ -552,7 +519,7 @@ export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
     this.is_deleting = true;
     this.domains_service
       .deleteDomain(this.domain_to_delete.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toast_service.success('Dominio eliminado correctamente');
@@ -563,8 +530,7 @@ export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
         error: () => {
           this.toast_service.error('Error al eliminar el dominio');
           this.is_deleting = false;
-        },
-      });
+        }});
   }
 
   // Helper methods
@@ -573,8 +539,7 @@ export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
       store: 'Tienda',
       ecommerce: 'E-commerce',
       organization: 'Organización',
-      vendix_core: 'Vendix Core',
-    };
+      vendix_core: 'Vendix Core'};
     return labels[type] || type;
   }
 
@@ -583,8 +548,7 @@ export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
       pending_dns: 'Pendiente DNS',
       pending_ssl: 'Pendiente SSL',
       active: 'Activo',
-      disabled: 'Deshabilitado',
-    };
+      disabled: 'Deshabilitado'};
     return labels[status] || status;
   }
 
@@ -593,8 +557,7 @@ export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
       pending_dns: 'yellow',
       pending_ssl: 'yellow',
       active: 'green',
-      disabled: 'red',
-    };
+      disabled: 'red'};
     return colors[status] || 'gray';
   }
 
@@ -604,8 +567,7 @@ export class StoreDomainsComponent implements OnInit, AfterViewInit, OnDestroy {
       custom_domain: 'Dominio Propio',
       custom_subdomain: 'Subdominio Propio',
       vendix_core: 'Vendix Core',
-      third_party_subdomain: 'Subdominio Terceros',
-    };
+      third_party_subdomain: 'Subdominio Terceros'};
     return labels[ownership] || ownership;
   }
 }

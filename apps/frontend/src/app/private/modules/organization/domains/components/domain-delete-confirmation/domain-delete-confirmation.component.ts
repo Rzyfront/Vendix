@@ -1,12 +1,14 @@
-import { Component, OnDestroy, input, output } from '@angular/core';
+import {Component, input, output,
+  DestroyRef,
+  inject} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   FormsModule,
   ReactiveFormsModule,
   FormControl,
-  Validators,
-} from '@angular/forms';
-import { Subject } from 'rxjs';
+  Validators} from '@angular/forms';
+
 
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
@@ -124,9 +126,9 @@ import { Domain } from '../../interfaces/domain.interface';
         display: block;
       }
     `,
-  ],
-})
-export class DomainDeleteConfirmationComponent implements OnDestroy {
+  ]})
+export class DomainDeleteConfirmationComponent implements {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = input(false);
   readonly domain = input<Domain | null>(null);
 
@@ -136,27 +138,17 @@ export class DomainDeleteConfirmationComponent implements OnDestroy {
 
   hostnameInput = new FormControl('', {
     validators: [Validators.required],
-    nonNullable: true,
-  });
+    nonNullable: true});
 
   showError = false;
-
-  private destroy$ = new Subject<void>();
-
-  constructor() {
+constructor() {
     this.hostnameInput.valueChanges.subscribe(() => {
       if (this.showError && this.isHostnameValid) {
         this.showError = false;
       }
     });
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  get placeholderText(): string {
+get placeholderText(): string {
     const domain = this.domain();
     return domain ? `Escribe '${domain.hostname}' para confirmar` : '';
   }

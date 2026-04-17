@@ -62,14 +62,14 @@
           size="sm"
           placeholder="Buscar por documento o proveedor..."
           [debounceTime]="300"
-          [ngModel]="search_term"
+          [ngModel]="search_term()"
           (ngModelChange)="onSearchChange($event)"
         ></app-inputsearch>
 
         <app-options-dropdown
           class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
           [filters]="filter_configs"
-          [filterValues]="filter_values"
+          [filterValues]="filter_values()"
           [actions]="dropdown_actions"
           [isLoading]="is_loading()"
           (filterChange)="onFilterChange($event)"
@@ -141,18 +141,18 @@
   }
 </app-card>
 
-@defer (when is_payment_modal_open) {
+@defer (when is_payment_modal_open()) {
   <vendix-payable-payment-modal
     [(isOpen)]="is_payment_modal_open"
-    [payable]="selected_payable"
+    [payable]="selected_payable()"
     (saved)="onPaymentRegistered()"
   ></vendix-payable-payment-modal>
 }
 
-@defer (when is_detail_modal_open) {
+@defer (when is_detail_modal_open()) {
   <vendix-payable-detail-modal
     [(isOpen)]="is_detail_modal_open"
-    [payable]="selected_payable"
+    [payable]="selected_payable()"
     (paymentRequested)="openPaymentModal($event)"
     (writeOffRequested)="confirmWriteOff($event)"
   ></vendix-payable-detail-modal>

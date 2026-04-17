@@ -1,7 +1,14 @@
-import { Component, OnInit, OnDestroy, signal, model, computed, inject } from '@angular/core';
+import {Component,
+  OnInit,
+  signal,
+  model,
+  computed,
+  inject,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
-import { Subject, takeUntil, forkJoin } from 'rxjs';
+import { forkJoin } from 'rxjs';
 
 import {
   Domain,
@@ -11,8 +18,7 @@ import {
   DomainOwnership,
   CreateDomainDto,
   UpdateDomainDto,
-  VerifyDomainResult,
-} from './interfaces/domain.interface';
+  VerifyDomainResult} from './interfaces/domain.interface';
 import { OrganizationDomainsService } from './services/organization-domains.service';
 import { OrganizationStoresService } from '../stores/services/organization-stores.service';
 
@@ -20,8 +26,7 @@ import {
   DomainCreateModalComponent,
   DomainEditModalComponent,
   DomainDeleteConfirmationComponent,
-  DomainVerifyModalComponent,
-} from './components/index';
+  DomainVerifyModalComponent} from './components/index';
 
 import {
   InputsearchComponent,
@@ -34,8 +39,7 @@ import {
   SelectorOption,
   ResponsiveDataViewComponent,
   ItemListCardConfig,
-  EmptyStateComponent,
-} from '../../../../shared/components/index';
+  EmptyStateComponent} from '../../../../shared/components/index';
 
 interface StatItem {
   title: string;
@@ -67,8 +71,8 @@ interface StoreOption {
     InputsearchComponent,
     IconComponent,
     ResponsiveDataViewComponent,
-    ButtonComponent
-],
+    ButtonComponent,
+  ],
   template: `
     <div class="space-y-6">
       <!-- Stats Cards -->
@@ -81,26 +85,26 @@ interface StoreOption {
             [iconName]="item.iconName"
             [iconBgColor]="item.iconBgColor"
             [iconColor]="item.iconColor"
-            >
+          >
           </app-stats>
         }
       </div>
-    
+
       <!-- Domains List -->
       <div class="bg-surface rounded-card shadow-card border border-border">
         <div class="px-6 py-4 border-b border-border">
           <div
             class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4"
-            >
+          >
             <div class="flex-1 min-w-0">
               <h2 class="text-lg font-semibold text-text-primary">
                 Todos los dominios ({{ domains().length }})
               </h2>
             </div>
-    
+
             <div
               class="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full sm:w-auto"
-              >
+            >
               <!-- Search Input -->
               <app-inputsearch
                 class="w-full sm:w-64"
@@ -109,38 +113,40 @@ interface StoreOption {
                 [debounceTime]="1000"
                 (searchChange)="onSearchChange($event)"
               ></app-inputsearch>
-    
+
               <!-- Status Filter -->
               <select
                 class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
                 (change)="onStatusChange($event)"
                 [value]="selectedStatus()"
-                >
+              >
                 <option value="">Todos los Estados</option>
                 <option value="active">Activo</option>
                 <option value="pending_dns">Pendiente DNS</option>
                 <option value="pending_ssl">Pendiente SSL</option>
                 <option value="disabled">Deshabilitado</option>
               </select>
-    
+
               <!-- Ownership Filter -->
               <select
                 class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
                 (change)="onOwnershipChange($event)"
                 [value]="selectedOwnership()"
-                >
+              >
                 <option value="">Todos los Tipos</option>
                 <option value="vendix_subdomain">Subdominio Vendix</option>
                 <option value="custom_domain">Dominio Personalizado</option>
-                <option value="custom_subdomain">Subdominio Personalizado</option>
+                <option value="custom_subdomain">
+                  Subdominio Personalizado
+                </option>
               </select>
-    
+
               <!-- Store Filter -->
               <select
                 class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
                 (change)="onStoreChange($event)"
                 [value]="selectedStoreId()"
-                >
+              >
                 <option value="">Todas las Tiendas</option>
                 @for (store of stores(); track store) {
                   <option [value]="store.id">
@@ -148,7 +154,7 @@ interface StoreOption {
                   </option>
                 }
               </select>
-    
+
               <div class="flex gap-2 items-center">
                 <app-button
                   variant="outline"
@@ -156,7 +162,7 @@ interface StoreOption {
                   (clicked)="refreshDomains()"
                   [disabled]="isLoading()"
                   title="Actualizar"
-                  >
+                >
                   <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
                 </app-button>
                 <app-button
@@ -164,7 +170,7 @@ interface StoreOption {
                   size="sm"
                   (clicked)="openCreateModal()"
                   title="Nuevo Dominio"
-                  >
+                >
                   <app-icon name="plus" [size]="16" slot="icon"></app-icon>
                   <span class="hidden sm:inline">Nuevo Dominio</span>
                 </app-button>
@@ -172,7 +178,7 @@ interface StoreOption {
             </div>
           </div>
         </div>
-    
+
         <!-- Loading State -->
         @if (isLoading()) {
           <div class="p-8 text-center">
@@ -190,15 +196,15 @@ interface StoreOption {
             [title]="getEmptyStateTitle()"
             [description]="getEmptyStateDescription()"
             actionButtonText="Crear Dominio"
-            [showRefreshButton]="hasFilters"
-            [showClearFilters]="hasFilters"
+            [showRefreshButton]="hasFilters()"
+            [showClearFilters]="hasFilters()"
             (actionClick)="openCreateModal()"
             (refreshClick)="refreshDomains()"
             (clearFiltersClick)="clearFilters()"
-            >
+          >
           </app-empty-state>
         }
-    
+
         <!-- Domains Table -->
         @if (!isLoading() && domains().length > 0) {
           <div class="p-6">
@@ -211,58 +217,58 @@ interface StoreOption {
               emptyMessage="No hay dominios registrados"
               emptyIcon="globe"
               (sort)="onTableSort($event)"
-              >
+            >
             </app-responsive-data-view>
           </div>
         }
       </div>
-    
+
       <!-- Create Domain Modal -->
       <app-domain-create-modal
         [(isOpen)]="isCreateModalOpen"
-        [isSubmitting]="isCreatingDomain"
-        [stores]="stores"
+        [isSubmitting]="isCreatingDomain()"
+        [stores]="stores()"
         (submit)="createDomain($event)"
         (cancel)="onCreateModalCancel()"
       ></app-domain-create-modal>
-    
+
       <!-- Edit Domain Modal -->
       <app-domain-edit-modal
         [(isOpen)]="isEditModalOpen"
-        [isSubmitting]="isUpdatingDomain"
-        [domain]="selectedDomain"
+        [isSubmitting]="isUpdatingDomain()"
+        [domain]="selectedDomain()"
         (submit)="updateDomain($event)"
         (cancel)="onEditModalCancel()"
       ></app-domain-edit-modal>
-    
+
       <!-- Verify Domain Modal -->
       <app-domain-verify-modal
         [(isOpen)]="isVerifyModalOpen"
-        [isVerifying]="isVerifyingDomain"
-        [domain]="selectedDomainForVerify"
-        [verificationResult]="verificationResult"
+        [isVerifying]="isVerifyingDomain()"
+        [domain]="selectedDomainForVerify()"
+        [verificationResult]="verificationResult()"
         (verify)="verifyDomain($event)"
         (cancel)="onVerifyModalCancel()"
       ></app-domain-verify-modal>
-    
+
       <!-- Delete Domain Confirmation Modal -->
       <app-domain-delete-confirmation
         [(isOpen)]="isDeleteModalOpen"
-        [domain]="selectedDomainForDelete"
+        [domain]="selectedDomainForDelete()"
         (confirm)="confirmDeleteDomain($event)"
         (cancel)="onDeleteModalCancel()"
       ></app-domain-delete-confirmation>
     </div>
-    `,
+  `,
   styles: [
     `
       :host {
         display: block;
       }
     `,
-  ],
-})
-export class DomainsComponent implements OnInit, OnDestroy {
+  ]})
+export class DomainsComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private domainsService = inject(OrganizationDomainsService);
   private storesService = inject(OrganizationStoresService);
   private toastService = inject(ToastService);
@@ -282,16 +288,14 @@ export class DomainsComponent implements OnInit, OnDestroy {
       label: 'Hostname',
       sortable: true,
       width: '250px',
-      priority: 1,
-    },
+      priority: 1},
     {
       key: 'store.name',
       label: 'Tienda',
       sortable: true,
       width: '150px',
       priority: 2,
-      defaultValue: 'Organización',
-    },
+      defaultValue: 'Organización'},
     {
       key: 'app_type',
       label: 'Tipo App',
@@ -308,11 +312,8 @@ export class DomainsComponent implements OnInit, OnDestroy {
           STORE_ADMIN: '#8b5cf6',
           STORE_LANDING: '#22c55e',
           ORG_ADMIN: '#f59e0b',
-          ORG_LANDING: '#06b6d4',
-        },
-      },
-      transform: (value: string) => this.formatAppType(value),
-    },
+          ORG_LANDING: '#06b6d4'}},
+      transform: (value: string) => this.formatAppType(value)},
     {
       key: 'ownership',
       label: 'Tipo',
@@ -328,11 +329,8 @@ export class DomainsComponent implements OnInit, OnDestroy {
           vendix_subdomain: '#22c55e',
           custom_domain: '#3b82f6',
           custom_subdomain: '#8b5cf6',
-          third_party_subdomain: '#f59e0b',
-        },
-      },
-      transform: (value: string) => this.formatOwnership(value),
-    },
+          third_party_subdomain: '#f59e0b'}},
+      transform: (value: string) => this.formatOwnership(value)},
     {
       key: 'status',
       label: 'Estado',
@@ -348,11 +346,8 @@ export class DomainsComponent implements OnInit, OnDestroy {
           active: '#22c55e',
           pending_dns: '#f59e0b',
           pending_ssl: '#f97316',
-          disabled: '#ef4444',
-        },
-      },
-      transform: (value: string) => this.formatStatus(value),
-    },
+          disabled: '#ef4444'}},
+      transform: (value: string) => this.formatStatus(value)},
     {
       key: 'ssl_status',
       label: 'SSL',
@@ -369,11 +364,8 @@ export class DomainsComponent implements OnInit, OnDestroy {
           pending: '#f59e0b',
           none: '#9ca3af',
           error: '#ef4444',
-          revoked: '#dc2626',
-        },
-      },
-      transform: (value: string) => this.formatSslStatus(value),
-    },
+          revoked: '#dc2626'}},
+      transform: (value: string) => this.formatSslStatus(value)},
     {
       key: 'is_primary',
       label: 'Primario',
@@ -384,10 +376,8 @@ export class DomainsComponent implements OnInit, OnDestroy {
       priority: 3,
       badgeConfig: {
         type: 'status',
-        size: 'sm',
-      },
-      transform: (value: boolean) => (value ? 'active' : 'inactive'),
-    },
+        size: 'sm'},
+      transform: (value: boolean) => (value ? 'active' : 'inactive')},
     {
       key: 'created_at',
       label: 'Creado',
@@ -398,9 +388,7 @@ export class DomainsComponent implements OnInit, OnDestroy {
         new Date(value).toLocaleDateString('es-ES', {
           day: '2-digit',
           month: '2-digit',
-          year: 'numeric',
-        }),
-    },
+          year: 'numeric'})},
   ];
 
   tableActions: TableAction[] = [
@@ -408,39 +396,20 @@ export class DomainsComponent implements OnInit, OnDestroy {
       label: 'Editar',
       icon: 'edit',
       action: (domain: Domain) => this.editDomain(domain),
-      variant: 'info',
-    },
+      variant: 'info'},
     {
       label: 'Verificar DNS',
       icon: 'shield-check',
       action: (domain: Domain) => this.openVerifyModal(domain),
       variant: 'secondary',
-      show: (domain: Domain) => this.canVerifyDomain(domain),
-    },
+      show: (domain: Domain) => this.canVerifyDomain(domain)},
     {
       label: 'Eliminar',
       icon: 'trash-2',
       action: (domain: Domain) => this.deleteDomain(domain),
       variant: 'danger',
-      show: (domain: Domain) => !domain.is_primary,
-    },
+      show: (domain: Domain) => !domain.is_primary},
   ];
-
-  // Modal state
-  isCreateModalOpen = false;
-  isCreatingDomain = false;
-
-  isEditModalOpen = false;
-  isUpdatingDomain = false;
-  selectedDomain: Domain | null = null;
-
-  isVerifyModalOpen = false;
-  isVerifyingDomain = false;
-  selectedDomainForVerify: Domain | null = null;
-  verificationResult: VerifyDomainResult | null = null;
-
-  isDeleteModalOpen = false;
-  selectedDomainForDelete: Domain | null = null;
 
   // Card Config for mobile
   cardConfig: ItemListCardConfig = {
@@ -455,23 +424,18 @@ export class DomainsComponent implements OnInit, OnDestroy {
         active: '#22c55e',
         pending_dns: '#f59e0b',
         pending_ssl: '#f97316',
-        disabled: '#ef4444',
-      },
-    },
+        disabled: '#ef4444'}},
     badgeTransform: (val: string) => this.formatStatus(val),
     detailKeys: [
       {
         key: 'app_type',
         label: 'Tipo App',
-        transform: (val: string) => this.formatAppType(val),
-      },
+        transform: (val: string) => this.formatAppType(val)},
       {
         key: 'ownership',
         label: 'Propiedad',
-        transform: (val: string) => this.formatOwnership(val),
-      },
-    ],
-  };
+        transform: (val: string) => this.formatOwnership(val)},
+    ]};
 
   readonly statsItems = signal<StatItem[]>([]);
 
@@ -491,36 +455,33 @@ export class DomainsComponent implements OnInit, OnDestroy {
   readonly isDeleteModalOpen = model<boolean>(false);
   readonly selectedDomainForDelete = signal<Domain | null>(null);
 
-  readonly hasFilters = computed(() =>
-    !!(this.searchTerm() || this.selectedStatus() || this.selectedOwnership() || this.selectedStoreId())
+  readonly hasFilters = computed(
+    () =>
+      !!(
+        this.searchTerm() ||
+        this.selectedStatus() ||
+        this.selectedOwnership() ||
+        this.selectedStoreId()
+      ),
   );
-
-  private destroy$ = new Subject<void>();
-
-  ngOnInit(): void {
+ngOnInit(): void {
     this.loadInitialData();
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  private loadInitialData(): void {
+private loadInitialData(): void {
     this.isLoading.set(true);
 
     forkJoin({
-      stores: this.storesService.getStores({}),
-    })
-      .pipe(takeUntil(this.destroy$))
+      stores: this.storesService.getStores({})})
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (results) => {
           if (results.stores.success && results.stores.data) {
-            this.stores.set(results.stores.data.map((store: any) => ({
-              id: store.id,
-              name: store.name,
-              slug: store.slug,
-            })));
+            this.stores.set(
+              results.stores.data.map((store: any) => ({
+                id: store.id,
+                name: store.name,
+                slug: store.slug})),
+            );
           }
           this.loadDomains();
           this.loadStats();
@@ -530,8 +491,7 @@ export class DomainsComponent implements OnInit, OnDestroy {
           this.isLoading.set(false);
           this.loadDomains();
           this.loadStats();
-        },
-      });
+        }});
   }
 
   loadDomains(): void {
@@ -539,16 +499,16 @@ export class DomainsComponent implements OnInit, OnDestroy {
 
     const query: DomainQueryDto = {
       ...(this.searchTerm() && { search: this.searchTerm() }),
-      ...(this.selectedStatus() && { status: this.selectedStatus() as DomainStatus }),
+      ...(this.selectedStatus() && {
+        status: this.selectedStatus() as DomainStatus}),
       ...(this.selectedOwnership() && {
-        ownership: this.selectedOwnership() as DomainOwnership,
-      }),
-      ...(this.selectedStoreId() && { store_id: parseInt(this.selectedStoreId(), 10) }),
-    };
+        ownership: this.selectedOwnership() as DomainOwnership}),
+      ...(this.selectedStoreId() && {
+        store_id: parseInt(this.selectedStoreId(), 10)})};
 
     this.domainsService
       .getDomains(query)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           if (response.success && response.data) {
@@ -562,14 +522,13 @@ export class DomainsComponent implements OnInit, OnDestroy {
           console.error('Error loading domains:', error);
           this.domains.set([]);
           this.isLoading.set(false);
-        },
-      });
+        }});
   }
 
   loadStats(): void {
     this.domainsService
       .getDomainStats()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           const data = response.data || ({} as DomainStats);
@@ -581,39 +540,34 @@ export class DomainsComponent implements OnInit, OnDestroy {
               smallText: 'Registrados',
               iconName: 'globe',
               iconBgColor: 'bg-primary/10',
-              iconColor: 'text-primary',
-            },
+              iconColor: 'text-primary'},
             {
               title: 'Activos',
               value: data.active || 0,
               smallText: 'En funcionamiento',
               iconName: 'check-circle',
               iconBgColor: 'bg-green-100',
-              iconColor: 'text-green-600',
-            },
+              iconColor: 'text-green-600'},
             {
               title: 'Pendientes',
               value: data.pending || 0,
               smallText: 'Verificación DNS/SSL',
               iconName: 'clock',
               iconBgColor: 'bg-yellow-100',
-              iconColor: 'text-yellow-600',
-            },
+              iconColor: 'text-yellow-600'},
             {
               title: 'SSL Activo',
               value: data.verified || 0,
               smallText: 'Certificados emitidos',
               iconName: 'shield-check',
               iconBgColor: 'bg-purple-100',
-              iconColor: 'text-purple-600',
-            },
+              iconColor: 'text-purple-600'},
           ]);
         },
         error: (error) => {
           console.error('Error loading stats:', error);
           this.toastService.error('Error al cargar estadísticas');
-        },
-      });
+        }});
   }
 
   refreshDomains(): void {
@@ -670,7 +624,7 @@ export class DomainsComponent implements OnInit, OnDestroy {
 
     this.domainsService
       .createDomain(domainData)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           if (response.success && response.data) {
@@ -689,8 +643,7 @@ export class DomainsComponent implements OnInit, OnDestroy {
             error.error?.message || 'Error al crear el dominio',
           );
           this.isCreatingDomain.set(false);
-        },
-      });
+        }});
   }
 
   // Edit Modal
@@ -709,7 +662,7 @@ export class DomainsComponent implements OnInit, OnDestroy {
 
     this.domainsService
       .updateDomain(event.hostname, event.data)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           if (response.success && response.data) {
@@ -719,7 +672,9 @@ export class DomainsComponent implements OnInit, OnDestroy {
             this.loadStats();
             this.toastService.success('Dominio actualizado exitosamente');
           } else {
-            this.toastService.error('Respuesta inválida al actualizar el dominio');
+            this.toastService.error(
+              'Respuesta inválida al actualizar el dominio',
+            );
           }
           this.isUpdatingDomain.set(false);
         },
@@ -729,8 +684,7 @@ export class DomainsComponent implements OnInit, OnDestroy {
             error.error?.message || 'Error al actualizar el dominio',
           );
           this.isUpdatingDomain.set(false);
-        },
-      });
+        }});
   }
 
   // Verify Modal
@@ -758,7 +712,7 @@ export class DomainsComponent implements OnInit, OnDestroy {
 
     this.domainsService
       .verifyDomain(hostname)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           if (response.success && response.data) {
@@ -777,8 +731,7 @@ export class DomainsComponent implements OnInit, OnDestroy {
             error.error?.message || 'Error al verificar el dominio',
           );
           this.isVerifyingDomain.set(false);
-        },
-      });
+        }});
   }
 
   // Delete Modal
@@ -795,17 +748,21 @@ export class DomainsComponent implements OnInit, OnDestroy {
   confirmDeleteDomain(hostname: string): void {
     this.domainsService
       .deleteDomain(hostname)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           if (response.success) {
-            this.domains.update((list) => list.filter((d) => d.hostname !== hostname));
+            this.domains.update((list) =>
+              list.filter((d) => d.hostname !== hostname),
+            );
             this.loadStats();
             this.toastService.success('Dominio eliminado exitosamente');
             this.isDeleteModalOpen.set(false);
             this.selectedDomainForDelete.set(null);
           } else {
-            this.toastService.error('Respuesta inválida al eliminar el dominio');
+            this.toastService.error(
+              'Respuesta inválida al eliminar el dominio',
+            );
           }
         },
         error: (error) => {
@@ -813,8 +770,7 @@ export class DomainsComponent implements OnInit, OnDestroy {
           this.toastService.error(
             error.error?.message || 'Error al eliminar el dominio',
           );
-        },
-      });
+        }});
   }
 
   // Formatters
@@ -824,8 +780,7 @@ export class DomainsComponent implements OnInit, OnDestroy {
       STORE_ADMIN: 'Admin Tienda',
       STORE_LANDING: 'Landing Tienda',
       ORG_ADMIN: 'Admin Org',
-      ORG_LANDING: 'Landing Org',
-    };
+      ORG_LANDING: 'Landing Org'};
     return typeMap[type] || type || 'N/A';
   }
 
@@ -835,8 +790,7 @@ export class DomainsComponent implements OnInit, OnDestroy {
       custom_domain: 'Personalizado',
       custom_subdomain: 'Subdominio',
       third_party_subdomain: 'Terceros',
-      vendix_core: 'Core',
-    };
+      vendix_core: 'Core'};
     return ownershipMap[ownership] || ownership;
   }
 
@@ -845,8 +799,7 @@ export class DomainsComponent implements OnInit, OnDestroy {
       active: 'Activo',
       pending_dns: 'DNS Pendiente',
       pending_ssl: 'SSL Pendiente',
-      disabled: 'Deshabilitado',
-    };
+      disabled: 'Deshabilitado'};
     return statusMap[status] || status;
   }
 
@@ -856,20 +809,19 @@ export class DomainsComponent implements OnInit, OnDestroy {
       pending: 'Pendiente',
       none: 'Sin SSL',
       error: 'Error',
-      revoked: 'Revocado',
-    };
+      revoked: 'Revocado'};
     return sslMap[status] || status;
   }
 
   getEmptyStateTitle(): string {
-    if (this.hasFilters) {
+    if (this.hasFilters()) {
       return 'No se encontraron dominios con los filtros seleccionados';
     }
     return 'No hay dominios registrados';
   }
 
   getEmptyStateDescription(): string {
-    if (this.hasFilters) {
+    if (this.hasFilters()) {
       return 'Intenta ajustar los filtros de búsqueda';
     }
     return 'Comienza creando tu primer dominio para tu organización o tiendas.';

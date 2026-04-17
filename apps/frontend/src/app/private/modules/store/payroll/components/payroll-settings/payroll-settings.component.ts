@@ -1,20 +1,19 @@
 import { Component, inject, DestroyRef, signal, computed } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DatePipe, NgClass } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Subject } from 'rxjs';
-import { takeUntil, finalize } from 'rxjs/operators';
+
+import { finalize } from 'rxjs/operators';
 
 import { PayrollService } from '../../services/payroll.service';
 import {
   PayrollRules,
-  PayrollUpdateAvailable,
-} from '../../interfaces/payroll.interface';
+  PayrollUpdateAvailable } from '../../interfaces/payroll.interface';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import {
   StickyHeaderComponent,
-  StickyHeaderActionButton,
-} from '../../../../../../shared/components/sticky-header/sticky-header.component';
+  StickyHeaderActionButton } from '../../../../../../shared/components/sticky-header/sticky-header.component';
 
 interface RuleField {
   key: keyof PayrollRules;
@@ -60,8 +59,7 @@ const FIELD_LABELS: Record<string, string> = {
   pension_employer_rate: 'Pensión (empleador)',
   sena_rate: 'SENA',
   icbf_rate: 'ICBF',
-  compensation_fund_rate: 'Caja de compensación',
-};
+  compensation_fund_rate: 'Caja de compensación' };
 
 const PERCENT_FIELDS = new Set([
   'severance_rate',
@@ -419,15 +417,12 @@ const CURRENCY_FIELDS = new Set(['minimum_wage', 'transport_subsidy']);
         }
       }
     `,
-  ],
-})
+  ] })
 export class PayrollSettingsComponent {
   private payrollService = inject(PayrollService);
   private toastService = inject(ToastService);
   private destroyRef = inject(DestroyRef);
-  private destroy$ = new Subject<void>();
-
-  readonly rules = signal<PayrollRules | null>(null);
+readonly rules = signal<PayrollRules | null>(null);
   defaultRules: PayrollRules | null = null;
   editedFields: Partial<PayrollRules> = {};
   readonly loading = signal(false);
@@ -446,8 +441,7 @@ export class PayrollSettingsComponent {
     return Object.entries(update.diff).map(([field, values]) => ({
       field,
       current: values.current,
-      system: values.system,
-    }));
+      system: values.system }));
   });
 
   headerActions: StickyHeaderActionButton[] = [
@@ -457,8 +451,7 @@ export class PayrollSettingsComponent {
       variant: 'primary',
       icon: 'save',
       loading: false,
-      disabled: true,
-    },
+      disabled: true },
   ];
 
   cards: SettingsCard[] = [
@@ -475,16 +468,13 @@ export class PayrollSettingsComponent {
               key: 'minimum_wage',
               label: 'Salario Mínimo (COP)',
               type: 'currency',
-              readonly: false,
-            },
+              readonly: false },
             {
               key: 'transport_subsidy',
               label: 'Auxilio de Transporte (COP)',
               type: 'currency',
-              readonly: false,
-            },
-          ],
-        },
+              readonly: false },
+          ] },
         {
           title: 'Umbrales',
           fields: [
@@ -492,16 +482,13 @@ export class PayrollSettingsComponent {
               key: 'transport_subsidy_threshold',
               label: 'Umbral Transporte (×SMMLV)',
               type: 'number',
-              readonly: false,
-            },
+              readonly: false },
             {
               key: 'retention_exempt_threshold',
               label: 'Umbral Retención (×SMMLV)',
               type: 'number',
-              readonly: false,
-            },
-          ],
-        },
+              readonly: false },
+          ] },
         {
           title: 'Calendario',
           fields: [
@@ -509,18 +496,14 @@ export class PayrollSettingsComponent {
               key: 'days_per_month',
               label: 'Días por Mes',
               type: 'number',
-              readonly: true,
-            },
+              readonly: true },
             {
               key: 'days_per_year',
               label: 'Días por Año',
               type: 'number',
-              readonly: true,
-            },
-          ],
-        },
-      ],
-    },
+              readonly: true },
+          ] },
+      ] },
     {
       title: 'Prestaciones Sociales',
       icon: 'gift',
@@ -534,30 +517,24 @@ export class PayrollSettingsComponent {
               key: 'severance_rate',
               label: 'Cesantías',
               type: 'percent',
-              readonly: false,
-            },
+              readonly: false },
             {
               key: 'severance_interest_rate',
               label: 'Intereses Cesantías',
               type: 'percent',
-              readonly: false,
-            },
+              readonly: false },
             {
               key: 'vacation_rate',
               label: 'Vacaciones',
               type: 'percent',
-              readonly: false,
-            },
+              readonly: false },
             {
               key: 'bonus_rate',
               label: 'Prima',
               type: 'percent',
-              readonly: false,
-            },
-          ],
-        },
-      ],
-    },
+              readonly: false },
+          ] },
+      ] },
     {
       title: 'Seguridad Social',
       icon: 'shield',
@@ -572,16 +549,13 @@ export class PayrollSettingsComponent {
               key: 'health_employee_rate',
               label: 'Salud',
               type: 'percent',
-              readonly: false,
-            },
+              readonly: false },
             {
               key: 'pension_employee_rate',
               label: 'Pensión',
               type: 'percent',
-              readonly: false,
-            },
-          ],
-        },
+              readonly: false },
+          ] },
         {
           title: 'Aportes Empleador',
           fields: [
@@ -589,51 +563,42 @@ export class PayrollSettingsComponent {
               key: 'health_employer_rate',
               label: 'Salud',
               type: 'percent',
-              readonly: false,
-            },
+              readonly: false },
             {
               key: 'pension_employer_rate',
               label: 'Pensión',
               type: 'percent',
-              readonly: false,
-            },
+              readonly: false },
             {
               key: 'sena_rate',
               label: 'SENA',
               type: 'percent',
-              readonly: false,
-            },
+              readonly: false },
             {
               key: 'icbf_rate',
               label: 'ICBF',
               type: 'percent',
-              readonly: false,
-            },
+              readonly: false },
             {
               key: 'compensation_fund_rate',
               label: 'Caja de Compensación',
               type: 'percent',
-              readonly: false,
-            },
-          ],
-        },
-      ],
-    },
+              readonly: false },
+          ] },
+      ] },
   ];
 
   constructor() {
     this.loadYears();
 
     this.destroyRef.onDestroy(() => {
-      this.destroy$.next();
-      this.destroy$.complete();
     });
   }
 
   private loadYears(): void {
     this.payrollService
       .getConfiguredYears()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.availableYears = res.data.years;
@@ -644,8 +609,7 @@ export class PayrollSettingsComponent {
         error: () => {
           this.loadRules();
           this.loadAvailableUpdates();
-        },
-      });
+        } });
   }
 
   onHeaderAction(actionId: string): void {
@@ -661,8 +625,7 @@ export class PayrollSettingsComponent {
         variant: 'primary',
         icon: 'save',
         loading: saving,
-        disabled: !this.hasChanges() || saving,
-      },
+        disabled: !this.hasChanges() || saving },
     ];
   }
 
@@ -681,7 +644,7 @@ export class PayrollSettingsComponent {
     this.payrollService
       .getPayrollRules(+this.selectedYear)
       .pipe(
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
         finalize(() => this.loading.set(false)),
       )
       .subscribe({
@@ -691,14 +654,13 @@ export class PayrollSettingsComponent {
         },
         error: () => {
           this.toastService.error('Error al cargar las reglas de nómina');
-        },
-      });
+        } });
   }
 
   private loadAvailableUpdates(): void {
     this.payrollService
       .getAvailableUpdates()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           const year = +this.selectedYear;
@@ -707,8 +669,7 @@ export class PayrollSettingsComponent {
         },
         error: () => {
           // Fallo silencioso — el banner es opcional
-        },
-      });
+        } });
   }
 
   toggleDiff(): void {
@@ -723,7 +684,7 @@ export class PayrollSettingsComponent {
     this.payrollService
       .applySystemDefaults(update.year)
       .pipe(
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
         finalize(() => this.applying_defaults.set(false)),
       )
       .subscribe({
@@ -738,8 +699,7 @@ export class PayrollSettingsComponent {
         },
         error: () => {
           this.toastService.error('Error al aplicar los parámetros oficiales');
-        },
-      });
+        } });
   }
 
   // --- Diff helpers ---
@@ -754,8 +714,7 @@ export class PayrollSettingsComponent {
       return new Intl.NumberFormat('es-CO', {
         style: 'currency',
         currency: 'COP',
-        maximumFractionDigits: 0,
-      }).format(Number(value));
+        maximumFractionDigits: 0 }).format(Number(value));
     }
     if (PERCENT_FIELDS.has(field)) {
       return (Math.round(Number(value) * 10000) / 100).toFixed(2) + '%';
@@ -806,12 +765,10 @@ export class PayrollSettingsComponent {
     const decimal = Math.round(percent * 100) / 10000;
     this.rules.set({
       ...rules,
-      arl_rates: { ...rules.arl_rates, [level]: decimal },
-    });
+      arl_rates: { ...rules.arl_rates, [level]: decimal } });
     this.editedFields.arl_rates = {
       ...this.editedFields.arl_rates,
-      [level]: decimal,
-    };
+      [level]: decimal };
     this.hasChanges.set(true);
     this.updateHeaderActions();
   }
@@ -838,7 +795,7 @@ export class PayrollSettingsComponent {
     this.payrollService
       .updatePayrollRules(+this.selectedYear, this.editedFields)
       .pipe(
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
         finalize(() => {
           this.saving.set(false);
           this.updateHeaderActions();
@@ -857,7 +814,6 @@ export class PayrollSettingsComponent {
         },
         error: () => {
           this.toastService.error('Error al actualizar las reglas de nómina');
-        },
-      });
+        } });
   }
 }

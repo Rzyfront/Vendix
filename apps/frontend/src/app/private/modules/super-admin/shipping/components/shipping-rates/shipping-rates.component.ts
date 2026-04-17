@@ -8,6 +8,7 @@ import {
   OnChanges,
   input,
   output,
+  signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
@@ -96,7 +97,7 @@ import {
               </app-button>
             </div>
             <div class="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
-              @if (loading) {
+              @if (loading()) {
                 <div
                   class="flex flex-col items-center justify-center py-20 text-gray-400 gap-3"
                 >
@@ -106,7 +107,7 @@ import {
                   >
                 </div>
               }
-              @if (!loading && rates.length === 0) {
+              @if (!loading() && rates().length === 0) {
                 <div
                   class="py-20 text-center px-8 border-2 border-dashed border-gray-100 rounded-2xl mx-2"
                 >
@@ -127,20 +128,20 @@ import {
                   </p>
                 </div>
               }
-              @for (rate of rates; track rate) {
+              @for (rate of rates(); track rate) {
                 <div
                   (click)="selectRate(rate)"
                   [class.border-[var(--color-primary)]]="
-                    selectedRate?.id === rate.id
+                    selectedRate()?.id === rate.id
                   "
                   [class.bg-[var(--color-primary)]/5]="
-                    selectedRate?.id === rate.id
+                    selectedRate()?.id === rate.id
                   "
-                  [class.shadow-md]="selectedRate?.id === rate.id"
-                  [class.translate-x-1]="selectedRate?.id === rate.id"
+                  [class.shadow-md]="selectedRate()?.id === rate.id"
+                  [class.translate-x-1]="selectedRate()?.id === rate.id"
                   class="p-4 rounded-2xl border border-[var(--color-border)] hover:bg-gray-50 transition-all duration-300 cursor-pointer group relative overflow-hidden"
                 >
-                  @if (selectedRate?.id === rate.id) {
+                  @if (selectedRate()?.id === rate.id) {
                     <div
                       class="absolute left-0 top-0 bottom-0 w-1 bg-[var(--color-primary)]"
                     ></div>
@@ -214,21 +215,23 @@ import {
               <div class="flex items-center justify-between mb-8">
                 <h4 class="text-lg font-black text-gray-900 flex items-center">
                   {{
-                    selectedRate ? 'Editar Tarifa' : 'Nueva Tarifa del Sistema'
+                    selectedRate()
+                      ? 'Editar Tarifa'
+                      : 'Nueva Tarifa del Sistema'
                   }}
-                  @if (selectedRate) {
+                  @if (selectedRate()) {
                     <span
                       class="ml-3 text-[10px] font-bold bg-purple-50 px-2 py-1 rounded-lg border border-purple-200 text-purple-600 tracking-widest"
-                      >REF: {{ selectedRate.id }}</span
+                      >REF: {{ selectedRate()!.id }}</span
                     >
                   }
                 </h4>
-                @if (selectedRate) {
+                @if (selectedRate()) {
                   <div class="animate-in fade-in duration-300">
                     <app-button
                       variant="ghost"
                       size="sm"
-                      (clicked)="deleteRate(selectedRate.id)"
+                      (clicked)="deleteRate(selectedRate()!.id)"
                       customClasses="!text-red-500 hover:!bg-red-50 !h-8 !px-3 !text-xs"
                     >
                       <app-icon
@@ -252,7 +255,7 @@ import {
                   <app-selector
                     label="Método de Envío"
                     formControlName="shipping_method_id"
-                    [options]="methodOptions"
+                    [options]="methodOptions()"
                     [required]="true"
                     tooltipText="Selecciona el método de envío del sistema para esta tarifa."
                   ></app-selector>
@@ -388,7 +391,7 @@ import {
               <app-button
                 variant="primary"
                 [fullWidth]="true"
-                [loading]="isSubmitting"
+                [loading]="isSubmitting()"
                 [disabled]="form.invalid"
                 (clicked)="onSubmit()"
               >
@@ -399,7 +402,7 @@ import {
                   class="mr-2"
                 ></app-icon>
                 {{
-                  selectedRate
+                  selectedRate()
                     ? 'Actualizar Tarifa'
                     : 'Crear Tarifa del Sistema'
                 }}
@@ -485,11 +488,11 @@ export class ShippingRatesComponent implements OnInit, OnChanges {
   private dialogService = inject(DialogService);
 
   ShippingRateType = ShippingRateType;
-  rates: ShippingRate[] = [];
-  selectedRate?: ShippingRate;
-  methodOptions: SelectorOption[] = [];
-  loading = false;
-  isSubmitting = false;
+  rates = signal<ShippingRate[]>([]);
+  selectedRate = signal<ShippingRate | undefined>(undefined);
+  methodOptions = signal<SelectorOption[]>([]);
+  loading = signal(false);
+  isSubmitting = signal(false);
 
   form: FormGroup;
 
@@ -656,10 +659,12 @@ export class ShippingRatesComponent implements OnInit, OnChanges {
 
   ngOnChanges(changes: SimpleChanges) {
     if (changes['methods']) {
-      this.methodOptions = this.methods().map((m) => ({
-        value: m.id,
-        label: m.name,
-      }));
+      this.methodOptions.set(
+        this.methods().map((m) => ({
+          value: m.id,
+          label: m.name,
+        })),
+      );
     }
     if (changes['zone'] && this.zone()) {
       this.loadRates();
@@ -670,14 +675,14 @@ export class ShippingRatesComponent implements OnInit, OnChanges {
   loadRates() {
     const z = this.zone();
     if (!z) return;
-    this.loading = true;
+    this.loading.set(true);
     this.shippingService.getRates(z.id).subscribe({
       next: (data) => {
-        this.rates = data;
-        this.loading = false;
+        this.rates.set(data);
+        this.loading.set(false);
       },
       error: () => {
-        this.loading = false;
+        this.loading.set(false);
       },
     });
   }
@@ -687,12 +692,12 @@ export class ShippingRatesComponent implements OnInit, OnChanges {
   }
 
   selectRate(rate: ShippingRate) {
-    this.selectedRate = rate;
+    this.selectedRate.set(rate);
     this.form.patchValue(rate);
   }
 
   prepareCreate() {
-    this.selectedRate = undefined;
+    this.selectedRate.set(undefined);
     this.form.reset({
       type: ShippingRateType.FLAT,
       base_cost: 0,
@@ -708,29 +713,29 @@ export class ShippingRatesComponent implements OnInit, OnChanges {
   onSubmit() {
     if (this.form.invalid || !this.zone) return;
 
-    this.isSubmitting = true;
+    this.isSubmitting.set(true);
     const formValue = this.form.value;
     const z = this.zone();
 
-    // Convert strings to numbers for API
     const payload = {
       ...formValue,
       shipping_zone_id: z?.id,
       shipping_method_id: Number(formValue.shipping_method_id),
     };
 
-    const request$ = this.selectedRate
-      ? this.shippingService.updateRate(this.selectedRate.id, payload)
+    const rate = this.selectedRate();
+    const request$ = rate
+      ? this.shippingService.updateRate(rate.id, payload)
       : this.shippingService.createRate(payload);
 
     request$.subscribe({
       next: () => {
-        this.isSubmitting = false;
+        this.isSubmitting.set(false);
         this.loadRates();
         this.prepareCreate();
       },
       error: () => {
-        this.isSubmitting = false;
+        this.isSubmitting.set(false);
         alert('Error al guardar la tarifa del sistema');
       },
     });
@@ -750,8 +755,8 @@ export class ShippingRatesComponent implements OnInit, OnChanges {
         if (confirmed) {
           this.shippingService.deleteRate(id).subscribe(() => {
             this.loadRates();
-            if (this.selectedRate?.id === id) {
-              this.selectedRate = undefined;
+            if (this.selectedRate()?.id === id) {
+              this.selectedRate.set(undefined);
               this.form.reset({ type: ShippingRateType.FLAT, is_active: true });
             }
           });

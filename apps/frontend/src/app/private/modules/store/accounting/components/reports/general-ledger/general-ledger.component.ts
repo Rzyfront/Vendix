@@ -1,7 +1,6 @@
-import { Component, inject, effect } from '@angular/core';
+import { Component, inject, effect, signal, computed } from '@angular/core';
 import { DatePipe, DecimalPipe } from '@angular/common';
 import { Store } from '@ngrx/store';
-import { Observable, first } from 'rxjs';
 import { toSignal } from '@angular/core/rxjs-interop';
 
 import {
@@ -56,7 +55,7 @@ import {
             </h2>
             <div class="flex items-center gap-2 w-full md:w-auto">
               <app-selector
-                [options]="period_options"
+                [options]="periodOptions()"
                 placeholder="Seleccionar periodo..."
                 (selectionChange)="onPeriodChange($event)"
                 class="flex-1 md:w-48"
@@ -253,45 +252,49 @@ export class GeneralLedgerComponent {
     initialValue: [] as FiscalPeriod[],
   });
 
-  period_options: { value: any; label: string }[] = [];
-  selected_period_id: number | null = null;
-  expanded_account_ids = new Set<number>();
+  // ✅ Migrated to signals (Section 9 + Section 10 — antipatrón variables planas + Set mutable)
+  readonly selectedPeriodId = signal<number | null>(null);
+  readonly periodOptions = computed(() =>
+    this.periods().map((p) => ({
+      value: p.id,
+      label: p.name,
+    }))
+  );
+  // ✅ Set mutable → signal (Section 10 — legítimo uso en estado de expansión)
+  readonly expandedAccountIds = signal(new Set<number>());
 
   constructor() {
-    // Initialize period options when periods are loaded
-    effect(() => {
-      const periods = this.periods();
-      this.period_options = periods.map((p) => ({
-        value: p.id,
-        label: p.name,
-      }));
-    });
+    // Auto-update period options when periods change (via computed)
+    // Effect no longer needed — computed handles it
   }
 
   onPeriodChange(value: any): void {
-    this.selected_period_id = value;
+    this.selectedPeriodId.set(value);
     this.loadReport();
   }
 
   loadReport(): void {
-    if (this.selected_period_id) {
+    const periodId = this.selectedPeriodId();
+    if (periodId) {
       this.store.dispatch(
         loadGeneralLedger({
-          query: { fiscal_period_id: this.selected_period_id },
+          query: { fiscal_period_id: periodId },
         }),
       );
     }
   }
 
   toggleAccount(id: number): void {
-    if (this.expanded_account_ids.has(id)) {
-      this.expanded_account_ids.delete(id);
+    const expanded = new Set(this.expandedAccountIds());
+    if (expanded.has(id)) {
+      expanded.delete(id);
     } else {
-      this.expanded_account_ids.add(id);
+      expanded.add(id);
     }
+    this.expandedAccountIds.set(expanded);
   }
 
   isAccountExpanded(id: number): boolean {
-    return this.expanded_account_ids.has(id);
+    return this.expandedAccountIds().has(id);
   }
 }

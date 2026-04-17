@@ -1,8 +1,11 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import {Component, OnInit, OnDestroy,
+  DestroyRef,
+  inject} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Subject, timer, forkJoin } from 'rxjs';
-import { takeUntil, map, catchError, filter } from 'rxjs/operators';
+import { timer, forkJoin } from 'rxjs';
+import { map, catchError, filter } from 'rxjs/operators';
 import { of } from 'rxjs';
 import { StatsComponent } from '../../../../shared/components';
 import { IconComponent } from '../../../../shared/components/icon/icon.component';
@@ -290,9 +293,9 @@ import { BackupStatus, SnapshotInfo } from './interfaces';
       }
     </div>
     `,
-  styles: [],
-})
+  styles: [] })
 export class BackupsComponent implements OnInit, OnDestroy {
+  private destroyRef = inject(DestroyRef);
   status: BackupStatus | null = null;
   snapshots: SnapshotInfo[] = [];
 
@@ -304,9 +307,7 @@ export class BackupsComponent implements OnInit, OnDestroy {
   showCreateModal = false;
   newSnapshotName = '';
   snapshotNameError = '';
-
-  private destroy$ = new Subject<void>();
-  private paused = false;
+private paused = false;
   private visibilityHandler = () => this.onVisibilityChange();
 
   constructor(
@@ -363,7 +364,7 @@ export class BackupsComponent implements OnInit, OnDestroy {
     timer(0, 60000)
       .pipe(
         filter(() => !this.paused),
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
       )
       .subscribe(() => {
         this.fetchStatus();
@@ -372,9 +373,8 @@ export class BackupsComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-    document.removeEventListener('visibilitychange', this.visibilityHandler);
+
+document.removeEventListener('visibilitychange', this.visibilityHandler);
   }
 
   // -- Actions --
@@ -399,7 +399,7 @@ export class BackupsComponent implements OnInit, OnDestroy {
           this.snapshotNameError = 'Error al crear el snapshot';
           return of(null);
         }),
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((res) => {
         this.creating = false;
@@ -429,7 +429,7 @@ export class BackupsComponent implements OnInit, OnDestroy {
           this.deletingId = null;
           return of(null);
         }),
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((res) => {
         this.deletingId = null;
@@ -496,7 +496,7 @@ export class BackupsComponent implements OnInit, OnDestroy {
       .pipe(
         map((res) => res.data),
         catchError(() => of(null)),
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((data) => {
         this.status = data;
@@ -510,7 +510,7 @@ export class BackupsComponent implements OnInit, OnDestroy {
       .pipe(
         map((res) => res.data),
         catchError(() => of([])),
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((data) => {
         this.snapshots = data;

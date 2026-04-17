@@ -3,16 +3,21 @@ import {
   OnDestroy,
   PLATFORM_ID,
   Inject,
+  signal,
 } from '@angular/core';
+import { toObservable } from '@angular/core/rxjs-interop';
 import { isPlatformBrowser } from '@angular/common';
-import { BehaviorSubject, fromEvent, Observable } from 'rxjs';
+import { fromEvent, Observable } from 'rxjs';
 import { map, startWith } from 'rxjs/operators';
 
 @Injectable({
   providedIn: 'root',
 })
 export class FullscreenService implements OnDestroy {
-  private isFullscreen$ = new BehaviorSubject<boolean>(false);
+  // Signal-first: canonical state holder
+  readonly isFullscreenSignal = signal<boolean>(false);
+  // Observable parallel for legacy consumers (takeUntil pipelines, etc.)
+  private readonly isFullscreen$ = toObservable(this.isFullscreenSignal);
   private fullscreenElement: Element | null = null;
   private eventListeners: (() => void)[] = [];
   private isBrowser: boolean;
@@ -30,14 +35,14 @@ export class FullscreenService implements OnDestroy {
    * Obtiene el estado actual de fullscreen como Observable
    */
   get isFullscreen(): Observable<boolean> {
-    return this.isFullscreen$.asObservable();
+    return this.isFullscreen$;
   }
 
   /**
    * Obtiene el estado actual de fullscreen como valor booleano
    */
   get isFullscreenActive(): boolean {
-    return this.isFullscreen$.value;
+    return this.isFullscreenSignal();
   }
 
   /**
@@ -59,7 +64,7 @@ export class FullscreenService implements OnDestroy {
         await (requestFullscreen as any).call(targetElement);
 
         this.fullscreenElement = targetElement;
-        this.isFullscreen$.next(true);
+        this.isFullscreenSignal.set(true);
       }
     } catch (error) {
       throw error;
@@ -81,7 +86,7 @@ export class FullscreenService implements OnDestroy {
         await (exitFullscreen as any).call(document);
 
         this.fullscreenElement = null;
-        this.isFullscreen$.next(false);
+        this.isFullscreenSignal.set(false);
       }
     } catch (error) {
       throw error;
@@ -162,8 +167,8 @@ export class FullscreenService implements OnDestroy {
    */
   private updateFullscreenState(): void {
     const isCurrentlyFullscreen = !!this.getFullscreenElement();
-    if (isCurrentlyFullscreen !== this.isFullscreen$.value) {
-      this.isFullscreen$.next(isCurrentlyFullscreen);
+    if (isCurrentlyFullscreen !== this.isFullscreenSignal()) {
+      this.isFullscreenSignal.set(isCurrentlyFullscreen);
       document.documentElement.classList.toggle('fullscreen-active', isCurrentlyFullscreen);
     }
   }

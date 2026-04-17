@@ -1,4 +1,5 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import { Component, OnInit, inject, signal, DestroyRef } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   FormsModule,
@@ -6,8 +7,8 @@ import {
   FormBuilder,
   FormGroup,
 } from '@angular/forms';
-import { debounceTime, distinctUntilChanged, Subject } from 'rxjs';
-import { takeUntil } from 'rxjs/operators';
+import { debounceTime, distinctUntilChanged, Subject, takeUntil } from 'rxjs';
+
 import { Router } from '@angular/router';
 
 // Import types
@@ -55,12 +56,13 @@ import {
     ModalComponent,
     IconComponent,
     PaginationComponent,
-    CardComponent
-],
+    CardComponent,
+  ],
   templateUrl: './support.component.html',
   styleUrls: ['./support.component.css'],
 })
 export class SupportComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private router = inject(Router);
   private supportService = inject(SupportService);
   private usersService = inject(UsersService);
@@ -244,9 +246,6 @@ export class SupportComponent implements OnInit {
     { value: TicketCategory.CHANGE, label: 'Cambio' },
     { value: TicketCategory.QUESTION, label: 'Consulta' },
   ];
-
-  private destroy$ = new Subject<void>();
-
   constructor() {
     this.filterForm = this.fb.group({
       status: [''],
@@ -260,7 +259,11 @@ export class SupportComponent implements OnInit {
 
     // Subscribe to filter changes
     this.filterForm.valueChanges
-      .pipe(debounceTime(300), distinctUntilChanged(), takeUntil(this.destroy$))
+      .pipe(
+        debounceTime(300),
+        distinctUntilChanged(),
+        takeUntilDestroyed(this.destroyRef),
+      )
       .subscribe(() => {
         this.pagination.page = 1;
         this.loadTickets();
@@ -284,8 +287,6 @@ export class SupportComponent implements OnInit {
   }
 
   ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
     this.userSearchDestroy$.next();
     this.userSearchDestroy$.complete();
   }

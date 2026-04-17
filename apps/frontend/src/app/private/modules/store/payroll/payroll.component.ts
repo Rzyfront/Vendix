@@ -1,8 +1,8 @@
-import { Component, inject, DestroyRef } from '@angular/core';
-import { toSignal } from '@angular/core/rxjs-interop';
+import { Component, inject, DestroyRef, signal } from '@angular/core';
+import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Store } from '@ngrx/store';
-import { Observable, Subject } from 'rxjs';
-import { takeUntil, filter } from 'rxjs/operators';
+import { Observable } from 'rxjs';
+import { filter } from 'rxjs/operators';
 
 import {
   loadEmployees,
@@ -56,23 +56,23 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
       <div class="px-2 md:px-0 mb-0 md:mb-4">
         <app-scrollable-tabs
           [tabs]="tabs"
-          [activeTab]="activeTab"
+          [activeTab]="activeTab()"
           size="md"
           (tabChange)="switchTab($event)"
         ></app-scrollable-tabs>
       </div>
 
       <!-- Stats: Sticky on mobile, static on desktop (hidden on settings tab) -->
-      @if (activeTab === 'employees' || activeTab === 'payroll-runs') {
+      @if (activeTab() === 'employees' || activeTab() === 'payroll-runs') {
         <div
           class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
         >
-          <vendix-payroll-stats [view]="activeTab"></vendix-payroll-stats>
+          <vendix-payroll-stats [view]="activeTab()"></vendix-payroll-stats>
         </div>
       }
 
       <!-- Employees Tab -->
-      @if (activeTab === 'employees') {
+      @if (activeTab() === 'employees') {
         <app-employee-list
           [employees]="employees() || []"
           [loading]="employeesLoading() || false"
@@ -82,18 +82,18 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
           (refresh)="refreshEmployees()"
           (bulkUpload)="openBulkUploadModal()"
         ></app-employee-list>
-        @defer (when isEmployeeCreateModalOpen) {
+        @defer (when isEmployeeCreateModalOpen()) {
           <vendix-employee-create
             [(isOpen)]="isEmployeeCreateModalOpen"
           ></vendix-employee-create>
         }
-        @defer (when isEmployeeDetailModalOpen) {
+        @defer (when isEmployeeDetailModalOpen()) {
           <vendix-employee-detail
             [(isOpen)]="isEmployeeDetailModalOpen"
-            [employee]="selectedEmployee"
+            [employee]="selectedEmployee()"
           ></vendix-employee-detail>
         }
-        @defer (when isEmployeeBulkUploadModalOpen) {
+        @defer (when isEmployeeBulkUploadModalOpen()) {
           <app-employee-bulk-upload-modal
             [(isOpen)]="isEmployeeBulkUploadModalOpen"
             (uploadComplete)="onBulkUploadComplete()"
@@ -102,7 +102,7 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
       }
 
       <!-- Payroll Runs Tab -->
-      @if (activeTab === 'payroll-runs') {
+      @if (activeTab() === 'payroll-runs') {
         <app-payroll-run-list
           [payrollRuns]="payrollRuns() || []"
           [loading]="payrollRunsLoading() || false"
@@ -110,21 +110,21 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
           (detail)="viewPayrollRun($event)"
           (refresh)="refreshPayrollRuns()"
         ></app-payroll-run-list>
-        @defer (when isPayrollRunCreateModalOpen) {
+        @defer (when isPayrollRunCreateModalOpen()) {
           <vendix-payroll-run-create
             [(isOpen)]="isPayrollRunCreateModalOpen"
           ></vendix-payroll-run-create>
         }
-        @defer (when isPayrollRunDetailModalOpen) {
+        @defer (when isPayrollRunDetailModalOpen()) {
           <vendix-payroll-run-detail
             [(isOpen)]="isPayrollRunDetailModalOpen"
-            [payrollRun]="selectedPayrollRun"
+            [payrollRun]="selectedPayrollRun()"
           ></vendix-payroll-run-detail>
         }
       }
 
       <!-- Settings Tab -->
-      @if (activeTab === 'settings') {
+      @if (activeTab() === 'settings') {
         <vendix-payroll-settings></vendix-payroll-settings>
       }
     </div>
@@ -134,8 +134,6 @@ export class PayrollComponent {
   private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
   private destroyRef = inject(DestroyRef);
-  private destroy$ = new Subject<void>();
-
   readonly employees = toSignal(this.store.select(selectEmployees), {
     initialValue: [] as Employee[],
   });
@@ -154,29 +152,26 @@ export class PayrollComponent {
   );
 
   // Tab state
-  tabs: ScrollableTab[] = [
+  readonly tabs: ScrollableTab[] = [
     { id: 'employees', label: 'Empleados', icon: 'users' },
     { id: 'payroll-runs', label: 'Nóminas', icon: 'file-text' },
     { id: 'settlements', label: 'Liquidaciones', icon: 'file-minus' },
     { id: 'advances', label: 'Adelantos', icon: 'hand-coins' },
     { id: 'settings', label: 'Configuración', icon: 'settings' },
   ];
-  activeTab:
-    | 'employees'
-    | 'payroll-runs'
-    | 'settlements'
-    | 'advances'
-    | 'settings' = 'employees';
+  readonly activeTab = signal<
+    'employees' | 'payroll-runs' | 'settlements' | 'advances' | 'settings'
+  >('employees');
 
   // Modal states
-  isEmployeeCreateModalOpen = false;
-  isEmployeeDetailModalOpen = false;
-  isEmployeeBulkUploadModalOpen = false;
-  isPayrollRunCreateModalOpen = false;
-  isPayrollRunDetailModalOpen = false;
+  readonly isEmployeeCreateModalOpen = signal(false);
+  readonly isEmployeeDetailModalOpen = signal(false);
+  readonly isEmployeeBulkUploadModalOpen = signal(false);
+  readonly isPayrollRunCreateModalOpen = signal(false);
+  readonly isPayrollRunDetailModalOpen = signal(false);
 
-  selectedEmployee: Employee | null = null;
-  selectedPayrollRun: PayrollRun | null = null;
+  readonly selectedEmployee = signal<Employee | null>(null);
+  readonly selectedPayrollRun = signal<PayrollRun | null>(null);
 
   constructor() {
     this.currencyService.loadCurrency();
@@ -189,45 +184,41 @@ export class PayrollComponent {
     this.store
       .select(selectCurrentPayrollRun)
       .pipe(
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
         filter((run): run is PayrollRun => run !== null),
       )
       .subscribe((run) => {
         if (
-          this.isPayrollRunDetailModalOpen &&
-          this.selectedPayrollRun?.id === run.id
+          this.isPayrollRunDetailModalOpen() &&
+          this.selectedPayrollRun()?.id === run.id
         ) {
-          this.selectedPayrollRun = run;
+          this.selectedPayrollRun.set(run);
         }
       });
 
-    this.destroyRef.onDestroy(() => {
-      this.destroy$.next();
-      this.destroy$.complete();
-    });
   }
 
   switchTab(tab: string): void {
-    this.activeTab = tab as 'employees' | 'payroll-runs' | 'settings';
+    this.activeTab.set(tab as 'employees' | 'payroll-runs' | 'settings');
   }
 
   // Employee handlers
   openEmployeeCreateModal(): void {
-    this.isEmployeeCreateModalOpen = true;
+    this.isEmployeeCreateModalOpen.set(true);
   }
 
   editEmployee(employee: Employee): void {
-    this.selectedEmployee = employee;
-    this.isEmployeeDetailModalOpen = true;
+    this.selectedEmployee.set(employee);
+    this.isEmployeeDetailModalOpen.set(true);
   }
 
   viewEmployee(employee: Employee): void {
-    this.selectedEmployee = employee;
-    this.isEmployeeDetailModalOpen = true;
+    this.selectedEmployee.set(employee);
+    this.isEmployeeDetailModalOpen.set(true);
   }
 
   openBulkUploadModal(): void {
-    this.isEmployeeBulkUploadModalOpen = true;
+    this.isEmployeeBulkUploadModalOpen.set(true);
   }
 
   onBulkUploadComplete(): void {
@@ -241,12 +232,12 @@ export class PayrollComponent {
 
   // Payroll Run handlers
   openPayrollRunCreateModal(): void {
-    this.isPayrollRunCreateModalOpen = true;
+    this.isPayrollRunCreateModalOpen.set(true);
   }
 
   viewPayrollRun(payrollRun: PayrollRun): void {
-    this.selectedPayrollRun = payrollRun;
-    this.isPayrollRunDetailModalOpen = true;
+    this.selectedPayrollRun.set(payrollRun);
+    this.isPayrollRunDetailModalOpen.set(true);
     // Fetch full detail with payroll_items (list endpoint doesn't include items)
     this.store.dispatch(loadPayrollRun({ id: payrollRun.id }));
   }

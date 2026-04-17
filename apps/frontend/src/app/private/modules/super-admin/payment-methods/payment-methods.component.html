@@ -2,7 +2,7 @@
 <div class="flex flex-col gap-6">
   <!-- Stats Grid -->
   <app-payment-method-stats
-    [stats]="paymentMethodStats"
+    [stats]="paymentMethodStats()"
   ></app-payment-method-stats>
 
   <!-- Main Content Card -->
@@ -62,7 +62,7 @@
             variant="outline"
             size="sm"
             (clicked)="refreshPaymentMethods()"
-            [disabled]="isLoading"
+            [disabled]="isLoading()"
             title="Actualizar"
           >
             <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
@@ -84,7 +84,7 @@
     <!-- Table Content Wrapper -->
     <div class="relative min-h-[400px] p-2 md:p-4">
       <!-- Loading Overlay -->
-      @if (isLoading) {
+      @if (isLoading()) {
         <div
           class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
         >
@@ -95,7 +95,7 @@
       }
 
       <!-- Empty State -->
-      @if (!isLoading && paymentMethods.length === 0) {
+      @if (!isLoading() && paymentMethods().length === 0) {
         <div class="p-8 flex justify-center w-full">
           <app-empty-state
             icon="credit-card"
@@ -114,13 +114,13 @@
 
       <!-- Payment Methods Table -->
       <!-- Payment Methods Table -->
-      @if (!isLoading && paymentMethods.length > 0) {
+      @if (!isLoading() && paymentMethods().length > 0) {
         <app-responsive-data-view
-          [data]="paymentMethods"
+          [data]="paymentMethods()"
           [columns]="tableColumns"
           [actions]="tableActions"
           [cardConfig]="cardConfig"
-          [loading]="isLoading"
+          [loading]="isLoading()"
           [sortable]="true"
           [hoverable]="true"
           [striped]="true"
@@ -133,19 +133,21 @@
     </div>
   </app-card>
 
-  @defer (when showCreateModal) {
+  @defer (when showCreateModal()) {
     <app-payment-method-create-modal
-      [(isOpen)]="showCreateModal"
-      [isSubmitting]="isCreatingPaymentMethod"
+      [isOpen]="showCreateModal()"
+      (isOpenChange)="showCreateModal.set($event)"
+      [isSubmitting]="isCreatingPaymentMethod()"
       (onPaymentMethodCreated)="onPaymentMethodCreated($event)"
     ></app-payment-method-create-modal>
   }
 
-  @defer (when showEditModal) {
+  @defer (when showEditModal()) {
     <app-payment-method-edit-modal
-      [(isOpen)]="showEditModal"
-      [isSubmitting]="isUpdatingPaymentMethod"
-      [paymentMethod]="currentPaymentMethod"
+      [isOpen]="showEditModal()"
+      (isOpenChange)="showEditModal.set($event)"
+      [isSubmitting]="isUpdatingPaymentMethod()"
+      [paymentMethod]="currentPaymentMethod()"
       (onPaymentMethodUpdated)="onPaymentMethodUpdated($event)"
     ></app-payment-method-edit-modal>
   }

@@ -1,18 +1,18 @@
-import {
-  Component,
+import {Component,
   OnInit,
-  OnDestroy,
   forwardRef,
   input,
   output,
-} from '@angular/core';
+  signal,
+  DestroyRef,
+  inject} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   ControlValueAccessor,
   NG_VALUE_ACCESSOR,
-  ReactiveFormsModule,
-} from '@angular/forms';
-import { Subject, debounceTime, distinctUntilChanged, takeUntil } from 'rxjs';
+  ReactiveFormsModule} from '@angular/forms';
+import { Subject, debounceTime, distinctUntilChanged } from 'rxjs';
 import { FormStyleVariant } from '../../types/form.types';
 
 export type InputSearchSize = 'sm' | 'md' | 'lg';
@@ -25,8 +25,7 @@ export type InputSearchSize = 'sm' | 'md' | 'lg';
     {
       provide: NG_VALUE_ACCESSOR,
       useExisting: forwardRef(() => InputsearchComponent),
-      multi: true,
-    },
+      multi: true},
   ],
   styleUrl: './inputsearch.component.scss',
   template: `
@@ -54,7 +53,7 @@ export type InputSearchSize = 'sm' | 'md' | 'lg';
           [placeholder]="placeholder()"
           [disabled]="isDisabled()"
           [readonly]="readonly()"
-          [value]="value"
+          [value]="value()"
           [class]="inputClasses"
           (input)="onInputChange($event)"
           (focus)="onFocus()"
@@ -64,7 +63,7 @@ export type InputSearchSize = 'sm' | 'md' | 'lg';
         />
 
         <!-- Botón de limpiar (opcional) -->
-        @if (showClear() && value) {
+        @if (showClear() && value()) {
           <button
             type="button"
             class="inputsearch-clear"
@@ -100,11 +99,11 @@ export type InputSearchSize = 'sm' | 'md' | 'lg';
         </div>
       }
     </div>
-  `,
-})
+  `})
 export class InputsearchComponent
-  implements OnInit, OnDestroy, ControlValueAccessor
+  implements OnInit, ControlValueAccessor
 {
+  private destroyRef = inject(DestroyRef);
   readonly type = input<'text' | 'search' | 'email' | 'url'>('text');
   readonly placeholder = input('Buscar...');
   readonly disabled = input<boolean>(false);
@@ -127,11 +126,9 @@ export class InputsearchComponent
   readonly escape = output<void>();
   readonly clear = output<void>();
 
-  value = '';
-  isFocused = false;
-
-  private destroy$ = new Subject<void>();
-  private searchSubject$ = new Subject<string>();
+  readonly value = signal('');
+  readonly isFocused = signal(false);
+private searchSubject$ = new Subject<string>();
 
   // ControlValueAccessor methods
   private onChange: (value: string) => void = () => {};
@@ -143,22 +140,16 @@ export class InputsearchComponent
       .pipe(
         debounceTime(this.debounceTime()),
         distinctUntilChanged(),
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((searchValue) => {
         this.searchChange.emit(searchValue);
         this.search.emit(searchValue);
       });
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  // ControlValueAccessor implementation
+// ControlValueAccessor implementation
   writeValue(value: string): void {
-    this.value = value || '';
+    this.value.set(value || '');
   }
 
   registerOnChange(fn: (value: string) => void): void {
@@ -180,23 +171,24 @@ export class InputsearchComponent
   // Event handlers
   onInputChange(event: Event): void {
     const target = event.target as HTMLInputElement;
-    this.value = target.value;
+    const next = target.value;
+    this.value.set(next);
 
     // Emitir el cambio inmediato para ControlValueAccessor
-    this.onChange(this.value);
+    this.onChange(next);
 
     // Emitir al subject para el debounce
-    this.searchSubject$.next(this.value);
+    this.searchSubject$.next(next);
   }
 
   onFocus(): void {
-    this.isFocused = true;
+    this.isFocused.set(true);
     // TODO: The 'emit' function requires a mandatory void argument
     this.focus.emit();
   }
 
   onBlur(): void {
-    this.isFocused = false;
+    this.isFocused.set(false);
     this.onTouched();
     // TODO: The 'emit' function requires a mandatory void argument
     this.blur.emit();
@@ -213,9 +205,9 @@ export class InputsearchComponent
   }
 
   clearInput(): void {
-    this.value = '';
-    this.onChange(this.value);
-    this.searchSubject$.next(this.value);
+    this.value.set('');
+    this.onChange('');
+    this.searchSubject$.next('');
     // TODO: The 'emit' function requires a mandatory void argument
     this.clear.emit();
   }
@@ -232,14 +224,13 @@ export class InputsearchComponent
         ? {
             sm: ['inputsearch-container-sm'],
             md: ['inputsearch-container-md'],
-            lg: ['inputsearch-container-lg'],
-          }[this.size()]
+            lg: ['inputsearch-container-lg']}[this.size()]
         : [];
 
     const stateClasses = [
       this.isDisabled() ? 'inputsearch-disabled' : '',
       this.errorMessage() ? 'inputsearch-error' : '',
-      this.isFocused ? 'inputsearch-focused' : '',
+      this.isFocused() ? 'inputsearch-focused' : '',
     ].filter(Boolean);
 
     const classes = [
@@ -268,14 +259,13 @@ export class InputsearchComponent
         ? {
             sm: ['inputsearch-wrapper-sm'],
             md: ['inputsearch-wrapper-md'],
-            lg: ['inputsearch-wrapper-lg'],
-          }[this.size()]
+            lg: ['inputsearch-wrapper-lg']}[this.size()]
         : [];
 
     const stateClasses = [
       this.isDisabled() ? 'inputsearch-wrapper-disabled' : '',
       this.errorMessage() ? 'inputsearch-wrapper-error' : '',
-      this.isFocused ? 'inputsearch-wrapper-focused' : '',
+      this.isFocused() ? 'inputsearch-wrapper-focused' : '',
     ].filter(Boolean);
 
     return [
@@ -297,14 +287,13 @@ export class InputsearchComponent
         ? {
             sm: ['inputsearch-input-sm'],
             md: ['inputsearch-input-md'],
-            lg: ['inputsearch-input-lg'],
-          }[this.size()]
+            lg: ['inputsearch-input-lg']}[this.size()]
         : [];
 
     const stateClasses = [
       this.isDisabled() ? 'inputsearch-input-disabled' : '',
       this.errorMessage() ? 'inputsearch-input-error' : '',
-      this.isFocused ? 'inputsearch-input-focused' : '',
+      this.isFocused() ? 'inputsearch-input-focused' : '',
     ].filter(Boolean);
 
     return [
@@ -326,8 +315,7 @@ export class InputsearchComponent
         ? {
             sm: ['inputsearch-icon-sm'],
             md: ['inputsearch-icon-md'],
-            lg: ['inputsearch-icon-lg'],
-          }[this.size()]
+            lg: ['inputsearch-icon-lg']}[this.size()]
         : [];
 
     return [...baseClasses, ...variantClasses, ...sizeClasses].join(' ');
@@ -344,8 +332,7 @@ export class InputsearchComponent
         ? {
             sm: ['inputsearch-clear-sm'],
             md: ['inputsearch-clear-md'],
-            lg: ['inputsearch-clear-lg'],
-          }[this.size()]
+            lg: ['inputsearch-clear-lg']}[this.size()]
         : [];
 
     return [...baseClasses, ...variantClasses, ...sizeClasses].join(' ');

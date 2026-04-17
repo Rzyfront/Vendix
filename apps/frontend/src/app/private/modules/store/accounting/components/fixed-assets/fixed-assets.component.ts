@@ -1,16 +1,16 @@
-import { Component, OnDestroy, inject, signal, computed } from '@angular/core';
+import {Component, inject, signal, computed,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CurrencyPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Subject } from 'rxjs';
-import { takeUntil } from 'rxjs/operators';
+
 
 import { AccountingService } from '../../services/accounting.service';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import {
   FixedAsset,
   FixedAssetCategory,
-  ApiResponse,
-} from '../../interfaces/accounting.interface';
+  ApiResponse} from '../../interfaces/accounting.interface';
 import { FixedAssetCreateModalComponent } from './fixed-asset-create-modal/fixed-asset-create-modal.component';
 import { FixedAssetDetailModalComponent } from './fixed-asset-detail-modal/fixed-asset-detail-modal.component';
 import { FixedAssetCategoriesModalComponent } from './fixed-asset-categories-modal/fixed-asset-categories-modal.component';
@@ -20,8 +20,7 @@ import {
   IconComponent,
   StatsComponent,
   InputsearchComponent,
-  SelectorComponent,
-} from '../../../../../../shared/components/index';
+  SelectorComponent} from '../../../../../../shared/components/index';
 
 interface AssetStats {
   total: number;
@@ -402,11 +401,10 @@ interface AssetStats {
         (categoriesChanged)="loadCategories()"
       ></vendix-fixed-asset-categories-modal>
     </div>
-  `,
-})
-export class FixedAssetsComponent implements OnDestroy {
-  private destroy$ = new Subject<void>();
-  private accounting_service = inject(AccountingService);
+  `})
+export class FixedAssetsComponent implements {
+  private destroyRef = inject(DestroyRef);
+private accounting_service = inject(AccountingService);
   private currencyService = inject(CurrencyFormatService);
 
   // Data
@@ -420,8 +418,7 @@ export class FixedAssetsComponent implements OnDestroy {
     total: 0,
     active: 0,
     fully_depreciated: 0,
-    total_book_value: 0,
-  });
+    total_book_value: 0});
 
   readonly formatted_book_value = computed(() =>
     this.currencyService.format(this.stats().total_book_value || 0),
@@ -475,20 +472,14 @@ export class FixedAssetsComponent implements OnDestroy {
     this.loadAssets();
     this.loadCategories();
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  loadAssets(): void {
+loadAssets(): void {
     this.is_loading.set(true);
     const query: Record<string, any> = {};
     if (this.filter_status) query['status'] = this.filter_status;
 
     this.accounting_service
       .getFixedAssets(query)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           this.assets.set(response.data);
@@ -498,19 +489,17 @@ export class FixedAssetsComponent implements OnDestroy {
         },
         error: () => {
           this.is_loading.set(false);
-        },
-      });
+        }});
   }
 
   loadCategories(): void {
     this.accounting_service
       .getFixedAssetCategories()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           this.categories.set(response.data);
-        },
-      });
+        }});
   }
 
   private computeStats(): void {
@@ -519,8 +508,7 @@ export class FixedAssetsComponent implements OnDestroy {
       total: assets.length,
       active: assets.filter((a) => a.status === 'active').length,
       fully_depreciated: assets.filter((a) => a.status === 'fully_depreciated').length,
-      total_book_value: assets.reduce((sum, a) => sum + (a.book_value ?? 0), 0),
-    });
+      total_book_value: assets.reduce((sum, a) => sum + (a.book_value ?? 0), 0)});
   }
 
   private applyFilters(): void {
@@ -582,9 +570,8 @@ export class FixedAssetsComponent implements OnDestroy {
     this.accounting_service
       .runDepreciation({
         year: this.depreciation_year,
-        month: this.depreciation_month,
-      })
-      .pipe(takeUntil(this.destroy$))
+        month: this.depreciation_month})
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.is_running_depreciation = false;
@@ -593,8 +580,7 @@ export class FixedAssetsComponent implements OnDestroy {
         },
         error: () => {
           this.is_running_depreciation = false;
-        },
-      });
+        }});
   }
 
   onAssetSaved(): void {
@@ -607,8 +593,7 @@ export class FixedAssetsComponent implements OnDestroy {
       active: 'Activo',
       fully_depreciated: 'Depreciado',
       retired: 'Retirado',
-      disposed: 'Baja',
-    };
+      disposed: 'Baja'};
     return labels[status] || status;
   }
 
@@ -617,8 +602,7 @@ export class FixedAssetsComponent implements OnDestroy {
       active: 'bg-emerald-50 text-emerald-600',
       fully_depreciated: 'bg-amber-50 text-amber-600',
       retired: 'bg-gray-100 text-gray-500',
-      disposed: 'bg-red-50 text-red-500',
-    };
+      disposed: 'bg-red-50 text-red-500'};
     return classes[status] || 'bg-gray-100 text-gray-500';
   }
 }

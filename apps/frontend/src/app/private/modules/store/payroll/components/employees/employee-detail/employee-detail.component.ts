@@ -335,8 +335,10 @@ export class EmployeeDetailComponent {
   readonly isOpenChange = output<boolean>();
 
   private payrollService = inject(PayrollService);
+  private fb = inject(FormBuilder);
+  private store = inject(Store);
 
-  employeeForm: FormGroup;
+  employeeForm: FormGroup = this.fb.group({});
   readonly loading = toSignal(this.store.select(selectEmployeesLoading), {
     initialValue: false,
   });
@@ -377,10 +379,7 @@ export class EmployeeDetailComponent {
     { label: 'Ventas', value: 'sales' },
   ];
 
-  constructor(
-    private fb: FormBuilder,
-    private store: Store,
-  ) {
+  constructor() {
     this.employeeForm = this.fb.group({
       user_id: [''],
       first_name: ['', [Validators.required, Validators.minLength(2)]],

@@ -84,9 +84,10 @@
     </div>
   </app-card>
 
-  @defer (when is_create_modal_open) {
+  @defer (when isCreateModalOpen()) {
     <vendix-budget-create-modal
-      [(isOpen)]="is_create_modal_open"
+      [isOpen]="isCreateModalOpen()"
+      (isOpenChange)="isCreateModalOpen.set($event)"
       (created)="onBudgetCreated()"
     ></vendix-budget-create-modal>
   }

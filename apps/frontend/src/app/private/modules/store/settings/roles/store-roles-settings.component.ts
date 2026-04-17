@@ -1,6 +1,8 @@
-import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
+import {Component, OnInit, inject, signal,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
-import { Subject, takeUntil } from 'rxjs';
+
 import { StoreRole, StoreRoleStats } from './interfaces/store-role.interface';
 import { StoreRolesService } from './services/store-roles.service';
 
@@ -8,14 +10,12 @@ import {
   StoreRoleCreateModalComponent,
   StoreRoleEditModalComponent,
   StoreRolePermissionsModalComponent,
-  StoreRolesListComponent,
-} from './components/index';
+  StoreRolesListComponent} from './components/index';
 
 import {
   DialogService,
   ToastService,
-  StatsComponent,
-} from '../../../../../shared/components/index';
+  StatsComponent} from '../../../../../shared/components/index';
 
 @Component({
   selector: 'app-store-roles-settings',
@@ -111,15 +111,13 @@ import {
         />
       }
     </div>
-  `,
-})
-export class StoreRolesSettingsComponent implements OnInit, OnDestroy {
+  `})
+export class StoreRolesSettingsComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private storeRolesService = inject(StoreRolesService);
   private dialogService = inject(DialogService);
   private toastService = inject(ToastService);
-  private destroy$ = new Subject<void>();
-
-  // State
+// State
   readonly roles = signal<StoreRole[]>([]);
   readonly filteredRoles = signal<StoreRole[]>([]);
   readonly roleStats = signal<StoreRoleStats | null>(null);
@@ -141,18 +139,12 @@ export class StoreRolesSettingsComponent implements OnInit, OnDestroy {
     this.loadRoles();
     this.loadStats();
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  loadRoles(): void {
+loadRoles(): void {
     this.isLoading.set(true);
 
     this.storeRolesService
       .getRoles()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           this.roles.set(response.data || []);
@@ -162,8 +154,7 @@ export class StoreRolesSettingsComponent implements OnInit, OnDestroy {
           console.error('Error loading store roles:', error);
           this.roles.set([]);
           this.filteredRoles.set([]);
-        },
-      })
+        }})
       .add(() => {
         this.isLoading.set(false);
       });
@@ -173,7 +164,7 @@ export class StoreRolesSettingsComponent implements OnInit, OnDestroy {
     this.statsLoading.set(true);
     this.storeRolesService
       .getStats()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (stats) => {
           this.roleStats.set(stats);
@@ -182,8 +173,7 @@ export class StoreRolesSettingsComponent implements OnInit, OnDestroy {
         error: (err) => {
           console.error('Error loading store role stats', err);
           this.statsLoading.set(false);
-        },
-      });
+        }});
   }
 
   // ── Filters ──────────────────────────────────────────────────────────
@@ -275,8 +265,7 @@ export class StoreRolesSettingsComponent implements OnInit, OnDestroy {
         message: `Estas seguro de que deseas eliminar el rol "${role.name}"? Esta accion no se puede deshacer.`,
         confirmText: 'Eliminar',
         cancelText: 'Cancelar',
-        confirmVariant: 'danger',
-      })
+        confirmVariant: 'danger'})
       .then((confirmed) => {
         if (confirmed) {
           this.storeRolesService.deleteRole(role.id).subscribe({
@@ -289,8 +278,7 @@ export class StoreRolesSettingsComponent implements OnInit, OnDestroy {
               const message =
                 error?.error?.message || 'Error al eliminar el rol';
               this.toastService.error(message);
-            },
-          });
+            }});
         }
       });
   }

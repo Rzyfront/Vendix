@@ -1,6 +1,7 @@
-import { Injectable } from '@angular/core';
+import { Injectable, signal } from '@angular/core';
+import { toObservable } from '@angular/core/rxjs-interop';
 import { HttpClient } from '@angular/common/http';
-import { Observable, BehaviorSubject } from 'rxjs';
+import { Observable } from 'rxjs';
 import { tap } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
 
@@ -98,17 +99,17 @@ export interface WizardCompletionResult {
 export class OnboardingWizardService {
   private readonly apiUrl = `${environment.apiUrl}/organization/onboarding-wizard`;
 
-  // Wizard state management
-  private currentStepSubject = new BehaviorSubject<number>(1);
-  public currentStep$ = this.currentStepSubject.asObservable();
+  // Wizard state management (signal-first)
+  readonly currentStep = signal<number>(1);
+  public currentStep$ = toObservable(this.currentStep);
 
-  private wizardDataSubject = new BehaviorSubject<any>({
+  readonly wizardData = signal<any>({
     user: {},
     organization: {},
     store: {},
     appConfig: {},
   });
-  public wizardData$ = this.wizardDataSubject.asObservable();
+  public wizardData$ = toObservable(this.wizardData);
 
   private _created_store_slug: string | null = null;
   private _app_type: 'STORE_ADMIN' | 'ORG_ADMIN' | null = null;
@@ -159,10 +160,10 @@ export class OnboardingWizardService {
         if (response.success && response.data) {
           // Only update step if it's different to avoid loops
           const backendStep = response.data.current_step;
-          const currentStep = this.currentStepSubject.value;
+          const currentStep = this.currentStep();
 
           if (backendStep !== currentStep) {
-            this.currentStepSubject.next(backendStep);
+            this.currentStep.set(backendStep);
           }
         }
       }),
@@ -210,8 +211,8 @@ export class OnboardingWizardService {
     return this.http.post(`${this.apiUrl}/setup-user`, data).pipe(
       tap((response: any) => {
         if (response.success) {
-          const currentData = this.wizardDataSubject.value;
-          this.wizardDataSubject.next({
+          const currentData = this.wizardData();
+          this.wizardData.set({
             ...currentData,
             user: data,
           });
@@ -229,8 +230,8 @@ export class OnboardingWizardService {
     return this.http.post(`${this.apiUrl}/setup-organization`, data).pipe(
       tap((response: any) => {
         if (response.success) {
-          const currentData = this.wizardDataSubject.value;
-          this.wizardDataSubject.next({
+          const currentData = this.wizardData();
+          this.wizardData.set({
             ...currentData,
             organization: data,
           });
@@ -248,8 +249,8 @@ export class OnboardingWizardService {
     return this.http.post(`${this.apiUrl}/setup-store`, data).pipe(
       tap((response: any) => {
         if (response.success) {
-          const currentData = this.wizardDataSubject.value;
-          this.wizardDataSubject.next({
+          const currentData = this.wizardData();
+          this.wizardData.set({
             ...currentData,
             store: data,
           });
@@ -271,8 +272,8 @@ export class OnboardingWizardService {
     return this.http.post(`${this.apiUrl}/setup-app-config`, data).pipe(
       tap((response: any) => {
         if (response.success) {
-          const currentData = this.wizardDataSubject.value;
-          this.wizardDataSubject.next({
+          const currentData = this.wizardData();
+          this.wizardData.set({
             ...currentData,
             appConfig: data,
           });
@@ -294,40 +295,36 @@ export class OnboardingWizardService {
    * Navigate to specific step
    */
   goToStep(step: number): void {
-    this.currentStepSubject.next(step);
+    this.currentStep.set(step);
   }
 
   /**
    * Move to next step
    */
   nextStep(): void {
-    const current = this.currentStepSubject.value;
-    this.currentStepSubject.next(current + 1);
+    this.currentStep.update((c) => c + 1);
   }
 
   /**
    * Move to previous step
    */
   previousStep(): void {
-    const current = this.currentStepSubject.value;
-    if (current > 1) {
-      this.currentStepSubject.next(current - 1);
-    }
+    this.currentStep.update((c) => (c > 1 ? c - 1 : c));
   }
 
   /**
    * Get current wizard data
    */
   getWizardData(): any {
-    return this.wizardDataSubject.value;
+    return this.wizardData();
   }
 
   /**
    * Update wizard data for a specific section
    */
   updateWizardData(section: string, data: any): void {
-    const currentData = this.wizardDataSubject.value;
-    this.wizardDataSubject.next({
+    const currentData = this.wizardData();
+    this.wizardData.set({
       ...currentData,
       [section]: data,
     });
@@ -337,8 +334,8 @@ export class OnboardingWizardService {
    * Reset wizard state
    */
   resetWizard(): void {
-    this.currentStepSubject.next(1);
-    this.wizardDataSubject.next({
+    this.currentStep.set(1);
+    this.wizardData.set({
       user: {},
       organization: {},
       store: {},

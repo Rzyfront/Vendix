@@ -1,7 +1,9 @@
-import { Component, OnInit, OnDestroy, inject, computed, signal } from '@angular/core';
+import {Component, OnInit, inject, computed, signal,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
-import { Subject, takeUntil, finalize } from 'rxjs';
+import { finalize } from 'rxjs';
 import {
   IconComponent,
   ModalComponent,
@@ -10,16 +12,14 @@ import {
   ButtonComponent,
   StickyHeaderComponent,
   StickyHeaderActionButton,
-  StickyHeaderBadgeColor,
-} from '../../../../../../../../src/app/shared/components';
+  StickyHeaderBadgeColor} from '../../../../../../../../src/app/shared/components';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { SupportService } from '../../services/support.service';
 import { AuthFacade } from '../../../../../../../../src/app/core/store/auth/auth.facade';
 import {
   Ticket,
   TicketStatus,
-  TicketPriority,
-} from '../../interfaces/ticket.interface';
+  TicketPriority} from '../../interfaces/ticket.interface';
 
 @Component({
   selector: 'app-superadmin-ticket-detail',
@@ -320,7 +320,8 @@ import {
     }
   `]
 })
-export class SuperadminTicketDetailComponent implements OnInit, OnDestroy {
+export class SuperadminTicketDetailComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private router = inject(Router);
   private route = inject(ActivatedRoute);
   private supportService = inject(SupportService);
@@ -347,34 +348,22 @@ export class SuperadminTicketDetailComponent implements OnInit, OnDestroy {
   // Enums
   TicketStatus = TicketStatus;
   TicketPriority = TicketPriority;
-
-  private destroy$ = new Subject<void>();
-
-  constructor() {
+constructor() {
     this.commentForm = this.fb.group({
-      content: ['', Validators.required],
-    });
+      content: ['', Validators.required]});
 
     this.statusForm = this.fb.group({
       status: [''],
-      notes: [''],
-    });
+      notes: ['']});
 
     this.closeForm = this.fb.group({
-      resolution_summary: [''],
-    });
+      resolution_summary: ['']});
   }
 
   ngOnInit(): void {
     this.loadTicket();
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  loadTicket(): void {
+loadTicket(): void {
     const id = this.route.snapshot.paramMap.get('id');
     if (!id) {
       this.toastService.error('ID de ticket no proporcionado');
@@ -383,7 +372,7 @@ export class SuperadminTicketDetailComponent implements OnInit, OnDestroy {
     }
 
     this.supportService.getTicketById(+id).pipe(
-      takeUntil(this.destroy$),
+      takeUntilDestroyed(this.destroyRef),
       finalize(() => this.loading.set(false))
     ).subscribe({
       next: (data) => {
@@ -392,8 +381,7 @@ export class SuperadminTicketDetailComponent implements OnInit, OnDestroy {
       error: (err: any) => {
         console.error('Error loading ticket:', err);
         this.toastService.error('Error al cargar el ticket');
-      },
-    });
+      }});
   }
 
   submitComment(): void {
@@ -422,8 +410,7 @@ export class SuperadminTicketDetailComponent implements OnInit, OnDestroy {
       error: (err: any) => {
         console.error('Error adding comment:', err);
         this.toastService.error('Error al agregar comentario');
-      },
-    });
+      }});
   }
 
   openStatusModal(): void {
@@ -462,8 +449,7 @@ export class SuperadminTicketDetailComponent implements OnInit, OnDestroy {
       error: (err: any) => {
         console.error('Error updating status:', err);
         this.toastService.error('Error al actualizar el estado');
-      },
-    });
+      }});
   }
 
   closeTicket(): void {
@@ -482,8 +468,7 @@ export class SuperadminTicketDetailComponent implements OnInit, OnDestroy {
       error: (err: any) => {
         console.error('Error closing ticket:', err);
         this.toastService.error('Error al cerrar el ticket');
-      },
-    });
+      }});
   }
 
   openAttachment(attachment: any): void {
@@ -532,8 +517,7 @@ export class SuperadminTicketDetailComponent implements OnInit, OnDestroy {
       WAITING_RESPONSE: 'yellow',
       RESOLVED: 'green',
       CLOSED: 'gray',
-      REOPENED: 'red',
-    };
+      REOPENED: 'red'};
     return colorMap[status as TicketStatus || TicketStatus.NEW] || 'blue';
   });
 
@@ -545,8 +529,7 @@ export class SuperadminTicketDetailComponent implements OnInit, OnDestroy {
         id: 'changeStatus',
         label: 'Cambiar Estado',
         variant: 'secondary',
-        icon: 'refresh-cw',
-      });
+        icon: 'refresh-cw'});
     }
 
     if (this.canCloseTicket()) {
@@ -554,8 +537,7 @@ export class SuperadminTicketDetailComponent implements OnInit, OnDestroy {
         id: 'close',
         label: 'Cerrar Ticket',
         variant: 'primary',
-        icon: 'check-circle',
-      });
+        icon: 'check-circle'});
     }
 
     return actions;
@@ -583,8 +565,7 @@ export class SuperadminTicketDetailComponent implements OnInit, OnDestroy {
       [TicketStatus.WAITING_RESPONSE]: 'Esperando',
       [TicketStatus.RESOLVED]: 'Resuelto',
       [TicketStatus.CLOSED]: 'Cerrado',
-      [TicketStatus.REOPENED]: 'Reabierto',
-    };
+      [TicketStatus.REOPENED]: 'Reabierto'};
     return labels[status || TicketStatus.NEW] || status || 'Nuevo';
   }
 
@@ -596,8 +577,7 @@ export class SuperadminTicketDetailComponent implements OnInit, OnDestroy {
       [TicketStatus.WAITING_RESPONSE]: 'bg-orange-100 text-orange-700 border-orange-200',
       [TicketStatus.RESOLVED]: 'bg-teal-100 text-teal-700 border-teal-200',
       [TicketStatus.CLOSED]: 'bg-gray-100 text-gray-700 border-gray-200',
-      [TicketStatus.REOPENED]: 'bg-red-100 text-red-700 border-red-200',
-    };
+      [TicketStatus.REOPENED]: 'bg-red-100 text-red-700 border-red-200'};
     return classes[status || TicketStatus.NEW] || 'bg-gray-100 text-gray-700';
   }
 
@@ -607,8 +587,7 @@ export class SuperadminTicketDetailComponent implements OnInit, OnDestroy {
       [TicketPriority.P1]: 'Urgente',
       [TicketPriority.P2]: 'Alta',
       [TicketPriority.P3]: 'Normal',
-      [TicketPriority.P4]: 'Baja',
-    };
+      [TicketPriority.P4]: 'Baja'};
     return labels[priority || TicketPriority.P3] || 'Normal';
   }
 
@@ -618,8 +597,7 @@ export class SuperadminTicketDetailComponent implements OnInit, OnDestroy {
       [TicketPriority.P1]: 'bg-orange-100 text-orange-700 border-orange-200',
       [TicketPriority.P2]: 'bg-yellow-100 text-yellow-700 border-yellow-200',
       [TicketPriority.P3]: 'bg-emerald-100 text-emerald-700 border-emerald-200',
-      [TicketPriority.P4]: 'bg-gray-100 text-gray-700 border-gray-200',
-    };
+      [TicketPriority.P4]: 'bg-gray-100 text-gray-700 border-gray-200'};
     return classes[priority || TicketPriority.P3] || 'bg-gray-100';
   }
 
@@ -630,8 +608,7 @@ export class SuperadminTicketDetailComponent implements OnInit, OnDestroy {
       'SERVICE_REQUEST': 'Solicitud de Servicio',
       'PROBLEM': 'Problema',
       'CHANGE': 'Cambio',
-      'QUESTION': 'Consulta',
-    };
+      'QUESTION': 'Consulta'};
     return labels[category] || category;
   }
 
@@ -643,7 +620,6 @@ export class SuperadminTicketDetailComponent implements OnInit, OnDestroy {
       month: 'short',
       year: 'numeric',
       hour: '2-digit',
-      minute: '2-digit',
-    });
+      minute: '2-digit'});
   }
 }

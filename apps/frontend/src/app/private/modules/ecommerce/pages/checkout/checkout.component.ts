@@ -1,4 +1,12 @@
-import { Component, OnInit, OnDestroy, signal, inject } from '@angular/core';
+import {
+  Component,
+  ChangeDetectionStrategy,
+  OnInit,
+  DestroyRef,
+  signal,
+  inject,
+} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router } from '@angular/router';
 import {
@@ -8,8 +16,6 @@ import {
   FormGroup,
   Validators,
 } from '@angular/forms';
-import { Subject } from 'rxjs';
-import { takeUntil } from 'rxjs/operators';
 import { CartService, Cart, CartItem } from '../../services/cart.service';
 import {
   CheckoutService,
@@ -66,19 +72,20 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
   ],
   templateUrl: './checkout.component.html',
   styleUrls: ['./checkout.component.scss'],
+  changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class CheckoutComponent implements OnInit, OnDestroy {
-  cart: Cart | null = null;
-  payment_methods: PaymentMethod[] = [];
-  addresses: Address[] = [];
+export class CheckoutComponent implements OnInit {
+  readonly cart = signal<Cart | null>(null);
+  readonly payment_methods = signal<PaymentMethod[]>([]);
+  readonly addresses = signal<Address[]>([]);
 
-  selected_payment_method_id: number | null = null;
-  selected_address_id: number | null = null;
-  use_new_address = false;
-  save_new_address = true; // Default to save the new address
+  readonly selected_payment_method_id = signal<number | null>(null);
+  readonly selected_address_id = signal<number | null>(null);
+  readonly use_new_address = signal(false);
+  readonly save_new_address = signal(true);
 
   address_form!: FormGroup;
-  notes = '';
+  readonly notes = signal('');
 
   readonly is_loading = signal(true);
   readonly is_submitting = signal(false);
@@ -91,7 +98,7 @@ export class CheckoutComponent implements OnInit, OnDestroy {
   // Flag to prevent cart-empty redirect after successful checkout
   private orderPlaced = false;
 
-  step = 1; // Dynamic steps depending on cart content
+  readonly step = signal(1);
 
   // ========== BOOKING ==========
   /** Booking selections keyed by product_id */
@@ -145,18 +152,18 @@ export class CheckoutComponent implements OnInit, OnDestroy {
   }
 
   // Recommendations
-  recommendedProducts = signal<EcommerceProduct[]>([]);
-  quickViewOpen = false;
-  selectedProductSlug: string | null = null;
+  readonly recommendedProducts = signal<EcommerceProduct[]>([]);
+  readonly quickViewOpen = signal(false);
+  readonly selectedProductSlug = signal<string | null>(null);
 
   // Location data (Country API)
-  countries: Country[] = [];
-  departments: Department[] = [];
-  cities: City[] = [];
-  loading_departments = false;
-  loading_cities = false;
+  readonly countries = signal<Country[]>([]);
+  readonly departments = signal<Department[]>([]);
+  readonly cities = signal<City[]>([]);
+  readonly loading_departments = signal(false);
+  readonly loading_cities = signal(false);
 
-  private destroy$ = new Subject<void>();
+  private destroyRef = inject(DestroyRef);
   private catalogService = inject(CatalogService);
   private countryService = inject(CountryService);
   private currencyService = inject(CurrencyFormatService);
@@ -199,7 +206,7 @@ export class CheckoutComponent implements OnInit, OnDestroy {
         booking.end_time
       ) {
         // Verify the product is actually in the current cart
-        const isInCart = this.cart?.items?.some(
+        const isInCart = this.cart()?.items?.some(
           (item) => item.product_id === booking.product_id,
         );
         if (!isInCart) {
@@ -220,11 +227,6 @@ export class CheckoutComponent implements OnInit, OnDestroy {
     }
   }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
   initForm(): void {
     this.address_form = this.fb.group({
       address_line1: ['', Validators.required],
@@ -242,7 +244,7 @@ export class CheckoutComponent implements OnInit, OnDestroy {
 
   private setupLocationData(): void {
     // Load countries
-    this.countries = this.countryService.getCountries();
+    this.countries.set(this.countryService.getCountries());
 
     // Setup listeners
     const countryControl = this.address_form.get('country_code');
@@ -254,8 +256,8 @@ export class CheckoutComponent implements OnInit, OnDestroy {
         this.loadDepartments();
       } else {
         // Clear downstream data for non-Colombia countries
-        this.departments = [];
-        this.cities = [];
+        this.departments.set([]);
+        this.cities.set([]);
         depControl?.setValue('');
         cityControl?.setValue('');
       }
@@ -268,7 +270,7 @@ export class CheckoutComponent implements OnInit, OnDestroy {
           this.loadCities(numericDepId);
         }
       } else {
-        this.cities = [];
+        this.cities.set([]);
         cityControl?.setValue('');
       }
     });
@@ -278,23 +280,23 @@ export class CheckoutComponent implements OnInit, OnDestroy {
   }
 
   private async loadDepartments(): Promise<void> {
-    this.loading_departments = true;
-    this.departments = await this.countryService.getDepartments();
-    this.loading_departments = false;
+    this.loading_departments.set(true);
+    this.departments.set(await this.countryService.getDepartments());
+    this.loading_departments.set(false);
   }
 
   private async loadCities(depId: number): Promise<void> {
-    this.loading_cities = true;
-    this.cities = await this.countryService.getCitiesByDepartment(depId);
-    this.loading_cities = false;
+    this.loading_cities.set(true);
+    this.cities.set(await this.countryService.getCitiesByDepartment(depId));
+    this.loading_cities.set(false);
   }
 
   loadData(): void {
     this.is_loading.set(true);
 
     // Load cart
-    this.cart_service.cart$.pipe(takeUntil(this.destroy$)).subscribe((cart) => {
-      this.cart = cart;
+    this.cart_service.cart$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((cart) => {
+      this.cart.set(cart);
       // Restore pending booking only after cart is loaded
       this.restorePendingBooking();
       if (!this.orderPlaced && (!cart || cart.items.length === 0)) {
@@ -311,18 +313,18 @@ export class CheckoutComponent implements OnInit, OnDestroy {
     this.account_service.getAddresses().subscribe({
       next: (response: any) => {
         if (response.success) {
-          this.addresses = response.data;
-          if (this.addresses.length > 0) {
-            this.selected_address_id = this.addresses[0].id;
+          this.addresses.set(response.data);
+          if (response.data.length > 0) {
+            this.selected_address_id.set(response.data[0].id);
           } else {
-            this.use_new_address = true;
+            this.use_new_address.set(true);
           }
         }
         this.is_loading.set(false);
       },
       error: () => {
         this.is_loading.set(false);
-        this.use_new_address = true;
+        this.use_new_address.set(true);
         this.toast.warning(
           'No pudimos cargar tus direcciones guardadas. Puedes ingresar una nueva.',
           'Aviso',
@@ -351,20 +353,22 @@ export class CheckoutComponent implements OnInit, OnDestroy {
   }
 
   selectAddress(address_id: number): void {
-    this.selected_address_id = address_id;
-    this.use_new_address = false;
+    this.selected_address_id.set(address_id);
+    this.use_new_address.set(false);
   }
 
   selectNewAddress(): void {
-    this.selected_address_id = null;
-    this.use_new_address = true;
+    this.selected_address_id.set(null);
+    this.use_new_address.set(true);
   }
 
   selectPaymentMethod(method_id: number): void {
-    this.selected_payment_method_id = method_id;
+    this.selected_payment_method_id.set(method_id);
 
     // Check if selected method is Wompi
-    const selectedMethod = this.payment_methods.find((m) => m.id === method_id);
+    const selectedMethod = this.payment_methods().find(
+      (m) => m.id === method_id,
+    );
     this.isWompiPayment.set(
       selectedMethod?.type === 'wompi' || selectedMethod?.provider === 'wompi',
     );
@@ -382,13 +386,13 @@ export class CheckoutComponent implements OnInit, OnDestroy {
 
   // Modified logic: call this when address is finalized (e.g. Next from Address step)
   loadShippingOptions(): void {
-    if (this.use_new_address && this.address_form.valid) {
+    if (this.use_new_address() && this.address_form.valid) {
       // Convert form to address object
       const address = this.mapFormToCalcAddress(this.address_form.value);
       this.fetchShipping(address);
-    } else if (this.selected_address_id) {
-      const address = this.addresses.find(
-        (a) => a.id === this.selected_address_id,
+    } else if (this.selected_address_id()) {
+      const address = this.addresses().find(
+        (a) => a.id === this.selected_address_id(),
       );
       if (address) {
         this.fetchShipping(this.mapAddressToCalc(address));
@@ -404,7 +408,7 @@ export class CheckoutComponent implements OnInit, OnDestroy {
       // Convert department ID to name
       if (address.state_province) {
         const depId = Number(address.state_province);
-        const department = this.departments.find((d) => d.id === depId);
+        const department = this.departments().find((d) => d.id === depId);
         if (department) {
           address.state_province = department.name;
         }
@@ -413,7 +417,7 @@ export class CheckoutComponent implements OnInit, OnDestroy {
       // Convert city ID to name
       if (address.city) {
         const cityId = Number(address.city);
-        const city = this.cities.find((c) => c.id === cityId);
+        const city = this.cities().find((c) => c.id === cityId);
         if (city) {
           address.city = city.name;
         }
@@ -463,25 +467,26 @@ export class CheckoutComponent implements OnInit, OnDestroy {
     this.checkout_service.getPaymentMethods(shippingType).subscribe({
       next: (response) => {
         if (response.success) {
-          this.payment_methods = response.data;
+          this.payment_methods.set(response.data);
 
           // Reset selection if current method is no longer available
-          if (this.selected_payment_method_id) {
-            const stillAvailable = this.payment_methods.find(
-              (m) => m.id === this.selected_payment_method_id,
+          if (this.selected_payment_method_id()) {
+            const stillAvailable = this.payment_methods().find(
+              (m) => m.id === this.selected_payment_method_id(),
             );
             if (!stillAvailable) {
-              this.selected_payment_method_id =
-                this.payment_methods[0]?.id || null;
+              this.selected_payment_method_id.set(
+                this.payment_methods()[0]?.id || null,
+              );
             }
-          } else if (this.payment_methods.length > 0) {
-            this.selected_payment_method_id = this.payment_methods[0].id;
+          } else if (this.payment_methods().length > 0) {
+            this.selected_payment_method_id.set(this.payment_methods()[0].id);
           }
 
           // Update Wompi flag based on current selection
-          if (this.selected_payment_method_id) {
-            const selectedMethod = this.payment_methods.find(
-              (m) => m.id === this.selected_payment_method_id,
+          if (this.selected_payment_method_id()) {
+            const selectedMethod = this.payment_methods().find(
+              (m) => m.id === this.selected_payment_method_id(),
             );
             this.isWompiPayment.set(
               selectedMethod?.type === 'wompi' ||
@@ -527,19 +532,19 @@ export class CheckoutComponent implements OnInit, OnDestroy {
   // Override nextStep to load shipping if moving from Step 1
   nextStep(): void {
     // Address step (only for carts with physical items)
-    if (this.step === 1 && !this.cartHasOnlyServices) {
-      if (this.use_new_address && !this.address_form.valid) {
+    if (this.step() === 1 && !this.cartHasOnlyServices) {
+      if (this.use_new_address() && !this.address_form.valid) {
         this.error_message.set('Por favor completa la dirección de envío');
         this.address_form.markAllAsTouched();
         return;
       }
-      if (!this.use_new_address && !this.selected_address_id) {
+      if (!this.use_new_address() && !this.selected_address_id()) {
         this.error_message.set('Por favor selecciona una dirección');
         return;
       }
 
       // If using new address and save_new_address is checked, save it first
-      if (this.use_new_address && this.save_new_address) {
+      if (this.use_new_address() && this.save_new_address()) {
         this.saveNewAddressAndContinue();
         return;
       }
@@ -547,12 +552,12 @@ export class CheckoutComponent implements OnInit, OnDestroy {
       // Load shipping before moving
       this.loadShippingOptions();
       this.error_message.set('');
-      this.step++;
+      this.step.set(this.step() + 1);
       return;
     }
 
     // Booking step validation
-    if (this.bookingStep !== null && this.step === this.bookingStep) {
+    if (this.bookingStep !== null && this.step() === this.bookingStep) {
       if (!this.allBookingSlotsSelected) {
         this.error_message.set(
           'Por favor selecciona un horario para todos los servicios',
@@ -560,13 +565,13 @@ export class CheckoutComponent implements OnInit, OnDestroy {
         return;
       }
       this.error_message.set('');
-      this.step++;
+      this.step.set(this.step() + 1);
       return;
     }
 
     // Payment step validation
-    if (this.step === this.paymentStep) {
-      if (!this.selected_payment_method_id) {
+    if (this.step() === this.paymentStep) {
+      if (!this.selected_payment_method_id()) {
         this.error_message.set('Por favor selecciona un método de pago');
         return;
       }
@@ -583,7 +588,7 @@ export class CheckoutComponent implements OnInit, OnDestroy {
     }
 
     this.error_message.set('');
-    this.step++;
+    this.step.set(this.step() + 1);
   }
 
   /** Handle booking slot selection from the picker */
@@ -630,9 +635,9 @@ export class CheckoutComponent implements OnInit, OnDestroy {
       next: (response) => {
         if (response.success) {
           // Add the new address to the list and select it
-          this.addresses.push(response.data);
-          this.selected_address_id = response.data.id;
-          this.use_new_address = false;
+          this.addresses.update((addresses) => [...addresses, response.data]);
+          this.selected_address_id.set(response.data.id);
+          this.use_new_address.set(false);
           this.toast.success(
             'Dirección guardada correctamente',
             'Dirección guardada',
@@ -641,7 +646,7 @@ export class CheckoutComponent implements OnInit, OnDestroy {
         // Continue with shipping options
         this.loadShippingOptions();
         this.error_message.set('');
-        this.step++;
+        this.step.set(this.step() + 1);
         this.is_loading.set(false);
       },
       error: (err) => {
@@ -653,7 +658,7 @@ export class CheckoutComponent implements OnInit, OnDestroy {
         );
         this.loadShippingOptions();
         this.error_message.set('');
-        this.step++;
+        this.step.set(this.step() + 1);
       },
     });
   }
@@ -668,7 +673,7 @@ export class CheckoutComponent implements OnInit, OnDestroy {
     if (addressValue.country_code === 'CO') {
       if (addressValue.state_province) {
         const depId = Number(addressValue.state_province);
-        const department = this.departments.find((d) => d.id === depId);
+        const department = this.departments().find((d) => d.id === depId);
         if (department) {
           addressValue.state_province = department.name;
         }
@@ -676,7 +681,7 @@ export class CheckoutComponent implements OnInit, OnDestroy {
 
       if (addressValue.city) {
         const cityId = Number(addressValue.city);
-        const city = this.cities.find((c) => c.id === cityId);
+        const city = this.cities().find((c) => c.id === cityId);
         if (city) {
           addressValue.city = city.name;
         }
@@ -692,11 +697,11 @@ export class CheckoutComponent implements OnInit, OnDestroy {
   }
 
   prevStep(): void {
-    this.step--;
+    this.step.set(this.step() - 1);
   }
 
   placeOrder(): void {
-    if (!this.selected_payment_method_id) {
+    if (!this.selected_payment_method_id()) {
       this.error_message.set('Por favor selecciona un método de pago');
       return;
     }
@@ -705,8 +710,8 @@ export class CheckoutComponent implements OnInit, OnDestroy {
     this.error_message.set('');
 
     const request: CheckoutRequest = {
-      payment_method_id: this.selected_payment_method_id,
-      notes: this.notes || undefined,
+      payment_method_id: this.selected_payment_method_id()!,
+      notes: this.notes() || undefined,
       // Only include shipping fields when cart has physical items
       ...(!this.cartHasOnlyServices
         ? {
@@ -721,14 +726,14 @@ export class CheckoutComponent implements OnInit, OnDestroy {
           }
         : {}),
       // Always send cart items as fallback (in case backend cart is empty/not synced)
-      items: this.cart?.items?.map((item: CartItem) => ({
+      items: this.cart()?.items?.map((item: CartItem) => ({
         product_id: item.product_id,
         product_variant_id: item.product_variant_id || undefined,
         quantity: item.quantity,
       })),
     };
 
-    if (!this.cartHasOnlyServices && this.use_new_address) {
+    if (!this.cartHasOnlyServices && this.use_new_address()) {
       // Convert IDs to names for backend compatibility
       let addressValue = { ...this.address_form.value };
 
@@ -737,7 +742,7 @@ export class CheckoutComponent implements OnInit, OnDestroy {
         // Convert department ID to name
         if (addressValue.state_province) {
           const depId = Number(addressValue.state_province);
-          const department = this.departments.find((d) => d.id === depId);
+          const department = this.departments().find((d) => d.id === depId);
           if (department) {
             addressValue.state_province = department.name;
           }
@@ -746,7 +751,7 @@ export class CheckoutComponent implements OnInit, OnDestroy {
         // Convert city ID to name
         if (addressValue.city) {
           const cityId = Number(addressValue.city);
-          const city = this.cities.find((c) => c.id === cityId);
+          const city = this.cities().find((c) => c.id === cityId);
           if (city) {
             addressValue.city = city.name;
           }
@@ -754,8 +759,8 @@ export class CheckoutComponent implements OnInit, OnDestroy {
       }
 
       request.shipping_address = addressValue;
-    } else if (!this.cartHasOnlyServices && this.selected_address_id) {
-      request.shipping_address_id = this.selected_address_id;
+    } else if (!this.cartHasOnlyServices && this.selected_address_id()) {
+      request.shipping_address_id = this.selected_address_id() ?? undefined;
     }
 
     // Wompi payment flow: create order first, then open widget
@@ -768,7 +773,8 @@ export class CheckoutComponent implements OnInit, OnDestroy {
           if (response.success) {
             this.orderPlaced = true;
             const orderId = response.data.order_id;
-            const totalAmount = (this.cart?.subtotal || 0) + this.shipping_cost;
+            const totalAmount =
+              (this.cart()?.subtotal ?? 0) + this.shipping_cost;
 
             this.checkout_service
               .prepareWompiPayment(
@@ -894,8 +900,8 @@ export class CheckoutComponent implements OnInit, OnDestroy {
   }
 
   onQuickView(product: EcommerceProduct): void {
-    this.selectedProductSlug = product.slug;
-    this.quickViewOpen = true;
+    this.selectedProductSlug.set(product.slug);
+    this.quickViewOpen.set(true);
   }
 
   onAddToCartFromSlider(product: EcommerceProduct): void {
@@ -906,13 +912,13 @@ export class CheckoutComponent implements OnInit, OnDestroy {
   // Helper getters for displaying selected location names in confirmation
   getSelectedCountryName(): string {
     const code = this.address_form.get('country_code')?.value;
-    const country = this.countries.find((c) => c.code === code);
+    const country = this.countries().find((c) => c.code === code);
     return country?.name || code || '';
   }
 
   getSelectedDepartmentName(): string {
     const depId = Number(this.address_form.get('state_province')?.value);
-    const department = this.departments.find((d) => d.id === depId);
+    const department = this.departments().find((d) => d.id === depId);
     return (
       department?.name || this.address_form.get('state_province')?.value || ''
     );
@@ -920,21 +926,21 @@ export class CheckoutComponent implements OnInit, OnDestroy {
 
   getSelectedCityName(): string {
     const cityId = Number(this.address_form.get('city')?.value);
-    const city = this.cities.find((c) => c.id === cityId);
+    const city = this.cities().find((c) => c.id === cityId);
     return city?.name || this.address_form.get('city')?.value || '';
   }
 
   // Transform location data to SelectorOption format
   get countryOptions(): SelectorOption[] {
-    return this.countries.map((c) => ({ value: c.code, label: c.name }));
+    return this.countries().map((c) => ({ value: c.code, label: c.name }));
   }
 
   get departmentOptions(): SelectorOption[] {
-    return this.departments.map((d) => ({ value: d.id, label: d.name }));
+    return this.departments().map((d) => ({ value: d.id, label: d.name }));
   }
 
   get cityOptions(): SelectorOption[] {
-    return this.cities.map((c) => ({ value: c.id, label: c.name }));
+    return this.cities().map((c) => ({ value: c.id, label: c.name }));
   }
 
   // Helper method for field validation errors

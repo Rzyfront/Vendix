@@ -6,9 +6,9 @@
   <div class="stats-container">
     <app-stats
       title="Total de Tiendas"
-      [value]="dashboardStats?.stats?.total_stores?.value || 0"
+      [value]="dashboardStats()?.stats?.total_stores?.value || 0"
       [smallText]="
-        (dashboardStats?.stats?.total_stores?.sub_value || 0) +
+        (dashboardStats()?.stats?.total_stores?.sub_value || 0) +
         ' nuevas este mes'
       "
       iconName="store"
@@ -18,9 +18,9 @@
 
     <app-stats
       title="Usuarios Activos"
-      [value]="dashboardStats?.stats?.active_users?.value || 0"
+      [value]="dashboardStats()?.stats?.active_users?.value || 0"
       [smallText]="
-        (dashboardStats?.stats?.active_users?.sub_value || 0) +
+        (dashboardStats()?.stats?.active_users?.sub_value || 0) +
         ' en línea ahora'
       "
       iconName="users"
@@ -30,9 +30,10 @@
 
     <app-stats
       title="Pedidos Mensuales"
-      [value]="dashboardStats?.stats?.monthly_orders?.value || 0"
+      [value]="dashboardStats()?.stats?.monthly_orders?.value || 0"
       [smallText]="
-        (dashboardStats?.stats?.monthly_orders?.sub_value || 0) + ' pedidos hoy'
+        (dashboardStats()?.stats?.monthly_orders?.sub_value || 0) +
+        ' pedidos hoy'
       "
       iconName="shopping-cart"
       iconBgColor="bg-orange-100"
@@ -70,10 +71,10 @@
             <button
               class="px-3 py-1 text-sm rounded-lg transition-colors"
               [style.background-color]="
-                selectedPeriod === '6m' ? 'var(--primary)' : 'var(--muted)'
+                selectedPeriod() === '6m' ? 'var(--primary)' : 'var(--muted)'
               "
               [style.color]="
-                selectedPeriod === '6m' ? 'white' : 'var(--muted-foreground)'
+                selectedPeriod() === '6m' ? 'white' : 'var(--muted-foreground)'
               "
               (click)="onPeriodChange('6m')"
             >
@@ -82,10 +83,10 @@
             <button
               class="px-3 py-1 text-sm rounded-lg transition-colors"
               [style.background-color]="
-                selectedPeriod === '1y' ? 'var(--primary)' : 'var(--muted)'
+                selectedPeriod() === '1y' ? 'var(--primary)' : 'var(--muted)'
               "
               [style.color]="
-                selectedPeriod === '1y' ? 'white' : 'var(--muted-foreground)'
+                selectedPeriod() === '1y' ? 'white' : 'var(--muted-foreground)'
               "
               (click)="onPeriodChange('1y')"
             >
@@ -94,10 +95,10 @@
             <button
               class="px-3 py-1 text-sm rounded-lg transition-colors"
               [style.background-color]="
-                selectedPeriod === 'all' ? 'var(--primary)' : 'var(--muted)'
+                selectedPeriod() === 'all' ? 'var(--primary)' : 'var(--muted)'
               "
               [style.color]="
-                selectedPeriod === 'all' ? 'white' : 'var(--muted-foreground)'
+                selectedPeriod() === 'all' ? 'white' : 'var(--muted-foreground)'
               "
               (click)="onPeriodChange('all')"
             >
@@ -109,7 +110,7 @@
       <div class="p-6">
         @defer (on viewport) {
           <app-chart
-            [options]="revenueChartData"
+            [options]="revenueChartData()"
             size="medium"
             [theme]="CHART_THEMES['corporate']"
             [animated]="true"
@@ -138,7 +139,7 @@
         <div class="relative h-64">
           @defer (on viewport) {
             <app-chart
-              [options]="storeDistributionData"
+              [options]="storeDistributionData()"
               size="small"
               [theme]="CHART_THEMES['vibrant']"
               [animated]="true"
@@ -154,7 +155,7 @@
             class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none"
           >
             <span class="text-3xl font-bold" style="color: var(--text)">
-              {{ storeDistributionLegend.length }}
+              {{ storeDistributionLegend().length }}
             </span>
             <span class="text-sm" style="color: var(--muted-foreground)">
               Types
@@ -163,7 +164,7 @@
         </div>
 
         <div class="mt-6 space-y-3">
-          @for (item of storeDistributionLegend; track item; let i = $index) {
+          @for (item of storeDistributionLegend(); track item; let i = $index) {
             <div
               class="flex items-center justify-between p-2 rounded-lg hover:bg-gray-50 transition-colors"
             >

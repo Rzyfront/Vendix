@@ -6,19 +6,18 @@ import {
   ElementRef,
   inject,
   effect,
-  DestroyRef,
-} from '@angular/core';
+  DestroyRef } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   FormBuilder,
   FormGroup,
   FormControl,
   Validators,
   ReactiveFormsModule,
-  FormsModule,
-} from '@angular/forms';
+  FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { Router } from '@angular/router';
-import { Subject, takeUntil, debounceTime } from 'rxjs';
+import { Subject, debounceTime } from 'rxjs';
 import { Store } from '@ngrx/store';
 import * as fromAuth from '../../../../../../core/store/auth';
 import { environment } from '../../../../../../../environments/environment';
@@ -29,8 +28,7 @@ import {
   IconComponent,
   TooltipComponent,
   SelectorComponent,
-  SelectorOption,
-} from '../../../../../../shared/components';
+  SelectorOption } from '../../../../../../shared/components';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { CurrencyFormatService, CurrencyPipe } from '../../../../../../shared/pipes/currency';
 import { CountryService, Department, City } from '../../../../../../services/country.service';
@@ -42,8 +40,7 @@ import { PosCustomer } from '../../models/customer.model';
 import {
   PosShippingMethod,
   PosShippingAddress,
-  PosShippingPaymentMode,
-} from '../../models/shipping.model';
+  PosShippingPaymentMode } from '../../models/shipping.model';
 import { PaymentRequest } from '../../models/payment.model';
 import { CurrencyInputDirective } from '../../../../../../shared/directives/currency-input.directive';
 import { toLocalDateString } from '../../../../../../shared/utils/date.util';
@@ -847,9 +844,9 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
         border-radius: 12px;
       }
     `,
-  ],
-})
+  ] })
 export class PosShippingModalComponent {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = input<boolean>(false);
   readonly cartState = input<CartState | null>(null);
   readonly closed = output<void>();
@@ -934,9 +931,7 @@ export class PosShippingModalComponent {
   paymentForm: FormGroup;
 
   currencySymbol: any;
-
-  private destroy$ = new Subject<void>();
-  private customerSearchSubject = new Subject<string>();
+private customerSearchSubject = new Subject<string>();
 
   get addressLine1Control(): FormControl {
     return this.addressForm.get('address_line1') as FormControl;
@@ -1018,23 +1013,18 @@ export class PosShippingModalComponent {
       address_line1: ['', Validators.required],
       city: ['', Validators.required],
       state_province: [''],
-      delivery_notes: [''],
-    });
+      delivery_notes: [''] });
     this.customerForm = this.fb.group({
       email: ['', [Validators.required, Validators.email]],
       firstName: ['', [Validators.required, Validators.minLength(2)]],
       lastName: ['', [Validators.required, Validators.minLength(2)]],
-      phone: [''],
-    });
+      phone: [''] });
     this.paymentForm = this.fb.group({
       cashReceived: [0, [Validators.required, Validators.min(0)]],
-      reference: [''],
-    });
+      reference: [''] });
     this.currencySymbol = this.currencyService.currencySymbol;
 
     inject(DestroyRef).onDestroy(() => {
-      this.destroy$.next();
-      this.destroy$.complete();
       if (this.validationWarningTimeout) {
         clearTimeout(this.validationWarningTimeout);
       }
@@ -1098,7 +1088,7 @@ export class PosShippingModalComponent {
   private loadShippingMethods(): void {
     this.shippingService
       .getShippingMethods()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((methods) => {
         this.shippingMethods = methods;
       });
@@ -1107,7 +1097,7 @@ export class PosShippingModalComponent {
   private loadPaymentMethods(): void {
     this.paymentService
       .getPaymentMethods()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((methods) => {
         this.paymentMethods = methods;
       });
@@ -1115,7 +1105,7 @@ export class PosShippingModalComponent {
 
   private setupFormListeners(): void {
     this.cashReceivedControl.valueChanges
-      .pipe(takeUntil(this.destroy$), debounceTime(100))
+      .pipe(takeUntilDestroyed(this.destroyRef), debounceTime(100))
       .subscribe((value: string | number | null) => {
         if (value !== null && value !== undefined && value !== '') {
           this.cashReceived = parseFloat(value.toString()) || 0;
@@ -1125,7 +1115,7 @@ export class PosShippingModalComponent {
 
     // Trigger shipping calculation when address changes
     this.addressForm.valueChanges
-      .pipe(takeUntil(this.destroy$), debounceTime(500))
+      .pipe(takeUntilDestroyed(this.destroyRef), debounceTime(500))
       .subscribe(() => {
         if (this.selectedShippingMethod && !this.manualCostOverride) {
           this.calculateShippingCost();
@@ -1134,7 +1124,7 @@ export class PosShippingModalComponent {
 
     // Debounced customer search (300ms)
     this.customerSearchSubject
-      .pipe(takeUntil(this.destroy$), debounceTime(300))
+      .pipe(takeUntilDestroyed(this.destroyRef), debounceTime(300))
       .subscribe((query) => this.executeCustomerSearch(query));
   }
 
@@ -1156,8 +1146,7 @@ export class PosShippingModalComponent {
       carrier: 'package',
       pickup: 'store',
       custom: 'settings',
-      third_party_provider: 'globe',
-    };
+      third_party_provider: 'globe' };
     return iconMap[type] || 'truck';
   }
 
@@ -1172,17 +1161,15 @@ export class PosShippingModalComponent {
     const items = this.cartState()!.items.map((item) => ({
       product_id: parseInt(item.product.id),
       quantity: item.quantity,
-      price: item.totalPrice,
-    }));
+      price: item.totalPrice }));
 
     this.shippingService
       .calculateShipping(items, {
         country_code: 'CO', // Default for now
         city: address.city || undefined,
         state_province: address.state_province || undefined,
-        address_line1: address.address_line1 || undefined,
-      })
-      .pipe(takeUntil(this.destroy$))
+        address_line1: address.address_line1 || undefined })
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (options) => {
           this.isCalculatingShipping = false;
@@ -1211,8 +1198,7 @@ export class PosShippingModalComponent {
           this.calculatedShippingCost = null;
           this.manualCostOverride = true;
           this.shippingCost = 0;
-        },
-      });
+        } });
   }
 
   toggleManualCost(): void {
@@ -1339,8 +1325,7 @@ export class PosShippingModalComponent {
       due.setDate(due.getDate() + freqDays[this.creditFrequency] * i);
       return {
         amount: i === n - 1 ? Math.round((this.creditRemainingBalance - baseAmount * (n - 1)) * 100) / 100 : baseAmount,
-        due_date: toLocalDateString(due),
-      };
+        due_date: toLocalDateString(due) };
     });
   }
 
@@ -1353,7 +1338,7 @@ export class PosShippingModalComponent {
   private loadStoreSettings(): void {
     this.store
       .select(fromAuth.selectStoreSettings)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((settings: any) => {
         if (settings?.pos?.default_payment_form) {
           this.defaultPaymentForm = settings.pos.default_payment_form;
@@ -1390,7 +1375,7 @@ export class PosShippingModalComponent {
       this.isSearchingCustomer = true;
       this.customerService
         .searchCustomers({ query: query.trim(), limit: 10 })
-        .pipe(takeUntil(this.destroy$))
+        .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: (response) => {
             this.customerSearchResults = response.data || [];
@@ -1402,10 +1387,8 @@ export class PosShippingModalComponent {
             this.toastService.show({
               variant: 'error',
               title: 'Error',
-              description: 'Error al buscar clientes',
-            });
-          },
-        });
+              description: 'Error al buscar clientes' });
+          } });
     } else {
       this.customerSearchResults = [];
     }
@@ -1419,8 +1402,7 @@ export class PosShippingModalComponent {
     const shippingAddress = customer.addresses?.find(a => a.is_primary) || customer.addresses?.[0];
     if (shippingAddress) {
       this.addressForm.patchValue({
-        address_line1: shippingAddress.address_line1,
-      });
+        address_line1: shippingAddress.address_line1 });
       this.selectedCustomerAddressId = shippingAddress.id;
 
       // Match department by name from API Colombia data
@@ -1446,8 +1428,7 @@ export class PosShippingModalComponent {
           // Fallback: set the raw text values if no API match
           this.addressForm.patchValue({
             state_province: shippingAddress.state_province || '',
-            city: shippingAddress.city || '',
-          });
+            city: shippingAddress.city || '' });
         }
       }
 
@@ -1474,9 +1455,8 @@ export class PosShippingModalComponent {
           email: formValue.email,
           first_name: formValue.firstName,
           last_name: formValue.lastName,
-          phone: formValue.phone || undefined,
-        })
-        .pipe(takeUntil(this.destroy$))
+          phone: formValue.phone || undefined })
+        .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: (customer) => {
             this.isSearchingCustomer = false;
@@ -1489,10 +1469,8 @@ export class PosShippingModalComponent {
             this.toastService.show({
               variant: 'error',
               title: 'Error',
-              description: error.error?.message || error.message || 'Error al crear cliente',
-            });
-          },
-        });
+              description: error.error?.message || error.message || 'Error al crear cliente' });
+          } });
     } else {
       Object.keys(this.customerForm.controls).forEach((key) => {
         this.customerForm.get(key)?.markAsTouched();
@@ -1596,8 +1574,7 @@ export class PosShippingModalComponent {
       'shipping-method': this.shippingMethodSection,
       'address': this.addressSection,
       'customer': this.customerSection,
-      'payment': this.paymentSection,
-    };
+      'payment': this.paymentSection };
     return map[section];
   }
 
@@ -1626,8 +1603,7 @@ export class PosShippingModalComponent {
       state_province: address.state_province || '',
       country_code: 'CO',
       recipient_name: this.customerDisplayName,
-      recipient_phone: this.cartState()!.customer?.phone || '',
-    };
+      recipient_phone: this.cartState()!.customer?.phone || '' };
 
     let paymentRequest: PaymentRequest | null = null;
     if (this.shippingPaymentForm === 'contado' && this.paymentMode === 'pay_now' && this.selectedPaymentMethod) {
@@ -1636,8 +1612,7 @@ export class PosShippingModalComponent {
         amount: this.totalWithShipping,
         paymentMethod: this.selectedPaymentMethod,
         cashReceived: this.cashReceived,
-        reference: this.referenceControl.value || '',
-      };
+        reference: this.referenceControl.value || '' };
     }
 
     // Build credit config if credit mode is selected
@@ -1649,8 +1624,7 @@ export class PosShippingModalComponent {
       initial_payment: this.creditInitialPayment,
       initial_payment_method_id: this.creditInitialPaymentMethod
         ? parseInt(this.creditInitialPaymentMethod.id)
-        : undefined,
-    } : undefined;
+        : undefined } : undefined;
 
     // If customer has no saved address and we have a new address, create it first
     if (!this.selectedCustomerAddressId && address.address_line1 && address.city && this.cartState()!.customer) {
@@ -1677,8 +1651,7 @@ export class PosShippingModalComponent {
       state: address.state_province || '',
       country: defaultCountryCode,
       type: 'shipping',
-      is_primary: !customer.addresses?.length,
-    }).pipe(takeUntil(this.destroy$)).subscribe({
+      is_primary: !customer.addresses?.length }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         const newAddressId = response?.data?.id || response?.id || null;
         this.processOrder(shippingAddress, deliveryType, paymentRequest, newAddressId, creditConfig);
@@ -1686,8 +1659,7 @@ export class PosShippingModalComponent {
       error: () => {
         // Fallback: process order without address ID
         this.processOrder(shippingAddress, deliveryType, paymentRequest, null, creditConfig);
-      },
-    });
+      } });
   }
 
   private processOrder(
@@ -1708,13 +1680,12 @@ export class PosShippingModalComponent {
           deliveryType,
           shippingAddress,
           deliveryNotes: address.delivery_notes || undefined,
-          shippingAddressId: addressId,
-        },
+          shippingAddressId: addressId },
         paymentRequest,
         'current_user',
         creditConfig,
       )
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           this.isProcessing = false;
@@ -1725,15 +1696,13 @@ export class PosShippingModalComponent {
               payment: response.payment,
               change: response.change,
               message: response.message,
-              isShippingOrder: true,
-            });
+              isShippingOrder: true });
             this.onModalClosed();
           } else {
             this.toastService.show({
               variant: 'error',
               title: 'Error',
-              description: response.message || 'Error al procesar el envío',
-            });
+              description: response.message || 'Error al procesar el envío' });
           }
         },
         error: (error) => {
@@ -1741,10 +1710,8 @@ export class PosShippingModalComponent {
           this.toastService.show({
             variant: 'error',
             title: 'Error',
-            description: error.message || 'Error al procesar el envío',
-          });
-        },
-      });
+            description: error.message || 'Error al procesar el envío' });
+        } });
   }
 
   onModalClosed(): void {

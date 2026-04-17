@@ -1,25 +1,19 @@
-import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
+import {Component, OnInit, inject, signal,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
-import {
-  debounceTime,
-  distinctUntilChanged,
-  Subject,
-  takeUntil,
-  finalize,
-} from 'rxjs';
+import { debounceTime, distinctUntilChanged, finalize } from 'rxjs';
 import {
   AuditLog,
   AuditStats,
   AuditQueryDto,
   AuditLogsResponse,
   AuditAction,
-  AuditResource,
-} from './interfaces/audit.interface';
+  AuditResource} from './interfaces/audit.interface';
 import { AuditService } from './services/audit.service';
 import {
   AuditStatsComponent,
-  AuditDetailsModalComponent,
-} from './components/index';
+  AuditDetailsModalComponent} from './components/index';
 
 // Import components from shared
 import {
@@ -34,14 +28,12 @@ import {
   ItemListCardConfig,
   PaginationComponent,
   EmptyStateComponent,
-  CardComponent,
-} from '../../../../shared/components/index';
+  CardComponent} from '../../../../shared/components/index';
 import {
   FormsModule,
   ReactiveFormsModule,
   FormBuilder,
-  FormGroup,
-} from '@angular/forms';
+  FormGroup} from '@angular/forms';
 
 @Component({
   selector: 'app-audit',
@@ -60,9 +52,9 @@ import {
     PaginationComponent,
     CardComponent
 ],
-  templateUrl: './audit.component.html',
-})
-export class AuditComponent implements OnInit, OnDestroy {
+  templateUrl: './audit.component.html'})
+export class AuditComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private readonly auditService = inject(AuditService);
   private readonly fb = inject(FormBuilder);
   private readonly toastService = inject(ToastService);
@@ -75,7 +67,6 @@ export class AuditComponent implements OnInit, OnDestroy {
   isDetailsModalOpen = signal<boolean>(false);
   selectedAuditLog = signal<AuditLog | null>(null);
 
-  private readonly destroy$ = new Subject<void>();
   filterForm: FormGroup;
 
   // Pagination state
@@ -89,8 +80,7 @@ export class AuditComponent implements OnInit, OnDestroy {
       sortable: true,
       priority: 1,
       transform: (value: any) =>
-        value ? `${value.first_name} ${value.last_name}` : 'Sistema',
-    },
+        value ? `${value.first_name} ${value.last_name}` : 'Sistema'},
     {
       key: 'action',
       label: 'Acción',
@@ -108,38 +98,32 @@ export class AuditComponent implements OnInit, OnDestroy {
           LOGOUT: '#6b7280', // gray-500
           READ: '#f59e0b', // amber-500
           PERMISSION_CHANGE: '#8b5cf6', // violet-500
-        },
-      },
-      transform: (value: AuditAction) => this.getActionLabel(value),
-    },
+        }},
+      transform: (value: AuditAction) => this.getActionLabel(value)},
     {
       key: 'resource',
       label: 'Recurso',
       sortable: true,
       priority: 2,
-      transform: (value: AuditResource) => this.getResourceDisplay(value),
-    },
+      transform: (value: AuditResource) => this.getResourceDisplay(value)},
     {
       key: 'stores',
       label: 'Tienda',
       sortable: true,
       priority: 2,
-      transform: (value: any) => value?.name || '---',
-    },
+      transform: (value: any) => value?.name || '---'},
     {
       key: 'ip_address',
       label: 'Dirección IP',
       sortable: true,
       priority: 3,
-      transform: (value: string) => value || 'N/A',
-    },
+      transform: (value: string) => value || 'N/A'},
     {
       key: 'created_at',
       label: 'Fecha y Hora',
       sortable: true,
       priority: 1,
-      transform: (value: string) => this.formatDate(value),
-    },
+      transform: (value: string) => this.formatDate(value)},
   ];
 
   tableActions: TableAction[] = [
@@ -147,8 +131,7 @@ export class AuditComponent implements OnInit, OnDestroy {
       label: 'Detalles',
       icon: 'eye',
       action: (log: AuditLog) => this.viewLogDetails(log),
-      variant: 'primary',
-    },
+      variant: 'primary'},
   ];
 
   // Filter options
@@ -193,22 +176,18 @@ export class AuditComponent implements OnInit, OnDestroy {
         LOGOUT: '#6b7280', // gray-500
         READ: '#f59e0b', // amber-500
         PERMISSION_CHANGE: '#8b5cf6', // violet-500
-      },
-    },
+      }},
     badgeTransform: (value: AuditAction) => this.getActionLabel(value),
     detailKeys: [
       {
         key: 'resource',
         label: 'Recurso',
-        transform: (v) => this.getResourceDisplay(v),
-      },
+        transform: (v) => this.getResourceDisplay(v)},
       {
         key: 'created_at',
         label: 'Fecha',
-        transform: (v) => this.formatDate(v),
-      },
-    ],
-  };
+        transform: (v) => this.formatDate(v)},
+    ]};
 
   constructor() {
     this.filterForm = this.fb.group({
@@ -216,8 +195,7 @@ export class AuditComponent implements OnInit, OnDestroy {
       action: [''],
       resource: [''],
       fromDate: [''],
-      toDate: [''],
-    });
+      toDate: ['']});
   }
 
   ngOnInit(): void {
@@ -226,7 +204,7 @@ export class AuditComponent implements OnInit, OnDestroy {
 
     // Reactive filters
     this.filterForm.valueChanges
-      .pipe(debounceTime(300), distinctUntilChanged(), takeUntil(this.destroy$))
+      .pipe(debounceTime(300), distinctUntilChanged(), takeUntilDestroyed(this.destroyRef))
       .subscribe(() => {
         this.pagination.page = 1;
         this.loadAuditLogs();
@@ -234,16 +212,10 @@ export class AuditComponent implements OnInit, OnDestroy {
 
     // Loading state from service
     this.auditService.isLoading$
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((loading) => this.isLoading.set(loading));
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  loadAuditLogs(): void {
+loadAuditLogs(): void {
     const filters = this.filterForm.value;
     const query: AuditQueryDto = {
       limit: this.pagination.limit,
@@ -251,12 +223,11 @@ export class AuditComponent implements OnInit, OnDestroy {
       action: filters.action || undefined,
       resource: filters.resource || undefined,
       fromDate: filters.fromDate || undefined,
-      toDate: filters.toDate || undefined,
-    };
+      toDate: filters.toDate || undefined};
 
     this.auditService
       .getAuditLogs(query)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: AuditLogsResponse) => {
           this.auditLogs.set(response.logs || []);
@@ -268,19 +239,17 @@ export class AuditComponent implements OnInit, OnDestroy {
         error: () => {
           this.auditLogs.set([]);
           this.toastService.error('Error al cargar logs');
-        },
-      });
+        }});
   }
 
   loadAuditStats(): void {
     const filters = this.filterForm.value;
     this.auditService
       .getAuditStats(filters.fromDate, filters.toDate)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (stats) => this.auditStats.set(stats),
-        error: () => this.toastService.error('Error al cargar estadísticas'),
-      });
+        error: () => this.toastService.error('Error al cargar estadísticas')});
   }
 
   onSearchChange(searchTerm: string): void {
@@ -308,8 +277,7 @@ export class AuditComponent implements OnInit, OnDestroy {
       action: '',
       resource: '',
       fromDate: '',
-      toDate: '',
-    });
+      toDate: ''});
   }
 
   getActionLabel(action: AuditAction): string {
@@ -320,8 +288,7 @@ export class AuditComponent implements OnInit, OnDestroy {
       LOGIN: 'Login',
       LOGOUT: 'Logout',
       READ: 'Lectura',
-      PERMISSION_CHANGE: 'Permisos',
-    };
+      PERMISSION_CHANGE: 'Permisos'};
     return map[action] || action;
   }
 
@@ -334,8 +301,7 @@ export class AuditComponent implements OnInit, OnDestroy {
       [AuditResource.PERMISSIONS]: 'Permisos',
       [AuditResource.PRODUCTS]: 'Productos',
       [AuditResource.ORDERS]: 'Órdenes',
-      [AuditResource.CATEGORIES]: 'Categorías',
-    };
+      [AuditResource.CATEGORIES]: 'Categorías'};
     return map[resource] || resource;
   }
 
@@ -347,8 +313,7 @@ export class AuditComponent implements OnInit, OnDestroy {
       month: '2-digit',
       year: 'numeric',
       hour: '2-digit',
-      minute: '2-digit',
-    });
+      minute: '2-digit'});
   }
 
   getEmptyStateTitle(): string {

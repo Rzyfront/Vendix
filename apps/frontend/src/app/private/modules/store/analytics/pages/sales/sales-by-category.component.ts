@@ -1,15 +1,16 @@
-import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
+import {Component, OnInit, inject, signal,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { RouterModule } from '@angular/router';
-import { Subject, takeUntil } from 'rxjs';
+
 
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import { TableColumn } from '../../../../../../shared/components/table/table.component';
 import {
   ResponsiveDataViewComponent,
-  ItemListCardConfig,
-} from '../../../../../../shared/components/index';
+  ItemListCardConfig} from '../../../../../../shared/components/index';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
@@ -20,12 +21,10 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import {
   getDefaultStartDate,
-  getDefaultEndDate,
-} from '../../../../../../shared/utils/date.util';
+  getDefaultEndDate} from '../../../../../../shared/utils/date.util';
 import {
   SalesByCategory,
-  SalesAnalyticsQueryDto,
-} from '../../interfaces/sales-analytics.interface';
+  SalesAnalyticsQueryDto} from '../../interfaces/sales-analytics.interface';
 
 import { EChartsOption } from 'echarts';
 
@@ -138,23 +137,20 @@ import { EChartsOption } from 'echarts';
         </app-card>
       </div>
     </div>
-  `,
-})
-export class SalesByCategoryComponent implements OnInit, OnDestroy {
+  `})
+export class SalesByCategoryComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private analyticsService = inject(AnalyticsService);
   private toastService = inject(ToastService);
   private currencyService = inject(CurrencyFormatService);
-  private destroy$ = new Subject<void>();
-
-  loading = signal(true);
+loading = signal(true);
   exporting = signal(false);
   data = signal<SalesByCategory[]>([]);
   chartOptions = signal<EChartsOption>({});
   dateRange = signal<DateRangeFilter>({
     start_date: getDefaultStartDate(),
     end_date: getDefaultEndDate(),
-    preset: 'thisMonth',
-  });
+    preset: 'thisMonth'});
 
   columns: TableColumn[] = [
     { key: 'category_name', label: 'Categoría', sortable: true, priority: 1 },
@@ -164,8 +160,7 @@ export class SalesByCategoryComponent implements OnInit, OnDestroy {
       sortable: true,
       align: 'right',
       priority: 1,
-      width: '100px',
-    },
+      width: '100px'},
     {
       key: 'revenue',
       label: 'Ingresos',
@@ -173,8 +168,7 @@ export class SalesByCategoryComponent implements OnInit, OnDestroy {
       align: 'right',
       priority: 1,
       width: '140px',
-      transform: (val) => this.formatCurrency(val),
-    },
+      transform: (val) => this.formatCurrency(val)},
     {
       key: 'percentage_of_total',
       label: '% del Total',
@@ -182,8 +176,7 @@ export class SalesByCategoryComponent implements OnInit, OnDestroy {
       align: 'right',
       priority: 1,
       width: '100px',
-      transform: (val) => `${val.toFixed(1)}%`,
-    },
+      transform: (val) => `${val.toFixed(1)}%`},
   ];
 
   cardConfig: ItemListCardConfig = {
@@ -192,27 +185,18 @@ export class SalesByCategoryComponent implements OnInit, OnDestroy {
       {
         key: 'revenue',
         label: 'Ingresos',
-        transform: (val: any) => this.formatCurrency(val),
-      },
+        transform: (val: any) => this.formatCurrency(val)},
       {
         key: 'percentage_of_total',
         label: 'Porcentaje',
-        transform: (val: any) => `${val.toFixed(1)}%`,
-      },
-    ],
-  };
+        transform: (val: any) => `${val.toFixed(1)}%`},
+    ]};
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
     this.loadData();
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  onDateRangeChange(range: DateRangeFilter): void {
+onDateRangeChange(range: DateRangeFilter): void {
     this.dateRange.set(range);
     this.loadData();
   }
@@ -220,12 +204,11 @@ export class SalesByCategoryComponent implements OnInit, OnDestroy {
   loadData(): void {
     this.loading.set(true);
     const query: SalesAnalyticsQueryDto = {
-      date_range: this.dateRange(),
-    };
+      date_range: this.dateRange()};
 
     this.analyticsService
       .getSalesByCategory(query)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           this.data.set(response.data);
@@ -235,29 +218,25 @@ export class SalesByCategoryComponent implements OnInit, OnDestroy {
         error: () => {
           this.toastService.error('Error al cargar ventas por categoría');
           this.loading.set(false);
-        },
-      });
+        }});
   }
 
   private updateChart(data: SalesByCategory[]): void {
     const chartData = data.map((item) => ({
       value: item.revenue,
-      name: item.category_name,
-    }));
+      name: item.category_name}));
 
     this.chartOptions.set({
       tooltip: {
         trigger: 'item',
         formatter: (params: any) => {
           return `${params.name}<br/>Ingresos: ${this.formatCurrency(params.value)}<br/>Porcentaje: ${params.percent}%`;
-        },
-      },
+        }},
       legend: {
         orient: 'vertical',
         right: '5%',
         top: 'middle',
-        textStyle: { color: '#6b7280' },
-      },
+        textStyle: { color: '#6b7280' }},
       series: [
         {
           name: 'Ventas por Categoría',
@@ -268,23 +247,17 @@ export class SalesByCategoryComponent implements OnInit, OnDestroy {
           itemStyle: {
             borderRadius: 4,
             borderColor: '#fff',
-            borderWidth: 2,
-          },
+            borderWidth: 2},
           label: {
-            show: false,
-          },
+            show: false},
           emphasis: {
             label: {
               show: true,
               fontSize: 14,
-              fontWeight: 'bold',
-            },
-          },
+              fontWeight: 'bold'}},
           labelLine: {
-            show: false,
-          },
-          data: chartData,
-        },
+            show: false},
+          data: chartData},
       ],
       color: [
         '#22c55e',
@@ -294,15 +267,14 @@ export class SalesByCategoryComponent implements OnInit, OnDestroy {
         '#8b5cf6',
         '#06b6d4',
         '#ec4899',
-      ],
-    });
+      ]});
   }
 
   exportReport(): void {
     this.exporting.set(true);
     this.analyticsService
       .exportSalesAnalytics({ date_range: this.dateRange() })
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (blob) => {
           const url = window.URL.createObjectURL(blob);
@@ -316,8 +288,7 @@ export class SalesByCategoryComponent implements OnInit, OnDestroy {
         error: () => {
           this.toastService.error('Error al exportar');
           this.exporting.set(false);
-        },
-      });
+        }});
   }
 
   formatCurrency(value: number): string {

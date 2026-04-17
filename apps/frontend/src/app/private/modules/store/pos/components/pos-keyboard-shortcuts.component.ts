@@ -304,8 +304,7 @@ export class PosKeyboardShortcutsComponent {
   constructor() {
     this.initializeDefaultShortcuts();
     this.setupKeyboardService();
-    this.destroyRef.onDestroy(() => {});
-  }
+}
 
   private initializeDefaultShortcuts(): void {
     const defaultGroups: ShortcutGroup[] = [

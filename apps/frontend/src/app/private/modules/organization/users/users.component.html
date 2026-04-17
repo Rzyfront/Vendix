@@ -113,24 +113,24 @@
     }
   </div>
 
-  @defer (when showCreateModal) {
+  @defer (when showCreateModal()) {
     <app-user-create-modal
       [(isOpen)]="showCreateModal"
       (onUserCreated)="onUserCreated()"
     ></app-user-create-modal>
   }
 
-  @defer (when showEditModal && currentUser) {
+  @defer (when showEditModal() && currentUser()) {
     <app-user-edit-modal
-      [user]="currentUser"
+      [user]="currentUser()"
       [(isOpen)]="showEditModal"
       (onUserUpdated)="onUserUpdated()"
     ></app-user-edit-modal>
   }
 
-  @defer (when showConfigModal && userForConfig) {
+  @defer (when showConfigModal()) {
     <app-user-config-modal
-      [user]="userForConfig"
+      [user]="userForConfig()"
       [(isOpen)]="showConfigModal"
       (onSaved)="onUserConfigured()"
     ></app-user-config-modal>

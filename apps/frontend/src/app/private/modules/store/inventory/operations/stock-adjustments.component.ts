@@ -1,6 +1,8 @@
-import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
+import {Component, OnInit, inject, signal,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
-import { Subject, takeUntil } from 'rxjs';
+
 import { HttpClient } from '@angular/common/http';
 import { map } from 'rxjs/operators';
 
@@ -8,8 +10,7 @@ import {
   StatsComponent,
   ToastService,
   FilterValues,
-  SelectorOption,
-} from '../../../../../shared/components/index';
+  SelectorOption} from '../../../../../shared/components/index';
 import { DialogService } from '../../../../../shared/components/dialog/dialog.service';
 import { environment } from '../../../../../../environments/environment';
 
@@ -22,8 +23,7 @@ import { InventoryService } from '../services';
 import {
   InventoryAdjustment,
   AdjustmentType,
-  BatchCreateAdjustmentsRequest,
-} from '../interfaces';
+  BatchCreateAdjustmentsRequest} from '../interfaces';
 
 @Component({
   selector: 'app-stock-adjustments',
@@ -124,9 +124,9 @@ import {
         ></app-adjustment-detail-modal>
       }
     </div>
-  `,
-})
-export class StockAdjustmentsComponent implements OnInit, OnDestroy {
+  `})
+export class StockAdjustmentsComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private inventoryService = inject(InventoryService);
   private toastService = inject(ToastService);
   private dialogService = inject(DialogService);
@@ -156,20 +156,11 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
   showBulkModal = signal(false);
   isSubmitting = signal(false);
   locationOptions = signal<SelectorOption[]>([]);
-
-  private destroy$ = new Subject<void>();
-
-  ngOnInit(): void {
+ngOnInit(): void {
     this.loadAdjustments();
     this.loadLocations();
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  // ============================================================
+// ============================================================
   // Data Loading
   // ============================================================
 
@@ -179,12 +170,11 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
     const query: any = {
       ...(this.current_type !== 'all' ? { type: this.current_type } : {}),
       limit: pag.limit,
-      offset: (pag.page - 1) * pag.limit,
-    };
+      offset: (pag.page - 1) * pag.limit};
 
     this.inventoryService
       .getAdjustments(query)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           if (response.data?.adjustments) {
@@ -192,8 +182,7 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
             this.pagination.update(p => ({
               ...p,
               total: response.data.total,
-              totalPages: Math.ceil(response.data.total / p.limit),
-            }));
+              totalPages: Math.ceil(response.data.total / p.limit)}));
             this.applyFilters();
             this.calculateStats();
           }
@@ -207,8 +196,7 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
         error: (error) => {
           this.toastService.error(error || 'Error al cargar ajustes');
           this.is_loading.set(false);
-        },
-      });
+        }});
   }
 
   loadLocations(): void {
@@ -216,7 +204,7 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
       .get<any>(`${environment.apiUrl}/store/inventory/locations`)
       .pipe(
         map((r) => r.data || r),
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
       )
       .subscribe({
         next: (locations: any[]) => {
@@ -225,8 +213,7 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
             arr.map((l) => ({ value: l.id, label: l.name })),
           );
         },
-        error: () => {},
-      });
+        error: () => {}});
   }
 
   applyFilters(): void {
@@ -257,8 +244,7 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
       total: adjs.length,
       losses: adjs.filter((a) => a.adjustment_type === 'loss').length,
       damages: adjs.filter((a) => a.adjustment_type === 'damage').length,
-      corrections: adjs.filter((a) => a.adjustment_type === 'manual_correction').length,
-    });
+      corrections: adjs.filter((a) => a.adjustment_type === 'manual_correction').length});
   }
 
   // ============================================================
@@ -321,7 +307,7 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
     this.isSubmitting.set(true);
     this.inventoryService
       .batchCreateAdjustments(dto)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.success('Ajustes creados como borrador');
@@ -332,15 +318,14 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
         error: (err) => {
           this.toastService.error(err || 'Error al crear ajustes');
           this.isSubmitting.set(false);
-        },
-      });
+        }});
   }
 
   onCreateAndComplete(dto: BatchCreateAdjustmentsRequest): void {
     this.isSubmitting.set(true);
     this.inventoryService
       .batchCreateAndComplete(dto)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.success(
@@ -353,8 +338,7 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
         error: (err) => {
           this.toastService.error(err || 'Error al crear y aprobar ajustes');
           this.isSubmitting.set(false);
-        },
-      });
+        }});
   }
 
   // ============================================================
@@ -366,14 +350,13 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
       title: 'Aprobar ajuste',
       message: `¿Aprobar el ajuste de ${adjustment.products?.name || 'producto'}? (${adjustment.quantity_change > 0 ? '+' : ''}${adjustment.quantity_change} unidades)`,
       confirmText: 'Aprobar',
-      cancelText: 'Cancelar',
-    });
+      cancelText: 'Cancelar'});
     if (!confirmed) return;
 
     this.isSubmitting.set(true);
     this.inventoryService
       .approveAdjustment(adjustment.id, 0)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.success('Ajuste aprobado');
@@ -384,8 +367,7 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
         error: (err) => {
           this.toastService.error(err || 'Error al aprobar');
           this.isSubmitting.set(false);
-        },
-      });
+        }});
   }
 
   async onDelete(adjustment: InventoryAdjustment): Promise<void> {
@@ -394,14 +376,13 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
       message: `¿Eliminar el ajuste de ${adjustment.products?.name || 'producto'}? Esta accion no se puede deshacer.`,
       confirmText: 'Eliminar',
       cancelText: 'Cancelar',
-      confirmVariant: 'danger',
-    });
+      confirmVariant: 'danger'});
     if (!confirmed) return;
 
     this.isSubmitting.set(true);
     this.inventoryService
       .deleteAdjustment(adjustment.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.success('Ajuste eliminado');
@@ -412,8 +393,7 @@ export class StockAdjustmentsComponent implements OnInit, OnDestroy {
         error: (err) => {
           this.toastService.error(err || 'Error al eliminar');
           this.isSubmitting.set(false);
-        },
-      });
+        }});
   }
 
   refresh(): void {

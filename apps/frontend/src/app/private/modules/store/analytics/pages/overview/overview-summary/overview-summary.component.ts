@@ -1,9 +1,10 @@
-import { Component, OnInit, OnDestroy, inject } from '@angular/core';
+import {Component, OnInit, OnDestroy, inject,
+  DestroyRef} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { Store } from '@ngrx/store';
-import { Observable, Subject, combineLatest, takeUntil } from 'rxjs';
-import { toSignal } from '@angular/core/rxjs-interop';
+import { Observable, combineLatest } from 'rxjs';
+import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
 
 import { CardComponent } from '../../../../../../../shared/components/card/card.component';
 import { StatsComponent } from '../../../../../../../shared/components/stats/stats.component';
@@ -12,18 +13,15 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
 import { OptionsDropdownComponent } from '../../../../../../../shared/components/options-dropdown/options-dropdown.component';
 import {
   FilterConfig,
-  FilterValues,
-} from '../../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
+  FilterValues } from '../../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import {
   CurrencyPipe,
-  CurrencyFormatService,
-} from '../../../../../../../shared/pipes/currency/currency.pipe';
+  CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 
 import { DateRangeFilter } from '../../../interfaces/analytics.interface';
 import {
   OverviewSummary,
-  OverviewTrend,
-} from '../../../interfaces/overview-analytics.interface';
+  OverviewTrend } from '../../../interfaces/overview-analytics.interface';
 
 import * as OverviewActions from '../state/overview-summary.actions';
 import * as OverviewSelectors from '../state/overview-summary.selectors';
@@ -45,14 +43,12 @@ import { getDefaultStartDate, getDefaultEndDate, formatChartPeriod } from '../..
     CurrencyPipe,
   ],
   templateUrl: './overview-summary.component.html',
-  styleUrls: ['./overview-summary.component.scss'],
-})
+  styleUrls: ['./overview-summary.component.scss'] })
 export class OverviewSummaryComponent implements OnInit, OnDestroy {
+  private destroyRef = inject(DestroyRef);
   private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
-  private destroy$ = new Subject<void>();
-
-  // Observables from store
+// Observables from store
   summary$: Observable<OverviewSummary | null> = this.store.select(
     OverviewSelectors.selectSummary,
   );
@@ -88,13 +84,11 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
     {
       key: 'date_from',
       label: 'Desde',
-      type: 'date',
-    },
+      type: 'date' },
     {
       key: 'date_to',
       label: 'Hasta',
-      type: 'date',
-    },
+      type: 'date' },
     {
       key: 'granularity',
       label: 'Granularidad',
@@ -106,8 +100,7 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
         { value: 'month', label: 'Por Mes' },
         { value: 'year', label: 'Por Ano' },
       ],
-      placeholder: 'Seleccionar',
-    },
+      placeholder: 'Seleccionar' },
   ];
 
   filterValues: FilterValues = {};
@@ -121,17 +114,16 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
 
     // Sync store state → filterValues
     combineLatest([this.dateRange$, this.granularity$])
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(([dateRange, granularity]) => {
         this.filterValues = {
           date_from: dateRange.start_date || null,
           date_to: dateRange.end_date || null,
-          granularity: granularity || 'day',
-        };
+          granularity: granularity || 'day' };
       });
 
     // Cache summary for template helpers
-    this.summary$.pipe(takeUntil(this.destroy$)).subscribe((summary) => {
+    this.summary$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((summary) => {
       this.currentSummary = summary;
       if (summary) {
         this.updateGaugeChart(summary.breakeven_ratio);
@@ -140,16 +132,15 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
 
     // Subscribe to trends to build comparative chart
     combineLatest([this.trends$, this.granularity$])
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(([trends, granularity]) => {
         this.updateComparativeChart(trends, granularity);
       });
   }
 
   ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-    this.store.dispatch(OverviewActions.clearOverviewSummaryState());
+
+this.store.dispatch(OverviewActions.clearOverviewSummaryState());
   }
 
   onFilterChange(values: FilterValues): void {
@@ -167,9 +158,7 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
           dateRange: {
             start_date: dateFrom || '',
             end_date: dateTo || '',
-            preset: 'custom',
-          },
-        }),
+            preset: 'custom' } }),
       );
     }
 
@@ -186,9 +175,7 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
         dateRange: {
           start_date: getDefaultStartDate(),
           end_date: getDefaultEndDate(),
-          preset: 'thisMonth',
-        },
-      }),
+          preset: 'thisMonth' } }),
     );
     this.store.dispatch(OverviewActions.setGranularity({ granularity: 'day' }));
   }
@@ -254,9 +241,7 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
             length: '60%',
             width: 6,
             itemStyle: {
-              color: 'auto',
-            },
-          },
+              color: 'auto' } },
           axisLine: {
             lineStyle: {
               width: 20,
@@ -264,31 +249,24 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
                 [0.467, '#22c55e'], // 0-70%: green
                 [0.6, '#eab308'], // 70-90%: yellow
                 [1, '#ef4444'], // 90-150%: red
-              ],
-            },
-          },
+              ] } },
           axisTick: { show: false },
           splitLine: {
             length: 12,
-            lineStyle: { width: 2, color: '#999' },
-          },
+            lineStyle: { width: 2, color: '#999' } },
           axisLabel: {
             distance: 25,
             fontSize: 11,
-            formatter: (value: number) => `${value}%`,
-          },
+            formatter: (value: number) => `${value}%` },
           detail: {
             valueAnimation: true,
             formatter: (value: number) => `${value.toFixed(1)}%`,
             fontSize: 20,
             fontWeight: 'bold',
             offsetCenter: [0, '20%'],
-            color: ratio < 70 ? '#22c55e' : ratio < 90 ? '#eab308' : '#ef4444',
-          },
-          data: [{ value: Math.min(ratio, 150) }],
-        },
-      ],
-    };
+            color: ratio < 70 ? '#22c55e' : ratio < 90 ? '#eab308' : '#ef4444' },
+          data: [{ value: Math.min(ratio, 150) }] },
+      ] };
   }
 
   private updateComparativeChart(
@@ -316,34 +294,28 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
             html += `${p.marker} ${p.seriesName}: ${this.currencyService.format(p.value)}<br/>`;
           }
           return html;
-        },
-      },
+        } },
       legend: {
         data: ['Ventas', 'Gastos', 'Impuestos', 'Rend. Bruto', 'Rend. Neto'],
         bottom: 0,
-        textStyle: { color: textSecondary },
-      },
+        textStyle: { color: textSecondary } },
       grid: {
         left: '3%',
         right: '4%',
         bottom: '15%',
-        containLabel: true,
-      },
+        containLabel: true },
       xAxis: {
         type: 'category',
         data: labels,
         axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary },
-      },
+        axisLabel: { color: textSecondary } },
       yAxis: {
         type: 'value',
         axisLine: { show: false },
         axisLabel: {
           color: textSecondary,
-          formatter: (value: number) => this.currencyService.format(value, 0),
-        },
-        splitLine: { lineStyle: { color: borderColor } },
-      },
+          formatter: (value: number) => this.currencyService.format(value, 0) },
+        splitLine: { lineStyle: { color: borderColor } } },
       series: [
         {
           name: 'Ventas',
@@ -362,10 +334,7 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
               colorStops: [
                 { offset: 0, color: '#22c55e4D' },
                 { offset: 1, color: '#22c55e0D' },
-              ],
-            },
-          },
-        },
+              ] } } },
         {
           name: 'Gastos',
           type: 'line',
@@ -383,10 +352,7 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
               colorStops: [
                 { offset: 0, color: '#ef44444D' },
                 { offset: 1, color: '#ef44440D' },
-              ],
-            },
-          },
-        },
+              ] } } },
         {
           name: 'Impuestos',
           type: 'line',
@@ -404,10 +370,7 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
               colorStops: [
                 { offset: 0, color: '#f59e0b4D' },
                 { offset: 1, color: '#f59e0b0D' },
-              ],
-            },
-          },
-        },
+              ] } } },
         {
           name: 'Rend. Bruto',
           type: 'line',
@@ -425,10 +388,7 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
               colorStops: [
                 { offset: 0, color: '#3b82f64D' },
                 { offset: 1, color: '#3b82f60D' },
-              ],
-            },
-          },
-        },
+              ] } } },
         {
           name: 'Rend. Neto',
           type: 'line',
@@ -446,12 +406,8 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
               colorStops: [
                 { offset: 0, color: '#8b5cf64D' },
                 { offset: 1, color: '#8b5cf60D' },
-              ],
-            },
-          },
-        },
-      ],
-    };
+              ] } } },
+      ] };
   }
 
 }

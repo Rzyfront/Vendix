@@ -1,13 +1,13 @@
-import {
-  Component,
+import {Component,
   OnInit,
-  OnDestroy,
   OnChanges,
   SimpleChanges,
   ChangeDetectionStrategy,
   input,
-  output
-} from '@angular/core';
+  output,
+  DestroyRef,
+  inject} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import {
   FormsModule,
@@ -15,16 +15,14 @@ import {
   FormBuilder,
   FormGroup,
   Validators,
-  AbstractControl,
-} from '@angular/forms';
-import { Subject, takeUntil } from 'rxjs';
+  AbstractControl} from '@angular/forms';
+
 
 import {
   Domain,
   UpdateDomainDto,
   DomainOwnership,
-  AppType,
-} from '../../interfaces/domain.interface';
+  AppType} from '../../interfaces/domain.interface';
 import { OrganizationDomainsService } from '../../services/organization-domains.service';
 
 import {
@@ -33,8 +31,7 @@ import {
   IconComponent,
   SelectorComponent,
   ToggleComponent,
-  SelectorOption,
-} from '../../../../../../shared/components/index';
+  SelectorOption} from '../../../../../../shared/components/index';
 
 @Component({
   selector: 'app-domain-edit-modal',
@@ -272,9 +269,9 @@ import {
         display: block;
       }
     `,
-  ],
-})
-export class DomainEditModalComponent implements OnInit, OnDestroy, OnChanges {
+  ]})
+export class DomainEditModalComponent implements OnInit, OnChanges {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = input(false);
   readonly isSubmitting = input(false);
   readonly domain = input<Domain | null>(null);
@@ -289,10 +286,7 @@ export class DomainEditModalComponent implements OnInit, OnDestroy, OnChanges {
   domainForm!: FormGroup;
   ownershipOptions: SelectorOption[] = [];
   appTypeOptions: SelectorOption[] = [];
-
-  private destroy$ = new Subject<void>();
-
-  constructor(
+constructor(
     private fb: FormBuilder,
     private domainsService: OrganizationDomainsService,
   ) {
@@ -308,13 +302,7 @@ export class DomainEditModalComponent implements OnInit, OnDestroy, OnChanges {
       this.populateForm();
     }
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  /**
+/**
    * Check if domain is a Vendix subdomain (read-only)
    */
   get isVendixSubdomain(): boolean {
@@ -325,8 +313,7 @@ export class DomainEditModalComponent implements OnInit, OnDestroy, OnChanges {
     this.domainForm = this.fb.group({
       ownership: [DomainOwnership.VENDIX_SUBDOMAIN],
       app_type: [null],
-      is_primary: [false],
-    });
+      is_primary: [false]});
   }
 
   private loadOptions(): void {
@@ -345,8 +332,7 @@ export class DomainEditModalComponent implements OnInit, OnDestroy, OnChanges {
     this.domainForm.patchValue({
       ownership: domain.ownership,
       app_type: domain.app_type,
-      is_primary: domain.is_primary,
-    });
+      is_primary: domain.is_primary});
   }
 
   formatStatus(status: string | undefined): string {
@@ -354,8 +340,7 @@ export class DomainEditModalComponent implements OnInit, OnDestroy, OnChanges {
       active: 'Activo',
       pending_dns: 'Pendiente DNS',
       pending_ssl: 'Pendiente SSL',
-      disabled: 'Deshabilitado',
-    };
+      disabled: 'Deshabilitado'};
     return statusMap[status || ''] || status || 'Desconocido';
   }
 
@@ -367,8 +352,7 @@ export class DomainEditModalComponent implements OnInit, OnDestroy, OnChanges {
       ORG_ADMIN: 'Admin Organización',
       ORG_LANDING: 'Landing Organización',
       VENDIX_LANDING: 'Vendix Landing',
-      VENDIX_ADMIN: 'Vendix Admin',
-    };
+      VENDIX_ADMIN: 'Vendix Admin'};
     return appTypeMap[appType || ''] || appType || 'No definido';
   }
 
@@ -403,13 +387,11 @@ export class DomainEditModalComponent implements OnInit, OnDestroy, OnChanges {
     const updateData: UpdateDomainDto = {
       ownership: formValue.ownership,
       app_type: formValue.app_type || undefined,
-      is_primary: formValue.is_primary,
-    };
+      is_primary: formValue.is_primary};
 
     this.submit.emit({
       hostname: domain.hostname,
-      data: updateData,
-    });
+      data: updateData});
   }
 
   getErrorMessage(control: AbstractControl | null): string {

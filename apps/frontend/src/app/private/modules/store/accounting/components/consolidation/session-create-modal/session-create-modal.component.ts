@@ -1,13 +1,14 @@
-import { Component, OnDestroy, inject, signal, output, input } from '@angular/core';
+import {Component, inject, signal, output, input,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
-import { Subject, takeUntil } from 'rxjs';
+
 
 import { AccountingService } from '../../../services/accounting.service';
 import {
   ConsolidationSession,
-  FiscalPeriod,
-} from '../../../interfaces/accounting.interface';
+  FiscalPeriod} from '../../../interfaces/accounting.interface';
 import {
   ModalComponent,
   ButtonComponent,
@@ -15,8 +16,7 @@ import {
   SelectorComponent,
   TextareaComponent,
   ToastService,
-  SelectorOption,
-} from '../../../../../../../shared/components/index';
+  SelectorOption} from '../../../../../../../shared/components/index';
 
 @Component({
   selector: 'vendix-session-create-modal',
@@ -81,11 +81,10 @@ import {
         </div>
       </div>
     </app-modal>
-  `,
-})
-export class SessionCreateModalComponent implements OnDestroy {
-  private destroy$ = new Subject<void>();
-  private fb = inject(FormBuilder);
+  `})
+export class SessionCreateModalComponent implements {
+  private destroyRef = inject(DestroyRef);
+private fb = inject(FormBuilder);
   private accounting_service = inject(AccountingService);
   private toast_service = inject(ToastService);
 
@@ -100,22 +99,15 @@ export class SessionCreateModalComponent implements OnDestroy {
   form = this.fb.group({
     name: ['', [Validators.required, Validators.minLength(3)]],
     fiscal_period_id: [null as number | null, [Validators.required]],
-    notes: [''],
-  });
+    notes: ['']});
 
   constructor() {
     this.loadPeriods();
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  private loadPeriods(): void {
+private loadPeriods(): void {
     this.accounting_service
       .getFiscalPeriods()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           const periods = res.data || [];
@@ -123,11 +115,9 @@ export class SessionCreateModalComponent implements OnDestroy {
           this.period_options.set(
             periods.map((p) => ({
               value: p.id,
-              label: p.name,
-            })),
+              label: p.name})),
           );
-        },
-      });
+        }});
   }
 
   onSubmit(): void {
@@ -140,9 +130,8 @@ export class SessionCreateModalComponent implements OnDestroy {
       .createConsolidationSession({
         name: name!,
         fiscal_period_id: fiscal_period_id!,
-        notes: notes || undefined,
-      })
-      .pipe(takeUntil(this.destroy$))
+        notes: notes || undefined})
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.toast_service.show({ variant: 'success', description: 'Sesion creada exitosamente' });
@@ -153,8 +142,7 @@ export class SessionCreateModalComponent implements OnDestroy {
         error: () => {
           this.toast_service.show({ variant: 'error', description: 'Error creando sesion' });
           this.is_submitting.set(false);
-        },
-      });
+        }});
   }
 
   onClose(): void {

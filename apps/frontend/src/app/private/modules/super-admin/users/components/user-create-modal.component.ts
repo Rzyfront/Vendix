@@ -1,26 +1,23 @@
-import {
-  Component,
+import {Component,
   input,
   output,
   OnInit,
-  OnDestroy,
   inject,
-} from '@angular/core';
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   ReactiveFormsModule,
   FormBuilder,
   FormGroup,
-  Validators,
-} from '@angular/forms';
+  Validators} from '@angular/forms';
 import {
   InputComponent,
   ButtonComponent,
-  ModalComponent,
-} from '../../../../../shared/components/index';
+  ModalComponent} from '../../../../../shared/components/index';
 import { UsersService } from '../services/users.service';
 import { CreateUserDto, UserState } from '../interfaces/user.interface';
-import { Subject, takeUntil } from 'rxjs';
+
 
 @Component({
   selector: 'app-user-create-modal',
@@ -164,9 +161,9 @@ import { Subject, takeUntil } from 'rxjs';
         display: block;
       }
     `,
-  ],
-})
-export class UserCreateModalComponent implements OnInit, OnDestroy {
+  ]})
+export class UserCreateModalComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   isOpen = input<boolean>(false);
   isOpenChange = output<boolean>();
   onUserCreated = output<void>();
@@ -192,21 +189,12 @@ export class UserCreateModalComponent implements OnInit, OnDestroy {
     organization_id: [null, [Validators.required]],
     password: ['', [Validators.required, Validators.minLength(8)]],
     app: [''],
-    state: [UserState.PENDING_VERIFICATION],
-  });
+    state: [UserState.PENDING_VERIFICATION]});
 
   isCreating: boolean = false;
   UserState = UserState;
-  private destroy$ = new Subject<void>();
-
-  ngOnInit(): void { }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  onSubmit(): void {
+ngOnInit(): void { }
+onSubmit(): void {
     if (this.userForm.invalid || this.isCreating) {
       return;
     }
@@ -216,7 +204,7 @@ export class UserCreateModalComponent implements OnInit, OnDestroy {
 
     this.usersService
       .createUser(userData)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.isCreating = false;
@@ -226,8 +214,7 @@ export class UserCreateModalComponent implements OnInit, OnDestroy {
         error: (error: any) => {
           this.isCreating = false;
           console.error('Error creating user:', error);
-        },
-      });
+        }});
   }
 
   onCancel(): void {
@@ -244,7 +231,6 @@ export class UserCreateModalComponent implements OnInit, OnDestroy {
       organization_id: null,
       password: '',
       app: '',
-      state: UserState.PENDING_VERIFICATION,
-    });
+      state: UserState.PENDING_VERIFICATION});
   }
 }

@@ -1,4 +1,4 @@
-import { Component, inject, DestroyRef, output, signal } from '@angular/core';
+import { Component, ChangeDetectionStrategy, inject, DestroyRef, output, signal } from '@angular/core';
 
 import { RouterModule, Router } from '@angular/router';
 import { Subject, debounceTime } from 'rxjs';

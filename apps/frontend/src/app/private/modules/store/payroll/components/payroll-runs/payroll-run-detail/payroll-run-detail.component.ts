@@ -7,11 +7,12 @@ import {
   DestroyRef,
   signal,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DatePipe, AsyncPipe } from '@angular/common';
 import { Store } from '@ngrx/store';
 import { Actions, ofType } from '@ngrx/effects';
 import { Subject } from 'rxjs';
-import { takeUntil, take, timeout } from 'rxjs/operators';
+import { take, timeout } from 'rxjs/operators';
 import {
   calculatePayrollRun,
   calculatePayrollRunSuccess,
@@ -289,9 +290,7 @@ export class PayrollRunDetailComponent {
   private store = inject(Store);
   private actions$ = inject(Actions);
   private destroyRef = inject(DestroyRef);
-
-  private destroy$ = new Subject<void>();
-  private fastTrackCancel$ = new Subject<void>();
+private fastTrackCancel$ = new Subject<void>();
 
   // ── StepsLine ─────────────────────────────────────────
   statusSteps: StepsLineItem[] = [
@@ -393,8 +392,6 @@ export class PayrollRunDetailComponent {
     });
 
     this.destroyRef.onDestroy(() => {
-      this.destroy$.next();
-      this.destroy$.complete();
       this.fastTrackCancel$.next();
       this.fastTrackCancel$.complete();
     });
@@ -480,7 +477,7 @@ export class PayrollRunDetailComponent {
         this.actions$.pipe(
           ofType(successFailureMap.success, successFailureMap.failure),
           take(1),
-          takeUntil(this.destroy$),
+          takeUntilDestroyed(this.destroyRef),
         ).subscribe(() => {
           this.loading.set(false);
         });
@@ -551,7 +548,7 @@ export class PayrollRunDetailComponent {
       take(1),
       timeout(this.FAST_TRACK_TIMEOUT),
       takeUntil(this.fastTrackCancel$),
-      takeUntil(this.destroy$),
+      takeUntilDestroyed(this.destroyRef),
     ).subscribe({
       next: (action) => {
         if (action.type === successFailure.failure.type) {

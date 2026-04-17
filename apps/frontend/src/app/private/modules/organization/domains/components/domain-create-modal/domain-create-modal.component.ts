@@ -1,11 +1,11 @@
-import {
-  Component,
+import {Component,
   OnInit,
-  OnDestroy,
   ChangeDetectionStrategy,
   input,
-  output
-} from '@angular/core';
+  output,
+  DestroyRef,
+  inject} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   FormsModule,
@@ -13,15 +13,13 @@ import {
   FormBuilder,
   FormGroup,
   Validators,
-  AbstractControl,
-} from '@angular/forms';
-import { Subject, takeUntil } from 'rxjs';
+  AbstractControl} from '@angular/forms';
+
 
 import {
   CreateDomainDto,
   DomainOwnership,
-  AppType,
-} from '../../interfaces/domain.interface';
+  AppType} from '../../interfaces/domain.interface';
 import { OrganizationDomainsService } from '../../services/organization-domains.service';
 
 import {
@@ -31,8 +29,7 @@ import {
   IconComponent,
   SelectorComponent,
   ToggleComponent,
-  SelectorOption,
-} from '../../../../../../shared/components/index';
+  SelectorOption} from '../../../../../../shared/components/index';
 
 interface StoreOption {
   id: number;
@@ -205,9 +202,9 @@ interface StoreOption {
         display: block;
       }
     `,
-  ],
-})
-export class DomainCreateModalComponent implements OnInit, OnDestroy {
+  ]})
+export class DomainCreateModalComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = input(false);
   readonly isSubmitting = input(false);
   readonly stores = input<StoreOption[]>([]);
@@ -220,10 +217,7 @@ export class DomainCreateModalComponent implements OnInit, OnDestroy {
   ownershipOptions: SelectorOption[] = [];
   appTypeOptions: SelectorOption[] = [];
   storeOptions: SelectorOption[] = [];
-
-  private destroy$ = new Subject<void>();
-
-  constructor(
+constructor(
     private fb: FormBuilder,
     private domainsService: OrganizationDomainsService,
   ) {
@@ -234,13 +228,7 @@ export class DomainCreateModalComponent implements OnInit, OnDestroy {
     this.loadOptions();
     this.setupOwnershipListener();
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  private initializeForm(): void {
+private initializeForm(): void {
     this.domainForm = this.fb.group({
       hostname: [
         '',
@@ -253,8 +241,7 @@ export class DomainCreateModalComponent implements OnInit, OnDestroy {
       ownership: [DomainOwnership.VENDIX_SUBDOMAIN, [Validators.required]],
       store_id: [null],
       app_type: [AppType.STORE_ECOMMERCE],
-      is_primary: [false],
-    });
+      is_primary: [false]});
   }
 
   private loadOptions(): void {
@@ -272,15 +259,14 @@ export class DomainCreateModalComponent implements OnInit, OnDestroy {
       { value: '', label: 'Sin tienda asignada' },
       ...this.stores().map((store) => ({
         value: store.id.toString(),
-        label: store.name,
-      })),
+        label: store.name})),
     ];
   }
 
   private setupOwnershipListener(): void {
     this.domainForm
       .get('ownership')
-      ?.valueChanges.pipe(takeUntil(this.destroy$))
+      ?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((ownership) => {
         const hostnameControl = this.domainForm.get('hostname');
         if (ownership === DomainOwnership.VENDIX_SUBDOMAIN) {
@@ -294,7 +280,7 @@ export class DomainCreateModalComponent implements OnInit, OnDestroy {
             Validators.required,
             Validators.minLength(3),
             Validators.pattern(
-              /^[a-zA-Z0-9][a-zA-Z0-9\-\.]*[a-zA-Z0-9]\.[a-zA-Z]{2,}$/,
+              /^[a-zA-Z0-9][a-zA-Z0-9\-\.]*[a-zA-Z0-9]\.[a-zA-Z]{2}$/,
             ),
           ]);
         }
@@ -358,8 +344,7 @@ export class DomainCreateModalComponent implements OnInit, OnDestroy {
       store_id: formValue.store_id ? parseInt(formValue.store_id, 10) : undefined,
       app_type: formValue.app_type || undefined,
       is_primary: formValue.is_primary || false,
-      config: {},
-    };
+      config: {}};
 
     this.submit.emit(domainData);
   }
@@ -370,8 +355,7 @@ export class DomainCreateModalComponent implements OnInit, OnDestroy {
       ownership: DomainOwnership.VENDIX_SUBDOMAIN,
       store_id: null,
       app_type: AppType.STORE_ECOMMERCE,
-      is_primary: false,
-    });
+      is_primary: false});
   }
 
   getErrorMessage(control: AbstractControl | null): string {

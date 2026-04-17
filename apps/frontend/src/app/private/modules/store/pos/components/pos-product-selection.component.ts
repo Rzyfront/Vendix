@@ -8,7 +8,7 @@ import {
   signal,
   DestroyRef,
 } from '@angular/core';
-import { Subject, debounceTime, distinctUntilChanged, takeUntil } from 'rxjs';
+import { Subject, debounceTime, distinctUntilChanged } from 'rxjs';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
@@ -80,14 +80,14 @@ import {
             size="sm"
             placeholder="Buscar productos..."
             [debounceTime]="300"
-            [(ngModel)]="searchQuery"
+            [(ngModel)]="searchQuery()"
             (searchChange)="onSearch($event)"
           />
 
           <!-- Componente de filtros -->
           <app-options-dropdown
             [filters]="filterConfigs"
-            [filterValues]="filterValues"
+            [filterValues]="filterValues()"
             [isLoading]="loading()"
             title="Filtros"
             triggerLabel="Filtros"
@@ -164,7 +164,7 @@ import {
             <p class="text-sm text-text-secondary mb-4 max-w-xs mx-auto">
               {{ getEmptyStateDescription() }}
             </p>
-            @if (searchQuery) {
+            @if (searchQuery()) {
               <app-button
                 variant="outline"
                 size="md"
@@ -308,7 +308,7 @@ import {
                         @if (product.pricing_type === 'weight') {
                           <span
                             class="text-[10px] font-normal text-text-secondary"
-                            >/{{ defaultWeightUnit }}</span
+                            >/{{ defaultWeightUnit() }}</span
                           >
                         }
                       </span>
@@ -399,10 +399,10 @@ import {
     </div>
 
     <!-- Variant Selector Modal -->
-    @if (showVariantSelector && selectedProductForVariant) {
+    @if (showVariantSelector() && selectedProductForVariant()) {
       <app-pos-variant-selector
-        [product]="selectedProductForVariant"
-        [variants]="selectedProductForVariant.product_variants"
+        [product]="selectedProductForVariant()"
+        [variants]="selectedProductForVariant()!.product_variants"
         (variantSelected)="onVariantSelected($event)"
         (closed)="onVariantSelectorClosed()"
       ></app-pos-variant-selector>
@@ -479,23 +479,24 @@ import {
   ],
 })
 export class PosProductSelectionComponent {
+  private destroyRef = inject(DestroyRef);
   readonly loading = signal(false);
-  searchQuery = '';
-  selectedCategory: any = null;
-  selectedBrand: any = null;
+  readonly searchQuery = signal('');
+  readonly selectedCategory = signal<any>(null);
+  readonly selectedBrand = signal<any>(null);
   readonly filteredProducts = signal<any[]>([]);
-  categories: any[] = [];
-  brands: any[] = [];
+  readonly categories = signal<any[]>([]);
+  readonly brands = signal<any[]>([]);
   addingToCart = new Set<string>();
 
   // Variant selection state
-  showVariantSelector = false;
-  selectedProductForVariant: any = null;
+  readonly showVariantSelector = signal(false);
+  readonly selectedProductForVariant = signal<any>(null);
 
   // Scale/weight settings from store
-  scaleEnabled = false;
-  defaultWeightUnit: 'kg' | 'g' | 'lb' = 'kg';
-  allowManualWeightEntry = true;
+  readonly scaleEnabled = signal(false);
+  readonly defaultWeightUnit = signal<'kg' | 'g' | 'lb'>('kg');
+  readonly allowManualWeightEntry = signal(true);
 
   // Filter configuration for the options dropdown
   filterConfigs: FilterConfig[] = [
@@ -516,7 +517,7 @@ export class PosProductSelectionComponent {
   ];
 
   // Current filter values
-  filterValues: FilterValues = {};
+  readonly filterValues = signal<FilterValues>({});
 
   readonly refreshTrigger = input<number>(0);
   readonly selectedCustomer = input<any>(null);
@@ -529,7 +530,6 @@ export class PosProductSelectionComponent {
   readonly openCustomerModal = output<void>();
   readonly openQueueModal = output<void>();
 
-  private destroy$ = new Subject<void>();
   private searchSubject$ = new Subject<string>();
   private productService = inject(PosProductService);
   private cartService = inject(PosCartService);
@@ -541,11 +541,6 @@ export class PosProductSelectionComponent {
   private scaleService = inject(PosScaleService);
 
   constructor() {
-    inject(DestroyRef).onDestroy(() => {
-      this.destroy$.next();
-      this.destroy$.complete();
-    });
-
     this.checkAuthState();
     this.loadScaleSettings();
     this.initializeCategories();
@@ -561,30 +556,30 @@ export class PosProductSelectionComponent {
   }
 
   private initializeCategories(): void {
-    this.categories = [{ id: '', name: 'Todos', icon: 'grid' }];
-    this.selectedCategory = this.categories[0];
+    const allCategory = { id: '', name: 'Todos', icon: 'grid' };
+    this.categories.set([allCategory]);
+    this.selectedCategory.set(allCategory);
     this.loadCategories();
   }
 
   private initializeBrands(): void {
-    this.brands = [
-      {
-        id: '',
-        name: 'Todas',
-        slug: 'all',
-        store_id: 0,
-        created_at: new Date(),
-        updated_at: new Date(),
-      },
-    ];
-    this.selectedBrand = this.brands[0];
+    const allBrand = {
+      id: '',
+      name: 'Todas',
+      slug: 'all',
+      store_id: 0,
+      created_at: new Date(),
+      updated_at: new Date(),
+    };
+    this.brands.set([allBrand]);
+    this.selectedBrand.set(allBrand);
     this.loadBrands();
   }
 
   private loadCategories(): void {
     this.productService
       .getCategories()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (categories) => {
           const backendCategories = categories.map((cat) => ({
@@ -592,43 +587,38 @@ export class PosProductSelectionComponent {
             name: cat.name,
             icon: 'tag',
           }));
-          this.categories = [this.categories[0], ...backendCategories];
+          this.categories.set([this.categories()[0], ...backendCategories]);
           this.updateFilterOptions();
         },
-        error: (error) => {
-          // Error loading categories, using defaults
-        },
+        error: (error) => {},
       });
   }
 
   private loadBrands(): void {
     this.productService
       .getBrands()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (brands) => {
           const backendBrands = brands.map((brand) => ({
             ...brand,
             id: brand.id.toString(),
           }));
-          this.brands = [this.brands[0], ...backendBrands];
+          this.brands.set([this.brands()[0], ...backendBrands]);
           this.updateFilterOptions();
         },
-        error: (error) => {
-          // Error loading brands, using defaults
-        },
+        error: (error) => {},
       });
   }
 
   private updateFilterOptions(): void {
-    // Update category options
     const categoryFilter = this.filterConfigs.find(
       (f) => f.key === 'category_id',
     );
     if (categoryFilter) {
       categoryFilter.options = [
         { value: '', label: 'Todas las Categorías' },
-        ...this.categories
+        ...this.categories()
           .filter((c) => c.id !== '')
           .map((cat) => ({
             value: cat.id.toString(),
@@ -637,12 +627,11 @@ export class PosProductSelectionComponent {
       ];
     }
 
-    // Update brand options
     const brandFilter = this.filterConfigs.find((f) => f.key === 'brand_id');
     if (brandFilter) {
       brandFilter.options = [
         { value: '', label: 'Todas las Marcas' },
-        ...this.brands
+        ...this.brands()
           .filter((b) => b.id !== '')
           .map((brand) => ({
             value: brand.id.toString(),
@@ -651,15 +640,18 @@ export class PosProductSelectionComponent {
       ];
     }
 
-    // Force re-render
     this.filterConfigs = [...this.filterConfigs];
   }
 
   private setupSearchSubscription(): void {
     this.searchSubject$
-      .pipe(debounceTime(300), distinctUntilChanged(), takeUntil(this.destroy$))
+      .pipe(
+        debounceTime(300),
+        distinctUntilChanged(),
+        takeUntilDestroyed(this.destroyRef),
+      )
       .subscribe((query) => {
-        this.searchQuery = query;
+        this.searchQuery.set(query);
         this.filterProducts();
       });
   }
@@ -677,21 +669,23 @@ export class PosProductSelectionComponent {
       include_stock: true,
     };
 
-    if (this.searchQuery) {
-      filters.query = this.searchQuery;
+    if (this.searchQuery()) {
+      filters.query = this.searchQuery();
     }
 
-    if (this.selectedCategory && this.selectedCategory.id !== '') {
-      filters.category = this.selectedCategory.id;
+    const selectedCat = this.selectedCategory();
+    if (selectedCat && selectedCat.id !== '') {
+      filters.category = selectedCat.id;
     }
 
-    if (this.selectedBrand && this.selectedBrand.id !== '') {
-      filters.brand = this.selectedBrand.id.toString();
+    const selectedBr = this.selectedBrand();
+    if (selectedBr && selectedBr.id !== '') {
+      filters.brand = selectedBr.id.toString();
     }
 
     this.productService
       .searchProducts(filters)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (result: SearchResult) => {
           const uniqueProducts = this.removeDuplicateProducts(
@@ -713,81 +707,84 @@ export class PosProductSelectionComponent {
   }
 
   onClearSearch(): void {
-    this.searchQuery = '';
+    this.searchQuery.set('');
     this.searchSubject$.next('');
   }
 
   onCategoryChange(event: any): void {
     const categoryId = event.target.value;
-    const category = this.categories.find((c) => c.id === categoryId);
-    this.selectedCategory = category || this.categories[0];
+    const category = this.categories().find((c) => c.id === categoryId);
+    this.selectedCategory.set(category || this.categories()[0]);
     this.filterProducts();
   }
 
   onSelectCategory(category: any): void {
-    this.selectedCategory = category;
+    this.selectedCategory.set(category);
     this.filterProducts();
   }
 
   onSelectBrand(brand: Brand): void {
-    this.selectedBrand = brand;
+    this.selectedBrand.set(brand);
     this.filterProducts();
   }
 
   onOptionsFilterChange(values: FilterValues): void {
-    this.filterValues = values;
+    this.filterValues.set(values);
 
     const categoryId = values['category_id'] as string;
     const brandId = values['brand_id'] as string;
 
-    // Update selected category for filtering
     if (categoryId) {
-      this.selectedCategory =
-        this.categories.find((c) => c.id === categoryId) || this.categories[0];
+      this.selectedCategory.set(
+        this.categories().find((c) => c.id === categoryId) ||
+          this.categories()[0],
+      );
     } else {
-      this.selectedCategory = this.categories[0];
+      this.selectedCategory.set(this.categories()[0]);
     }
 
-    // Update selected brand for filtering
     if (brandId) {
-      this.selectedBrand =
-        this.brands.find((b) => b.id.toString() === brandId) || this.brands[0];
+      this.selectedBrand.set(
+        this.brands().find((b) => b.id.toString() === brandId) ||
+          this.brands()[0],
+      );
     } else {
-      this.selectedBrand = this.brands[0];
+      this.selectedBrand.set(this.brands()[0]);
     }
 
     this.filterProducts();
   }
 
   onClearFilters(): void {
-    this.filterValues = {};
-    this.selectedCategory = this.categories[0];
-    this.selectedBrand = this.brands[0];
+    this.filterValues.set({});
+    this.selectedCategory.set(this.categories()[0]);
+    this.selectedBrand.set(this.brands()[0]);
     this.filterProducts();
   }
 
   onFilterChange(filters: ProductQueryDto): void {
-    // Update selected category and brand for UI consistency
     if (filters.category_id) {
-      this.selectedCategory =
-        this.categories.find((c) => c.id === filters.category_id!.toString()) ||
-        this.categories[0];
+      this.selectedCategory.set(
+        this.categories().find(
+          (c) => c.id === filters.category_id!.toString(),
+        ) || this.categories()[0],
+      );
     } else {
-      this.selectedCategory = this.categories[0];
+      this.selectedCategory.set(this.categories()[0]);
     }
 
     if (filters.brand_id) {
-      this.selectedBrand =
-        this.brands.find(
+      this.selectedBrand.set(
+        this.brands().find(
           (b) => b.id.toString() === filters.brand_id!.toString(),
-        ) || this.brands[0];
+        ) || this.brands()[0],
+      );
     } else {
-      this.selectedBrand = this.brands[0];
+      this.selectedBrand.set(this.brands()[0]);
     }
 
-    // Update search query if it was changed in filters (for future extensibility)
-    if (filters.search !== undefined && filters.search !== this.searchQuery) {
-      this.searchQuery = filters.search;
+    if (filters.search !== undefined && filters.search !== this.searchQuery()) {
+      this.searchQuery.set(filters.search);
     }
 
     this.filterProducts();
@@ -799,7 +796,7 @@ export class PosProductSelectionComponent {
     const selectedClass =
       'border-primary bg-primary-light text-primary shadow-card';
 
-    return this.selectedCategory?.id === category.id
+    return this.selectedCategory()?.id === category.id
       ? selectedClass
       : baseClass;
   }
@@ -837,8 +834,8 @@ export class PosProductSelectionComponent {
 
     // Intercept products with variants — open selector modal
     if (product.has_variants && product.product_variants?.length > 0) {
-      this.showVariantSelector = true;
-      this.selectedProductForVariant = product;
+      this.showVariantSelector.set(true);
+      this.selectedProductForVariant.set(product);
       return;
     }
 
@@ -846,17 +843,17 @@ export class PosProductSelectionComponent {
   }
 
   async onVariantSelected(variant: PosProductVariant): Promise<void> {
-    this.showVariantSelector = false;
-    const product = this.selectedProductForVariant;
-    this.selectedProductForVariant = null;
+    this.showVariantSelector.set(false);
+    const product = this.selectedProductForVariant();
+    this.selectedProductForVariant.set(null);
 
     if (!product) return;
 
     // If product is weight-based and scale is enabled, prompt for weight
     const isWeightProduct =
-      product.pricing_type === 'weight' && this.scaleEnabled;
+      product.pricing_type === 'weight' && this.scaleEnabled();
     if (isWeightProduct) {
-      const unit = this.defaultWeightUnit;
+      const unit = this.defaultWeightUnit();
       const variantPrice = variant.price_override ?? product.final_price;
       const weight = await this.getWeightFromScaleOrManual(
         product.name,
@@ -877,7 +874,7 @@ export class PosProductSelectionComponent {
       this.addingToCart.add(product.id);
       this.cartService
         .addToCart({ product, quantity: 1, variant, weight, weight_unit: unit })
-        .pipe(takeUntil(this.destroy$))
+        .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: () => {
             this.addingToCart.delete(product.id);
@@ -907,7 +904,7 @@ export class PosProductSelectionComponent {
         quantity: 1,
         variant,
       })
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.addingToCart.delete(product.id);
@@ -928,8 +925,8 @@ export class PosProductSelectionComponent {
   }
 
   onVariantSelectorClosed(): void {
-    this.showVariantSelector = false;
-    this.selectedProductForVariant = null;
+    this.showVariantSelector.set(false);
+    this.selectedProductForVariant.set(null);
   }
 
   private async addToCartNormal(product: any): Promise<void> {
@@ -948,11 +945,11 @@ export class PosProductSelectionComponent {
 
     // Check if product is sold by weight and scale is enabled
     const isWeightProduct =
-      product.pricing_type === 'weight' && this.scaleEnabled;
+      product.pricing_type === 'weight' && this.scaleEnabled();
 
     // For weight products, require weight input
     if (isWeightProduct) {
-      const unit = this.defaultWeightUnit;
+      const unit = this.defaultWeightUnit();
       const weight = await this.getWeightFromScaleOrManual(
         product.name,
         product.final_price,
@@ -981,7 +978,7 @@ export class PosProductSelectionComponent {
         product: product,
         quantity: 1,
       })
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.addingToCart.delete(product.id);
@@ -1000,7 +997,7 @@ export class PosProductSelectionComponent {
   private addWeightProductToCart(product: any, weight: number): void {
     this.addingToCart.add(product.id);
 
-    const unit = this.defaultWeightUnit;
+    const unit = this.defaultWeightUnit();
     const totalPrice = product.final_price * weight;
 
     this.cartService
@@ -1010,7 +1007,7 @@ export class PosProductSelectionComponent {
         weight: weight,
         weight_unit: unit,
       })
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.addingToCart.delete(product.id);
@@ -1038,11 +1035,11 @@ export class PosProductSelectionComponent {
         title: 'Lectura de Báscula',
         message: `${productName}\nPrecio: ${this.formatPrice(price)}/${unit}`,
         weightUnit: unit,
-        allowManualFallback: this.allowManualWeightEntry,
+        allowManualFallback: this.allowManualWeightEntry(),
       });
     }
 
-    if (this.allowManualWeightEntry) {
+    if (this.allowManualWeightEntry()) {
       const weightStr = await this.dialogService.prompt(
         {
           title: 'Ingresar Peso',
@@ -1086,7 +1083,7 @@ export class PosProductSelectionComponent {
   }
 
   get showScaleButton(): boolean {
-    return this.scaleEnabled && this.scaleService.isWebSerialSupported();
+    return this.scaleEnabled() && this.scaleService.isWebSerialSupported();
   }
 
   onImageError(event: any): void {
@@ -1126,14 +1123,14 @@ export class PosProductSelectionComponent {
   }
 
   getEmptyStateTitle(): string {
-    if (this.searchQuery) {
+    if (this.searchQuery()) {
       return 'No se encontraron productos';
     }
     return 'No hay productos disponibles';
   }
 
   getEmptyStateDescription(): string {
-    if (this.searchQuery) {
+    if (this.searchQuery()) {
       return 'Intenta buscar con otros términos o cambia la categoría.';
     }
     return 'Los productos aparecerán aquí cuando estén disponibles.';
@@ -1146,14 +1143,16 @@ export class PosProductSelectionComponent {
   private loadScaleSettings(): void {
     this.store
       .select(selectStoreSettings)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((storeSettings: any) => {
         if (storeSettings?.pos?.scale) {
-          this.scaleEnabled = storeSettings.pos.scale.enabled ?? false;
-          this.defaultWeightUnit =
-            storeSettings.pos.scale.default_weight_unit || 'kg';
-          this.allowManualWeightEntry =
-            storeSettings.pos.scale.allow_manual_weight_entry ?? true;
+          this.scaleEnabled.set(storeSettings.pos.scale.enabled ?? false);
+          this.defaultWeightUnit.set(
+            storeSettings.pos.scale.default_weight_unit || 'kg',
+          );
+          this.allowManualWeightEntry.set(
+            storeSettings.pos.scale.allow_manual_weight_entry ?? true,
+          );
 
           if (storeSettings.pos.scale.device) {
             this.scaleService.configure(storeSettings.pos.scale.device);

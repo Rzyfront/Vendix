@@ -4,12 +4,14 @@ import {
   ElementRef,
   HostListener,
   inject,
+  signal,
   viewChild
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { Router } from '@angular/router';
-import { FormsModule } from '@angular/forms';
-import { Subject, takeUntil, debounceTime, distinctUntilChanged } from 'rxjs';
+import { FormControl, FormsModule, ReactiveFormsModule } from '@angular/forms';
+import { Subject, debounceTime, distinctUntilChanged } from 'rxjs';
 
 import { IconComponent } from '../icon/icon.component';
 import { SpinnerComponent } from '../spinner/spinner.component';
@@ -19,7 +21,7 @@ import { HelpArticle } from '../../../private/modules/store/help/models/help-art
 @Component({
   selector: 'app-help-search-overlay',
   standalone: true,
-  imports: [FormsModule, IconComponent, SpinnerComponent],
+  imports: [FormsModule, ReactiveFormsModule, IconComponent, SpinnerComponent],
   template: `
     <!-- Trigger Button -->
     <button
@@ -46,14 +48,14 @@ import { HelpArticle } from '../../../private/modules/store/help/models/help-art
             type="text"
             class="spotlight-input"
             placeholder="Buscar artículos de ayuda..."
-            [(ngModel)]="query"
-            (ngModelChange)="onQueryChange($event)"
+            [formControl]="searchControl"
+            (input)="onQueryChange(searchControl.value)"
             autocomplete="off"
             />
-          @if (!query) {
+          @if (!searchControl.value) {
             <kbd class="spotlight-kbd">ESC</kbd>
           }
-          @if (query) {
+          @if (searchControl.value) {
             <button
               class="spotlight-clear"
               (click)="clearQuery()"
@@ -62,24 +64,24 @@ import { HelpArticle } from '../../../private/modules/store/help/models/help-art
             </button>
           }
         </div>
-    
+
         <!-- Results -->
-        @if (query.length >= 2) {
+        @if (searchControl.value.length >= 2) {
           <div class="spotlight-results">
             <!-- Loading -->
-            @if (isSearching) {
+            @if (isSearching()) {
               <div class="spotlight-loading">
                 <app-spinner size="sm"></app-spinner>
                 <span>Buscando...</span>
               </div>
             }
             <!-- Results List -->
-            @for (article of results; track article; let i = $index) {
+            @for (article of results(); track article; let i = $index) {
               <div
                 class="spotlight-result"
-                [class.active]="i === activeIndex"
+                [class.active]="i === activeIndex()"
                 (click)="selectResult(article)"
-                (mouseenter)="activeIndex = i"
+                (mouseenter)="activeIndex.set(i)"
                 >
                 <div class="result-content">
                   <span class="result-title">{{ article.title }}</span>
@@ -89,7 +91,7 @@ import { HelpArticle } from '../../../private/modules/store/help/models/help-art
               </div>
             }
             <!-- Empty -->
-            @if (!isSearching && results.length === 0 && hasSearched) {
+            @if (!isSearching() && results().length === 0 && hasSearched()) {
               <div class="spotlight-empty">
                 <app-icon name="search" [size]="24" class="empty-icon"></app-icon>
                 <span>No se encontraron artículos</span>
@@ -97,9 +99,9 @@ import { HelpArticle } from '../../../private/modules/store/help/models/help-art
             }
           </div>
         }
-    
+
         <!-- Hint -->
-        @if (query.length < 2) {
+        @if (searchControl.value.length < 2) {
           <div class="spotlight-hint">
             <app-icon name="help-circle" [size]="16"></app-icon>
             <span>Escribe al menos 2 caracteres para buscar</span>
@@ -300,75 +302,70 @@ import { HelpArticle } from '../../../private/modules/store/help/models/help-art
       color: var(--color-text-tertiary, #9ca3af);
       font-size: 0.8125rem;
     }
-  `],
-})
+  `] })
 export class HelpSearchOverlayComponent {
   private helpCenterService = inject(HelpCenterService);
   private router = inject(Router);
   private destroyRef = inject(DestroyRef);
-  private destroy$ = new Subject<void>();
-  private searchSubject$ = new Subject<string>();
+private searchSubject$ = new Subject<string>();
 
   readonly dialogRef = viewChild.required<ElementRef<HTMLDialogElement>>('dialogRef');
 
-  isOpen = false;
-  query = '';
-  results: HelpArticle[] = [];
-  isSearching = false;
-  hasSearched = false;
-  activeIndex = 0;
+  readonly isOpen = signal(false);
+  readonly searchControl = new FormControl<string>('', { nonNullable: true });
+  readonly results = signal<HelpArticle[]>([]);
+  readonly isSearching = signal(false);
+  readonly hasSearched = signal(false);
+  readonly activeIndex = signal(0);
 
   constructor() {
     this.searchSubject$
       .pipe(
         debounceTime(300),
         distinctUntilChanged(),
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
       )
       .subscribe(q => {
         if (q.trim().length >= 2) {
           this.search(q);
         } else {
-          this.results = [];
-          this.hasSearched = false;
+          this.results.set([]);
+          this.hasSearched.set(false);
         }
       });
 
-    this.destroyRef.onDestroy(() => {
-      this.destroy$.next();
-      this.destroy$.complete();
-    });
   }
 
   @HostListener('document:keydown', ['$event'])
   onKeydown(event: KeyboardEvent): void {
-    if (event.key === 'Escape' && this.isOpen) {
+    if (event.key === 'Escape' && this.isOpen()) {
       this.close();
       event.preventDefault();
     }
 
-    if (!this.isOpen) return;
+    if (!this.isOpen()) return;
 
     if (event.key === 'ArrowDown') {
       event.preventDefault();
-      this.activeIndex = Math.min(this.activeIndex + 1, this.results.length - 1);
+      this.activeIndex.set(Math.min(this.activeIndex() + 1, this.results().length - 1));
     }
 
     if (event.key === 'ArrowUp') {
       event.preventDefault();
-      this.activeIndex = Math.max(this.activeIndex - 1, 0);
+      this.activeIndex.set(Math.max(this.activeIndex() - 1, 0));
     }
 
-    if (event.key === 'Enter' && this.results[this.activeIndex]) {
+    const current = this.results()[this.activeIndex()];
+    if (event.key === 'Enter' && current) {
       event.preventDefault();
-      this.selectResult(this.results[this.activeIndex]);
+      this.selectResult(current);
     }
   }
 
   open(event: Event): void {
     event.stopPropagation();
     this.dialogRef().nativeElement.showModal();
-    this.isOpen = true;
+    this.isOpen.set(true);
     setTimeout(() => {
       const input = this.dialogRef().nativeElement.querySelector('.spotlight-input') as HTMLInputElement;
       input?.focus();
@@ -380,11 +377,11 @@ export class HelpSearchOverlayComponent {
     if (dialogRef.nativeElement.open) {
       dialogRef.nativeElement.close();
     }
-    this.isOpen = false;
-    this.query = '';
-    this.results = [];
-    this.hasSearched = false;
-    this.activeIndex = 0;
+    this.isOpen.set(false);
+    this.searchControl.setValue('');
+    this.results.set([]);
+    this.hasSearched.set(false);
+    this.activeIndex.set(0);
   }
 
   onBackdropClick(event: Event): void {
@@ -398,9 +395,9 @@ export class HelpSearchOverlayComponent {
   }
 
   clearQuery(): void {
-    this.query = '';
-    this.results = [];
-    this.hasSearched = false;
+    this.searchControl.setValue('');
+    this.results.set([]);
+    this.hasSearched.set(false);
   }
 
   selectResult(article: HelpArticle): void {
@@ -409,21 +406,20 @@ export class HelpSearchOverlayComponent {
   }
 
   private search(q: string): void {
-    this.isSearching = true;
+    this.isSearching.set(true);
     this.helpCenterService.searchArticles(q, 8)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (results) => {
-          this.results = results;
-          this.isSearching = false;
-          this.hasSearched = true;
-          this.activeIndex = 0;
+          this.results.set(results);
+          this.isSearching.set(false);
+          this.hasSearched.set(true);
+          this.activeIndex.set(0);
         },
         error: () => {
-          this.isSearching = false;
-          this.hasSearched = true;
-        },
-      });
+          this.isSearching.set(false);
+          this.hasSearched.set(true);
+        } });
   }
 
 }

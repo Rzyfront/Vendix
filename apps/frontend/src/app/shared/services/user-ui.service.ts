@@ -1,31 +1,33 @@
-import { Injectable } from '@angular/core';
-import { BehaviorSubject } from 'rxjs';
+import { Injectable, signal } from '@angular/core';
+import { toObservable } from '@angular/core/rxjs-interop';
 
 @Injectable({
   providedIn: 'root',
 })
 export class UserUiService {
-  private isProfileOpenSubject = new BehaviorSubject<boolean>(false);
-  public isProfileOpen$ = this.isProfileOpenSubject.asObservable();
+  // Signal-first holders of simple UI state.
+  readonly isProfileOpen = signal<boolean>(false);
+  readonly isSettingsOpen = signal<boolean>(false);
 
-  private isSettingsOpenSubject = new BehaviorSubject<boolean>(false);
-  public isSettingsOpen$ = this.isSettingsOpenSubject.asObservable();
+  // Observable parallels for legacy consumers.
+  public isProfileOpen$ = toObservable(this.isProfileOpen);
+  public isSettingsOpen$ = toObservable(this.isSettingsOpen);
 
   constructor() {}
 
   openProfile() {
-    this.isProfileOpenSubject.next(true);
+    this.isProfileOpen.set(true);
   }
 
   closeProfile() {
-    this.isProfileOpenSubject.next(false);
+    this.isProfileOpen.set(false);
   }
 
   openSettings() {
-    this.isSettingsOpenSubject.next(true);
+    this.isSettingsOpen.set(true);
   }
 
   closeSettings() {
-    this.isSettingsOpenSubject.next(false);
+    this.isSettingsOpen.set(false);
   }
 }

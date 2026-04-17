@@ -167,7 +167,7 @@ interface EntryStats {
       <!-- Detail Modal -->
       <vendix-journal-entry-detail
         [(isOpen)]="is_detail_modal_open"
-        [entry]="selected_entry"
+        [entry]="selected_entry()"
       ></vendix-journal-entry-detail>
     </div>
   `,
@@ -314,7 +314,8 @@ export class JournalEntriesComponent {
   }
 
   onFilterChange(values: FilterValues): void {
-    this.filter_values.set({ ...values });
+    const updatedValues = { ...values };
+    this.filter_values.set(updatedValues);
     const status_filter = (values['status'] as string) || '';
     this.store.dispatch(AccountingActions.setStatusFilter({ status_filter }));
   }

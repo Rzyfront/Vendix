@@ -1,4 +1,4 @@
-import { Component, inject, input, signal } from '@angular/core';
+import { Component, ChangeDetectionStrategy, inject, input, signal } from '@angular/core';
 
 import { RouterModule, Router } from '@angular/router';
 import { Category } from '../../services/catalog.service';

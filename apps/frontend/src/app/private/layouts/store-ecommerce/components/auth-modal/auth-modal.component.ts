@@ -5,6 +5,8 @@ import {
   input,
   output,
   effect,
+  signal,
+  computed,
 } from '@angular/core';
 import {
   FormBuilder,
@@ -72,11 +74,11 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
         </div>
         <!-- Title -->
         <h3 class="text-lg font-semibold text-[var(--color-text-primary)]">
-          {{ isLogin ? 'Iniciar Sesion' : 'Crear Cuenta' }}
+          {{ isLogin() ? 'Iniciar Sesion' : 'Crear Cuenta' }}
         </h3>
         <p class="text-sm text-[var(--color-text-secondary)] mt-1">
           {{
-            isLogin
+            isLogin()
               ? 'Ingresa tus credenciales para continuar'
               : 'Registrate para realizar tu compra'
           }}
@@ -89,10 +91,10 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
           <button
             type="button"
             (click)="switchMode(true)"
-            [class.border-b-2]="isLogin"
-            [class.border-[var(--color-primary)]]="isLogin"
-            [class.text-[var(--color-primary)]]="isLogin"
-            [class.text-[var(--color-text-secondary)]]="!isLogin"
+            [class.border-b-2]="isLogin()"
+            [class.border-[var(--color-primary)]]="isLogin()"
+            [class.text-[var(--color-primary)]]="isLogin()"
+            [class.text-[var(--color-text-secondary)]]="!isLogin()"
             class="flex-1 py-2 text-sm font-medium transition-colors"
           >
             Login
@@ -100,10 +102,10 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
           <button
             type="button"
             (click)="switchMode(false)"
-            [class.border-b-2]="!isLogin"
-            [class.border-[var(--color-primary)]]="!isLogin"
-            [class.text-[var(--color-primary)]]="!isLogin"
-            [class.text-[var(--color-text-secondary)]]="isLogin"
+            [class.border-b-2]="!isLogin()"
+            [class.border-[var(--color-primary)]]="!isLogin()"
+            [class.text-[var(--color-primary)]]="!isLogin()"
+            [class.text-[var(--color-text-secondary)]]="isLogin()"
             class="flex-1 py-2 text-sm font-medium transition-colors"
           >
             Registro
@@ -111,7 +113,7 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
         </div>
 
         <!-- Error Message -->
-        @if (errorMessage) {
+        @if (errorMessage()) {
           <div
             class="p-4 rounded-lg bg-red-50 border border-red-200"
             role="alert"
@@ -123,8 +125,8 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
                 class="text-red-500 mt-0.5 flex-shrink-0"
               ></app-icon>
               <div class="flex-1">
-                <p class="text-sm font-medium text-red-800">{{ errorTitle }}</p>
-                <p class="text-sm text-red-700 mt-1">{{ errorMessage }}</p>
+                <p class="text-sm font-medium text-red-800">{{ errorTitle() }}</p>
+                <p class="text-sm text-red-700 mt-1">{{ errorMessage() }}</p>
               </div>
             </div>
           </div>
@@ -136,7 +138,7 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
           (ngSubmit)="onSubmit()"
           class="space-y-4"
         >
-          @if (!isLogin) {
+          @if (!isLogin()) {
             <div class="grid grid-cols-2 gap-4">
               <app-input
                 label="Nombre"
@@ -170,7 +172,7 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
           ></app-input>
 
           <!-- Password requirements (always visible in register mode) -->
-          @if (!isLogin) {
+          @if (!isLogin()) {
             <div
               class="flex items-start gap-2 p-3 rounded-lg bg-blue-50 border border-blue-100"
             >
@@ -182,11 +184,11 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
               <div class="text-xs text-blue-700">
                 <p class="font-medium">Requisitos de contraseña:</p>
                 <ul class="mt-1 space-y-0.5">
-                  <li [class.text-green-600]="hasMinLength">
-                    {{ hasMinLength ? '✓' : '○' }} Mínimo 8 caracteres
+                  <li [class.text-green-600]="hasMinLength()">
+                    {{ hasMinLength() ? '✓' : '○' }} Mínimo 8 caracteres
                   </li>
-                  <li [class.text-green-600]="hasSpecialChar">
-                    {{ hasSpecialChar ? '✓' : '○' }} Al menos un carácter
+                  <li [class.text-green-600]="hasSpecialChar()">
+                    {{ hasSpecialChar() ? '✓' : '○' }} Al menos un carácter
                     especial
                   </li>
                 </ul>
@@ -195,17 +197,17 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
           }
 
           <!-- Documentos Legales -->
-          @if (!isLogin && pendingDocuments.length > 0) {
+          @if (!isLogin() && pendingDocuments().length > 0) {
             <div class="space-y-3 pt-2">
               <p class="text-xs font-medium text-[var(--color-text-primary)]">
                 Documentos Legales
               </p>
-              @for (doc of pendingDocuments; track doc.document_id) {
+              @for (doc of pendingDocuments(); track doc.document_id) {
                 <div class="flex items-start gap-2">
                   <input
                     type="checkbox"
                     [id]="'doc-' + doc.document_id"
-                    [checked]="acceptedDocuments[doc.document_id]"
+                    [checked]="acceptedDocuments()[doc.document_id]"
                     (change)="toggleDoc(doc.document_id)"
                     class="mt-1 h-3.5 w-3.5 rounded border-gray-300 text-[var(--color-primary)] focus:ring-[var(--color-primary)]"
                   />
@@ -238,7 +240,7 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
           [fullWidth]="true"
           [loading]="loading() || false"
         >
-          {{ isLogin ? 'Iniciar sesión' : 'Crear cuenta' }}
+          {{ isLogin() ? 'Iniciar sesión' : 'Crear cuenta' }}
         </app-button>
       </div>
     </app-modal>
@@ -246,9 +248,9 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
     <!-- Preview Modal -->
     <app-legal-preview-modal
       [(isOpen)]="showPreviewModal"
-      [title]="previewDoc.title"
-      [content]="previewDoc.content"
-      [version]="previewDoc.version"
+      [title]="previewDoc().title"
+      [content]="previewDoc().content"
+      [version]="previewDoc().version"
     ></app-legal-preview-modal>
   `,
 })
@@ -259,15 +261,15 @@ export class AuthModalComponent {
   readonly storeName = input('Tienda');
   readonly closed = output<void>();
 
-  isLogin = true;
-  errorMessage: string | null = null;
-  errorTitle = 'Error de autenticación';
+  readonly isLogin = signal(true);
+  readonly errorMessage = signal<string | null>(null);
+  readonly errorTitle = signal('Error de autenticación');
 
   // Legal Documents state
-  pendingDocuments: PendingDocument[] = [];
-  acceptedDocuments: Record<number, boolean> = {};
-  showPreviewModal = false;
-  previewDoc = { title: '', content: '', version: '' };
+  readonly pendingDocuments = signal<PendingDocument[]>([]);
+  readonly acceptedDocuments = signal<Record<number, boolean>>({});
+  readonly showPreviewModal = signal(false);
+  readonly previewDoc = signal({ title: '', content: '', version: '' });
 
   private fb = inject(FormBuilder);
   private authFacade = inject(AuthFacade);
@@ -278,6 +280,13 @@ export class AuthModalComponent {
 
   loading = this.authFacade.authLoading;
   authForm: FormGroup;
+
+  // Password validation — computed signals reacting to form value changes
+  private readonly passwordValue = signal('');
+  readonly hasMinLength = computed(() => this.passwordValue().length >= 8);
+  readonly hasSpecialChar = computed(() =>
+    /[^A-Za-z0-9]/.test(this.passwordValue()),
+  );
 
   constructor() {
     // Initialize form in constructor
@@ -315,18 +324,19 @@ export class AuthModalComponent {
           const rawMessage =
             typeof error === 'string' ? error : extractApiErrorMessage(error);
           const { title, message } = this.mapErrorToUserFriendly(rawMessage);
-          this.errorTitle = title;
-          this.errorMessage = message;
+          this.errorTitle.set(title);
+          this.errorMessage.set(message);
           this.toast.error(message, title, 4000);
         }
       });
 
-    // Clear error when user starts typing
+    // Clear error when user starts typing + track password value for computed signals
     this.authForm.valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(() => {
-        if (this.errorMessage) {
-          this.errorMessage = null;
+      .subscribe((value) => {
+        this.passwordValue.set(value?.password ?? '');
+        if (this.errorMessage()) {
+          this.errorMessage.set(null);
         }
       });
 
@@ -335,12 +345,12 @@ export class AuthModalComponent {
       const mode = this.initialMode();
       const open = this.isOpen();
 
-      this.isLogin = mode === 'login';
+      this.isLogin.set(mode === 'login');
       this.updateValidators();
 
       if (open) {
-        this.errorMessage = null;
-        if (!this.isLogin) {
+        this.errorMessage.set(null);
+        if (!this.isLogin()) {
           this.loadPendingDocuments();
         }
       }
@@ -359,14 +369,6 @@ export class AuthModalComponent {
   }
   get lastNameControl() {
     return this.authForm.get('last_name')!;
-  }
-
-  // Password validation getters
-  get hasMinLength(): boolean {
-    return (this.authForm.get('password')?.value || '').length >= 8;
-  }
-  get hasSpecialChar(): boolean {
-    return /[^A-Za-z0-9]/.test(this.authForm.get('password')?.value || '');
   }
 
   /**
@@ -462,14 +464,23 @@ export class AuthModalComponent {
     };
   }
 
+  private initAcceptedDocuments(docs: PendingDocument[]): void {
+    const accepted: Record<number, boolean> = {};
+    docs.forEach((doc) => {
+      accepted[doc.document_id] = false;
+    });
+    this.acceptedDocuments.set(accepted);
+  }
+
   loadPendingDocuments(): void {
     this.legalService.getPendingDocumentsForCustomer().subscribe({
       next: (docs) => {
+        let finalDocs: PendingDocument[];
         if (docs && docs.length > 0) {
-          this.pendingDocuments = docs;
+          finalDocs = docs;
         } else {
           // Fallback if no documents returned: Show generic Terms
-          this.pendingDocuments = [
+          finalDocs = [
             {
               document_id: -1, // ID negativo para identificar que es local
               title: 'Términos y Condiciones',
@@ -481,17 +492,13 @@ export class AuthModalComponent {
             },
           ];
         }
-
-        // Initialize acceptance state
-        this.acceptedDocuments = {};
-        this.pendingDocuments.forEach((doc) => {
-          this.acceptedDocuments[doc.document_id] = false;
-        });
+        this.pendingDocuments.set(finalDocs);
+        this.initAcceptedDocuments(finalDocs);
       },
       error: (err) => {
         console.error('Error loading legal docs', err);
         // On error also show fallback
-        this.pendingDocuments = [
+        const fallback: PendingDocument[] = [
           {
             document_id: -1,
             title: 'Términos y Condiciones',
@@ -502,31 +509,33 @@ export class AuthModalComponent {
             document_type: 'TERMS_OF_SERVICE',
           },
         ];
-        this.acceptedDocuments = {};
-        this.pendingDocuments.forEach((doc) => {
-          this.acceptedDocuments[doc.document_id] = false;
-        });
+        this.pendingDocuments.set(fallback);
+        this.initAcceptedDocuments(fallback);
       },
     });
   }
 
   toggleDoc(id: number): void {
-    this.acceptedDocuments[id] = !this.acceptedDocuments[id];
+    this.acceptedDocuments.update((current) => ({
+      ...current,
+      [id]: !current[id],
+    }));
   }
 
   previewDocument(doc: PendingDocument): void {
-    this.previewDoc = {
+    this.previewDoc.set({
       title: doc.title,
       content: doc.content,
       version: doc.version,
-    };
-    this.showPreviewModal = true;
+    });
+    this.showPreviewModal.set(true);
   }
 
   private processPendingAcceptances(): void {
-    const docIds = Object.keys(this.acceptedDocuments)
+    const accepted = this.acceptedDocuments();
+    const docIds = Object.keys(accepted)
       .map(Number)
-      .filter((id) => this.acceptedDocuments[id] && id > 0);
+      .filter((id) => accepted[id] && id > 0);
 
     // Gather metadata for acceptance
     const metadata = {
@@ -542,10 +551,10 @@ export class AuthModalComponent {
   }
 
   switchMode(isLogin: boolean): void {
-    this.isLogin = isLogin;
-    this.errorMessage = null;
+    this.isLogin.set(isLogin);
+    this.errorMessage.set(null);
     this.updateValidators();
-    if (!this.isLogin) {
+    if (!this.isLogin()) {
       this.loadPendingDocuments();
     }
   }
@@ -554,7 +563,7 @@ export class AuthModalComponent {
     const firstNameControl = this.authForm.get('first_name');
     const lastNameControl = this.authForm.get('last_name');
 
-    if (this.isLogin) {
+    if (this.isLogin()) {
       firstNameControl?.clearValidators();
       lastNameControl?.clearValidators();
     } else {
@@ -567,11 +576,11 @@ export class AuthModalComponent {
   }
 
   onClose(): void {
-    this.errorMessage = null;
+    this.errorMessage.set(null);
     this.closed.emit();
     this.authForm.reset();
-    this.pendingDocuments = [];
-    this.acceptedDocuments = {};
+    this.pendingDocuments.set([]);
+    this.acceptedDocuments.set({});
   }
 
   onSubmit(): void {
@@ -585,30 +594,30 @@ export class AuthModalComponent {
     }
 
     // Verificar aceptación de documentos legales en registro
-    if (!this.isLogin && this.pendingDocuments.length > 0) {
-      const allAccepted = this.pendingDocuments.every(
-        (doc) => this.acceptedDocuments[doc.document_id],
+    if (!this.isLogin() && this.pendingDocuments().length > 0) {
+      const accepted = this.acceptedDocuments();
+      const allAccepted = this.pendingDocuments().every(
+        (doc) => accepted[doc.document_id],
       );
       if (!allAccepted) {
-        this.errorMessage =
-          'Debes aceptar todos los documentos legales para continuar.';
+        this.errorMessage.set(
+          'Debes aceptar todos los documentos legales para continuar.',
+        );
         return;
       }
     }
 
     // Clear previous errors
-    this.errorMessage = null;
+    this.errorMessage.set(null);
 
-    const currentDomain = this.tenantFacade.getCurrentDomainConfig();
-    const currentStore = this.tenantFacade.getCurrentStore();
-
-    if (this.isLogin) {
+    if (this.isLogin()) {
       // Use the dedicated loginCustomer for e-commerce
       const storeId = this.tenantFacade.getCurrentStoreId();
 
       if (!storeId) {
-        this.errorMessage =
-          'No se pudo identificar la tienda. Por favor, recarga la página.';
+        this.errorMessage.set(
+          'No se pudo identificar la tienda. Por favor, recarga la página.',
+        );
         return;
       }
 
@@ -625,8 +634,9 @@ export class AuthModalComponent {
       const storeId = this.tenantFacade.getCurrentStoreId();
 
       if (!storeId) {
-        this.errorMessage =
-          'No se pudo identificar la tienda. Por favor, recarga la página.';
+        this.errorMessage.set(
+          'No se pudo identificar la tienda. Por favor, recarga la página.',
+        );
         return;
       }
 

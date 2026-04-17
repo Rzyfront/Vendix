@@ -1,17 +1,15 @@
 import { Component, inject, DestroyRef } from '@angular/core';
-import { toSignal } from '@angular/core/rxjs-interop';
+import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import { Store } from '@ngrx/store';
-import { Observable, Subject } from 'rxjs';
-import { takeUntil, filter } from 'rxjs/operators';
+import { Observable } from 'rxjs';
+import { filter } from 'rxjs/operators';
 
 import {
   loadEmployees,
-  loadEmployeeStats,
-} from '../state/actions/payroll.actions';
+  loadEmployeeStats } from '../state/actions/payroll.actions';
 import {
   selectEmployees,
-  selectEmployeesLoading,
-} from '../state/selectors/payroll.selectors';
+  selectEmployeesLoading } from '../state/selectors/payroll.selectors';
 import { Employee } from '../interfaces/payroll.interface';
 
 import { PayrollStatsComponent } from '../components/payroll-stats/payroll-stats.component';
@@ -63,17 +61,13 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
         (uploadComplete)="onBulkUploadComplete()"
       ></app-employee-bulk-upload-modal>
     </div>
-  `,
-})
+  ` })
 export class PayrollEmployeesPageComponent {
   private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
   private destroyRef = inject(DestroyRef);
-  private destroy$ = new Subject<void>();
-
-  readonly employees = toSignal(this.store.select(selectEmployees), {
-    initialValue: [] as Employee[],
-  });
+readonly employees = toSignal(this.store.select(selectEmployees), {
+    initialValue: [] as Employee[] });
   readonly employeesLoading = toSignal(
     this.store.select(selectEmployeesLoading),
     { initialValue: false },
@@ -90,8 +84,6 @@ export class PayrollEmployeesPageComponent {
     this.store.dispatch(loadEmployeeStats());
 
     this.destroyRef.onDestroy(() => {
-      this.destroy$.next();
-      this.destroy$.complete();
     });
   }
 

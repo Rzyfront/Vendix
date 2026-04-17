@@ -1,27 +1,24 @@
-import {
-  Component,
+import {Component,
   OnInit,
-  OnDestroy,
   inject,
   input,
   output,
   model,
-} from '@angular/core';
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   ReactiveFormsModule,
   FormBuilder,
   FormGroup,
-  Validators,
-} from '@angular/forms';
+  Validators} from '@angular/forms';
 import {
   InputComponent,
   ButtonComponent,
-  ModalComponent,
-} from '../../../../../shared/components/index';
+  ModalComponent} from '../../../../../shared/components/index';
 import { UsersService } from '../services/users.service';
 import { User, UpdateUserDto, UserState } from '../interfaces/user.interface';
-import { Subject, takeUntil } from 'rxjs';
+
 
 @Component({
   selector: 'app-user-edit-modal',
@@ -189,9 +186,9 @@ import { Subject, takeUntil } from 'rxjs';
         display: block;
       }
     `,
-  ],
-})
-export class UserEditModalComponent implements OnInit, OnDestroy {
+  ]})
+export class UserEditModalComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   readonly user = input<User | null>(null);
   readonly isOpen = model<boolean>(false);
   readonly isOpenChange = output<boolean>();
@@ -200,9 +197,7 @@ export class UserEditModalComponent implements OnInit, OnDestroy {
   userForm: FormGroup;
   isUpdating: boolean = false;
   UserState = UserState;
-  private destroy$ = new Subject<void>();
-
-  constructor(
+constructor(
     private fb: FormBuilder,
     private usersService: UsersService,
   ) {
@@ -231,8 +226,7 @@ export class UserEditModalComponent implements OnInit, OnDestroy {
           ),
         ],
       ],
-      state: [UserState.ACTIVE],
-    });
+      state: [UserState.ACTIVE]});
   }
 
   ngOnInit(): void {}
@@ -241,13 +235,7 @@ export class UserEditModalComponent implements OnInit, OnDestroy {
     this.isOpen.set(false);
     this.isOpenChange.emit(false);
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  ngOnChanges(): void {
+ngOnChanges(): void {
     const user = this.user();
     if (user) {
       this.userForm.patchValue({
@@ -255,8 +243,7 @@ export class UserEditModalComponent implements OnInit, OnDestroy {
         last_name: user.last_name,
         username: user.username,
         email: user.email,
-        state: user.state,
-      });
+        state: user.state});
     }
   }
 
@@ -280,7 +267,7 @@ export class UserEditModalComponent implements OnInit, OnDestroy {
 
     this.usersService
       .updateUser(user.id, userData)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.isUpdating = false;
@@ -295,8 +282,7 @@ export class UserEditModalComponent implements OnInit, OnDestroy {
           this.isUpdating = false;
           console.error('Error updating user:', error);
           // TODO: Show user-friendly error message
-        },
-      });
+        }});
   }
 
   formatDate(dateString: string): string {
@@ -304,7 +290,6 @@ export class UserEditModalComponent implements OnInit, OnDestroy {
     return date.toLocaleDateString('es-ES', {
       day: '2-digit',
       month: '2-digit',
-      year: 'numeric',
-    });
+      year: 'numeric'});
   }
 }

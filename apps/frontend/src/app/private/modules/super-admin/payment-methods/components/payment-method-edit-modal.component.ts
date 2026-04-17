@@ -1,32 +1,28 @@
-import {
-  Component,
+import {Component,
   OnInit,
-  OnDestroy,
   inject,
   input,
   output,
   effect,
-} from '@angular/core';
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   ReactiveFormsModule,
   FormBuilder,
   FormGroup,
-  Validators,
-} from '@angular/forms';
+  Validators} from '@angular/forms';
 import {
   PaymentMethod,
   UpdatePaymentMethodDto,
   PaymentMethodType,
-  ProcessingFeeType,
-} from '../interfaces/payment-method.interface';
+  ProcessingFeeType} from '../interfaces/payment-method.interface';
 import {
   InputComponent,
   ButtonComponent,
   ModalComponent,
-  SelectorComponent,
-} from '../../../../../shared/components/index';
-import { Subject, takeUntil } from 'rxjs';
+  SelectorComponent} from '../../../../../shared/components/index';
+
 
 @Component({
   selector: 'app-payment-method-edit-modal',
@@ -235,9 +231,9 @@ import { Subject, takeUntil } from 'rxjs';
         display: block;
       }
     `,
-  ],
-})
-export class PaymentMethodEditModalComponent implements OnInit, OnDestroy {
+  ]})
+export class PaymentMethodEditModalComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private readonly fb = inject(FormBuilder);
 
   paymentMethod = input<PaymentMethod | null>(null);
@@ -247,9 +243,7 @@ export class PaymentMethodEditModalComponent implements OnInit, OnDestroy {
   onPaymentMethodUpdated = output<UpdatePaymentMethodDto>();
 
   paymentMethodForm: FormGroup;
-  private destroy$ = new Subject<void>();
-
-  typeOptions = [
+typeOptions = [
     { value: PaymentMethodType.CASH, label: 'Efectivo' },
     { value: PaymentMethodType.CARD, label: 'Tarjeta' },
     { value: PaymentMethodType.PAYPAL, label: 'PayPal' },
@@ -276,8 +270,7 @@ export class PaymentMethodEditModalComponent implements OnInit, OnDestroy {
       processing_fee_value: [null],
       min_amount: [null],
       max_amount: [null],
-      is_active: [true],
-    });
+      is_active: [true]});
 
     effect(() => {
       const pm = this.paymentMethod();
@@ -294,8 +287,7 @@ export class PaymentMethodEditModalComponent implements OnInit, OnDestroy {
           processing_fee_value: pm.processing_fee_value,
           min_amount: pm.min_amount,
           max_amount: pm.max_amount,
-          is_active: pm.is_active,
-        });
+          is_active: pm.is_active});
       }
     });
 
@@ -307,13 +299,7 @@ export class PaymentMethodEditModalComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void { }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  toggleStatus(active: boolean): void {
+toggleStatus(active: boolean): void {
     this.paymentMethodForm.patchValue({ is_active: active });
   }
 
@@ -351,7 +337,6 @@ export class PaymentMethodEditModalComponent implements OnInit, OnDestroy {
       processing_fee_value: null,
       min_amount: null,
       max_amount: null,
-      is_active: true,
-    });
+      is_active: true});
   }
 }

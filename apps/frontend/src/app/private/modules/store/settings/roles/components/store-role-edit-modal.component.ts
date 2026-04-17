@@ -1,30 +1,26 @@
-import {
-  Component,
+import {Component,
   input,
   output,
   model,
-  OnDestroy,
   inject,
-} from '@angular/core';
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   ReactiveFormsModule,
   FormBuilder,
   FormGroup,
-  Validators,
-} from '@angular/forms';
+  Validators} from '@angular/forms';
 import {
   InputComponent,
   ButtonComponent,
   ModalComponent,
-  ToastService,
-} from '../../../../../../shared/components/index';
+  ToastService} from '../../../../../../shared/components/index';
 import { StoreRolesService } from '../services/store-roles.service';
 import {
   StoreRole,
-  UpdateStoreRoleDto,
-} from '../interfaces/store-role.interface';
-import { Subject, takeUntil } from 'rxjs';
+  UpdateStoreRoleDto} from '../interfaces/store-role.interface';
+
 
 @Component({
   selector: 'app-store-role-edit-modal',
@@ -125,9 +121,9 @@ import { Subject, takeUntil } from 'rxjs';
         display: block;
       }
     `,
-  ],
-})
-export class StoreRoleEditModalComponent implements OnDestroy {
+  ]})
+export class StoreRoleEditModalComponent implements {
+  private destroyRef = inject(DestroyRef);
   readonly role = model<StoreRole | null>(null);
   readonly isOpen = model<boolean>(false);
   readonly isOpenChange = output<boolean>();
@@ -135,9 +131,7 @@ export class StoreRoleEditModalComponent implements OnDestroy {
 
   roleForm: FormGroup;
   isUpdating: boolean = false;
-  private destroy$ = new Subject<void>();
-
-  private storeRolesService = inject(StoreRolesService);
+private storeRolesService = inject(StoreRolesService);
   private toastService = inject(ToastService);
 
   constructor(private fb: FormBuilder) {
@@ -150,22 +144,14 @@ export class StoreRoleEditModalComponent implements OnDestroy {
           Validators.maxLength(50),
         ],
       ],
-      description: [''],
-    });
+      description: ['']});
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  ngOnChanges(): void {
+ngOnChanges(): void {
     const currentRole = this.role();
     if (currentRole) {
       this.roleForm.patchValue({
         name: currentRole.name,
-        description: currentRole.description || '',
-      });
+        description: currentRole.description || ''});
     }
   }
 
@@ -183,7 +169,7 @@ export class StoreRoleEditModalComponent implements OnDestroy {
 
     this.storeRolesService
       .updateRole(currentRole.id, roleData)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.isUpdating = false;
@@ -201,8 +187,7 @@ export class StoreRoleEditModalComponent implements OnDestroy {
           console.error('Error updating store role:', error);
           const message = error?.error?.message || 'Error al actualizar el rol';
           this.toastService.error(message);
-        },
-      });
+        }});
   }
 
   onCancel(): void {

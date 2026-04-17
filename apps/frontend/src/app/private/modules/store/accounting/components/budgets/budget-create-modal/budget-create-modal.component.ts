@@ -1,8 +1,10 @@
-import { Component, inject, OnDestroy, input, output } from '@angular/core';
+import {Component, inject, input, output,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { Router } from '@angular/router';
-import { Subject, takeUntil } from 'rxjs';
+
 
 import { AccountingService } from '../../../services/accounting.service';
 import { FiscalPeriod } from '../../../interfaces/accounting.interface';
@@ -13,8 +15,7 @@ import {
   SelectorComponent,
   SelectorOption,
   TextareaComponent,
-  ToastService,
-} from '../../../../../../../shared/components/index';
+  ToastService} from '../../../../../../../shared/components/index';
 
 @Component({
   selector: 'vendix-budget-create-modal',
@@ -28,11 +29,10 @@ import {
     TextareaComponent
 ],
   templateUrl: './budget-create-modal.component.html',
-  styleUrls: ['./budget-create-modal.component.scss'],
-})
-export class BudgetCreateModalComponent implements OnDestroy {
-  private destroy$ = new Subject<void>();
-  private fb = inject(FormBuilder);
+  styleUrls: ['./budget-create-modal.component.scss']})
+export class BudgetCreateModalComponent implements {
+  private destroyRef = inject(DestroyRef);
+private fb = inject(FormBuilder);
   private accounting_service = inject(AccountingService);
   private toast_service = inject(ToastService);
   private router = inject(Router);
@@ -48,31 +48,22 @@ export class BudgetCreateModalComponent implements OnDestroy {
     name: ['', [Validators.required, Validators.minLength(3)]],
     description: [''],
     fiscal_period_id: [null as number | null, [Validators.required]],
-    variance_threshold: [10, [Validators.min(0), Validators.max(100)]],
-  });
+    variance_threshold: [10, [Validators.min(0), Validators.max(100)]]});
 
   constructor() {
     this.loadFiscalPeriods();
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  private loadFiscalPeriods(): void {
+private loadFiscalPeriods(): void {
     this.accounting_service
       .getFiscalPeriods()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           const periods: FiscalPeriod[] = res.data || [];
           this.fiscal_periods = periods.map((p) => ({
             value: p.id,
-            label: p.name,
-          }));
-        },
-      });
+            label: p.name}));
+        }});
   }
 
   onSubmit(): void {
@@ -83,7 +74,7 @@ export class BudgetCreateModalComponent implements OnDestroy {
 
     this.accounting_service
       .createBudget(dto as any)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.toast_service.show({ variant: 'success', description: 'Presupuesto creado' });
@@ -99,8 +90,7 @@ export class BudgetCreateModalComponent implements OnDestroy {
         error: () => {
           this.toast_service.show({ variant: 'error', description: 'Error al crear presupuesto' });
           this.is_submitting = false;
-        },
-      });
+        }});
   }
 
   onClose(): void {
