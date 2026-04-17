@@ -1,4 +1,4 @@
-import { Component, input, computed, OnInit, OnDestroy } from '@angular/core';
+import { Component, input, computed, signal, OnInit, OnDestroy } from '@angular/core';
 
 import { RouterModule } from '@angular/router';
 
@@ -46,7 +46,7 @@ export class ImageCarouselComponent implements OnInit, OnDestroy {
     },
   ];
 
-  currentSlide = 0;
+  readonly currentSlide = signal(0);
   autoplayInterval: any;
 
   ngOnInit() {
@@ -58,19 +58,20 @@ export class ImageCarouselComponent implements OnInit, OnDestroy {
   }
 
   goToSlide(index: number) {
-    this.currentSlide = index;
+    this.currentSlide.set(index);
     this.updateSlideVisibility();
   }
 
   nextSlide() {
-    this.currentSlide = (this.currentSlide + 1) % this.effectiveSlides().length;
+    this.currentSlide.set((this.currentSlide() + 1) % this.effectiveSlides().length);
     this.updateSlideVisibility();
   }
 
   prevSlide() {
-    this.currentSlide =
-      (this.currentSlide - 1 + this.effectiveSlides().length) %
-      this.effectiveSlides().length;
+    this.currentSlide.set(
+      (this.currentSlide() - 1 + this.effectiveSlides().length) %
+      this.effectiveSlides().length
+    );
     this.updateSlideVisibility();
   }
 

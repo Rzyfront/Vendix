@@ -52,9 +52,9 @@ interface RegistrationError {
         <!-- Branding -->
         <div class="text-center">
           <div class="mx-auto flex items-center justify-center space-x-2 sm:space-x-3 mb-3 sm:mb-4">
-            @if (logoUrl) {
+            @if (logoUrl()) {
               <div class="w-8 h-8 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center overflow-hidden">
-                <img [src]="logoUrl" alt="Logo" class="w-full h-full object-contain" />
+                <img [src]="logoUrl()" alt="Logo" class="w-full h-full object-contain" />
               </div>
             } @else {
               <div
@@ -240,7 +240,14 @@ export class RegisterOwnerComponent implements OnInit {
 
   readonly registrationState = signal<RegistrationState>('idle');
   readonly registrationError = signal<RegistrationError | null>(null);
-  logoUrl: string = '';
+  readonly logoUrl = computed(() => {
+    const appConfig = this.configFacade.getCurrentConfig();
+    if (appConfig) {
+      return appConfig.branding?.logo?.url ||
+        (appConfig.domainConfig?.isMainVendixDomain ? 'vlogo.png' : '');
+    }
+    return '';
+  });
 
   readonly isLoading = signal(false);
 
@@ -261,13 +268,7 @@ export class RegisterOwnerComponent implements OnInit {
   });
 
   ngOnInit(): void {
-    const appConfig = this.configFacade.getCurrentConfig();
-    if (appConfig) {
-      this.logoUrl = appConfig.branding?.logo?.url || '';
-      if (!this.logoUrl && appConfig.domainConfig?.isMainVendixDomain) {
-        this.logoUrl = 'vlogo.png';
-      }
-    }
+    // logoUrl es ahora computed() — no necesita inicialización
   }
 
   onFieldBlur(fieldName: string): void {

@@ -1,4 +1,4 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, inject, signal, computed } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
@@ -29,14 +29,14 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
       <header class="storefront-header">
         <div class="header-content">
           <div class="store-logo" (click)="navigateToHome()">
-            @if (branding?.logo) {
+            @if (branding()?.logo) {
               <img
-                [src]="branding.logo"
+                [src]="branding()?.logo"
                 [alt]="storeName + ' Logo'"
                 class="logo-image"
               />
             }
-            @if (!branding?.logo) {
+            @if (!branding()?.logo) {
               <div class="logo-fallback">
                 <app-icon
                   name="shopping-bag"
@@ -54,7 +54,8 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
                 placeholder="Buscar productos..."
                 [debounceTime]="400"
                 size="sm"
-                [(ngModel)]="searchTerm"
+                [ngModel]="searchTerm()"
+                (ngModelChange)="searchTerm.set($event)"
                 (search)="onSearch()"
               ></app-inputsearch>
             </div>
@@ -67,8 +68,8 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
                   title="Favoritos"
                 >
                   <app-icon name="heart" [size]="22"></app-icon>
-                  @if (wishlist.length > 0) {
-                    <span class="badge">{{ wishlist.length }}</span>
+                  @if (wishlist().length > 0) {
+                    <span class="badge">{{ wishlist().length }}</span>
                   }
                 </button>
                 <button
@@ -103,8 +104,8 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
                 title="Carrito"
               >
                 <app-icon name="shopping-cart" [size]="22"></app-icon>
-                @if (cartItems.length > 0) {
-                  <span class="badge badge-accent">{{ cartItems.length }}</span>
+                @if (cartItems().length > 0) {
+                  <span class="badge badge-accent">{{ cartItems().length }}</span>
                 }
               </button>
             </div>
@@ -118,7 +119,7 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
         <section class="hero-banner">
           <div class="banner-content">
             <h2>{{ heroTitle }}</h2>
-            <p>{{ heroDescription }}</p>
+            <p>{{ heroDescription() }}</p>
             <app-button
               (click)="scrollToProducts()"
               variant="primary"
@@ -130,15 +131,15 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
         </section>
 
         <!-- Categories -->
-        @if (categories.length) {
+        @if (categories().length) {
           <section class="categories-section">
             <h3>Categorías</h3>
             <div class="categories-grid">
-              @for (category of categories; track category) {
+              @for (category of categories(); track category) {
                 <div
                   class="category-card"
                   (click)="filterByCategory(category.id)"
-                  [class.active]="selectedCategory === category.id"
+                  [class.active]="selectedCategory() === category.id"
                 >
                   <div class="category-icon">{{ category.icon }}</div>
                   <span>{{ category.name }}</span>
@@ -153,7 +154,7 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
           <div class="section-header">
             <h3>Productos</h3>
             <div class="sort-options">
-              <select [(ngModel)]="sortBy" (change)="sortProducts()">
+              <select [ngModel]="sortBy()" (ngModelChange)="sortBy.set($event); sortProducts()">
                 <option value="name">Ordenar por Nombre</option>
                 <option value="price-low">Precio: Menor a Mayor</option>
                 <option value="price-high">Precio: Mayor a Menor</option>
@@ -163,7 +164,7 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
           </div>
 
           <div class="products-grid">
-            @for (product of filteredProducts; track product) {
+            @for (product of filteredProducts(); track product) {
               <div class="product-card">
                 <app-card class="product-card-content">
                   <div class="product-image">
@@ -213,7 +214,7 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
             }
           </div>
 
-          @if (filteredProducts.length === 0) {
+          @if (filteredProducts().length === 0) {
             <div class="no-products">
               <p>No se encontraron productos que coincidan con tu búsqueda.</p>
             </div>
@@ -222,14 +223,14 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
       </main>
 
       <!-- Shopping Cart Sidebar -->
-      @if (showCart) {
+      @if (showCart()) {
         <div class="cart-sidebar">
           <div class="cart-header">
             <h4>Tu Carrito</h4>
             <button class="close-cart" (click)="toggleCart()">×</button>
           </div>
           <div class="cart-items">
-            @for (item of cartItems; track item) {
+            @for (item of cartItems(); track item) {
               <div class="cart-item">
                 <img
                   [src]="item.image"
@@ -255,7 +256,7 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
             }
           </div>
           <div class="cart-footer">
-            <div class="cart-total">Total: {{ cartTotal | currency }}</div>
+            <div class="cart-total">Total: {{ cartTotal() | currency }}</div>
             <app-button
               variant="primary"
               size="lg"
@@ -272,7 +273,7 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
         <div class="footer-content">
           <div class="footer-section">
             <h5>{{ storeName }}</h5>
-            <p>{{ storeDescription }}</p>
+            <p>{{ storeDescription() }}</p>
           </div>
           <div class="footer-section">
             <h5>Contacto</h5>
@@ -289,37 +290,42 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
   styleUrls: ['./storefront.component.scss'],
 })
 export class StorefrontComponent implements OnInit {
-  storeName = 'Tienda';
-  storeDescription = '';
-  branding: any = {};
-  heroTitle = 'Bienvenido a Nuestra Tienda';
-  heroDescription = 'Descubre los mejores productos con precios increíbles';
-  contactInfo = 'Tel: +1 234 567 8900 | Email: info@tienda.com';
-  storeHours = 'Lunes a Viernes: 9:00 AM - 6:00 PM';
+  // Constants
+  readonly storeName = 'Tienda';
+  readonly heroTitle = 'Bienvenido a Nuestra Tienda';
+  readonly contactInfo = 'Tel: +1 234 567 8900 | Email: info@tienda.com';
+  readonly storeHours = 'Lunes a Viernes: 9:00 AM - 6:00 PM';
 
-  searchTerm = '';
-  selectedCategory: string | null = null;
-  sortBy = 'name';
-  showCart = false;
+  // Signals para estado de UI
+  readonly storeDescription = signal('');
+  readonly branding = signal<any>({});
+  readonly heroDescription = signal('Descubre los mejores productos con precios increíbles');
+  readonly searchTerm = signal('');
+  readonly selectedCategory = signal<string | null>(null);
+  readonly sortBy = signal('name');
+  readonly showCart = signal(false);
 
-  categories: any[] = [];
-  products: any[] = [];
-  filteredProducts: any[] = [];
-  cartItems: any[] = [];
-  wishlist: any[] = [];
+  // Data arrays
+  readonly categories = signal<any[]>([]);
+  readonly products = signal<any[]>([]);
+  readonly filteredProducts = signal<any[]>([]);
+  readonly cartItems = signal<any[]>([]);
+  readonly wishlist = signal<any[]>([]);
 
-  get cartTotal(): number {
-    return this.cartItems.reduce(
+  // Computed
+  readonly cartTotal = computed(() =>
+    this.cartItems().reduce(
       (total, item) => total + item.price * item.quantity,
       0,
-    );
-  }
+    )
+  );
 
   private configFacade = inject(ConfigFacade);
   private authFacade = inject(AuthFacade);
   private router = inject(Router);
 
-  isAuthenticated = this.authFacade.isAuthenticated;
+  // Reference to authFacade signal
+  readonly isAuthenticated = this.authFacade.isAuthenticated;
 
   async ngOnInit() {
     const appConfig = this.configFacade.getCurrentConfig();
@@ -331,20 +337,20 @@ export class StorefrontComponent implements OnInit {
     const domainConfig = appConfig.domainConfig;
     // const tenantConfig = appConfig.tenantConfig;
 
-    this.storeName = domainConfig.store_slug || 'Tienda';
-    // this.branding = tenantConfig?.branding || {};
-    // this.storeDescription = tenantConfig?.store?.description || '';
+    // this.storeName = domainConfig.store_slug || 'Tienda'; // readonly, no mutable
+    // this.branding.set(tenantConfig?.branding || {});
+    // this.storeDescription.set(tenantConfig?.store?.description || '');
 
     // Cargar datos de ejemplo
-    this.categories = this.generateSampleCategories();
-    this.products = this.generateSampleProducts();
-    this.filteredProducts = [...this.products];
+    this.categories.set(this.generateSampleCategories());
+    this.products.set(this.generateSampleProducts());
+    this.filteredProducts.set([...this.products()]);
   }
 
   private loadDefaultData() {
-    this.categories = this.generateSampleCategories();
-    this.products = this.generateSampleProducts();
-    this.filteredProducts = [...this.products];
+    this.categories.set(this.generateSampleCategories());
+    this.products.set(this.generateSampleProducts());
+    this.filteredProducts.set([...this.products()]);
   }
 
   private generateSampleCategories(): any[] {
@@ -409,70 +415,83 @@ export class StorefrontComponent implements OnInit {
   }
 
   filterByCategory(categoryId: string) {
-    this.selectedCategory =
-      this.selectedCategory === categoryId ? null : categoryId;
+    const currentCategory = this.selectedCategory();
+    this.selectedCategory.set(
+      currentCategory === categoryId ? null : categoryId
+    );
     this.filterProducts();
   }
 
   filterProducts() {
-    let filtered = [...this.products];
+    let filtered = [...this.products()];
+    const searchTermVal = this.searchTerm().toLowerCase();
 
     // Filtrar por búsqueda
-    if (this.searchTerm) {
+    if (searchTermVal) {
       filtered = filtered.filter(
         (product) =>
-          product.name.toLowerCase().includes(this.searchTerm.toLowerCase()) ||
+          product.name.toLowerCase().includes(searchTermVal) ||
           product.description
             .toLowerCase()
-            .includes(this.searchTerm.toLowerCase()),
+            .includes(searchTermVal),
       );
     }
 
     // Filtrar por categoría
-    if (this.selectedCategory) {
+    const selectedCat = this.selectedCategory();
+    if (selectedCat) {
       filtered = filtered.filter(
-        (product) => product.category === this.selectedCategory,
+        (product) => product.category === selectedCat,
       );
     }
 
-    this.filteredProducts = filtered;
+    this.filteredProducts.set(filtered);
     this.sortProducts();
   }
 
   sortProducts() {
-    switch (this.sortBy) {
+    const sortByVal = this.sortBy();
+    const filtered = [...this.filteredProducts()];
+
+    switch (sortByVal) {
       case 'name':
-        this.filteredProducts.sort((a, b) => a.name.localeCompare(b.name));
+        filtered.sort((a, b) => a.name.localeCompare(b.name));
         break;
       case 'price-low':
-        this.filteredProducts.sort((a, b) => a.price - b.price);
+        filtered.sort((a, b) => a.price - b.price);
         break;
       case 'price-high':
-        this.filteredProducts.sort((a, b) => b.price - a.price);
+        filtered.sort((a, b) => b.price - a.price);
         break;
       case 'newest':
         // Simular orden por fecha (en producción usaría fecha real)
-        this.filteredProducts.sort((a, b) => b.id - a.id);
+        filtered.sort((a, b) => b.id - a.id);
         break;
     }
+
+    this.filteredProducts.set(filtered);
   }
 
   addToCart(product: any) {
-    const existingItem = this.cartItems.find((item) => item.id === product.id);
+    const currentItems = this.cartItems();
+    const existingItem = currentItems.find((item) => item.id === product.id);
 
     if (existingItem) {
       existingItem.quantity++;
+      this.cartItems.set([...currentItems]);
     } else {
-      this.cartItems.push({
+      this.cartItems.set([...currentItems, {
         ...product,
         quantity: 1,
-      });
+      }]);
     }
   }
 
   removeFromCart(item: any) {
-    this.cartItems = this.cartItems.filter(
-      (cartItem) => cartItem.id !== item.id,
+    this.cartItems.set(
+      this.cartItems().filter(
+        (cartItem) => cartItem.id !== item.id,
+      )
     );
   }
 
@@ -483,21 +502,25 @@ export class StorefrontComponent implements OnInit {
       this.removeFromCart(item);
     } else if (newQuantity <= item.stock) {
       item.quantity = newQuantity;
+      this.cartItems.set([...this.cartItems()]);
     }
   }
 
   toggleWishlist(product: any) {
-    const index = this.wishlist.findIndex((item) => item.id === product.id);
+    const currentWishlist = this.wishlist();
+    const index = currentWishlist.findIndex((item) => item.id === product.id);
 
     if (index > -1) {
-      this.wishlist.splice(index, 1);
+      const updated = [...currentWishlist];
+      updated.splice(index, 1);
+      this.wishlist.set(updated);
     } else {
-      this.wishlist.push(product);
+      this.wishlist.set([...currentWishlist, product]);
     }
   }
 
   toggleCart() {
-    this.showCart = !this.showCart;
+    this.showCart.update(v => !v);
   }
 
   scrollToProducts() {
