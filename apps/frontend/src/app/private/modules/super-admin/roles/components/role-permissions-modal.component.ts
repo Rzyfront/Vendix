@@ -79,7 +79,7 @@ import {
               variant="outline"
               size="sm"
               (clicked)="selectAllPermissions()"
-              [disabled]="isLoading"
+              [disabled]="isLoading()"
             >
               Seleccionar todos
             </app-button>
@@ -87,7 +87,7 @@ import {
               variant="outline"
               size="sm"
               (clicked)="deselectAllPermissions()"
-              [disabled]="isLoading"
+              [disabled]="isLoading()"
             >
               Deseleccionar todos
             </app-button>
@@ -95,7 +95,7 @@ import {
         </div>
 
         <!-- Loading state -->
-        @if (isLoading) {
+        @if (isLoading()) {
           <div class="flex justify-center py-8">
             <div
               class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
@@ -104,7 +104,7 @@ import {
         }
 
         <!-- Permissions table -->
-        @if (!isLoading) {
+        @if (!isLoading()) {
           <div class="permissions-table-container">
             <div class="overflow-x-auto">
               <table class="min-w-full divide-y divide-border">
@@ -148,7 +148,7 @@ import {
                 </thead>
                 <tbody class="bg-surface divide-y divide-border">
                   @for (
-                    permission of filteredPermissions;
+                    permission of filteredPermissions();
                     track trackByPermissionId($index, permission)
                   ) {
                     <tr class="hover:bg-muted/10 transition-colors">
@@ -195,7 +195,7 @@ import {
               </table>
             </div>
             <!-- Empty state -->
-            @if (filteredPermissions.length === 0) {
+            @if (filteredPermissions().length === 0) {
               <div class="text-center py-8">
                 <app-icon
                   name="search"
@@ -211,9 +211,9 @@ import {
         <!-- Selected permissions summary -->
         <div class="selected-summary">
           <p class="text-sm text-text-secondary">
-            <span class="font-medium">{{ selectedPermissions.length }}</span>
+            <span class="font-medium">{{ selectedPermissions().length }}</span>
             de
-            <span class="font-medium">{{ filteredPermissions.length }}</span>
+            <span class="font-medium">{{ filteredPermissions().length }}</span>
             permisos seleccionados
           </p>
         </div>
