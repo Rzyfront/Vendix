@@ -3,7 +3,6 @@ import { CanActivate, Router } from '@angular/router';
 import { AuthFacade } from '../store/auth/auth.facade';
 import { EnvironmentContextService } from '../services/environment-context.service';
 import { AppEnvironment } from '../models/domain-config.interface';
-import { take } from 'rxjs/operators';
 import { ToastService } from '../../shared/components/toast/toast.service';
 
 @Injectable({
@@ -25,9 +24,7 @@ export class OrganizationAdminGuard implements CanActivate {
       }
 
       // Verificar que el usuario está autenticado
-      const isAuthenticated = await this.authFacade.isAuthenticated$
-        .pipe(take(1))
-        .toPromise();
+      const isAuthenticated = this.authFacade.isAuthenticated();
       if (!isAuthenticated) {
         this.toastService.warning('No tienes permisos para ver esa ruta');
         this.router.navigate(['/auth/login']);
@@ -43,7 +40,7 @@ export class OrganizationAdminGuard implements CanActivate {
       }
 
       // Verificar roles de organización
-      const user = await this.authFacade.user$.pipe(take(1)).toPromise();
+      const user = this.authFacade.user();
       const hasOrgRole = user?.roles?.some((role: string) =>
         ['org_admin', 'owner', 'super_admin'].includes(role),
       );

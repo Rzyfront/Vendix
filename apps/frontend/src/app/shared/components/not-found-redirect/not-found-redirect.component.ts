@@ -1,14 +1,8 @@
-import { Component, inject, OnInit } from '@angular/core';
+import { Component, inject } from '@angular/core';
 import { Router } from '@angular/router';
-import { Store } from '@ngrx/store';
-import { take } from 'rxjs/operators';
-import { combineLatest } from 'rxjs';
 import { ToastService } from '../toast/toast.service';
 import { SessionService } from '../../../core/services/session.service';
-import {
-  selectIsAuthenticated,
-  selectSelectedAppType,
-} from '../../../core/store/auth/auth.selectors';
+import { AuthFacade } from '../../../core/store/auth/auth.facade';
 import { AppEnvironment } from '../../../core/models/domain-config.interface';
 
 /**
@@ -32,10 +26,10 @@ import { AppEnvironment } from '../../../core/models/domain-config.interface';
   standalone: true,
   template: '',
 })
-export class NotFoundRedirectComponent implements OnInit {
+export class NotFoundRedirectComponent {
   private router = inject(Router);
   private toastService = inject(ToastService);
-  private store = inject(Store);
+  private authFacade = inject(AuthFacade);
   private sessionService = inject(SessionService);
 
   private readonly APP_REDIRECT_MAP: Record<string, string> = {
@@ -48,14 +42,11 @@ export class NotFoundRedirectComponent implements OnInit {
     [AppEnvironment.STORE_LANDING]: '/',
   };
 
-  ngOnInit(): void {
-    // Si la sesión se está terminando, no hacer nada
-    // SessionService maneja la navegación
+  constructor() {
     if (this.sessionService.isTerminating()) {
       return;
     }
 
-    // Solo mostrar toast si NO estamos en proceso de logout
     if (!this.sessionService.shouldSuppressNotifications()) {
       this.toastService.warning(
         'La ruta solicitada no existe o no está disponible',
@@ -63,16 +54,10 @@ export class NotFoundRedirectComponent implements OnInit {
       );
     }
 
-    // Get user state and redirect
-    combineLatest([
-      this.store.select(selectIsAuthenticated),
-      this.store.select(selectSelectedAppType),
-    ])
-      .pipe(take(1))
-      .subscribe(([isAuthenticated, appType]) => {
-        const redirectUrl = this.getRedirectUrl(isAuthenticated, appType);
-        this.router.navigate([redirectUrl]);
-      });
+    const isAuthenticated = this.authFacade.isAuthenticated();
+    const appType = this.authFacade.selectedAppType();
+    const redirectUrl = this.getRedirectUrl(isAuthenticated, appType);
+    this.router.navigate([redirectUrl]);
   }
 
   private getRedirectUrl(isAuthenticated: boolean, appType: string): string {

@@ -1,5 +1,5 @@
-import { Component, EventEmitter, Input, Output } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, model, input, output } from '@angular/core';
+
 import { FormsModule } from '@angular/forms';
 import { ModalComponent } from '../modal/modal.component';
 import { ButtonComponent } from '../button/button.component';
@@ -8,39 +8,39 @@ import { InputComponent } from '../input/input.component';
 @Component({
   selector: 'app-prompt-modal',
   standalone: true,
-  imports: [CommonModule, FormsModule, ModalComponent, ButtonComponent, InputComponent],
+  imports: [FormsModule, ModalComponent, ButtonComponent, InputComponent],
   templateUrl: './prompt-modal.component.html',
   styleUrl: './prompt-modal.component.scss',
 })
 export class PromptModalComponent {
-  @Input() title = 'Ingresar valor';
-  @Input() message = '';
-  @Input() placeholder = '';
-  @Input() defaultValue = '';
-  @Input() confirmText = 'Aceptar';
-  @Input() cancelText = 'Cancelar';
-  @Input() size: 'sm' | 'md' | 'lg' = 'sm';
-  @Input() showCloseButton = true;
-  @Input() customClasses = '';
+  readonly title = input('Ingresar valor');
+  readonly message = input('');
+  readonly placeholder = input('');
+  readonly defaultValue = input('');
+  readonly confirmText = input('Aceptar');
+  readonly cancelText = input('Cancelar');
+  readonly size = input<'sm' | 'md' | 'lg'>('sm');
+  readonly showCloseButton = input(true);
+  readonly customClasses = input('');
+  readonly inputType = input<'text' | 'number'>('text');
+  readonly isOpen = model(true);
 
-  @Output() confirm = new EventEmitter<string>();
-  @Output() cancel = new EventEmitter<void>();
-  @Output() isOpenChange = new EventEmitter<boolean>();
+  readonly confirm = output<string>();
+  readonly cancel = output<void>();
 
-  @Input() isOpen = true;
   inputValue = '';
 
-  ngOnInit(): void {
-    this.inputValue = this.defaultValue;
+  constructor() {
+    this.inputValue = '';
   }
 
   onConfirm(): void {
     this.confirm.emit(this.inputValue);
-    this.isOpenChange.emit(false);
+    this.isOpen.set(false);
   }
 
   onCancel(): void {
     this.cancel.emit();
-    this.isOpenChange.emit(false);
+    this.isOpen.set(false);
   }
 }

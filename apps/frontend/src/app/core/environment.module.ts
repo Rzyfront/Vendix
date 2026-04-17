@@ -1,5 +1,4 @@
 import { NgModule } from '@angular/core';
-import { CommonModule } from '@angular/common';
 
 // Services
 import { EnvironmentSwitchService } from './services/environment-switch.service';
@@ -10,7 +9,7 @@ import { OrganizationAdminGuard } from './guards/organization-admin.guard';
 import { StoreAdminGuard } from './guards/store-admin.guard';
 
 @NgModule({
-  imports: [CommonModule],
+  imports: [],
   providers: [
     EnvironmentSwitchService,
     EnvironmentContextService,

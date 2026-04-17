@@ -1,14 +1,11 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
-  OnChanges,
-  SimpleChanges,
+  input,
+  output,
   inject,
-  ChangeDetectionStrategy,
+  effect,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
@@ -26,39 +23,37 @@ interface EntryRow {
   selector: 'vendix-payroll-item-detail',
   standalone: true,
   imports: [
-    CommonModule,
     ModalComponent,
     ButtonComponent,
     IconComponent,
-    ExpandableCardComponent,
-  ],
-  changeDetection: ChangeDetectionStrategy.OnPush,
+    ExpandableCardComponent
+],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="isOpenChange.emit(false)"
       [title]="modalTitle"
       size="lg"
     >
-      @if (item) {
+      @if (item()) {
         <!-- 1. Info del empleado -->
         <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 p-3 bg-[var(--color-background)] rounded-lg text-xs">
           <div>
             <span class="text-[var(--color-text-secondary)]">Cargo</span>
-            <p class="font-medium">{{ item.employee?.position || 'N/A' }}</p>
+            <p class="font-medium">{{ item()!.employee?.position || 'N/A' }}</p>
           </div>
           <div>
             <span class="text-[var(--color-text-secondary)]">Departamento</span>
-            <p class="font-medium">{{ item.employee?.department || 'N/A' }}</p>
+            <p class="font-medium">{{ item()!.employee?.department || 'N/A' }}</p>
           </div>
           <div>
             <span class="text-[var(--color-text-secondary)]">Centro de Costo</span>
-            <p class="font-medium">{{ getCostCenterLabel(item.employee?.cost_center) }}</p>
+            <p class="font-medium">{{ getCostCenterLabel(item()!.employee?.cost_center) }}</p>
           </div>
           <div>
             <span class="text-[var(--color-text-secondary)]">Dias Trabajados</span>
-            <p class="font-medium">{{ item.worked_days }}/30</p>
+            <p class="font-medium">{{ item()!.worked_days }}/30</p>
           </div>
         </div>
 
@@ -66,19 +61,19 @@ interface EntryRow {
         <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4">
           <div class="p-3 rounded-lg bg-blue-50 border border-blue-100 text-center">
             <p class="text-[10px] uppercase tracking-wide text-blue-600">Devengado</p>
-            <p class="text-sm font-bold text-blue-700">{{ formatCurrency(item.total_earnings) }}</p>
+            <p class="text-sm font-bold text-blue-700">{{ formatCurrency(item()!.total_earnings) }}</p>
           </div>
           <div class="p-3 rounded-lg bg-red-50 border border-red-100 text-center">
             <p class="text-[10px] uppercase tracking-wide text-red-600">Deducciones</p>
-            <p class="text-sm font-bold text-red-700">{{ formatCurrency(item.total_deductions) }}</p>
+            <p class="text-sm font-bold text-red-700">{{ formatCurrency(item()!.total_deductions) }}</p>
           </div>
           <div class="p-3 rounded-lg bg-yellow-50 border border-yellow-100 text-center">
             <p class="text-[10px] uppercase tracking-wide text-yellow-600">Costos Emp.</p>
-            <p class="text-sm font-bold text-yellow-700">{{ formatCurrency(item.total_employer_costs) }}</p>
+            <p class="text-sm font-bold text-yellow-700">{{ formatCurrency(item()!.total_employer_costs) }}</p>
           </div>
           <div class="p-3 rounded-lg bg-green-50 border border-green-100 text-center">
             <p class="text-[10px] uppercase tracking-wide text-green-600">Neto a Pagar</p>
-            <p class="text-sm font-bold text-green-700">{{ formatCurrency(item.net_pay) }}</p>
+            <p class="text-sm font-bold text-green-700">{{ formatCurrency(item()!.net_pay) }}</p>
           </div>
         </div>
 
@@ -91,7 +86,7 @@ interface EntryRow {
                 <app-icon name="trending-up" [size]="14" class="text-blue-600"></app-icon>
               </div>
               <span class="text-sm font-semibold text-[var(--color-text-primary)]">Devengados</span>
-              <span class="ml-auto text-sm font-bold text-blue-700">{{ formatCurrency(item.total_earnings) }}</span>
+              <span class="ml-auto text-sm font-bold text-blue-700">{{ formatCurrency(item()!.total_earnings) }}</span>
             </div>
             <div class="px-4 py-3 space-y-1">
               @for (entry of earningsEntries; track entry.key) {
@@ -113,7 +108,7 @@ interface EntryRow {
                 <app-icon name="trending-down" [size]="14" class="text-red-600"></app-icon>
               </div>
               <span class="text-sm font-semibold text-[var(--color-text-primary)]">Deducciones</span>
-              <span class="ml-auto text-sm font-bold text-red-700">{{ formatCurrency(item.total_deductions) }}</span>
+              <span class="ml-auto text-sm font-bold text-red-700">{{ formatCurrency(item()!.total_deductions) }}</span>
             </div>
             <div class="px-4 py-3 space-y-1">
               @for (entry of deductionsEntries; track entry.key) {
@@ -135,7 +130,7 @@ interface EntryRow {
                 <app-icon name="building" [size]="14" class="text-yellow-600"></app-icon>
               </div>
               <span class="text-sm font-semibold text-[var(--color-text-primary)]">Costos Empleador</span>
-              <span class="ml-auto text-sm font-bold text-yellow-700">{{ formatCurrency(item.total_employer_costs) }}</span>
+              <span class="ml-auto text-sm font-bold text-yellow-700">{{ formatCurrency(item()!.total_employer_costs) }}</span>
             </div>
             <div class="px-4 py-3 space-y-1">
               @for (entry of employerCostsEntries; track entry.key) {
@@ -183,10 +178,10 @@ interface EntryRow {
     </app-modal>
   `,
 })
-export class PayrollItemDetailComponent implements OnChanges {
-  @Input() isOpen = false;
-  @Input() item: PayrollItem | null = null;
-  @Output() isOpenChange = new EventEmitter<boolean>();
+export class PayrollItemDetailComponent {
+  readonly isOpen = input<boolean>(false);
+  readonly item = input<PayrollItem | null>(null);
+  readonly isOpenChange = output<boolean>();
 
   private currencyService = inject(CurrencyFormatService);
 
@@ -221,11 +216,11 @@ export class PayrollItemDetailComponent implements OnChanges {
     sales: 'Ventas',
   };
 
-  ngOnChanges(changes: SimpleChanges): void {
-    if (changes['item']) {
+  constructor() {
+    effect(() => {
       this.computeEntries();
       this.computeTitle();
-    }
+    });
   }
 
   formatCurrency(value: number | undefined | null): string {
@@ -238,18 +233,20 @@ export class PayrollItemDetailComponent implements OnChanges {
   }
 
   private computeTitle(): void {
-    if (!this.item) {
+    const item = this.item();
+    if (!item) {
       this.modalTitle = '';
       return;
     }
-    const emp = this.item.employee;
+    const emp = item.employee;
     this.modalTitle = emp
       ? `${emp.first_name} ${emp.last_name}`
-      : `Empleado #${this.item.employee_id}`;
+      : `Empleado #${item.employee_id}`;
   }
 
   private computeEntries(): void {
-    if (!this.item) {
+    const item = this.item();
+    if (!item) {
       this.earningsEntries = [];
       this.deductionsEntries = [];
       this.employerCostsEntries = [];
@@ -258,13 +255,13 @@ export class PayrollItemDetailComponent implements OnChanges {
       return;
     }
 
-    this.earningsEntries = this.toEntryRows(this.item.earnings);
-    this.deductionsEntries = this.toEntryRows(this.item.deductions);
-    this.employerCostsEntries = this.toEntryRows(this.item.employer_costs);
+    this.earningsEntries = this.toEntryRows(item.earnings);
+    this.deductionsEntries = this.toEntryRows(item.deductions);
+    this.employerCostsEntries = this.toEntryRows(item.employer_costs);
 
-    if (this.item.provisions) {
-      this.provisionsEntries = this.toEntryRows(this.item.provisions);
-      this.provisionsTotal = this.item.provisions['total'] || this.provisionsEntries.reduce((sum, e) => sum + e.value, 0);
+    if (item.provisions) {
+      this.provisionsEntries = this.toEntryRows(item.provisions);
+      this.provisionsTotal = item.provisions['total'] || this.provisionsEntries.reduce((sum, e) => sum + e.value, 0);
     } else {
       this.provisionsEntries = [];
       this.provisionsTotal = 0;

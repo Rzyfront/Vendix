@@ -1,11 +1,10 @@
 import {
   Component,
-  EventEmitter,
-  Input,
-  Output,
-  OnChanges,
+  input,
+  output,
+  effect,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   ReactiveFormsModule,
   FormBuilder,
@@ -28,20 +27,19 @@ import {
   selector: 'app-domain-edit-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ModalComponent,
     InputComponent,
-    ButtonComponent,
+    ButtonComponent
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
       title="Editar Dominio"
-      [subtitle]="domain ? 'Editando: ' + domain.hostname : ''"
+      [subtitle]="domain() ? 'Editando: ' + domain()!.hostname : ''"
     >
       <form [formGroup]="domainForm" class="space-y-4">
           <div class="grid grid-cols-1 gap-4">
@@ -148,7 +146,7 @@ import {
           <app-button
             variant="primary"
             size="sm"
-            [loading]="isLoading"
+            [loading]="isLoading()"
             (clicked)="onSubmit()"
           >
             Actualizar Dominio
@@ -157,23 +155,26 @@ import {
     </app-modal>
   `,
 })
-export class DomainEditModalComponent implements OnChanges {
-  @Input() domain: Domain | null = null;
-  @Input() isOpen = false;
-  @Input() isLoading = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() update = new EventEmitter<{ id: number; data: UpdateDomainDto }>();
-  @Output() cancel = new EventEmitter<void>();
+export class DomainEditModalComponent {
+  readonly domain = input<Domain | null>(null);
+  readonly isOpen = input(false);
+  readonly isLoading = input(false);
+  readonly isOpenChange = output<boolean>();
+  readonly update = output<{
+    id: number;
+    data: UpdateDomainDto;
+  }>();
+  readonly cancel = output<void>();
   domainForm!: FormGroup;
 
   constructor(private fb: FormBuilder) {
     this.initializeForm();
-  }
 
-  ngOnChanges(): void {
-    if (this.domain && this.isOpen) {
-      this.populateForm();
-    }
+    effect(() => {
+      if (this.domain() && this.isOpen()) {
+        this.populateForm();
+      }
+    });
   }
 
   private initializeForm(): void {
@@ -189,28 +190,27 @@ export class DomainEditModalComponent implements OnChanges {
   }
 
   private populateForm(): void {
-    if (!this.domain) return;
+    const domain = this.domain();
+    if (!domain) return;
 
     this.domainForm.patchValue({
-      hostname: this.domain.hostname,
-      domain_type: this.domain.domain_type,
-      status: this.domain.status,
-      organization_id: this.domain.organization_id,
-      store_id: this.domain.store_id || null,
-      primary_color: this.domain.config?.branding?.primary_color || '#7ED7A5',
-      theme: this.domain.config?.branding?.theme || 'light',
+      hostname: domain.hostname,
+      domain_type: domain.domain_type,
+      status: domain.status,
+      organization_id: domain.organization_id,
+      store_id: domain.store_id || null,
+      primary_color: domain.config?.branding?.primary_color || '#7ED7A5',
+      theme: domain.config?.branding?.theme || 'light',
     });
   }
 
   open(domain: Domain): void {
-    this.domain = domain;
-    this.isOpen = true;
+    this.isOpenChange.emit(true);
     this.populateForm();
   }
 
   close(): void {
-    this.isOpen = false;
-    this.domain = null;
+    this.isOpenChange.emit(false);
     this.domainForm.reset();
   }
 
@@ -227,14 +227,13 @@ export class DomainEditModalComponent implements OnChanges {
   }
 
   onSubmit(): void {
-    if (this.domainForm.invalid || !this.domain) {
+    const domain = this.domain();
+    if (this.domainForm.invalid || !domain) {
       Object.keys(this.domainForm.controls).forEach((key) => {
         this.domainForm.get(key)?.markAsTouched();
       });
       return;
     }
-
-    this.isLoading = true;
 
     const formData = this.domainForm.value;
     const domainData: UpdateDomainDto = {
@@ -250,7 +249,7 @@ export class DomainEditModalComponent implements OnChanges {
     };
 
     this.update.emit({
-      id: this.domain.id,
+      id: domain.id,
       data: domainData,
     });
   }
@@ -262,18 +261,16 @@ export class DomainEditModalComponent implements OnChanges {
         return 'Este campo es requerido';
       }
       if (control.errors?.['minlength']) {
-        return 'Mínimo 3 caracteres';
+        return 'Minimo 3 caracteres';
       }
     }
     return '';
   }
 
-  // Public method to set loading state
   setLoading(loading: boolean): void {
-    this.isLoading = loading;
+    // Loading is now controlled via input from parent
   }
 
-  // Public method to reset form
   resetForm(): void {
     this.domainForm.reset({
       hostname: '',

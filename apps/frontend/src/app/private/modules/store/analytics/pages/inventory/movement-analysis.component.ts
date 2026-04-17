@@ -1,19 +1,19 @@
-import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, OnInit, inject, signal,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import { RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-import { Subject, takeUntil, forkJoin } from 'rxjs';
+import { forkJoin } from 'rxjs';
 import type { EChartsOption } from 'echarts';
 
 import { TableColumn } from '../../../../../../shared/components/table/table.component';
 import {
   ResponsiveDataViewComponent,
-  ItemListCardConfig,
-} from '../../../../../../shared/components/index';
+  ItemListCardConfig} from '../../../../../../shared/components/index';
 import {
   SelectorComponent,
-  SelectorOption,
-} from '../../../../../../shared/components/selector/selector.component';
+  SelectorOption} from '../../../../../../shared/components/selector/selector.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
@@ -24,19 +24,19 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
 
 import { AnalyticsService } from '../../services/analytics.service';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
-import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
+import {
+  getDefaultStartDate,
+  getDefaultEndDate} from '../../../../../../shared/utils/date.util';
 import {
   StockMovementReport,
   MovementSummaryItem,
   MovementTrend,
-  InventoryAnalyticsQueryDto,
-} from '../../interfaces/inventory-analytics.interface';
+  InventoryAnalyticsQueryDto} from '../../interfaces/inventory-analytics.interface';
 
 @Component({
   selector: 'vendix-movement-analysis',
   standalone: true,
   imports: [
-    CommonModule,
     RouterModule,
     FormsModule,
     CardComponent,
@@ -168,10 +168,16 @@ import {
               >Tendencia de Movimientos</span
             >
             <div class="h-[350px]">
-              <app-chart
-                [options]="trendsChartOptions()"
-                [loading]="loadingTrends()"
-              ></app-chart>
+              @defer (on viewport) {
+                <app-chart
+                  [options]="trendsChartOptions()"
+                  [loading]="loadingTrends()"
+                ></app-chart>
+              } @placeholder {
+                <div
+                  class="h-full bg-surface-secondary animate-pulse rounded-xl"
+                ></div>
+              }
             </div>
           </app-card>
 
@@ -181,10 +187,16 @@ import {
               >Distribución por Tipo</span
             >
             <div class="h-[350px]">
-              <app-chart
-                [options]="distributionChartOptions()"
-                [loading]="loadingSummary()"
-              ></app-chart>
+              @defer (on viewport) {
+                <app-chart
+                  [options]="distributionChartOptions()"
+                  [loading]="loadingSummary()"
+                ></app-chart>
+              } @placeholder {
+                <div
+                  class="h-full bg-surface-secondary animate-pulse rounded-xl"
+                ></div>
+              }
             </div>
           </app-card>
         </div>
@@ -222,14 +234,12 @@ import {
         </app-card>
       }
     </div>
-  `,
-})
-export class MovementAnalysisComponent implements OnInit, OnDestroy {
+  `})
+export class MovementAnalysisComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private analyticsService = inject(AnalyticsService);
   private toastService = inject(ToastService);
-  private destroy$ = new Subject<void>();
-
-  // State
+// State
   activeView = signal<'chart' | 'table'>('chart');
   loadingSummary = signal(true);
   loadingTrends = signal(true);
@@ -255,8 +265,7 @@ export class MovementAnalysisComponent implements OnInit, OnDestroy {
   dateRange = signal<DateRangeFilter>({
     start_date: getDefaultStartDate(),
     end_date: getDefaultEndDate(),
-    preset: 'thisMonth',
-  });
+    preset: 'thisMonth'});
 
   granularityOptions: SelectorOption[] = [
     { value: 'day', label: 'Diario' },
@@ -271,8 +280,7 @@ export class MovementAnalysisComponent implements OnInit, OnDestroy {
       sortable: true,
       priority: 1,
       width: '120px',
-      transform: (val) => new Date(val).toLocaleDateString('es-CO'),
-    },
+      transform: (val) => new Date(val).toLocaleDateString('es-CO')},
     { key: 'product_name', label: 'Producto', sortable: true, priority: 1 },
     { key: 'sku', label: 'SKU', sortable: true, priority: 2, width: '100px' },
     {
@@ -291,46 +299,38 @@ export class MovementAnalysisComponent implements OnInit, OnDestroy {
           transfer: 'info',
           adjustment: 'default',
           damage: 'danger',
-          expiration: 'danger',
-        },
-      },
-    },
+          expiration: 'danger'}}},
     {
       key: 'quantity',
       label: 'Cantidad',
       sortable: true,
       align: 'right',
       priority: 1,
-      width: '100px',
-    },
+      width: '100px'},
     {
       key: 'from_location',
       label: 'Origen',
       priority: 2,
       width: '120px',
-      transform: (val) => val || '-',
-    },
+      transform: (val) => val || '-'},
     {
       key: 'to_location',
       label: 'Destino',
       priority: 2,
       width: '120px',
-      transform: (val) => val || '-',
-    },
+      transform: (val) => val || '-'},
     {
       key: 'user_name',
       label: 'Usuario',
       priority: 2,
       width: '120px',
-      transform: (val) => val || '-',
-    },
+      transform: (val) => val || '-'},
     {
       key: 'reason',
       label: 'Razón',
       priority: 3,
       width: '150px',
-      transform: (val) => val || '-',
-    },
+      transform: (val) => val || '-'},
   ];
 
   cardConfig: ItemListCardConfig = {
@@ -346,34 +346,23 @@ export class MovementAnalysisComponent implements OnInit, OnDestroy {
         return: 'warn',
         transfer: 'info',
         adjustment: 'default',
-        damage: 'danger',
-      },
-    },
+        damage: 'danger'}},
     detailKeys: [
       {
         key: 'quantity',
         label: 'Cantidad',
-        transform: (val: any) => `${val} uds`,
-      },
+        transform: (val: any) => `${val} uds`},
       {
         key: 'date',
         label: 'Fecha',
         icon: 'calendar',
-        transform: (val: any) => new Date(val).toLocaleDateString('es-CO'),
-      },
-    ],
-  };
+        transform: (val: any) => new Date(val).toLocaleDateString('es-CO')},
+    ]};
 
   ngOnInit(): void {
     this.loadChartData();
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  onDateRangeChange(range: DateRangeFilter): void {
+onDateRangeChange(range: DateRangeFilter): void {
     this.dateRange.set(range);
     this.loadChartData();
     if (this.activeView() === 'table') {
@@ -388,8 +377,7 @@ export class MovementAnalysisComponent implements OnInit, OnDestroy {
 
   private buildQuery(): InventoryAnalyticsQueryDto {
     return {
-      date_range: this.dateRange(),
-    };
+      date_range: this.dateRange()};
   }
 
   private loadChartData(): void {
@@ -402,14 +390,11 @@ export class MovementAnalysisComponent implements OnInit, OnDestroy {
       summary: this.analyticsService.getMovementSummary(query),
       trends: this.analyticsService.getMovementTrends({
         ...query,
-        granularity: this.granularity() as any,
-      }),
+        granularity: this.granularity() as any}),
       movements: this.analyticsService.getStockMovements({
         ...query,
-        limit: 100,
-      }),
-    })
-      .pipe(takeUntil(this.destroy$))
+        limit: 100})})
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: ({ summary, trends, movements }) => {
           this.summary.set(summary.data);
@@ -427,8 +412,7 @@ export class MovementAnalysisComponent implements OnInit, OnDestroy {
           this.loadingSummary.set(false);
           this.loadingTrends.set(false);
           this.loadingMovements.set(false);
-        },
-      });
+        }});
   }
 
   private loadTrends(): void {
@@ -437,7 +421,7 @@ export class MovementAnalysisComponent implements OnInit, OnDestroy {
 
     this.analyticsService
       .getMovementTrends({ ...query, granularity: this.granularity() as any })
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           this.trends.set(response.data);
@@ -447,8 +431,7 @@ export class MovementAnalysisComponent implements OnInit, OnDestroy {
         error: () => {
           this.toastService.error('Error al cargar tendencias');
           this.loadingTrends.set(false);
-        },
-      });
+        }});
   }
 
   private loadMovements(): void {
@@ -457,7 +440,7 @@ export class MovementAnalysisComponent implements OnInit, OnDestroy {
 
     this.analyticsService
       .getStockMovements({ ...query, limit: 100 })
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           this.movements.set(response.data);
@@ -466,8 +449,7 @@ export class MovementAnalysisComponent implements OnInit, OnDestroy {
         error: () => {
           this.toastService.error('Error al cargar movimientos');
           this.loadingMovements.set(false);
-        },
-      });
+        }});
   }
 
   private updateStats(summary: MovementSummaryItem[]): void {
@@ -503,28 +485,23 @@ export class MovementAnalysisComponent implements OnInit, OnDestroy {
     this.trendsChartOptions.set({
       tooltip: {
         trigger: 'axis',
-        axisPointer: { type: 'shadow' },
-      },
+        axisPointer: { type: 'shadow' }},
       legend: {
         data: ['Entradas', 'Salidas', 'Ajustes', 'Transferencias'],
-        bottom: 0,
-      },
+        bottom: 0},
       grid: {
         left: '3%',
         right: '4%',
         bottom: '15%',
         top: '5%',
-        containLabel: true,
-      },
+        containLabel: true},
       xAxis: {
         type: 'category',
         data: labels,
-        axisLabel: { fontSize: 11 },
-      },
+        axisLabel: { fontSize: 11 }},
       yAxis: {
         type: 'value',
-        axisLabel: { fontSize: 11 },
-      },
+        axisLabel: { fontSize: 11 }},
       series: [
         {
           name: 'Entradas',
@@ -532,34 +509,29 @@ export class MovementAnalysisComponent implements OnInit, OnDestroy {
           smooth: true,
           data: trends.map((t) => t.stock_in),
           lineStyle: { color: successColor, width: 2 },
-          itemStyle: { color: successColor },
-        },
+          itemStyle: { color: successColor }},
         {
           name: 'Salidas',
           type: 'line',
           smooth: true,
           data: trends.map((t) => t.stock_out),
           lineStyle: { color: dangerColor, width: 2 },
-          itemStyle: { color: dangerColor },
-        },
+          itemStyle: { color: dangerColor }},
         {
           name: 'Ajustes',
           type: 'line',
           smooth: true,
           data: trends.map((t) => t.adjustments),
           lineStyle: { color: primaryColor, width: 2 },
-          itemStyle: { color: primaryColor },
-        },
+          itemStyle: { color: primaryColor }},
         {
           name: 'Transferencias',
           type: 'line',
           smooth: true,
           data: trends.map((t) => t.transfers),
           lineStyle: { color: warnColor, width: 2 },
-          itemStyle: { color: warnColor },
-        },
-      ],
-    });
+          itemStyle: { color: warnColor }},
+      ]});
   }
 
   private updateDistributionChart(summary: MovementSummaryItem[]): void {
@@ -571,19 +543,16 @@ export class MovementAnalysisComponent implements OnInit, OnDestroy {
       transfer: 'Transferencia',
       adjustment: 'Ajuste',
       damage: 'Daño',
-      expiration: 'Expiración',
-    };
+      expiration: 'Expiración'};
 
     this.distributionChartOptions.set({
       tooltip: {
         trigger: 'item',
-        formatter: '{b}: {c} ({d}%)',
-      },
+        formatter: '{b}: {c} ({d}%)'},
       legend: {
         orient: 'vertical',
         right: '5%',
-        top: 'center',
-      },
+        top: 'center'},
       series: [
         {
           type: 'pie',
@@ -592,22 +561,18 @@ export class MovementAnalysisComponent implements OnInit, OnDestroy {
           avoidLabelOverlap: false,
           label: { show: false },
           emphasis: {
-            label: { show: true, fontSize: 14, fontWeight: 'bold' },
-          },
+            label: { show: true, fontSize: 14, fontWeight: 'bold' }},
           data: summary.map((s) => ({
             name: typeLabels[s.movement_type] || s.movement_type,
-            value: s.count,
-          })),
-        },
-      ],
-    });
+            value: s.count}))},
+      ]});
   }
 
   exportReport(): void {
     this.exporting.set(true);
     this.analyticsService
       .exportMovementsXlsx(this.buildQuery())
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (blob) => {
           const url = window.URL.createObjectURL(blob);
@@ -622,8 +587,6 @@ export class MovementAnalysisComponent implements OnInit, OnDestroy {
         error: () => {
           this.toastService.error('Error al exportar');
           this.exporting.set(false);
-        },
-      });
+        }});
   }
-
 }

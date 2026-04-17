@@ -1,13 +1,6 @@
-import {
-  Component,
-  inject,
-  input,
-  output,
-  signal,
-  computed,
-  ChangeDetectionStrategy,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, inject, input, output, signal, computed, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import { FormsModule } from '@angular/forms';
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
@@ -29,8 +22,7 @@ interface ReceiveLineItem {
 @Component({
   selector: 'app-po-receive-modal',
   standalone: true,
-  imports: [CommonModule, FormsModule, ModalComponent, ButtonComponent, IconComponent],
-  changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [FormsModule, ModalComponent, ButtonComponent, IconComponent],
   template: `
     <app-modal
       [isOpen]="isOpen()"
@@ -142,6 +134,7 @@ interface ReceiveLineItem {
   `],
 })
 export class PoReceiveModalComponent {
+  private destroyRef = inject(DestroyRef);
   private purchaseOrdersService = inject(PurchaseOrdersService);
   private toastService = inject(ToastService);
 
@@ -235,7 +228,7 @@ export class PoReceiveModalComponent {
     this.saving.set(true);
     const notes = this.notes.trim() || undefined;
 
-    this.purchaseOrdersService.receivePurchaseOrder(po.id, itemsToReceive, notes).subscribe({
+    this.purchaseOrdersService.receivePurchaseOrder(po.id, itemsToReceive, notes).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.saving.set(false);
         this.toastService.success('Mercancia recibida correctamente');

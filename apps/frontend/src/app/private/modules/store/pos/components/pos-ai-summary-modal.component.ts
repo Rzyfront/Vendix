@@ -1,19 +1,6 @@
-import {
-  Component,
-  input,
-  output,
-  signal,
-  computed,
-  effect,
-  untracked,
-  OnDestroy,
-  ChangeDetectionStrategy,
-  inject,
-  ViewChild,
-  ElementRef,
-  AfterViewChecked,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, input, output, signal, computed, effect, untracked, DestroyRef, inject, ViewChild, ElementRef, AfterViewChecked} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import { Subscription } from 'rxjs';
 import {
   ModalComponent,
@@ -29,13 +16,11 @@ import {
 @Component({
   selector: 'app-pos-ai-summary-modal',
   standalone: true,
-  changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
-    CommonModule,
     ModalComponent,
     ButtonComponent,
-    IconComponent,
-  ],
+    IconComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen()"
@@ -259,7 +244,7 @@ import {
     `,
   ],
 })
-export class PosAISummaryModalComponent implements OnDestroy, AfterViewChecked {
+export class PosAISummaryModalComponent implements AfterViewChecked {
   @ViewChild('scrollContainer') private scrollContainer?: ElementRef<HTMLElement>;
   private shouldAutoScroll = false;
   readonly isOpen = input<boolean>(false);
@@ -273,6 +258,7 @@ export class PosAISummaryModalComponent implements OnDestroy, AfterViewChecked {
 
   private subscription: Subscription | null = null;
   private readonly cashRegisterService = inject(PosCashRegisterService);
+  private readonly destroyRef = inject(DestroyRef);
 
   constructor() {
     effect(() => {
@@ -282,6 +268,8 @@ export class PosAISummaryModalComponent implements OnDestroy, AfterViewChecked {
         untracked(() => this.startStream(sid));
       }
     });
+
+    this.destroyRef.onDestroy(() => this.cleanup());
   }
 
   ngAfterViewChecked(): void {
@@ -290,10 +278,6 @@ export class PosAISummaryModalComponent implements OnDestroy, AfterViewChecked {
       el.scrollTop = el.scrollHeight;
       this.shouldAutoScroll = false;
     }
-  }
-
-  ngOnDestroy(): void {
-    this.cleanup();
   }
 
   retry(): void {
@@ -319,7 +303,7 @@ export class PosAISummaryModalComponent implements OnDestroy, AfterViewChecked {
 
     this.subscription = this.cashRegisterService
       .streamClosingSummary(sessionId)
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (event: AIStreamEvent) => {
           if (event.type === 'text' && event.content) {
             if (this.status() === 'loading') {

@@ -1,33 +1,35 @@
-import { Component, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, inject, signal,
+  DestroyRef} from '@angular/core';
+import { NgClass } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Store } from '@ngrx/store';
-import { Observable } from 'rxjs';
+
+import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
+import { filter, switchMap, take, of, catchError } from 'rxjs';
+
 
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { environment } from '../../../../../../../environments/environment';
+import { TenantFacade } from '../../../../../../core/store/tenant/tenant.facade';
+import { AppType } from '../../../../../../core/models/environment.enum';
 
 import {
   AccountMapping,
-  ChartAccount,
-} from '../../interfaces/accounting.interface';
+  ChartAccount} from '../../interfaces/accounting.interface';
 import {
   selectAccountMappings,
   selectAccountMappingsLoading,
-  selectLeafAccounts,
-} from '../../state/selectors/accounting.selectors';
+  selectLeafAccounts} from '../../state/selectors/accounting.selectors';
 import {
   loadAccountMappings,
   saveAccountMappings,
   resetAccountMappings,
-  loadAccounts,
-} from '../../state/actions/accounting.actions';
+  loadAccounts} from '../../state/actions/accounting.actions';
 import {
   ButtonComponent,
   CardComponent,
   EmptyStateComponent,
-  IconComponent,
-} from '../../../../../../shared/components/index';
+  IconComponent} from '../../../../../../shared/components/index';
 
 interface MappingGroup {
   key: string;
@@ -171,8 +173,7 @@ const MAPPING_LABELS: Record<string, string> = {
   'cash_register.movement.other': 'Contrapartida (Movimiento Manual)',
   // Transferencias de Stock
   'stock_transfer.completed.inventory_origin': 'Inventario (Tienda Origen)',
-  'stock_transfer.completed.inventory_destination': 'Inventario (Tienda Destino)',
-};
+  'stock_transfer.completed.inventory_destination': 'Inventario (Tienda Destino)'};
 
 const GROUP_DEFINITIONS: Array<{
   key: string;
@@ -184,32 +185,27 @@ const GROUP_DEFINITIONS: Array<{
     key: 'invoicing',
     label: 'Facturacion',
     icon: 'file-text',
-    prefixes: ['invoice.validated.'],
-  },
+    prefixes: ['invoice.validated.']},
   {
     key: 'payments',
     label: 'Pagos',
     icon: 'credit-card',
-    prefixes: ['payment.received.'],
-  },
+    prefixes: ['payment.received.']},
   {
     key: 'expenses',
     label: 'Gastos',
     icon: 'trending-down',
-    prefixes: ['expense.approved.', 'expense.paid.'],
-  },
+    prefixes: ['expense.approved.', 'expense.paid.']},
   {
     key: 'payroll',
     label: 'Nomina',
     icon: 'users',
-    prefixes: ['payroll.approved.', 'payroll.paid.'],
-  },
+    prefixes: ['payroll.approved.', 'payroll.paid.']},
   {
     key: 'credit_sales',
     label: 'Ventas a Credito',
     icon: 'file-plus',
-    prefixes: ['credit_sale.created.'],
-  },
+    prefixes: ['credit_sale.created.']},
   {
     key: 'inventory',
     label: 'Inventario',
@@ -220,74 +216,62 @@ const GROUP_DEFINITIONS: Array<{
       'purchase_order.received.',
       'purchase_order.payment.',
       'inventory.adjusted.',
-    ],
-  },
+    ]},
   {
     key: 'layaway',
     label: 'Plan Separe',
     icon: 'clock',
-    prefixes: ['layaway.payment.', 'layaway.completed.'],
-  },
+    prefixes: ['layaway.payment.', 'layaway.completed.']},
   {
     key: 'fixed_assets',
     label: 'Activos Fijos',
     icon: 'hard-drive',
-    prefixes: ['depreciation.monthly.', 'disposal.fixed_asset.'],
-  },
+    prefixes: ['depreciation.monthly.', 'disposal.fixed_asset.']},
   {
     key: 'withholding',
     label: 'Retencion en la Fuente',
     icon: 'percent',
-    prefixes: ['withholding.applied.'],
-  },
+    prefixes: ['withholding.applied.']},
   {
     key: 'settlements',
     label: 'Liquidaciones',
     icon: 'user-minus',
-    prefixes: ['settlement.paid.'],
-  },
+    prefixes: ['settlement.paid.']},
   {
     key: 'wallet',
     label: 'Wallet / Monedero',
     icon: 'wallet',
-    prefixes: ['wallet.topup.', 'wallet.debit.'],
-  },
+    prefixes: ['wallet.topup.', 'wallet.debit.']},
   {
     key: 'accounts_payable',
     label: 'Cuentas por Pagar',
     icon: 'file-output',
-    prefixes: ['ap.payment.', 'ap.write_off.'],
-  },
+    prefixes: ['ap.payment.', 'ap.write_off.']},
   {
     key: 'accounts_receivable',
     label: 'Cuentas por Cobrar (Castigos)',
     icon: 'file-input',
-    prefixes: ['ar.write_off.'],
-  },
+    prefixes: ['ar.write_off.']},
   {
     key: 'installments',
     label: 'Cuotas de Credito',
     icon: 'calendar-check',
-    prefixes: ['installment_payment.received.'],
-  },
+    prefixes: ['installment_payment.received.']},
   {
     key: 'stock_transfers',
     label: 'Transferencias de Stock',
     icon: 'repeat',
-    prefixes: ['stock_transfer.completed.'],
-  },
+    prefixes: ['stock_transfer.completed.']},
   {
     key: 'commissions',
     label: 'Comisiones',
     icon: 'award',
-    prefixes: ['commission.calculated.'],
-  },
+    prefixes: ['commission.calculated.']},
   {
     key: 'cash_register',
     label: 'Caja Registradora',
     icon: 'calculator',
-    prefixes: ['cash_register.opened.', 'cash_register.closed.', 'cash_register.movement.'],
-  },
+    prefixes: ['cash_register.opened.', 'cash_register.closed.', 'cash_register.movement.']},
 ];
 
 const GROUP_FLOW_MAP: Record<string, string> = {
@@ -307,70 +291,100 @@ const GROUP_FLOW_MAP: Record<string, string> = {
   installments: 'installments',
   stock_transfers: 'stock_transfers',
   commissions: 'commissions',
-  cash_register: 'cash_register',
-};
+  cash_register: 'cash_register'};
 
 @Component({
   selector: 'vendix-account-mappings',
   standalone: true,
   imports: [
-    CommonModule,
     ButtonComponent,
     CardComponent,
     IconComponent,
     EmptyStateComponent,
+    NgClass,
   ],
   templateUrl: './account-mappings.component.html',
-  styleUrls: ['./account-mappings.component.scss'],
-})
-export class AccountMappingsComponent implements OnInit {
+  styleUrls: ['./account-mappings.component.scss']})
+export class AccountMappingsComponent {
+  private destroyRef = inject(DestroyRef);
   private store = inject(Store);
   private http = inject(HttpClient);
   private toast = inject(ToastService);
-
-  mappings$: Observable<AccountMapping[]> = this.store.select(
-    selectAccountMappings,
+  private tenantFacade = inject(TenantFacade);
+// State signals
+  readonly loading = toSignal(
+    this.store.select(selectAccountMappingsLoading),
+    { initialValue: false }
   );
-  loading$: Observable<boolean> = this.store.select(
-    selectAccountMappingsLoading,
+  readonly leaf_accounts = toSignal(
+    this.store.select(selectLeafAccounts),
+    { initialValue: [] as ChartAccount[] }
   );
-  leaf_accounts$: Observable<ChartAccount[]> =
-    this.store.select(selectLeafAccounts);
 
-  mapping_groups: MappingGroup[] = [];
-  leaf_accounts: ChartAccount[] = [];
-  changed_mappings = new Map<string, number>();
-  has_changes = false;
-  has_custom_mappings = false;
-  flow_toggles: Record<string, boolean> = {};
-  flows_loaded = false;
+  // Local state
+  readonly mapping_groups = signal<MappingGroup[]>([]);
+  readonly changed_mappings = signal<Map<string, number>>(new Map());
+  readonly has_changes = signal(false);
+  readonly has_custom_mappings = signal(false);
+  readonly flow_toggles = signal<Record<string, boolean>>({});
+  readonly flows_loaded = signal(false);
 
-  ngOnInit(): void {
+  constructor() {
     this.store.dispatch(loadAccountMappings({}));
     this.store.dispatch(loadAccounts());
 
-    this.leaf_accounts$.subscribe((accounts) => {
-      this.leaf_accounts = accounts;
-    });
+    this.store
+      .select(selectAccountMappings)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((mappings) => {
+        this.mapping_groups.set(this.buildGroups(mappings));
+        this.has_custom_mappings.set(
+          mappings.some((m) => m.source !== 'default')
+        );
+        this.changed_mappings.set(new Map());
+        this.has_changes.set(false);
+      });
 
-    this.mappings$.subscribe((mappings) => {
-      this.mapping_groups = this.buildGroups(mappings);
-      this.has_custom_mappings = mappings.some((m) => m.source !== 'default');
-      this.changed_mappings.clear();
-      this.has_changes = false;
-    });
-
-    this.http.get<any>(`${environment.apiUrl}/store/settings`).subscribe({
-      next: (res) => {
-        const settings = res?.data?.settings || res?.data || res;
-        this.flow_toggles = settings?.module_flows?.accounting || settings?.accounting_flows || {};
-        this.flows_loaded = true;
-      },
-      error: () => { this.flows_loaded = true; },
-    });
+    this.tenantFacade.currentEnvironment$
+      .pipe(
+        filter((env): env is AppType => !!env),
+        take(1),
+        switchMap((env) => {
+          const endpoint = this.getSettingsEndpoint(env);
+          if (!endpoint) {
+            this.flows_loaded.set(true);
+            return of(null);
+          }
+          return this.http
+            .get<any>(`${environment.apiUrl}${endpoint}`)
+            .pipe(catchError(() => of(null)));
+        }),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((res) => {
+        if (res) {
+          const settings = res?.data?.settings || res?.data || res;
+          this.flow_toggles.set(
+            settings?.module_flows?.accounting ||
+              settings?.accounting_flows ||
+              {},
+          );
+        }
+        this.flows_loaded.set(true);
+      });
   }
 
-  getLabel(mapping_key: string): string {
+  private getSettingsEndpoint(env: AppType): string | null {
+    switch (env) {
+      case AppType.STORE_ADMIN:
+        return '/store/settings';
+      case AppType.ORG_ADMIN:
+        return '/organization/settings';
+      default:
+        return null;
+    }
+  }
+getLabel(mapping_key: string): string {
     return MAPPING_LABELS[mapping_key] || mapping_key;
   }
 
@@ -378,35 +392,36 @@ export class AccountMappingsComponent implements OnInit {
     const labels: Record<string, string> = {
       default: 'Default',
       organization: 'Organizacion',
-      store: 'Tienda',
-    };
+      store: 'Tienda'};
     return labels[source] || source;
   }
 
   getSelectedAccountId(mapping: AccountMapping): number | string {
-    if (this.changed_mappings.has(mapping.mapping_key)) {
-      return this.changed_mappings.get(mapping.mapping_key)!;
+    const changedMappings = this.changed_mappings();
+    if (changedMappings.has(mapping.mapping_key)) {
+      return changedMappings.get(mapping.mapping_key)!;
     }
     return mapping.account_id || '';
   }
 
   onAccountChange(mapping_key: string, event: Event): void {
     const value = (event.target as HTMLSelectElement).value;
+    const updatedMap = new Map(this.changed_mappings());
     if (value) {
-      this.changed_mappings.set(mapping_key, Number(value));
+      updatedMap.set(mapping_key, Number(value));
     } else {
-      this.changed_mappings.delete(mapping_key);
+      updatedMap.delete(mapping_key);
     }
-    this.has_changes = this.changed_mappings.size > 0;
+    this.changed_mappings.set(updatedMap);
+    this.has_changes.set(updatedMap.size > 0);
   }
 
   saveMappings(): void {
-    if (!this.has_changes) return;
-    const mappings = Array.from(this.changed_mappings.entries()).map(
+    if (!this.has_changes()) return;
+    const mappings = Array.from(this.changed_mappings().entries()).map(
       ([mapping_key, account_id]) => ({
         mapping_key,
-        account_id,
-      }),
+        account_id}),
     );
     this.store.dispatch(saveAccountMappings({ mappings }));
   }
@@ -424,26 +439,43 @@ export class AccountMappingsComponent implements OnInit {
   isFlowEnabled(group_key: string): boolean {
     const flow_key = GROUP_FLOW_MAP[group_key];
     if (!flow_key) return true;
-    return this.flow_toggles[flow_key] !== false;
+    return this.flow_toggles()[flow_key] !== false;
   }
 
   toggleFlow(group_key: string): void {
     const flow_key = GROUP_FLOW_MAP[group_key];
     if (!flow_key) return;
+    const env = this.tenantFacade.currentEnvironment();
+    const endpoint = env ? this.getSettingsEndpoint(env) : null;
+    if (!endpoint) {
+      this.toast.error('No se puede actualizar la configuración en este contexto');
+      return;
+    }
     const new_value = !this.isFlowEnabled(group_key);
-    this.flow_toggles[flow_key] = new_value;
-    this.http.patch(`${environment.apiUrl}/store/settings`, {
-      module_flows: { accounting: { [flow_key]: new_value } },
-    }).subscribe({
-      next: () => {
-        const group = GROUP_DEFINITIONS.find(g => g.key === group_key);
-        this.toast.success(`Flujo "${group?.label || group_key}" ${new_value ? 'activado' : 'desactivado'}`);
-      },
-      error: () => {
-        this.flow_toggles[flow_key] = !new_value;
-        this.toast.error('Error al actualizar la configuracion del flujo');
-      },
-    });
+    const updatedToggles = { ...this.flow_toggles(), [flow_key]: new_value };
+    this.flow_toggles.set(updatedToggles);
+    this.http
+      .patch(`${environment.apiUrl}${endpoint}`, {
+        module_flows: { accounting: { [flow_key]: new_value } }})
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          const group = GROUP_DEFINITIONS.find((g) => g.key === group_key);
+          this.toast.success(
+            `Flujo "${group?.label || group_key}" ${
+              new_value ? 'activado' : 'desactivado'
+            }`
+          );
+        },
+        error: () => {
+          const revertedToggles = {
+            ...this.flow_toggles(),
+            [flow_key]: !new_value};
+          this.flow_toggles.set(revertedToggles);
+          this.toast.error(
+            'Error al actualizar la configuracion del flujo'
+          );
+        }});
   }
 
   private buildGroups(mappings: AccountMapping[]): MappingGroup[] {
@@ -451,7 +483,6 @@ export class AccountMappingsComponent implements OnInit {
       ...def,
       mappings: mappings.filter((m) =>
         def.prefixes.some((prefix) => m.mapping_key.startsWith(prefix)),
-      ),
-    })).filter((g) => g.mappings.length > 0);
+      )})).filter((g) => g.mappings.length > 0);
   }
 }

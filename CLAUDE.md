@@ -33,6 +33,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | -- | `vendix-monorepo-workspaces` |
 | -- | `vendix-panel-ui` |
 | -- | `vendix-prisma-scopes` |
+| -- | `vendix-zoneless-signals` |
 | Adding MCP resources or tools | `vendix-mcp-server` |
 | Adding a new AI provider | `vendix-ai-platform-core` |
 | Adding chat features | `vendix-ai-chat` |
@@ -48,6 +49,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Adding tool-use to AI features | `vendix-ai-agent-tools` |
 | Adding/removing workspaces | `vendix-monorepo-workspaces` |
 | After creating/modifying a skill | `skill-sync` |
+| Auditing Zoneless compliance (zoneless-audit.sh) or enforcing CI grep rules | `vendix-zoneless-signals` |
 | Configuring AI providers or applications | `vendix-ai-engine` |
 | Configuring AI rate limiting | `vendix-ai-platform-core` |
 | Configuring CI/CD | `vendix-monorepo-workspaces` |
@@ -74,19 +76,23 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Debugging agent loop issues | `vendix-ai-agent-tools` |
 | Debugging embedding generation | `vendix-ai-embeddings-rag` |
 | Debugging missing accounting entries | `vendix-auto-entries` |
+| Debugging stale templates, missing re-renders, or change detection issues | `vendix-zoneless-signals` |
 | Designing UI screens, mobile-first layouts, accessibility review, landing pages, UX patterns | `vendix-ui-ux` |
 | Displaying or formatting dates in frontend | `vendix-date-timezone` |
 | Displaying or formatting money/currency values | `vendix-currency-formatting` |
 | Editing Schema | `vendix-prisma-schema` |
+| Editing or creating any Angular component under apps/frontend (Zoneless patterns apply) | `vendix-zoneless-signals` |
 | Exposing Vendix data to AI clients | `vendix-mcp-server` |
 | Fixing Forbidden/403 errors in scoped services | `vendix-multi-tenant-context` |
 | Fixing currency display issues or hardcoded $ symbols | `vendix-currency-formatting` |
 | Fixing date display off-by-one bugs | `vendix-date-timezone` |
+| Fixing signal-used-without-invoking bugs (!this.flag vs !this.flag()) | `vendix-zoneless-signals` |
 | Formatting chart axis labels with dates | `vendix-date-timezone` |
 | General Development | `vendix-development-rules` |
 | Handling Errors | `vendix-error-handling` |
 | Handling store context | `vendix-multi-tenant-context` |
 | Implementing AI streaming | `vendix-ai-streaming` |
+| Implementing ControlValueAccessor (CVA) in custom form components | `vendix-zoneless-signals` |
 | Implementing authentication | `vendix-backend-auth` |
 | Implementing multi-tenant logic | `vendix-multi-tenant-context` |
 | Implementing semantic search | `vendix-ai-embeddings-rag` |
@@ -95,6 +101,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Integrating AI Engine into a domain | `vendix-ai-engine` |
 | Managing Routes | `vendix-frontend-routing` |
 | Managing State | `vendix-frontend-state` |
+| Migrating legacy Angular patterns (BehaviorSubject, take(1).subscribe) to Signals | `vendix-zoneless-signals` |
 | Modifying StockLevelManager service | `vendix-inventory-stock` |
 | Modifying auto-entry event handlers | `vendix-auto-entries` |
 | Modifying package.json | `vendix-monorepo-workspaces` |
@@ -104,6 +111,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Querying by date ranges in backend | `vendix-date-timezone` |
 | Regenerate AGENTS.md Auto-invoke tables (sync.sh) | `skill-sync` |
 | Reserving or releasing stock | `vendix-inventory-stock` |
+| Reviewing or replacing NgZone, markForCheck, detectChanges, @Input, @Output, EventEmitter | `vendix-zoneless-signals` |
 | Styling AI interaction buttons or loading states | `vendix-ai-engine` |
 | Styling and Theming | `vendix-frontend-theme` |
 | Transitioning products between simple and variant modes | `vendix-inventory-stock` |
@@ -111,9 +119,12 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Understanding AI cost tracking | `vendix-ai-platform-core` |
 | Understanding Public/Private Apps and Domains | `vendix-app-architecture` |
 | Uploading files, handling S3 URLs, or saving image URLs to database | `vendix-s3-storage` |
+| Using input(), output(), model(), signal(), computed(), effect(), or toSignal() | `vendix-zoneless-signals` |
+| Using toSignal() in facades — validating initialValue presence | `vendix-zoneless-signals` |
 | Verifying Build | `buildcheck-dev` |
 | Working on backend domains | `vendix-backend-domain` |
 | Working on frontend domains | `vendix-frontend-domain` |
+| Working with @defer, @if, @for control flow blocks in templates | `vendix-zoneless-signals` |
 | Working with AI agent or tool-use | `vendix-ai-engine` |
 | Working with AI async processing | `vendix-ai-queue` |
 | Working with AI chat NgRx state | `vendix-ai-chat` |
@@ -173,12 +184,13 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 
 **These skills contain the MOST CRITICAL rules that must ALWAYS be respected:**
 
-| Skill                 | Trigger             | Priority     | Description                           |
-| --------------------- | ------------------- | ------------ | ------------------------------------- |
-| **`how-to-dev`**      | **ALWAYS**          | **CRITICAL** | Mandatory ultra-obligatory dev flow   |
-| **`Vendix-core`**     | **ALWAYS**          | **CRITICAL** | Core patterns and conventions         |
-| **`git-workflow`**    | **ALWAYS**          | **CRITICAL** | Git commit, PR, branching and conflict rules |
-| **`knowledge-gap`**   | **UNKNOWN PATTERN** | **HIGH**     | Protocol for new/undefined patterns   |
+| Skill                             | Trigger                       | Priority     | Description                                                                 |
+| --------------------------------- | ----------------------------- | ------------ | --------------------------------------------------------------------------- |
+| **`how-to-dev`**                  | **ALWAYS**                    | **CRITICAL** | Mandatory ultra-obligatory dev flow                                         |
+| **`Vendix-core`**                  | **ALWAYS**                    | **CRITICAL** | Core patterns and conventions                                               |
+| **`git-workflow`**                | **ALWAYS**                    | **CRITICAL** | Git commit, PR, branching and conflict rules                                |
+| **`vendix-zoneless-signals`**     | **ANY FRONTEND FILE**         | **CRITICAL** | Zoneless + Signals (Angular 20) — violaciones producen bugs silenciosos     |
+| **`knowledge-gap`**               | **UNKNOWN PATTERN**           | **HIGH**     | Protocol for new/undefined patterns                                         |
 
 **⚠️ IMPORTANT:** NEVER compromise these rules. They are the foundation of the project.
 

@@ -1,19 +1,18 @@
 import {
   Component,
-  EventEmitter,
-  Input,
-  Output,
+  input,
+  output,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { DatePipe } from '@angular/common';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { CashRegisterSession } from '../services/pos-cash-register.service';
 
 @Component({
   selector: 'app-pos-session-status-bar',
   standalone: true,
-  imports: [CommonModule, IconComponent],
+  imports: [DatePipe, IconComponent],
   template: `
-    @if (session) {
+    @if (session()) {
       <div class="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-2 bg-green-50 border border-green-200 rounded-xl text-green-700 min-h-[40px]">
         <!-- Pulsing alive indicator -->
         <span class="relative flex h-2.5 w-2.5 flex-shrink-0" aria-hidden="true">
@@ -22,9 +21,9 @@ import { CashRegisterSession } from '../services/pos-cash-register.service';
         </span>
 
         <!-- Register info -->
-        <span class="font-semibold text-sm truncate max-w-[90px] sm:max-w-none">{{ session.register?.name || 'Caja' }}</span>
+        <span class="font-semibold text-sm truncate max-w-[90px] sm:max-w-none">{{ session()!.register?.name || 'Caja' }}</span>
         <span class="text-green-300 hidden sm:inline" aria-hidden="true">&middot;</span>
-        <span class="text-green-600/80 text-xs hidden sm:inline whitespace-nowrap">{{ session.opened_at | date:'shortTime' }}</span>
+        <span class="text-green-600/80 text-xs hidden sm:inline whitespace-nowrap">{{ session()!.opened_at | date:'shortTime' }}</span>
 
         <!-- Action buttons -->
         <div class="flex items-center gap-1 sm:gap-1.5 ml-auto flex-shrink-0">
@@ -59,7 +58,7 @@ import { CashRegisterSession } from '../services/pos-cash-register.service';
           </button>
         </div>
       </div>
-    } @else if (showOpenButton) {
+    } @else if (showOpenButton()) {
       <button
         type="button"
         (click)="openClicked.emit()"
@@ -74,10 +73,10 @@ import { CashRegisterSession } from '../services/pos-cash-register.service';
   `,
 })
 export class PosSessionStatusBarComponent {
-  @Input() session: CashRegisterSession | null = null;
-  @Input() showOpenButton = true;
-  @Output() openClicked = new EventEmitter<void>();
-  @Output() closeClicked = new EventEmitter<void>();
-  @Output() movementClicked = new EventEmitter<void>();
-  @Output() detailClicked = new EventEmitter<void>();
+  readonly session = input<CashRegisterSession | null>(null);
+  readonly showOpenButton = input<boolean>(true);
+  readonly openClicked = output<void>();
+  readonly closeClicked = output<void>();
+  readonly movementClicked = output<void>();
+  readonly detailClicked = output<void>();
 }

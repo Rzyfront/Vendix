@@ -1,14 +1,14 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
-  ChangeDetectionStrategy,
+  input,
+  output,
+  model,
   OnInit,
   OnChanges,
   SimpleChanges,
+  ChangeDetectionStrategy,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   ReactiveFormsModule,
   FormGroup,
@@ -35,7 +35,6 @@ import { environment } from '../../../../../../../environments/environment';
   selector: 'app-domain-form-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
@@ -47,11 +46,11 @@ import { environment } from '../../../../../../../environments/environment';
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class DomainFormModalComponent implements OnInit, OnChanges {
-  @Input() isOpen = false;
-  @Input() isSaving = false;
-  @Input() domain: StoreDomain | null = null;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() save = new EventEmitter<CreateStoreDomainDto>();
+  readonly isOpen = model<boolean>(false);
+  readonly isSaving = model<boolean>(false);
+  readonly domain = input<StoreDomain | null>(null);
+  readonly isOpenChange = output<boolean>();
+  readonly save = output<CreateStoreDomainDto>();
 
   form: FormGroup;
   vendixDomain = environment.vendixDomain;
@@ -80,15 +79,16 @@ export class DomainFormModalComponent implements OnInit, OnChanges {
   ngOnInit(): void {}
 
   ngOnChanges(changes: SimpleChanges): void {
-    if (changes['domain'] && this.domain) {
+    const currentDomain = this.domain();
+    if (changes['domain'] && currentDomain) {
       this.form.patchValue({
-        hostname: this.domain.hostname,
-        domain_type: this.domain.domain_type,
-        ownership: this.domain.ownership,
-        is_primary: this.domain.is_primary,
+        hostname: currentDomain.hostname,
+        domain_type: currentDomain.domain_type,
+        ownership: currentDomain.ownership,
+        is_primary: currentDomain.is_primary,
       });
       this.form.get('hostname')?.disable();
-    } else if (changes['isOpen'] && this.isOpen && !this.domain) {
+    } else if (changes['isOpen'] && this.isOpen() && !currentDomain) {
       this.form.reset({
         hostname: '',
         domain_type: 'store',
@@ -110,13 +110,14 @@ export class DomainFormModalComponent implements OnInit, OnChanges {
     }
 
     const formValue = this.form.getRawValue();
+    const currentDomain = this.domain();
     this.save.emit({
       ...formValue,
-      config: this.domain?.config || {},
+      config: currentDomain?.config || {},
     });
   }
 
   get isEditing(): boolean {
-    return !!this.domain;
+    return !!this.domain();
   }
 }

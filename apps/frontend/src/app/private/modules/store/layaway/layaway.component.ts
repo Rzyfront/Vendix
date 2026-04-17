@@ -1,5 +1,4 @@
-import { Component, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject } from '@angular/core';
 import { Router, RouterModule } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
@@ -29,7 +28,6 @@ import {
   selector: 'app-layaway',
   standalone: true,
   imports: [
-    CommonModule,
     RouterModule,
     StatsComponent,
     CardComponent,
@@ -43,7 +41,7 @@ import {
   templateUrl: './layaway.component.html',
   styleUrls: ['./layaway.component.scss'],
 })
-export class LayawayComponent implements OnInit {
+export class LayawayComponent {
   private store = inject(Store);
   private router = inject(Router);
   private currencyService = inject(CurrencyFormatService);
@@ -177,7 +175,7 @@ export class LayawayComponent implements OnInit {
     },
   ];
 
-  ngOnInit() {
+  constructor() {
     this.store.dispatch(LayawayActions.loadLayaways());
     this.store.dispatch(LayawayActions.loadStats());
   }

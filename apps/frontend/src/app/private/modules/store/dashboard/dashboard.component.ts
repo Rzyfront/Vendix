@@ -1,7 +1,6 @@
-import { Component, OnInit, OnDestroy, signal, inject, effect, untracked, computed } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, signal, inject, effect, untracked, computed, DestroyRef } from '@angular/core';
 import { Router } from '@angular/router';
-import { Subject, takeUntil } from 'rxjs';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { EChartsOption } from 'echarts';
 
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
@@ -56,7 +55,6 @@ const QUICK_LINKS: QuickLink[] = [
   selector: 'app-store-dashboard',
   standalone: true,
   imports: [
-    CommonModule,
     StatsComponent,
     ChartComponent,
     IconComponent,
@@ -276,14 +274,14 @@ const QUICK_LINKS: QuickLink[] = [
     </div>
   `,
 })
-export class DashboardComponent implements OnInit, OnDestroy {
+export class DashboardComponent {
   private readonly authFacade = inject(AuthFacade);
   private readonly analyticsService = inject(AnalyticsService);
   private readonly dashboardService = inject(StoreDashboardService);
   private readonly currencyService = inject(CurrencyFormatService);
   private readonly toastService = inject(ToastService);
   private readonly router = inject(Router);
-  private readonly destroy$ = new Subject<void>();
+  private readonly destroyRef = inject(DestroyRef);
 
   // Quick links config
   readonly quickLinks = QUICK_LINKS;
@@ -301,7 +299,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
     { value: 'custom', label: 'Personalizado' },
   ];
 
-  // Store
+  // Store — derived from facade signal (userStore$ converted once)
+  private readonly userStore = toSignal(this.authFacade.userStore$, { initialValue: null });
   storeId = signal<string | null>(null);
 
   // Date range
@@ -368,6 +367,18 @@ export class DashboardComponent implements OnInit, OnDestroy {
   channelChartOptions = signal<EChartsOption>({});
 
   constructor() {
+    this.currencyService.loadCurrency();
+
+    // Bootstrap: wait for store id then load data once
+    effect(() => {
+      const store = this.userStore();
+      const id = (store as any)?.id;
+      if (id && !this.storeId()) {
+        this.storeId.set(String(id));
+        untracked(() => this.loadAllData());
+      }
+    });
+
     // React to date range changes (skip initial emission)
     let isFirst = true;
     effect(() => {
@@ -375,24 +386,6 @@ export class DashboardComponent implements OnInit, OnDestroy {
       if (isFirst) { isFirst = false; return; }
       untracked(() => this.loadAllData());
     });
-  }
-
-  ngOnInit(): void {
-    this.currencyService.loadCurrency();
-    this.authFacade.userStore$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe((store: any) => {
-        const id = store?.id;
-        if (id && !this.storeId()) {
-          this.storeId.set(String(id));
-          this.loadAllData();
-        }
-      });
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
   }
 
   onDateFilterChange(values: FilterValues): void {
@@ -432,7 +425,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     // 1. Sales summary → stats cards
     this.analyticsService
       .getSalesSummary(query)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           this.summary.set(response.data);
@@ -447,7 +440,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     // 2. Sales trends → trend chart
     this.analyticsService
       .getSalesTrends({ ...query, granularity: 'day' })
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           const data = response.data || [];
@@ -461,7 +454,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     // 3. Sales by channel → pie chart
     this.analyticsService
       .getSalesByChannel(query)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           const data = response.data || [];
@@ -475,7 +468,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     // 4. Dashboard stats → dispatch/refund alerts
     this.dashboardService
       .getDashboardStats()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (stats) => {
           this.dispatchPendingCount.set(stats.dispatchPendingCount || 0);
@@ -487,7 +480,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     // 5. Inventory summary → low stock/out of stock alerts
     this.analyticsService
       .getInventorySummary({})
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           this.lowStockCount.set(response.data.low_stock_count || 0);

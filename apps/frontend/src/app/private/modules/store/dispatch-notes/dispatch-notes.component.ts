@@ -1,7 +1,6 @@
-import { Component, OnInit, OnDestroy, ViewChild, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, DestroyRef, ViewChild, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
-import { Subject, takeUntil } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ToastService } from '../../../../shared/components/toast/toast.service';
 import { DispatchNotesService } from './services/dispatch-notes.service';
 import { DispatchNotePrintService } from './services/dispatch-note-print.service';
@@ -17,7 +16,6 @@ import {
   selector: 'app-dispatch-notes',
   standalone: true,
   imports: [
-    CommonModule,
     DispatchNoteListComponent,
     DispatchNoteStatsComponent,
     DispatchNoteWizardComponent,
@@ -50,11 +48,12 @@ import {
     </div>
   `,
 })
-export class DispatchNotesComponent implements OnInit, OnDestroy {
+export class DispatchNotesComponent {
   private dispatchNotesService = inject(DispatchNotesService);
   private printService = inject(DispatchNotePrintService);
   private router = inject(Router);
   private toastService = inject(ToastService);
+  private destroyRef = inject(DestroyRef);
 
   @ViewChild(DispatchNoteListComponent) dispatch_note_list!: DispatchNoteListComponent;
 
@@ -64,21 +63,14 @@ export class DispatchNotesComponent implements OnInit, OnDestroy {
   stats_loading = signal(false);
   is_modal_open = signal(false);
 
-  private destroy$ = new Subject<void>();
-
-  ngOnInit(): void {
+  constructor() {
     this.loadStats();
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
   }
 
   loadStats(): void {
     this.stats_loading.set(true);
     this.dispatchNotesService.getStats()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (s) => {
           this.stats.set(s);

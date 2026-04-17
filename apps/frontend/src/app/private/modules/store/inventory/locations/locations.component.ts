@@ -1,7 +1,7 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, OnInit, signal, computed, DestroyRef, inject } from '@angular/core';
+
 import { FormsModule } from '@angular/forms';
-import { Subscription } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 // Shared Components
 import {
@@ -40,7 +40,6 @@ import { LocationFormModalComponent } from './components/location-form-modal.com
   selector: 'app-locations',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ButtonComponent,
     ResponsiveDataViewComponent,
@@ -60,7 +59,7 @@ import { LocationFormModalComponent } from './components/location-form-modal.com
       >
         <app-stats
           title="Total Ubicaciones"
-          [value]="stats.total"
+          [value]="stats().total"
           smallText="Registradas en el sistema"
           iconName="map-pin"
           iconBgColor="bg-blue-100"
@@ -69,7 +68,7 @@ import { LocationFormModalComponent } from './components/location-form-modal.com
 
         <app-stats
           title="Almacenes"
-          [value]="stats.warehouses"
+          [value]="stats().warehouses"
           smallText="Puntos de almacenamiento"
           iconName="warehouse"
           iconBgColor="bg-purple-100"
@@ -78,7 +77,7 @@ import { LocationFormModalComponent } from './components/location-form-modal.com
 
         <app-stats
           title="Activas"
-          [value]="stats.active"
+          [value]="stats().active"
           smallText="Operativas actualmente"
           iconName="check-circle"
           iconBgColor="bg-green-100"
@@ -87,7 +86,7 @@ import { LocationFormModalComponent } from './components/location-form-modal.com
 
         <app-stats
           title="Inactivas"
-          [value]="stats.inactive"
+          [value]="stats().inactive"
           smallText="Fuera de operación"
           iconName="x-circle"
           iconBgColor="bg-amber-100"
@@ -108,7 +107,7 @@ import { LocationFormModalComponent } from './components/location-form-modal.com
             <h2
               class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary"
             >
-              Ubicaciones ({{ pagination.total }})
+              Ubicaciones ({{ pagination().total }})
             </h2>
 
             <!-- Search row - horizontal on mobile -->
@@ -136,7 +135,7 @@ import { LocationFormModalComponent } from './components/location-form-modal.com
                 [filters]="filterConfigs"
                 [filterValues]="filterValues"
                 [actions]="dropdownActions"
-                [isLoading]="is_loading"
+                [isLoading]="is_loading()"
                 (filterChange)="onFilterChange($event)"
                 (clearAllFilters)="clearFilters()"
                 (actionClick)="onActionClick($event)"
@@ -146,99 +145,95 @@ import { LocationFormModalComponent } from './components/location-form-modal.com
         </div>
 
         <!-- Loading State -->
-        <div *ngIf="is_loading" class="p-4 md:p-6 text-center">
-          <div
-            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-          ></div>
-          <p class="mt-2 text-text-secondary">Cargando ubicaciones...</p>
-        </div>
+        @if (is_loading()) {
+          <div class="p-4 md:p-6 text-center">
+            <div
+              class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            ></div>
+            <p class="mt-2 text-text-secondary">Cargando ubicaciones...</p>
+          </div>
+        }
 
         <!-- Empty State -->
-        <div
-          *ngIf="!is_loading && filtered_locations.length === 0"
-          class="p-8 md:p-12 text-center text-gray-500"
-        >
-          <app-icon
-            name="map-pin"
-            [size]="48"
-            class="mx-auto mb-4 text-gray-300"
-          ></app-icon>
-          <h3 class="text-lg font-medium text-gray-900">No hay ubicaciones</h3>
-          <p class="mt-1 text-sm md:text-base">
-            Comienza agregando una nueva ubicación para tu inventario.
-          </p>
-          <div class="mt-6">
-            <app-button variant="primary" (clicked)="openCreateModal()">
-              <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-              Agregar Ubicación
-            </app-button>
+        @if (!is_loading() && filtered_locations().length === 0) {
+          <div class="p-8 md:p-12 text-center text-gray-500">
+            <app-icon
+              name="map-pin"
+              [size]="48"
+              class="mx-auto mb-4 text-gray-300"
+            ></app-icon>
+            <h3 class="text-lg font-medium text-gray-900">
+              No hay ubicaciones
+            </h3>
+            <p class="mt-1 text-sm md:text-base">
+              Comienza agregando una nueva ubicación para tu inventario.
+            </p>
+            <div class="mt-6">
+              <app-button variant="primary" (clicked)="openCreateModal()">
+                <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+                Agregar Ubicación
+              </app-button>
+            </div>
           </div>
-        </div>
+        }
 
         <!-- Table -->
-        <div
-          *ngIf="!is_loading && filtered_locations.length > 0"
-          class="px-2 pb-2 pt-3 md:p-4"
-        >
-          <app-responsive-data-view
-            [data]="filtered_locations"
-            [columns]="table_columns"
-            [cardConfig]="cardConfig"
-            [actions]="table_actions"
-            [loading]="is_loading"
-            emptyMessage="No hay ubicaciones registradas"
-            emptyIcon="map-pin"
-            (sort)="onSort($event)"
-            (rowClick)="onRowClick($event)"
-          ></app-responsive-data-view>
-
-          <div class="mt-4 flex justify-center">
-            <app-pagination
-              [currentPage]="pagination.page"
-              [totalPages]="pagination.totalPages"
-              [total]="pagination.total"
-              [limit]="pagination.limit"
-              infoStyle="none"
-              (pageChange)="changePage($event)"
-            />
+        @if (!is_loading() && filtered_locations().length > 0) {
+          <div class="px-2 pb-2 pt-3 md:p-4">
+            <app-responsive-data-view
+              [data]="filtered_locations()"
+              [columns]="table_columns"
+              [cardConfig]="cardConfig"
+              [actions]="table_actions"
+              [loading]="is_loading()"
+              emptyMessage="No hay ubicaciones registradas"
+              emptyIcon="map-pin"
+              (sort)="onSort($event)"
+              (rowClick)="onRowClick($event)"
+            ></app-responsive-data-view>
+            <div class="mt-4 flex justify-center">
+              <app-pagination
+                [currentPage]="pagination().page"
+                [totalPages]="pagination().totalPages"
+                [total]="pagination().total"
+                [limit]="pagination().limit"
+                infoStyle="none"
+                (pageChange)="changePage($event)"
+              />
+            </div>
           </div>
-        </div>
+        }
       </app-card>
 
       <!-- Create/Edit Modal -->
       <app-location-form-modal
-        [isOpen]="is_modal_open"
-        [location]="selected_location"
-        [isSubmitting]="is_submitting"
+        [isOpen]="is_modal_open()"
+        [location]="selected_location()"
+        [isSubmitting]="is_submitting()"
         (cancel)="closeModal()"
         (save)="onSaveLocation($event)"
       ></app-location-form-modal>
     </div>
   `,
 })
-export class LocationsComponent implements OnInit, OnDestroy {
-  // Data
-  locations: InventoryLocation[] = [];
-  filtered_locations: InventoryLocation[] = [];
-  selected_location: InventoryLocation | null = null;
+export class LocationsComponent implements OnInit {
+  locations = signal<InventoryLocation[]>([]);
+  filtered_locations = computed(() => this.locations());
+  selected_location = signal<InventoryLocation | null>(null);
 
-  // Stats
-  stats = {
+  stats = signal({
     total: 0,
     active: 0,
     inactive: 0,
     warehouses: 0,
-  };
+  });
 
-  // Pagination
-  pagination = { page: 1, limit: 10, total: 0, totalPages: 0 };
+  pagination = signal({ page: 1, limit: 10, total: 0, totalPages: 0 });
 
-  // Filters
   status_filter: 'all' | 'active' | 'inactive' = 'all';
   type_filter = '';
-  search_term = '';
+  search_term = signal('');
 
-  // Filter configuration for the options dropdown
   filterConfigs: FilterConfig[] = [
     {
       key: 'is_active',
@@ -264,10 +259,8 @@ export class LocationsComponent implements OnInit, OnDestroy {
     },
   ];
 
-  // Current filter values
   filterValues: FilterValues = {};
 
-  // Dropdown actions
   dropdownActions: DropdownAction[] = [
     { label: 'Refrescar', icon: 'refresh-cw', action: 'refresh' },
     {
@@ -278,7 +271,6 @@ export class LocationsComponent implements OnInit, OnDestroy {
     },
   ];
 
-  // Table Configuration
   table_columns: TableColumn[] = [
     {
       key: 'code',
@@ -330,7 +322,6 @@ export class LocationsComponent implements OnInit, OnDestroy {
     },
   ];
 
-  // Card Config for mobile
   cardConfig: ItemListCardConfig = {
     titleKey: 'name',
     subtitleKey: 'code',
@@ -368,12 +359,11 @@ export class LocationsComponent implements OnInit, OnDestroy {
     ],
   };
 
-  // UI State
-  is_loading = false;
-  is_modal_open = false;
-  is_submitting = false;
+  is_loading = signal(false);
+  is_modal_open = signal(false);
+  is_submitting = signal(false);
 
-  private subscriptions: Subscription[] = [];
+  private destroyRef = inject(DestroyRef);
 
   constructor(
     private locationsService: LocationsService,
@@ -385,71 +375,62 @@ export class LocationsComponent implements OnInit, OnDestroy {
     this.loadLocations();
   }
 
-  ngOnDestroy(): void {
-    this.subscriptions.forEach((sub) => sub.unsubscribe());
-  }
-
-  // ============================================================
-  // Data Loading
-  // ============================================================
-
   loadLocations(): void {
-    this.is_loading = true;
+    this.is_loading.set(true);
+    const p = this.pagination();
     const query: any = {
-      page: this.pagination.page,
-      limit: this.pagination.limit,
-      ...(this.search_term ? { search: this.search_term } : {}),
+      page: p.page,
+      limit: p.limit,
+      ...(this.search_term() ? { search: this.search_term() } : {}),
       ...(this.status_filter === 'active' ? { is_active: true } : {}),
       ...(this.status_filter === 'inactive' ? { is_active: false } : {}),
       ...(this.type_filter ? { type: this.type_filter } : {}),
     };
 
-    const sub = this.locationsService.getLocations(query).subscribe({
-      next: (response: any) => {
-        if (response.data) {
-          this.locations = response.data;
-          if (response.meta) {
-            this.pagination.total = response.meta.total;
-            this.pagination.totalPages = response.meta.totalPages;
+    this.locationsService
+      .getLocations(query)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response: any) => {
+          if (response.data) {
+            this.locations.set(response.data);
+            if (response.meta) {
+              this.pagination.update((pg) => ({
+                ...pg,
+                total: response.meta.total,
+                totalPages: response.meta.totalPages,
+              }));
+            }
+            this.calculateStats();
           }
-          this.filtered_locations = [...this.locations];
-          this.calculateStats();
-        }
-        if (this.locations.length === 0 && this.pagination.page > 1) {
-          this.pagination.page--;
-          this.loadLocations();
-          return;
-        }
-        this.is_loading = false;
-      },
-      error: (error) => {
-        this.toastService.error(error || 'Error al cargar ubicaciones');
-        this.is_loading = false;
-      },
-    });
-    this.subscriptions.push(sub);
-  }
-
-  applyFilters(): void {
-    this.filtered_locations = [...this.locations];
+          if (this.locations().length === 0 && this.pagination().page > 1) {
+            this.pagination.update((pg) => ({ ...pg, page: pg.page - 1 }));
+            this.loadLocations();
+            return;
+          }
+          this.is_loading.set(false);
+        },
+        error: (error) => {
+          this.toastService.error(error || 'Error al cargar ubicaciones');
+          this.is_loading.set(false);
+        },
+      });
   }
 
   calculateStats(): void {
-    this.stats.total = this.pagination.total || this.locations.length;
-    this.stats.active = this.locations.filter((l) => l.is_active).length;
-    this.stats.inactive = this.locations.filter((l) => !l.is_active).length;
-    this.stats.warehouses = this.locations.filter(
-      (l) => l.type === 'warehouse',
-    ).length;
+    const list = this.locations();
+    const pg = this.pagination();
+    this.stats.set({
+      total: pg.total || list.length,
+      active: list.filter((l) => l.is_active).length,
+      inactive: list.filter((l) => !l.is_active).length,
+      warehouses: list.filter((l) => l.type === 'warehouse').length,
+    });
   }
 
-  // ============================================================
-  // Event Handlers
-  // ============================================================
-
   onSearch(term: string): void {
-    this.search_term = term;
-    this.pagination.page = 1;
+    this.search_term.set(term);
+    this.pagination.update((p) => ({ ...p, page: 1 }));
     this.loadLocations();
   }
 
@@ -466,21 +447,21 @@ export class LocationsComponent implements OnInit, OnDestroy {
       this.status_filter = 'all';
     }
 
-    this.pagination.page = 1;
+    this.pagination.update((p) => ({ ...p, page: 1 }));
     this.loadLocations();
   }
 
   clearFilters(): void {
     this.status_filter = 'all';
     this.type_filter = '';
-    this.search_term = '';
+    this.search_term.set('');
     this.filterValues = {};
-    this.pagination.page = 1;
+    this.pagination.update((p) => ({ ...p, page: 1 }));
     this.loadLocations();
   }
 
   changePage(page: number): void {
-    this.pagination.page = page;
+    this.pagination.update((p) => ({ ...p, page }));
     this.loadLocations();
   }
 
@@ -500,79 +481,71 @@ export class LocationsComponent implements OnInit, OnDestroy {
       this.loadLocations();
       return;
     }
-    // Client-side sorting
-    this.locations = [...this.locations].sort((a, b) => {
-      const val_a = (a as any)[event.column] || '';
-      const val_b = (b as any)[event.column] || '';
-      const comparison = String(val_a).localeCompare(String(val_b));
-      return event.direction === 'asc' ? comparison : -comparison;
-    });
+    this.locations.update((list) =>
+      [...list].sort((a, b) => {
+        const val_a = (a as any)[event.column] || '';
+        const val_b = (b as any)[event.column] || '';
+        const comparison = String(val_a).localeCompare(String(val_b));
+        return event.direction === 'asc' ? comparison : -comparison;
+      }),
+    );
   }
 
   onRowClick(location: InventoryLocation): void {
     this.openEditModal(location);
   }
 
-  // ============================================================
-  // Modal Management
-  // ============================================================
-
   openCreateModal(): void {
-    this.selected_location = null;
-    this.is_modal_open = true;
+    this.selected_location.set(null);
+    this.is_modal_open.set(true);
   }
 
   openEditModal(location: InventoryLocation): void {
-    this.selected_location = location;
-    this.is_modal_open = true;
+    this.selected_location.set(location);
+    this.is_modal_open.set(true);
   }
 
   closeModal(): void {
-    this.is_modal_open = false;
-    this.selected_location = null;
+    this.is_modal_open.set(false);
+    this.selected_location.set(null);
   }
 
-  // ============================================================
-  // CRUD Operations
-  // ============================================================
-
   onSaveLocation(data: CreateLocationDto | UpdateLocationDto): void {
-    this.is_submitting = true;
+    this.is_submitting.set(true);
 
-    if (this.selected_location) {
-      // Update
-      const sub = this.locationsService
-        .updateLocation(this.selected_location.id, data)
+    const loc = this.selected_location();
+    if (loc) {
+      this.locationsService
+        .updateLocation(loc.id, data)
+        .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: () => {
             this.toastService.success('Ubicación actualizada correctamente');
-            this.is_submitting = false;
+            this.is_submitting.set(false);
             this.closeModal();
             this.loadLocations();
           },
           error: (error) => {
             this.toastService.error(error || 'Error al actualizar ubicación');
-            this.is_submitting = false;
+            this.is_submitting.set(false);
           },
         });
-      this.subscriptions.push(sub);
     } else {
-      // Create
-      const sub = this.locationsService
+      this.locationsService
         .createLocation(data as CreateLocationDto)
+        .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: () => {
             this.toastService.success('Ubicación creada correctamente');
-            this.is_submitting = false;
+            this.is_submitting.set(false);
             this.closeModal();
             this.loadLocations();
           },
           error: (error) => {
             this.toastService.error(error || 'Error al crear ubicación');
-            this.is_submitting = false;
+            this.is_submitting.set(false);
           },
         });
-      this.subscriptions.push(sub);
     }
   }
 
@@ -593,15 +566,17 @@ export class LocationsComponent implements OnInit, OnDestroy {
   }
 
   deleteLocation(location: InventoryLocation): void {
-    const sub = this.locationsService.deleteLocation(location.id).subscribe({
-      next: () => {
-        this.toastService.success('Ubicación eliminada correctamente');
-        this.loadLocations();
-      },
-      error: (error) => {
-        this.toastService.error(error || 'Error al eliminar ubicación');
-      },
-    });
-    this.subscriptions.push(sub);
+    this.locationsService
+      .deleteLocation(location.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.success('Ubicación eliminada correctamente');
+          this.loadLocations();
+        },
+        error: (error) => {
+          this.toastService.error(error || 'Error al eliminar ubicación');
+        },
+      });
   }
 }

@@ -1,5 +1,5 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input, output, signal, computed } from '@angular/core';
+import { NgClass } from '@angular/common';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { HelpArticle } from '../../../models/help-article.model';
 import { markdownToHtml } from '../../../../../../../shared/utils/markdown.util';
@@ -7,56 +7,62 @@ import { markdownToHtml } from '../../../../../../../shared/utils/markdown.util'
 @Component({
   selector: 'app-help-article-card',
   standalone: true,
-  imports: [CommonModule, IconComponent],
-  host: { '[class.is-expanded]': 'isExpanded' },
+  imports: [NgClass, IconComponent],
+  host: { '[class.is-expanded]': 'isExpanded()' },
   template: `
     <div
       class="article-card"
-      [class.expanded]="isExpanded"
-      [attr.id]="'article-' + article.slug"
-    >
+      [class.expanded]="isExpanded()"
+      [attr.id]="'article-' + article().slug"
+      >
       <!-- Card Header -->
       <div class="article-header" (click)="toggle()">
         <div class="article-meta">
-          <span class="meta-badge category-badge">{{ article.category.name }}</span>
-          <span class="meta-badge" [ngClass]="'type-' + article.type.toLowerCase()">{{ getTypeLabel(article.type) }}</span>
-          <span *ngIf="article.is_featured" class="featured-badge">
-            <app-icon name="star" [size]="12"></app-icon>
-            Destacado
-          </span>
+          <span class="meta-badge category-badge">{{ article().category.name }}</span>
+          <span class="meta-badge" [ngClass]="'type-' + article().type.toLowerCase()">{{ getTypeLabel(article().type) }}</span>
+          @if (article().is_featured) {
+            <span class="featured-badge">
+              <app-icon name="star" [size]="12"></app-icon>
+              Destacado
+            </span>
+          }
         </div>
-
-        <h3 class="article-title">{{ article.title }}</h3>
-        <p class="article-summary">{{ article.summary }}</p>
-
+    
+        <h3 class="article-title">{{ article().title }}</h3>
+        <p class="article-summary">{{ article().summary }}</p>
+    
         <div class="article-footer">
           <div class="article-stats">
             <span class="stat-item">
               <app-icon name="eye" [size]="14"></app-icon>
-              {{ article.view_count }} vistas
+              {{ article().view_count }} vistas
             </span>
-            <span *ngIf="article.module" class="stat-item">
-              <app-icon name="layout-grid" [size]="14"></app-icon>
-              {{ article.module }}
-            </span>
+            @if (article().module) {
+              <span class="stat-item">
+                <app-icon name="layout-grid" [size]="14"></app-icon>
+                {{ article().module }}
+              </span>
+            }
           </div>
-          <button class="expand-btn" [attr.aria-label]="isExpanded ? 'Colapsar' : 'Ver más'">
-            <span>{{ isExpanded ? 'Cerrar' : 'Ver más' }}</span>
+          <button class="expand-btn" [attr.aria-label]="isExpanded() ? 'Colapsar' : 'Ver más'">
+            <span>{{ isExpanded() ? 'Cerrar' : 'Ver más' }}</span>
             <app-icon
-              [name]="isExpanded ? 'chevron-up' : 'chevron-down'"
+              [name]="isExpanded() ? 'chevron-up' : 'chevron-down'"
               [size]="16"
             ></app-icon>
           </button>
         </div>
       </div>
-
+    
       <!-- Expanded Content -->
-      <div class="article-content" *ngIf="isExpanded">
-        <div class="content-divider"></div>
-        <div class="content-body" [innerHTML]="renderedContent"></div>
-      </div>
+      @if (isExpanded()) {
+        <div class="article-content">
+          <div class="content-divider"></div>
+          <div class="content-body" [innerHTML]="renderedContent()"></div>
+        </div>
+      }
     </div>
-  `,
+    `,
   styles: [`
     .article-card {
       background: var(--color-surface, #fff);
@@ -237,19 +243,15 @@ import { markdownToHtml } from '../../../../../../../shared/utils/markdown.util'
   `],
 })
 export class HelpArticleCardComponent {
-  @Input() article!: HelpArticle;
-  @Input() isExpanded = false;
-  @Output() expanded = new EventEmitter<HelpArticle>();
+  readonly article = input.required<HelpArticle>();
+  readonly isExpanded = input<boolean>(false);
+  readonly expanded = output<HelpArticle | null>();
 
-  get renderedContent(): string {
-    return this.markdownToHtml(this.article.content);
-  }
+  readonly renderedContent = computed(() => this.markdownToHtml(this.article().content));
 
   toggle(): void {
-    this.isExpanded = !this.isExpanded;
-    if (this.isExpanded) {
-      this.expanded.emit(this.article);
-    }
+    // Emit null to collapse (parent sets expandedSlug to null), or emit article to expand
+    this.expanded.emit(this.isExpanded() ? null : this.article());
   }
 
   getTypeLabel(type: string): string {

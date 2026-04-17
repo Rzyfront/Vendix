@@ -2,10 +2,16 @@
     <!-- Account Header -->
     <div class="account-header">
         <div class="header-content">
-            @if (profile && profile.avatar_url) {
-                <div class="avatar">
-                    <img [src]="profile.avatar_url" [alt]="profile.first_name || 'Usuario'" />
-                </div>
+            @if (profile(); as prof) {
+                @if (prof.avatar_url) {
+                    <div class="avatar">
+                        <img [src]="prof.avatar_url" [alt]="prof.first_name || 'Usuario'" />
+                    </div>
+                } @else {
+                    <div class="avatar avatar-placeholder">
+                        <app-icon name="user" [size]="24"></app-icon>
+                    </div>
+                }
             } @else {
                 <div class="avatar avatar-placeholder">
                     <app-icon name="user" [size]="24"></app-icon>
@@ -13,7 +19,7 @@
             }
             <div class="header-info">
                 <h1>Mi Cuenta</h1>
-                <p class="header-email">{{ profile?.email }}</p>
+                <p class="header-email">{{ profile()?.email }}</p>
             </div>
         </div>
         <app-button variant="outline-danger" (clicked)="logout()">
@@ -34,21 +40,21 @@
         </a>
     </nav>
 
-    @if (success_message) {
+    @if (success_message()) {
         <div class="success-message">
             <app-icon name="check-circle" [size]="20"></app-icon>
-            {{ success_message }}
+            {{ success_message() }}
         </div>
     }
 
-    @if (error_message) {
+    @if (error_message()) {
         <div class="error-message">
             <app-icon name="alert-circle" [size]="20"></app-icon>
-            {{ error_message }}
+            {{ error_message() }}
         </div>
     }
 
-    @if (is_loading) {
+    @if (is_loading()) {
         <div class="loading">
             <div class="spinner"></div>
             <p>Cargando...</p>
@@ -76,7 +82,7 @@
                                 <app-input label="Teléfono" type="tel" formControlName="phone" placeholder="+57 300 123 4567" [control]="profile_form.get('phone')"></app-input>
                             </div>
                             <div class="form-group">
-                                <app-input label="Email" type="email" [value]="profile?.email || ''" [disabled]="true"></app-input>
+                                <app-input label="Email" type="email" [ngModel]="profile()?.email || ''" [ngModelOptions]="{ standalone: true }" [disabled]="true"></app-input>
                             </div>
                         </div>
                         <div class="form-row">
@@ -93,11 +99,11 @@
                             </div>
                         </div>
                         <div class="form-actions">
-                            <app-button type="submit" variant="primary" [loading]="is_saving" [disabled]="is_saving || !profile_form.valid">
-                                @if (!is_saving) {
+                            <app-button type="submit" variant="primary" [loading]="is_saving()" [disabled]="is_saving() || !profile_form.valid">
+                                @if (!is_saving()) {
                                     <app-icon slot="icon" name="save" [size]="18"></app-icon>
                                 }
-                                {{ is_saving ? 'Guardando...' : 'Guardar cambios' }}
+                                {{ is_saving() ? 'Guardando...' : 'Guardar cambios' }}
                             </app-button>
                         </div>
                     </form>
@@ -108,10 +114,10 @@
                     <div class="section-header">
                         <h2>Seguridad</h2>
                     </div>
-                    @if (!show_password_form) {
+                    @if (!show_password_form()) {
                         <div class="security-actions">
                             <p class="security-hint">Cambiar tu contraseña regularmente ayuda a proteger tu cuenta.</p>
-                            <app-button variant="outline" (clicked)="show_password_form = true">
+                            <app-button variant="outline" (clicked)="show_password_form.set(true)">
                                 <app-icon slot="icon" name="key" [size]="18"></app-icon>
                                 Cambiar contraseña
                             </app-button>
@@ -130,11 +136,11 @@
                                 </div>
                             </div>
                             <div class="form-actions">
-                                <app-button type="button" variant="ghost" (clicked)="show_password_form = false; password_form.reset()">
+                                <app-button type="button" variant="ghost" (clicked)="show_password_form.set(false); password_form.reset()">
                                     Cancelar
                                 </app-button>
-                                <app-button type="submit" variant="primary" [loading]="is_changing_password" [disabled]="is_changing_password || !password_form.valid">
-                                    {{ is_changing_password ? 'Cambiando...' : 'Cambiar contraseña' }}
+                                <app-button type="submit" variant="primary" [loading]="is_changing_password()" [disabled]="is_changing_password() || !password_form.valid">
+                                    {{ is_changing_password() ? 'Cambiando...' : 'Cambiar contraseña' }}
                                 </app-button>
                             </div>
                         </form>
@@ -152,7 +158,7 @@
                         </app-button>
                     </div>
 
-                    @if (!profile || !profile.addresses || profile.addresses.length === 0) {
+                    @if (!profile() || !profile()?.addresses || (profile()?.addresses?.length ?? 0) === 0) {
                         <div class="empty-state">
                             <app-icon name="map-pin" [size]="32"></app-icon>
                             <p>No tienes direcciones guardadas</p>
@@ -162,7 +168,7 @@
                         </div>
                     } @else {
                         <div class="address-list">
-                            @for (addr of profile.addresses; track addr.id) {
+                            @for (addr of profile()?.addresses; track addr.id) {
                                 <div class="address-card" [class.primary]="addr.is_primary">
                                     <div class="address-icon">
                                         <app-icon name="map-pin" [size]="32"></app-icon>
@@ -225,8 +231,8 @@
     <!-- Address Modal -->
     <app-address-modal
         [(isOpen)]="show_address_modal"
-        [mode]="address_modal_mode"
-        [address]="editing_address"
+        [mode]="address_modal_mode()"
+        [address]="editing_address()"
         (saved)="onAddressSaved($event)"
     />
 </div>

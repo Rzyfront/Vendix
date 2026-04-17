@@ -1,12 +1,10 @@
-import { Component, ChangeDetectionStrategy, ChangeDetectorRef, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject, DestroyRef } from '@angular/core';
+
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { timer } from 'rxjs';
 import { filter, map, catchError } from 'rxjs/operators';
 import { of } from 'rxjs';
-import { DestroyRef } from '@angular/core';
 import { StatsComponent } from '../../../../../../shared/components';
-import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { StatusIndicatorComponent } from '../../components';
 import { MonitoringService } from '../../services';
 import { MonitoringOverview, ServerInfo, MetricStatus } from '../../interfaces';
@@ -14,8 +12,7 @@ import { MonitoringOverview, ServerInfo, MetricStatus } from '../../interfaces';
 @Component({
   selector: 'app-monitoring-overview-page',
   standalone: true,
-  imports: [CommonModule, StatsComponent, IconComponent, StatusIndicatorComponent],
-  changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [StatsComponent, StatusIndicatorComponent],
   template: `
     <div class="space-y-6">
       <!-- Stats Cards -->
@@ -58,54 +55,42 @@ import { MonitoringOverview, ServerInfo, MetricStatus } from '../../interfaces';
         ></app-stats>
       </div>
 
-      <!-- Status bar -->
-      <div
-        class="rounded-card shadow-card p-4 flex items-center justify-between flex-wrap gap-3"
-        style="background: var(--color-surface); border: 1px solid var(--color-border);"
-      >
-        <div class="flex items-center gap-4">
-          <app-status-indicator
-            [status]="overallStatus"
-            [label]="overallStatusLabel"
-          ></app-status-indicator>
-          <span class="text-sm" style="color: var(--color-text-secondary);">
-            <app-icon name="clock" [size]="14" style="display: inline; vertical-align: middle; margin-right: 4px; color: var(--color-text-muted);"></app-icon>
-            Uptime: <strong style="color: var(--color-text-primary);">{{ formatUptime(overview?.server?.uptime) }}</strong>
-          </span>
+      <!-- Overall Status -->
+      <div class="p-4 rounded-xl" style="background: var(--color-surface); border: 1px solid var(--color-border);">
+        <div class="flex items-center justify-between">
+          <div class="flex items-center gap-3">
+            <app-status-indicator [status]="overallStatus"></app-status-indicator>
+            <span class="text-sm font-medium" style="color: var(--color-text-primary);">Estado General</span>
+          </div>
+          <span class="text-sm" style="color: var(--color-text-muted);">{{ overallStatusLabel }}</span>
         </div>
-        <span class="text-xs font-mono px-2 py-1 rounded-full" style="background: var(--color-background); color: var(--color-text-muted);">
-          Auto-refresh: 60s
-        </span>
       </div>
 
-      <!-- Server Info Summary -->
-      <div *ngIf="serverInfo" class="rounded-card shadow-card p-6" style="background: var(--color-surface); border: 1px solid var(--color-border);">
-        <h3 class="text-sm font-semibold mb-4" style="color: var(--color-text-primary);">Informacion del Servidor</h3>
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <div class="p-3 rounded-lg text-center" style="background: var(--color-background);">
-            <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Hostname</p>
-            <p class="font-mono text-sm font-bold truncate" style="color: var(--color-text-primary);">{{ serverInfo.hostname }}</p>
-          </div>
-          <div class="p-3 rounded-lg text-center" style="background: var(--color-background);">
-            <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Platform</p>
-            <p class="font-mono text-sm font-bold" style="color: var(--color-text-primary);">{{ serverInfo.platform }} {{ serverInfo.arch }}</p>
-          </div>
-          <div class="p-3 rounded-lg text-center" style="background: var(--color-background);">
-            <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">CPUs</p>
-            <p class="font-mono text-sm font-bold" style="color: var(--color-text-primary);">{{ serverInfo.cpuCount }}</p>
-          </div>
-          <div class="p-3 rounded-lg text-center" style="background: var(--color-background);">
-            <p class="text-[10px] uppercase tracking-wider font-medium mb-1" style="color: var(--color-text-muted);">Node.js</p>
-            <p class="font-mono text-sm font-bold" style="color: var(--color-text-primary);">{{ serverInfo.nodeVersion }}</p>
+      <!-- Server Info -->
+      @if (serverInfo) {
+        <div class="p-4 rounded-xl" style="background: var(--color-surface); border: 1px solid var(--color-border);">
+          <h3 class="text-sm font-semibold mb-3" style="color: var(--color-text-primary);">Informacion del Servidor</h3>
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+            <div>
+              <p class="text-[10px] uppercase" style="color: var(--color-text-muted);">Hostname</p>
+              <p class="font-mono text-sm" style="color: var(--color-text-primary);">{{ serverInfo.hostname }}</p>
+            </div>
+            <div>
+              <p class="text-[10px] uppercase" style="color: var(--color-text-muted);">Plataforma</p>
+              <p class="font-mono text-sm" style="color: var(--color-text-primary);">{{ serverInfo.platform }}</p>
+            </div>
+            <div>
+              <p class="text-[10px] uppercase" style="color: var(--color-text-muted);">Node.js</p>
+              <p class="font-mono text-sm font-bold" style="color: var(--color-text-primary);">{{ serverInfo.nodeVersion }}</p>
+            </div>
           </div>
         </div>
-      </div>
+      }
     </div>
-  `,
+    `,
 })
-export class MonitoringOverviewPage implements OnInit {
+export class MonitoringOverviewPage {
   private readonly monitoringService = inject(MonitoringService);
-  private readonly cdr = inject(ChangeDetectorRef);
   private readonly destroyRef = inject(DestroyRef);
 
   overview: MonitoringOverview | null = null;
@@ -131,7 +116,7 @@ export class MonitoringOverviewPage implements OnInit {
   private paused = false;
   private visibilityHandler = () => { this.paused = document.hidden; };
 
-  ngOnInit(): void {
+  constructor() {
     document.addEventListener('visibilitychange', this.visibilityHandler);
 
     // Fetch server info once
@@ -141,7 +126,6 @@ export class MonitoringOverviewPage implements OnInit {
       takeUntilDestroyed(this.destroyRef),
     ).subscribe(data => {
       this.serverInfo = data;
-      this.cdr.markForCheck();
     });
 
     // Poll overview every 60s
@@ -149,6 +133,10 @@ export class MonitoringOverviewPage implements OnInit {
       filter(() => !this.paused),
       takeUntilDestroyed(this.destroyRef),
     ).subscribe(() => this.fetchOverview());
+
+    this.destroyRef.onDestroy(() => {
+      document.removeEventListener('visibilitychange', this.visibilityHandler);
+    });
   }
 
   formatUptime(seconds?: number): string {
@@ -172,7 +160,6 @@ export class MonitoringOverviewPage implements OnInit {
       this.overview = data;
       this.loadingOverview = false;
       this.computeOverviewValues();
-      this.cdr.markForCheck();
     });
   }
 

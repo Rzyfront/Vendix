@@ -47,7 +47,8 @@
   border: 2px solid var(--color-border);
   border-radius: var(--radius-lg);
   cursor: pointer;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 0.15s ease, border-color 0.15s ease,
+    background-color 0.15s ease, box-shadow 0.15s ease;
 
   &:hover {
     border-color: var(--color-primary);
@@ -105,7 +106,6 @@
       rgba(255, 255, 255, 0.1) 50%,
       rgba(var(--color-primary-rgb, 126, 215, 165), 0.2) 100%
     ) !important;
-  backdrop-filter: blur(4px);
   position: relative;
   overflow: hidden;
 
@@ -122,8 +122,12 @@
       rgba(255, 255, 255, 0.3) 50%,
       transparent 70%
     );
-    animation: glass-shimmer 3s ease-in-out infinite;
+    transform: translateX(-100%) rotate(45deg);
   }
+}
+
+.theme-box:not(.disabled):hover .glass-preview::after {
+  animation: glass-shimmer 3s ease-in-out infinite;
 }
 
 @keyframes glass-shimmer {
@@ -143,7 +147,8 @@
     height: 40px;
     border-radius: var(--radius-md);
     border: 2px solid var(--color-border);
-    transition: all 0.2s ease;
+    transition: transform 0.15s ease, border-color 0.15s ease,
+      box-shadow 0.15s ease;
   }
 
   span {
@@ -189,29 +194,21 @@
 
 // ==================== Modules Section ====================
 .compact-modules-grid {
-  columns: 280px auto;
-  column-gap: 0.75rem;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 0.75rem;
+  align-items: start;
 }
 
 .module-group {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  break-inside: avoid;
-  margin-bottom: 0.75rem;
   background: var(--color-surface, #fff);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-lg, 0.75rem);
   padding: 0.75rem;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
-
-  &:last-child {
-    margin-bottom: 0;
-  }
-
-  &.is-parent {
-    break-inside: avoid;
-  }
 }
 
 .children-grid {
@@ -295,7 +292,7 @@
 // ==================== Responsive ====================
 @media (max-width: 768px) {
   .compact-modules-grid {
-    columns: 1;
+    grid-template-columns: 1fr;
   }
 
   .app-type-selection {

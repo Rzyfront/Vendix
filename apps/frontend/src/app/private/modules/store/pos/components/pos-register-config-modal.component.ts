@@ -1,9 +1,10 @@
 import {
     Component,
-    EventEmitter,
-    Input,
-    Output,
-    OnInit,
+    input,
+    output,
+    effect,
+    untracked,
+    inject,
 } from '@angular/core';
 import {
     FormBuilder,
@@ -11,7 +12,7 @@ import {
     Validators,
     ReactiveFormsModule,
 } from '@angular/forms';
-import { CommonModule } from '@angular/common';
+
 
 import {
     ButtonComponent,
@@ -24,16 +25,15 @@ import {
     selector: 'app-pos-register-config-modal',
     standalone: true,
     imports: [
-        CommonModule,
-        ReactiveFormsModule,
-        ButtonComponent,
-        ModalComponent,
-        InputComponent,
-        IconComponent,
-    ],
+    ReactiveFormsModule,
+    ButtonComponent,
+    ModalComponent,
+    InputComponent,
+    IconComponent
+],
     template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'md'"
@@ -112,11 +112,11 @@ import {
     </app-modal>
   `,
 })
-export class PosRegisterConfigModalComponent implements OnInit {
-    @Input() isOpen = false;
-    @Output() isOpenChange = new EventEmitter<boolean>();
-    @Output() closed = new EventEmitter<void>();
-    @Output() saved = new EventEmitter<string>();
+export class PosRegisterConfigModalComponent {
+    readonly isOpen = input<boolean>(false);
+    readonly isOpenChange = output<boolean>();
+    readonly closed = output<void>();
+    readonly saved = output<string>();
 
     configForm: FormGroup;
 
@@ -124,12 +124,12 @@ export class PosRegisterConfigModalComponent implements OnInit {
         this.configForm = this.fb.group({
             registerId: ['', [Validators.required, Validators.minLength(2)]],
         });
-    }
 
-    ngOnInit(): void {
-        if (this.isOpen) {
-            this.loadConfig();
-        }
+        effect(() => {
+            if (this.isOpen()) {
+                untracked(() => this.loadConfig());
+            }
+        });
     }
 
     loadConfig(): void {

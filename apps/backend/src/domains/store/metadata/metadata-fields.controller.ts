@@ -16,8 +16,11 @@ export class MetadataFieldsController {
 
   @Get()
   @Permissions('store:settings:read')
-  async listFields(@Query('entity_type') entityType?: string) {
-    const result = await this.service.listFields(entityType);
+  async listFields(
+    @Query('entity_type') entityType?: string,
+    @Query('include_inactive') includeInactive?: string,
+  ) {
+    const result = await this.service.listFields(entityType, includeInactive === 'true');
     return this.responseService.success(result);
   }
 

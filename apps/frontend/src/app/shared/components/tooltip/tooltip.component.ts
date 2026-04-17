@@ -1,11 +1,13 @@
 import {
   Component,
-  Input,
+  DestroyRef,
   HostBinding,
-  ChangeDetectionStrategy,
   HostListener,
+  inject,
+  input,
+  signal,
+  computed,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
 
 export type TooltipSize = 'sm' | 'md' | 'lg';
 export type TooltipPosition = 'top' | 'bottom' | 'left' | 'right';
@@ -21,18 +23,18 @@ export type TooltipColor =
 @Component({
   selector: 'app-tooltip',
   standalone: true,
-  imports: [CommonModule],
+  imports: [],
   template: `
     <ng-content></ng-content>
     <div
       class="tooltip-container"
-      [attr.data-position]="position"
-      [attr.data-size]="size"
-      [attr.data-color]="color"
-      [class.visible]="visible"
+      [attr.data-position]="position()"
+      [attr.data-size]="size()"
+      [attr.data-color]="color()"
+      [class.visible]="isVisible()"
     >
       <div class="tooltip-content">
-        {{ content }}
+        {{ content() }}
       </div>
       <div class="tooltip-arrow"></div>
     </div>
@@ -228,9 +230,15 @@ export type TooltipColor =
       }
 
       @keyframes ai-tooltip-shimmer {
-        0%   { background-position: 0% 50%; }
-        50%  { background-position: 100% 50%; }
-        100% { background-position: 0% 50%; }
+        0% {
+          background-position: 0% 50%;
+        }
+        50% {
+          background-position: 100% 50%;
+        }
+        100% {
+          background-position: 0% 50%;
+        }
       }
 
       .tooltip-container[data-color='ai'] .tooltip-content {
@@ -351,17 +359,31 @@ export type TooltipColor =
       }
     `,
   ],
-  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class TooltipComponent {
-  @Input() content = '';
-  @Input() size: TooltipSize = 'md';
-  @Input() position: TooltipPosition = 'top';
-  @Input() color: TooltipColor = 'default';
-  @Input() visible = false;
-  @Input() delay = 200;
+  readonly content = input('');
+  readonly size = input<TooltipSize>('md');
+  readonly position = input<TooltipPosition>('top');
+  readonly color = input<TooltipColor>('default');
+  readonly delay = input(200);
+  readonly visible = input<boolean | undefined>(undefined);
+
+  private _visible = signal(false);
+  readonly isVisible = computed(() => {
+    const ext = this.visible();
+    return ext !== undefined ? ext : this._visible();
+  });
 
   private showTimeout: any;
+  private destroyRef = inject(DestroyRef);
+
+  constructor() {
+    this.destroyRef.onDestroy(() => {
+      if (this.showTimeout) {
+        clearTimeout(this.showTimeout);
+      }
+    });
+  }
 
   @HostBinding('attr.data-tooltip')
   get tooltipAttr() {
@@ -374,8 +396,8 @@ export class TooltipComponent {
       clearTimeout(this.showTimeout);
     }
     this.showTimeout = setTimeout(() => {
-      this.visible = true;
-    }, this.delay);
+      this._visible.set(true);
+    }, this.delay());
   }
 
   @HostListener('mouseleave')
@@ -383,12 +405,6 @@ export class TooltipComponent {
     if (this.showTimeout) {
       clearTimeout(this.showTimeout);
     }
-    this.visible = false;
-  }
-
-  ngOnDestroy() {
-    if (this.showTimeout) {
-      clearTimeout(this.showTimeout);
-    }
+    this._visible.set(false);
   }
 }

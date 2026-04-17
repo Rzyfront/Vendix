@@ -1,6 +1,7 @@
-import { Injectable } from '@angular/core';
+import { Injectable, signal } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { BehaviorSubject, Observable, Subject } from 'rxjs';
+import { Observable, Subject } from 'rxjs';
+import { toObservable } from '@angular/core/rxjs-interop';
 import { environment } from '../../../../../../environments/environment';
 import {
   MonitoringOverview,
@@ -17,13 +18,14 @@ import {
 export class MonitoringService {
   private readonly baseUrl = `${environment.apiUrl}/superadmin/monitoring`;
 
-  readonly autoRefresh$ = new BehaviorSubject<boolean>(true);
+  readonly autoRefresh = signal<boolean>(true);
+  readonly autoRefresh$ = toObservable(this.autoRefresh);
   readonly manualRefresh$ = new Subject<void>();
 
   constructor(private readonly http: HttpClient) {}
 
   toggleAutoRefresh(): void {
-    this.autoRefresh$.next(!this.autoRefresh$.value);
+    this.autoRefresh.set(!this.autoRefresh());
   }
 
   triggerRefresh(): void {

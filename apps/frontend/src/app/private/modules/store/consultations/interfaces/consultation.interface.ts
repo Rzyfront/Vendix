@@ -22,6 +22,7 @@ export interface ConsultationContext {
   consultation_template: any;
   preconsultation_template: any;
   preconsultation_submission: any;
+  consultation_responses: any[];
   consultation_notes: ConsultationNote[];
   customer_history: {
     previous_bookings: any[];

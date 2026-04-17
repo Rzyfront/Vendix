@@ -1,5 +1,6 @@
-import { Component, Input, Output, EventEmitter, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, input, output, inject, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 
 import { AccountingService } from '../../../services/accounting.service';
@@ -17,17 +18,16 @@ import {
   selector: 'vendix-fixed-asset-categories-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
     IconComponent,
     InputComponent,
-    SelectorComponent,
-  ],
+    SelectorComponent
+],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onClose()"
       title="Categorias de Activos Fijos"
@@ -36,14 +36,14 @@ import {
       <div class="p-4 space-y-4 max-h-[70vh] overflow-y-auto">
 
         <!-- Category List -->
-        @if (categories.length === 0 && !show_form) {
+        @if (categories().length === 0 && !show_form) {
           <div class="flex flex-col items-center justify-center py-8 text-gray-400">
             <app-icon name="tag" [size]="40"></app-icon>
             <p class="mt-3 text-sm">No hay categorias creadas</p>
           </div>
         } @else {
           <div class="divide-y divide-border">
-            @for (cat of categories; track cat.id) {
+            @for (cat of categories(); track cat.id) {
               <div class="flex items-center justify-between py-3 px-2 hover:bg-gray-50 rounded-lg">
                 <div class="min-w-0 flex-1">
                   <div class="flex items-center gap-2">
@@ -118,8 +118,8 @@ import {
               <div class="flex justify-end gap-2 mt-3">
                 <app-button variant="outline" size="sm" (clicked)="cancelForm()">Cancelar</app-button>
                 <app-button variant="primary" size="sm" (clicked)="saveCategory()"
-                            [disabled]="form.invalid || is_submitting"
-                            [loading]="is_submitting">
+                            [disabled]="form.invalid || is_submitting()"
+                            [loading]="is_submitting()">
                   {{ editing_category ? 'Actualizar' : 'Crear' }}
                 </app-button>
               </div>
@@ -145,10 +145,11 @@ import {
   `,
 })
 export class FixedAssetCategoriesModalComponent {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Input() categories: FixedAssetCategory[] = [];
-  @Output() categoriesChanged = new EventEmitter<void>();
+  private destroyRef = inject(DestroyRef);
+  readonly isOpen = input(false);
+  readonly isOpenChange = output<boolean>();
+  readonly categories = input<FixedAssetCategory[]>([]);
+  readonly categoriesChanged = output<void>();
 
   private fb = inject(FormBuilder);
   private accounting_service = inject(AccountingService);
@@ -156,7 +157,7 @@ export class FixedAssetCategoriesModalComponent {
 
   show_form = false;
   editing_category: FixedAssetCategory | null = null;
-  is_submitting = false;
+  is_submitting = signal(false);
 
   method_options = [
     { value: 'straight_line', label: 'Linea Recta' },
@@ -199,7 +200,7 @@ export class FixedAssetCategoriesModalComponent {
 
   saveCategory(): void {
     if (this.form.invalid) return;
-    this.is_submitting = true;
+    this.is_submitting.set(true);
 
     const values = this.form.getRawValue();
     const dto: any = {
@@ -213,20 +214,20 @@ export class FixedAssetCategoriesModalComponent {
       ? this.accounting_service.updateFixedAssetCategory(this.editing_category.id, dto)
       : this.accounting_service.createFixedAssetCategory(dto);
 
-    request$.subscribe({
+    request$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.toast_service.show({
           variant: 'success',
           description: this.editing_category ? 'Categoria actualizada' : 'Categoria creada',
         });
-        this.is_submitting = false;
+        this.is_submitting.set(false);
         this.show_form = false;
         this.editing_category = null;
         this.categoriesChanged.emit();
       },
       error: () => {
         this.toast_service.show({ variant: 'error', description: 'Error al guardar la categoria' });
-        this.is_submitting = false;
+        this.is_submitting.set(false);
       },
     });
   }
@@ -234,7 +235,7 @@ export class FixedAssetCategoriesModalComponent {
   deleteCategory(cat: FixedAssetCategory): void {
     if (!confirm(`¿Eliminar la categoria "${cat.name}"? Los activos asociados no seran eliminados.`)) return;
 
-    this.accounting_service.deleteFixedAssetCategory(cat.id).subscribe({
+    this.accounting_service.deleteFixedAssetCategory(cat.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.toast_service.show({ variant: 'success', description: 'Categoria eliminada' });
         this.categoriesChanged.emit();

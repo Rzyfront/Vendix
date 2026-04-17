@@ -1,7 +1,7 @@
-import { Component, Input, Output, EventEmitter, signal, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, signal, inject, input, output, DestroyRef } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import { FormsModule } from '@angular/forms';
-import { Subject, takeUntil } from 'rxjs';
 
 import {
   ModalComponent,
@@ -38,17 +38,16 @@ interface BulkUploadResult {
   selector: 'app-bulk-adjustment-modal',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ModalComponent,
     ButtonComponent,
     SelectorComponent,
     TextareaComponent,
-    IconComponent,
-  ],
+    IconComponent
+],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onClose()"
       title="Ajuste Masivo de Inventario"
@@ -83,7 +82,7 @@ interface BulkUploadResult {
 
             <app-selector
               label="Ubicación / Bodega"
-              [options]="locations"
+              [options]="locations()"
               [ngModel]="selected_location_id"
               (ngModelChange)="selected_location_id = $event"
               placeholder="Seleccione una ubicación"
@@ -302,14 +301,14 @@ interface BulkUploadResult {
   `,
 })
 export class BulkAdjustmentModalComponent {
-  @Input() isOpen = false;
-  @Input() locations: SelectorOption[] = [];
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() completed = new EventEmitter<void>();
+  readonly isOpen = input(false);
+  readonly locations = input<SelectorOption[]>([]);
+  readonly isOpenChange = output<boolean>();
+  readonly completed = output<void>();
 
   private inventory_service = inject(InventoryService);
   private toast_service = inject(ToastService);
-  private destroy$ = new Subject<void>();
+  private destroyRef = inject(DestroyRef);
 
   step = signal(1);
   is_downloading = signal(false);
@@ -343,7 +342,7 @@ export class BulkAdjustmentModalComponent {
     const location_id = this.selected_location_id ? Number(this.selected_location_id) : undefined;
 
     this.inventory_service.downloadAdjustmentTemplate(location_id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (blob) => {
           const url = window.URL.createObjectURL(blob);
@@ -399,7 +398,7 @@ export class BulkAdjustmentModalComponent {
       this.selected_adjustment_type || 'count_variance',
       this.description || undefined,
     )
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           this.upload_result = response.data;
@@ -449,8 +448,4 @@ export class BulkAdjustmentModalComponent {
     this.description = '';
   }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
 }

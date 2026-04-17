@@ -1,5 +1,5 @@
 import { Component, input, output, computed } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 
 // Shared Components
@@ -24,14 +24,13 @@ import { InventoryMovement, MovementType } from '../../../interfaces';
   selector: 'app-movement-list',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     InputsearchComponent,
     OptionsDropdownComponent,
     ResponsiveDataViewComponent,
     EmptyStateComponent,
-    CardComponent,
-  ],
+    CardComponent
+],
   templateUrl: './movement-list.component.html',
 })
 export class MovementListComponent {

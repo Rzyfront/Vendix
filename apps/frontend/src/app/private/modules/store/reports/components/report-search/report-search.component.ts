@@ -1,12 +1,12 @@
 import { Component, output, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 
 @Component({
   selector: 'vendix-report-search',
   standalone: true,
-  imports: [CommonModule, FormsModule, IconComponent],
+  imports: [FormsModule, IconComponent],
   template: `
     <div class="search-container">
       <app-icon name="search" [size]="18" class="search-icon" />

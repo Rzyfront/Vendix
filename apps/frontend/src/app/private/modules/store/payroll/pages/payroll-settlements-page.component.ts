@@ -1,20 +1,16 @@
 import {
   Component,
-  OnInit,
-  OnDestroy,
   inject,
+  DestroyRef,
   signal,
-  computed,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { Subject } from 'rxjs';
-import { takeUntil } from 'rxjs/operators';
+  computed } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 
 import { PayrollService } from '../services/payroll.service';
 import {
   PayrollSettlement,
-  SettlementStats,
-} from '../interfaces/payroll.interface';
+  SettlementStats } from '../interfaces/payroll.interface';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { StatsComponent } from '../../../../../shared/components/stats/stats.component';
@@ -28,12 +24,11 @@ import { SettlementDetailComponent } from '../components/settlements/settlement-
   selector: 'vendix-payroll-settlements-page',
   standalone: true,
   imports: [
-    CommonModule,
     StatsComponent,
     SettlementListComponent,
     SettlementCreateComponent,
-    SettlementDetailComponent,
-  ],
+    SettlementDetailComponent
+],
   template: `
     <div class="w-full">
       <!-- Stats: Sticky on mobile, static on desktop -->
@@ -103,15 +98,13 @@ import { SettlementDetailComponent } from '../components/settlements/settlement-
         (updated)="onSettlementUpdated()"
       ></app-settlement-detail>
     </div>
-  `,
-})
-export class PayrollSettlementsPageComponent implements OnInit, OnDestroy {
+  ` })
+export class PayrollSettlementsPageComponent {
   private payrollService = inject(PayrollService);
   protected currencyService = inject(CurrencyFormatService);
   private toastService = inject(ToastService);
-  private destroy$ = new Subject<void>();
-
-  // State
+  private destroyRef = inject(DestroyRef);
+// State
   settlements = signal<PayrollSettlement[]>([]);
   stats = signal<SettlementStats | null>(null);
   loading = signal(false);
@@ -131,15 +124,13 @@ export class PayrollSettlementsPageComponent implements OnInit, OnDestroy {
     return Object.values(s.by_status).reduce((sum, entry) => sum + (entry?.count || 0), 0);
   });
 
-  ngOnInit(): void {
+  constructor() {
     this.currencyService.loadCurrency();
     this.loadSettlements();
     this.loadStats();
-  }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
+    this.destroyRef.onDestroy(() => {
+    });
   }
 
   loadSettlements(): void {
@@ -150,7 +141,7 @@ export class PayrollSettlementsPageComponent implements OnInit, OnDestroy {
 
     this.payrollService
       .getSettlements(query)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.settlements.set(res.data || []);
@@ -160,19 +151,16 @@ export class PayrollSettlementsPageComponent implements OnInit, OnDestroy {
           this.loading.set(false);
           this.toastService.show({
             variant: 'error',
-            description: 'Error cargando liquidaciones',
-          });
-        },
-      });
+            description: 'Error cargando liquidaciones' });
+        } });
   }
 
   loadStats(): void {
     this.payrollService
       .getSettlementStats()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (res) => this.stats.set(res.data),
-      });
+        next: (res) => this.stats.set(res.data) });
   }
 
   onSearch(term: string): void {
@@ -194,10 +182,9 @@ export class PayrollSettlementsPageComponent implements OnInit, OnDestroy {
     this.isDetailModalOpen = true;
     this.payrollService
       .getSettlement(settlement.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (res) => (this.selectedSettlement = res.data),
-      });
+        next: (res) => (this.selectedSettlement = res.data) });
   }
 
   onSettlementCreated(): void {
@@ -213,60 +200,51 @@ export class PayrollSettlementsPageComponent implements OnInit, OnDestroy {
   onApprove(settlement: PayrollSettlement): void {
     this.payrollService
       .approveSettlement(settlement.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.show({
             variant: 'success',
-            description: 'Liquidacion aprobada',
-          });
+            description: 'Liquidacion aprobada' });
           this.onSettlementUpdated();
         },
         error: () =>
           this.toastService.show({
             variant: 'error',
-            description: 'Error al aprobar',
-          }),
-      });
+            description: 'Error al aprobar' }) });
   }
 
   onPay(settlement: PayrollSettlement): void {
     this.payrollService
       .paySettlement(settlement.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.show({
             variant: 'success',
-            description: 'Liquidacion pagada',
-          });
+            description: 'Liquidacion pagada' });
           this.onSettlementUpdated();
         },
         error: () =>
           this.toastService.show({
             variant: 'error',
-            description: 'Error al pagar',
-          }),
-      });
+            description: 'Error al pagar' }) });
   }
 
   onCancel(settlement: PayrollSettlement): void {
     this.payrollService
       .cancelSettlement(settlement.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.show({
             variant: 'success',
-            description: 'Liquidacion cancelada',
-          });
+            description: 'Liquidacion cancelada' });
           this.onSettlementUpdated();
         },
         error: () =>
           this.toastService.show({
             variant: 'error',
-            description: 'Error al cancelar',
-          }),
-      });
+            description: 'Error al cancelar' }) });
   }
 }

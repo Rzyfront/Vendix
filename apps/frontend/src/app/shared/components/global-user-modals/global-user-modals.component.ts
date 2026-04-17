@@ -1,5 +1,5 @@
 import { Component, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { ProfileModalComponent } from '../profile-modal/profile-modal.component';
 import { SettingsModalComponent } from '../settings-modal/settings-modal.component';
 import { UserUiService } from '../../services/user-ui.service';
@@ -7,21 +7,29 @@ import { UserUiService } from '../../services/user-ui.service';
 @Component({
   selector: 'app-global-user-modals',
   standalone: true,
-  imports: [CommonModule, ProfileModalComponent, SettingsModalComponent],
+  imports: [ProfileModalComponent, SettingsModalComponent],
   template: `
     <app-profile-modal
-      [isOpen]="(userUiService.isProfileOpen$ | async) || false"
+      [isOpen]="isProfileOpen() || false"
       (isOpenChange)="onProfileClose($event)"
     ></app-profile-modal>
 
     <app-settings-modal
-      [isOpen]="(userUiService.isSettingsOpen$ | async) || false"
+      [isOpen]="isSettingsOpen() || false"
       (isOpenChange)="onSettingsClose($event)"
     ></app-settings-modal>
   `,
 })
 export class GlobalUserModalsComponent {
   userUiService = inject(UserUiService);
+
+  // Signal-based properties
+  readonly isProfileOpen = toSignal(this.userUiService.isProfileOpen$, {
+    initialValue: false,
+  });
+  readonly isSettingsOpen = toSignal(this.userUiService.isSettingsOpen$, {
+    initialValue: false,
+  });
 
   constructor() {}
 

@@ -1,6 +1,12 @@
-import { Component, OnChanges, SimpleChanges, Output, EventEmitter, Input, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
+import {Component, input, output, inject, effect, signal, DestroyRef} from '@angular/core';
+import { DatePipe } from '@angular/common';
+import {toSignal, takeUntilDestroyed} from '@angular/core/rxjs-interop';
+import {
+  FormBuilder,
+  FormGroup,
+  Validators,
+  ReactiveFormsModule,
+} from '@angular/forms';
 import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
 import {
@@ -13,14 +19,17 @@ import { PayrollService } from '../../../services/payroll.service';
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
-import { SelectorComponent, SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
+import {
+  SelectorComponent,
+  SelectorOption,
+} from '../../../../../../../shared/components/selector/selector.component';
 import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
 
 @Component({
   selector: 'vendix-employee-detail',
   standalone: true,
   imports: [
-    CommonModule,
+    DatePipe,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
@@ -29,7 +38,7 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onClose()"
       title="Detalle de Empleado"
@@ -37,41 +46,71 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
     >
       <div class="p-4">
         <!-- Status Badge -->
-        <div *ngIf="employee" class="mb-4 flex items-center gap-2">
-          <span class="text-sm text-text-secondary">Estado:</span>
-          <span [class]="getStatusBadgeClass(employee.status)" class="px-2 py-0.5 rounded-full text-xs font-medium">
-            {{ getStatusLabel(employee.status) }}
-          </span>
-          <span *ngIf="employee.employee_code" class="ml-auto text-sm text-text-secondary">
-            Codigo: {{ employee.employee_code }}
-          </span>
-        </div>
+        @if (employee()) {
+          <div class="mb-4 flex items-center gap-2">
+            <span class="text-sm text-text-secondary">Estado:</span>
+            <span
+              [class]="getStatusBadgeClass(employee()!.status)"
+              class="px-2 py-0.5 rounded-full text-xs font-medium"
+            >
+              {{ getStatusLabel(employee()!.status) }}
+            </span>
+            @if (employee()!.employee_code) {
+              <span class="ml-auto text-sm text-text-secondary">
+                Codigo: {{ employee()!.employee_code }}
+              </span>
+            }
+          </div>
+        }
 
         <!-- Linked user info -->
-        <div *ngIf="employee?.user" class="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
-          <div class="flex items-center gap-2">
-            <span class="text-sm font-medium text-blue-800">Usuario vinculado:</span>
-            <span class="text-sm text-blue-700">{{ employee?.user?.first_name }} {{ employee?.user?.last_name }} ({{ employee?.user?.email }})</span>
+        @if (employee()?.user) {
+          <div class="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+            <div class="flex items-center gap-2">
+              <span class="text-sm font-medium text-blue-800"
+                >Usuario vinculado:</span
+              >
+              <span class="text-sm text-blue-700"
+                >{{ employee()?.user?.first_name }}
+                {{ employee()?.user?.last_name }} ({{
+                  employee()?.user?.email
+                }})</span
+              >
+            </div>
           </div>
-        </div>
+        }
 
-        <form [formGroup]="employeeForm" (ngSubmit)="onSubmit()" class="space-y-6">
-
+        <form
+          [formGroup]="employeeForm"
+          (ngSubmit)="onSubmit()"
+          class="space-y-6"
+        >
           <!-- Link User (optional) -->
           <div class="mb-2">
-            <h3 class="text-sm font-semibold text-text-primary mb-3 uppercase tracking-wide">Vincular con Usuario</h3>
+            <h3
+              class="text-sm font-semibold text-text-primary mb-3 uppercase tracking-wide"
+            >
+              Vincular con Usuario
+            </h3>
             <app-selector
               label="Usuario del sistema (opcional)"
               formControlName="user_id"
-              [options]="availableUsers"
+              [options]="availableUsers()"
               placeholder="Seleccionar usuario..."
             ></app-selector>
-            <p class="text-xs text-text-secondary mt-1">Al seleccionar un usuario, se autocompletaran los datos personales.</p>
+            <p class="text-xs text-text-secondary mt-1">
+              Al seleccionar un usuario, se autocompletaran los datos
+              personales.
+            </p>
           </div>
 
           <!-- Personal Data -->
           <div>
-            <h3 class="text-sm font-semibold text-text-primary mb-3 uppercase tracking-wide">Datos Personales</h3>
+            <h3
+              class="text-sm font-semibold text-text-primary mb-3 uppercase tracking-wide"
+            >
+              Datos Personales
+            </h3>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <app-input
                 label="Nombre"
@@ -105,7 +144,11 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
 
           <!-- Employment Data -->
           <div>
-            <h3 class="text-sm font-semibold text-text-primary mb-3 uppercase tracking-wide">Datos Laborales</h3>
+            <h3
+              class="text-sm font-semibold text-text-primary mb-3 uppercase tracking-wide"
+            >
+              Datos Laborales
+            </h3>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <app-input
                 label="Fecha de Ingreso"
@@ -144,7 +187,11 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
 
           <!-- Compensation -->
           <div>
-            <h3 class="text-sm font-semibold text-text-primary mb-3 uppercase tracking-wide">Compensación</h3>
+            <h3
+              class="text-sm font-semibold text-text-primary mb-3 uppercase tracking-wide"
+            >
+              Compensación
+            </h3>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <app-input
                 label="Salario Base"
@@ -180,7 +227,11 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
 
           <!-- Social Security -->
           <div>
-            <h3 class="text-sm font-semibold text-text-primary mb-3 uppercase tracking-wide">Seguridad Social</h3>
+            <h3
+              class="text-sm font-semibold text-text-primary mb-3 uppercase tracking-wide"
+            >
+              Seguridad Social
+            </h3>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <app-input
                 label="EPS (Salud)"
@@ -213,68 +264,79 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
               ></app-input>
             </div>
           </div>
-
         </form>
 
         <!-- Terminate Action -->
-        <ng-container *ngIf="employee && employee.status === 'active'">
+        @if (employee() && employee()!.status === 'active') {
           <div class="mt-5 pt-4 border-t border-border space-y-2">
-            <span class="text-xs font-medium text-text-secondary uppercase tracking-wide">Acciones</span>
+            <span
+              class="text-xs font-medium text-text-secondary uppercase tracking-wide"
+              >Acciones</span
+            >
             <div class="flex justify-end">
               <app-button
                 variant="outline-danger"
                 size="sm"
                 (clicked)="onTerminate()"
-                [loading]="(loading$ | async) || false"
+                [loading]="loading() || false"
               >
                 Terminar Contrato
               </app-button>
             </div>
           </div>
-        </ng-container>
+        }
 
         <!-- Termination info -->
-        <div *ngIf="employee?.termination_date" class="mt-4 p-3 bg-red-50 rounded-lg border border-red-200">
-          <p class="text-sm text-red-800">
-            <strong>Fecha de terminacion:</strong> {{ employee?.termination_date | date:'dd/MM/yyyy' }}
-          </p>
-        </div>
+        @if (employee()?.termination_date) {
+          <div class="mt-4 p-3 bg-red-50 rounded-lg border border-red-200">
+            <p class="text-sm text-red-800">
+              <strong>Fecha de terminacion:</strong>
+              {{ employee()?.termination_date | date: 'dd/MM/yyyy' }}
+            </p>
+          </div>
+        }
       </div>
 
       <!-- Footer -->
       <div slot="footer">
-        <div class="flex items-center justify-end gap-2 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
-          <app-button
-            variant="outline"
-            size="sm"
-            (clicked)="onClose()">
+        <div
+          class="flex items-center justify-end gap-2 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100"
+        >
+          <app-button variant="outline" size="sm" (clicked)="onClose()">
             Cerrar
           </app-button>
 
-          <app-button
-            *ngIf="employee?.status !== 'terminated'"
-            variant="primary"
-            size="sm"
-            (clicked)="onSubmit()"
-            [disabled]="employeeForm.invalid || ((loading$ | async) || false)"
-            [loading]="(loading$ | async) || false">
-            Actualizar
-          </app-button>
+          @if (employee()?.status !== 'terminated') {
+            <app-button
+              variant="primary"
+              size="sm"
+              (clicked)="onSubmit()"
+              [disabled]="employeeForm.invalid || loading() || false"
+              [loading]="loading() || false"
+            >
+              Actualizar
+            </app-button>
+          }
         </div>
       </div>
     </app-modal>
-  `
+  `,
 })
-export class EmployeeDetailComponent implements OnChanges {
-  @Input() isOpen = false;
-  @Input() employee: Employee | null = null;
-  @Output() isOpenChange = new EventEmitter<boolean>();
+export class EmployeeDetailComponent {
+  private destroyRef = inject(DestroyRef);
+  readonly isOpen = input<boolean>(false);
+  readonly employee = input<Employee | null>(null);
+  readonly isOpenChange = output<boolean>();
 
   private payrollService = inject(PayrollService);
+  private fb = inject(FormBuilder);
+  private store = inject(Store);
 
-  employeeForm: FormGroup;
-  loading$: Observable<boolean>;
-  availableUsers: SelectorOption[] = [];
+  employeeForm: FormGroup = this.fb.group({});
+  readonly loading = toSignal(this.store.select(selectEmployeesLoading), {
+    initialValue: false,
+  });
+  readonly availableUsers = signal<SelectorOption[]>([]);
   private availableUsersData: AvailableUser[] = [];
 
   documentTypeOptions: SelectorOption[] = [
@@ -311,12 +373,7 @@ export class EmployeeDetailComponent implements OnChanges {
     { label: 'Ventas', value: 'sales' },
   ];
 
-  constructor(
-    private fb: FormBuilder,
-    private store: Store
-  ) {
-    this.loading$ = this.store.select(selectEmployeesLoading);
-
+  constructor() {
     this.employeeForm = this.fb.group({
       user_id: [''],
       first_name: ['', [Validators.required, Validators.minLength(2)]],
@@ -341,20 +398,21 @@ export class EmployeeDetailComponent implements OnChanges {
 
     this.loadAvailableUsers();
 
-    this.employeeForm.get('user_id')!.valueChanges.subscribe((value) => {
+    this.employeeForm.get('user_id')!.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((value) => {
       this.onUserSelected(value);
     });
-  }
 
-  ngOnChanges(changes: SimpleChanges) {
-    if (changes['employee'] && this.employee) {
-      this.patchForm(this.employee);
-      if (this.employee.status === 'terminated') {
-        this.employeeForm.disable();
-      } else {
-        this.employeeForm.enable();
+    effect(() => {
+      const emp = this.employee();
+      if (emp) {
+        this.patchForm(emp);
+        if (emp.status === 'terminated') {
+          this.employeeForm.disable();
+        } else {
+          this.employeeForm.enable();
+        }
       }
-    }
+    });
   }
 
   private patchForm(employee: Employee) {
@@ -388,50 +446,55 @@ export class EmployeeDetailComponent implements OnChanges {
   }
 
   onSubmit() {
-    if (this.employeeForm.invalid || !this.employee || this.employee.status === 'terminated') {
+    const emp = this.employee();
+    if (this.employeeForm.invalid || !emp || emp.status === 'terminated') {
       this.employeeForm.markAllAsTouched();
       return;
     }
 
     const formValue = this.employeeForm.value;
 
-    this.store.dispatch(updateEmployee({
-      id: this.employee.id,
-      employee: {
-        first_name: formValue.first_name,
-        last_name: formValue.last_name,
-        document_type: formValue.document_type,
-        document_number: formValue.document_number,
-        hire_date: formValue.hire_date,
-        contract_type: formValue.contract_type,
-        position: formValue.position || undefined,
-        department: formValue.department || undefined,
-        cost_center: formValue.cost_center || undefined,
-        base_salary: Number(formValue.base_salary),
-        payment_frequency: formValue.payment_frequency,
-        bank_name: formValue.bank_name || undefined,
-        bank_account_number: formValue.bank_account_number || undefined,
-        health_provider: formValue.health_provider || undefined,
-        pension_fund: formValue.pension_fund || undefined,
-        arl_risk_level: formValue.arl_risk_level ? Number(formValue.arl_risk_level) : undefined,
-        severance_fund: formValue.severance_fund || undefined,
-        compensation_fund: formValue.compensation_fund || undefined,
-        user_id: formValue.user_id || undefined,
-      }
-    }));
+    this.store.dispatch(
+      updateEmployee({
+        id: emp.id,
+        employee: {
+          first_name: formValue.first_name,
+          last_name: formValue.last_name,
+          document_type: formValue.document_type,
+          document_number: formValue.document_number,
+          hire_date: formValue.hire_date,
+          contract_type: formValue.contract_type,
+          position: formValue.position || undefined,
+          department: formValue.department || undefined,
+          cost_center: formValue.cost_center || undefined,
+          base_salary: Number(formValue.base_salary),
+          payment_frequency: formValue.payment_frequency,
+          bank_name: formValue.bank_name || undefined,
+          bank_account_number: formValue.bank_account_number || undefined,
+          health_provider: formValue.health_provider || undefined,
+          pension_fund: formValue.pension_fund || undefined,
+          arl_risk_level: formValue.arl_risk_level
+            ? Number(formValue.arl_risk_level)
+            : undefined,
+          severance_fund: formValue.severance_fund || undefined,
+          compensation_fund: formValue.compensation_fund || undefined,
+          user_id: formValue.user_id || undefined,
+        },
+      }),
+    );
     this.onClose();
   }
 
   loadAvailableUsers(): void {
-    this.payrollService.getAvailableUsers().subscribe((res) => {
+    this.payrollService.getAvailableUsers().pipe(takeUntilDestroyed(this.destroyRef)).subscribe((res) => {
       this.availableUsersData = res.data;
-      this.availableUsers = [
+      this.availableUsers.set([
         { value: '', label: 'Sin vincular (datos manuales)' },
         ...res.data.map((user) => ({
           value: user.id,
           label: `${user.first_name} ${user.last_name} (${user.email})`,
         })),
-      ];
+      ]);
     });
   }
 
@@ -449,8 +512,9 @@ export class EmployeeDetailComponent implements OnChanges {
   }
 
   onTerminate(): void {
-    if (this.employee) {
-      this.store.dispatch(terminateEmployee({ id: this.employee.id }));
+    const emp = this.employee();
+    if (emp) {
+      this.store.dispatch(terminateEmployee({ id: emp.id }));
       this.onClose();
     }
   }

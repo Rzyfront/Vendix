@@ -1,7 +1,7 @@
 <div class="w-full">
   <!-- Stats: Sticky on mobile, static on desktop -->
   <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
-    <app-purchase-order-stats [stats]="stats"></app-purchase-order-stats>
+    <app-purchase-order-stats [stats]="stats()"></app-purchase-order-stats>
   </div>
 
   <!-- Purchase Orders List (owns search, filters, loading, empty state) -->
@@ -14,8 +14,8 @@
 
   <!-- Detail Modal with tabs (Detalle, Recepciones, Pagos, Adjuntos, Historial) -->
   <app-po-detail-modal
-    [isOpen]="isDetailModalOpen"
-    [order]="selectedOrder"
+    [isOpen]="isDetailModalOpen()"
+    [order]="selectedOrder()"
     (close)="closeDetailModal()"
     (orderUpdated)="onOrderUpdated()"
   ></app-po-detail-modal>

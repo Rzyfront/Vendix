@@ -1,13 +1,13 @@
-import { Component, OnInit, OnDestroy, computed, signal, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, DestroyRef, computed, signal, inject } from '@angular/core';
+
 import {
   FormBuilder,
   FormGroup,
+  FormsModule,
   Validators,
-  ReactiveFormsModule,
-} from '@angular/forms';
-import { Subject, takeUntil, map, startWith, take } from 'rxjs';
-import { toSignal } from '@angular/core/rxjs-interop';
+  ReactiveFormsModule } from '@angular/forms';
+import { map, startWith } from 'rxjs';
+import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import { HttpClient } from '@angular/common/http';
 import { firstValueFrom } from 'rxjs';
 import { Router } from '@angular/router';
@@ -21,8 +21,7 @@ import {
   FooterSettings,
   SettingsResponse,
   SliderImage,
-  SliderPhoto,
-} from './interfaces';
+  SliderPhoto } from './interfaces';
 import { FooterSettingsFormComponent } from './components/footer-settings-form';
 import { StoreShareModalComponent } from './components/store-share-modal';
 import {
@@ -34,8 +33,7 @@ import {
   SelectorComponent,
   SettingToggleComponent,
   StickyHeaderComponent,
-  StickyHeaderActionButton,
-} from '../../../../shared/components';
+  StickyHeaderActionButton } from '../../../../shared/components';
 import { TourModalComponent } from '../../../../shared/components/tour/tour-modal/tour-modal.component';
 import { TourService } from '../../../../shared/components/tour/services/tour.service';
 import { ECOMMERCE_TOUR_CONFIG } from '../../../../shared/components/tour/configs/ecommerce-tour.config';
@@ -47,8 +45,8 @@ import type { Currency } from '../../../../shared/pipes/currency';
   selector: 'app-ecommerce',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
+    FormsModule,
     IconComponent,
     ButtonComponent,
     InputComponent,
@@ -57,12 +55,11 @@ import type { Currency } from '../../../../shared/pipes/currency';
     StickyHeaderComponent,
     FooterSettingsFormComponent,
     StoreShareModalComponent,
-    TourModalComponent,
-  ],
+    TourModalComponent
+],
   templateUrl: './ecommerce.component.html',
-  styleUrls: ['./ecommerce.component.scss'],
-})
-export class EcommerceComponent implements OnInit, OnDestroy {
+  styleUrls: ['./ecommerce.component.scss'] })
+export class EcommerceComponent {
   private fb = inject(FormBuilder);
   private ecommerceService = inject(EcommerceService);
   private toastService = inject(ToastService);
@@ -73,10 +70,8 @@ export class EcommerceComponent implements OnInit, OnDestroy {
   private router = inject(Router);
   private shippingMethodsService = inject(ShippingMethodsService);
   private tourService = inject(TourService);
-
-  private destroy$ = new Subject<void>();
-
-  // Tour
+  private destroyRef = inject(DestroyRef);
+// Tour
   showTourModal = false;
   readonly ecommerceTourConfig = ECOMMERCE_TOUR_CONFIG;
 
@@ -89,7 +84,7 @@ export class EcommerceComponent implements OnInit, OnDestroy {
 
   // Form & UI state
   settingsForm: FormGroup = this.createForm();
-  isLoading = false;
+  readonly isLoading = signal(false);
   isSaving = signal(false);
   hasShippingMethods = signal<boolean | null>(null);
 
@@ -134,8 +129,7 @@ export class EcommerceComponent implements OnInit, OnDestroy {
         id: 'reset',
         label: 'Restablecer',
         variant: 'outline',
-        disabled: isSaving || isPristine,
-      });
+        disabled: isSaving || isPristine });
     }
 
     if (this.isEditMode() && this.ecommerceUrl) {
@@ -144,15 +138,13 @@ export class EcommerceComponent implements OnInit, OnDestroy {
         label: 'Compartir',
         variant: 'outline',
         icon: 'share-2',
-        disabled: !this.ecommerceUrl,
-      });
+        disabled: !this.ecommerceUrl });
       actions.push({
         id: 'open',
         label: 'Abrir Tienda',
         variant: 'outline',
         icon: 'external-link',
-        disabled: !this.ecommerceUrl,
-      });
+        disabled: !this.ecommerceUrl });
     }
 
     actions.push({
@@ -165,37 +157,24 @@ export class EcommerceComponent implements OnInit, OnDestroy {
       variant: 'primary',
       icon: isSaving ? undefined : 'save',
       loading: isSaving,
-      disabled: isSaving || isPristine || isInvalid,
-    });
+      disabled: isSaving || isPristine || isInvalid });
 
     return actions;
   });
 
   constructor() {
-    // Sincronizar trigger con cambios del formulario
-    this.settingsForm.valueChanges.pipe(takeUntil(this.destroy$)).subscribe(() => this.formUpdateTrigger.update(v => v + 1));
-    this.settingsForm.statusChanges.pipe(takeUntil(this.destroy$)).subscribe(() => this.formUpdateTrigger.update(v => v + 1));
-  }
+    this.settingsForm.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => this.formUpdateTrigger.update(v => v + 1));
+    this.settingsForm.statusChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => this.formUpdateTrigger.update(v => v + 1));
 
-  ngOnInit(): void {
-    // Check if should show ecommerce tour
     this.checkAndStartEcommerceTour();
-
-    // Configurar prefijo +57 para WhatsApp ANTES de cargar datos
     this.setupWhatsappPrefixEnforcement();
-
     this.loadSettings();
-    // Asegurar que la moneda esté cargada
     this.currencyService.loadCurrency();
-    // Cargar monedas activas para el selector
     this.loadCurrencies();
-    // Verificar estado de métodos de envío
     this.checkShippingStatus();
-  }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
+    this.destroyRef.onDestroy(() => {
+    });
   }
 
   /**
@@ -214,22 +193,18 @@ export class EcommerceComponent implements OnInit, OnDestroy {
         colores: this.fb.group({
           primary_color: ['#3B82F6'],
           secondary_color: ['#10B981'],
-          accent_color: ['#F59E0B'],
-        }),
-      }),
+          accent_color: ['#F59E0B'] }) }),
 
       // Configuración General
       general: this.fb.group({
         currency: [this.currencyService.currencyCode() || 'COP'],
         locale: ['es-CO'],
-        timezone: ['America/Bogota'],
-      }),
+        timezone: ['America/Bogota'] }),
 
       // Slider Principal
       slider: this.fb.group({
         enable: [false],
-        photos: this.fb.array([]),
-      }),
+        photos: this.fb.array([]) }),
 
       // Catálogo
       catalog: this.fb.group({
@@ -238,23 +213,19 @@ export class EcommerceComponent implements OnInit, OnDestroy {
         allow_reviews: [true],
         show_variants: [true],
         show_related_products: [false],
-        enable_filters: [false],
-      }),
+        enable_filters: [false] }),
 
       // Carrito
       cart: this.fb.group({
         cart_expiration_hours: [24],
-        max_quantity_per_item: [10],
-      }),
+        max_quantity_per_item: [10] }),
 
       // Checkout
       checkout: this.fb.group({
         whatsapp_checkout: [false],
         whatsapp_number: ['', [Validators.pattern(/^\+57[\d+#*\s()-]*$/)]],
         confirm_whatsapp_number: ['', [Validators.pattern(/^\+57[\d+#*\s()-]*$/)]],  // frontend-only, never sent to backend
-        require_registration: [false],
-      }),
-    });
+        require_registration: [false] }) });
   }
 
   // --- Typed Getters for Form Controls ---
@@ -305,7 +276,7 @@ export class EcommerceComponent implements OnInit, OnDestroy {
 
     controls.forEach(control => {
       control.valueChanges
-        .pipe(takeUntil(this.destroy$))
+        .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe((value: string) => {
           if (!value || value.length < 3) {
             control.setValue('+57', { emitEvent: false });
@@ -322,7 +293,7 @@ export class EcommerceComponent implements OnInit, OnDestroy {
 
     // Handle the toggle: when enabled, initialize with +57 if empty
     this.whatsappCheckoutControl.valueChanges
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((enabled: boolean) => {
         if (enabled) {
           if (!this.whatsappNumberControl.value) {
@@ -339,10 +310,10 @@ export class EcommerceComponent implements OnInit, OnDestroy {
    * Load settings and determine mode (setup vs edit)
    */
   private loadSettings(): void {
-    this.isLoading = true;
+    this.isLoading.set(true);
     this.ecommerceService
       .getSettings()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: SettingsResponse) => {
           if (response.exists && response.config) {
@@ -373,8 +344,7 @@ export class EcommerceComponent implements OnInit, OnDestroy {
                   url: photo.url || undefined,
                   key: photo.key || undefined,
                   title: photo.title,
-                  caption: photo.caption,
-                }));
+                  caption: photo.caption }));
             }
 
             // Cargar configuración del footer
@@ -391,25 +361,24 @@ export class EcommerceComponent implements OnInit, OnDestroy {
             this.ecommerceUrl = null;
             this.loadTemplate();
           }
-          this.isLoading = false;
+          this.isLoading.set(false);
         },
         error: (error) => {
           this.toastService.error(
             'Error al cargar configuración: ' + error.message,
           );
-          this.isLoading = false;
-        },
-      });
+          this.isLoading.set(false);
+        } });
   }
 
   /**
    * Load default template (used in setup mode)
    */
   private loadTemplate(): void {
-    this.isLoading = true;
+    this.isLoading.set(true);
     this.ecommerceService
       .getTemplate('basic')
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (template: EcommerceSettings) => {
           this.settingsForm.patchValue(template);
@@ -419,13 +388,12 @@ export class EcommerceComponent implements OnInit, OnDestroy {
           if (template.footer) {
             this.footerSettings = template.footer;
           }
-          this.isLoading = false;
+          this.isLoading.set(false);
         },
         error: (error) => {
           this.toastService.error('Error al cargar template: ' + error.message);
-          this.isLoading = false;
-        },
-      });
+          this.isLoading.set(false);
+        } });
   }
 
   /**
@@ -442,8 +410,7 @@ export class EcommerceComponent implements OnInit, OnDestroy {
       if (response.success && response.data) {
         this.currencies = response.data.map((c) => ({
           value: c.code,
-          label: `${c.name} (${c.code})`,
-        }));
+          label: `${c.name} (${c.code})` }));
       } else {
         // Fallback to common currencies if service fails
         this.currencies = [
@@ -468,11 +435,10 @@ export class EcommerceComponent implements OnInit, OnDestroy {
    */
   private checkShippingStatus(): void {
     this.shippingMethodsService.getShippingMethodStats()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (stats) => this.hasShippingMethods.set(stats.enabled_methods > 0),
-        error: () => this.hasShippingMethods.set(false),
-      });
+        error: () => this.hasShippingMethods.set(false) });
   }
 
   navigateToShipping(): void {
@@ -484,8 +450,7 @@ export class EcommerceComponent implements OnInit, OnDestroy {
       title: 'Configurar Métodos de Envío',
       message: 'Tu tienda necesita al menos un método de envío activo para que los clientes puedan completar sus compras. Te redirigiremos a la configuración de envíos.',
       confirmText: 'Ir a Configuración de Envíos',
-      cancelText: 'Configurar después',
-    });
+      cancelText: 'Configurar después' });
     if (confirmed) {
       this.router.navigate(['/admin/settings/shipping']);
     }
@@ -560,7 +525,7 @@ export class EcommerceComponent implements OnInit, OnDestroy {
 
       this.ecommerceService
         .uploadSliderImage(file)
-        .pipe(takeUntil(this.destroy$))
+        .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: (result) => {
             this.sliderImages[placeholder_index] = {
@@ -568,8 +533,7 @@ export class EcommerceComponent implements OnInit, OnDestroy {
               key: result.key,
               thumbnail: result.thumbKey,
               title: '',
-              caption: '',
-            };
+              caption: '' };
             pending_uploads--;
             if (pending_uploads === 0) {
               this.isUploadingImage = false;
@@ -590,8 +554,7 @@ export class EcommerceComponent implements OnInit, OnDestroy {
               this.updateSliderPhotosForm();
             }
             this.toastService.error('Error al subir imagen: ' + error.message);
-          },
-        });
+          } });
     }
 
     input.value = '';
@@ -684,7 +647,7 @@ export class EcommerceComponent implements OnInit, OnDestroy {
 
     this.ecommerceService
       .uploadSliderImage(file) // Reutilizamos el mismo servicio de subida
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (result) => {
           this.logoPreview = result.url || result.key;
@@ -703,8 +666,7 @@ export class EcommerceComponent implements OnInit, OnDestroy {
         error: (error) => {
           this.isUploadingLogo = false;
           this.toastService.error('Error al subir el logo: ' + error.message);
-        },
-      });
+        } });
 
     input.value = '';
   }
@@ -731,8 +693,7 @@ export class EcommerceComponent implements OnInit, OnDestroy {
       url: img.url || null,
       key: img.key || null,
       title: img.title || '',
-      caption: img.caption || '',
-    }));
+      caption: img.caption || '' }));
 
     // Asegurarnos de que el formulario tenga los datos actualizados
     const sliderGroup = this.settingsForm.get('slider') as FormGroup;
@@ -761,8 +722,7 @@ export class EcommerceComponent implements OnInit, OnDestroy {
           ? 'Debes ingresar y confirmar tu numero de WhatsApp para activar esta opcion.'
           : 'Los numeros de WhatsApp no coinciden. Verifica e intenta de nuevo.',
         confirmText: 'Entendido',
-        cancelText: 'Cerrar',
-      });
+        cancelText: 'Cerrar' });
       this.whatsappCheckoutControl.setValue(false);
       this.whatsappNumberControl.setValue('');
       this.confirmWhatsappNumberControl.setValue('');
@@ -797,23 +757,19 @@ export class EcommerceComponent implements OnInit, OnDestroy {
       checkout: checkoutPayload,
       inicio: {
         ...this.settingsForm.value.inicio,
-        logo_url: this.logoKey || this.settingsForm.value.inicio.logo_url,
-      },
+        logo_url: this.logoKey || this.settingsForm.value.inicio.logo_url },
       slider: {
         ...this.settingsForm.value.slider,
         photos: this.sliderImages.map((img) => ({
           url: img.key || img.url || null, // Preferir la KEY para persistencia
           key: img.key || null,
           title: img.title || '',
-          caption: img.caption || '',
-        })),
-      },
-      footer: this.footerSettings,
-    };
+          caption: img.caption || '' })) },
+      footer: this.footerSettings };
 
     this.ecommerceService
       .updateSettings(settings)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (savedSettings) => {
           const message = this.isSetupMode()
@@ -842,8 +798,7 @@ export class EcommerceComponent implements OnInit, OnDestroy {
         error: (error) => {
           this.toastService.error('Error al guardar: ' + error.message);
           this.isSaving.set(false);
-        },
-      });
+        } });
   }
 
   /**
@@ -898,16 +853,14 @@ export class EcommerceComponent implements OnInit, OnDestroy {
     // Auto-fill título if empty
     if (!titulo || titulo.trim() === '') {
       inicio.patchValue({
-        titulo: `Bienvenido a ${this.storeName}`,
-      });
+        titulo: `Bienvenido a ${this.storeName}` });
     }
 
     // Auto-fill párrafo if empty
     if (!parrafo || parrafo.trim() === '') {
       inicio.patchValue({
         parrafo:
-          'Encuentra aquí todo lo que buscas y si no lo encuentras pregúntanos...',
-      });
+          'Encuentra aquí todo lo que buscas y si no lo encuentras pregúntanos...' });
     }
   }
   /**
@@ -924,26 +877,24 @@ export class EcommerceComponent implements OnInit, OnDestroy {
    * Sincronizar colores desde el branding de la tienda (source of truth)
    */
   syncColorsFromBranding(): void {
-    this.store.select(selectStoreSettings).pipe(take(1)).subscribe((storeSettings: any) => {
-      const branding = storeSettings?.branding;
+    const storeSettings: any = this.store.selectSignal(selectStoreSettings)();
+    const branding = storeSettings?.branding;
 
-      if (!branding) {
-        this.toastService.warning('No se encontró configuración de branding');
-        return;
-      }
+    if (!branding) {
+      this.toastService.warning('No se encontró configuración de branding');
+      return;
+    }
 
-      const coloresGroup = this.settingsForm.get('inicio.colores') as FormGroup;
-      if (coloresGroup) {
-        coloresGroup.patchValue({
-          primary_color: branding.primary_color || '#3B82F6',
-          secondary_color: branding.secondary_color || '#10B981',
-          accent_color: branding.accent_color || '#F59E0B',
-        });
-        this.settingsForm.markAsDirty();
-        this.formUpdateTrigger.update(v => v + 1);
-        this.toastService.success('Colores sincronizados desde el branding de la tienda');
-      }
-    });
+    const coloresGroup = this.settingsForm.get('inicio.colores') as FormGroup;
+    if (coloresGroup) {
+      coloresGroup.patchValue({
+        primary_color: branding.primary_color || '#3B82F6',
+        secondary_color: branding.secondary_color || '#10B981',
+        accent_color: branding.accent_color || '#F59E0B' });
+      this.settingsForm.markAsDirty();
+      this.formUpdateTrigger.update(v => v + 1);
+      this.toastService.success('Colores sincronizados desde el branding de la tienda');
+    }
   }
 
   /**

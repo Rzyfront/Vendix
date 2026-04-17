@@ -39,7 +39,12 @@ export class AccountsReceivableService {
         { document_number: { contains: search, mode: 'insensitive' } },
         {
           customer: {
-            name: { contains: search, mode: 'insensitive' },
+            first_name: { contains: search, mode: 'insensitive' },
+          },
+        },
+        {
+          customer: {
+            last_name: { contains: search, mode: 'insensitive' },
           },
         },
       ];
@@ -51,12 +56,18 @@ export class AccountsReceivableService {
       if (date_to) where.due_date.lte = new Date(date_to);
     }
 
-    const [data, total] = await Promise.all([
+    const [raw_data, total] = await Promise.all([
       this.prisma.accounts_receivable.findMany({
         where,
         include: {
           customer: {
-            select: { id: true, name: true, email: true, phone: true },
+            select: {
+              id: true,
+              first_name: true,
+              last_name: true,
+              email: true,
+              phone: true,
+            },
           },
           ar_payments: {
             orderBy: { payment_date: 'desc' },
@@ -71,6 +82,18 @@ export class AccountsReceivableService {
       }),
       this.prisma.accounts_receivable.count({ where }),
     ]);
+
+    const data = raw_data.map((r) => ({
+      ...r,
+      customer: r.customer
+        ? {
+            id: r.customer.id,
+            name: `${r.customer.first_name ?? ''} ${r.customer.last_name ?? ''}`.trim(),
+            email: r.customer.email,
+            phone: r.customer.phone,
+          }
+        : null,
+    }));
 
     return {
       data,
@@ -89,7 +112,13 @@ export class AccountsReceivableService {
       where: { id },
       include: {
         customer: {
-          select: { id: true, name: true, email: true, phone: true },
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+            email: true,
+            phone: true,
+          },
         },
         ar_payments: {
           orderBy: { payment_date: 'desc' },
@@ -108,7 +137,17 @@ export class AccountsReceivableService {
       throw new NotFoundException(`Cuenta por cobrar #${id} no encontrada`);
     }
 
-    return ar;
+    return {
+      ...ar,
+      customer: ar.customer
+        ? {
+            id: ar.customer.id,
+            name: `${ar.customer.first_name ?? ''} ${ar.customer.last_name ?? ''}`.trim(),
+            email: ar.customer.email,
+            phone: ar.customer.phone,
+          }
+        : null,
+    };
   }
 
   // ─── DASHBOARD ─────────────────────────────────────────────

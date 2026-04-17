@@ -1,32 +1,31 @@
-import {
-  Component,
+import {Component,
   OnInit,
-  OnDestroy,
   OnChanges,
   SimpleChanges,
   inject,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
+  signal,
+  computed,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import { RouterModule, Router } from '@angular/router';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { Subject, Subscription } from 'rxjs';
-import { debounceTime, distinctUntilChanged, takeUntil } from 'rxjs/operators';
+import { debounceTime, distinctUntilChanged } from 'rxjs/operators';
 
 import { StoresService } from './services/stores.service';
 import {
   StoreListItem,
   StoreState,
   StoreType,
-  CreateStoreDto,
-} from './interfaces/store.interface';
+  CreateStoreDto} from './interfaces/store.interface';
 
 // Import new components
 import {
   StoreStatsComponent,
   StoreCreateModalComponent,
-  StoreEditModalComponent,
-} from './components/index';
+  StoreEditModalComponent} from './components/index';
 
 import { StoreSettingsModalComponent } from './components/store-settings-modal.component';
 
@@ -44,8 +43,7 @@ import {
   TableAction,
   PaginationComponent,
   EmptyStateComponent,
-  CardComponent,
-} from '../../../../shared/components/index';
+  CardComponent} from '../../../../shared/components/index';
 
 // Import styles (CSS instead of SCSS to avoid loader issues)
 import './stores.component.css';
@@ -54,7 +52,6 @@ import './stores.component.css';
   selector: 'app-stores',
   standalone: true,
   imports: [
-    CommonModule,
     RouterModule,
     FormsModule,
     ReactiveFormsModule,
@@ -72,9 +69,9 @@ import './stores.component.css';
     CardComponent,
   ],
   providers: [StoresService],
-  templateUrl: './stores.component.html',
-})
-export class StoresComponent implements OnInit, OnDestroy, OnChanges {
+  templateUrl: './stores.component.html'})
+export class StoresComponent implements OnInit, OnChanges {
+  private destroyRef = inject(DestroyRef);
   // Dependencies
   private readonly storesService = inject(StoresService);
   private readonly fb = inject(FormBuilder);
@@ -83,11 +80,11 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
   private readonly router = inject(Router);
 
   // State
-  stores: StoreListItem[] = [];
-  isLoading = false;
-  searchTerm = '';
-  selectedOrganization = '';
-  pagination = { page: 1, limit: 10, total: 0, totalPages: 0 };
+  readonly stores = signal<StoreListItem[]>([]);
+  readonly isLoading = signal(false);
+  readonly searchTerm = signal('');
+  readonly selectedOrganization = signal('');
+  readonly pagination = signal({ page: 1, limit: 10, total: 0, totalPages: 0 });
 
   // Filter states
   filterForm: FormGroup;
@@ -116,8 +113,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       label: 'Nombre',
       sortable: true,
       width: '160px',
-      priority: 1,
-    },
+      priority: 1},
     { key: 'slug', label: 'Slug', sortable: true, width: '120px', priority: 3 },
     {
       key: 'organizations.name',
@@ -125,8 +121,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       sortable: true,
       width: '140px',
       defaultValue: 'N/A',
-      priority: 2,
-    },
+      priority: 2},
     {
       key: 'addresses',
       label: 'Dirección',
@@ -140,8 +135,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
           return `${primaryAddress.city}, ${primaryAddress.state_province}`;
         }
         return `${value[0].city}, ${value[0].state_province}`;
-      },
-    },
+      }},
     {
       key: 'store_type',
       label: 'Tipo',
@@ -158,11 +152,8 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
           online: '#3b82f6',
           hybrid: '#8b5cf6',
           popup: '#f59e0b',
-          kiosko: '#ef4444',
-        },
-      },
-      transform: (value: StoreType) => this.formatStoreType(value),
-    },
+          kiosko: '#ef4444'}},
+      transform: (value: StoreType) => this.formatStoreType(value)},
     {
       key: '_count.store_users',
       label: 'Usuarios',
@@ -170,8 +161,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       width: '80px',
       align: 'center',
       defaultValue: '0',
-      priority: 3,
-    },
+      priority: 3},
     {
       key: 'is_active',
       label: 'Estado',
@@ -182,10 +172,8 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       priority: 1,
       badgeConfig: {
         type: 'status',
-        size: 'sm',
-      },
-      transform: (value: boolean) => this.formatActiveStatus(value),
-    },
+        size: 'sm'},
+      transform: (value: boolean) => this.formatActiveStatus(value)},
   ];
 
   // Card configuration for mobile
@@ -201,9 +189,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
         online: '#3b82f6',
         hybrid: '#8b5cf6',
         popup: '#f59e0b',
-        kiosko: '#ef4444',
-      },
-    },
+        kiosko: '#ef4444'}},
     badgeTransform: (value: StoreType) => this.formatStoreType(value),
     detailKeys: [
       { key: 'slug', label: 'Slug' },
@@ -213,36 +199,31 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
         transform: (v) => {
           if (!v || v.length === 0) return 'N/A';
           return v[0].city || 'N/A';
-        },
-      },
+        }},
       { key: '_count.store_users', label: 'Usuarios', icon: 'users' },
     ],
     footerKey: 'is_active',
-    footerTransform: (val) => (val ? 'Activo' : 'Inactivo'),
-  };
+    footerTransform: (val) => (val ? 'Activo' : 'Inactivo')};
 
   tableActions: TableAction[] = [
     {
       label: 'Editar',
       icon: 'edit',
       action: (store) => this.editStore(store),
-      variant: 'info',
-    },
+      variant: 'info'},
     {
       label: 'Configuración',
       icon: 'settings',
       action: (store) => this.openSettingsModal(store),
-      variant: 'ghost',
-    },
+      variant: 'ghost'},
     {
       label: 'Eliminar',
       icon: 'trash-2',
       action: (store) => this.deleteStore(store),
-      variant: 'danger',
-    },
+      variant: 'danger'},
   ];
 
-  stats = {
+  readonly stats = signal({
     total_stores: 0,
     active_stores: 0,
     inactive_stores: 0,
@@ -250,34 +231,30 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
     draft_stores: 0,
     total_revenue: 0,
     total_orders: 0,
-    total_products: 0,
-  };
+    total_products: 0});
 
   // Modal state
-  isCreateModalOpen = false;
-  isCreatingStore = false;
+  readonly isCreateModalOpen = signal(false);
+  readonly isCreatingStore = signal(false);
   createStoreForm!: FormGroup;
 
   // Edit Modal state
-  isEditModalOpen = false;
-  isUpdatingStore = false;
-  selectedStore?: StoreListItem;
+  readonly isEditModalOpen = signal(false);
+  readonly isUpdatingStore = signal(false);
+  readonly selectedStore = signal<StoreListItem | null>(null);
 
   // Settings Modal state
-  isSettingsModalOpen = false;
-  isUpdatingSettings = false;
-  selectedStoreForSettings?: StoreListItem;
-
-  private destroy$ = new Subject<void>();
-  private searchSubject = new Subject<string>();
+  readonly isSettingsModalOpen = signal(false);
+  readonly isUpdatingSettings = signal(false);
+  readonly selectedStoreForSettings = signal<StoreListItem | null>(null);
+private searchSubject$ = new Subject<string>();
 
   constructor() {
     this.filterForm = this.fb.group({
       search: [''],
       store_type: [''],
       is_active: [''],
-      include_non_production: [''],
-    });
+      include_non_production: ['']});
     this.initializeCreateForm();
   }
 
@@ -286,35 +263,35 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
     this.loadStats();
 
     // Set up search debounce
-    this.searchSubject
-      .pipe(debounceTime(300), distinctUntilChanged(), takeUntil(this.destroy$))
+    this.searchSubject$
+      .pipe(debounceTime(300), distinctUntilChanged(), takeUntilDestroyed(this.destroyRef))
       .subscribe((searchTerm) => {
-        this.searchTerm = searchTerm;
-        this.pagination.page = 1;
+        this.searchTerm.set(searchTerm);
+        this.pagination.update((p) => ({ ...p, page: 1 }));
         this.loadStores();
       });
 
     // Subscribe to loading states from service
     this.storesService.isLoading$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe((loading) => (this.isLoading = loading));
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((loading) => this.isLoading.set(loading));
 
     this.storesService.isCreatingStore$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe((loading) => (this.isCreatingStore = loading));
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((loading) => this.isCreatingStore.set(loading));
 
     this.storesService.isUpdatingStore$
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((loading) => {
-        this.isUpdatingStore = loading;
-        this.isUpdatingSettings = loading;
+        this.isUpdatingStore.set(loading);
+        this.isUpdatingSettings.set(loading);
       });
 
     // Subscribe to filter changes
     this.filterForm.valueChanges
-      .pipe(debounceTime(300), distinctUntilChanged(), takeUntil(this.destroy$))
+      .pipe(debounceTime(300), distinctUntilChanged(), takeUntilDestroyed(this.destroyRef))
       .subscribe(() => {
-        this.pagination.page = 1;
+        this.pagination.update((p) => ({ ...p, page: 1 }));
         this.loadStores();
       });
   }
@@ -323,13 +300,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
     if (changes['stores'] && !changes['stores'].firstChange) {
     }
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  private initializeCreateForm(): void {
+private initializeCreateForm(): void {
     this.createStoreForm = this.fb.group({
       name: ['', [Validators.required, Validators.minLength(2)]],
       slug: ['', [Validators.required, Validators.minLength(2)]],
@@ -341,8 +312,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       city: [''],
       country: [''],
       organization_id: [null, [Validators.required]],
-      state: ['active'],
-    });
+      state: ['active']});
   }
 
   get hasFilters(): boolean {
@@ -356,7 +326,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
   }
 
   openCreateStoreModal(): void {
-    this.isCreateModalOpen = true;
+    this.isCreateModalOpen.set(true);
     this.createStoreForm.reset({
       name: '',
       slug: '',
@@ -368,19 +338,18 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       city: '',
       country: '',
       organization_id: null,
-      state: 'active',
-    });
+      state: 'active'});
   }
 
   onCreateModalChange(isOpen: boolean): void {
-    this.isCreateModalOpen = isOpen;
+    this.isCreateModalOpen.set(isOpen);
     if (!isOpen) {
       this.createStoreForm.reset();
     }
   }
 
   onCreateModalCancel(): void {
-    this.isCreateModalOpen = false;
+    this.isCreateModalOpen.set(false);
     this.createStoreForm.reset();
   }
 
@@ -407,17 +376,16 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
         country: formData.country || undefined,
         organization_id: formData.organization_id,
         is_active: formData.state === 'active' ? true : false,
-        store_type: StoreType.PHYSICAL,
-      };
+        store_type: StoreType.PHYSICAL};
     }
 
     this.storesService
       .createStore(storeData as CreateStoreDto)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           if (response.success && response.data) {
-            this.isCreateModalOpen = false;
+            this.isCreateModalOpen.set(false);
             this.loadStores();
             this.loadStats();
             this.toastService.success('Tienda creada exitosamente');
@@ -427,85 +395,82 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
         },
         error: (error) => {
           this.toastService.error('Error al crear la tienda');
-        },
-      });
+        }});
   }
 
   loadStores(): void {
     const filters = this.filterForm.value;
+    const pag = this.pagination();
+    const selectedOrg = this.selectedOrganization();
     const query = {
-      page: this.pagination.page,
-      limit: this.pagination.limit,
+      page: pag.page,
+      limit: pag.limit,
       ...(filters.search && { search: filters.search }),
       ...(filters.is_active && {
-        is_active: filters.is_active === 'true',
-      }),
+        is_active: filters.is_active === 'true'}),
       ...(filters.store_type && {
-        store_type: filters.store_type as StoreType,
-      }),
-      ...(this.selectedOrganization && {
-        organization_id: parseInt(this.selectedOrganization),
-      }),
+        store_type: filters.store_type as StoreType}),
+      ...(selectedOrg && {
+        organization_id: parseInt(selectedOrg)}),
       ...(filters.include_non_production === 'all' && {
-        include_non_production: true,
-      }),
-    };
+        include_non_production: true})};
 
     this.storesService
       .getStores(query)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: any) => {
           if (response.meta) {
-            this.pagination.total = response.meta.total || 0;
-            this.pagination.totalPages =
-              response.meta.totalPages ||
-              Math.ceil(this.pagination.total / this.pagination.limit);
+            this.pagination.update((p) => ({
+              ...p,
+              total: response.meta.total || 0,
+              totalPages:
+                response.meta.totalPages ||
+                Math.ceil((response.meta.total || 0) / p.limit)}));
           }
           if (response.success && response.data) {
-            this.stores = response.data.map((store: any) => ({
-              id: store.id,
-              name: store.name,
-              slug: store.slug,
-              store_code: store.store_code || '',
-              store_type: store.store_type || StoreType.PHYSICAL,
-              timezone: store.timezone || 'America/Bogota',
-              is_active: store.is_active !== undefined ? store.is_active : true,
-              manager_user_id: store.manager_user_id,
-              organization_id: store.organization_id,
-              created_at: store.created_at || new Date().toISOString(),
-              updated_at: store.updated_at || new Date().toISOString(),
-              organizations: store.organizations || {
-                id: store.organization_id,
-                name: 'Unknown',
-                slug: 'unknown',
-              },
-              addresses: store.addresses || [],
-              _count: store._count || {
-                products: 0,
-                orders: 0,
-                store_users: 0,
-              },
-            }));
+            this.stores.set(
+              response.data.map((store: any) => ({
+                id: store.id,
+                name: store.name,
+                slug: store.slug,
+                store_code: store.store_code || '',
+                store_type: store.store_type || StoreType.PHYSICAL,
+                timezone: store.timezone || 'America/Bogota',
+                is_active:
+                  store.is_active !== undefined ? store.is_active : true,
+                manager_user_id: store.manager_user_id,
+                organization_id: store.organization_id,
+                created_at: store.created_at || new Date().toISOString(),
+                updated_at: store.updated_at || new Date().toISOString(),
+                organizations: store.organizations || {
+                  id: store.organization_id,
+                  name: 'Unknown',
+                  slug: 'unknown'},
+                addresses: store.addresses || [],
+                _count: store._count || {
+                  products: 0,
+                  orders: 0,
+                  store_users: 0}})),
+            );
           } else {
-            this.stores = [];
+            this.stores.set([]);
           }
         },
         error: (error) => {
           console.error('Error loading stores:', error);
           this.toastService.error('Error al cargar las tiendas');
-        },
-      });
+        }});
   }
 
   loadStats(): void {
     this.storesService
       .getStoreStatsList()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           if (response.success && response.data) {
-            this.stats = {
+            this.stats.set({
               total_stores: response.data.totalStores || 0,
               active_stores: response.data.activeStores || 0,
               inactive_stores: response.data.storesByState?.['false'] || 0,
@@ -513,28 +478,25 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
               draft_stores: 0,
               total_revenue: 0,
               total_orders: 0,
-              total_products: 0,
-            };
+              total_products: 0});
           } else {
             this.updateStats();
           }
         },
         error: (error) => {
           this.updateStats();
-        },
-      });
+        }});
   }
 
   updateStats(): void {
-    this.stats.total_stores = this.stores.length;
-    this.stats.active_stores = this.stores.filter(
-      (store) => store.is_active === true,
-    ).length;
-    this.stats.inactive_stores = this.stores.filter(
-      (store) => store.is_active === false,
-    ).length;
-    this.stats.suspended_stores = 0;
-    this.stats.draft_stores = 0;
+    const list = this.stores();
+    this.stats.update((s) => ({
+      ...s,
+      total_stores: list.length,
+      active_stores: list.filter((store) => store.is_active === true).length,
+      inactive_stores: list.filter((store) => store.is_active === false).length,
+      suspended_stores: 0,
+      draft_stores: 0}));
   }
 
   refreshStores(): void {
@@ -546,9 +508,8 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       search: '',
       store_type: '',
       is_active: '',
-      include_non_production: '',
-    });
-    this.selectedOrganization = '';
+      include_non_production: ''});
+    this.selectedOrganization.set('');
   }
 
   onStoreTypeChange(value: string): void {
@@ -560,33 +521,34 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
   }
 
   openSettingsModal(store: StoreListItem): void {
-    this.selectedStoreForSettings = store;
-    this.isSettingsModalOpen = true;
+    this.selectedStoreForSettings.set(store);
+    this.isSettingsModalOpen.set(true);
   }
 
   onSettingsModalChange(isOpen: boolean): void {
-    this.isSettingsModalOpen = isOpen;
+    this.isSettingsModalOpen.set(isOpen);
     if (!isOpen) {
-      this.selectedStoreForSettings = undefined;
+      this.selectedStoreForSettings.set(null);
     }
   }
 
   onSettingsModalCancel(): void {
-    this.isSettingsModalOpen = false;
-    this.selectedStoreForSettings = undefined;
+    this.isSettingsModalOpen.set(false);
+    this.selectedStoreForSettings.set(null);
   }
 
   updateStoreSettings(settingsData: any): void {
-    if (!this.selectedStoreForSettings) return;
+    const current = this.selectedStoreForSettings();
+    if (!current) return;
 
     this.storesService
-      .updateStoreSettings(this.selectedStoreForSettings.id, settingsData)
-      .pipe(takeUntil(this.destroy$))
+      .updateStoreSettings(current.id, settingsData)
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           if (response.success && response.data) {
-            this.isSettingsModalOpen = false;
-            this.selectedStoreForSettings = undefined;
+            this.isSettingsModalOpen.set(false);
+            this.selectedStoreForSettings.set(null);
             this.toastService.success('Configuración actualizada exitosamente');
           } else {
             this.toastService.error(
@@ -596,8 +558,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
         },
         error: (error) => {
           this.toastService.error('Error al actualizar la configuración');
-        },
-      });
+        }});
   }
 
   onSearchChange(searchTerm: string): void {
@@ -605,7 +566,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
   }
 
   onPageChange(page: number): void {
-    this.pagination.page = page;
+    this.pagination.update((p) => ({ ...p, page }));
     this.loadStores();
   }
 
@@ -622,8 +583,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       inactive: 'Inactivo',
       draft: 'Borrador',
       suspended: 'Suspendido',
-      archived: 'Archivado',
-    };
+      archived: 'Archivado'};
     return statusMap[status] || status;
   }
 
@@ -633,8 +593,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       [StoreType.ONLINE]: 'Online',
       [StoreType.HYBRID]: 'Híbrida',
       [StoreType.POPUP]: 'Temporal',
-      [StoreType.KIOSKO]: 'Kiosco',
-    };
+      [StoreType.KIOSKO]: 'Kiosco'};
     return typeMap[type] || type;
   }
 
@@ -646,8 +605,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
     return new Date(dateString).toLocaleDateString('es-ES', {
       year: 'numeric',
       month: 'short',
-      day: 'numeric',
-    });
+      day: 'numeric'});
   }
 
   deleteStore(store: StoreListItem): void {
@@ -657,13 +615,12 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
         message: `¿Estás seguro de que deseas eliminar la tienda "${store.name}"? Esta acción no se puede deshacer.`,
         confirmText: 'Eliminar',
         cancelText: 'Cancelar',
-        confirmVariant: 'danger',
-      })
+        confirmVariant: 'danger'})
       .then((confirmed) => {
         if (confirmed) {
           this.storesService
             .deleteStore(store.id)
-            .pipe(takeUntil(this.destroy$))
+            .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe({
               next: (response) => {
                 if (response.success) {
@@ -677,8 +634,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
               },
               error: (error) => {
                 this.toastService.error('Error al eliminar la tienda');
-              },
-            });
+              }});
         }
       });
   }
@@ -686,24 +642,25 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
   viewStore(store: StoreListItem): void {}
 
   editStore(store: StoreListItem): void {
-    this.selectedStore = store;
-    this.isEditModalOpen = true;
+    this.selectedStore.set(store);
+    this.isEditModalOpen.set(true);
   }
 
   onEditModalChange(isOpen: boolean): void {
-    this.isEditModalOpen = isOpen;
+    this.isEditModalOpen.set(isOpen);
     if (!isOpen) {
-      this.selectedStore = undefined;
+      this.selectedStore.set(null);
     }
   }
 
   onEditModalCancel(): void {
-    this.isEditModalOpen = false;
-    this.selectedStore = undefined;
+    this.isEditModalOpen.set(false);
+    this.selectedStore.set(null);
   }
 
   updateStore(storeData: any): void {
-    if (!this.selectedStore) return;
+    const current = this.selectedStore();
+    if (!current) return;
 
     const updateData = {
       name: storeData.name,
@@ -716,17 +673,16 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
       city: storeData.city,
       country: storeData.country,
       is_active: storeData.state === 'active' ? true : false,
-      store_type: storeData.store_type || StoreType.PHYSICAL,
-    };
+      store_type: storeData.store_type || StoreType.PHYSICAL};
 
     this.storesService
-      .updateStore(this.selectedStore.id, updateData)
-      .pipe(takeUntil(this.destroy$))
+      .updateStore(current.id, updateData)
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           if (response.success && response.data) {
-            this.isEditModalOpen = false;
-            this.selectedStore = undefined;
+            this.isEditModalOpen.set(false);
+            this.selectedStore.set(null);
             this.loadStores();
             this.loadStats();
             this.toastService.success('Tienda actualizada exitosamente');
@@ -738,8 +694,7 @@ export class StoresComponent implements OnInit, OnDestroy, OnChanges {
         },
         error: (error) => {
           this.toastService.error('Error al actualizar la tienda');
-        },
-      });
+        }});
   }
 
   getEmptyStateTitle(): string {

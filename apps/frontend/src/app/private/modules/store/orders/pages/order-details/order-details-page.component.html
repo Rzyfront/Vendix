@@ -2,7 +2,9 @@
   <!-- Loading State -->
   @if (isLoading()) {
     <div class="flex justify-center items-center h-64">
-      <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
+      <div
+        class="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"
+      ></div>
     </div>
   }
 
@@ -11,7 +13,11 @@
     <div class="bg-red-50 border border-red-200 rounded-lg p-4 mb-6">
       <div class="flex">
         <div class="text-red-500 mr-3">
-          <app-icon name="alert-triangle" size="24" class="text-red-500"></app-icon>
+          <app-icon
+            name="alert-triangle"
+            size="24"
+            class="text-red-500"
+          ></app-icon>
         </div>
         <div>
           <h3 class="text-red-800 font-medium">Error</h3>
@@ -45,32 +51,56 @@
 
     <!-- Main Grid: Two columns -->
     <div class="max-w-[1600px] mx-auto">
-
       <!-- Channel + Delivery Info Bar -->
       <div class="bg-surface border border-border rounded-lg px-3 py-2 mb-4">
         <div class="flex items-center gap-3 text-[12px]">
           <div class="flex items-center gap-1.5 text-text-primary font-medium">
-            <app-icon [name]="channelConfig().icon" size="14" class="text-text-secondary"></app-icon>
+            <app-icon
+              [name]="channelConfig().icon"
+              size="14"
+              class="text-text-secondary"
+            ></app-icon>
             <span>Canal:</span>
-            <span class="text-text-secondary font-normal">{{ channelConfig().label }}</span>
+            <span class="text-text-secondary font-normal">{{
+              channelConfig().label
+            }}</span>
           </div>
           <span class="w-px h-3.5 bg-border"></span>
           <div class="flex items-center gap-1.5 text-text-primary font-medium">
-            <app-icon [name]="deliveryConfig().icon" size="14" class="text-text-secondary"></app-icon>
+            <app-icon
+              [name]="deliveryConfig().icon"
+              size="14"
+              class="text-text-secondary"
+            ></app-icon>
             <span>Entrega:</span>
-            <span class="text-text-secondary font-normal">{{ deliveryConfig().label }}</span>
+            <span class="text-text-secondary font-normal">{{
+              deliveryConfig().label
+            }}</span>
           </div>
           @if (isCreditOrder()) {
             <span class="w-px h-3.5 bg-border"></span>
             <div class="flex items-center gap-1.5">
-              <span class="px-2 py-0.5 bg-blue-500 text-white text-[10px] font-black uppercase rounded tracking-wider">Crédito</span>
-              <span class="px-1.5 py-0.5 text-[10px] font-bold uppercase rounded tracking-wider"
-                [ngClass]="isInstallmentCredit() ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'">
-                {{ isInstallmentCredit() ? 'Cuotas' : 'Libre' }}
+              <span
+                class="px-2 py-0.5 bg-blue-500 text-white text-[10px] font-black uppercase rounded tracking-wider"
+                >Crédito</span
+              >
+              <span
+                class="px-1.5 py-0.5 text-[10px] font-bold uppercase rounded tracking-wider"
+                [ngClass]="
+                  isInstallmentCredit()
+                    ? 'bg-blue-100 text-blue-700'
+                    : 'bg-purple-100 text-purple-700'
+                "
+              >
+                {{ isInstallmentCredit() ? "Cuotas" : "Libre" }}
               </span>
               @if (overdueCount() > 0) {
-                <span class="px-1.5 py-0.5 bg-red-500 text-white text-[10px] font-black rounded">
-                  {{ overdueCount() }} vencida{{ overdueCount() > 1 ? 's' : '' }}
+                <span
+                  class="px-1.5 py-0.5 bg-red-500 text-white text-[10px] font-black rounded"
+                >
+                  {{ overdueCount() }} vencida{{
+                    overdueCount() > 1 ? "s" : ""
+                  }}
                 </span>
               }
             </div>
@@ -82,48 +112,89 @@
         <!-- ═══ COLUMNA IZQUIERDA ═══ -->
         <div class="flex flex-col gap-3">
           <!-- 1. INFORMACION DEL CLIENTE -->
-          <app-card title="Informacion del Cliente" shadow="sm" [responsivePadding]="true">
+          <app-card
+            title="Informacion del Cliente"
+            shadow="sm"
+            [responsivePadding]="true"
+          >
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3 md:gap-4">
               <!-- Profile Info -->
               <div class="md:col-span-2 flex items-start gap-3 sm:gap-4">
-                <div class="w-10 h-10 sm:w-12 sm:h-12 bg-primary/10 text-primary rounded-lg sm:rounded-xl flex items-center justify-center text-base sm:text-lg font-bold border border-primary/5 flex-shrink-0 aspect-square">
+                <div
+                  class="w-10 h-10 sm:w-12 sm:h-12 bg-primary/10 text-primary rounded-lg sm:rounded-xl flex items-center justify-center text-base sm:text-lg font-bold border border-primary/5 flex-shrink-0 aspect-square"
+                >
                   {{ orderData.users?.first_name?.charAt(0) || "C" }}
                 </div>
                 <div class="space-y-0.5 sm:space-y-1 min-w-0">
-                  <p class="text-base sm:text-lg font-bold text-gray-900 truncate">
-                    @if (orderData.users?.first_name || orderData.users?.last_name) {
-                      {{ orderData.users?.first_name }} {{ orderData.users?.last_name }}
+                  <p
+                    class="text-base sm:text-lg font-bold text-gray-900 truncate"
+                  >
+                    @if (
+                      orderData.users?.first_name || orderData.users?.last_name
+                    ) {
+                      {{ orderData.users?.first_name }}
+                      {{ orderData.users?.last_name }}
                     } @else {
                       Consumidor Final
                     }
                   </p>
-                  <div class="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-gray-600">
-                    <app-icon name="mail" size="14" class="text-gray-400 flex-shrink-0 sm:[--icon-size:16px]"></app-icon>
-                    <span class="truncate">{{ orderData.users?.email || 'Sin correo registrado' }}</span>
+                  <div
+                    class="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-gray-600"
+                  >
+                    <app-icon
+                      name="mail"
+                      size="14"
+                      class="text-gray-400 flex-shrink-0 sm:[--icon-size:16px]"
+                    ></app-icon>
+                    <span class="truncate">{{
+                      orderData.users?.email || "Sin correo registrado"
+                    }}</span>
                   </div>
-                  <div class="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-gray-600">
-                    <app-icon name="phone" size="14" class="text-gray-400 flex-shrink-0 sm:[--icon-size:16px]"></app-icon>
-                    <span class="truncate">{{ orderData.users?.phone || 'Sin telefono registrado' }}</span>
+                  <div
+                    class="flex items-center gap-1.5 sm:gap-2 text-xs sm:text-sm text-gray-600"
+                  >
+                    <app-icon
+                      name="phone"
+                      size="14"
+                      class="text-gray-400 flex-shrink-0 sm:[--icon-size:16px]"
+                    ></app-icon>
+                    <span class="truncate">{{
+                      orderData.users?.phone || "Sin telefono registrado"
+                    }}</span>
                   </div>
                 </div>
               </div>
 
               <!-- Direccion de Entrega -->
-              <div class="bg-[var(--color-surface)] rounded-xl border border-border p-3 sm:p-4">
-                <h3 class="text-xs font-bold text-text-secondary uppercase tracking-wider mb-2 sm:mb-3 flex items-center gap-2">
-                  <app-icon name="truck" size="14" class="text-primary-600"></app-icon>
+              <div
+                class="bg-[var(--color-surface)] rounded-xl border border-border p-3 sm:p-4"
+              >
+                <h3
+                  class="text-xs font-bold text-text-secondary uppercase tracking-wider mb-2 sm:mb-3 flex items-center gap-2"
+                >
+                  <app-icon
+                    name="truck"
+                    size="14"
+                    class="text-primary-600"
+                  ></app-icon>
                   Direccion de Entrega
                 </h3>
-                @if (orderData.addresses_orders_shipping_address_idToaddresses; as addr) {
+                @if (
+                  orderData.addresses_orders_shipping_address_idToaddresses;
+                  as addr
+                ) {
                   <div class="text-gray-700 space-y-1">
                     <p class="font-semibold">{{ addr.address_line1 }}</p>
                     @if (addr.address_line2) {
                       <p class="text-sm">{{ addr.address_line2 }}</p>
                     }
                     <p class="text-sm text-gray-500">
-                      {{ addr.city }}, {{ addr.state_province }} {{ addr.postal_code }}
+                      {{ addr.city }}, {{ addr.state_province }}
+                      {{ addr.postal_code }}
                     </p>
-                    <p class="text-xs font-bold text-gray-400 mt-2 uppercase">{{ addr.country_code }}</p>
+                    <p class="text-xs font-bold text-gray-400 mt-2 uppercase">
+                      {{ addr.country_code }}
+                    </p>
                   </div>
                 } @else {
                   <p class="text-sm text-gray-400 italic">No especificada</p>
@@ -131,24 +202,40 @@
               </div>
 
               <!-- Direccion de Facturacion -->
-              <div class="bg-[var(--color-surface)] rounded-xl border border-border p-3 sm:p-4">
-                <h3 class="text-xs font-bold text-text-secondary uppercase tracking-wider mb-2 sm:mb-3 flex items-center gap-2">
-                  <app-icon name="file-text" size="14" class="text-primary-600"></app-icon>
+              <div
+                class="bg-[var(--color-surface)] rounded-xl border border-border p-3 sm:p-4"
+              >
+                <h3
+                  class="text-xs font-bold text-text-secondary uppercase tracking-wider mb-2 sm:mb-3 flex items-center gap-2"
+                >
+                  <app-icon
+                    name="file-text"
+                    size="14"
+                    class="text-primary-600"
+                  ></app-icon>
                   Direccion de Facturacion
                 </h3>
-                @if (orderData.addresses_orders_billing_address_idToaddresses; as addr) {
+                @if (
+                  orderData.addresses_orders_billing_address_idToaddresses;
+                  as addr
+                ) {
                   <div class="text-gray-700 space-y-1">
                     <p class="font-semibold">{{ addr.address_line1 }}</p>
                     @if (addr.address_line2) {
                       <p class="text-sm">{{ addr.address_line2 }}</p>
                     }
                     <p class="text-sm text-gray-500">
-                      {{ addr.city }}, {{ addr.state_province }} {{ addr.postal_code }}
+                      {{ addr.city }}, {{ addr.state_province }}
+                      {{ addr.postal_code }}
                     </p>
-                    <p class="text-xs font-bold text-gray-400 mt-2 uppercase">{{ addr.country_code }}</p>
+                    <p class="text-xs font-bold text-gray-400 mt-2 uppercase">
+                      {{ addr.country_code }}
+                    </p>
                   </div>
                 } @else {
-                  <p class="text-sm text-gray-400 italic">Igual a la direccion de envio</p>
+                  <p class="text-sm text-gray-400 italic">
+                    Igual a la direccion de envio
+                  </p>
                 }
               </div>
             </div>
@@ -157,38 +244,68 @@
           <!-- 2. ARTICULOS DEL PEDIDO -->
           <app-card shadow="sm" [responsivePadding]="true">
             <div slot="header" class="flex items-center justify-between w-full">
-              <h3 class="text-base sm:text-lg font-semibold text-[var(--color-text-primary)]">Articulos del Pedido</h3>
-              <span class="text-[11px] sm:text-xs font-medium text-gray-500 bg-[var(--color-background)] px-2.5 py-1 rounded-lg">
+              <h3
+                class="text-base sm:text-lg font-semibold text-[var(--color-text-primary)]"
+              >
+                Articulos del Pedido
+              </h3>
+              <span
+                class="text-[11px] sm:text-xs font-medium text-gray-500 bg-[var(--color-background)] px-2.5 py-1 rounded-lg"
+              >
                 {{ orderData.order_items?.length || 0 }} productos
               </span>
             </div>
 
             <div class="space-y-2">
               @for (item of orderData.order_items; track item.id) {
-                <div class="p-3 sm:p-4 bg-[var(--color-surface)] rounded-xl border border-border hover:border-gray-300 transition-colors">
+                <div
+                  class="p-3 sm:p-4 bg-[var(--color-surface)] rounded-xl border border-border hover:border-gray-300 transition-colors"
+                >
                   <div class="flex items-center gap-3 sm:gap-4">
                     <!-- Product Image -->
-                    <div class="w-11 h-11 sm:w-14 sm:h-14 bg-white rounded-lg flex-shrink-0 flex items-center justify-center border border-border overflow-hidden">
+                    <div
+                      class="w-11 h-11 sm:w-14 sm:h-14 bg-white rounded-lg flex-shrink-0 flex items-center justify-center border border-border overflow-hidden"
+                    >
                       @if (item.products && item.products.image_url) {
-                        <img [src]="item.products.image_url" class="w-full h-full object-cover" />
+                        <img
+                          [src]="item.products.image_url"
+                          class="w-full h-full object-cover"
+                        />
                       } @else {
-                        <app-icon name="image" size="20" class="text-gray-300 sm:[--icon-size:24px]"></app-icon>
+                        <app-icon
+                          name="image"
+                          size="20"
+                          class="text-gray-300 sm:[--icon-size:24px]"
+                        ></app-icon>
                       }
                     </div>
 
                     <!-- Product Info -->
                     <div class="flex-1 min-w-0">
-                      <h3 class="text-sm sm:text-base font-semibold text-gray-900 truncate">{{ item.product_name }}</h3>
-                      <p class="text-[11px] font-mono text-gray-400 mt-0.5">SKU: {{ item.variant_sku || "N/A" }}</p>
+                      <h3
+                        class="text-sm sm:text-base font-semibold text-gray-900 truncate"
+                      >
+                        {{ item.product_name }}
+                      </h3>
+                      <p class="text-[11px] font-mono text-gray-400 mt-0.5">
+                        SKU: {{ item.variant_sku || "N/A" }}
+                      </p>
                       @if (item.variant_attributes) {
-                        <div class="mt-1 text-xs text-gray-500">{{ item.variant_attributes }}</div>
+                        <div class="mt-1 text-xs text-gray-500">
+                          {{ item.variant_attributes }}
+                        </div>
                       }
                     </div>
 
                     <!-- Price -->
                     <div class="text-right flex-shrink-0">
-                      <p class="font-bold text-gray-900 text-sm sm:text-lg">{{ item.total_price || 0 | currency }}</p>
-                      <p class="text-xs text-gray-500">{{ item.quantity }} x {{ item.unit_price || 0 | currency }}</p>
+                      <p class="font-bold text-gray-900 text-sm sm:text-lg">
+                        {{ item.total_price || 0 | currency }}
+                      </p>
+                      <p class="text-xs text-gray-500">
+                        {{ item.quantity }} x
+                        {{ item.unit_price || 0 | currency }}
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -198,56 +315,136 @@
 
           <!-- PLAN DE CUOTAS (Credit Installments) -->
           @if (isInstallmentCredit() && order()?.order_installments?.length) {
-            <app-card title="Plan de Cuotas" shadow="sm" [responsivePadding]="true">
+            <app-card
+              title="Plan de Cuotas"
+              shadow="sm"
+              [responsivePadding]="true"
+            >
               <!-- Desktop Table -->
               <div class="hidden md:block overflow-x-auto -mx-3 sm:-mx-4">
                 <table class="w-full text-sm">
                   <thead>
                     <tr class="bg-[var(--color-surface)]">
-                      <th class="px-3 py-2 text-[10px] font-bold text-text-secondary uppercase tracking-wider text-left">#</th>
-                      <th class="px-3 py-2 text-[10px] font-bold text-text-secondary uppercase tracking-wider text-left">Vence</th>
-                      <th class="px-3 py-2 text-[10px] font-bold text-text-secondary uppercase tracking-wider text-right">Capital</th>
-                      <th class="px-3 py-2 text-[10px] font-bold text-text-secondary uppercase tracking-wider text-right">Interés</th>
-                      <th class="px-3 py-2 text-[10px] font-bold text-text-secondary uppercase tracking-wider text-right">Total</th>
-                      <th class="px-3 py-2 text-[10px] font-bold text-text-secondary uppercase tracking-wider text-right">Pagado</th>
-                      <th class="px-3 py-2 text-[10px] font-bold text-text-secondary uppercase tracking-wider text-center">Estado</th>
-                      <th class="px-3 py-2 text-[10px] font-bold text-text-secondary uppercase tracking-wider text-center">Acciones</th>
+                      <th
+                        class="px-3 py-2 text-[10px] font-bold text-text-secondary uppercase tracking-wider text-left"
+                      >
+                        #
+                      </th>
+                      <th
+                        class="px-3 py-2 text-[10px] font-bold text-text-secondary uppercase tracking-wider text-left"
+                      >
+                        Vence
+                      </th>
+                      <th
+                        class="px-3 py-2 text-[10px] font-bold text-text-secondary uppercase tracking-wider text-right"
+                      >
+                        Capital
+                      </th>
+                      <th
+                        class="px-3 py-2 text-[10px] font-bold text-text-secondary uppercase tracking-wider text-right"
+                      >
+                        Interés
+                      </th>
+                      <th
+                        class="px-3 py-2 text-[10px] font-bold text-text-secondary uppercase tracking-wider text-right"
+                      >
+                        Total
+                      </th>
+                      <th
+                        class="px-3 py-2 text-[10px] font-bold text-text-secondary uppercase tracking-wider text-right"
+                      >
+                        Pagado
+                      </th>
+                      <th
+                        class="px-3 py-2 text-[10px] font-bold text-text-secondary uppercase tracking-wider text-center"
+                      >
+                        Estado
+                      </th>
+                      <th
+                        class="px-3 py-2 text-[10px] font-bold text-text-secondary uppercase tracking-wider text-center"
+                      >
+                        Acciones
+                      </th>
                     </tr>
                   </thead>
                   <tbody class="divide-y divide-border">
                     @for (inst of order()!.order_installments!; track inst.id) {
-                      <tr class="hover:bg-[var(--color-surface)] transition-colors">
-                        <td class="px-3 py-2.5 text-sm font-medium text-gray-900">{{ inst.installment_number }}</td>
-                        <td class="px-3 py-2.5 text-sm text-text-secondary">{{ formatDate(inst.due_date) }}</td>
-                        <td class="px-3 py-2.5 text-sm text-text-secondary text-right">{{ inst.capital_amount | currency }}</td>
-                        <td class="px-3 py-2.5 text-sm text-text-secondary text-right">{{ inst.interest_amount | currency }}</td>
-                        <td class="px-3 py-2.5 text-sm font-semibold text-gray-900 text-right">{{ inst.amount | currency }}</td>
-                        <td class="px-3 py-2.5 text-sm font-semibold text-right" [ngClass]="inst.amount_paid > 0 ? 'text-green-600' : 'text-gray-400'">
+                      <tr
+                        class="hover:bg-[var(--color-surface)] transition-colors"
+                      >
+                        <td
+                          class="px-3 py-2.5 text-sm font-medium text-gray-900"
+                        >
+                          {{ inst.installment_number }}
+                        </td>
+                        <td class="px-3 py-2.5 text-sm text-text-secondary">
+                          {{ formatDate(inst.due_date) }}
+                        </td>
+                        <td
+                          class="px-3 py-2.5 text-sm text-text-secondary text-right"
+                        >
+                          {{ inst.capital_amount | currency }}
+                        </td>
+                        <td
+                          class="px-3 py-2.5 text-sm text-text-secondary text-right"
+                        >
+                          {{ inst.interest_amount | currency }}
+                        </td>
+                        <td
+                          class="px-3 py-2.5 text-sm font-semibold text-gray-900 text-right"
+                        >
+                          {{ inst.amount | currency }}
+                        </td>
+                        <td
+                          class="px-3 py-2.5 text-sm font-semibold text-right"
+                          [ngClass]="
+                            inst.amount_paid > 0
+                              ? 'text-green-600'
+                              : 'text-gray-400'
+                          "
+                        >
                           {{ inst.amount_paid | currency }}
                         </td>
                         <td class="px-3 py-2.5 text-center">
-                          <span class="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider"
-                            [ngClass]="getInstallmentStateClass(inst.state)">
+                          <span
+                            class="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider"
+                            [ngClass]="getInstallmentStateClass(inst.state)"
+                          >
                             {{ getInstallmentStateLabel(inst.state) }}
                           </span>
                         </td>
                         <td class="px-3 py-2.5 text-center">
                           <div class="flex items-center justify-center gap-1">
-                            @if (inst.state === 'pending' || inst.state === 'partial' || inst.state === 'overdue') {
+                            @if (
+                              inst.state === "pending" ||
+                              inst.state === "partial" ||
+                              inst.state === "overdue"
+                            ) {
                               <button
                                 (click)="payInstallment(inst)"
                                 class="p-1.5 rounded-lg hover:bg-primary/10 text-primary transition-colors"
                                 title="Pagar cuota"
                               >
-                                <app-icon name="credit-card" size="14"></app-icon>
+                                <app-icon
+                                  name="credit-card"
+                                  size="14"
+                                ></app-icon>
                               </button>
                               @if (isPrivilegedUser()) {
                                 <button
-                                  (click)="forgiveInstallment(inst.id, inst.installment_number)"
+                                  (click)="
+                                    forgiveInstallment(
+                                      inst.id,
+                                      inst.installment_number
+                                    )
+                                  "
                                   class="p-1.5 rounded-lg hover:bg-red-50 text-red-400 hover:text-red-600 transition-colors"
                                   title="Condonar cuota"
                                 >
-                                  <app-icon name="x-circle" size="14"></app-icon>
+                                  <app-icon
+                                    name="x-circle"
+                                    size="14"
+                                  ></app-icon>
                                 </button>
                               }
                             }
@@ -264,23 +461,37 @@
                 @for (inst of order()!.order_installments!; track inst.id) {
                   <div class="px-3 py-2.5 space-y-1.5">
                     <div class="flex justify-between items-center">
-                      <span class="text-sm font-bold text-gray-900">Cuota {{ inst.installment_number }}</span>
-                      <span class="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider"
-                        [ngClass]="getInstallmentStateClass(inst.state)">
+                      <span class="text-sm font-bold text-gray-900"
+                        >Cuota {{ inst.installment_number }}</span
+                      >
+                      <span
+                        class="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider"
+                        [ngClass]="getInstallmentStateClass(inst.state)"
+                      >
                         {{ getInstallmentStateLabel(inst.state) }}
                       </span>
                     </div>
-                    <div class="flex justify-between text-xs text-text-secondary">
+                    <div
+                      class="flex justify-between text-xs text-text-secondary"
+                    >
                       <span>Vence: {{ formatDate(inst.due_date) }}</span>
-                      <span class="font-semibold text-gray-900">{{ inst.amount | currency }}</span>
+                      <span class="font-semibold text-gray-900">{{
+                        inst.amount | currency
+                      }}</span>
                     </div>
                     @if (inst.amount_paid > 0) {
                       <div class="flex justify-between text-xs">
                         <span class="text-text-secondary">Pagado</span>
-                        <span class="font-semibold text-green-600">{{ inst.amount_paid | currency }}</span>
+                        <span class="font-semibold text-green-600">{{
+                          inst.amount_paid | currency
+                        }}</span>
                       </div>
                     }
-                    @if (inst.state === 'pending' || inst.state === 'partial' || inst.state === 'overdue') {
+                    @if (
+                      inst.state === "pending" ||
+                      inst.state === "partial" ||
+                      inst.state === "overdue"
+                    ) {
                       <div class="flex gap-2 pt-1.5">
                         <button
                           (click)="payInstallment(inst)"
@@ -291,7 +502,12 @@
                         </button>
                         @if (isPrivilegedUser()) {
                           <button
-                            (click)="forgiveInstallment(inst.id, inst.installment_number)"
+                            (click)="
+                              forgiveInstallment(
+                                inst.id,
+                                inst.installment_number
+                              )
+                            "
                             class="px-2 py-1.5 text-[10px] font-bold text-red-500 bg-red-50 rounded-lg hover:bg-red-100 transition-colors flex items-center justify-center gap-1"
                           >
                             <app-icon name="x-circle" size="12"></app-icon>
@@ -307,27 +523,49 @@
           }
 
           <!-- 3. HISTORIAL DE LA ORDEN (cronológico ascendente) -->
-          <app-card title="Historial de la Orden" shadow="sm" [responsivePadding]="true">
-            <app-timeline class="block pt-1" [steps]="history_timeline_steps()" [collapsible]="true"
-              expand_label="Ver historial completo" collapse_label="Ocultar historial">
+          <app-card
+            title="Historial de la Orden"
+            shadow="sm"
+            [responsivePadding]="true"
+          >
+            <app-timeline
+              class="block pt-1"
+              [steps]="history_timeline_steps()"
+              [collapsible]="true"
+              expand_label="Ver historial completo"
+              collapse_label="Ocultar historial"
+            >
               <ng-template #stepTemplate let-step let-isLast="isLast">
                 <div class="flex flex-col sm:flex-row sm:justify-between gap-2">
                   <div>
-                    <p class="text-sm font-bold text-gray-900">{{ step.label }}</p>
+                    <p class="text-sm font-bold text-gray-900">
+                      {{ step.label }}
+                    </p>
                     @if (step.data) {
                       <p class="text-xs text-gray-500 mt-1">
                         Realizado por
-                        <span class="font-semibold text-gray-700">{{ step.data.users?.first_name }} {{ step.data.users?.last_name }}</span>
+                        <span class="font-semibold text-gray-700"
+                          >{{ step.data.users?.first_name }}
+                          {{ step.data.users?.last_name }}</span
+                        >
                       </p>
                       @if (step.data.new_values?.state) {
-                        <div class="mt-2 text-xs bg-[var(--color-surface)] text-text-secondary px-3 py-1.5 rounded-lg inline-flex items-center gap-2 border border-border">
-                          <span class="w-1.5 h-1.5 rounded-full bg-primary-500"></span>
-                          Nuevo estado: {{ formatStatus(step.data.new_values.state) }}
+                        <div
+                          class="mt-2 text-xs bg-[var(--color-surface)] text-text-secondary px-3 py-1.5 rounded-lg inline-flex items-center gap-2 border border-border"
+                        >
+                          <span
+                            class="w-1.5 h-1.5 rounded-full bg-primary-500"
+                          ></span>
+                          Nuevo estado:
+                          {{ formatStatus(step.data.new_values.state) }}
                         </div>
                       }
                     }
                   </div>
-                  <span class="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">{{ step.date }}</span>
+                  <span
+                    class="text-[10px] font-bold text-gray-400 uppercase tracking-tighter"
+                    >{{ step.date }}</span
+                  >
                 </div>
               </ng-template>
             </app-timeline>
@@ -336,20 +574,33 @@
 
         <!-- ═══ COLUMNA DERECHA (SIDEBAR) ═══ -->
         <div class="flex flex-col gap-3 lg:pt-0 pt-1">
-
           <!-- SHIPPING METHOD ASSIGNMENT (only for delivery_type 'other') -->
           @if (showShippingAssignment()) {
-            <div class="bg-amber-50 rounded-xl border border-amber-200 p-4 shadow-sm">
-              <h3 class="text-xs font-bold text-amber-800 uppercase tracking-wider mb-2 flex items-center gap-2">
-                <app-icon name="truck" size="14" class="text-amber-600"></app-icon>
+            <div
+              class="bg-amber-50 rounded-xl border border-amber-200 p-4 shadow-sm"
+            >
+              <h3
+                class="text-xs font-bold text-amber-800 uppercase tracking-wider mb-2 flex items-center gap-2"
+              >
+                <app-icon
+                  name="truck"
+                  size="14"
+                  class="text-amber-600"
+                ></app-icon>
                 Asignar Metodo de Envio
               </h3>
 
               @if (!showShippingMethodCard()) {
                 <p class="text-xs text-amber-700 mb-3">
-                  Esta orden no tiene un metodo de envio asignado. Puedes asignar uno para definir el tipo de entrega.
+                  Esta orden no tiene un metodo de envio asignado. Puedes
+                  asignar uno para definir el tipo de entrega.
                 </p>
-                <app-button variant="primary" [fullWidth]="true" (clicked)="openShippingAssignCard()" customClasses="!bg-amber-600 hover:!bg-amber-700">
+                <app-button
+                  variant="primary"
+                  [fullWidth]="true"
+                  (clicked)="openShippingAssignCard()"
+                  customClasses="!bg-amber-600 hover:!bg-amber-700"
+                >
                   <app-icon slot="icon" name="package" size="16"></app-icon>
                   Seleccionar
                 </app-button>
@@ -357,10 +608,14 @@
                 <!-- Expanded: method list -->
                 @if (isLoadingShippingMethods()) {
                   <div class="flex justify-center py-4">
-                    <div class="animate-spin rounded-full h-6 w-6 border-b-2 border-amber-600"></div>
+                    <div
+                      class="animate-spin rounded-full h-6 w-6 border-b-2 border-amber-600"
+                    ></div>
                   </div>
                 } @else if (shippingMethods().length === 0) {
-                  <p class="text-xs text-amber-600 italic py-2">No hay metodos de envio activos configurados.</p>
+                  <p class="text-xs text-amber-600 italic py-2">
+                    No hay metodos de envio activos configurados.
+                  </p>
                 } @else {
                   <div class="space-y-1.5 mb-3 max-h-48 overflow-y-auto">
                     @for (method of shippingMethods(); track method.id) {
@@ -368,14 +623,34 @@
                         (click)="onShippingMethodSelect(method.id)"
                         class="w-full text-left p-2.5 rounded-lg border transition-all text-sm flex items-center gap-2.5"
                         [ngClass]="{
-                          'border-amber-400 bg-amber-100 ring-1 ring-amber-400': selectedShippingMethodId() === method.id,
-                          'border-amber-200 bg-white hover:bg-amber-50': selectedShippingMethodId() !== method.id
+                          'border-amber-400 bg-amber-100 ring-1 ring-amber-400':
+                            selectedShippingMethodId() === method.id,
+                          'border-amber-200 bg-white hover:bg-amber-50':
+                            selectedShippingMethodId() !== method.id,
                         }"
                       >
-                        <app-icon [name]="shippingMethodsService.getShippingMethodIcon(method.type)" size="16" class="text-amber-700 flex-shrink-0"></app-icon>
+                        <app-icon
+                          [name]="
+                            shippingMethodsService.getShippingMethodIcon(
+                              method.type
+                            )
+                          "
+                          size="16"
+                          class="text-amber-700 flex-shrink-0"
+                        ></app-icon>
                         <div class="min-w-0 flex-1">
-                          <p class="font-semibold text-gray-900 truncate text-xs">{{ method.name }}</p>
-                          <p class="text-[10px] text-gray-500">{{ shippingMethodsService.getShippingMethodTypeLabel(method.type) }}</p>
+                          <p
+                            class="font-semibold text-gray-900 truncate text-xs"
+                          >
+                            {{ method.name }}
+                          </p>
+                          <p class="text-[10px] text-gray-500">
+                            {{
+                              shippingMethodsService.getShippingMethodTypeLabel(
+                                method.type
+                              )
+                            }}
+                          </p>
                         </div>
                       </button>
                     }
@@ -385,7 +660,9 @@
                 <!-- Shipping cost field (shown when a method is selected) -->
                 @if (selectedShippingMethod()) {
                   <div class="mb-3" [formGroup]="shippingAssignForm">
-                    <label class="block text-xs font-bold text-amber-800 mb-1">Costo de envio</label>
+                    <label class="block text-xs font-bold text-amber-800 mb-1"
+                      >Costo de envio</label
+                    >
                     <input
                       type="number"
                       formControlName="shipping_cost"
@@ -399,12 +676,24 @@
 
                 <!-- Action buttons -->
                 <div class="flex items-center gap-2">
-                  <app-button variant="outline" size="sm" [fullWidth]="true" (clicked)="skipShippingAssignment()">
+                  <app-button
+                    variant="outline"
+                    size="sm"
+                    [fullWidth]="true"
+                    (clicked)="skipShippingAssignment()"
+                  >
                     Continuar sin metodo
                   </app-button>
                   @if (selectedShippingMethodId()) {
-                    <app-button variant="primary" size="sm" [fullWidth]="true" (clicked)="submitShippingAssignment()" [disabled]="isProcessingAction()" customClasses="!bg-amber-600 hover:!bg-amber-700">
-                      {{ isProcessingAction() ? 'Asignando...' : 'Confirmar' }}
+                    <app-button
+                      variant="primary"
+                      size="sm"
+                      [fullWidth]="true"
+                      (clicked)="submitShippingAssignment()"
+                      [disabled]="isProcessingAction()"
+                      customClasses="!bg-amber-600 hover:!bg-amber-700"
+                    >
+                      {{ isProcessingAction() ? "Asignando..." : "Confirmar" }}
                     </app-button>
                   }
                 </div>
@@ -414,38 +703,64 @@
 
           <!-- 4. PROGRESO DE LA ORDEN -->
           <app-card shadow="sm" [responsivePadding]="true">
-            <h2 class="text-xs sm:text-sm font-bold text-gray-900 uppercase tracking-wider mb-3 sm:mb-4">
+            <h2
+              class="text-xs sm:text-sm font-bold text-gray-900 uppercase tracking-wider mb-3 sm:mb-4"
+            >
               Progreso de la Orden
             </h2>
 
-            <app-timeline [steps]="lifecycle_steps_timeline()" [collapsible]="true"
-              expand_label="Ver progreso completo" collapse_label="Ocultar progreso" />
+            <app-timeline
+              [steps]="lifecycle_steps_timeline()"
+              [collapsible]="true"
+              expand_label="Ver progreso completo"
+              collapse_label="Ocultar progreso"
+            />
           </app-card>
 
           <!-- 5. FLOW METADATA CARDS -->
 
           <!-- Shipping Info Card -->
-          @if (flowMetadata().tracking_number || flowMetadata().carrier || flowMetadata().shipping_notes) {
-            <div class="bg-blue-50 rounded-xl border border-blue-200 p-4 shadow-sm">
-              <h3 class="text-xs font-bold text-blue-800 uppercase tracking-wider mb-3 flex items-center gap-2">
-                <app-icon name="truck" size="14" class="text-blue-600"></app-icon>
+          @if (
+            flowMetadata().tracking_number ||
+            flowMetadata().carrier ||
+            flowMetadata().shipping_notes
+          ) {
+            <div
+              class="bg-blue-50 rounded-xl border border-blue-200 p-4 shadow-sm"
+            >
+              <h3
+                class="text-xs font-bold text-blue-800 uppercase tracking-wider mb-3 flex items-center gap-2"
+              >
+                <app-icon
+                  name="truck"
+                  size="14"
+                  class="text-blue-600"
+                ></app-icon>
                 Informacion de Envio
               </h3>
               <div class="space-y-2 text-sm">
                 @if (flowMetadata().tracking_number) {
                   <div class="flex items-center gap-2">
                     <span class="text-blue-600 font-medium">Rastreo:</span>
-                    <span class="text-blue-900 font-mono">{{ flowMetadata().tracking_number }}</span>
+                    <span class="text-blue-900 font-mono">{{
+                      flowMetadata().tracking_number
+                    }}</span>
                   </div>
                 }
                 @if (flowMetadata().carrier) {
                   <div class="flex items-center gap-2">
-                    <span class="text-blue-600 font-medium">Transportista:</span>
-                    <span class="text-blue-900">{{ flowMetadata().carrier }}</span>
+                    <span class="text-blue-600 font-medium"
+                      >Transportista:</span
+                    >
+                    <span class="text-blue-900">{{
+                      flowMetadata().carrier
+                    }}</span>
                   </div>
                 }
                 @if (flowMetadata().shipping_notes) {
-                  <div class="text-blue-700 text-xs mt-2">{{ flowMetadata().shipping_notes }}</div>
+                  <div class="text-blue-700 text-xs mt-2">
+                    {{ flowMetadata().shipping_notes }}
+                  </div>
                 }
               </div>
             </div>
@@ -453,52 +768,94 @@
 
           <!-- Delivery Info Card -->
           @if (flowMetadata().delivered_to || flowMetadata().delivery_notes) {
-            <div class="bg-green-50 rounded-xl border border-green-200 p-4 shadow-sm">
-              <h3 class="text-xs font-bold text-green-800 uppercase tracking-wider mb-3 flex items-center gap-2">
-                <app-icon name="package" size="14" class="text-green-600"></app-icon>
+            <div
+              class="bg-green-50 rounded-xl border border-green-200 p-4 shadow-sm"
+            >
+              <h3
+                class="text-xs font-bold text-green-800 uppercase tracking-wider mb-3 flex items-center gap-2"
+              >
+                <app-icon
+                  name="package"
+                  size="14"
+                  class="text-green-600"
+                ></app-icon>
                 Informacion de Entrega
               </h3>
               <div class="space-y-2 text-sm">
                 @if (flowMetadata().delivered_to) {
                   <div class="flex items-center gap-2">
-                    <span class="text-green-600 font-medium">Recibido por:</span>
-                    <span class="text-green-900">{{ flowMetadata().delivered_to }}</span>
+                    <span class="text-green-600 font-medium"
+                      >Recibido por:</span
+                    >
+                    <span class="text-green-900">{{
+                      flowMetadata().delivered_to
+                    }}</span>
                   </div>
                 }
                 @if (flowMetadata().delivery_notes) {
-                  <div class="text-green-700 text-xs mt-2">{{ flowMetadata().delivery_notes }}</div>
+                  <div class="text-green-700 text-xs mt-2">
+                    {{ flowMetadata().delivery_notes }}
+                  </div>
                 }
               </div>
             </div>
           }
 
           <!-- Cancellation Info Card -->
-          @if (orderData.state === 'cancelled' && flowMetadata().cancellation_reason) {
-            <div class="bg-red-50 rounded-xl border border-red-200 p-4 shadow-sm">
-              <h3 class="text-xs font-bold text-red-800 uppercase tracking-wider mb-3 flex items-center gap-2">
-                <app-icon name="x-circle" size="14" class="text-red-600"></app-icon>
+          @if (
+            orderData.state === "cancelled" &&
+            flowMetadata().cancellation_reason
+          ) {
+            <div
+              class="bg-red-50 rounded-xl border border-red-200 p-4 shadow-sm"
+            >
+              <h3
+                class="text-xs font-bold text-red-800 uppercase tracking-wider mb-3 flex items-center gap-2"
+              >
+                <app-icon
+                  name="x-circle"
+                  size="14"
+                  class="text-red-600"
+                ></app-icon>
                 Orden Cancelada
               </h3>
-              <p class="text-sm text-red-700">{{ flowMetadata().cancellation_reason }}</p>
+              <p class="text-sm text-red-700">
+                {{ flowMetadata().cancellation_reason }}
+              </p>
             </div>
           }
 
           <!-- Refund Info Card -->
-          @if (orderData.state === 'refunded' && (flowMetadata().refund_reason || flowMetadata().refund_amount)) {
-            <div class="bg-orange-50 rounded-xl border border-orange-200 p-4 shadow-sm">
-              <h3 class="text-xs font-bold text-orange-800 uppercase tracking-wider mb-3 flex items-center gap-2">
-                <app-icon name="rotate-ccw" size="14" class="text-orange-600"></app-icon>
+          @if (
+            orderData.state === "refunded" &&
+            (flowMetadata().refund_reason || flowMetadata().refund_amount)
+          ) {
+            <div
+              class="bg-orange-50 rounded-xl border border-orange-200 p-4 shadow-sm"
+            >
+              <h3
+                class="text-xs font-bold text-orange-800 uppercase tracking-wider mb-3 flex items-center gap-2"
+              >
+                <app-icon
+                  name="rotate-ccw"
+                  size="14"
+                  class="text-orange-600"
+                ></app-icon>
                 Reembolso Procesado
               </h3>
               <div class="space-y-2 text-sm">
                 @if (flowMetadata().refund_amount) {
                   <div class="flex items-center gap-2">
                     <span class="text-orange-600 font-medium">Monto:</span>
-                    <span class="text-orange-900 font-bold">{{ flowMetadata().refund_amount | currency }}</span>
+                    <span class="text-orange-900 font-bold">{{
+                      flowMetadata().refund_amount | currency
+                    }}</span>
                   </div>
                 }
                 @if (flowMetadata().refund_reason) {
-                  <p class="text-orange-700">{{ flowMetadata().refund_reason }}</p>
+                  <p class="text-orange-700">
+                    {{ flowMetadata().refund_reason }}
+                  </p>
                 }
               </div>
             </div>
@@ -507,28 +864,54 @@
           <!-- Refund History (for partial refunds or detailed view) -->
           @if (orderRefunds() && orderRefunds().length > 0) {
             <app-card shadow="sm" [responsivePadding]="true">
-              <h2 class="text-xs font-bold text-gray-900 uppercase tracking-wider mb-3 flex items-center gap-2">
-                <app-icon name="rotate-ccw" size="14" class="text-orange-600"></app-icon>
+              <h2
+                class="text-xs font-bold text-gray-900 uppercase tracking-wider mb-3 flex items-center gap-2"
+              >
+                <app-icon
+                  name="rotate-ccw"
+                  size="14"
+                  class="text-orange-600"
+                ></app-icon>
                 Historial de Reembolsos
               </h2>
               <div class="space-y-2">
                 @for (refund of orderRefunds(); track refund.id) {
-                  <div class="p-3 bg-[var(--color-surface)] rounded-lg border border-border">
+                  <div
+                    class="p-3 bg-[var(--color-surface)] rounded-lg border border-border"
+                  >
                     <div class="flex items-center justify-between mb-1">
-                      <span class="text-sm font-bold text-gray-900">{{ refund.amount | currency }}</span>
-                      <span class="px-2 py-0.5 text-[10px] font-black uppercase rounded-md"
+                      <span class="text-sm font-bold text-gray-900">{{
+                        refund.amount | currency
+                      }}</span>
+                      <span
+                        class="px-2 py-0.5 text-[10px] font-black uppercase rounded-md"
                         [ngClass]="{
-                          'bg-green-500/20 text-green-600': refund.state === 'completed',
-                          'bg-yellow-500/20 text-yellow-600': refund.state === 'processing',
-                          'bg-gray-500/20 text-gray-400': refund.state !== 'completed' && refund.state !== 'processing'
-                        }">
-                        {{ refund.state === 'completed' ? 'Completado' : refund.state === 'processing' ? 'Procesando' : refund.state }}
+                          'bg-green-500/20 text-green-600':
+                            refund.state === 'completed',
+                          'bg-yellow-500/20 text-yellow-600':
+                            refund.state === 'processing',
+                          'bg-gray-500/20 text-gray-400':
+                            refund.state !== 'completed' &&
+                            refund.state !== 'processing',
+                        }"
+                      >
+                        {{
+                          refund.state === "completed"
+                            ? "Completado"
+                            : refund.state === "processing"
+                              ? "Procesando"
+                              : refund.state
+                        }}
                       </span>
                     </div>
                     @if (refund.reason) {
-                      <p class="text-xs text-gray-500 mb-1">{{ refund.reason }}</p>
+                      <p class="text-xs text-gray-500 mb-1">
+                        {{ refund.reason }}
+                      </p>
                     }
-                    <div class="flex items-center justify-between text-[10px] text-gray-400">
+                    <div
+                      class="flex items-center justify-between text-[10px] text-gray-400"
+                    >
                       <span>{{ refund.refund_items.length || 0 }} item(s)</span>
                       <span>{{ formatDate(refund.created_at) }}</span>
                     </div>
@@ -541,21 +924,40 @@
           <!-- 6. SEGUIMIENTO DE ENVIO -->
           @if (showShipmentTracking()) {
             <app-card shadow="sm" [responsivePadding]="true">
-              <h2 class="text-sm font-bold text-gray-900 uppercase tracking-wider mb-4 flex items-center gap-2">
-                <app-icon name="map-pin" size="16" class="text-primary-600"></app-icon>
+              <h2
+                class="text-sm font-bold text-gray-900 uppercase tracking-wider mb-4 flex items-center gap-2"
+              >
+                <app-icon
+                  name="map-pin"
+                  size="16"
+                  class="text-primary-600"
+                ></app-icon>
                 Seguimiento de Envio
               </h2>
 
               <!-- Tracking Timeline -->
-              <app-timeline [steps]="tracking_steps_timeline()" [collapsible]="true"
-                expand_label="Ver seguimiento completo" collapse_label="Ocultar seguimiento" size="sm" />
+              <app-timeline
+                [steps]="tracking_steps_timeline()"
+                [collapsible]="true"
+                expand_label="Ver seguimiento completo"
+                collapse_label="Ocultar seguimiento"
+                size="sm"
+              />
 
               <!-- Tracking number -->
               @if (flowMetadata().tracking_number) {
-                <div class="mt-4 p-3 bg-[var(--color-surface)] rounded-lg border border-border flex items-center justify-between gap-2">
+                <div
+                  class="mt-4 p-3 bg-[var(--color-surface)] rounded-lg border border-border flex items-center justify-between gap-2"
+                >
                   <div class="min-w-0">
-                    <span class="text-[10px] font-bold text-text-secondary uppercase block">Numero de rastreo</span>
-                    <code class="text-sm font-mono text-gray-900 truncate block">{{ flowMetadata().tracking_number }}</code>
+                    <span
+                      class="text-[10px] font-bold text-text-secondary uppercase block"
+                      >Numero de rastreo</span
+                    >
+                    <code
+                      class="text-sm font-mono text-gray-900 truncate block"
+                      >{{ flowMetadata().tracking_number }}</code
+                    >
                   </div>
                   <button
                     (click)="copyTrackingNumber()"
@@ -570,30 +972,51 @@
 
           <!-- 7. ACCIONES DE FLUJO -->
           <app-card shadow="sm" [responsivePadding]="true">
-            <h2 class="text-xs sm:text-sm font-bold text-gray-900 uppercase tracking-wider mb-3 sm:mb-4">Acciones</h2>
+            <h2
+              class="text-xs sm:text-sm font-bold text-gray-900 uppercase tracking-wider mb-3 sm:mb-4"
+            >
+              Acciones
+            </h2>
 
             @if (availableActions().length > 0) {
               <div class="space-y-2">
                 @for (action of availableActions(); track action.id) {
-                  @if (action.type === 'alert') {
-                    <app-alert-banner [variant]="$any(action.color)" [icon]="action.icon">
+                  @if (action.type === "alert") {
+                    <app-alert-banner
+                      [variant]="$any(action.color)"
+                      [icon]="action.icon"
+                    >
                       {{ action.label }}
                     </app-alert-banner>
                   } @else {
                     <app-button
-                      [variant]="action.variant === 'danger' ? 'outline-danger' : action.variant === 'warning' ? 'outline-warning' : action.variant === 'success' ? 'success' : 'primary'"
+                      [variant]="
+                        action.variant === 'danger'
+                          ? 'outline-danger'
+                          : action.variant === 'warning'
+                            ? 'outline-warning'
+                            : action.variant === 'success'
+                              ? 'success'
+                              : 'primary'
+                      "
                       [fullWidth]="true"
                       [disabled]="isProcessingAction()"
                       (clicked)="executeAction(action.id)"
                     >
-                      <app-icon slot="icon" [name]="action.icon" size="16"></app-icon>
+                      <app-icon
+                        slot="icon"
+                        [name]="action.icon"
+                        size="16"
+                      ></app-icon>
                       {{ action.label }}
                     </app-button>
                   }
                 }
               </div>
             } @else {
-              <div class="text-[10px] text-center text-text-secondary font-bold uppercase tracking-widest bg-[var(--color-surface)] py-3 rounded-xl border border-dashed border-border">
+              <div
+                class="text-[10px] text-center text-text-secondary font-bold uppercase tracking-widest bg-[var(--color-surface)] py-3 rounded-xl border border-dashed border-border"
+              >
                 No hay acciones disponibles
               </div>
             }
@@ -601,30 +1024,46 @@
 
           <!-- 8. RESUMEN DE PAGO -->
           <app-card shadow="sm" [responsivePadding]="true">
-            <h2 class="text-xs sm:text-sm font-bold text-gray-900 uppercase tracking-wider mb-3 sm:mb-4">Resumen de Pago</h2>
+            <h2
+              class="text-xs sm:text-sm font-bold text-gray-900 uppercase tracking-wider mb-3 sm:mb-4"
+            >
+              Resumen de Pago
+            </h2>
 
             <div class="space-y-2.5">
               <div class="flex justify-between items-center text-sm">
                 <span class="text-text-secondary">Subtotal</span>
-                <span class="font-semibold text-gray-900">{{ orderData.subtotal_amount || 0 | currency }}</span>
+                <span class="font-semibold text-gray-900">{{
+                  orderData.subtotal_amount || 0 | currency
+                }}</span>
               </div>
               @if (orderData.discount_amount && orderData.discount_amount > 0) {
                 <div class="flex justify-between items-center text-sm">
                   <span class="text-text-secondary">Descuento</span>
-                  <span class="font-semibold text-green-600">-{{ orderData.discount_amount || 0 | currency }}</span>
+                  <span class="font-semibold text-green-600"
+                    >-{{ orderData.discount_amount || 0 | currency }}</span
+                  >
                 </div>
               }
               <div class="flex justify-between items-center text-sm">
                 <span class="text-text-secondary">Envio</span>
-                <span class="font-semibold text-gray-900">{{ orderData.shipping_cost || 0 | currency }}</span>
+                <span class="font-semibold text-gray-900">{{
+                  orderData.shipping_cost || 0 | currency
+                }}</span>
               </div>
               <div class="flex justify-between items-center text-sm">
                 <span class="text-text-secondary">Impuestos</span>
-                <span class="font-semibold text-gray-900">{{ orderData.tax_amount || 0 | currency }}</span>
+                <span class="font-semibold text-gray-900">{{
+                  orderData.tax_amount || 0 | currency
+                }}</span>
               </div>
-              <div class="pt-3 mt-1 border-t border-border flex justify-between items-center">
+              <div
+                class="pt-3 mt-1 border-t border-border flex justify-between items-center"
+              >
                 <span class="text-base font-bold text-gray-900">Total</span>
-                <span class="text-xl sm:text-2xl font-black text-primary-600 font-mono tracking-tighter">
+                <span
+                  class="text-xl sm:text-2xl font-black text-primary-600 font-mono tracking-tighter"
+                >
                   {{ orderData.grand_total || 0 | currency }}
                 </span>
               </div>
@@ -635,43 +1074,78 @@
               <div class="pt-3 mt-1 border-t border-border space-y-2.5">
                 <div class="flex justify-between items-center text-sm">
                   <span class="text-text-secondary">Total a pagar</span>
-                  <span class="font-bold text-gray-900">{{ creditTotal() | currency }}</span>
+                  <span class="font-bold text-gray-900">{{
+                    creditTotal() | currency
+                  }}</span>
                 </div>
                 <div class="flex justify-between items-center text-sm">
                   <span class="text-text-secondary">Pagado</span>
-                  <span class="font-bold text-green-600">{{ totalPaid() | currency }}</span>
+                  <span class="font-bold text-green-600">{{
+                    totalPaid() | currency
+                  }}</span>
                 </div>
                 <div class="flex justify-between items-center text-sm">
                   <span class="text-text-secondary">Pendiente</span>
-                  <span class="font-bold" [ngClass]="overdueCount() > 0 ? 'text-red-600' : 'text-gray-900'">
+                  <span
+                    class="font-bold"
+                    [ngClass]="
+                      overdueCount() > 0 ? 'text-red-600' : 'text-gray-900'
+                    "
+                  >
                     {{ remainingBalance() | currency }}
                   </span>
                 </div>
                 @if (order()?.interest_rate) {
                   <div class="flex justify-between items-center text-xs">
                     <span class="text-text-secondary">Tasa anual</span>
-                    <span class="font-semibold text-gray-700">{{ (order()?.interest_rate || 0) * 100 }}% {{ interestTypeLabel() }}</span>
+                    <span class="font-semibold text-gray-700"
+                      >{{ (order()?.interest_rate || 0) * 100 }}%
+                      {{ interestTypeLabel() }}</span
+                    >
                   </div>
                   @if (totalInterestAmount() > 0) {
                     <div class="flex justify-between items-center text-xs">
                       <span class="text-text-secondary">Interés total</span>
-                      <span class="font-semibold text-red-500">+ {{ totalInterestAmount() | currency }} ({{ effectiveInterestPercent() }}%)</span>
+                      <span class="font-semibold text-red-500"
+                        >+ {{ totalInterestAmount() | currency }} ({{
+                          effectiveInterestPercent()
+                        }}%)</span
+                      >
                     </div>
                   }
                 }
                 <!-- Progress Bar -->
                 <div class="space-y-1">
                   <div class="flex justify-between items-center">
-                    <span class="text-[10px] font-bold text-text-secondary uppercase tracking-wider">Progreso</span>
-                    <span class="text-xs font-bold" [ngClass]="paymentProgress() >= 100 ? 'text-green-600' : 'text-primary'">
+                    <span
+                      class="text-[10px] font-bold text-text-secondary uppercase tracking-wider"
+                      >Progreso</span
+                    >
+                    <span
+                      class="text-xs font-bold"
+                      [ngClass]="
+                        paymentProgress() >= 100
+                          ? 'text-green-600'
+                          : 'text-primary'
+                      "
+                    >
                       {{ paymentProgress() }}%
                     </span>
                   </div>
-                  <div class="w-full bg-gray-100 rounded-full h-2 overflow-hidden">
-                    <div class="h-full rounded-full transition-all duration-500"
-                      [ngClass]="paymentProgress() >= 100 ? 'bg-green-500' : overdueCount() > 0 ? 'bg-red-500' : 'bg-primary'"
-                      [style.width.%]="paymentProgress()">
-                    </div>
+                  <div
+                    class="w-full bg-gray-100 rounded-full h-2 overflow-hidden"
+                  >
+                    <div
+                      class="h-full rounded-full transition-all duration-500"
+                      [ngClass]="
+                        paymentProgress() >= 100
+                          ? 'bg-green-500'
+                          : overdueCount() > 0
+                            ? 'bg-red-500'
+                            : 'bg-primary'
+                      "
+                      [style.width.%]="paymentProgress()"
+                    ></div>
                   </div>
                 </div>
               </div>
@@ -680,24 +1154,42 @@
             <!-- Payment History -->
             @if (orderData.payments && orderData.payments.length > 0) {
               <div class="mt-4 space-y-2">
-                <h3 class="text-xs font-bold text-text-secondary uppercase tracking-wider">Historial de Pagos</h3>
+                <h3
+                  class="text-xs font-bold text-text-secondary uppercase tracking-wider"
+                >
+                  Historial de Pagos
+                </h3>
                 @for (payment of orderData.payments; track payment.id) {
-                  <div class="p-3 bg-[var(--color-surface)] rounded-lg border border-border">
+                  <div
+                    class="p-3 bg-[var(--color-surface)] rounded-lg border border-border"
+                  >
                     <div class="flex items-center justify-between">
-                      <span class="text-sm font-medium">{{ payment.amount | currency }}</span>
-                      <span class="px-2 py-0.5 text-[10px] font-black uppercase rounded-md"
-                        [ngClass]="getPaymentStateClass(payment.state)">
+                      <span class="text-sm font-medium">{{
+                        payment.amount | currency
+                      }}</span>
+                      <span
+                        class="px-2 py-0.5 text-[10px] font-black uppercase rounded-md"
+                        [ngClass]="getPaymentStateClass(payment.state)"
+                      >
                         {{ getPaymentStateLabel(payment.state) }}
                       </span>
                     </div>
-                    <p class="text-[10px] text-gray-400 mt-1">{{ formatDate(payment.created_at) }}</p>
+                    <p class="text-[10px] text-gray-400 mt-1">
+                      {{ formatDate(payment.created_at) }}
+                    </p>
                   </div>
                 }
               </div>
             } @else {
-              <div class="mt-4 p-3 bg-[var(--color-surface)] rounded-lg border border-border flex items-center justify-between">
-                <span class="text-xs font-bold text-text-secondary uppercase">Estado del Pago</span>
-                <span class="px-3 py-1 text-[10px] font-black uppercase rounded-lg tracking-wider bg-gray-500/20 text-gray-400">
+              <div
+                class="mt-4 p-3 bg-[var(--color-surface)] rounded-lg border border-border flex items-center justify-between"
+              >
+                <span class="text-xs font-bold text-text-secondary uppercase"
+                  >Estado del Pago</span
+                >
+                <span
+                  class="px-3 py-1 text-[10px] font-black uppercase rounded-lg tracking-wider bg-gray-500/20 text-gray-400"
+                >
                   Pendiente
                 </span>
               </div>
@@ -705,7 +1197,12 @@
 
             <!-- Print Ticket -->
             <div class="pt-4">
-              <app-button variant="secondary" [fullWidth]="true" (clicked)="printOrder()" customClasses="!bg-gray-900 hover:!bg-black !shadow-md">
+              <app-button
+                variant="secondary"
+                [fullWidth]="true"
+                (clicked)="printOrder()"
+                customClasses="!bg-gray-900 hover:!bg-black !shadow-md"
+              >
                 <app-icon slot="icon" name="printer" size="16"></app-icon>
                 Imprimir Ticket
               </app-button>
@@ -719,41 +1216,59 @@
          FLOW MODALS
          ═══════════════════════════════════════════════════════════ -->
 
-    <!-- PAY MODAL (new rich component) -->
-    <app-order-payment-modal
-      [isOpen]="showPayModal()"
-      [order]="orderData"
-      [paymentMethods]="paymentMethods()"
-      [isCreditOrder]="isCreditOrder()"
-      [remainingBalance]="remainingBalance()"
-      [installments]="orderData.order_installments || []"
-      [creditType]="orderData.credit_type || ''"
-      [preSelectedInstallment]="preSelectedInstallment()"
-      (isOpenChange)="showPayModal.set($event)"
-      (closed)="showPayModal.set(false)"
-      (paymentSubmitted)="onPaymentSubmitted($event)"
-    />
+    @defer (when showPayModal()) {
+      <app-order-payment-modal
+        [isOpen]="showPayModal()"
+        [order]="orderData"
+        [paymentMethods]="paymentMethods()"
+        [isCreditOrder]="isCreditOrder()"
+        [remainingBalance]="remainingBalance()"
+        [installments]="orderData.order_installments || []"
+        [creditType]="orderData.credit_type || ''"
+        [preSelectedInstallment]="preSelectedInstallment()"
+        (isOpenChange)="showPayModal.set($event)"
+        (closed)="showPayModal.set(false)"
+        (paymentSubmitted)="onPaymentSubmitted($event)"
+      />
+    }
 
     <!-- SHIP MODAL (delivery-type aware) -->
     <app-modal
       [isOpen]="showShipModal()"
       (closed)="showShipModal.set(false); isManualShipMode.set(false)"
-      [title]="isManualShipMode() ? 'Despachar sin confirmar pago' : shipModalConfig().title"
+      [title]="
+        isManualShipMode()
+          ? 'Despachar sin confirmar pago'
+          : shipModalConfig().title
+      "
       size="md"
     >
       <div class="p-4 space-y-4" [formGroup]="shipForm">
         @if (isManualShipMode()) {
-          <div class="bg-orange-50 border border-orange-200 rounded-xl p-3 flex items-start gap-3">
-            <app-icon name="alert-triangle" size="18" class="text-orange-600 mt-0.5"></app-icon>
+          <div
+            class="bg-orange-50 border border-orange-200 rounded-xl p-3 flex items-start gap-3"
+          >
+            <app-icon
+              name="alert-triangle"
+              size="18"
+              class="text-orange-600 mt-0.5"
+            ></app-icon>
             <div>
-              <p class="text-sm font-bold text-orange-800">Despacho sin pago confirmado</p>
-              <p class="text-xs text-orange-600 mt-0.5">La orden se despachara sin que el pago haya sido confirmado. Deberas confirmar el pago antes de marcar la entrega.</p>
+              <p class="text-sm font-bold text-orange-800">
+                Despacho sin pago confirmado
+              </p>
+              <p class="text-xs text-orange-600 mt-0.5">
+                La orden se despachara sin que el pago haya sido confirmado.
+                Deberas confirmar el pago antes de marcar la entrega.
+              </p>
             </div>
           </div>
         }
         @if (shipModalConfig().showShippingInfo) {
           <div class="bg-gray-50 rounded-lg p-4 space-y-3">
-            <h4 class="text-sm font-bold text-gray-700">Información de Envío</h4>
+            <h4 class="text-sm font-bold text-gray-700">
+              Información de Envío
+            </h4>
             <div class="grid grid-cols-2 gap-3 text-sm">
               @if (orderData.shipping_method; as method) {
                 <div>
@@ -764,12 +1279,16 @@
               @if (orderData.shipping_rate?.shipping_zone; as zone) {
                 <div>
                   <span class="text-gray-500">Zona</span>
-                  <p class="font-medium text-gray-900">{{ zone.display_name || zone.name }}</p>
+                  <p class="font-medium text-gray-900">
+                    {{ zone.display_name || zone.name }}
+                  </p>
                 </div>
               }
               <div>
                 <span class="text-gray-500">Costo de envío</span>
-                <p class="font-medium text-gray-900">{{ orderData.shipping_cost || 0 | currency }}</p>
+                <p class="font-medium text-gray-900">
+                  {{ orderData.shipping_cost || 0 | currency }}
+                </p>
               </div>
               @if (orderData.shipping_method; as sm) {
                 @if (sm.min_days || sm.max_days) {
@@ -792,7 +1311,9 @@
         }
         @if (shipModalConfig().showTracking) {
           <div>
-            <label class="block text-sm font-bold text-gray-700 mb-1.5">Numero de Rastreo</label>
+            <label class="block text-sm font-bold text-gray-700 mb-1.5"
+              >Numero de Rastreo</label
+            >
             <input
               type="text"
               formControlName="tracking_number"
@@ -803,7 +1324,9 @@
         }
         @if (shipModalConfig().showCarrier) {
           <div>
-            <label class="block text-sm font-bold text-gray-700 mb-1.5">Transportista</label>
+            <label class="block text-sm font-bold text-gray-700 mb-1.5"
+              >Transportista</label
+            >
             <input
               type="text"
               formControlName="carrier"
@@ -814,7 +1337,9 @@
         }
         @if (shipModalConfig().showNotes) {
           <div>
-            <label class="block text-sm font-bold text-gray-700 mb-1.5">Notas</label>
+            <label class="block text-sm font-bold text-gray-700 mb-1.5"
+              >Notas</label
+            >
             <textarea
               formControlName="notes"
               rows="2"
@@ -825,14 +1350,27 @@
         }
       </div>
 
-      <div slot="footer" class="flex items-center justify-end gap-2 p-4 border-t border-border">
-        <app-button variant="outline" (clicked)="showShipModal.set(false); isManualShipMode.set(false)">Cancelar</app-button>
+      <div
+        slot="footer"
+        class="flex items-center justify-end gap-2 p-4 border-t border-border"
+      >
+        <app-button
+          variant="outline"
+          (clicked)="showShipModal.set(false); isManualShipMode.set(false)"
+          >Cancelar</app-button
+        >
         <app-button
           [variant]="isManualShipMode() ? 'outline-warning' : 'primary'"
           (clicked)="submitShipment()"
           [disabled]="isProcessingAction()"
         >
-          {{ isProcessingAction() ? 'Procesando...' : (isManualShipMode() ? 'Despachar sin pago' : shipModalConfig().confirmLabel) }}
+          {{
+            isProcessingAction()
+              ? "Procesando..."
+              : isManualShipMode()
+                ? "Despachar sin pago"
+                : shipModalConfig().confirmLabel
+          }}
         </app-button>
       </div>
     </app-modal>
@@ -841,26 +1379,51 @@
     <app-modal
       [isOpen]="showDeliverModal()"
       (closed)="showDeliverModal.set(false); isManualDeliverMode.set(false)"
-      [title]="isManualDeliverMode() ? (orderData.delivery_type === 'pickup' ? 'Entregar directamente al cliente' : 'Entregar sin confirmar pago') : 'Marcar como Entregado'"
+      [title]="
+        isManualDeliverMode()
+          ? orderData.delivery_type === 'pickup'
+            ? 'Entregar directamente al cliente'
+            : 'Entregar sin confirmar pago'
+          : 'Marcar como Entregado'
+      "
       size="md"
     >
       <div class="p-4 space-y-4" [formGroup]="deliverForm">
         @if (isManualDeliverMode()) {
-          <div class="bg-orange-50 border border-orange-200 rounded-xl p-3 flex items-start gap-3">
-            <app-icon name="alert-triangle" size="18" class="text-orange-600 mt-0.5"></app-icon>
+          <div
+            class="bg-orange-50 border border-orange-200 rounded-xl p-3 flex items-start gap-3"
+          >
+            <app-icon
+              name="alert-triangle"
+              size="18"
+              class="text-orange-600 mt-0.5"
+            ></app-icon>
             <div>
-              @if (orderData.delivery_type === 'pickup') {
-                <p class="text-sm font-bold text-orange-800">Entrega directa al cliente</p>
-                <p class="text-xs text-orange-600 mt-0.5">Se omitira el paso "Lista para recoger" y la orden se marcara como entregada directamente. Si el pago esta confirmado, la orden se finalizara automaticamente.</p>
+              @if (orderData.delivery_type === "pickup") {
+                <p class="text-sm font-bold text-orange-800">
+                  Entrega directa al cliente
+                </p>
+                <p class="text-xs text-orange-600 mt-0.5">
+                  Se omitira el paso "Lista para recoger" y la orden se marcara
+                  como entregada directamente. Si el pago esta confirmado, la
+                  orden se finalizara automaticamente.
+                </p>
               } @else {
-                <p class="text-sm font-bold text-orange-800">Entrega sin pago confirmado</p>
-                <p class="text-xs text-orange-600 mt-0.5">La orden se marcara como entregada sin que el pago haya sido confirmado.</p>
+                <p class="text-sm font-bold text-orange-800">
+                  Entrega sin pago confirmado
+                </p>
+                <p class="text-xs text-orange-600 mt-0.5">
+                  La orden se marcara como entregada sin que el pago haya sido
+                  confirmado.
+                </p>
               }
             </div>
           </div>
         }
         <div>
-          <label class="block text-sm font-bold text-gray-700 mb-1.5">Recibido por</label>
+          <label class="block text-sm font-bold text-gray-700 mb-1.5"
+            >Recibido por</label
+          >
           <input
             type="text"
             formControlName="delivered_to"
@@ -869,7 +1432,9 @@
           />
         </div>
         <div>
-          <label class="block text-sm font-bold text-gray-700 mb-1.5">Notas de Entrega</label>
+          <label class="block text-sm font-bold text-gray-700 mb-1.5"
+            >Notas de Entrega</label
+          >
           <textarea
             formControlName="delivery_notes"
             rows="2"
@@ -879,14 +1444,29 @@
         </div>
       </div>
 
-      <div slot="footer" class="flex items-center justify-end gap-2 p-4 border-t border-border">
-        <app-button variant="outline" (clicked)="showDeliverModal.set(false); isManualDeliverMode.set(false)">Cancelar</app-button>
+      <div
+        slot="footer"
+        class="flex items-center justify-end gap-2 p-4 border-t border-border"
+      >
+        <app-button
+          variant="outline"
+          (clicked)="
+            showDeliverModal.set(false); isManualDeliverMode.set(false)
+          "
+          >Cancelar</app-button
+        >
         <app-button
           [variant]="isManualDeliverMode() ? 'outline-warning' : 'primary'"
           (clicked)="submitDelivery()"
           [disabled]="isProcessingAction()"
         >
-          {{ isProcessingAction() ? 'Procesando...' : (isManualDeliverMode() ? 'Confirmar Entrega Directa' : 'Confirmar Entrega') }}
+          {{
+            isProcessingAction()
+              ? "Procesando..."
+              : isManualDeliverMode()
+                ? "Confirmar Entrega Directa"
+                : "Confirmar Entrega"
+          }}
         </app-button>
       </div>
     </app-modal>
@@ -899,16 +1479,28 @@
       size="md"
     >
       <div class="p-4 space-y-4" [formGroup]="cancelForm">
-        <div class="bg-red-50 border border-red-200 rounded-xl p-3 flex items-start gap-3">
-          <app-icon name="alert-triangle" size="18" class="text-red-600 mt-0.5"></app-icon>
+        <div
+          class="bg-red-50 border border-red-200 rounded-xl p-3 flex items-start gap-3"
+        >
+          <app-icon
+            name="alert-triangle"
+            size="18"
+            class="text-red-600 mt-0.5"
+          ></app-icon>
           <div>
-            <p class="text-sm font-bold text-red-800">Esta accion no se puede deshacer</p>
-            <p class="text-xs text-red-600 mt-0.5">La orden sera cancelada permanentemente.</p>
+            <p class="text-sm font-bold text-red-800">
+              Esta accion no se puede deshacer
+            </p>
+            <p class="text-xs text-red-600 mt-0.5">
+              La orden sera cancelada permanentemente.
+            </p>
           </div>
         </div>
 
         <div>
-          <label class="block text-sm font-bold text-gray-700 mb-1.5">Razon de cancelacion *</label>
+          <label class="block text-sm font-bold text-gray-700 mb-1.5"
+            >Razon de cancelacion *</label
+          >
           <textarea
             formControlName="reason"
             rows="3"
@@ -918,25 +1510,31 @@
         </div>
       </div>
 
-      <div slot="footer" class="flex items-center justify-end gap-2 p-4 border-t border-border">
-        <app-button variant="outline" (clicked)="showCancelModal.set(false)">Volver</app-button>
+      <div
+        slot="footer"
+        class="flex items-center justify-end gap-2 p-4 border-t border-border"
+      >
+        <app-button variant="outline" (clicked)="showCancelModal.set(false)"
+          >Volver</app-button
+        >
         <app-button
           variant="danger"
           (clicked)="submitCancellation()"
           [disabled]="cancelForm.invalid || isProcessingAction()"
         >
-          {{ isProcessingAction() ? 'Cancelando...' : 'Cancelar Orden' }}
+          {{ isProcessingAction() ? "Cancelando..." : "Cancelar Orden" }}
         </app-button>
       </div>
     </app-modal>
 
-    <!-- REFUND MODAL (professional multi-step) -->
-    <app-order-refund-modal
-      [isOpen]="showRefundModal()"
-      [order]="orderData"
-      (isOpenChange)="showRefundModal.set($event)"
-      (closed)="showRefundModal.set(false)"
-      (refundSubmitted)="onRefundSubmitted()"
-    />
+    @defer (when showRefundModal()) {
+      <app-order-refund-modal
+        [isOpen]="showRefundModal()"
+        [order]="orderData"
+        (isOpenChange)="showRefundModal.set($event)"
+        (closed)="showRefundModal.set(false)"
+        (refundSubmitted)="onRefundSubmitted()"
+      />
+    }
   }
 </div>

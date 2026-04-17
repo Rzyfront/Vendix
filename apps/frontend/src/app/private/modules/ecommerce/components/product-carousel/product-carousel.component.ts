@@ -1,25 +1,27 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
   ViewChild,
   ElementRef,
   AfterViewInit,
-  OnDestroy,
+  DestroyRef,
+  inject,
+  input,
+  output,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { EcommerceProduct } from '../../services/catalog.service';
+import { CurrencyPipe } from '@angular/common';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 
 @Component({
   selector: 'app-product-carousel',
   standalone: true,
-  imports: [CommonModule, IconComponent],
+  imports: [IconComponent,
+    CurrencyPipe,
+  ],
   template: `
     <div class="carousel-container">
       <div class="carousel-header">
-        <h3 class="carousel-title">{{ title }}</h3>
+        <h3 class="carousel-title">{{ title() }}</h3>
         <div class="carousel-controls">
           <button class="control-btn" (click)="scrollLeft()" aria-label="Anterior">
             <app-icon name="chevron-left" [size]="20" />
@@ -29,10 +31,10 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
           </button>
         </div>
       </div>
-
+    
       <div class="carousel-viewport" #viewport (scroll)="onScroll()">
         <div class="carousel-track">
-          @for (product of products; track product.id) {
+          @for (product of products(); track product.id) {
             <div class="carousel-item" (click)="onQuickView(product)">
               <div class="product-mini-card">
                 <div class="image-wrapper">
@@ -45,7 +47,9 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
                   </button>
                 </div>
                 <div class="product-info">
-                  <span class="product-brand" *ngIf="product.brand">{{ product.brand.name }}</span>
+                  @if (product.brand) {
+                    <span class="product-brand">{{ product.brand.name }}</span>
+                  }
                   <h4 class="product-name">{{ product.name }}</h4>
                   <div class="product-price">
                     <span class="current-price">{{ product.final_price | currency }}</span>
@@ -62,7 +66,7 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
         </div>
       </div>
     </div>
-  `,
+    `,
   styles: [`
     .carousel-container {
       width: 100%;
@@ -242,22 +246,20 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
     }
   `],
 })
-export class ProductCarouselComponent implements AfterViewInit, OnDestroy {
-  @Input() title = 'Productos sugeridos';
-  @Input() products: EcommerceProduct[] = [];
-  @Output() quick_view = new EventEmitter<EcommerceProduct>();
-  @Output() add_to_cart = new EventEmitter<EcommerceProduct>();
+export class ProductCarouselComponent implements AfterViewInit {
+  readonly title = input<string>('Productos sugeridos');
+  readonly products = input<EcommerceProduct[]>([]);
+  readonly quick_view = output<EcommerceProduct>();
+  readonly add_to_cart = output<EcommerceProduct>();
 
   @ViewChild('viewport') viewport!: ElementRef<HTMLDivElement>;
 
   private autoScrollInterval: any;
+  private destroyRef = inject(DestroyRef);
 
   ngAfterViewInit(): void {
     this.startAutoScroll();
-  }
-
-  ngOnDestroy(): void {
-    this.stopAutoScroll();
+    this.destroyRef.onDestroy(() => this.stopAutoScroll());
   }
 
   scrollLeft(): void {
@@ -285,6 +287,7 @@ export class ProductCarouselComponent implements AfterViewInit, OnDestroy {
     event.preventDefault();
     this.add_to_cart.emit(product);
   }
+
 
   private startAutoScroll(): void {
     this.autoScrollInterval = setInterval(() => {

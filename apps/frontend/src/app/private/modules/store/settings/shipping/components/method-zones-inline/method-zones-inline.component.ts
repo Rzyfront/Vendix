@@ -4,7 +4,7 @@ import {
   input,
   output,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   ButtonComponent,
   IconComponent,
@@ -21,7 +21,7 @@ import {
 @Component({
   selector: 'app-method-zones-inline',
   standalone: true,
-  imports: [CommonModule, ButtonComponent, IconComponent, ResponsiveDataViewComponent],
+  imports: [ButtonComponent, IconComponent, ResponsiveDataViewComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="zones-inline">

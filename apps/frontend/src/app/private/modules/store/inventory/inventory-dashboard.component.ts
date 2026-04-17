@@ -1,5 +1,6 @@
-import { Component, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, OnInit, inject, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import { RouterModule } from '@angular/router';
 
 // Shared Components
@@ -20,7 +21,7 @@ import { InventoryStats, PurchaseOrder, Supplier } from './interfaces';
 @Component({
   selector: 'app-inventory-dashboard',
   standalone: true,
-  imports: [CommonModule, RouterModule, StatsComponent, IconComponent, TableComponent],
+  imports: [RouterModule, StatsComponent, IconComponent, TableComponent],
   template: `
     <div class="w-full">
       <!-- Stats Grid -->
@@ -142,6 +143,7 @@ import { InventoryStats, PurchaseOrder, Supplier } from './interfaces';
   `,
 })
 export class InventoryDashboardComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private currencyService = inject(CurrencyFormatService);
   // Stats
   stats: InventoryStats = {
@@ -211,7 +213,7 @@ export class InventoryDashboardComponent implements OnInit {
 
   loadStats(): void {
     this.is_loading_stats = true;
-    this.inventoryService.getInventoryStats().subscribe({
+    this.inventoryService.getInventoryStats().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         if (response.data) {
           this.stats = response.data;
@@ -226,7 +228,7 @@ export class InventoryDashboardComponent implements OnInit {
 
   loadRecentOrders(): void {
     this.is_loading_orders = true;
-    this.purchaseOrdersService.getPurchaseOrders({ limit: 5 }).subscribe({
+    this.purchaseOrdersService.getPurchaseOrders({ limit: 5 }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         if (response.data) {
           this.recent_orders = response.data;
@@ -241,7 +243,7 @@ export class InventoryDashboardComponent implements OnInit {
 
   loadTopSuppliers(): void {
     this.is_loading_suppliers = true;
-    this.suppliersService.getSuppliers({ limit: 5, is_active: true }).subscribe({
+    this.suppliersService.getSuppliers({ limit: 5, is_active: true }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         if (response.data) {
           this.top_suppliers = response.data;

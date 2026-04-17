@@ -1,18 +1,7 @@
 /** REBUILD TRIGGER 2 **/
-import {
-  Component,
-  Output,
-  EventEmitter,
-  OnInit,
-  ChangeDetectionStrategy,
-  ChangeDetectorRef,
-  inject,
-  signal,
-  computed,
-  ViewChild,
-  ElementRef,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, output, OnInit, ChangeDetectionStrategy, inject, signal, computed, viewChild, ElementRef, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import { FormsModule } from '@angular/forms';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { ButtonComponent } from '../../button/button.component';
@@ -35,7 +24,7 @@ interface DocumentStatus extends LegalDocument {
 @Component({
   selector: 'app-terms-step',
   standalone: true,
-  imports: [CommonModule, FormsModule, ButtonComponent, IconComponent],
+  imports: [FormsModule, ButtonComponent, IconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [
     `
@@ -502,129 +491,132 @@ interface DocumentStatus extends LegalDocument {
             para activar tu cuenta.
           </p>
         </div>
-
+    
         <!-- Loading State -->
-        <div *ngIf="loading" class="loading-state">
-          <app-icon name="loader-2" [spin]="true" size="32"></app-icon>
-          <p class="loading-text">Cargando documentos...</p>
-        </div>
-
+        @if (loading()) {
+          <div class="loading-state">
+            <app-icon name="loader-2" [spin]="true" size="32"></app-icon>
+            <p class="loading-text">Cargando documentos...</p>
+          </div>
+        }
+    
         <!-- Empty State -->
-        <div *ngIf="!loading && documents.length === 0" class="empty-state">
-          <p class="empty-text">No hay documentos pendientes por aceptar.</p>
-          <app-button variant="primary" (clicked)="onComplete()">
-            Continuar
-          </app-button>
-        </div>
-
+        @if (!loading() && documents.length === 0) {
+          <div class="empty-state">
+            <p class="empty-text">No hay documentos pendientes por aceptar.</p>
+            <app-button variant="primary" (clicked)="onComplete()">
+              Continuar
+            </app-button>
+          </div>
+        }
+    
         <!-- Documents Layout -->
-        <div
-          *ngIf="!loading && documents.length > 0"
-          class="terms-layout"
-        >
-          <!-- Document List -->
-          <div class="terms-documents">
-            <div
-              *ngFor="let doc of documents"
-              class="document-card"
-              [class.selected]="selectedDoc()?.id === doc.id"
-              (click)="selectDocument(doc)"
-            >
-              <div class="card-header">
-                <div class="card-title-row">
-                  <div class="card-icon">
-                    <app-icon name="file-text" size="18" class="terms-icon"></app-icon>
-                  </div>
-                  <h4 class="card-title">{{ doc.title }}</h4>
-                </div>
-
-                <div
-                  class="card-checkbox"
-                  (click)="$event.stopPropagation(); toggleAcceptance(doc)"
-                >
-                  <input
-                    type="checkbox"
-                    [id]="'doc-' + doc.id"
-                    [checked]="doc.accepted"
-                    [disabled]="doc.loading"
-                    (click)="$event.stopPropagation()"
-                    (change)="toggleAcceptance(doc)"
-                  />
-                  <div class="checkbox-visual">
-                    <app-icon
-                      name="check"
-                      size="14"
-                      color="#ffffff"
-                      class="checkbox-icon"
-                    ></app-icon>
-                  </div>
-                </div>
-
-                <app-icon
-                  *ngIf="doc.loading"
-                  name="loader-2"
-                  [spin]="true"
-                  size="14"
-                  class="card-loading"
-                ></app-icon>
-              </div>
-
-              <div class="card-meta">
-                <span class="version-badge">v{{ doc.version }}</span>
-                <span
-                  class="view-link"
-                  (click)="$event.stopPropagation(); selectDocument(doc)"
-                >
-                  Ver documento
-                  <app-icon name="chevron-right" size="12"></app-icon>
-                </span>
-              </div>
-
-              <p class="card-hint">
-                Haz clic en el checkbox para aceptar los términos
-              </p>
-            </div>
-          </div>
-
-          <!-- Document Viewer -->
+        @if (!loading() && documents.length > 0) {
           <div
-            *ngIf="selectedDoc()"
-            #documentViewer
-            class="document-viewer animate-in fade-in slide-in-from-right-4 duration-300"
-          >
-            <div class="viewer-header">
-              <span class="viewer-title">{{ selectedDoc()?.title }}</span>
-              <span class="viewer-version">
-                Versión {{ selectedDoc()?.version }}
-              </span>
+            class="terms-layout"
+            >
+            <!-- Document List -->
+            <div class="terms-documents">
+              @for (doc of documents; track doc) {
+                <div
+                  class="document-card"
+                  [class.selected]="selectedDoc()?.id === doc.id"
+                  (click)="selectDocument(doc)"
+                  >
+                  <div class="card-header">
+                    <div class="card-title-row">
+                      <div class="card-icon">
+                        <app-icon name="file-text" size="18" class="terms-icon"></app-icon>
+                      </div>
+                      <h4 class="card-title">{{ doc.title }}</h4>
+                    </div>
+                    <div
+                      class="card-checkbox"
+                      (click)="$event.stopPropagation(); toggleAcceptance(doc)"
+                      >
+                      <input
+                        type="checkbox"
+                        [id]="'doc-' + doc.id"
+                        [checked]="doc.accepted"
+                        [disabled]="doc.loading"
+                        (click)="$event.stopPropagation()"
+                        (change)="toggleAcceptance(doc)"
+                        />
+                      <div class="checkbox-visual">
+                        <app-icon
+                          name="check"
+                          size="14"
+                          color="#ffffff"
+                          class="checkbox-icon"
+                        ></app-icon>
+                      </div>
+                    </div>
+                    @if (doc.loading) {
+                      <app-icon
+                        name="loader-2"
+                        [spin]="true"
+                        size="14"
+                        class="card-loading"
+                      ></app-icon>
+                    }
+                  </div>
+                  <div class="card-meta">
+                    <span class="version-badge">v{{ doc.version }}</span>
+                    <span
+                      class="view-link"
+                      (click)="$event.stopPropagation(); selectDocument(doc)"
+                      >
+                      Ver documento
+                      <app-icon name="chevron-right" size="12"></app-icon>
+                    </span>
+                  </div>
+                  <p class="card-hint">
+                    Haz clic en el checkbox para aceptar los términos
+                  </p>
+                </div>
+              }
             </div>
-            <div
-              class="viewer-body prose prose-sm max-w-none prose-slate"
-              [innerHTML]="renderedContent()"
-            ></div>
+            <!-- Document Viewer -->
+            @if (selectedDoc()) {
+              <div
+                #documentViewer
+                class="document-viewer animate-in fade-in slide-in-from-right-4 duration-300"
+                >
+                <div class="viewer-header">
+                  <span class="viewer-title">{{ selectedDoc()?.title }}</span>
+                  <span class="viewer-version">
+                    Versión {{ selectedDoc()?.version }}
+                  </span>
+                </div>
+                <div
+                  class="viewer-body prose prose-sm max-w-none prose-slate"
+                  [innerHTML]="renderedContent()"
+                ></div>
+              </div>
+            }
           </div>
-        </div>
+        }
       </div>
     </div>
-  `,
+    `,
 })
 export class TermsStepComponent implements OnInit {
-  @Output() completed = new EventEmitter<void>();
-  @Output() back = new EventEmitter<void>();
+  private destroyRef = inject(DestroyRef);
+  readonly completed = output<void>();
+  readonly back = output<void>();
 
   private legalService = inject(LegalService);
   private toastService = inject(ToastService);
-  readonly cdr = inject(ChangeDetectorRef);
   private sanitizer = inject(DomSanitizer);
 
-  loading = true;
-  submitting = false;
+  readonly loading = signal(true);
+  readonly submitting = signal(false);
   documents: DocumentStatus[] = [];
 
   // Selected document for viewing
   selectedDoc = signal<DocumentStatus | null>(null);
 
-  @ViewChild('documentViewer') documentViewer?: ElementRef<HTMLElement>;
+  readonly documentViewer = viewChild<ElementRef<HTMLElement>>('documentViewer');
 
   // Rendered HTML from Markdown
   renderedContent = computed(() => {
@@ -650,16 +642,15 @@ export class TermsStepComponent implements OnInit {
   }
 
   loadPendingTerms() {
-    this.loading = true;
+    this.loading.set(true);
     this.legalService
       .getPendingTerms()
       .pipe(
         finalize(() => {
-          this.loading = false;
-          this.cdr.markForCheck();
+          this.loading.set(false);
         }),
       )
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (docs) => {
           this.documents = docs.map((doc) => ({
             ...doc,
@@ -674,42 +665,37 @@ export class TermsStepComponent implements OnInit {
             // Auto-select first document
             this.selectDocument(this.documents[0]);
           }
-          this.cdr.markForCheck();
         },
         error: (err) => {
           console.error('Error loading terms', err);
           this.toastService.error(
             'Error al cargar los términos y condiciones. Por favor intenta nuevamente.',
           );
-          this.cdr.markForCheck();
         },
       });
   }
 
   selectDocument(doc: DocumentStatus) {
     this.selectedDoc.set(doc);
-    this.cdr.markForCheck();
 
     // Scroll to document viewer after a brief delay to allow rendering
     setTimeout(() => {
-      this.documentViewer?.nativeElement?.scrollIntoView({
+      this.documentViewer()?.nativeElement?.scrollIntoView({
         behavior: 'smooth',
-        block: 'start'
+        block: 'start',
       });
     }, 100);
   }
 
   toggleAcceptance(doc: DocumentStatus) {
     doc.accepted = !doc.accepted;
-    this.cdr.markForCheck();
+    // Mutating array items doesn't trigger signal tracking — reassign to force update
+    this.documents = [...this.documents];
   }
 
   acceptAllAndSubmit() {
     // Mark all documents as accepted
-    this.documents.forEach((doc) => {
-      doc.accepted = true;
-    });
-    this.cdr.markForCheck();
+    this.documents = this.documents.map((doc) => ({ ...doc, accepted: true }));
 
     // Submit all acceptances
     this.submitAcceptances();
@@ -718,28 +704,32 @@ export class TermsStepComponent implements OnInit {
   submitAcceptances() {
     if (!this.allAccepted) return;
 
-    this.submitting = true;
-    this.cdr.markForCheck();
+    this.submitting.set(true);
 
     const pendingDocs = this.documents.filter((d) => !d.loading);
 
-    const acceptanceRequests = pendingDocs.map((doc) => {
-      doc.loading = true;
-      this.cdr.markForCheck();
-      return this.legalService
+    // Mark all as loading
+    this.documents = this.documents.map((d) =>
+      pendingDocs.find((p) => p.id === d.id) ? { ...d, loading: true } : d,
+    );
+
+    const acceptanceRequests = pendingDocs.map((doc) =>
+      this.legalService
         .acceptDocument(doc.id, 'onboarding')
         .toPromise()
         .then(() => {
-          doc.loading = false;
-          this.cdr.markForCheck();
+          this.documents = this.documents.map((d) =>
+            d.id === doc.id ? { ...d, loading: false } : d,
+          );
           return { success: true, id: doc.id };
         })
         .catch((err) => {
-          doc.loading = false;
-          this.cdr.markForCheck();
+          this.documents = this.documents.map((d) =>
+            d.id === doc.id ? { ...d, loading: false } : d,
+          );
           return { success: false, id: doc.id, error: err };
-        });
-    });
+        }),
+    );
 
     Promise.all(acceptanceRequests).then((results) => {
       const failures = results.filter((r) => !r.success);
@@ -748,12 +738,11 @@ export class TermsStepComponent implements OnInit {
         this.toastService.success('Documentos aceptados correctamente');
         this.completed.emit();
       } else {
-        this.submitting = false;
+        this.submitting.set(false);
         this.toastService.error(
           'Hubo un error al aceptar algunos documentos. Por favor intenta nuevamente.',
         );
       }
-      this.cdr.markForCheck();
     });
   }
 

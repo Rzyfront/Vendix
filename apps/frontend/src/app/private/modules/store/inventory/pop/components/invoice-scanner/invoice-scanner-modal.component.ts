@@ -1,12 +1,5 @@
-import {
-  Component,
-  Input,
-  Output,
-  EventEmitter,
-  signal,
-  computed,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, input, output, signal, computed, DestroyRef, inject} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { switchMap, catchError } from 'rxjs';
 import { of } from 'rxjs';
@@ -32,7 +25,6 @@ import {
   selector: 'app-invoice-scanner-modal',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ModalComponent,
     ButtonComponent,
@@ -45,7 +37,7 @@ import {
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="onOpenChange($event)"
       (cancel)="onCancel()"
       size="xl"
@@ -443,9 +435,10 @@ import {
   ],
 })
 export class InvoiceScannerModalComponent {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() confirmed = new EventEmitter<{
+  private destroyRef = inject(DestroyRef);
+  readonly isOpen = input(false);
+  readonly isOpenChange = output<boolean>();
+  readonly confirmed = output<{
     scanResult: InvoiceScanResult;
     matchResult: InvoiceMatchResult;
     editedItems: MatchedLineItem[];
@@ -618,7 +611,7 @@ export class InvoiceScannerModalComponent {
           return of(null);
         }),
       )
-      .subscribe((matchResponse) => {
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe((matchResponse) => {
         this.isScanning.set(false);
         if (!matchResponse) return;
 

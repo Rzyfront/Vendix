@@ -1,10 +1,10 @@
 import { Component } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 
 @Component({
   selector: 'app-security-settings',
   standalone: true,
-  imports: [CommonModule],
+  imports: [],
   template: `
     <div class="w-full">
       <div class="mb-6">

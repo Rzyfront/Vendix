@@ -1,4 +1,4 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
+import { Component, input, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
   IconComponent,
@@ -24,18 +24,18 @@ import { User, UserState } from '../interfaces/user.interface';
           </div>
           <div>
             <h3 class="font-semibold text-text-primary">
-              {{ user.first_name }} {{ user.last_name }}
+              {{ user().first_name }} {{ user().last_name }}
             </h3>
-            <p class="text-sm text-text-secondary">{{ '@' + user.username }}</p>
+            <p class="text-sm text-text-secondary">{{ '@' + user().username }}</p>
           </div>
         </div>
 
         <!-- Status Badge -->
         <span
           class="px-2 py-1 text-xs font-medium rounded-full"
-          [class]="getStateDisplay(user.state).class"
+          [class]="getStateDisplay(user().state).class"
         >
-          {{ getStateDisplay(user.state).text }}
+          {{ getStateDisplay(user().state).text }}
         </span>
       </div>
 
@@ -47,7 +47,7 @@ import { User, UserState } from '../interfaces/user.interface';
             [size]="16"
             class="text-text-secondary mr-2"
           ></app-icon>
-          <span class="text-text-primary">{{ user.email }}</span>
+          <span class="text-text-primary">{{ user().email }}</span>
         </div>
 
         <div class="flex items-center text-sm">
@@ -56,7 +56,7 @@ import { User, UserState } from '../interfaces/user.interface';
             [size]="16"
             class="text-text-secondary mr-2"
           ></app-icon>
-          <span class="text-text-primary">{{ user.app || 'N/A' }}</span>
+          <span class="text-text-primary">{{ user().app || 'N/A' }}</span>
         </div>
 
         <div class="flex items-center text-sm">
@@ -66,7 +66,7 @@ import { User, UserState } from '../interfaces/user.interface';
             class="text-text-secondary mr-2"
           ></app-icon>
           <span class="text-text-primary"
-            >Creado: {{ formatDate(user.created_at) }}</span
+            >Creado: {{ formatDate(user().created_at) }}</span
           >
         </div>
       </div>
@@ -78,7 +78,7 @@ import { User, UserState } from '../interfaces/user.interface';
             name="check-circle"
             [size]="16"
             [ngClass]="
-              user.email_verified ? 'text-green-500' : 'text-yellow-500'
+              user().email_verified ? 'text-green-500' : 'text-yellow-500'
             "
             class="mr-1"
           ></app-icon>
@@ -90,7 +90,7 @@ import { User, UserState } from '../interfaces/user.interface';
             name="shield"
             [size]="16"
             [ngClass]="
-              user.two_factor_enabled ? 'text-green-500' : 'text-gray-400'
+              user().two_factor_enabled ? 'text-green-500' : 'text-gray-400'
             "
             class="mr-1"
           ></app-icon>
@@ -106,7 +106,7 @@ import { User, UserState } from '../interfaces/user.interface';
           <app-button
             variant="outline"
             size="sm"
-            (clicked)="edit.emit(user)"
+            (clicked)="edit.emit(user())"
             title="Editar usuario"
           >
             <app-icon name="edit" [size]="16"></app-icon>
@@ -115,14 +115,14 @@ import { User, UserState } from '../interfaces/user.interface';
           <app-button
             variant="outline"
             size="sm"
-            (clicked)="toggleStatus.emit(user)"
+            (clicked)="toggleStatus.emit(user())"
             [ngClass]="
-              user.state === UserState.ACTIVE
+              user().state === UserState.ACTIVE
                 ? 'text-yellow-600'
                 : 'text-green-600'
             "
             [title]="
-              user.state === UserState.ACTIVE
+              user().state === UserState.ACTIVE
                 ? 'Archivar usuario'
                 : 'Reactivar usuario'
             "
@@ -133,7 +133,7 @@ import { User, UserState } from '../interfaces/user.interface';
           <app-button
             variant="outline"
             size="sm"
-            (clicked)="delete.emit(user)"
+            (clicked)="delete.emit(user())"
             class="text-red-600 hover:text-red-700"
             title="Eliminar usuario"
           >
@@ -141,7 +141,7 @@ import { User, UserState } from '../interfaces/user.interface';
           </app-button>
         </div>
 
-        <div class="text-xs text-text-secondary">ID: {{ user.id }}</div>
+        <div class="text-xs text-text-secondary">ID: {{ user().id }}</div>
       </div>
     </div>
   `,
@@ -154,10 +154,10 @@ import { User, UserState } from '../interfaces/user.interface';
   ],
 })
 export class UserCardComponent {
-  @Input() user!: User;
-  @Output() edit = new EventEmitter<User>();
-  @Output() delete = new EventEmitter<User>();
-  @Output() toggleStatus = new EventEmitter<User>();
+  readonly user = input.required<User>();
+  readonly edit = output<User>();
+  readonly delete = output<User>();
+  readonly toggleStatus = output<User>();
   UserState = UserState;
 
   getStateDisplay(state: UserState): { text: string; class: string } {

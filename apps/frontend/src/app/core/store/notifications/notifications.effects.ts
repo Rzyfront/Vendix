@@ -1,5 +1,10 @@
-import { Injectable, inject, NgZone } from '@angular/core';
-import { Actions, createEffect, ofType, ROOT_EFFECTS_INIT } from '@ngrx/effects';
+import { Injectable, inject } from '@angular/core';
+import {
+  Actions,
+  createEffect,
+  ofType,
+  ROOT_EFFECTS_INIT,
+} from '@ngrx/effects';
 import { Store } from '@ngrx/store';
 import {
   switchMap,
@@ -7,7 +12,6 @@ import {
   catchError,
   mergeMap,
   tap,
-  take,
   filter,
 } from 'rxjs/operators';
 import { of, Observable, EMPTY } from 'rxjs';
@@ -17,16 +21,15 @@ import { PushSubscriptionService } from '../../services/push-subscription.servic
 import * as NotificationsActions from './notifications.actions';
 import * as AuthActions from '../auth/auth.actions';
 import { AppNotification } from './notifications.actions';
-import { selectIsAuthenticated } from '../auth/auth.selectors';
+import { AuthFacade } from '../auth/auth.facade';
 
 @Injectable()
 export class NotificationsEffects {
   private actions$ = inject(Actions);
   private notificationsService = inject(NotificationsApiService);
   private store = inject(Store);
-  private ngZone = inject(NgZone);
-
   private pushService = inject(PushSubscriptionService);
+  private authFacade = inject(AuthFacade);
   private eventSource: EventSource | null = null;
 
   /**
@@ -37,16 +40,14 @@ export class NotificationsEffects {
   init$ = createEffect(() =>
     this.actions$.pipe(
       ofType(ROOT_EFFECTS_INIT),
-      switchMap(() =>
-        this.store.select(selectIsAuthenticated).pipe(
-          take(1),
-          filter((isAuth) => isAuth),
-          switchMap(() => [
-            NotificationsActions.loadNotifications(),
-            NotificationsActions.connectSse(),
-          ]),
-        ),
-      ),
+      switchMap(() => {
+        const isAuth = this.authFacade.isAuthenticated();
+        if (!isAuth) return EMPTY;
+        return [
+          NotificationsActions.loadNotifications(),
+          NotificationsActions.connectSse(),
+        ];
+      }),
     ),
   );
 
@@ -93,37 +94,31 @@ export class NotificationsEffects {
           this.eventSource = new EventSource(url);
 
           this.eventSource.onopen = () => {
-            this.ngZone.run(() => {
-              observer.next(NotificationsActions.sseConnected());
-            });
+            observer.next(NotificationsActions.sseConnected());
           };
 
           this.eventSource.onmessage = (event: MessageEvent) => {
-            this.ngZone.run(() => {
-              try {
-                const data = JSON.parse(event.data);
-                const notification: AppNotification = {
-                  id: data.id,
-                  type: data.type,
-                  title: data.title,
-                  body: data.body,
-                  data: data.data,
-                  is_read: false,
-                  created_at: data.created_at,
-                };
-                observer.next(
-                  NotificationsActions.receivedNotification({ notification }),
-                );
-              } catch {
-                // Ignore malformed SSE messages
-              }
-            });
+            try {
+              const data = JSON.parse(event.data);
+              const notification: AppNotification = {
+                id: data.id,
+                type: data.type,
+                title: data.title,
+                body: data.body,
+                data: data.data,
+                is_read: false,
+                created_at: data.created_at,
+              };
+              observer.next(
+                NotificationsActions.receivedNotification({ notification }),
+              );
+            } catch {
+              // Ignore malformed SSE messages
+            }
           };
 
           this.eventSource.onerror = () => {
-            this.ngZone.run(() => {
-              observer.next(NotificationsActions.sseDisconnected());
-            });
+            observer.next(NotificationsActions.sseDisconnected());
             // EventSource auto-reconnects — we don't complete the observable
           };
 
@@ -175,7 +170,10 @@ export class NotificationsEffects {
       this.actions$.pipe(
         ofType(NotificationsActions.sseConnected),
         tap(() => {
-          if (this.pushService.isSupported && this.pushService.permissionState === 'granted') {
+          if (
+            this.pushService.isSupported &&
+            this.pushService.permissionState === 'granted'
+          ) {
             this.pushService.refreshSubscription();
           }
         }),

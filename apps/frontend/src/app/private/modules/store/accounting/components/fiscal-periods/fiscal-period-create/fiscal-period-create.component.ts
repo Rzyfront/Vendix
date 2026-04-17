@@ -1,5 +1,5 @@
-import { Component, Input, Output, EventEmitter, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input, output, inject, signal } from '@angular/core';
+
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { Store } from '@ngrx/store';
 
@@ -15,15 +15,14 @@ import {
   selector: 'vendix-fiscal-period-create',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
-    InputComponent,
-  ],
+    InputComponent
+],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onClose()"
       title="Nuevo Periodo Fiscal"
@@ -65,8 +64,8 @@ import {
           <app-button
             variant="primary"
             (clicked)="onSubmit()"
-            [disabled]="form.invalid || is_submitting"
-            [loading]="is_submitting"
+            [disabled]="form.invalid || is_submitting()"
+            [loading]="is_submitting()"
           >
             Crear Periodo
           </app-button>
@@ -76,13 +75,13 @@ import {
   `,
 })
 export class FiscalPeriodCreateComponent {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
+  readonly isOpen = input(false);
+  readonly isOpenChange = output<boolean>();
 
   private fb = inject(FormBuilder);
   private store = inject(Store);
 
-  is_submitting = false;
+  is_submitting = signal(false);
 
   form = this.fb.group({
     name: ['', [Validators.required]],
@@ -93,7 +92,7 @@ export class FiscalPeriodCreateComponent {
   onSubmit(): void {
     if (this.form.invalid) return;
 
-    this.is_submitting = true;
+    this.is_submitting.set(true);
     const values = this.form.getRawValue();
 
     const dto: CreateFiscalPeriodDto = {
@@ -103,7 +102,7 @@ export class FiscalPeriodCreateComponent {
     };
 
     this.store.dispatch(createFiscalPeriod({ fiscal_period: dto }));
-    this.is_submitting = false;
+    this.is_submitting.set(false);
     this.onClose();
   }
 

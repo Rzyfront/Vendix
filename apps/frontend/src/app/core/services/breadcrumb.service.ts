@@ -1,7 +1,7 @@
-import { Injectable } from '@angular/core';
+import {Injectable, signal, DestroyRef, inject} from '@angular/core';
+import {toObservable, takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import { Router, NavigationEnd } from '@angular/router';
 import { filter } from 'rxjs/operators';
-import { BehaviorSubject } from 'rxjs';
 
 export interface BreadcrumbItem {
   label: string;
@@ -20,7 +20,8 @@ export interface BreadcrumbRoute {
   providedIn: 'root',
 })
 export class BreadcrumbService {
-  private breadcrumbSubject = new BehaviorSubject<{
+  private destroyRef = inject(DestroyRef);
+  readonly breadcrumb = signal<{
     parent?: BreadcrumbItem;
     current: BreadcrumbItem;
     title: string;
@@ -29,7 +30,7 @@ export class BreadcrumbService {
     current: { label: 'Dashboard' },
   });
 
-  breadcrumb$ = this.breadcrumbSubject.asObservable();
+  breadcrumb$ = toObservable(this.breadcrumb);
 
   private routes: BreadcrumbRoute[] = [
     // Dashboard
@@ -1233,7 +1234,7 @@ export class BreadcrumbService {
   private initializeBreadcrumb() {
     this.router.events
       .pipe(filter((event) => event instanceof NavigationEnd))
-      .subscribe((event: NavigationEnd) => {
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe((event: NavigationEnd) => {
         this.updateBreadcrumb(event.urlAfterRedirects);
       });
 
@@ -1261,7 +1262,7 @@ export class BreadcrumbService {
         },
       };
 
-      this.breadcrumbSubject.next(breadcrumb);
+      this.breadcrumb.set(breadcrumb);
     } else {
       // Breadcrumb por defecto si no hay coincidencia
       const defaultBreadcrumb = {
@@ -1272,7 +1273,7 @@ export class BreadcrumbService {
           icon: 'home',
         },
       };
-      this.breadcrumbSubject.next(defaultBreadcrumb);
+      this.breadcrumb.set(defaultBreadcrumb);
     }
   }
 
@@ -1364,13 +1365,12 @@ export class BreadcrumbService {
 
   // Obtener título de la página actual
   getCurrentTitle(): string {
-    const current = this.breadcrumbSubject.value;
-    return current.title;
+    return this.breadcrumb().title;
   }
 
   // Navegar al padre si existe
   navigateToParent() {
-    const parent = this.breadcrumbSubject.value.parent;
+    const parent = this.breadcrumb().parent;
     if (parent?.url) {
       this.router.navigateByUrl(parent.url);
     }
@@ -1378,8 +1378,8 @@ export class BreadcrumbService {
 
   // Actualizar título dinámicamente (útil para IDs de recursos)
   updateCurrentTitle(title: string, subtitle?: string) {
-    const current = this.breadcrumbSubject.value;
-    this.breadcrumbSubject.next({
+    const current = this.breadcrumb();
+    this.breadcrumb.set({
       ...current,
       title: title,
       current: {

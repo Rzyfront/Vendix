@@ -1,5 +1,6 @@
-import { Component, OnInit, inject, signal, computed } from '@angular/core';
-import { CommonModule, CurrencyPipe, DatePipe } from '@angular/common';
+import {Component, inject, signal, computed, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { CurrencyPipe, DatePipe } from '@angular/common';
 import { ActivatedRoute, Router } from '@angular/router';
 import {
   ButtonComponent,
@@ -25,7 +26,6 @@ type AccountingFilter = 'all' | 'unmatched' | 'matched';
   selector: 'vendix-reconciliation-workspace',
   standalone: true,
   imports: [
-    CommonModule,
     ButtonComponent,
     IconComponent,
     ScrollableTabsComponent,
@@ -279,7 +279,8 @@ type AccountingFilter = 'all' | 'unmatched' | 'matched';
     </div>
   `,
 })
-export class ReconciliationWorkspaceComponent implements OnInit {
+export class ReconciliationWorkspaceComponent {
+  private destroyRef = inject(DestroyRef);
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private reconciliationService = inject(BankReconciliationService);
@@ -339,7 +340,7 @@ export class ReconciliationWorkspaceComponent implements OnInit {
     return all;
   });
 
-  ngOnInit(): void {
+  constructor() {
     const id = Number(this.route.snapshot.paramMap.get('id'));
     if (id) {
       this.loadReconciliation(id);
@@ -348,7 +349,7 @@ export class ReconciliationWorkspaceComponent implements OnInit {
 
   private loadReconciliation(id: number): void {
     this.loading.set(true);
-    this.reconciliationService.getReconciliation(id).subscribe({
+    this.reconciliationService.getReconciliation(id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (res) => {
         const data = res.data;
         this.reconciliation.set(data);
@@ -372,7 +373,7 @@ export class ReconciliationWorkspaceComponent implements OnInit {
         status: 'posted',
         limit: 500,
       })
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (res) => {
           this.entries.set(res.data || []);
         },
@@ -397,7 +398,7 @@ export class ReconciliationWorkspaceComponent implements OnInit {
     const rec = this.reconciliation();
     if (!rec) return;
     this.autoMatching.set(true);
-    this.reconciliationService.runAutoMatch(rec.id).subscribe({
+    this.reconciliationService.runAutoMatch(rec.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (res) => {
         this.autoMatching.set(false);
         this.toastService.success(`${res.data.total_matched} partidas conciliadas automaticamente`);
@@ -421,7 +422,7 @@ export class ReconciliationWorkspaceComponent implements OnInit {
         bank_transaction_id: bankTx.id,
         accounting_entry_id: entry.id,
       })
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: () => {
           this.toastService.success('Partida conciliada manualmente');
           this.selectedBankTx.set(null);
@@ -442,7 +443,7 @@ export class ReconciliationWorkspaceComponent implements OnInit {
       cancelText: 'Cancelar',
     }).then((confirmed) => {
       if (!confirmed) return;
-      this.reconciliationService.unmatch(rec.id, match.id).subscribe({
+      this.reconciliationService.unmatch(rec.id, match.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: () => {
           this.toastService.success('Conciliacion deshecha');
           this.loadReconciliation(rec.id);
@@ -462,7 +463,7 @@ export class ReconciliationWorkspaceComponent implements OnInit {
       cancelText: 'Cancelar',
     }).then((confirmed) => {
       if (!confirmed) return;
-      this.reconciliationService.completeReconciliation(rec.id).subscribe({
+      this.reconciliationService.completeReconciliation(rec.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: () => {
           this.toastService.success('Conciliacion completada');
           this.loadReconciliation(rec.id);

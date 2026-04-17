@@ -5,9 +5,10 @@ import {
   OnChanges,
   inject,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   ReactiveFormsModule,
+  FormsModule,
   FormBuilder,
   FormGroup,
   Validators,
@@ -25,13 +26,13 @@ import {
   selector: 'app-currency-edit-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
+    FormsModule,
     ModalComponent,
     InputComponent,
     ButtonComponent,
-    SelectorComponent,
-  ],
+    SelectorComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen()"
@@ -46,21 +47,24 @@ import {
           <!-- Campos readonly desde la API -->
           <app-input
             label="Código de Moneda"
-            [value]="currency()?.code || ''"
+            [ngModel]="currency()?.code || ''"
+            [ngModelOptions]="{ standalone: true }"
             [disabled]="true"
             helpText="Código ISO 4217 (no editable)"
           ></app-input>
 
           <app-input
             label="Nombre de Moneda"
-            [value]="currency()?.name || ''"
+            [ngModel]="currency()?.name || ''"
+            [ngModelOptions]="{ standalone: true }"
             [disabled]="true"
             helpText="Nombre completo (no editable)"
           ></app-input>
 
           <app-input
             label="Símbolo"
-            [value]="currency()?.symbol || ''"
+            [ngModel]="currency()?.symbol || ''"
+            [ngModelOptions]="{ standalone: true }"
             [disabled]="true"
             helpText="Símbolo de moneda (no editable)"
           ></app-input>

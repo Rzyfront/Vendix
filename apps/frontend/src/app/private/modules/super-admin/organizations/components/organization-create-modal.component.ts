@@ -1,5 +1,5 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input, output } from '@angular/core';
+
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 
@@ -14,16 +14,15 @@ import { CreateOrganizationDto } from '../services/organizations.service';
   selector: 'app-organization-create-modal',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     ModalComponent,
     InputComponent,
-    ButtonComponent,
-  ],
+    ButtonComponent
+],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
@@ -153,8 +152,8 @@ import { CreateOrganizationDto } from '../services/organizations.service';
           <app-button
             variant="primary"
             (clicked)="onSubmit()"
-            [disabled]="organizationForm.invalid || isSubmitting"
-            [loading]="isSubmitting"
+            [disabled]="organizationForm.invalid || isSubmitting()"
+            [loading]="isSubmitting()"
           >
             Crear Organización
           </app-button>
@@ -164,12 +163,12 @@ import { CreateOrganizationDto } from '../services/organizations.service';
   `,
 })
 export class OrganizationCreateModalComponent {
-  @Input() isOpen = false;
-  @Input() isSubmitting = false;
+  readonly isOpen = input(false);
+  readonly isSubmitting = input(false);
 
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() submit = new EventEmitter<CreateOrganizationDto>();
-  @Output() cancel = new EventEmitter<void>();
+  readonly isOpenChange = output<boolean>();
+  readonly submit = output<CreateOrganizationDto>();
+  readonly cancel = output<void>();
 
   organizationForm!: FormGroup;
 

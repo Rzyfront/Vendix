@@ -1,35 +1,45 @@
 import { TestBed } from '@angular/core/testing';
 import {
-  HttpClientTestingModule,
   HttpTestingController,
+  provideHttpClientTesting,
 } from '@angular/common/http/testing';
-import { HTTP_INTERCEPTORS, HttpClient } from '@angular/common/http';
+import {
+  HttpClient,
+  provideHttpClient,
+  withInterceptors,
+} from '@angular/common/http';
 import { of, throwError as rxjsThrowError } from 'rxjs';
-import { AuthInterceptor } from './auth.interceptor';
+import { authInterceptorFn } from './auth.interceptor';
 import { AuthService } from '../services/auth.service';
-import { PLATFORM_ID } from '@angular/core';
+import { SessionService } from '../services/session.service';
+import { PLATFORM_ID, signal } from '@angular/core';
 
-describe('AuthInterceptor', () => {
+describe('authInterceptorFn', () => {
   let httpMock: HttpTestingController;
   let httpClient: HttpClient;
   let authServiceSpy: jasmine.SpyObj<AuthService>;
+  let sessionServiceSpy: jasmine.SpyObj<SessionService> & {
+    isTerminating: ReturnType<typeof signal<boolean>>;
+  };
 
   beforeEach(() => {
-    const spy = jasmine.createSpyObj('AuthService', [
+    const authSpy = jasmine.createSpyObj('AuthService', [
       'getToken',
       'refreshToken',
       'logout',
     ]);
+    const sessionSpy = jasmine.createSpyObj('SessionService', [
+      'terminateSession',
+    ]);
+    // isTerminating is a signal in SessionService — mock as such.
+    (sessionSpy as any).isTerminating = signal(false);
 
     TestBed.configureTestingModule({
-      imports: [HttpClientTestingModule],
       providers: [
-        { provide: AuthService, useValue: spy },
-        {
-          provide: HTTP_INTERCEPTORS,
-          useClass: AuthInterceptor,
-          multi: true,
-        },
+        provideHttpClient(withInterceptors([authInterceptorFn])),
+        provideHttpClientTesting(),
+        { provide: AuthService, useValue: authSpy },
+        { provide: SessionService, useValue: sessionSpy },
         { provide: PLATFORM_ID, useValue: 'browser' },
       ],
     });
@@ -37,6 +47,11 @@ describe('AuthInterceptor', () => {
     httpMock = TestBed.inject(HttpTestingController);
     httpClient = TestBed.inject(HttpClient);
     authServiceSpy = TestBed.inject(AuthService) as jasmine.SpyObj<AuthService>;
+    sessionServiceSpy = TestBed.inject(
+      SessionService,
+    ) as jasmine.SpyObj<SessionService> & {
+      isTerminating: ReturnType<typeof signal<boolean>>;
+    };
   });
 
   afterEach(() => {
@@ -131,20 +146,24 @@ describe('AuthInterceptor', () => {
       secondReq.flush({ data: 'success' });
     });
 
-    it('should logout user when refresh fails', () => {
+    it('should terminate session when refresh fails', () => {
       authServiceSpy.refreshToken.and.returnValue(
         rxjsThrowError(() => new Error('Refresh failed')) as any,
       );
 
-      httpClient.get('/api/test').subscribe(
-        () => fail('Should have thrown error'),
-        () => {
-          expect(authServiceSpy.logout).toHaveBeenCalled();
+      httpClient.get('/api/test').subscribe({
+        next: () => {
+          // EMPTY completes without next — this branch is fine
         },
-      );
+        error: () => fail('Interceptor should swallow via EMPTY'),
+      });
 
       const req = httpMock.expectOne('/api/test');
       req.flush({}, { status: 401, statusText: 'Unauthorized' });
+
+      expect(sessionServiceSpy.terminateSession).toHaveBeenCalledWith(
+        'token_refresh_failed',
+      );
     });
 
     it('should handle concurrent 401 requests correctly', () => {

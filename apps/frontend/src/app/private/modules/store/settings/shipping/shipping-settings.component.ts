@@ -1,13 +1,15 @@
-import { Component, OnInit, OnDestroy, signal, computed } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, OnInit, signal, computed,
+  DestroyRef,
+  inject} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import { FormsModule } from '@angular/forms';
-import { Subject, takeUntil } from 'rxjs';
+
 import { ShippingMethodsService } from './services/shipping-methods.service';
 import {
   ShippingMethodStats,
   StoreShippingMethod,
-  SystemShippingMethod,
-} from './interfaces/shipping-methods.interface';
+  SystemShippingMethod} from './interfaces/shipping-methods.interface';
 import { ShippingZone, ZoneStats } from './interfaces/shipping-zones.interface';
 import {
   ToastService,
@@ -22,22 +24,19 @@ import {
   ItemListCardConfig,
   OptionsDropdownComponent,
   DropdownAction,
-  CardComponent,
-} from '../../../../../../app/shared/components/index';
+  CardComponent} from '../../../../../../app/shared/components/index';
 import { ShippingMethodsModalComponent } from './components/shipping-methods-modal.component';
 import { ZoneModalComponent } from './components/index';
 import { RatesModalComponent } from './components/rates-modal/rates-modal.component';
 import { ModalComponent } from '../../../../../../app/shared/components/index';
 import {
   ScrollableTabsComponent,
-  ScrollableTab,
-} from '../../../../../../app/shared/components/index';
+  ScrollableTab} from '../../../../../../app/shared/components/index';
 
 @Component({
   selector: 'app-shipping-settings',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     StatsComponent,
     ButtonComponent,
@@ -67,14 +66,18 @@ import {
         ></app-stats>
         <app-stats
           title="Zonas Config."
-          [value]="zone_stats()?.total_zones || (zone_stats()?.store_zones || 0)"
+          [value]="zone_stats()?.total_zones || zone_stats()?.store_zones || 0"
           iconName="map-pin"
           iconBgColor="bg-green-100"
           iconColor="text-green-600"
         ></app-stats>
         <app-stats
           title="Tarifas Activas"
-          [value]="zone_stats()?.store_rates || shipping_method_stats()?.total_rates || 0"
+          [value]="
+            zone_stats()?.store_rates ||
+            shipping_method_stats()?.total_rates ||
+            0
+          "
           iconName="tag"
           iconBgColor="bg-purple-100"
           iconColor="text-purple-600"
@@ -98,13 +101,18 @@ import {
       <!-- Tab: Methods -->
       @if (active_tab() === 'methods') {
         <app-card [responsive]="true" [padding]="false">
-
           <!-- Sticky search header -->
-          <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
-                      md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
-            <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
-              <h2 class="text-[13px] font-bold text-gray-600 tracking-wide
-                         md:text-lg md:font-semibold md:text-text-primary">
+          <div
+            class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
+                      md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
+          >
+            <div
+              class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
+            >
+              <h2
+                class="text-[13px] font-bold text-gray-600 tracking-wide
+                         md:text-lg md:font-semibold md:text-text-primary"
+              >
                 Métodos de Envío ({{ filtered_methods().length }})
               </h2>
               <div class="flex items-center gap-2 w-full md:w-auto">
@@ -147,22 +155,38 @@ import {
           <!-- Loading State -->
           @if (is_loading()) {
             <div class="p-4 md:p-6 text-center">
-              <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-              <p class="mt-2 text-text-secondary">Cargando métodos de envío...</p>
+              <div
+                class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+              ></div>
+              <p class="mt-2 text-text-secondary">
+                Cargando métodos de envío...
+              </p>
             </div>
           }
 
           <!-- Empty State -->
           @if (!is_loading() && filtered_methods().length === 0) {
             <div class="p-8 text-center">
-              <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-gray-100 flex items-center justify-center">
-                <app-icon name="truck" [size]="24" class="text-gray-400"></app-icon>
+              <div
+                class="w-12 h-12 mx-auto mb-3 rounded-full bg-gray-100 flex items-center justify-center"
+              >
+                <app-icon
+                  name="truck"
+                  [size]="24"
+                  class="text-gray-400"
+                ></app-icon>
               </div>
               @if (search_term()) {
-                <p class="text-sm text-text-secondary">No se encontraron métodos con ese criterio</p>
+                <p class="text-sm text-text-secondary">
+                  No se encontraron métodos con ese criterio
+                </p>
               } @else {
-                <p class="text-sm text-text-secondary">No hay métodos de envío configurados</p>
-                <p class="text-xs text-gray-400 mt-1">Agrega tu primer método de envío</p>
+                <p class="text-sm text-text-secondary">
+                  No hay métodos de envío configurados
+                </p>
+                <p class="text-xs text-gray-400 mt-1">
+                  Agrega tu primer método de envío
+                </p>
               }
             </div>
           }
@@ -172,13 +196,18 @@ import {
       <!-- Tab: Zones -->
       @if (active_tab() === 'zones') {
         <app-card [responsive]="true" [padding]="false">
-
           <!-- Sticky search header -->
-          <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
-                      md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
-            <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
-              <h2 class="text-[13px] font-bold text-gray-600 tracking-wide
-                         md:text-lg md:font-semibold md:text-text-primary">
+          <div
+            class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
+                      md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border"
+          >
+            <div
+              class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4"
+            >
+              <h2
+                class="text-[13px] font-bold text-gray-600 tracking-wide
+                         md:text-lg md:font-semibold md:text-text-primary"
+              >
                 Zonas y Tarifas ({{ filtered_store_zones().length }})
               </h2>
               <div class="flex items-center gap-2 w-full md:w-auto">
@@ -217,116 +246,147 @@ import {
           <!-- Loading State -->
           @if (is_loading_store_zones()) {
             <div class="p-4 md:p-6 text-center">
-              <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+              <div
+                class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+              ></div>
               <p class="mt-2 text-text-secondary">Cargando zonas...</p>
             </div>
           }
 
           <!-- Empty State -->
-          @if (!is_loading_store_zones() && filtered_store_zones().length === 0) {
+          @if (
+            !is_loading_store_zones() && filtered_store_zones().length === 0
+          ) {
             <div class="p-8 text-center">
-              <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-gray-100 flex items-center justify-center">
-                <app-icon name="map-pin" [size]="24" class="text-gray-400"></app-icon>
+              <div
+                class="w-12 h-12 mx-auto mb-3 rounded-full bg-gray-100 flex items-center justify-center"
+              >
+                <app-icon
+                  name="map-pin"
+                  [size]="24"
+                  class="text-gray-400"
+                ></app-icon>
               </div>
               @if (zones_search_term()) {
-                <p class="text-sm text-text-secondary">No se encontraron zonas con ese criterio</p>
+                <p class="text-sm text-text-secondary">
+                  No se encontraron zonas con ese criterio
+                </p>
               } @else {
-                <p class="text-sm text-text-secondary">No tienes zonas creadas</p>
-                <p class="text-xs text-gray-400 mt-1">Activa un método de envío o crea una zona personalizada</p>
+                <p class="text-sm text-text-secondary">
+                  No tienes zonas creadas
+                </p>
+                <p class="text-xs text-gray-400 mt-1">
+                  Activa un método de envío o crea una zona personalizada
+                </p>
               }
             </div>
           }
         </app-card>
       }
 
-      <!-- Zone CRUD Modal -->
-        @if (show_zone_modal()) {
-          <app-zone-modal
-            [zone]="selected_zone"
-            [mode]="zone_modal_mode"
-            (close)="closeZoneModal()"
-            (saved)="onZoneSaved()"
-          ></app-zone-modal>
+      @defer (when show_zone_modal()) {
+        <app-zone-modal
+          [zone]="selected_zone"
+          [mode]="zone_modal_mode"
+          (close)="closeZoneModal()"
+          (saved)="onZoneSaved()"
+        ></app-zone-modal>
+      }
+
+      @defer (when show_rates_modal()) {
+        <app-rates-modal
+          [zone]="selected_zone_for_rates!"
+          [is_read_only]="is_rates_read_only()"
+          (close)="closeRatesModal()"
+          (rates_changed)="onRatesChanged()"
+        ></app-rates-modal>
+      }
+
+      <!-- System Zones Modal -->
+      <app-modal
+        [isOpen]="show_system_zones_modal()"
+        title="Zonas del Sistema"
+        subtitle="Duplica zonas preconfiguradas para personalizar"
+        size="lg"
+        (closed)="closeSystemZonesModal()"
+      >
+        <div slot="header">
+          <div
+            class="w-10 h-10 rounded-xl bg-green-50 flex items-center justify-center border border-green-100"
+          >
+            <app-icon
+              name="globe"
+              [size]="20"
+              class="text-green-600"
+            ></app-icon>
+          </div>
+        </div>
+
+        <div class="mb-4">
+          <app-inputsearch
+            class="w-full"
+            size="sm"
+            placeholder="Buscar zonas del sistema..."
+            [debounceTime]="300"
+            [ngModel]="system_zones_search_term()"
+            (ngModelChange)="onSystemZonesSearchChange($event)"
+          ></app-inputsearch>
+        </div>
+
+        @if (is_loading_system_zones()) {
+          <div class="p-4 text-center">
+            <div
+              class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary"
+            ></div>
+            <p class="mt-2 text-sm text-text-secondary">
+              Cargando zonas del sistema...
+            </p>
+          </div>
         }
 
-        <!-- Rates Modal -->
-        @if (show_rates_modal()) {
-          <app-rates-modal
-            [zone]="selected_zone_for_rates!"
-            [is_read_only]="is_rates_read_only()"
-            (close)="closeRatesModal()"
-            (rates_changed)="onRatesChanged()"
-          ></app-rates-modal>
+        @if (!is_loading_system_zones() && filtered_system_zones().length > 0) {
+          <app-responsive-data-view
+            [data]="filtered_system_zones()"
+            [columns]="system_zones_columns"
+            [cardConfig]="system_zones_card_config"
+            [actions]="system_zones_actions"
+            [loading]="is_loading_system_zones()"
+            emptyMessage="No hay zonas del sistema"
+            emptyIcon="globe"
+          ></app-responsive-data-view>
         }
 
-        <!-- System Zones Modal -->
-        <app-modal
-          [isOpen]="show_system_zones_modal()"
-          title="Zonas del Sistema"
-          subtitle="Duplica zonas preconfiguradas para personalizar"
-          size="lg"
-          (closed)="closeSystemZonesModal()"
-        >
-          <div slot="header">
-            <div class="w-10 h-10 rounded-xl bg-green-50 flex items-center justify-center border border-green-100">
-              <app-icon name="globe" [size]="20" class="text-green-600"></app-icon>
+        @if (
+          !is_loading_system_zones() && filtered_system_zones().length === 0
+        ) {
+          <div class="p-6 text-center">
+            <div
+              class="w-12 h-12 mx-auto mb-3 rounded-full bg-green-50 flex items-center justify-center"
+            >
+              <app-icon
+                name="check-circle"
+                [size]="24"
+                class="text-green-500"
+              ></app-icon>
             </div>
+            <p class="text-sm text-text-secondary">
+              @if (system_zones_search_term()) {
+                No hay zonas del sistema con ese criterio
+              } @else {
+                No hay zonas del sistema disponibles
+              }
+            </p>
           </div>
+        }
 
-          <div class="mb-4">
-            <app-inputsearch
-              class="w-full"
-              size="sm"
-              placeholder="Buscar zonas del sistema..."
-              [debounceTime]="300"
-              [ngModel]="system_zones_search_term()"
-              (ngModelChange)="onSystemZonesSearchChange($event)"
-            ></app-inputsearch>
-          </div>
+        <div slot="footer" class="flex justify-end gap-3">
+          <app-button variant="ghost" (clicked)="closeSystemZonesModal()">
+            Cerrar
+          </app-button>
+        </div>
+      </app-modal>
 
-          @if (is_loading_system_zones()) {
-            <div class="p-4 text-center">
-              <div class="inline-block animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
-              <p class="mt-2 text-sm text-text-secondary">Cargando zonas del sistema...</p>
-            </div>
-          }
-
-          @if (!is_loading_system_zones() && filtered_system_zones().length > 0) {
-            <app-responsive-data-view
-              [data]="filtered_system_zones()"
-              [columns]="system_zones_columns"
-              [cardConfig]="system_zones_card_config"
-              [actions]="system_zones_actions"
-              [loading]="is_loading_system_zones()"
-              emptyMessage="No hay zonas del sistema"
-              emptyIcon="globe"
-            ></app-responsive-data-view>
-          }
-
-          @if (!is_loading_system_zones() && filtered_system_zones().length === 0) {
-            <div class="p-6 text-center">
-              <div class="w-12 h-12 mx-auto mb-3 rounded-full bg-green-50 flex items-center justify-center">
-                <app-icon name="check-circle" [size]="24" class="text-green-500"></app-icon>
-              </div>
-              <p class="text-sm text-text-secondary">
-                @if (system_zones_search_term()) {
-                  No hay zonas del sistema con ese criterio
-                } @else {
-                  No hay zonas del sistema disponibles
-                }
-              </p>
-            </div>
-          }
-
-          <div slot="footer" class="flex justify-end gap-3">
-            <app-button variant="ghost" (clicked)="closeSystemZonesModal()">
-              Cerrar
-            </app-button>
-          </div>
-        </app-modal>
-
-      <!-- Modal para agregar métodos disponibles -->
-      @if (show_methods_modal()) {
+      @defer (when show_methods_modal()) {
         <app-shipping-methods-modal
           [available_methods]="available_shipping_methods()"
           [is_loading]="is_loading_available()"
@@ -345,12 +405,10 @@ import {
         width: 100%;
       }
     `,
-  ],
-})
-export class ShippingSettingsComponent implements OnInit, OnDestroy {
-  private destroy$ = new Subject<void>();
-
-  // Tabs configuration
+  ]})
+export class ShippingSettingsComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
+// Tabs configuration
   readonly tabs: ScrollableTab[] = [
     { id: 'methods', label: 'Métodos de Envío', icon: 'truck' },
     { id: 'zones', label: 'Zonas y Tarifas', icon: 'map-pin' },
@@ -437,8 +495,7 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
       label: 'Método de Envío',
       sortable: true,
       priority: 1,
-      transform: (value: string) => value || 'Sin nombre',
-    },
+      transform: (value: string) => value || 'Sin nombre'},
     {
       key: 'type',
       label: 'Tipo',
@@ -451,11 +508,8 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
           pickup: '#22c55e',
           own_fleet: '#3b82f6',
           carrier: '#f59e0b',
-          third_party_provider: '#7c3aed',
-        },
-      },
-      transform: (value: string) => this.getTypeLabel(value),
-    },
+          third_party_provider: '#7c3aed'}},
+      transform: (value: string) => this.getTypeLabel(value)},
     {
       key: 'is_active',
       label: 'Estado',
@@ -463,25 +517,21 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
       priority: 1,
       badgeConfig: {
         type: 'custom',
-        colorMap: { true: '#22c55e', false: '#f59e0b' },
-      },
-      transform: (value: boolean) => (value ? 'Activo' : 'Inactivo'),
-    },
+        colorMap: { true: '#22c55e', false: '#f59e0b' }},
+      transform: (value: boolean) => (value ? 'Activo' : 'Inactivo')},
     {
       key: 'min_days',
       label: 'Tiempo',
       sortable: true,
       priority: 3,
       transform: (_value: any, item: StoreShippingMethod) =>
-        this.formatDeliveryTime(item?.min_days, item?.max_days),
-    },
+        this.formatDeliveryTime(item?.min_days, item?.max_days)},
     {
       key: 'created_at',
       label: 'Fecha Agregado',
       sortable: true,
       priority: 3,
-      transform: (value: string) => new Date(value).toLocaleDateString(),
-    },
+      transform: (value: string) => new Date(value).toLocaleDateString()},
   ];
 
   methods_card_config: ItemListCardConfig = {
@@ -496,22 +546,18 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
     badgeConfig: {
       type: 'custom',
       size: 'sm',
-      colorMap: { true: '#22c55e', false: '#f59e0b' },
-    },
+      colorMap: { true: '#22c55e', false: '#f59e0b' }},
     badgeTransform: (val: boolean) => (val ? 'Activo' : 'Inactivo'),
     detailKeys: [
       {
         key: 'provider_name',
         label: 'Proveedor',
-        transform: (val: string) => val || 'Sin proveedor',
-      },
+        transform: (val: string) => val || 'Sin proveedor'},
       {
         key: 'created_at',
         label: 'Agregado',
-        transform: (val: string) => new Date(val).toLocaleDateString(),
-      },
-    ],
-  };
+        transform: (val: string) => new Date(val).toLocaleDateString()},
+    ]};
 
   methods_table_actions: TableAction[] = [
     {
@@ -520,23 +566,20 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
       variant: 'ghost',
       action: (row: StoreShippingMethod) =>
         this.openEditShippingMethodModal(row),
-      show: (row: StoreShippingMethod) => row.is_active,
-    },
+      show: (row: StoreShippingMethod) => row.is_active},
     {
       label: (row: StoreShippingMethod) =>
         row.is_active ? 'Desactivar' : 'Activar',
       icon: (row: StoreShippingMethod) => (row.is_active ? 'pause' : 'play'),
       variant: 'primary',
-      action: (row: StoreShippingMethod) => this.toggleShippingMethod(row),
-    },
+      action: (row: StoreShippingMethod) => this.toggleShippingMethod(row)},
     {
       label: 'Eliminar',
       icon: 'trash',
       variant: 'danger',
       action: (row: StoreShippingMethod) =>
         this.confirmDeleteShippingMethod(row),
-      show: (row: StoreShippingMethod) => !row.is_active,
-    },
+      show: (row: StoreShippingMethod) => !row.is_active},
   ];
 
   // ========== ZONES TABLE CONFIG ==========
@@ -547,14 +590,12 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
       key: 'countries',
       label: 'Países',
       priority: 2,
-      transform: (value: string[]) => this.formatCountries(value),
-    },
+      transform: (value: string[]) => this.formatCountries(value)},
     {
       key: '_count.shipping_rates',
       label: 'Tarifas',
       priority: 2,
-      defaultValue: '0',
-    },
+      defaultValue: '0'},
     {
       key: 'is_active',
       label: 'Estado',
@@ -562,10 +603,8 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
       priority: 1,
       badgeConfig: {
         type: 'custom',
-        colorMap: { true: '#22c55e', false: '#f59e0b' },
-      },
-      transform: (value: boolean) => (value ? 'Activa' : 'Inactiva'),
-    },
+        colorMap: { true: '#22c55e', false: '#f59e0b' }},
+      transform: (value: boolean) => (value ? 'Activa' : 'Inactiva')},
   ];
 
   zones_card_config: ItemListCardConfig = {
@@ -579,8 +618,7 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
     badgeConfig: {
       type: 'custom',
       size: 'sm',
-      colorMap: { true: '#22c55e', false: '#f59e0b' },
-    },
+      colorMap: { true: '#22c55e', false: '#f59e0b' }},
     badgeTransform: (value: boolean) => (value ? 'Activa' : 'Inactiva'),
     detailKeys: [
       { key: '_count.shipping_rates', label: 'Tarifas' },
@@ -588,34 +626,29 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
         key: 'source_type',
         label: 'Origen',
         transform: (val: string) =>
-          val === 'system_copy' ? 'Del sistema' : 'Personalizada',
-      },
+          val === 'system_copy' ? 'Del sistema' : 'Personalizada'},
     ],
     footerKey: 'created_at',
     footerLabel: 'Creada',
     footerTransform: (val: string) =>
-      val ? new Date(val).toLocaleDateString() : '-',
-  };
+      val ? new Date(val).toLocaleDateString() : '-'};
 
   zones_table_actions: TableAction[] = [
     {
       label: 'Tarifas',
       icon: 'tag',
       variant: 'primary',
-      action: (zone: ShippingZone) => this.openRatesModal(zone, false),
-    },
+      action: (zone: ShippingZone) => this.openRatesModal(zone, false)},
     {
       label: 'Editar',
       icon: 'edit',
       variant: 'info',
-      action: (zone: ShippingZone) => this.openZoneModal('edit', zone),
-    },
+      action: (zone: ShippingZone) => this.openZoneModal('edit', zone)},
     {
       label: 'Eliminar',
       icon: 'trash-2',
       variant: 'danger',
-      action: (zone: ShippingZone) => this.confirmDeleteZone(zone),
-    },
+      action: (zone: ShippingZone) => this.confirmDeleteZone(zone)},
   ];
 
   // Zones dropdown actions
@@ -624,8 +657,7 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
       label: 'Crear zona',
       icon: 'plus',
       action: 'create_zone',
-      variant: 'primary',
-    },
+      variant: 'primary'},
     { label: 'Zonas del sistema', icon: 'globe', action: 'system_zones' },
   ];
 
@@ -636,14 +668,12 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
       key: 'countries',
       label: 'Países',
       priority: 2,
-      transform: (value: string[]) => this.formatCountries(value),
-    },
+      transform: (value: string[]) => this.formatCountries(value)},
     {
       key: '_count.shipping_rates',
       label: 'Tarifas',
       priority: 2,
-      defaultValue: '0',
-    },
+      defaultValue: '0'},
   ];
 
   system_zones_card_config: ItemListCardConfig = {
@@ -653,22 +683,19 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
       this.formatCountries(item.countries),
     avatarFallbackIcon: 'globe',
     avatarShape: 'square',
-    detailKeys: [{ key: '_count.shipping_rates', label: 'Tarifas' }],
-  };
+    detailKeys: [{ key: '_count.shipping_rates', label: 'Tarifas' }]};
 
   system_zones_actions: TableAction[] = [
     {
       label: 'Ver',
       icon: 'eye',
       variant: 'primary',
-      action: (zone: ShippingZone) => this.openRatesModal(zone, true),
-    },
+      action: (zone: ShippingZone) => this.openRatesModal(zone, true)},
     {
       label: 'Duplicar',
       icon: 'copy',
       variant: 'ghost',
-      action: (zone: ShippingZone) => this.duplicateSystemZone(zone),
-    },
+      action: (zone: ShippingZone) => this.duplicateSystemZone(zone)},
   ];
 
   constructor(
@@ -685,13 +712,7 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
     this.loadSystemZones();
     this.loadStoreZones();
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  // Tab change handler
+// Tab change handler
   onTabChange(tabId: string): void {
     this.active_tab.set(tabId as 'methods' | 'zones');
   }
@@ -734,7 +755,7 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
     this.is_loading.set(true);
     this.shipping_methods_service
       .getStoreShippingMethods()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: any) => {
           this.shipping_methods.set(response.data || response);
@@ -746,14 +767,13 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
           );
           this.shipping_methods.set([]);
           this.is_loading.set(false);
-        },
-      });
+        }});
   }
 
   loadShippingMethodStats(): void {
     this.shipping_methods_service
       .getShippingMethodStats()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (stats: any) => {
           this.shipping_method_stats.set(stats.data || stats);
@@ -763,15 +783,14 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
             'Error al cargar estadísticas: ' + error.message,
           );
           this.shipping_method_stats.set(null);
-        },
-      });
+        }});
   }
 
   loadAvailableShippingMethods(): void {
     this.is_loading_available.set(true);
     this.shipping_methods_service
       .getAvailableShippingMethods()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (methods: any) => {
           const methods_data = methods.data || methods;
@@ -786,8 +805,7 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
           );
           this.available_shipping_methods.set([]);
           this.is_loading_available.set(false);
-        },
-      });
+        }});
   }
 
   // ========== MODAL METHODS ==========
@@ -808,16 +826,14 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
         message: `Al activar "${method.name}", se copiarán automáticamente las zonas y tarifas preconfiguradas del sistema. ¿Continuar?`,
         confirmText: 'Activar',
         cancelText: 'Cancelar',
-        confirmVariant: 'primary',
-      })
+        confirmVariant: 'primary'})
       .then((confirmed) => {
         if (confirmed) {
           this.is_enabling.set(true);
           this.shipping_methods_service
             .enableShippingMethod(method.id, {
-              name: method.name,
-            })
-            .pipe(takeUntil(this.destroy$))
+              name: method.name})
+            .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe({
               next: (result: any) => {
                 const data = result.data || result;
@@ -847,8 +863,7 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
                   'Error al activar método de envío: ' + error.message,
                 );
                 this.is_enabling.set(false);
-              },
-            });
+              }});
         }
       });
   }
@@ -872,7 +887,7 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
     if (method.is_active) {
       this.shipping_methods_service
         .disableShippingMethod(method.id)
-        .pipe(takeUntil(this.destroy$))
+        .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: () => {
             this.toast_service.success('Método de envío desactivado');
@@ -883,13 +898,12 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
             this.toast_service.error(
               'Error al desactivar método: ' + error.message,
             );
-          },
-        });
+          }});
     } else {
       this.is_loading.set(true);
       this.shipping_methods_service
         .enableStoreShippingMethod(method.id)
-        .pipe(takeUntil(this.destroy$))
+        .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: () => {
             this.toast_service.success('Método de envío activado');
@@ -902,8 +916,7 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
             this.toast_service.error(
               'Error al activar método: ' + error.message,
             );
-          },
-        });
+          }});
     }
   }
 
@@ -914,13 +927,12 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
         message: `¿Estás seguro de eliminar "${method.name}"? Se eliminarán también todas sus zonas y tarifas.`,
         confirmText: 'Eliminar',
         cancelText: 'Cancelar',
-        confirmVariant: 'danger',
-      })
+        confirmVariant: 'danger'})
       .then((confirmed) => {
         if (confirmed) {
           this.shipping_methods_service
             .deleteShippingMethod(method.id)
-            .pipe(takeUntil(this.destroy$))
+            .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe({
               next: () => {
                 this.toast_service.success(
@@ -936,8 +948,7 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
                 this.toast_service.error(
                   'Error al eliminar método: ' + error.message,
                 );
-              },
-            });
+              }});
         }
       });
   }
@@ -947,19 +958,18 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
   loadZoneStats(): void {
     this.shipping_methods_service
       .getZoneStats()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (stats) => this.zone_stats.set(stats),
         error: () =>
-          this.toast_service.error('Error al cargar estadísticas de zonas'),
-      });
+          this.toast_service.error('Error al cargar estadísticas de zonas')});
   }
 
   loadSystemZones(): void {
     this.is_loading_system_zones.set(true);
     this.shipping_methods_service
       .getSystemZones()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (zones) => {
           this.system_zones.set(zones);
@@ -968,15 +978,14 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
         error: () => {
           this.toast_service.error('Error al cargar zonas del sistema');
           this.is_loading_system_zones.set(false);
-        },
-      });
+        }});
   }
 
   loadStoreZones(): void {
     this.is_loading_store_zones.set(true);
     this.shipping_methods_service
       .getStoreZones()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (zones) => {
           this.store_zones.set(zones);
@@ -985,8 +994,7 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
         error: () => {
           this.toast_service.error('Error al cargar tus zonas');
           this.is_loading_store_zones.set(false);
-        },
-      });
+        }});
   }
 
   // Zone modal
@@ -1014,13 +1022,12 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
         message: `¿Estás seguro de eliminar la zona "${zone.name}"? Se eliminarán también todas sus tarifas.`,
         confirmText: 'Eliminar',
         cancelText: 'Cancelar',
-        confirmVariant: 'danger',
-      })
+        confirmVariant: 'danger'})
       .then((confirmed) => {
         if (confirmed) {
           this.shipping_methods_service
             .deleteZone(zone.id)
-            .pipe(takeUntil(this.destroy$))
+            .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe({
               next: () => {
                 this.toast_service.success('Zona eliminada correctamente');
@@ -1031,8 +1038,7 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
                 this.toast_service.error(
                   'Error al eliminar zona: ' + error.message,
                 );
-              },
-            });
+              }});
         }
       });
   }
@@ -1063,13 +1069,12 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
         message: `Se creará una copia editable de "${zone.name}" con todas sus tarifas. ¿Continuar?`,
         confirmText: 'Duplicar',
         cancelText: 'Cancelar',
-        confirmVariant: 'primary',
-      })
+        confirmVariant: 'primary'})
       .then((confirmed) => {
         if (confirmed) {
           this.shipping_methods_service
             .duplicateSystemZone(zone.id)
-            .pipe(takeUntil(this.destroy$))
+            .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe({
               next: () => {
                 this.toast_service.success(
@@ -1082,8 +1087,7 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
                 this.toast_service.error(
                   'Error al duplicar zona: ' + error.message,
                 );
-              },
-            });
+              }});
         }
       });
   }
@@ -1095,13 +1099,12 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
         message: `Esto actualizará "${zone.name}" con los últimos cambios del sistema. Tus personalizaciones en la zona serán sobrescritas. ¿Continuar?`,
         confirmText: 'Sincronizar',
         cancelText: 'Cancelar',
-        confirmVariant: 'primary',
-      })
+        confirmVariant: 'primary'})
       .then((confirmed) => {
         if (confirmed) {
           this.shipping_methods_service
             .syncZoneWithSystem(zone.id)
-            .pipe(takeUntil(this.destroy$))
+            .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe({
               next: (result: any) => {
                 const stats = result._sync_stats || result.data?._sync_stats;
@@ -1117,8 +1120,7 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
                 this.toast_service.error(
                   'Error al sincronizar zona: ' + error.message,
                 );
-              },
-            });
+              }});
         }
       });
   }
@@ -1131,8 +1133,7 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
       pickup: 'Recogida',
       own_fleet: 'Flota propia',
       carrier: 'Transportadora',
-      third_party_provider: 'Externo',
-    };
+      third_party_provider: 'Externo'};
     return label_map[type] || type;
   }
 
@@ -1165,8 +1166,7 @@ export class ShippingSettingsComponent implements OnInit, OnDestroy {
     BR: 'Brasil',
     UY: 'Uruguay',
     PY: 'Paraguay',
-    BO: 'Bolivia',
-  };
+    BO: 'Bolivia'};
 
   formatCountries(countries: string[]): string {
     if (!countries || countries.length === 0) return '-';

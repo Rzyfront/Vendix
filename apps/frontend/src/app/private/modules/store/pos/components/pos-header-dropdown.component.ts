@@ -1,11 +1,11 @@
 import {
   Component,
-  EventEmitter,
-  Input,
-  Output,
+  input,
+  output,
+  signal,
   HostListener,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { NgClass, DatePipe } from '@angular/common';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { CashRegisterSession } from '../services/pos-cash-register.service';
 import { PosCustomer } from '../models/customer.model';
@@ -13,7 +13,7 @@ import { PosCustomer } from '../models/customer.model';
 @Component({
   selector: 'app-pos-header-dropdown',
   standalone: true,
-  imports: [CommonModule, IconComponent],
+  imports: [NgClass, DatePipe, IconComponent],
   template: `
     <div class="relative" #dropdownContainer>
       <!-- Compact pill trigger -->
@@ -23,7 +23,7 @@ import { PosCustomer } from '../models/customer.model';
         class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-surface border border-border hover:bg-surface/80 active:scale-95 transition-all min-h-[36px] cursor-pointer"
       >
         <!-- Customer avatar -->
-        @if (customer) {
+        @if (customer()) {
           <div
             class="w-6 h-6 rounded-full bg-primary/20 flex items-center justify-center text-primary flex-shrink-0"
           >
@@ -32,15 +32,15 @@ import { PosCustomer } from '../models/customer.model';
         }
 
         <!-- Schedule dot -->
-        @if (scheduleEnabled) {
+        @if (scheduleEnabled()) {
           <span
             class="h-2 w-2 rounded-full flex-shrink-0"
-            [ngClass]="isWithinHours ? 'bg-green-500' : 'bg-red-500'"
+            [ngClass]="isWithinHours() ? 'bg-green-500' : 'bg-red-500'"
           ></span>
         }
 
         <!-- Cash register dot -->
-        @if (cashSession) {
+        @if (cashSession()) {
           <span class="relative flex h-2 w-2 flex-shrink-0">
             <span
               class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"
@@ -49,7 +49,7 @@ import { PosCustomer } from '../models/customer.model';
               class="relative inline-flex rounded-full h-2 w-2 bg-green-500"
             ></span>
           </span>
-        } @else if (showCashOpenButton) {
+        } @else if (showCashOpenButton()) {
           <span class="h-2 w-2 rounded-full bg-amber-400 flex-shrink-0"></span>
         }
 
@@ -58,18 +58,18 @@ import { PosCustomer } from '../models/customer.model';
           name="chevron-down"
           [size]="14"
           class="text-text-secondary transition-transform duration-200"
-          [ngClass]="{ 'rotate-180': isOpen }"
+          [ngClass]="{ 'rotate-180': isOpen() }"
         ></app-icon>
       </button>
 
       <!-- Dropdown panel -->
-      @if (isOpen) {
+      @if (isOpen()) {
         <div
           class="absolute right-0 top-full mt-2 w-72 bg-surface rounded-xl border border-border shadow-lg z-50 overflow-hidden"
           (click)="$event.stopPropagation()"
         >
           <!-- Customer section -->
-          @if (customer) {
+          @if (customer()) {
             <div
               class="flex items-center gap-2.5 p-3 bg-gradient-to-r from-primary-light/50 to-primary-light/30 border-b border-border cursor-pointer hover:from-primary-light/70 hover:to-primary-light/50 transition-all"
               (click)="customerClicked.emit()"
@@ -82,11 +82,11 @@ import { PosCustomer } from '../models/customer.model';
               <div class="flex flex-col min-w-0 flex-1">
                 <span
                   class="font-semibold text-text-primary text-sm leading-tight truncate"
-                  >{{ customer.name }}</span
+                  >{{ customer()!.name }}</span
                 >
                 <span
                   class="text-xs text-text-secondary leading-tight truncate"
-                  >{{ customer.email }}</span
+                  >{{ customer()!.email }}</span
                 >
               </div>
               <div
@@ -103,49 +103,49 @@ import { PosCustomer } from '../models/customer.model';
           }
 
           <!-- Schedule section -->
-          @if (scheduleEnabled) {
+          @if (scheduleEnabled()) {
             <div
               class="flex items-center gap-2 p-3 cursor-pointer hover:bg-surface/60 transition-all border-b border-border"
               (click)="scheduleClicked.emit()"
             >
               <span
                 class="h-2.5 w-2.5 rounded-full flex-shrink-0"
-                [ngClass]="isWithinHours ? 'bg-green-500' : 'bg-red-500'"
+                [ngClass]="isWithinHours() ? 'bg-green-500' : 'bg-red-500'"
               ></span>
               <div class="flex flex-col min-w-0 flex-1">
                 <span
                   class="text-sm font-semibold"
-                  [ngClass]="isWithinHours ? 'text-green-700' : 'text-red-600'"
+                  [ngClass]="isWithinHours() ? 'text-green-700' : 'text-red-600'"
                 >
                   {{
-                    isWithinHours
+                    isWithinHours()
                       ? 'En servicio'
-                      : isDayClosed
+                      : isDayClosed()
                         ? 'Cerrado hoy'
                         : 'Fuera de servicio'
                   }}
                 </span>
-                @if (!isDayClosed && todayHours) {
+                @if (!isDayClosed() && todayHours()) {
                   <span
                     class="text-xs"
                     [ngClass]="
-                      isWithinHours ? 'text-green-600/70' : 'text-red-500/70'
+                      isWithinHours() ? 'text-green-600/70' : 'text-red-500/70'
                     "
                   >
-                    {{ todayHours.open }} – {{ todayHours.close }}
+                    {{ todayHours()!.open }} – {{ todayHours()!.close }}
                   </span>
                 }
               </div>
               <app-icon
                 name="clock"
                 [size]="14"
-                [ngClass]="isWithinHours ? 'text-green-500' : 'text-red-400'"
+                [ngClass]="isWithinHours() ? 'text-green-500' : 'text-red-400'"
               ></app-icon>
             </div>
           }
 
           <!-- Cash register section -->
-          @if (cashSession) {
+          @if (cashSession()) {
             <div class="p-3 space-y-2">
               <div class="flex items-center gap-2">
                 <span class="relative flex h-2.5 w-2.5 flex-shrink-0">
@@ -157,10 +157,10 @@ import { PosCustomer } from '../models/customer.model';
                   ></span>
                 </span>
                 <span class="font-semibold text-sm text-green-700">{{
-                  cashSession.register?.name || 'Caja'
+                  cashSession()!.register?.name || 'Caja'
                 }}</span>
                 <span class="text-green-600/80 text-xs">{{
-                  cashSession.opened_at | date: 'shortTime'
+                  cashSession()!.opened_at | date: 'shortTime'
                 }}</span>
               </div>
               <div class="flex items-center gap-1.5">
@@ -190,7 +190,7 @@ import { PosCustomer } from '../models/customer.model';
                 </button>
               </div>
             </div>
-          } @else if (showCashOpenButton) {
+          } @else if (showCashOpenButton()) {
             <div class="p-3">
               <button
                 type="button"
@@ -208,39 +208,39 @@ import { PosCustomer } from '../models/customer.model';
   `,
 })
 export class PosHeaderDropdownComponent {
-  @Input() customer: PosCustomer | null = null;
-  @Input() scheduleEnabled = false;
-  @Input() isWithinHours = false;
-  @Input() isDayClosed = false;
-  @Input() todayHours: { open: string; close: string } | null = null;
-  @Input() cashSession: CashRegisterSession | null = null;
-  @Input() showCashOpenButton = false;
+  readonly customer = input<PosCustomer | null>(null);
+  readonly scheduleEnabled = input<boolean>(false);
+  readonly isWithinHours = input<boolean>(false);
+  readonly isDayClosed = input<boolean>(false);
+  readonly todayHours = input<{ open: string; close: string } | null>(null);
+  readonly cashSession = input<CashRegisterSession | null>(null);
+  readonly showCashOpenButton = input<boolean>(false);
 
-  @Output() customerClicked = new EventEmitter<void>();
-  @Output() clearCustomer = new EventEmitter<void>();
-  @Output() scheduleClicked = new EventEmitter<void>();
-  @Output() cashOpenClicked = new EventEmitter<void>();
-  @Output() cashCloseClicked = new EventEmitter<void>();
-  @Output() cashMovementClicked = new EventEmitter<void>();
-  @Output() cashDetailClicked = new EventEmitter<void>();
+  readonly customerClicked = output<void>();
+  readonly clearCustomer = output<void>();
+  readonly scheduleClicked = output<void>();
+  readonly cashOpenClicked = output<void>();
+  readonly cashCloseClicked = output<void>();
+  readonly cashMovementClicked = output<void>();
+  readonly cashDetailClicked = output<void>();
 
-  isOpen = false;
+  isOpen = signal(false);
 
   @HostListener('document:click', ['$event'])
   onDocumentClick(event: MouseEvent): void {
     const target = event.target as HTMLElement | null;
     const container = (this as any).dropdownContainer?.nativeElement;
     if (container && target && !container.contains(target)) {
-      this.isOpen = false;
+      this.isOpen.set(false);
     }
   }
 
   @HostListener('document:keydown.escape')
   onEscape(): void {
-    this.isOpen = false;
+    this.isOpen.set(false);
   }
 
   toggleDropdown(): void {
-    this.isOpen = !this.isOpen;
+    this.isOpen.update(v => !v);
   }
 }

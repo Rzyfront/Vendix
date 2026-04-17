@@ -5376,7 +5376,6 @@ model entity_metadata_fields {
   store          stores                      @relation(fields: [store_id], references: [id])
   values         entity_metadata_values[]
   template_items data_collection_items[]
-  responses      data_collection_responses[]
 
   @@unique([store_id, entity_type, field_key])
   @@index([store_id, entity_type, is_active])
@@ -5526,31 +5525,10 @@ model data_collection_submissions {
   template  data_collection_templates   @relation(fields: [template_id], references: [id])
   booking   bookings?                   @relation(fields: [booking_id], references: [id])
   customer  users?                      @relation("submission_customer", fields: [customer_id], references: [id])
-  responses data_collection_responses[]
-
   @@index([store_id, status])
   @@index([booking_id])
   @@index([customer_id])
   @@index([expires_at])
-}
-
-model data_collection_responses {
-  id            Int       @id @default(autoincrement())
-  submission_id Int
-  field_id      Int
-  value_text    String?   @db.Text
-  value_number  Decimal?  @db.Decimal(12, 4)
-  value_date    DateTime? @db.Date
-  value_bool    Boolean?
-  value_json    Json?
-  created_at    DateTime  @default(now()) @db.Timestamp(6)
-  updated_at    DateTime  @default(now()) @db.Timestamp(6)
-
-  submission data_collection_submissions @relation(fields: [submission_id], references: [id], onDelete: Cascade)
-  field      entity_metadata_fields      @relation(fields: [field_id], references: [id])
-
-  @@unique([submission_id, field_id])
-  @@index([submission_id])
 }
 
 // ============================================

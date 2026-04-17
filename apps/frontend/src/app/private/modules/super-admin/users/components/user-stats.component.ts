@@ -1,12 +1,12 @@
 import { Component, input, OnInit } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { StatsComponent } from '../../../../../shared/components/index';
 import { UserStats } from '../interfaces/user.interface';
 
 @Component({
   selector: 'app-user-stats',
   standalone: true,
-  imports: [CommonModule, StatsComponent],
+  imports: [StatsComponent],
   template: `
     <div class="space-y-4">
       <div class="stats-container">

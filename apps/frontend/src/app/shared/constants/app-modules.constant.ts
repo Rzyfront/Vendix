@@ -40,37 +40,6 @@ export const APP_MODULES: { [key: string]: AppModule[]; ORG_ADMIN: AppModule[]; 
       description: 'Ajustes de la organizaci\u00f3n',
     },
     {
-      key: 'analytics',
-      label: 'Anal\u00edticas',
-      description: 'M\u00e9tricas y estad\u00edsticas',
-    },
-    {
-      key: 'reports',
-      label: 'Reportes',
-      description: 'Reportes detallados por tienda',
-    },
-    {
-      key: 'inventory',
-      label: 'Inventario',
-      description: 'Gesti\u00f3n de inventario consolidado',
-    },
-    { key: 'billing', label: 'Facturaci\u00f3n', description: 'Facturas y pagos' },
-    {
-      key: 'ecommerce',
-      label: 'E-commerce',
-      description: 'Ventas online consolidadas',
-    },
-    {
-      key: 'orders',
-      label: '\u00d3rdenes',
-      description: 'Gestionar \u00f3rdenes de todas las tiendas',
-    },
-    {
-      key: 'expenses',
-      label: 'Gastos',
-      description: 'Gesti\u00f3n de gastos de la organizaci\u00f3n',
-    },
-    {
       key: 'accounting',
       label: 'Contabilidad',
       description: 'Plan de cuentas y asientos contables',
@@ -135,11 +104,6 @@ export const APP_MODULES: { [key: string]: AppModule[]; ORG_ADMIN: AppModule[]; 
           key: 'orders_reservations',
           label: 'Reservas',
           description: 'Gesti\u00f3n de reservas y agendamiento de servicios',
-        },
-        {
-          key: 'orders_consultations',
-          label: 'Consultas',
-          description: 'Atenci\u00f3n de consultas m\u00e9dicas y est\u00e9ticas',
         },
         {
           key: 'orders_dispatch_notes',
@@ -261,6 +225,26 @@ export const APP_MODULES: { [key: string]: AppModule[]; ORG_ADMIN: AppModule[]; 
           label: 'Rendimiento',
           description: 'KPIs de rendimiento',
         },
+        {
+          key: 'analytics_inventory',
+          label: 'Anal\u00edticas de Inventario',
+          description: 'An\u00e1lisis de inventario y rotaci\u00f3n',
+        },
+        {
+          key: 'analytics_products',
+          label: 'Anal\u00edticas de Productos',
+          description: 'Desempe\u00f1o de productos y cat\u00e1logo',
+        },
+        {
+          key: 'analytics_customers',
+          label: 'Anal\u00edticas de Clientes',
+          description: 'Resumen y segmentaci\u00f3n de clientes',
+        },
+        {
+          key: 'analytics_financial',
+          label: 'Financiero',
+          description: 'P\u00e9rdidas y ganancias, m\u00e1rgenes financieros',
+        },
       ],
     },
 
@@ -334,6 +318,21 @@ export const APP_MODULES: { [key: string]: AppModule[]; ORG_ADMIN: AppModule[]; 
           key: 'cartera_aging',
           label: 'Cartera por Vencimiento',
           description: 'Reporte de antig\u00fcedad de cartera',
+        },
+        {
+          key: 'accounting_withholding_tax',
+          label: 'Retenciones',
+          description: 'Gesti\u00f3n de retenciones en la fuente y autoretenciones',
+        },
+        {
+          key: 'accounting_exogenous',
+          label: 'Info Ex\u00f3gena',
+          description: 'Reportes de informaci\u00f3n ex\u00f3gena DIAN',
+        },
+        {
+          key: 'taxes_ica',
+          label: 'ICA Municipal',
+          description: 'Impuesto de industria y comercio municipal',
         },
       ],
     },
@@ -429,6 +428,11 @@ export const APP_MODULES: { [key: string]: AppModule[]; ORG_ADMIN: AppModule[]; 
           key: 'settings_cash_registers',
           label: 'Caja Registradora',
           description: 'Gesti\u00f3n de cajas, sesiones y movimientos',
+        },
+        {
+          key: 'settings_habeas_data',
+          label: 'Datos Personales',
+          description: 'Pol\u00edtica de habeas data y consentimientos',
         },
       ],
     },

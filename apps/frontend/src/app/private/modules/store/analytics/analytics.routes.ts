@@ -19,8 +19,7 @@ export const analyticsRoutes: Routes = [
       {
         path: '',
         pathMatch: 'full',
-        loadComponent: () =>
-          import('./analytics.component').then((c) => c.AnalyticsComponent),
+        redirectTo: 'overview',
       },
       // Overview Analytics
       {

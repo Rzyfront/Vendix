@@ -1,14 +1,15 @@
 import {
   Component,
-  OnInit,
-  OnDestroy,
   NO_ERRORS_SCHEMA,
-  Output,
-  Input,
-  EventEmitter,
+  input,
+  output,
+  inject,
+  effect,
+  signal,
+  DestroyRef,
 } from '@angular/core';
-import { Subject, debounceTime, distinctUntilChanged, takeUntil } from 'rxjs';
-import { CommonModule } from '@angular/common';
+import { Subject, debounceTime, distinctUntilChanged } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
 
@@ -23,7 +24,10 @@ import {
   FilterValues,
   BadgeComponent,
 } from '../../../../../shared/components';
-import { CurrencyPipe, CurrencyFormatService } from '../../../../../shared/pipes/currency';
+import {
+  CurrencyPipe,
+  CurrencyFormatService,
+} from '../../../../../shared/pipes/currency';
 import { Router } from '@angular/router';
 
 import { PosCartService } from '../services/pos-cart.service';
@@ -40,13 +44,16 @@ import {
   selectUser,
   selectStoreSettings,
 } from '../../../../../core/store/auth/auth.selectors';
-import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfaces';
+import {
+  ProductQueryDto,
+  Brand,
+  ProductCategory,
+} from '../../products/interfaces';
 
 @Component({
   selector: 'app-pos-product-selection',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     IconComponent,
     ButtonComponent,
@@ -62,7 +69,9 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
       class="h-full flex flex-col bg-surface rounded-card lg:rounded-card shadow-card border border-border overflow-hidden"
     >
       <!-- Products Header -->
-      <div class="px-3 lg:px-6 py-3 lg:py-4 border-b border-border product-header">
+      <div
+        class="px-3 lg:px-6 py-3 lg:py-4 border-b border-border product-header"
+      >
         <!-- Single header row: count badge + search + filters -->
         <div class="flex items-center gap-2 lg:gap-3 w-full">
           <!-- Input de búsqueda -->
@@ -71,15 +80,16 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
             size="sm"
             placeholder="Buscar productos..."
             [debounceTime]="300"
-            [(ngModel)]="searchQuery"
+            [ngModel]="searchQuery()"
+            (ngModelChange)="searchQuery.set($event)"
             (searchChange)="onSearch($event)"
           />
 
           <!-- Componente de filtros -->
           <app-options-dropdown
             [filters]="filterConfigs"
-            [filterValues]="filterValues"
-            [isLoading]="loading"
+            [filterValues]="filterValues()"
+            [isLoading]="loading()"
             title="Filtros"
             triggerLabel="Filtros"
             (filterChange)="onOptionsFilterChange($event)"
@@ -88,17 +98,17 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
           ></app-options-dropdown>
 
           <!-- Botón cliente / Cola -->
-          @if (queueEnabled && queueCount > 0) {
+          @if (queueEnabled() && queueCount() > 0) {
             <button
               class="relative flex items-center justify-center w-10 sm:w-11 h-10 sm:h-11 rounded-[10px] bg-accent/10 hover:bg-accent/20 transition-colors border border-accent/30 shrink-0"
               (click)="openQueueModal.emit()"
-              title="Cola de clientes ({{ queueCount }})"
+              title="Cola de clientes ({{ queueCount() }})"
             >
               <app-icon name="users" [size]="18" class="text-accent"></app-icon>
               <span
                 class="absolute -top-1.5 -right-1.5 min-w-[20px] h-5 flex items-center justify-center rounded-full bg-accent text-white text-xs font-bold px-1"
               >
-                {{ queueCount }}
+                {{ queueCount() }}
               </span>
             </button>
           } @else {
@@ -107,13 +117,15 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
               size="md"
               customClasses="w-10 sm:w-11 !px-0 bg-surface !rounded-[10px] shrink-0"
               (clicked)="openCustomerModal.emit()"
-              [title]="selectedCustomer ? selectedCustomer.name : 'Agregar cliente'"
+              [title]="
+                selectedCustomer() ? selectedCustomer().name : 'Agregar cliente'
+              "
             >
               <app-icon
                 slot="icon"
-                [name]="selectedCustomer ? 'user-check' : 'user-plus'"
+                [name]="selectedCustomer() ? 'user-check' : 'user-plus'"
                 [size]="18"
-                [class]="selectedCustomer ? 'text-primary' : ''"
+                [class]="selectedCustomer() ? 'text-primary' : ''"
               ></app-icon>
             </app-button>
           }
@@ -123,215 +135,279 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
       <!-- Products Content -->
       <div class="flex-1 overflow-y-auto min-h-0 p-3 lg:p-6 relative z-0">
         <!-- Loading State -->
-        <div *ngIf="loading" class="p-8 text-center">
-          <div
-            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-          ></div>
-          <p class="mt-2 text-text-secondary">Cargando productos...</p>
-        </div>
+        @if (loading()) {
+          <div class="p-8 text-center">
+            <div
+              class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            ></div>
+            <p class="mt-2 text-text-secondary">Cargando productos...</p>
+          </div>
+        }
 
         <!-- Empty State -->
-        <div
-          *ngIf="!loading && filteredProducts.length === 0"
-          class="flex flex-col items-center justify-center h-64 text-center p-8"
-        >
+        @if (!loading() && filteredProducts().length === 0) {
           <div
-            class="w-20 h-20 rounded-2xl flex items-center justify-center mb-4"
-            style="background-color: var(--color-primary-light)"
+            class="flex flex-col items-center justify-center h-64 text-center p-8"
           >
-            <app-icon
-              name="package-open"
-              [size]="36"
-              color="var(--color-primary)"
-            ></app-icon>
+            <div
+              class="w-20 h-20 rounded-2xl flex items-center justify-center mb-4"
+              style="background-color: var(--color-primary-light)"
+            >
+              <app-icon
+                name="package-open"
+                [size]="36"
+                color="var(--color-primary)"
+              ></app-icon>
+            </div>
+            <h3 class="text-lg font-semibold text-text-primary mb-2">
+              {{ getEmptyStateTitle() }}
+            </h3>
+            <p class="text-sm text-text-secondary mb-4 max-w-xs mx-auto">
+              {{ getEmptyStateDescription() }}
+            </p>
+            @if (searchQuery()) {
+              <app-button
+                variant="outline"
+                size="md"
+                (clicked)="onClearSearch()"
+              >
+                Limpiar búsqueda
+              </app-button>
+            }
           </div>
-          <h3 class="text-lg font-semibold text-text-primary mb-2">
-            {{ getEmptyStateTitle() }}
-          </h3>
-          <p class="text-sm text-text-secondary mb-4 max-w-xs mx-auto">
-            {{ getEmptyStateDescription() }}
-          </p>
-          <app-button
-            *ngIf="searchQuery"
-            variant="outline"
-            size="md"
-            (clicked)="onClearSearch()"
-          >
-            Limpiar búsqueda
-          </app-button>
-        </div>
+        }
 
         <!-- Modern Compact Products Grid -->
-        <div
-          *ngIf="!loading && filteredProducts.length > 0"
-          class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-2 sm:gap-3"
-        >
-          <!-- Modern Product Card (iOS-style) -->
+        @if (!loading() && filteredProducts().length > 0) {
           <div
-            *ngFor="let product of filteredProducts; trackBy: trackByProductId"
-            (click)="onAddToCart(product)"
-            class="group relative bg-surface border border-border rounded-card shadow-sm hover:shadow-lg transition-all duration-200 cursor-pointer overflow-hidden product-card"
-            [class]="
-              product.track_inventory !== false && product.stock === 0
-                ? 'opacity-60 cursor-not-allowed'
-                : 'cursor-pointer hover:border-primary active:scale-[0.97]'
-            "
+            class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-2 sm:gap-3"
           >
-            <!-- Product Image or Icon -->
-            <div
-              class="aspect-square bg-gradient-to-br from-surface to-muted/30 relative overflow-hidden"
-            >
-              <!-- Product Image -->
-              <img
-                *ngIf="product.image_url || product.image"
-                [src]="product.image_url || product.image"
-                [alt]="product.name"
-                class="w-full h-full object-cover"
-                (error)="onImageError($event)"
-              />
-
-              <!-- Default Icon when no image -->
+            <!-- Modern Product Card (iOS-style) -->
+            @for (
+              product of filteredProducts();
+              track trackByProductId($index, product)
+            ) {
               <div
-                *ngIf="!product.image && !product.image_url"
-                class="absolute inset-0 flex items-center justify-center"
+                (click)="onAddToCart(product)"
+                class="group relative bg-surface border border-border rounded-card shadow-sm hover:shadow-lg transition-all duration-200 cursor-pointer overflow-hidden product-card"
+                [class]="
+                  product.track_inventory !== false && product.stock === 0
+                    ? 'opacity-60 cursor-not-allowed'
+                    : 'cursor-pointer hover:border-primary active:scale-[0.97]'
+                "
               >
+                <!-- Product Image or Icon -->
                 <div
-                  class="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center"
+                  class="aspect-square bg-gradient-to-br from-surface to-muted/30 relative overflow-hidden"
                 >
-                  <app-icon
-                    name="image"
-                    [size]="24"
-                    class="text-primary/60"
-                  ></app-icon>
-                </div>
-              </div>
-
-              <!-- Stock Badge -->
-              @if (product.track_inventory !== false) {
-                @if (product.stock <= 5) {
-                  <app-badge
-                    [variant]="product.stock === 0 ? 'error' : 'warning'"
-                    size="xs"
-                    badgeStyle="outline"
-                    class="absolute top-2 right-2 z-[1]">
-                    {{ product.stock === 0 ? 'AGOTADO' : 'Últimas ' + product.stock }}
-                  </app-badge>
-                }
-              } @else {
-                <app-badge variant="info" size="xs" badgeStyle="outline" class="absolute top-2 right-2 z-[1]">
-                  Disponible
-                </app-badge>
-              }
-
-              <!-- Variant Indicator -->
-              <div
-                *ngIf="product.has_variants"
-                class="absolute top-2 left-2 px-1.5 py-1 rounded-md text-[10px] font-semibold backdrop-blur-md bg-black/60 border border-white/10 flex items-center gap-1"
-              >
-                <app-icon name="layers" [size]="12" [color]="'#ffffff'"></app-icon>
-                <span class="text-white">{{ product.product_variants?.length }}</span>
-              </div>
-
-              <!-- Weight Product Badge -->
-              <div
-                *ngIf="product.pricing_type === 'weight'"
-                class="absolute bottom-2 left-2 px-1.5 py-1 rounded-md text-[10px] font-semibold backdrop-blur-md bg-blue-600/80 border border-white/10 flex items-center gap-1"
-              >
-                <app-icon name="scale" [size]="12" [color]="'#ffffff'"></app-icon>
-                <span class="text-white">Peso</span>
-              </div>
-            </div>
-
-            <!-- Product Info -->
-            <div class="p-2 sm:p-3">
-              <!-- Product Name -->
-              <h3
-                class="text-text-primary font-medium text-xs sm:text-sm leading-tight line-clamp-2 mb-1 sm:mb-2 group-hover:text-primary transition-colors"
-                [title]="product.name"
-              >
-                {{ product.name }}
-              </h3>
-
-              <!-- Product Description (hidden on mobile, shortened on desktop) -->
-              <p
-                *ngIf="product.description"
-                class="hidden sm:block text-text-secondary text-xs line-clamp-1 mb-2"
-                [title]="product.description"
-              >
-                {{ product.description }}
-              </p>
-
-              <!-- Bottom Section: Price and Stock -->
-              <div class="flex items-center justify-between">
-                <!-- Price -->
-                <div class="flex flex-col">
-                  <span class="text-text-primary font-bold text-xs sm:text-sm lg:text-base xl:text-lg leading-tight truncate">
-                    {{ product.final_price | currency }}<span *ngIf="product.pricing_type === 'weight'" class="text-[10px] font-normal text-text-secondary">/{{ defaultWeightUnit }}</span>
-                  </span>
-                  <!-- Stock indicator for non-variant products -->
-                  @if (product.track_inventory !== false) {
-                    <span
-                      *ngIf="!product.has_variants"
-                      class="text-[10px] sm:text-xs leading-tight"
-                      [class]="product.stock === 0
-                        ? 'text-error font-semibold'
-                        : product.stock <= 5
-                          ? 'text-warning font-medium'
-                          : 'text-text-muted'"
+                  <!-- Product Image -->
+                  @if (product.image_url || product.image) {
+                    <img
+                      [src]="product.image_url || product.image"
+                      [alt]="product.name"
+                      class="w-full h-full object-cover"
+                      (error)="onImageError($event)"
+                    />
+                  }
+                  <!-- Default Icon when no image -->
+                  @if (!product.image && !product.image_url) {
+                    <div
+                      class="absolute inset-0 flex items-center justify-center"
                     >
-                      {{ product.stock === 0 ? 'Sin stock' : product.stock + ' en stock' }}
-                    </span>
+                      <div
+                        class="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center"
+                      >
+                        <app-icon
+                          name="image"
+                          [size]="24"
+                          class="text-primary/60"
+                        ></app-icon>
+                      </div>
+                    </div>
+                  }
+                  <!-- Stock Badge -->
+                  @if (product.track_inventory !== false) {
+                    @if (product.stock <= 5) {
+                      <app-badge
+                        [variant]="product.stock === 0 ? 'error' : 'warning'"
+                        size="xs"
+                        badgeStyle="outline"
+                        class="absolute top-2 right-2 z-[1]"
+                      >
+                        {{
+                          product.stock === 0
+                            ? 'AGOTADO'
+                            : 'Últimas ' + product.stock
+                        }}
+                      </app-badge>
+                    }
                   } @else {
-                    <span *ngIf="!product.has_variants" class="text-[10px] sm:text-xs leading-tight text-blue-600 font-medium">
+                    <app-badge
+                      variant="info"
+                      size="xs"
+                      badgeStyle="outline"
+                      class="absolute top-2 right-2 z-[1]"
+                    >
                       Disponible
-                    </span>
+                    </app-badge>
+                  }
+                  <!-- Variant Indicator -->
+                  @if (product.has_variants) {
+                    <div
+                      class="absolute top-2 left-2 px-1.5 py-1 rounded-md text-[10px] font-semibold backdrop-blur-md bg-black/60 border border-white/10 flex items-center gap-1"
+                    >
+                      <app-icon
+                        name="layers"
+                        [size]="12"
+                        [color]="'#ffffff'"
+                      ></app-icon>
+                      <span class="text-white">{{
+                        product.product_variants?.length
+                      }}</span>
+                    </div>
+                  }
+                  <!-- Weight Product Badge -->
+                  @if (product.pricing_type === 'weight') {
+                    <div
+                      class="absolute bottom-2 left-2 px-1.5 py-1 rounded-md text-[10px] font-semibold backdrop-blur-md bg-blue-600/80 border border-white/10 flex items-center gap-1"
+                    >
+                      <app-icon
+                        name="scale"
+                        [size]="12"
+                        [color]="'#ffffff'"
+                      ></app-icon>
+                      <span class="text-white">Peso</span>
+                    </div>
                   }
                 </div>
-              </div>
-
-              <!-- Additional Product Details + Add Button -->
-              <div
-                class="hidden sm:flex items-center justify-between mt-2 pt-2 border-t border-border/60 gap-2"
-              >
-                <div class="flex-1 min-w-0 flex items-center gap-2 text-xs text-text-muted">
-                  <span *ngIf="product.sku" class="font-mono truncate max-w-[80px]" [title]="product.sku">{{
-                    product.sku
-                  }}</span>
-                  <span *ngIf="product.category_name" class="truncate">{{
-                    product.category_name
-                  }}</span>
+                <!-- Product Info -->
+                <div class="p-2 sm:p-3">
+                  <!-- Product Name -->
+                  <h3
+                    class="text-text-primary font-medium text-xs sm:text-sm leading-tight line-clamp-2 mb-1 sm:mb-2 group-hover:text-primary transition-colors"
+                    [title]="product.name"
+                  >
+                    {{ product.name }}
+                  </h3>
+                  <!-- Product Description (hidden on mobile, shortened on desktop) -->
+                  @if (product.description) {
+                    <p
+                      class="hidden sm:block text-text-secondary text-xs line-clamp-1 mb-2"
+                      [title]="product.description"
+                    >
+                      {{ product.description }}
+                    </p>
+                  }
+                  <!-- Bottom Section: Price and Stock -->
+                  <div class="flex items-center justify-between">
+                    <!-- Price -->
+                    <div class="flex flex-col">
+                      <span
+                        class="text-text-primary font-bold text-xs sm:text-sm lg:text-base xl:text-lg leading-tight truncate"
+                      >
+                        {{ product.final_price | currency }}
+                        @if (product.pricing_type === 'weight') {
+                          <span
+                            class="text-[10px] font-normal text-text-secondary"
+                            >/{{ defaultWeightUnit() }}</span
+                          >
+                        }
+                      </span>
+                      <!-- Stock indicator for non-variant products -->
+                      @if (product.track_inventory !== false) {
+                        @if (!product.has_variants) {
+                          <span
+                            class="text-[10px] sm:text-xs leading-tight"
+                            [class]="
+                              product.stock === 0
+                                ? 'text-error font-semibold'
+                                : product.stock <= 5
+                                  ? 'text-warning font-medium'
+                                  : 'text-text-muted'
+                            "
+                          >
+                            {{
+                              product.stock === 0
+                                ? 'Sin stock'
+                                : product.stock + ' en stock'
+                            }}
+                          </span>
+                        }
+                      } @else {
+                        @if (!product.has_variants) {
+                          <span
+                            class="text-[10px] sm:text-xs leading-tight text-blue-600 font-medium"
+                          >
+                            Disponible
+                          </span>
+                        }
+                      }
+                    </div>
+                  </div>
+                  <!-- Additional Product Details + Add Button -->
+                  <div
+                    class="hidden sm:flex items-center justify-between mt-2 pt-2 border-t border-border/60 gap-2"
+                  >
+                    <div
+                      class="flex-1 min-w-0 flex items-center gap-2 text-xs text-text-muted"
+                    >
+                      @if (product.sku) {
+                        <span
+                          class="font-mono truncate max-w-[80px]"
+                          [title]="product.sku"
+                          >{{ product.sku }}</span
+                        >
+                      }
+                      @if (product.category_name) {
+                        <span class="truncate">{{
+                          product.category_name
+                        }}</span>
+                      }
+                    </div>
+                    <button
+                      class="shrink-0 w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 shadow-sm text-[var(--color-text-on-primary)]"
+                      [ngClass]="
+                        product.stock === 0
+                          ? 'opacity-50 cursor-not-allowed bg-muted'
+                          : 'bg-[var(--color-primary)] hover:opacity-90 hover:scale-110 active:scale-95'
+                      "
+                      [disabled]="product.stock === 0"
+                      (click)="$event.stopPropagation(); onAddToCart(product)"
+                      aria-label="Agregar al carrito"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2.5"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                      </svg>
+                    </button>
+                  </div>
                 </div>
-                <button
-                  class="shrink-0 w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 shadow-sm text-[var(--color-text-on-primary)]"
-                  [ngClass]="
-                    product.stock === 0
-                      ? 'opacity-50 cursor-not-allowed bg-muted'
-                      : 'bg-[var(--color-primary)] hover:opacity-90 hover:scale-110 active:scale-95'
-                  "
-                  [disabled]="product.stock === 0"
-                  (click)="$event.stopPropagation(); onAddToCart(product)"
-                  aria-label="Agregar al carrito"
-                >
-                  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                    <line x1="12" y1="5" x2="12" y2="19"></line>
-                    <line x1="5" y1="12" x2="19" y2="12"></line>
-                  </svg>
-                </button>
               </div>
-            </div>
+            }
           </div>
-        </div>
+        }
       </div>
     </div>
 
     <!-- Variant Selector Modal -->
-    <app-pos-variant-selector
-      *ngIf="showVariantSelector && selectedProductForVariant"
-      [product]="selectedProductForVariant"
-      [variants]="selectedProductForVariant.product_variants"
-      (variantSelected)="onVariantSelected($event)"
-      (closed)="onVariantSelectorClosed()"
-    ></app-pos-variant-selector>
+    @if (showVariantSelector() && selectedProductForVariant()) {
+      <app-pos-variant-selector
+        [product]="selectedProductForVariant()"
+        [variants]="selectedProductForVariant()!.product_variants"
+        (variantSelected)="onVariantSelected($event)"
+        (closed)="onVariantSelectorClosed()"
+      ></app-pos-variant-selector>
+    }
   `,
   styles: [
     `
@@ -400,28 +476,28 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
         color: var(--color-primary);
         font-weight: var(--fw-bold);
       }
-
     `,
   ],
 })
-export class PosProductSelectionComponent implements OnInit, OnDestroy {
-  loading = false;
-  searchQuery = '';
-  selectedCategory: any = null;
-  selectedBrand: any = null;
-  filteredProducts: any[] = [];
-  categories: any[] = [];
-  brands: any[] = [];
+export class PosProductSelectionComponent {
+  private destroyRef = inject(DestroyRef);
+  readonly loading = signal(false);
+  readonly searchQuery = signal('');
+  readonly selectedCategory = signal<any>(null);
+  readonly selectedBrand = signal<any>(null);
+  readonly filteredProducts = signal<any[]>([]);
+  readonly categories = signal<any[]>([]);
+  readonly brands = signal<any[]>([]);
   addingToCart = new Set<string>();
 
   // Variant selection state
-  showVariantSelector = false;
-  selectedProductForVariant: any = null;
+  readonly showVariantSelector = signal(false);
+  readonly selectedProductForVariant = signal<any>(null);
 
   // Scale/weight settings from store
-  scaleEnabled = false;
-  defaultWeightUnit: 'kg' | 'g' | 'lb' = 'kg';
-  allowManualWeightEntry = true;
+  readonly scaleEnabled = signal(false);
+  readonly defaultWeightUnit = signal<'kg' | 'g' | 'lb'>('kg');
+  readonly allowManualWeightEntry = signal(true);
 
   // Filter configuration for the options dropdown
   filterConfigs: FilterConfig[] = [
@@ -442,78 +518,69 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
   ];
 
   // Current filter values
-  filterValues: FilterValues = {};
+  readonly filterValues = signal<FilterValues>({});
 
-  @Input() set refreshTrigger(value: number) {
-    if (value > 0) this.loadProducts();
-  }
-  @Input() selectedCustomer: any = null;
-  @Input() queueEnabled = false;
-  @Input() queueCount = 0;
+  readonly refreshTrigger = input<number>(0);
+  readonly selectedCustomer = input<any>(null);
+  readonly queueEnabled = input<boolean>(false);
+  readonly queueCount = input<number>(0);
 
-  @Output() productSelected = new EventEmitter<any>();
-  @Output() productAddedToCart = new EventEmitter<{
-    product: any;
-    quantity: number;
-  }>();
-  @Output() bookingRequired = new EventEmitter<any>();
-  @Output() openCustomerModal = new EventEmitter<void>();
-  @Output() openQueueModal = new EventEmitter<void>();
+  readonly productSelected = output<any>();
+  readonly productAddedToCart = output<{ product: any; quantity: number }>();
+  readonly bookingRequired = output<any>();
+  readonly openCustomerModal = output<void>();
+  readonly openQueueModal = output<void>();
 
-  private destroy$ = new Subject<void>();
   private searchSubject$ = new Subject<string>();
+  private productService = inject(PosProductService);
+  private cartService = inject(PosCartService);
+  private toastService = inject(ToastService);
+  private dialogService = inject(DialogService);
+  private router = inject(Router);
+  private store = inject(Store);
+  private currencyService = inject(CurrencyFormatService);
+  private scaleService = inject(PosScaleService);
 
-  constructor(
-    private productService: PosProductService,
-    private cartService: PosCartService,
-    private toastService: ToastService,
-    private dialogService: DialogService,
-    private router: Router,
-    private store: Store,
-    private currencyService: CurrencyFormatService,
-    private scaleService: PosScaleService,
-  ) { }
-
-  ngOnInit(): void {
+  constructor() {
     this.checkAuthState();
     this.loadScaleSettings();
     this.initializeCategories();
     this.initializeBrands();
     this.setupSearchSubscription();
-
     this.loadProducts();
-  }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
+    effect(() => {
+      if (this.refreshTrigger() > 0) {
+        this.loadProducts();
+      }
+    });
   }
 
   private initializeCategories(): void {
-    this.categories = [{ id: '', name: 'Todos', icon: 'grid' }];
-    this.selectedCategory = this.categories[0];
+    const allCategory = { id: '', name: 'Todos', icon: 'grid' };
+    this.categories.set([allCategory]);
+    this.selectedCategory.set(allCategory);
     this.loadCategories();
   }
 
   private initializeBrands(): void {
-    this.brands = [
-      {
-        id: '',
-        name: 'Todas',
-        slug: 'all',
-        store_id: 0,
-        created_at: new Date(),
-        updated_at: new Date(),
-      },
-    ];
-    this.selectedBrand = this.brands[0];
+    const allBrand = {
+      id: '',
+      name: 'Todas',
+      slug: 'all',
+      store_id: 0,
+      created_at: new Date(),
+      updated_at: new Date(),
+    };
+    this.brands.set([allBrand]);
+    this.selectedBrand.set(allBrand);
     this.loadBrands();
   }
 
   private loadCategories(): void {
     this.productService
       .getCategories()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (categories) => {
           const backendCategories = categories.map((cat) => ({
@@ -521,111 +588,116 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
             name: cat.name,
             icon: 'tag',
           }));
-          this.categories = [this.categories[0], ...backendCategories];
+          this.categories.set([this.categories()[0], ...backendCategories]);
           this.updateFilterOptions();
         },
-        error: (error) => {
-          // Error loading categories, using defaults
-        },
+        error: (error) => {},
       });
   }
 
   private loadBrands(): void {
     this.productService
       .getBrands()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (brands) => {
           const backendBrands = brands.map((brand) => ({
             ...brand,
             id: brand.id.toString(),
           }));
-          this.brands = [this.brands[0], ...backendBrands];
+          this.brands.set([this.brands()[0], ...backendBrands]);
           this.updateFilterOptions();
         },
-        error: (error) => {
-          // Error loading brands, using defaults
-        },
+        error: (error) => {},
       });
   }
 
   private updateFilterOptions(): void {
-    // Update category options
-    const categoryFilter = this.filterConfigs.find(f => f.key === 'category_id');
+    const categoryFilter = this.filterConfigs.find(
+      (f) => f.key === 'category_id',
+    );
     if (categoryFilter) {
       categoryFilter.options = [
         { value: '', label: 'Todas las Categorías' },
-        ...this.categories.filter(c => c.id !== '').map(cat => ({
-          value: cat.id.toString(),
-          label: cat.name,
-        })),
+        ...this.categories()
+          .filter((c) => c.id !== '')
+          .map((cat) => ({
+            value: cat.id.toString(),
+            label: cat.name,
+          })),
       ];
     }
 
-    // Update brand options
-    const brandFilter = this.filterConfigs.find(f => f.key === 'brand_id');
+    const brandFilter = this.filterConfigs.find((f) => f.key === 'brand_id');
     if (brandFilter) {
       brandFilter.options = [
         { value: '', label: 'Todas las Marcas' },
-        ...this.brands.filter(b => b.id !== '').map(brand => ({
-          value: brand.id.toString(),
-          label: brand.name,
-        })),
+        ...this.brands()
+          .filter((b) => b.id !== '')
+          .map((brand) => ({
+            value: brand.id.toString(),
+            label: brand.name,
+          })),
       ];
     }
 
-    // Force re-render
     this.filterConfigs = [...this.filterConfigs];
   }
 
   private setupSearchSubscription(): void {
     this.searchSubject$
-      .pipe(debounceTime(300), distinctUntilChanged(), takeUntil(this.destroy$))
+      .pipe(
+        debounceTime(300),
+        distinctUntilChanged(),
+        takeUntilDestroyed(this.destroyRef),
+      )
       .subscribe((query) => {
-        this.searchQuery = query;
+        this.searchQuery.set(query);
         this.filterProducts();
       });
   }
 
   loadProducts(): void {
-    this.loading = true;
+    this.loading.set(true);
     this.filterProducts();
   }
 
   private filterProducts(): void {
-    this.loading = true;
+    this.loading.set(true);
     const filters: any = {
       state: 'active',
       pos_optimized: true,
       include_stock: true,
     };
 
-    if (this.searchQuery) {
-      filters.query = this.searchQuery;
+    if (this.searchQuery()) {
+      filters.query = this.searchQuery();
     }
 
-    if (this.selectedCategory && this.selectedCategory.id !== '') {
-      filters.category = this.selectedCategory.id;
+    const selectedCat = this.selectedCategory();
+    if (selectedCat && selectedCat.id !== '') {
+      filters.category = selectedCat.id;
     }
 
-    if (this.selectedBrand && this.selectedBrand.id !== '') {
-      filters.brand = this.selectedBrand.id.toString();
+    const selectedBr = this.selectedBrand();
+    if (selectedBr && selectedBr.id !== '') {
+      filters.brand = selectedBr.id.toString();
     }
 
     this.productService
       .searchProducts(filters)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (result: SearchResult) => {
           const uniqueProducts = this.removeDuplicateProducts(
             result.products || [],
           );
 
-          this.filteredProducts = uniqueProducts;
-          this.loading = false;
+          this.filteredProducts.set(uniqueProducts);
+          this.loading.set(false);
         },
         error: (error: any) => {
-          this.loading = false;
+          this.loading.set(false);
           this.toastService.error('Error al cargar productos');
         },
       });
@@ -636,82 +708,84 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
   }
 
   onClearSearch(): void {
-    this.searchQuery = '';
+    this.searchQuery.set('');
     this.searchSubject$.next('');
   }
 
   onCategoryChange(event: any): void {
     const categoryId = event.target.value;
-    const category = this.categories.find((c) => c.id === categoryId);
-    this.selectedCategory = category || this.categories[0];
+    const category = this.categories().find((c) => c.id === categoryId);
+    this.selectedCategory.set(category || this.categories()[0]);
     this.filterProducts();
   }
 
   onSelectCategory(category: any): void {
-    this.selectedCategory = category;
+    this.selectedCategory.set(category);
     this.filterProducts();
   }
 
   onSelectBrand(brand: Brand): void {
-    this.selectedBrand = brand;
+    this.selectedBrand.set(brand);
     this.filterProducts();
   }
 
   onOptionsFilterChange(values: FilterValues): void {
-    this.filterValues = values;
+    this.filterValues.set(values);
 
     const categoryId = values['category_id'] as string;
     const brandId = values['brand_id'] as string;
 
-    // Update selected category for filtering
     if (categoryId) {
-      this.selectedCategory =
-        this.categories.find((c) => c.id === categoryId) ||
-        this.categories[0];
+      this.selectedCategory.set(
+        this.categories().find((c) => c.id === categoryId) ||
+          this.categories()[0],
+      );
     } else {
-      this.selectedCategory = this.categories[0];
+      this.selectedCategory.set(this.categories()[0]);
     }
 
-    // Update selected brand for filtering
     if (brandId) {
-      this.selectedBrand =
-        this.brands.find((b) => b.id.toString() === brandId) ||
-        this.brands[0];
+      this.selectedBrand.set(
+        this.brands().find((b) => b.id.toString() === brandId) ||
+          this.brands()[0],
+      );
     } else {
-      this.selectedBrand = this.brands[0];
+      this.selectedBrand.set(this.brands()[0]);
     }
 
     this.filterProducts();
   }
 
   onClearFilters(): void {
-    this.filterValues = {};
-    this.selectedCategory = this.categories[0];
-    this.selectedBrand = this.brands[0];
+    this.filterValues.set({});
+    this.selectedCategory.set(this.categories()[0]);
+    this.selectedBrand.set(this.brands()[0]);
     this.filterProducts();
   }
 
   onFilterChange(filters: ProductQueryDto): void {
-    // Update selected category and brand for UI consistency
     if (filters.category_id) {
-      this.selectedCategory =
-        this.categories.find((c) => c.id === filters.category_id!.toString()) ||
-        this.categories[0];
+      this.selectedCategory.set(
+        this.categories().find(
+          (c) => c.id === filters.category_id!.toString(),
+        ) || this.categories()[0],
+      );
     } else {
-      this.selectedCategory = this.categories[0];
+      this.selectedCategory.set(this.categories()[0]);
     }
 
     if (filters.brand_id) {
-      this.selectedBrand =
-        this.brands.find((b) => b.id.toString() === filters.brand_id!.toString()) ||
-        this.brands[0];
+      this.selectedBrand.set(
+        this.brands().find(
+          (b) => b.id.toString() === filters.brand_id!.toString(),
+        ) || this.brands()[0],
+      );
     } else {
-      this.selectedBrand = this.brands[0];
+      this.selectedBrand.set(this.brands()[0]);
     }
 
-    // Update search query if it was changed in filters (for future extensibility)
-    if (filters.search !== undefined && filters.search !== this.searchQuery) {
-      this.searchQuery = filters.search;
+    if (filters.search !== undefined && filters.search !== this.searchQuery()) {
+      this.searchQuery.set(filters.search);
     }
 
     this.filterProducts();
@@ -723,7 +797,7 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
     const selectedClass =
       'border-primary bg-primary-light text-primary shadow-card';
 
-    return this.selectedCategory?.id === category.id
+    return this.selectedCategory()?.id === category.id
       ? selectedClass
       : baseClass;
   }
@@ -734,7 +808,10 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
 
   async onAddToCart(product: any): Promise<void> {
     // Interceptar servicios que requieren reserva (SIEMPRE antes de validaciones de precio)
-    if (product.product_type === 'service' || product.requires_booking === true) {
+    if (
+      product.product_type === 'service' ||
+      product.requires_booking === true
+    ) {
       this.bookingRequired.emit(product);
       return;
     }
@@ -758,28 +835,32 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
 
     // Intercept products with variants — open selector modal
     if (product.has_variants && product.product_variants?.length > 0) {
-      this.showVariantSelector = true;
-      this.selectedProductForVariant = product;
+      this.showVariantSelector.set(true);
+      this.selectedProductForVariant.set(product);
       return;
     }
-
 
     await this.addToCartNormal(product);
   }
 
   async onVariantSelected(variant: PosProductVariant): Promise<void> {
-    this.showVariantSelector = false;
-    const product = this.selectedProductForVariant;
-    this.selectedProductForVariant = null;
+    this.showVariantSelector.set(false);
+    const product = this.selectedProductForVariant();
+    this.selectedProductForVariant.set(null);
 
     if (!product) return;
 
     // If product is weight-based and scale is enabled, prompt for weight
-    const isWeightProduct = product.pricing_type === 'weight' && this.scaleEnabled;
+    const isWeightProduct =
+      product.pricing_type === 'weight' && this.scaleEnabled();
     if (isWeightProduct) {
-      const unit = this.defaultWeightUnit;
+      const unit = this.defaultWeightUnit();
       const variantPrice = variant.price_override ?? product.final_price;
-      const weight = await this.getWeightFromScaleOrManual(product.name, variantPrice, unit);
+      const weight = await this.getWeightFromScaleOrManual(
+        product.name,
+        variantPrice,
+        unit,
+      );
       if (weight === undefined) return;
 
       if (weight <= 0) {
@@ -794,17 +875,23 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
       this.addingToCart.add(product.id);
       this.cartService
         .addToCart({ product, quantity: 1, variant, weight, weight_unit: unit })
-        .pipe(takeUntil(this.destroy$))
+        .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: () => {
             this.addingToCart.delete(product.id);
-            const variantLabel = variant.attributes?.map(a => a.attribute_value).join(' / ') || '';
-            this.toastService.success(`${product.name} (${variantLabel}) ${weight} ${unit} agregado al carrito`);
+            const variantLabel =
+              variant.attributes?.map((a) => a.attribute_value).join(' / ') ||
+              '';
+            this.toastService.success(
+              `${product.name} (${variantLabel}) ${weight} ${unit} agregado al carrito`,
+            );
             this.productAddedToCart.emit({ product, quantity: 1 });
           },
           error: (error) => {
             this.addingToCart.delete(product.id);
-            this.toastService.warning(error.message || 'Error al agregar variante al carrito');
+            this.toastService.warning(
+              error.message || 'Error al agregar variante al carrito',
+            );
           },
         });
       return;
@@ -818,24 +905,29 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
         quantity: 1,
         variant,
       })
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.addingToCart.delete(product.id);
-          const variantLabel = variant.attributes?.map(a => a.attribute_value).join(' / ') || '';
-          this.toastService.success(`${product.name} (${variantLabel}) agregado al carrito`);
+          const variantLabel =
+            variant.attributes?.map((a) => a.attribute_value).join(' / ') || '';
+          this.toastService.success(
+            `${product.name} (${variantLabel}) agregado al carrito`,
+          );
           this.productAddedToCart.emit({ product, quantity: 1 });
         },
         error: (error) => {
           this.addingToCart.delete(product.id);
-          this.toastService.warning(error.message || 'Error al agregar variante al carrito');
+          this.toastService.warning(
+            error.message || 'Error al agregar variante al carrito',
+          );
         },
       });
   }
 
   onVariantSelectorClosed(): void {
-    this.showVariantSelector = false;
-    this.selectedProductForVariant = null;
+    this.showVariantSelector.set(false);
+    this.selectedProductForVariant.set(null);
   }
 
   private async addToCartNormal(product: any): Promise<void> {
@@ -853,12 +945,17 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
     }
 
     // Check if product is sold by weight and scale is enabled
-    const isWeightProduct = product.pricing_type === 'weight' && this.scaleEnabled;
+    const isWeightProduct =
+      product.pricing_type === 'weight' && this.scaleEnabled();
 
     // For weight products, require weight input
     if (isWeightProduct) {
-      const unit = this.defaultWeightUnit;
-      const weight = await this.getWeightFromScaleOrManual(product.name, product.final_price, unit);
+      const unit = this.defaultWeightUnit();
+      const weight = await this.getWeightFromScaleOrManual(
+        product.name,
+        product.final_price,
+        unit,
+      );
       if (weight === undefined) return;
 
       if (weight <= 0) {
@@ -882,7 +979,7 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
         product: product,
         quantity: 1,
       })
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.addingToCart.delete(product.id);
@@ -891,7 +988,9 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
         },
         error: (error) => {
           this.addingToCart.delete(product.id);
-          this.toastService.warning(error.message || 'Error al agregar producto al carrito');
+          this.toastService.warning(
+            error.message || 'Error al agregar producto al carrito',
+          );
         },
       });
   }
@@ -899,7 +998,7 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
   private addWeightProductToCart(product: any, weight: number): void {
     this.addingToCart.add(product.id);
 
-    const unit = this.defaultWeightUnit;
+    const unit = this.defaultWeightUnit();
     const totalPrice = product.final_price * weight;
 
     this.cartService
@@ -909,18 +1008,20 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
         weight: weight,
         weight_unit: unit,
       })
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.addingToCart.delete(product.id);
           this.toastService.success(
-            `${product.name} (${weight} ${unit}) agregado al carrito - ${this.formatPrice(totalPrice)}`
+            `${product.name} (${weight} ${unit}) agregado al carrito - ${this.formatPrice(totalPrice)}`,
           );
           this.productAddedToCart.emit({ product, quantity: 1 });
         },
         error: (error) => {
           this.addingToCart.delete(product.id);
-          this.toastService.warning(error.message || 'Error al agregar producto al carrito');
+          this.toastService.warning(
+            error.message || 'Error al agregar producto al carrito',
+          );
         },
       });
   }
@@ -935,11 +1036,11 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
         title: 'Lectura de Báscula',
         message: `${productName}\nPrecio: ${this.formatPrice(price)}/${unit}`,
         weightUnit: unit,
-        allowManualFallback: this.allowManualWeightEntry,
+        allowManualFallback: this.allowManualWeightEntry(),
       });
     }
 
-    if (this.allowManualWeightEntry) {
+    if (this.allowManualWeightEntry()) {
       const weightStr = await this.dialogService.prompt(
         {
           title: 'Ingresar Peso',
@@ -948,6 +1049,7 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
           defaultValue: '1.0',
           confirmText: 'Agregar',
           cancelText: 'Cancelar',
+          inputType: 'number',
         },
         { size: 'sm' },
       );
@@ -957,7 +1059,9 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
       return isNaN(weight) ? undefined : weight;
     }
 
-    this.toastService.warning('Báscula no conectada y pesado manual deshabilitado');
+    this.toastService.warning(
+      'Báscula no conectada y pesado manual deshabilitado',
+    );
     return undefined;
   }
 
@@ -976,11 +1080,11 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
   }
 
   get scaleConnectionStatus() {
-    return this.scaleService.status$.value;
+    return this.scaleService.status();
   }
 
   get showScaleButton(): boolean {
-    return this.scaleEnabled && this.scaleService.isWebSerialSupported();
+    return this.scaleEnabled() && this.scaleService.isWebSerialSupported();
   }
 
   onImageError(event: any): void {
@@ -1020,14 +1124,14 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
   }
 
   getEmptyStateTitle(): string {
-    if (this.searchQuery) {
+    if (this.searchQuery()) {
       return 'No se encontraron productos';
     }
     return 'No hay productos disponibles';
   }
 
   getEmptyStateDescription(): string {
-    if (this.searchQuery) {
+    if (this.searchQuery()) {
       return 'Intenta buscar con otros términos o cambia la categoría.';
     }
     return 'Los productos aparecerán aquí cuando estén disponibles.';
@@ -1038,32 +1142,45 @@ export class PosProductSelectionComponent implements OnInit, OnDestroy {
   }
 
   private loadScaleSettings(): void {
-    this.store.select(selectStoreSettings).pipe(takeUntil(this.destroy$)).subscribe((storeSettings: any) => {
-      if (storeSettings?.pos?.scale) {
-        this.scaleEnabled = storeSettings.pos.scale.enabled ?? false;
-        this.defaultWeightUnit = storeSettings.pos.scale.default_weight_unit || 'kg';
-        this.allowManualWeightEntry = storeSettings.pos.scale.allow_manual_weight_entry ?? true;
+    this.store
+      .select(selectStoreSettings)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((storeSettings: any) => {
+        if (storeSettings?.pos?.scale) {
+          this.scaleEnabled.set(storeSettings.pos.scale.enabled ?? false);
+          this.defaultWeightUnit.set(
+            storeSettings.pos.scale.default_weight_unit || 'kg',
+          );
+          this.allowManualWeightEntry.set(
+            storeSettings.pos.scale.allow_manual_weight_entry ?? true,
+          );
 
-        if (storeSettings.pos.scale.device) {
-          this.scaleService.configure(storeSettings.pos.scale.device);
+          if (storeSettings.pos.scale.device) {
+            this.scaleService.configure(storeSettings.pos.scale.device);
+          }
         }
-      }
-    });
+      });
   }
 
   private checkAuthState(): void {
     // Use store selectors instead of direct localStorage access
-    this.store.select(selectAccessToken).subscribe((token: any) => {
-      if (!token) {
-        this.toastService.error(
-          'No estás autenticado. Por favor, inicia sesión.',
-        );
-      }
-    });
+    this.store
+      .select(selectAccessToken)
+      .pipe(takeUntilDestroyed())
+      .subscribe((token: any) => {
+        if (!token) {
+          this.toastService.error(
+            'No estás autenticado. Por favor, inicia sesión.',
+          );
+        }
+      });
 
-    this.store.select(selectUser).subscribe((user: any) => {
-      // User data handled by store
-    });
+    this.store
+      .select(selectUser)
+      .pipe(takeUntilDestroyed())
+      .subscribe((user: any) => {
+        // User data handled by store
+      });
 
     // Keep store check for now since it's critical for POS
     const currentStore = localStorage.getItem('current_store');

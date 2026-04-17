@@ -1,13 +1,7 @@
-import {
-  Component,
-  Input,
-  Output,
-  EventEmitter,
-  OnChanges,
-  SimpleChanges,
-  inject,
-} from '@angular/core';
+import {Component, input, output, inject, effect, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
+import { firstValueFrom } from 'rxjs';
 
 import { CarteraService } from '../../services/cartera.service';
 import {
@@ -29,34 +23,34 @@ import {
   imports: [CommonModule, ModalComponent, ButtonComponent, IconComponent],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onClose()"
-      [title]="receivable?.document_number || 'Detalle Cuenta por Cobrar'"
+      [title]="receivable()?.document_number || 'Detalle Cuenta por Cobrar'"
       size="xl"
     >
-      @if (detail) {
+      @if (detail(); as d) {
         <div class="p-4 space-y-6 max-h-[70vh] overflow-y-auto">
           <!-- Customer Info -->
           <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
               <p class="text-xs text-gray-500">Cliente</p>
               <p class="text-sm font-semibold">
-                {{ detail.customer?.name || '—' }}
+                {{ d.customer?.name || '—' }}
               </p>
             </div>
             <div>
               <p class="text-xs text-gray-500">Email</p>
-              <p class="text-sm">{{ detail.customer?.email || '—' }}</p>
+              <p class="text-sm">{{ d.customer?.email || '—' }}</p>
             </div>
             <div>
               <p class="text-xs text-gray-500">Telefono</p>
-              <p class="text-sm">{{ detail.customer?.phone || '—' }}</p>
+              <p class="text-sm">{{ d.customer?.phone || '—' }}</p>
             </div>
             <div>
               <p class="text-xs text-gray-500">Origen</p>
               <p class="text-sm">
-                {{ detail.source_type }} #{{ detail.source_id }}
+                {{ d.source_type }} #{{ d.source_id }}
               </p>
             </div>
           </div>
@@ -65,13 +59,13 @@ import {
           <div class="flex items-center gap-3">
             <span
               class="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full"
-              [class]="getStatusClass(detail.status)"
+              [class]="getStatusClass(d.status)"
             >
-              {{ getStatusLabel(detail.status) }}
+              {{ getStatusLabel(d.status) }}
             </span>
-            @if (detail.days_overdue > 0) {
+            @if (d.days_overdue > 0) {
               <span class="text-xs text-red-500 font-medium">
-                {{ detail.days_overdue }} dias vencido
+                {{ d.days_overdue }} dias vencido
               </span>
             }
           </div>
@@ -83,25 +77,25 @@ import {
             <div>
               <p class="text-xs text-gray-500">Monto Original</p>
               <p class="text-sm font-semibold font-mono">
-                {{ formatCurrency(detail.original_amount) }}
+                {{ formatCurrency(d.original_amount) }}
               </p>
             </div>
             <div>
               <p class="text-xs text-gray-500">Cobrado</p>
               <p class="text-sm font-semibold font-mono text-emerald-600">
-                {{ formatCurrency(detail.paid_amount) }}
+                {{ formatCurrency(d.paid_amount) }}
               </p>
             </div>
             <div>
               <p class="text-xs text-gray-500">Saldo</p>
               <p class="text-sm font-bold font-mono text-primary">
-                {{ formatCurrency(detail.balance) }}
+                {{ formatCurrency(d.balance) }}
               </p>
             </div>
             <div>
               <p class="text-xs text-gray-500">Vencimiento</p>
               <p class="text-sm font-medium">
-                {{ detail.due_date | date : 'dd/MM/yyyy' }}
+                {{ d.due_date | date: 'dd/MM/yyyy' }}
               </p>
             </div>
           </div>
@@ -111,36 +105,38 @@ import {
             <div>
               <p class="text-xs text-gray-500">Fecha Emision</p>
               <p class="text-sm">
-                {{ detail.issue_date | date : 'dd/MM/yyyy' }}
+                {{ d.issue_date | date: 'dd/MM/yyyy' }}
               </p>
             </div>
             <div>
               <p class="text-xs text-gray-500">Ultimo Pago</p>
               <p class="text-sm">
                 {{
-                  detail.last_payment_date
-                    ? (detail.last_payment_date | date : 'dd/MM/yyyy')
+                  d.last_payment_date
+                    ? (d.last_payment_date | date: 'dd/MM/yyyy')
                     : '—'
                 }}
               </p>
             </div>
-            @if (detail.notes) {
+            @if (d.notes) {
               <div class="col-span-2">
                 <p class="text-xs text-gray-500">Notas</p>
-                <p class="text-sm">{{ detail.notes }}</p>
+                <p class="text-sm">{{ d.notes }}</p>
               </div>
             }
           </div>
 
           <!-- Payment History -->
           <div>
-            <h4 class="text-sm font-semibold text-text-primary mb-3 flex items-center gap-2">
+            <h4
+              class="text-sm font-semibold text-text-primary mb-3 flex items-center gap-2"
+            >
               <app-icon name="history" [size]="16"></app-icon>
               Historial de Cobros
             </h4>
-            @if (detail.ar_payments && detail.ar_payments.length > 0) {
+            @if (d.ar_payments && d.ar_payments.length > 0) {
               <div class="space-y-2">
-                @for (payment of detail.ar_payments; track payment.id) {
+                @for (payment of d.ar_payments; track payment.id) {
                   <div
                     class="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
                   >
@@ -159,9 +155,10 @@ import {
                           {{ formatCurrency(payment.amount) }}
                         </p>
                         <p class="text-xs text-gray-500">
-                          {{ payment.payment_date | date : 'dd/MM/yyyy' }}
+                          {{ payment.payment_date | date: 'dd/MM/yyyy' }}
                           @if (payment.payment_method) {
-                            · {{ getPaymentMethodLabel(payment.payment_method) }}
+                            ·
+                            {{ getPaymentMethodLabel(payment.payment_method) }}
                           }
                           @if (payment.reference) {
                             · Ref: {{ payment.reference }}
@@ -181,17 +178,19 @@ import {
 
           <!-- Payment Agreements -->
           <div>
-            <h4 class="text-sm font-semibold text-text-primary mb-3 flex items-center gap-2">
+            <h4
+              class="text-sm font-semibold text-text-primary mb-3 flex items-center gap-2"
+            >
               <app-icon name="handshake" [size]="16"></app-icon>
               Acuerdos de Pago
             </h4>
             @if (
-              detail.payment_agreements &&
-              detail.payment_agreements.length > 0
+              d.payment_agreements &&
+              d.payment_agreements.length > 0
             ) {
               <div class="space-y-3">
                 @for (
-                  agreement of detail.payment_agreements;
+                  agreement of d.payment_agreements;
                   track agreement.id
                 ) {
                   <div class="p-3 bg-gray-50 rounded-lg space-y-2">
@@ -208,9 +207,7 @@ import {
                         "
                       >
                         {{
-                          agreement.state === 'active'
-                            ? 'Activo'
-                            : 'Completado'
+                          agreement.state === 'active' ? 'Activo' : 'Completado'
                         }}
                       </span>
                     </div>
@@ -256,7 +253,7 @@ import {
                           >
                             <span>
                               Cuota {{ installment.installment_number }} ·
-                              {{ installment.due_date | date : 'dd/MM/yyyy' }}
+                              {{ installment.due_date | date: 'dd/MM/yyyy' }}
                             </span>
                             <div class="flex items-center gap-2">
                               <span class="font-mono">
@@ -264,9 +261,13 @@ import {
                               </span>
                               <span
                                 class="text-[9px] font-bold uppercase px-1.5 py-0.5 rounded-full"
-                                [class]="getInstallmentStatusClass(installment.state)"
+                                [class]="
+                                  getInstallmentStatusClass(installment.state)
+                                "
                               >
-                                {{ getInstallmentStatusLabel(installment.state) }}
+                                {{
+                                  getInstallmentStatusLabel(installment.state)
+                                }}
                               </span>
                             </div>
                           </div>
@@ -285,33 +286,23 @@ import {
 
           <!-- Actions -->
           @if (
-            detail.status !== 'paid' && detail.status !== 'written_off'
+            d.status !== 'paid' && d.status !== 'written_off'
           ) {
-            <div
-              class="flex justify-end gap-3 pt-4 border-t border-border"
-            >
+            <div class="flex justify-end gap-3 pt-4 border-t border-border">
               <app-button
                 variant="outline"
                 size="sm"
-                (clicked)="writeOffRequested.emit(detail)"
+                (clicked)="writeOffRequested.emit(d)"
               >
-                <app-icon
-                  name="x-circle"
-                  [size]="14"
-                  slot="icon"
-                ></app-icon>
+                <app-icon name="x-circle" [size]="14" slot="icon"></app-icon>
                 Castigar
               </app-button>
               <app-button
                 variant="primary"
                 size="sm"
-                (clicked)="paymentRequested.emit(detail)"
+                (clicked)="paymentRequested.emit(d)"
               >
-                <app-icon
-                  name="banknote"
-                  [size]="14"
-                  slot="icon"
-                ></app-icon>
+                <app-icon name="banknote" [size]="14" slot="icon"></app-icon>
                 Registrar Cobro
               </app-button>
             </div>
@@ -328,41 +319,43 @@ import {
     </app-modal>
   `,
 })
-export class ReceivableDetailModalComponent implements OnChanges {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Input() receivable: AccountReceivable | null = null;
-  @Output() paymentRequested = new EventEmitter<AccountReceivable>();
-  @Output() writeOffRequested = new EventEmitter<AccountReceivable>();
+export class ReceivableDetailModalComponent {
+  private destroyRef = inject(DestroyRef);
+  readonly isOpen = input(false);
+  readonly isOpenChange = output<boolean>();
+  readonly receivable = input<AccountReceivable | null>(null);
+  readonly paymentRequested = output<AccountReceivable>();
+  readonly writeOffRequested = output<AccountReceivable>();
 
   private carteraService = inject(CarteraService);
   private currencyService = inject(CurrencyFormatService);
 
-  detail: AccountReceivable | null = null;
-  is_loading = false;
+  detail = signal<AccountReceivable | null>(null);
+  is_loading = signal(false);
 
-  ngOnChanges(changes: SimpleChanges): void {
-    if (changes['isOpen'] && this.isOpen && this.receivable) {
-      this.loadDetail();
-    }
-    if (changes['isOpen'] && !this.isOpen) {
-      this.detail = null;
-    }
+  constructor() {
+    effect(() => {
+      if (this.isOpen() && this.receivable()) {
+        this.loadDetail();
+      }
+      if (this.isOpen() === false) {
+        this.detail.set(null);
+      }
+    });
   }
 
-  private loadDetail(): void {
-    if (!this.receivable) return;
-    this.is_loading = true;
-    this.carteraService.getReceivable(this.receivable.id).subscribe({
-      next: (response) => {
-        this.detail = response.data;
-        this.is_loading = false;
-      },
-      error: () => {
-        this.detail = this.receivable;
-        this.is_loading = false;
-      },
-    });
+  private async loadDetail(): Promise<void> {
+    const rec = this.receivable();
+    if (!rec) return;
+    this.is_loading.set(true);
+    try {
+      const response = await firstValueFrom(this.carteraService.getReceivable(rec.id));
+      this.detail.set(response.data);
+      this.is_loading.set(false);
+    } catch {
+      this.detail.set(rec);
+      this.is_loading.set(false);
+    }
   }
 
   onClose(): void {

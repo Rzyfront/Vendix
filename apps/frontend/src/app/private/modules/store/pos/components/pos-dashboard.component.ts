@@ -1,5 +1,6 @@
-import { Component, Output, EventEmitter, OnInit } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, output, inject, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 
 // Import shared components
@@ -11,7 +12,7 @@ import { DashboardData, DashboardFilters } from '../models/dashboard.model';
 @Component({
   selector: 'app-pos-dashboard',
   standalone: true,
-  imports: [CommonModule, FormsModule, StatsComponent],
+  imports: [DecimalPipe, FormsModule, StatsComponent],
   template: `
     <div class="pos-dashboard-container">
       <div class="dashboard-header">
@@ -19,8 +20,8 @@ import { DashboardData, DashboardFilters } from '../models/dashboard.model';
         <div class="header-controls">
           <select
             class="date-range-select"
-            [(ngModel)]="filters.dateRange"
-            (change)="onFiltersChange()"
+            [ngModel]="filters().dateRange"
+            (ngModelChange)="onDateRangeChange($event)"
           >
             <option value="today">Hoy</option>
             <option value="week">Esta Semana</option>
@@ -30,193 +31,195 @@ import { DashboardData, DashboardFilters } from '../models/dashboard.model';
           <button
             class="refresh-btn"
             (click)="refreshData()"
-            [disabled]="loading"
+            [disabled]="loading()"
             type="button"
           >
-            <i class="fas fa-sync-alt" [class.spinning]="loading"></i>
+            <i class="fas fa-sync-alt" [class.spinning]="loading()"></i>
             Actualizar
           </button>
         </div>
       </div>
 
-      <div class="stats-overview" *ngIf="dashboardData">
-        <div class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6">
-          <!-- Ventas -->
-          <app-stats
-            title="Ventas"
-            [value]="'$' + formatNumber(dashboardData.todayStats.totalSales)"
-            smallText="+12.5% vs ayer"
-            iconName="dollar-sign"
-            iconBgColor="bg-primary/10"
-            iconColor="text-primary"
-          ></app-stats>
-
-          <!-- Órdenes -->
-          <app-stats
-            title="Órdenes"
-            [value]="dashboardData.todayStats.totalOrders"
-            smallText="+8.2% vs ayer"
-            iconName="shopping-cart"
-            iconBgColor="bg-pink-100"
-            iconColor="text-pink-600"
-          ></app-stats>
-
-          <!-- Clientes -->
-          <app-stats
-            title="Clientes"
-            [value]="dashboardData.todayStats.totalCustomers"
-            smallText="+15.3% vs ayer"
-            iconName="users"
-            iconBgColor="bg-blue-100"
-            iconColor="text-blue-600"
-          ></app-stats>
-
-          <!-- Promedio -->
-          <app-stats
-            title="Promedio"
-            [value]="'$' + formatNumber(dashboardData.todayStats.averageOrderValue)"
-            smallText="-2.1% vs ayer"
-            iconName="trending-up"
-            iconBgColor="bg-green-100"
-            iconColor="text-green-600"
-          ></app-stats>
+      @if (dashboardData()) {
+        <div class="stats-overview">
+          <div class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6">
+            <!-- Ventas -->
+            <app-stats
+              title="Ventas"
+              [value]="
+                '$' + formatNumber(dashboardData()!.todayStats.totalSales)
+              "
+              smallText="+12.5% vs ayer"
+              iconName="dollar-sign"
+              iconBgColor="bg-primary/10"
+              iconColor="text-primary"
+            ></app-stats>
+            <!-- Órdenes -->
+            <app-stats
+              title="Órdenes"
+              [value]="dashboardData()!.todayStats.totalOrders"
+              smallText="+8.2% vs ayer"
+              iconName="shopping-cart"
+              iconBgColor="bg-pink-100"
+              iconColor="text-pink-600"
+            ></app-stats>
+            <!-- Clientes -->
+            <app-stats
+              title="Clientes"
+              [value]="dashboardData()!.todayStats.totalCustomers"
+              smallText="+15.3% vs ayer"
+              iconName="users"
+              iconBgColor="bg-blue-100"
+              iconColor="text-blue-600"
+            ></app-stats>
+            <!-- Promedio -->
+            <app-stats
+              title="Promedio"
+              [value]="
+                '$' +
+                formatNumber(dashboardData()!.todayStats.averageOrderValue)
+              "
+              smallText="-2.1% vs ayer"
+              iconName="trending-up"
+              iconBgColor="bg-green-100"
+              iconColor="text-green-600"
+            ></app-stats>
+          </div>
         </div>
-      </div>
+      }
 
-      <div class="dashboard-content" *ngIf="dashboardData">
-        <div class="content-row">
-          <div class="chart-container">
-            <div class="chart-header">
-              <h3>Ventas Diarias</h3>
-              <div class="chart-actions">
-                <button
-                  class="export-btn"
-                  (click)="exportData('csv')"
-                  type="button"
-                >
-                  <i class="fas fa-download"></i>
-                  CSV
-                </button>
-                <button
-                  class="export-btn"
-                  (click)="exportData('excel')"
-                  type="button"
-                >
-                  <i class="fas fa-file-excel"></i>
-                  Excel
-                </button>
+      @if (dashboardData()) {
+        <div class="dashboard-content">
+          <div class="content-row">
+            <div class="chart-container">
+              <div class="chart-header">
+                <h3>Ventas Diarias</h3>
+                <div class="chart-actions">
+                  <button
+                    class="export-btn"
+                    (click)="exportData('csv')"
+                    type="button"
+                  >
+                    <i class="fas fa-download"></i>
+                    CSV
+                  </button>
+                  <button
+                    class="export-btn"
+                    (click)="exportData('excel')"
+                    type="button"
+                  >
+                    <i class="fas fa-file-excel"></i>
+                    Excel
+                  </button>
+                </div>
+              </div>
+              <div class="chart-placeholder">
+                <canvas id="salesChart"></canvas>
+                <p class="chart-text">Gráfico de ventas diarias</p>
               </div>
             </div>
-            <div class="chart-placeholder">
-              <canvas id="salesChart"></canvas>
-              <p class="chart-text">Gráfico de ventas diarias</p>
-            </div>
-          </div>
-
-          <div class="top-products-container">
-            <div class="section-header">
-              <h3>Productos Más Vendidos</h3>
-            </div>
-            <div class="products-list">
-              <div
-                class="product-item"
-                *ngFor="
-                  let product of dashboardData.topProducts;
-                  trackBy: trackById
-                "
-              >
-                <div class="product-info">
-                  <h4>{{ product.name }}</h4>
-                  <p class="product-sku">{{ product.sku }}</p>
-                </div>
-                <div class="product-stats">
-                  <p class="product-quantity">
-                    {{ product.quantity }} unidades
-                  </p>
-                  <p class="product-revenue">
-                    \${{ product.revenue | number: '1.0-0' }}
-                  </p>
-                  <div class="product-bar">
-                    <div
-                      class="bar-fill"
-                      [style.width.%]="product.percentage"
-                    ></div>
+            <div class="top-products-container">
+              <div class="section-header">
+                <h3>Productos Más Vendidos</h3>
+              </div>
+              <div class="products-list">
+                @for (
+                  product of dashboardData()!.topProducts;
+                  track trackById($index, product)
+                ) {
+                  <div class="product-item">
+                    <div class="product-info">
+                      <h4>{{ product.name }}</h4>
+                      <p class="product-sku">{{ product.sku }}</p>
+                    </div>
+                    <div class="product-stats">
+                      <p class="product-quantity">
+                        {{ product.quantity }} unidades
+                      </p>
+                      <p class="product-revenue">
+                        \${{ product.revenue | number: '1.0-0' }}
+                      </p>
+                      <div class="product-bar">
+                        <div
+                          class="bar-fill"
+                          [style.width.%]="product.percentage"
+                        ></div>
+                      </div>
+                    </div>
                   </div>
-                </div>
+                }
+              </div>
+            </div>
+          </div>
+          <div class="content-row">
+            <div class="payment-methods-container">
+              <div class="section-header">
+                <h3>Métodos de Pago</h3>
+              </div>
+              <div class="payment-methods">
+                @for (
+                  method of dashboardData()!.paymentMethods;
+                  track trackByMethod($index, method)
+                ) {
+                  <div class="payment-item">
+                    <div class="payment-info">
+                      <span class="payment-name">{{ method.method }}</span>
+                      <span class="payment-count"
+                        >{{ method.count }} transacciones</span
+                      >
+                    </div>
+                    <div class="payment-stats">
+                      <span class="payment-amount"
+                        >\${{ method.amount | number: '1.0-0' }}</span
+                      >
+                      <span class="payment-percentage"
+                        >{{ method.percentage | number: '1.1' }}%</span
+                      >
+                    </div>
+                  </div>
+                }
+              </div>
+            </div>
+            <div class="categories-container">
+              <div class="section-header">
+                <h3>Ventas por Categoría</h3>
+              </div>
+              <div class="categories-list">
+                @for (
+                  category of dashboardData()!.categoryStats;
+                  track trackByCategory($index, category)
+                ) {
+                  <div class="category-item">
+                    <div class="category-info">
+                      <span class="category-name">{{ category.category }}</span>
+                      <span class="category-quantity"
+                        >{{ category.quantity }} productos</span
+                      >
+                    </div>
+                    <div class="category-stats">
+                      <span class="category-sales"
+                        >\${{ category.sales | number: '1.0-0' }}</span
+                      >
+                      <span class="category-percentage"
+                        >{{ category.percentage | number: '1.1' }}%</span
+                      >
+                    </div>
+                  </div>
+                }
               </div>
             </div>
           </div>
         </div>
+      }
 
-        <div class="content-row">
-          <div class="payment-methods-container">
-            <div class="section-header">
-              <h3>Métodos de Pago</h3>
-            </div>
-            <div class="payment-methods">
-              <div
-                class="payment-item"
-                *ngFor="
-                  let method of dashboardData.paymentMethods;
-                  trackBy: trackByMethod
-                "
-              >
-                <div class="payment-info">
-                  <span class="payment-name">{{ method.method }}</span>
-                  <span class="payment-count"
-                    >{{ method.count }} transacciones</span
-                  >
-                </div>
-                <div class="payment-stats">
-                  <span class="payment-amount"
-                    >\${{ method.amount | number: '1.0-0' }}</span
-                  >
-                  <span class="payment-percentage"
-                    >{{ method.percentage | number: '1.1' }}%</span
-                  >
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div class="categories-container">
-            <div class="section-header">
-              <h3>Ventas por Categoría</h3>
-            </div>
-            <div class="categories-list">
-              <div
-                class="category-item"
-                *ngFor="
-                  let category of dashboardData.categoryStats;
-                  trackBy: trackByCategory
-                "
-              >
-                <div class="category-info">
-                  <span class="category-name">{{ category.category }}</span>
-                  <span class="category-quantity"
-                    >{{ category.quantity }} productos</span
-                  >
-                </div>
-                <div class="category-stats">
-                  <span class="category-sales"
-                    >\${{ category.sales | number: '1.0-0' }}</span
-                  >
-                  <span class="category-percentage"
-                    >{{ category.percentage | number: '1.1' }}%</span
-                  >
-                </div>
-              </div>
-            </div>
+      @if (loading()) {
+        <div class="loading-overlay">
+          <div class="loading-spinner">
+            <i class="fas fa-spinner fa-spin"></i>
+            <p>Cargando datos...</p>
           </div>
         </div>
-      </div>
-
-      <div class="loading-overlay" *ngIf="loading">
-        <div class="loading-spinner">
-          <i class="fas fa-spinner fa-spin"></i>
-          <p>Cargando datos...</p>
-        </div>
-      </div>
+      }
     </div>
   `,
   styles: [
@@ -542,18 +545,24 @@ import { DashboardData, DashboardFilters } from '../models/dashboard.model';
     `,
   ],
 })
-export class PosDashboardComponent implements OnInit {
-  @Output() dataExported = new EventEmitter<{ format: string; data: Blob }>();
+export class PosDashboardComponent {
+  private destroyRef = inject(DestroyRef);
+  readonly dataExported = output<{ format: string; data: Blob }>();
 
-  dashboardData: DashboardData | null = null;
-  loading: boolean = false;
-  filters: DashboardFilters = {
+  readonly dashboardData = signal<DashboardData | null>(null);
+  readonly loading = signal(false);
+  readonly filters = signal<DashboardFilters>({
     dateRange: 'today',
-  };
+  });
 
-  constructor(private dashboardService: PosDashboardService) {}
+  private dashboardService = inject(PosDashboardService);
 
-  ngOnInit(): void {
+  constructor() {
+    this.loadDashboardData();
+  }
+
+  onDateRangeChange(dateRange: DashboardFilters['dateRange']): void {
+    this.filters.update((f) => ({ ...f, dateRange }));
     this.loadDashboardData();
   }
 
@@ -566,35 +575,37 @@ export class PosDashboardComponent implements OnInit {
   }
 
   private loadDashboardData(): void {
-    this.loading = true;
+    this.loading.set(true);
 
-    this.dashboardService.getDashboardData(this.filters).subscribe({
+    this.dashboardService.getDashboardData(this.filters()).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (data) => {
-        this.dashboardData = data;
-        this.loading = false;
+        this.dashboardData.set(data);
+        this.loading.set(false);
       },
       error: (error) => {
         console.error('Error cargando datos del dashboard:', error);
-        this.loading = false;
+        this.loading.set(false);
       },
     });
   }
 
   exportData(format: 'csv' | 'excel' | 'pdf'): void {
-    if (!this.dashboardData) return;
+    if (!this.dashboardData()) return;
 
-    this.dashboardService.exportDashboardData(this.filters, format).subscribe({
-      next: (blob) => {
-        this.dataExported.emit({ format, data: blob });
-        this.downloadFile(
-          blob,
-          `dashboard-${this.filters.dateRange}.${format}`,
-        );
-      },
-      error: (error) => {
-        console.error('Error exportando datos:', error);
-      },
-    });
+    this.dashboardService
+      .exportDashboardData(this.filters(), format)
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+        next: (blob) => {
+          this.dataExported.emit({ format, data: blob });
+          this.downloadFile(
+            blob,
+            `dashboard-${this.filters().dateRange}.${format}`,
+          );
+        },
+        error: (error) => {
+          console.error('Error exportando datos:', error);
+        },
+      });
   }
 
   private downloadFile(blob: Blob, filename: string): void {

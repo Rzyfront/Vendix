@@ -1,11 +1,11 @@
-import { Component, EventEmitter, Input, Output, OnChanges, SimpleChanges } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, model, output, inject, signal, effect, DestroyRef } from '@angular/core';
 import {
   FormBuilder,
   FormGroup,
   ReactiveFormsModule,
   Validators,
 } from '@angular/forms';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   ModalComponent,
   ButtonComponent,
@@ -22,7 +22,6 @@ import { TaxCategory } from '../interfaces';
   selector: 'app-tax-quick-create',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
@@ -34,7 +33,7 @@ import { TaxCategory } from '../interfaces';
     <app-modal
       [size]="'md'"
       [title]="'Crear Nueva Categoría de Impuesto'"
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (closed)="onCancel()"
     >
       <form [formGroup]="taxCategoryForm" class="space-y-4">
@@ -83,14 +82,14 @@ import { TaxCategory } from '../interfaces';
         <app-button
           variant="outline"
           (clicked)="onCancel()"
-          [disabled]="isSubmitting"
+          [disabled]="isSubmitting()"
         >
           Cancelar
         </app-button>
         <app-button
           variant="primary"
           (clicked)="onSubmit()"
-          [loading]="isSubmitting"
+          [loading]="isSubmitting()"
           [disabled]="taxCategoryForm.invalid"
         >
           Crear Impuesto
@@ -99,25 +98,26 @@ import { TaxCategory } from '../interfaces';
     </app-modal>
   `,
 })
-export class TaxQuickCreateComponent implements OnChanges {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() created = new EventEmitter<TaxCategory>();
-  @Output() cancel = new EventEmitter<void>();
+export class TaxQuickCreateComponent {
+  private fb = inject(FormBuilder);
+  private taxesService = inject(TaxesService);
+  private toastService = inject(ToastService);
+  private destroyRef = inject(DestroyRef);
 
-  taxCategoryForm: FormGroup;
-  isSubmitting = false;
+  readonly isOpen = model<boolean>(false);
+  readonly created = output<TaxCategory>();
+  readonly cancel = output<void>();
+
+  readonly isSubmitting = signal(false);
 
   typeOptions: SelectorOption[] = [
     { value: 'percentage', label: 'Porcentaje' },
     { value: 'fixed', label: 'Fijo' },
   ];
 
-  constructor(
-    private fb: FormBuilder,
-    private taxesService: TaxesService,
-    private toastService: ToastService,
-  ) {
+  taxCategoryForm: FormGroup;
+
+  constructor() {
     this.taxCategoryForm = this.fb.group({
       name: [
         '',
@@ -132,46 +132,49 @@ export class TaxQuickCreateComponent implements OnChanges {
       store_id: [1],
       description: ['', [Validators.maxLength(500)]],
     });
-  }
 
-  ngOnChanges(changes: SimpleChanges): void {
-    if (changes['isOpen'] && changes['isOpen'].currentValue === true) {
-      this.taxCategoryForm.reset({
-        name: '',
-        type: 'percentage',
-        rate: 0,
-        store_id: 1,
-        description: '',
-      });
-    }
+    // Reset form when modal opens
+    effect(() => {
+      if (this.isOpen()) {
+        this.taxCategoryForm.reset({
+          name: '',
+          type: 'percentage',
+          rate: 0,
+          store_id: 1,
+          description: '',
+        });
+      }
+    });
   }
 
   onCancel() {
     this.taxCategoryForm.reset();
-    this.isOpenChange.emit(false);
+    this.isOpen.set(false);
     this.cancel.emit();
   }
 
   onSubmit() {
     if (this.taxCategoryForm.invalid) return;
 
-    this.isSubmitting = true;
+    this.isSubmitting.set(true);
     const taxCategoryData = this.taxCategoryForm.value;
 
-    this.taxesService.createTaxCategory(taxCategoryData).subscribe({
-      next: (taxCategory) => {
-        this.toastService.success('Categoría de impuesto creada exitosamente');
-        this.created.emit(taxCategory);
-        this.isSubmitting = false;
-        this.taxCategoryForm.reset();
-        this.isOpenChange.emit(false);
-      },
-      error: (error) => {
-        console.error('Error creando categoría de impuesto:', error);
-        this.toastService.error('Error al crear categoría de impuesto');
-        this.isSubmitting = false;
-      },
-    });
+    this.taxesService.createTaxCategory(taxCategoryData)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (taxCategory) => {
+          this.toastService.success('Categoría de impuesto creada exitosamente');
+          this.created.emit(taxCategory);
+          this.isSubmitting.set(false);
+          this.taxCategoryForm.reset();
+          this.isOpen.set(false);
+        },
+        error: (error) => {
+          console.error('Error creando categoría de impuesto:', error);
+          this.toastService.error('Error al crear categoría de impuesto');
+          this.isSubmitting.set(false);
+        },
+      });
   }
 
   getErrorMessage(fieldName: string): string {

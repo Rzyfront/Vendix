@@ -1,5 +1,4 @@
-import { Component, Input, inject, OnInit } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject, input } from '@angular/core';
 
 // Import shared components
 import { StatsComponent } from '../../../../../../shared/components/index';
@@ -15,21 +14,21 @@ export interface PurchaseOrderStats {
 @Component({
   selector: 'app-purchase-order-stats',
   standalone: true,
-  imports: [CommonModule, StatsComponent],
+  imports: [StatsComponent],
   templateUrl: './purchase-order-stats.component.html',
   styleUrls: ['./purchase-order-stats.component.scss'],
 })
-export class PurchaseOrderStatsComponent implements OnInit {
+export class PurchaseOrderStatsComponent {
   private currencyService = inject(CurrencyFormatService);
 
-  @Input() stats: PurchaseOrderStats = {
+  readonly stats = input<PurchaseOrderStats>({
     total: 0,
     pending: 0,
     received: 0,
     total_value: 0,
-  };
+  });
 
-  ngOnInit(): void {
+  constructor() {
     // Asegurar que la moneda esté cargada
     this.currencyService.loadCurrency();
   }

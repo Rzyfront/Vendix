@@ -32,6 +32,10 @@ export class DataCollectionTemplatesService {
     return this.http.post<any>(`${this.apiUrl}/${id}/duplicate`, {}).pipe(map(r => r.data));
   }
 
+  delete(id: number): Observable<void> {
+    return this.http.delete<any>(`${this.apiUrl}/${id}`).pipe(map(r => r.data));
+  }
+
   assignProducts(id: number, productIds: number[]): Observable<DataCollectionTemplate> {
     return this.http.post<any>(`${this.apiUrl}/${id}/products`, { product_ids: productIds }).pipe(map(r => r.data));
   }

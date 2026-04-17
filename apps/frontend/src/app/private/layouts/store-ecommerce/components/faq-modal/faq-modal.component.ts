@@ -1,5 +1,5 @@
-import { Component, EventEmitter, Input, Output } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input, output, signal } from '@angular/core';
+
 import { IconComponent } from '../../../../../shared/components';
 
 export interface FaqItem {
@@ -10,9 +10,9 @@ export interface FaqItem {
 @Component({
   selector: 'app-faq-modal',
   standalone: true,
-  imports: [CommonModule, IconComponent],
+  imports: [IconComponent],
   template: `
-    @if (isOpen) {
+    @if (isOpen()) {
     <div class="fixed inset-0 z-50 flex items-center justify-center p-4">
       <!-- Backdrop -->
       <div
@@ -40,9 +40,9 @@ export interface FaqItem {
 
         <!-- Content -->
         <div class="p-4 md:p-6 overflow-y-auto max-h-[calc(80vh-180px)]">
-          @if (items && items.length > 0) {
+          @if (items() && items().length > 0) {
           <div class="space-y-3">
-            @for (item of items; track item.question; let i = $index) {
+            @for (item of items(); track item.question; let i = $index) {
             <div class="border border-gray-200 rounded-xl overflow-hidden">
               <!-- Question (Accordion Header) -->
               <button
@@ -51,13 +51,13 @@ export interface FaqItem {
                 class="w-full flex items-center justify-between p-4 text-left hover:bg-gray-50 transition-colors">
                 <span class="font-medium text-gray-900 pr-4">{{ item.question }}</span>
                 <app-icon
-                  [name]="expandedIndex === i ? 'chevron-up' : 'chevron-down'"
+                  [name]="expandedIndex() === i ? 'chevron-up' : 'chevron-down'"
                   [size]="20"
                   class="text-gray-500 flex-shrink-0 transition-transform duration-200"></app-icon>
               </button>
 
               <!-- Answer (Accordion Content) -->
-              @if (expandedIndex === i) {
+              @if (expandedIndex() === i) {
               <div class="px-4 pb-4 animate-in fade-in slide-in-from-top-1 duration-150">
                 <div class="pt-2 border-t border-gray-100">
                   <p class="text-gray-600 leading-relaxed whitespace-pre-wrap">{{ item.answer }}</p>
@@ -92,14 +92,14 @@ export interface FaqItem {
   `,
 })
 export class FaqModalComponent {
-  @Input() isOpen = false;
-  @Input() items: FaqItem[] = [];
-  @Output() closed = new EventEmitter<void>();
+  readonly isOpen = input(false);
+  readonly items = input<FaqItem[]>([]);
+  readonly closed = output<void>();
 
-  expandedIndex: number | null = 0; // First item expanded by default
+  readonly expandedIndex = signal<number | null>(0);
 
   toggleItem(index: number): void {
-    this.expandedIndex = this.expandedIndex === index ? null : index;
+    this.expandedIndex.update((current) => (current === index ? null : index));
   }
 
   close(): void {

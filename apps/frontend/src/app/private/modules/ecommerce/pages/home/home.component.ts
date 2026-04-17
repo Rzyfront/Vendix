@@ -1,5 +1,12 @@
-import { Component, OnInit, inject, DestroyRef, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {
+  Component,
+  ChangeDetectionStrategy,
+  OnInit,
+  inject,
+  DestroyRef,
+  signal,
+} from '@angular/core';
+
 import { RouterModule, Router } from '@angular/router';
 import {
   CatalogService,
@@ -23,7 +30,6 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
   selector: 'app-home',
   standalone: true,
   imports: [
-    CommonModule,
     RouterModule,
     ProductCardComponent,
     HeroBannerComponent,
@@ -33,22 +39,22 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
   ],
   templateUrl: './home.component.html',
   styleUrls: ['./home.component.scss'],
+  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class HomeComponent implements OnInit {
-  featured_products: EcommerceProduct[] = [];
-  new_arrivals: EcommerceProduct[] = [];
-  sale_products: EcommerceProduct[] = [];
-  is_loading_featured = true;
-  slider_config: any = null;
-  show_slider = false;
-  banner_content = { title: '', paragraph: '' };
-
-  // Quick View Modal
-  quickViewOpen = false;
-  selectedProductSlug: string | null = null;
-
-  // Share Modal
-  shareModalOpen = false;
+  readonly featured_products = signal<EcommerceProduct[]>([]);
+  readonly new_arrivals = signal<EcommerceProduct[]>([]);
+  readonly sale_products = signal<EcommerceProduct[]>([]);
+  readonly is_loading_featured = signal(true);
+  readonly quickViewOpen = signal(false);
+  readonly shareModalOpen = signal(false);
+  readonly selectedProductSlug = signal<string | null>(null);
+  readonly slider_config = signal<any>(null);
+  readonly show_slider = signal(false);
+  readonly banner_content = signal<{ title: string; paragraph: string }>({
+    title: 'Bienvenido',
+    paragraph: 'Encuentra aquí todo lo que buscas...',
+  });
   shareProduct: EcommerceProduct | null = null;
 
   // Wishlist state
@@ -102,11 +108,11 @@ export class HomeComponent implements OnInit {
       .pipe(takeUntilDestroyed(this.destroy_ref))
       .subscribe({
         next: (response) => {
-          this.featured_products = response.data;
-          this.is_loading_featured = false;
+          this.featured_products.set(response.data);
+          this.is_loading_featured.set(false);
         },
         error: () => {
-          this.is_loading_featured = false;
+          this.is_loading_featured.set(false);
         },
       });
   }
@@ -124,24 +130,24 @@ export class HomeComponent implements OnInit {
           const customConfig = domainConfig.customConfig || {};
           const ecommerceConfig = customConfig.ecommerce || {};
 
-          this.slider_config = ecommerceConfig.slider || null;
+          this.slider_config.set(ecommerceConfig.slider || null);
 
           // Verificar si hay fotos configuradas
           const hasPhotos =
-            Array.isArray(this.slider_config?.photos) &&
-            this.slider_config.photos.length > 0;
+            Array.isArray(this.slider_config()?.photos) &&
+            this.slider_config()?.photos.length > 0;
 
           // El slider se muestra si hay fotos
           // El campo 'enable' es opcional - si no existe, se asume true cuando hay fotos
-          this.show_slider = hasPhotos;
+          this.show_slider.set(hasPhotos);
 
           // Mapeo de contenido para el banner estático desde ecommerce.inicio
           const inicio = ecommerceConfig.inicio || {};
 
-          this.banner_content = {
+          this.banner_content.set({
             title: inicio.titulo || 'Bienvenido',
             paragraph: inicio.parrafo || 'Encuentra aquí todo lo que buscas...',
-          };
+          });
         },
       });
   }
@@ -165,7 +171,7 @@ export class HomeComponent implements OnInit {
 
   onModalAddedToCart(_product: EcommerceProduct): void {
     // Modal already added the product to cart and closed itself
-    this.quickViewOpen = false;
+    this.quickViewOpen.set(false);
   }
 
   onToggleWishlist(product: EcommerceProduct): void {
@@ -192,17 +198,17 @@ export class HomeComponent implements OnInit {
   }
 
   onQuickView(product: EcommerceProduct): void {
-    this.selectedProductSlug = product.slug;
-    this.quickViewOpen = true;
+    this.selectedProductSlug.set(product.slug);
+    this.quickViewOpen.set(true);
   }
 
   onShare(product: EcommerceProduct): void {
     this.shareProduct = product;
-    this.shareModalOpen = true;
+    this.shareModalOpen.set(true);
   }
 
   onShareModalClosed(): void {
-    this.shareModalOpen = false;
+    this.shareModalOpen.set(false);
     this.shareProduct = null;
   }
 

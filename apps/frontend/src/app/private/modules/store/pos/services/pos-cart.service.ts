@@ -1,6 +1,7 @@
-import { Injectable } from '@angular/core';
-import { BehaviorSubject, Observable, of, throwError, forkJoin } from 'rxjs';
+import { Injectable, signal } from '@angular/core';
+import { Observable, of, throwError, forkJoin } from 'rxjs';
 import { catchError, delay, map, tap } from 'rxjs/operators';
+import { toObservable } from '@angular/core/rxjs-interop';
 import {
   CartItem,
   CartSummary,
@@ -27,37 +28,34 @@ import { PosProductService, Product, PosProductVariant } from './pos-product.ser
   providedIn: 'root',
 })
 export class PosCartService {
-  private readonly cartState$ = new BehaviorSubject<CartState>(
-    this.getInitialState(),
-  );
-  private readonly loading$ = new BehaviorSubject<boolean>(false);
+  readonly cartState = signal<CartState>(this.getInitialState());
+  readonly loading = signal<boolean>(false);
 
   constructor(private productService: PosProductService) { }
 
   // Observable getters
-  get cartState(): Observable<CartState> {
-    return this.cartState$.asObservable();
+  get cartState$(): Observable<CartState> {
+    return toObservable(this.cartState);
   }
 
   get items(): Observable<CartItem[]> {
-    return this.cartState$.asObservable().pipe(map((state) => state.items));
+    return toObservable(this.cartState).pipe(map((state) => state.items));
   }
 
   get customer(): Observable<PosCustomer | null> {
-    return this.cartState$.asObservable().pipe(map((state) => state.customer));
+    return toObservable(this.cartState).pipe(map((state) => state.customer));
   }
 
   get summary(): Observable<CartSummary> {
-    return this.cartState$.asObservable().pipe(map((state) => state.summary));
+    return toObservable(this.cartState).pipe(map((state) => state.summary));
   }
 
-  get loading(): Observable<boolean> {
-    return this.loading$.asObservable();
+  get loading$(): Observable<boolean> {
+    return toObservable(this.loading);
   }
 
   get isEmpty(): Observable<boolean> {
-    return this.cartState$
-      .asObservable()
+    return toObservable(this.cartState)
       .pipe(map((state) => state.items.length === 0));
   }
 
@@ -75,7 +73,7 @@ export class PosCartService {
 
     return of(request).pipe(
       map((req) => this.processAddToCart(req)),
-      tap((newState) => this.cartState$.next(newState)),
+      tap((newState) => this.cartState.set(newState)),
     );
   }
 
@@ -85,7 +83,7 @@ export class PosCartService {
   updateCartItem(request: UpdateCartItemRequest): Observable<CartState> {
     return of(request).pipe(
       map((req) => this.processUpdateCartItem(req)),
-      tap((newState) => this.cartState$.next(newState)),
+      tap((newState) => this.cartState.set(newState)),
     );
   }
 
@@ -95,7 +93,7 @@ export class PosCartService {
   removeFromCart(itemId: string): Observable<CartState> {
     return of(itemId).pipe(
       map((id) => this.processRemoveFromCart(id)),
-      tap((newState) => this.cartState$.next(newState)),
+      tap((newState) => this.cartState.set(newState)),
     );
   }
 
@@ -105,7 +103,7 @@ export class PosCartService {
   clearCart(): Observable<CartState> {
     return of(null).pipe(
       map(() => this.getInitialState()),
-      tap((newState) => this.cartState$.next(newState)),
+      tap((newState) => this.cartState.set(newState)),
     );
   }
 
@@ -115,14 +113,14 @@ export class PosCartService {
   setCustomer(customer: PosCustomer | null): Observable<CartState> {
     return of(customer).pipe(
       map((cust) => {
-        const currentState = this.cartState$.value;
+        const currentState = this.cartState();
         return {
           ...currentState,
           customer: cust,
           updatedAt: new Date(),
         };
       }),
-      tap((newState) => this.cartState$.next(newState)),
+      tap((newState) => this.cartState.set(newState)),
     );
   }
 
@@ -132,14 +130,14 @@ export class PosCartService {
   updateNotes(notes: string): Observable<CartState> {
     return of(notes).pipe(
       map((note) => {
-        const currentState = this.cartState$.value;
+        const currentState = this.cartState();
         return {
           ...currentState,
           notes: note.trim(),
           updatedAt: new Date(),
         };
       }),
-      tap((newState) => this.cartState$.next(newState)),
+      tap((newState) => this.cartState.set(newState)),
     );
   }
 
@@ -157,7 +155,7 @@ export class PosCartService {
 
     return of(request).pipe(
       map((req) => this.processApplyDiscount(req)),
-      tap((newState) => this.cartState$.next(newState)),
+      tap((newState) => this.cartState.set(newState)),
     );
   }
 
@@ -167,7 +165,7 @@ export class PosCartService {
   removeDiscount(discountId: string): Observable<CartState> {
     return of(discountId).pipe(
       map((id) => this.processRemoveDiscount(id)),
-      tap((newState) => this.cartState$.next(newState)),
+      tap((newState) => this.cartState.set(newState)),
     );
   }
 
@@ -246,7 +244,7 @@ export class PosCartService {
 
         return newState;
       }),
-      tap((newState) => this.cartState$.next(newState)),
+      tap((newState) => this.cartState.set(newState)),
     );
   }
 
@@ -254,7 +252,7 @@ export class PosCartService {
    * Update weight for a weight-based cart item
    */
   updateCartItemWeight(itemId: string, newWeight: number): Observable<CartState> {
-    const currentState = this.cartState$.value;
+    const currentState = this.cartState();
     const itemIndex = currentState.items.findIndex(item => item.id === itemId);
 
     if (itemIndex === -1) {
@@ -284,7 +282,7 @@ export class PosCartService {
       updatedAt: new Date(),
     };
 
-    this.cartState$.next(newState);
+    this.cartState.set(newState);
     return of(newState);
   }
 
@@ -294,7 +292,7 @@ export class PosCartService {
   applyPromotions(activePromotions: any[]): Observable<CartState> {
     return of(activePromotions).pipe(
       map((promotions) => {
-        const currentState = this.cartState$.value;
+        const currentState = this.cartState();
 
         // Remove previously auto-applied promotion discounts
         const manualDiscounts = currentState.appliedDiscounts.filter(d => !d.is_auto_applied);
@@ -349,7 +347,7 @@ export class PosCartService {
           updatedAt: new Date(),
         } as CartState;
       }),
-      tap((newState) => this.cartState$.next(newState)),
+      tap((newState) => this.cartState.set(newState)),
     );
   }
 
@@ -357,7 +355,7 @@ export class PosCartService {
    * Apply a coupon code as a discount (new coupon system)
    */
   applyCouponDiscount(couponValidation: any): Observable<CartState> {
-    const currentState = this.cartState$.value;
+    const currentState = this.cartState();
 
     // Remove any previously applied coupon
     const withoutCoupon = currentState.appliedDiscounts.filter(d => !d.coupon_id);
@@ -387,7 +385,7 @@ export class PosCartService {
       updatedAt: new Date(),
     };
 
-    this.cartState$.next(newState);
+    this.cartState.set(newState);
     return of(newState);
   }
 
@@ -395,7 +393,7 @@ export class PosCartService {
    * Remove the applied coupon
    */
   removeCoupon(): Observable<CartState> {
-    const currentState = this.cartState$.value;
+    const currentState = this.cartState();
     const withoutCoupon = currentState.appliedDiscounts.filter(d => !d.coupon_id);
 
     const newState: CartState = {
@@ -406,7 +404,7 @@ export class PosCartService {
       updatedAt: new Date(),
     };
 
-    this.cartState$.next(newState);
+    this.cartState.set(newState);
     return of(newState);
   }
 
@@ -414,7 +412,7 @@ export class PosCartService {
    * Get promotion IDs from applied discounts (for sending to backend)
    */
   getAppliedPromotionIds(): number[] {
-    return this.cartState$.value.appliedDiscounts
+    return this.cartState().appliedDiscounts
       .filter(d => d.promotion_id && !d.coupon_id)
       .map(d => d.promotion_id!);
   }
@@ -423,13 +421,14 @@ export class PosCartService {
    * Get the applied coupon data (for sending to backend)
    */
   getAppliedCoupon(): { coupon_id: number; coupon_code: string } | null {
-    return this.cartState$.value.appliedCoupon
-      ? { coupon_id: this.cartState$.value.appliedCoupon.id, coupon_code: this.cartState$.value.appliedCoupon.code }
+    const state = this.cartState();
+    return state.appliedCoupon
+      ? { coupon_id: state.appliedCoupon.id, coupon_code: state.appliedCoupon.code }
       : null;
   }
 
   addPendingBooking(booking: PendingBooking): Observable<CartState> {
-    const current = this.cartState$.getValue();
+    const current = this.cartState();
     const exists = current.pendingBookings.some(b => b.id === booking.id);
     if (exists) return of(current);
 
@@ -438,30 +437,30 @@ export class PosCartService {
       pendingBookings: [...current.pendingBookings, booking],
       updatedAt: new Date(),
     };
-    this.cartState$.next(newState);
+    this.cartState.set(newState);
     return of(newState);
   }
 
   removePendingBooking(bookingId: number): Observable<CartState> {
-    const current = this.cartState$.getValue();
+    const current = this.cartState();
     const newState: CartState = {
       ...current,
       pendingBookings: current.pendingBookings.filter(b => b.id !== bookingId),
       updatedAt: new Date(),
     };
-    this.cartState$.next(newState);
+    this.cartState.set(newState);
     return of(newState);
   }
 
   getPendingBookingIds(): number[] {
-    return this.cartState$.getValue().pendingBookings.map(b => b.id);
+    return this.cartState().pendingBookings.map(b => b.id);
   }
 
   /**
    * Get current cart state value
    */
   getCurrentState(): CartState {
-    return this.cartState$.value;
+    return this.cartState();
   }
 
   /**
@@ -469,7 +468,7 @@ export class PosCartService {
    */
   getItemById(itemId: string): CartItem | null {
     return (
-      this.cartState$.value.items.find((item) => item.id === itemId) || null
+      this.cartState().items.find((item) => item.id === itemId) || null
     );
   }
 
@@ -477,7 +476,7 @@ export class PosCartService {
    * Check if product is in cart
    */
   isProductInCart(productId: string): boolean {
-    return this.cartState$.value.items.some(
+    return this.cartState().items.some(
       (item) => item.product.id === productId,
     );
   }
@@ -486,7 +485,7 @@ export class PosCartService {
    * Get item quantity for product
    */
   getProductQuantity(productId: string): number {
-    const item = this.cartState$.value.items.find(
+    const item = this.cartState().items.find(
       (item) => item.product.id === productId,
     );
     return item ? item.quantity : 0;
@@ -496,7 +495,7 @@ export class PosCartService {
    * Process add to cart
    */
   private processAddToCart(request: AddToCartRequest): CartState {
-    const currentState = this.cartState$.value;
+    const currentState = this.cartState();
 
     // Check if this is a weight product
     const isWeightProduct = !!request.weight && request.weight > 0;
@@ -586,7 +585,7 @@ export class PosCartService {
    * Process update cart item
    */
   private processUpdateCartItem(request: UpdateCartItemRequest): CartState {
-    const currentState = this.cartState$.value;
+    const currentState = this.cartState();
     const itemIndex = currentState.items.findIndex(
       (item) => item.id === request.itemId,
     );
@@ -635,7 +634,7 @@ export class PosCartService {
    * Process remove from cart
    */
   private processRemoveFromCart(itemId: string): CartState {
-    const currentState = this.cartState$.value;
+    const currentState = this.cartState();
     const updatedItems = currentState.items.filter(
       (item) => item.id !== itemId,
     );
@@ -655,7 +654,7 @@ export class PosCartService {
    * Process apply discount
    */
   private processApplyDiscount(request: ApplyDiscountRequest): CartState {
-    const currentState = this.cartState$.value;
+    const currentState = this.cartState();
     // Para descuentos, usamos el subtotal BRUTO (con IVA) tal como está en el carrito
     const subtotal = this.calculateSubtotal(currentState.items);
 
@@ -689,7 +688,7 @@ export class PosCartService {
    * Process remove discount
    */
   private processRemoveDiscount(discountId: string): CartState {
-    const currentState = this.cartState$.value;
+    const currentState = this.cartState();
     const updatedDiscounts = currentState.appliedDiscounts.filter(
       (discount) => discount.id !== discountId,
     );
@@ -822,7 +821,7 @@ export class PosCartService {
       const availableStock = request.variant ? request.variant.stock : request.product.stock;
 
       // Check current cart quantity for this product+variant combo
-      const currentState = this.cartState$.value;
+      const currentState = this.cartState();
       const existingItem = currentState.items.find(
         (item) =>
           item.product.id === request.product.id &&
@@ -851,7 +850,7 @@ export class PosCartService {
     request: ApplyDiscountRequest,
   ): CartValidationError[] {
     const errors: CartValidationError[] = [];
-    const currentState = this.cartState$.value;
+    const currentState = this.cartState();
     const subtotal = this.calculateSubtotal(currentState.items);
 
     if (subtotal <= 0) {

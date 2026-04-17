@@ -1,0 +1,17 @@
+meta {
+  name: Presigned URL - Empty Key
+  type: http
+  seq: 5
+}
+
+get {
+  url: http://{{url}}/upload/presigned-url?key=
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("empty key is rejected", function() {
+    expect(res.status).to.equal(400);
+  });
+}

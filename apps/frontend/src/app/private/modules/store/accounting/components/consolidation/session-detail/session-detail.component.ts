@@ -1,20 +1,17 @@
-import {
-  Component,
-  OnInit,
-  OnDestroy,
+import {Component,
   inject,
   signal,
   computed,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ActivatedRoute, Router } from '@angular/router';
+import { DatePipe } from '@angular/common';
 import {
   ReactiveFormsModule,
   FormsModule,
   FormBuilder,
-  Validators,
-} from '@angular/forms';
-import { Subject, takeUntil } from 'rxjs';
+  Validators} from '@angular/forms';
+
 
 import { AccountingService } from '../../../services/accounting.service';
 import {
@@ -22,8 +19,7 @@ import {
   IntercompanyTransaction,
   ConsolidationAdjustment,
   ConsolidatedReport,
-  ChartAccount,
-} from '../../../interfaces/accounting.interface';
+  ChartAccount} from '../../../interfaces/accounting.interface';
 import {
   ModalComponent,
   ButtonComponent,
@@ -41,15 +37,13 @@ import {
   ItemListCardConfig,
   SelectorOption,
   ScrollableTab,
-  BadgeVariant,
-} from '../../../../../../../shared/components/index';
+  BadgeVariant} from '../../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 
 @Component({
   selector: 'vendix-session-detail',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     FormsModule,
     ModalComponent,
@@ -62,13 +56,13 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
     IconComponent,
     ScrollableTabsComponent,
     ResponsiveDataViewComponent,
+    DatePipe,
   ],
   templateUrl: './session-detail.component.html',
-  styleUrls: ['./session-detail.component.scss'],
-})
-export class SessionDetailComponent implements OnInit, OnDestroy {
-  private destroy$ = new Subject<void>();
-  private route = inject(ActivatedRoute);
+  styleUrls: ['./session-detail.component.scss']})
+export class SessionDetailComponent {
+  private destroyRef = inject(DestroyRef);
+private route = inject(ActivatedRoute);
   private router = inject(Router);
   private fb = inject(FormBuilder);
   private accounting_service = inject(AccountingService);
@@ -89,7 +83,8 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
   adjustments = signal<ConsolidationAdjustment[]>([]);
   adj_loading = signal(false);
   adj_submitting = signal(false);
-  is_adjustment_modal_open = false;
+  // ✅ Migrated to signal for two-way binding (Section 9 — antipatrón variables planas)
+  readonly isAdjustmentModalOpen = signal(false);
 
   // Reports
   report_data = signal<ConsolidatedReport | null>(null);
@@ -147,27 +142,23 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
       key: 'from_store',
       label: 'Desde',
       priority: 1,
-      transform: (val: any) => val?.name || '-',
-    },
+      transform: (val: any) => val?.name || '-'},
     {
       key: 'to_store',
       label: 'Hacia',
       priority: 1,
-      transform: (val: any) => val?.name || '-',
-    },
+      transform: (val: any) => val?.name || '-'},
     {
       key: 'account',
       label: 'Cuenta',
       priority: 2,
-      transform: (val: any) => (val ? `${val.code} - ${val.name}` : '-'),
-    },
+      transform: (val: any) => (val ? `${val.code} - ${val.name}` : '-')},
     {
       key: 'amount',
       label: 'Monto',
       align: 'right',
       priority: 1,
-      transform: (val: any) => this.formatCurrency(val),
-    },
+      transform: (val: any) => this.formatCurrency(val)},
     {
       key: 'eliminated',
       label: 'Estado',
@@ -175,8 +166,7 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
       priority: 1,
       badge: true,
       badgeConfig: { type: 'status' },
-      transform: (val: any) => (val ? 'Eliminada' : 'Pendiente'),
-    },
+      transform: (val: any) => (val ? 'Eliminada' : 'Pendiente')},
   ];
 
   ic_card_config: ItemListCardConfig = {
@@ -189,8 +179,7 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
     badgeKey: 'eliminated',
     badgeConfig: {
       type: 'status',
-      colorMap: { true: 'success', false: 'warn' },
-    },
+      colorMap: { true: 'success', false: 'warn' }},
     badgeTransform: (val: any) => (val ? 'Eliminada' : 'Pendiente'),
     footerKey: 'amount',
     footerLabel: 'Monto',
@@ -201,10 +190,8 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
         key: 'account',
         label: 'Cuenta',
         icon: 'book-open',
-        transform: (val: any) => (val ? `${val.code}` : '-'),
-      },
-    ],
-  };
+        transform: (val: any) => (val ? `${val.code}` : '-')},
+    ]};
 
   ic_table_actions: TableAction[] = [
     {
@@ -213,8 +200,7 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
       variant: 'danger',
       action: (row: IntercompanyTransaction) => this.onEliminateIC(row),
       show: (row: IntercompanyTransaction) =>
-        !row.eliminated && this.session()?.status === 'in_progress',
-    },
+        !row.eliminated && this.session()?.status === 'in_progress'},
   ];
 
   // ── Adjustments Table Config ───────────────────────────────────
@@ -223,30 +209,26 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
       key: 'account',
       label: 'Cuenta',
       priority: 1,
-      transform: (val: any) => (val ? `${val.code} - ${val.name}` : '-'),
-    },
+      transform: (val: any) => (val ? `${val.code} - ${val.name}` : '-')},
     {
       key: 'type',
       label: 'Tipo',
       priority: 1,
       badge: true,
       badgeConfig: { type: 'status' },
-      transform: (val: any) => this.getAdjTypeLabel(val),
-    },
+      transform: (val: any) => this.getAdjTypeLabel(val)},
     {
       key: 'debit_amount',
       label: 'Debito',
       align: 'right',
       priority: 1,
-      transform: (val: any) => this.formatCurrency(val),
-    },
+      transform: (val: any) => this.formatCurrency(val)},
     {
       key: 'credit_amount',
       label: 'Credito',
       align: 'right',
       priority: 1,
-      transform: (val: any) => this.formatCurrency(val),
-    },
+      transform: (val: any) => this.formatCurrency(val)},
     { key: 'description', label: 'Descripcion', priority: 2 },
   ];
 
@@ -259,25 +241,20 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
       colorMap: {
         elimination: 'danger',
         reclassification: 'info',
-        adjustment: 'warn',
-      },
-    },
+        adjustment: 'warn'}},
     badgeTransform: (val: any) => this.getAdjTypeLabel(val),
     detailKeys: [
       {
         key: 'debit_amount',
         label: 'Debito',
         icon: 'arrow-up',
-        transform: (val: any) => this.formatCurrency(val),
-      },
+        transform: (val: any) => this.formatCurrency(val)},
       {
         key: 'credit_amount',
         label: 'Credito',
         icon: 'arrow-down',
-        transform: (val: any) => this.formatCurrency(val),
-      },
-    ],
-  };
+        transform: (val: any) => this.formatCurrency(val)},
+    ]};
 
   adj_table_actions: TableAction[] = [
     {
@@ -285,8 +262,7 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
       icon: 'trash-2',
       variant: 'danger',
       action: (row: ConsolidationAdjustment) => this.onRemoveAdjustment(row),
-      show: () => this.session()?.status === 'in_progress',
-    },
+      show: () => this.session()?.status === 'in_progress'},
   ];
 
   // ── Adjustment Form ────────────────────────────────────────────
@@ -295,8 +271,7 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
     type: ['elimination' as string, [Validators.required]],
     debit_amount: [0, [Validators.required, Validators.min(0)]],
     credit_amount: [0, [Validators.required, Validators.min(0)]],
-    description: ['', [Validators.required]],
-  });
+    description: ['', [Validators.required]]});
 
   adjustment_type_options: SelectorOption[] = [
     { value: 'elimination', label: 'Eliminacion' },
@@ -313,7 +288,7 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
   ];
 
   // ── Lifecycle ──────────────────────────────────────────────────
-  ngOnInit(): void {
+  constructor() {
     const id = Number(this.route.snapshot.paramMap.get('id'));
     if (id) {
       this.loadSession(id);
@@ -322,32 +297,24 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
       this.loadAccounts();
     }
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  // ── Data Loading ───────────────────────────────────────────────
+// ── Data Loading ───────────────────────────────────────────────
   private loadSession(id: number): void {
     this.accounting_service
       .getConsolidationSession(id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => this.session.set(res.data),
         error: () =>
           this.toast_service.show({
             variant: 'error',
-            description: 'Error cargando sesion',
-          }),
-      });
+            description: 'Error cargando sesion'})});
   }
 
   private loadICTransactions(session_id: number): void {
     this.ic_loading.set(true);
     this.accounting_service
       .getIntercompanyTransactions(session_id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           const txns = res.data || [];
@@ -362,29 +329,27 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
           }
           this.stores.set(Array.from(store_map.values()));
         },
-        error: () => this.ic_loading.set(false),
-      });
+        error: () => this.ic_loading.set(false)});
   }
 
   private loadAdjustments(session_id: number): void {
     this.adj_loading.set(true);
     this.accounting_service
       .getConsolidationSession(session_id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           // Session detail may include adjustments; if backend provides them separately,
           // this can be refactored to use a dedicated endpoint.
           this.adj_loading.set(false);
         },
-        error: () => this.adj_loading.set(false),
-      });
+        error: () => this.adj_loading.set(false)});
   }
 
   private loadAccounts(): void {
     this.accounting_service
       .getChartOfAccounts()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           const flatten = (accs: ChartAccount[]): ChartAccount[] =>
@@ -397,8 +362,7 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
               [] as ChartAccount[],
             );
           this.accounts.set(flatten(res.data || []));
-        },
-      });
+        }});
   }
 
   // ── Tab Change ────────────────────────────────────────────────
@@ -416,24 +380,21 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
     this.action_loading.set(true);
     this.accounting_service
       .startConsolidationSession(id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.session.set(res.data);
           this.action_loading.set(false);
           this.toast_service.show({
             variant: 'success',
-            description: 'Sesion iniciada',
-          });
+            description: 'Sesion iniciada'});
         },
         error: () => {
           this.action_loading.set(false);
           this.toast_service.show({
             variant: 'error',
-            description: 'Error iniciando sesion',
-          });
-        },
-      });
+            description: 'Error iniciando sesion'});
+        }});
   }
 
   onComplete(): void {
@@ -442,24 +403,21 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
     this.action_loading.set(true);
     this.accounting_service
       .completeConsolidationSession(id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.session.set(res.data);
           this.action_loading.set(false);
           this.toast_service.show({
             variant: 'success',
-            description: 'Sesion completada',
-          });
+            description: 'Sesion completada'});
         },
         error: () => {
           this.action_loading.set(false);
           this.toast_service.show({
             variant: 'error',
-            description: 'Error completando sesion',
-          });
-        },
-      });
+            description: 'Error completando sesion'});
+        }});
   }
 
   onCancel(): void {
@@ -468,24 +426,21 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
     this.action_loading.set(true);
     this.accounting_service
       .cancelConsolidationSession(id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.session.set(res.data);
           this.action_loading.set(false);
           this.toast_service.show({
             variant: 'success',
-            description: 'Sesion cancelada',
-          });
+            description: 'Sesion cancelada'});
         },
         error: () => {
           this.action_loading.set(false);
           this.toast_service.show({
             variant: 'error',
-            description: 'Error cancelando sesion',
-          });
-        },
-      });
+            description: 'Error cancelando sesion'});
+        }});
   }
 
   // ── Intercompany Actions ───────────────────────────────────────
@@ -495,24 +450,21 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
     this.ic_loading.set(true);
     this.accounting_service
       .detectIntercompanyTransactions(id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.ic_transactions.set(res.data || []);
           this.ic_loading.set(false);
           this.toast_service.show({
             variant: 'success',
-            description: 'Deteccion completada',
-          });
+            description: 'Deteccion completada'});
         },
         error: () => {
           this.ic_loading.set(false);
           this.toast_service.show({
             variant: 'error',
-            description: 'Error detectando transacciones',
-          });
-        },
-      });
+            description: 'Error detectando transacciones'});
+        }});
   }
 
   onEliminateAllIC(): void {
@@ -521,47 +473,41 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
     this.ic_loading.set(true);
     this.accounting_service
       .eliminateAllIntercompany(id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.loadICTransactions(id);
           this.toast_service.show({
             variant: 'success',
-            description: 'Todas las transacciones eliminadas',
-          });
+            description: 'Todas las transacciones eliminadas'});
         },
         error: () => {
           this.ic_loading.set(false);
           this.toast_service.show({
             variant: 'error',
-            description: 'Error eliminando transacciones',
-          });
-        },
-      });
+            description: 'Error eliminando transacciones'});
+        }});
   }
 
   onEliminateIC(txn: IntercompanyTransaction): void {
     this.ic_loading.set(true);
     this.accounting_service
       .eliminateIntercompany(txn.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           const session_id = this.session()?.id;
           if (session_id) this.loadICTransactions(session_id);
           this.toast_service.show({
             variant: 'success',
-            description: 'Transaccion eliminada',
-          });
+            description: 'Transaccion eliminada'});
         },
         error: () => {
           this.ic_loading.set(false);
           this.toast_service.show({
             variant: 'error',
-            description: 'Error eliminando transaccion',
-          });
-        },
-      });
+            description: 'Error eliminando transaccion'});
+        }});
   }
 
   // ── Adjustment Actions ─────────────────────────────────────────
@@ -580,56 +526,48 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
         type: type as any,
         debit_amount: debit_amount || 0,
         credit_amount: credit_amount || 0,
-        description: description!,
-      })
-      .pipe(takeUntil(this.destroy$))
+        description: description!})
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.adjustments.update((arr) => [...arr, res.data]);
           this.adj_submitting.set(false);
-          this.is_adjustment_modal_open = false;
+          this.isAdjustmentModalOpen.set(false);
           this.adj_form.reset({
             type: 'elimination',
             debit_amount: 0,
-            credit_amount: 0,
-          });
+            credit_amount: 0});
           this.toast_service.show({
             variant: 'success',
-            description: 'Ajuste agregado',
-          });
+            description: 'Ajuste agregado'});
         },
         error: () => {
           this.adj_submitting.set(false);
           this.toast_service.show({
             variant: 'error',
-            description: 'Error agregando ajuste',
-          });
-        },
-      });
+            description: 'Error agregando ajuste'});
+        }});
   }
 
   onRemoveAdjustment(adj: ConsolidationAdjustment): void {
     this.adj_loading.set(true);
     this.accounting_service
       .removeConsolidationAdjustment(adj.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.adjustments.update((arr) => arr.filter((a) => a.id !== adj.id));
           this.adj_loading.set(false);
           this.toast_service.show({
             variant: 'success',
-            description: 'Ajuste eliminado',
-          });
+            description: 'Ajuste eliminado'});
         },
         error: () => {
           this.adj_loading.set(false);
           this.toast_service.show({
             variant: 'error',
-            description: 'Error eliminando ajuste',
-          });
-        },
-      });
+            description: 'Error eliminando ajuste'});
+        }});
   }
 
   // ── Auto-Eliminate Action ──────────────────────────────────────
@@ -639,7 +577,7 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
     this.auto_eliminate_loading.set(true);
     this.accounting_service
       .autoEliminateIntercompany(id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.auto_eliminate_loading.set(false);
@@ -648,17 +586,14 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
           const data = res.data;
           this.toast_service.show({
             variant: 'success',
-            description: `Auto-eliminacion completada: ${data.eliminated_count} transacciones eliminadas`,
-          });
+            description: `Auto-eliminacion completada: ${data.eliminated_count} transacciones eliminadas`});
         },
         error: () => {
           this.auto_eliminate_loading.set(false);
           this.toast_service.show({
             variant: 'error',
-            description: 'Error en auto-eliminacion',
-          });
-        },
-      });
+            description: 'Error en auto-eliminacion'});
+        }});
   }
 
   // ── Drill-down Actions ──────────────────────────────────────────
@@ -681,7 +616,7 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
 
     this.accounting_service
       .getConsolidationTransactions(session_id, filters)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.drilldown_data.set(res.data?.data || []);
@@ -692,10 +627,8 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
           this.drilldown_loading.set(false);
           this.toast_service.show({
             variant: 'error',
-            description: 'Error cargando transacciones',
-          });
-        },
-      });
+            description: 'Error cargando transacciones'});
+        }});
   }
 
   // ── Export Action ────────────────────────────────────────────────
@@ -705,7 +638,7 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
     this.export_loading.set(true);
     this.accounting_service
       .exportConsolidation(id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.export_loading.set(false);
@@ -715,17 +648,14 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
           }
           this.toast_service.show({
             variant: 'success',
-            description: 'Reporte exportado exitosamente',
-          });
+            description: 'Reporte exportado exitosamente'});
         },
         error: () => {
           this.export_loading.set(false);
           this.toast_service.show({
             variant: 'error',
-            description: 'Error exportando reporte',
-          });
-        },
-      });
+            description: 'Error exportando reporte'});
+        }});
   }
 
   // ── Report Actions ─────────────────────────────────────────────
@@ -761,7 +691,7 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
         return;
     }
 
-    obs$.pipe(takeUntil(this.destroy$)).subscribe({
+    obs$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (res: any) => {
         this.report_data.set(res.data);
         this.report_loading.set(false);
@@ -770,10 +700,8 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
         this.report_loading.set(false);
         this.toast_service.show({
           variant: 'error',
-          description: 'Error cargando reporte',
-        });
-      },
-    });
+          description: 'Error cargando reporte'});
+      }});
   }
 
   // ── Helpers ────────────────────────────────────────────────────
@@ -786,8 +714,7 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
       draft: 'Borrador',
       in_progress: 'En Progreso',
       completed: 'Completada',
-      cancelled: 'Cancelada',
-    };
+      cancelled: 'Cancelada'};
     return labels[this.session()?.status || ''] || '-';
   }
 
@@ -796,8 +723,7 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
       draft: 'warning',
       in_progress: 'primary',
       completed: 'success',
-      cancelled: 'error',
-    };
+      cancelled: 'error'};
     return map[this.session()?.status || ''] || 'neutral';
   }
 
@@ -805,8 +731,7 @@ export class SessionDetailComponent implements OnInit, OnDestroy {
     const labels: Record<string, string> = {
       elimination: 'Eliminacion',
       reclassification: 'Reclasificacion',
-      adjustment: 'Ajuste',
-    };
+      adjustment: 'Ajuste'};
     return labels[type] || type;
   }
 

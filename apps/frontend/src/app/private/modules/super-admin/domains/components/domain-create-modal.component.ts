@@ -1,5 +1,5 @@
-import { Component, EventEmitter, Input, Output } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input, output } from '@angular/core';
+
 import {
   ReactiveFormsModule,
   FormBuilder,
@@ -17,15 +17,14 @@ import { CreateDomainDto, DomainType } from '../interfaces/domain.interface';
   selector: 'app-domain-create-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ModalComponent,
     InputComponent,
-    ButtonComponent,
+    ButtonComponent
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
@@ -116,7 +115,7 @@ import { CreateDomainDto, DomainType } from '../interfaces/domain.interface';
         <app-button
           variant="primary"
           size="sm"
-          [loading]="isLoading"
+          [loading]="isLoading()"
           (clicked)="onSubmit()"
         >
           Crear Dominio
@@ -126,11 +125,11 @@ import { CreateDomainDto, DomainType } from '../interfaces/domain.interface';
   `,
 })
 export class DomainCreateModalComponent {
-  @Input() isOpen = false;
-  @Input() isLoading = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() create = new EventEmitter<CreateDomainDto>();
-  @Output() cancel = new EventEmitter<void>();
+  readonly isOpen = input(false);
+  readonly isLoading = input(false);
+  readonly isOpenChange = output<boolean>();
+  readonly create = output<CreateDomainDto>();
+  readonly cancel = output<void>();
   domainForm!: FormGroup;
 
   constructor(private fb: FormBuilder) {
@@ -149,7 +148,7 @@ export class DomainCreateModalComponent {
   }
 
   open(): void {
-    this.isOpen = true;
+    this.isOpenChange.emit(true);
     this.domainForm.reset({
       hostname: '',
       domain_type: DomainType.PRIMARY,
@@ -161,7 +160,7 @@ export class DomainCreateModalComponent {
   }
 
   close(): void {
-    this.isOpen = false;
+    this.isOpenChange.emit(false);
     this.domainForm.reset();
   }
 
@@ -184,8 +183,6 @@ export class DomainCreateModalComponent {
       });
       return;
     }
-
-    this.isLoading = true;
 
     const formData = this.domainForm.value;
     const domainData: CreateDomainDto = {
@@ -211,18 +208,16 @@ export class DomainCreateModalComponent {
         return 'Este campo es requerido';
       }
       if (control.errors?.['minlength']) {
-        return 'Mínimo 3 caracteres';
+        return 'Minimo 3 caracteres';
       }
     }
     return '';
   }
 
-  // Public method to set loading state
   setLoading(loading: boolean): void {
-    this.isLoading = loading;
+    // Loading is now controlled via input from parent
   }
 
-  // Public method to reset form
   resetForm(): void {
     this.domainForm.reset({
       hostname: '',

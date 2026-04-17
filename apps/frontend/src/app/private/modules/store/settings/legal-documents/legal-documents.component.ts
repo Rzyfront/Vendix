@@ -1,5 +1,6 @@
-import { Component, OnInit, inject, signal, computed } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, OnInit, inject, signal, computed, model, input, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import { RouterModule } from '@angular/router';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
 import { StoreLegalDocumentsService } from './services/store-legal-documents.service';
@@ -29,7 +30,6 @@ import { formatDateOnlyUTC } from '../../../../../shared/utils/date.util';
   selector: 'app-legal-documents',
   standalone: true,
   imports: [
-    CommonModule,
     RouterModule,
     ReactiveFormsModule,
     StoreLegalDocumentModalComponent,
@@ -138,6 +138,7 @@ import { formatDateOnlyUTC } from '../../../../../shared/utils/date.util';
   `,
 })
 export class LegalDocumentsComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private service = inject(StoreLegalDocumentsService);
   private toast = inject(ToastService);
 
@@ -254,7 +255,7 @@ export class LegalDocumentsComponent implements OnInit {
 
   loadDocuments() {
     this.loading.set(true);
-    this.service.getDocuments().subscribe({
+    this.service.getDocuments().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (docs) => {
         this.documents.set(docs);
         this.loading.set(false);
@@ -278,7 +279,7 @@ export class LegalDocumentsComponent implements OnInit {
 
   openEditModal(doc: StoreLegalDocument) {
     this.loading.set(true);
-    this.service.getDocument(doc.id).subscribe({
+    this.service.getDocument(doc.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (fullDoc) => {
         this.selectedDocument = fullDoc;
         this.isModalOpen = true;
@@ -301,7 +302,7 @@ export class LegalDocumentsComponent implements OnInit {
     if (this.selectedDocument) {
       this.service
         .updateDocument(this.selectedDocument.id, dto as UpdateStoreDocumentDto)
-        .subscribe({
+        .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
           next: () => {
             this.toast.success('Documento actualizado');
             this.closeModal();
@@ -313,7 +314,7 @@ export class LegalDocumentsComponent implements OnInit {
           },
         });
     } else {
-      this.service.createDocument(dto as CreateStoreDocumentDto).subscribe({
+      this.service.createDocument(dto as CreateStoreDocumentDto).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: () => {
           this.toast.success('Documento creado');
           this.closeModal();
@@ -330,7 +331,7 @@ export class LegalDocumentsComponent implements OnInit {
   toggleActivation(doc: StoreLegalDocument) {
     if (doc.is_active) {
       if (!confirm('¿Desactivar este documento?')) return;
-      this.service.deactivateDocument(doc.id).subscribe({
+      this.service.deactivateDocument(doc.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: () => {
           this.toast.success('Documento desactivado');
           this.loadDocuments();
@@ -344,7 +345,7 @@ export class LegalDocumentsComponent implements OnInit {
         )
       )
         return;
-      this.service.activateDocument(doc.id).subscribe({
+      this.service.activateDocument(doc.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: () => {
           this.toast.success('Documento activado');
           this.loadDocuments();
@@ -361,7 +362,7 @@ export class LegalDocumentsComponent implements OnInit {
       )
     )
       return;
-    this.service.deleteDocument(doc.id).subscribe({
+    this.service.deleteDocument(doc.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.toast.success('Documento eliminado');
         this.loadDocuments();

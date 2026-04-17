@@ -1,5 +1,5 @@
-import { Component, Input, Output, EventEmitter, OnInit } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input, output, effect } from '@angular/core';
+
 import { FormsModule } from '@angular/forms';
 
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
@@ -16,15 +16,14 @@ import { PopCartService, PopCartItemLotInfo } from '../services/pop-cart.service
   selector: 'app-pop-lot-modal',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ModalComponent,
     ButtonComponent,
-    InputComponent,
-  ],
+    InputComponent
+],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'md'"
@@ -100,13 +99,13 @@ import { PopCartService, PopCartItemLotInfo } from '../services/pop-cart.service
   styleUrls: ['./pop-lot-modal.component.scss'],
 })
 export class PopLotModalComponent {
-  @Input() isOpen = false;
-  @Input() initialLotInfo?: PopCartItemLotInfo;
-  @Output() isOpenChange = new EventEmitter<boolean>();
+  readonly isOpen = input(false);
+  readonly initialLotInfo = input<PopCartItemLotInfo | undefined>(undefined);
+  readonly isOpenChange = output<boolean>();
 
-  @Output() close = new EventEmitter<void>();
-  @Output() save = new EventEmitter<PopCartItemLotInfo>();
-  @Output() skip = new EventEmitter<void>();
+  readonly close = output<void>();
+  readonly save = output<PopCartItemLotInfo>();
+  readonly skip = output<void>();
 
   form: PopCartItemLotInfo = {
     batch_number: '',
@@ -114,14 +113,13 @@ export class PopLotModalComponent {
     expiration_date: undefined,
   };
 
-  // ============================================================
-  // Lifecycle
-  // ============================================================
-
-  ngOnInit(): void {
-    if (this.initialLotInfo) {
-      this.form = { ...this.initialLotInfo };
-    }
+  constructor() {
+    effect(() => {
+      const info = this.initialLotInfo();
+      if (info) {
+        this.form = { ...info };
+      }
+    });
   }
 
   // ============================================================

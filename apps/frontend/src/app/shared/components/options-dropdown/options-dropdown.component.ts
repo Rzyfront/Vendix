@@ -1,22 +1,20 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
-  ChangeDetectionStrategy,
-  OnChanges,
-  OnDestroy,
+  DestroyRef,
   HostListener,
   ElementRef,
-  ViewChild,
-  SimpleChanges,
-  ChangeDetectorRef,
+  effect,
   inject,
+  input,
+  output,
+  signal,
+  viewChild
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import { FormsModule } from '@angular/forms';
-import { Subject, Subscription } from 'rxjs';
-import { debounceTime } from 'rxjs/operators';
+import { Subject, of } from 'rxjs';
+import { debounceTime, switchMap } from 'rxjs/operators';
 
 import { IconComponent } from '../icon/icon.component';
 import { IconName } from '../icon/icons.registry';
@@ -33,66 +31,64 @@ import {
   selector: 'app-options-dropdown',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     IconComponent,
     SelectorComponent,
-    MultiSelectorComponent,
-  ],
+    MultiSelectorComponent
+],
   templateUrl: './options-dropdown.component.html',
   styleUrls: ['./options-dropdown.component.scss'],
-  changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class OptionsDropdownComponent implements OnChanges, OnDestroy {
+export class OptionsDropdownComponent {
   /** Configuration for each filter in the dropdown */
-  @Input() filters: FilterConfig[] = [];
+  readonly filters = input<FilterConfig[]>([]);
 
   /** Actions to display in the dropdown */
-  @Input() actions: DropdownAction[] = [];
+  readonly actions = input<DropdownAction[]>([]);
 
   /** Whether to show the actions trigger button */
-  @Input() showActions: boolean = true;
+  readonly showActions = input<boolean>(true);
 
   /** Current filter values */
-  @Input() filterValues: FilterValues = {};
+  readonly filterValues = input<FilterValues>({});
 
   /** Title shown in the dropdown header */
-  @Input() title: string = 'Opciones';
+  readonly title = input<string>('Opciones');
 
   /** Label for the trigger button */
-  @Input() triggerLabel: string = 'Opciones';
+  readonly triggerLabel = input<string>('Opciones');
 
   /** Icon for the trigger button */
-  @Input() triggerIcon: IconName = 'sliders-horizontal';
+  readonly triggerIcon = input<IconName>('sliders-horizontal');
 
   /** Debounce time in milliseconds for filter changes */
-  @Input() debounceMs: number = 350;
+  readonly debounceMs = input<number>(350);
 
   /** Whether the component is in a loading state */
-  @Input() isLoading: boolean = false;
+  readonly isLoading = input<boolean>(false);
 
   /** Emits when filter values change (after debounce) */
-  @Output() filterChange = new EventEmitter<FilterValues>();
+  readonly filterChange = output<FilterValues>();
 
   /** Emits when an action is clicked */
-  @Output() actionClick = new EventEmitter<string>();
+  readonly actionClick = output<string>();
 
   /** Emits when "clear all" is clicked */
-  @Output() clearAllFilters = new EventEmitter<void>();
+  readonly clearAllFilters = output<void>();
 
-  @ViewChild('dropdownContainer') dropdownContainer!: ElementRef<HTMLElement>;
-  @ViewChild('actionsTriggerButton') actionsTriggerButton!: ElementRef<HTMLButtonElement>;
-  @ViewChild('filtersTriggerButton') filtersTriggerButton!: ElementRef<HTMLButtonElement>;
+  readonly dropdownContainer = viewChild.required<ElementRef<HTMLElement>>('dropdownContainer');
+  readonly actionsTriggerButton = viewChild.required<ElementRef<HTMLButtonElement>>('actionsTriggerButton');
+  readonly filtersTriggerButton = viewChild.required<ElementRef<HTMLButtonElement>>('filtersTriggerButton');
 
-  private cdr = inject(ChangeDetectorRef);
+  private readonly destroyRef = inject(DestroyRef);
 
-  isActionsOpen: boolean = false;
-  isFiltersOpen: boolean = false;
-  activeFiltersCount: number = 0;
+  readonly isActionsOpen = signal(false);
+  readonly isFiltersOpen = signal(false);
+  readonly activeFiltersCount = signal(0);
 
   /** Position for mobile dropdown */
-  dropdownTop: number | null = null;
-  dropdownRight: number | null = null;
+  readonly dropdownTop = signal<number | null>(null);
+  readonly dropdownRight = signal<number | null>(null);
 
   /** Check if we're on mobile/tablet */
   get isMobileOrTablet(): boolean {
@@ -100,42 +96,32 @@ export class OptionsDropdownComponent implements OnChanges, OnDestroy {
   }
 
   /** Local state for filter values */
-  localFilterValues: FilterValues = {};
+  readonly localFilterValues = signal<FilterValues>({});
 
-  /** Debounce subject for filter changes */
-  private filterChange$ = new Subject<void>();
-  private filterSubscription: Subscription;
+  /** Emits debounce trigger — value is the debounce time to apply */
+  private readonly debounceTrigger$ = new Subject<number>();
 
   constructor() {
-    this.filterSubscription = this.filterChange$
-      .pipe(debounceTime(this.debounceMs))
+    // Sync filterValues input → local state
+    effect(() => {
+      this.localFilterValues.set({ ...this.filterValues() });
+      this.calculateActiveFiltersCount();
+    });
+
+    // Single pipeline: switchMap re-creates debounce when a new ms value arrives
+    this.debounceTrigger$
+      .pipe(
+        switchMap((ms) => of(null).pipe(debounceTime(ms))),
+        takeUntilDestroyed(this.destroyRef),
+      )
       .subscribe(() => this.emitFilterChange());
-  }
-
-  ngOnChanges(changes: SimpleChanges): void {
-    if (changes['filterValues']) {
-      this.localFilterValues = { ...this.filterValues };
-    }
-
-    if (changes['debounceMs'] && !changes['debounceMs'].firstChange) {
-      // Re-subscribe with new debounce time
-      this.filterSubscription?.unsubscribe();
-      this.filterSubscription = this.filterChange$
-        .pipe(debounceTime(this.debounceMs))
-        .subscribe(() => this.emitFilterChange());
-    }
-
-    this.calculateActiveFiltersCount();
-  }
-
-  ngOnDestroy(): void {
-    this.filterSubscription?.unsubscribe();
   }
 
   private calculateActiveFiltersCount(): void {
     let count = 0;
-    for (const filter of this.filters) {
-      const value = this.localFilterValues[filter.key];
+    const values = this.localFilterValues();
+    for (const filter of this.filters()) {
+      const value = values[filter.key];
       if (filter.type === 'multi-select') {
         if (Array.isArray(value) && value.length > 0) {
           count++;
@@ -146,28 +132,22 @@ export class OptionsDropdownComponent implements OnChanges, OnDestroy {
         }
       }
     }
-    this.activeFiltersCount = count;
+    this.activeFiltersCount.set(count);
   }
 
   toggleActionsDropdown(): void {
-    this.isActionsOpen = !this.isActionsOpen;
-    this.isFiltersOpen = false;
+    this.isActionsOpen.update((v) => !v);
+    this.isFiltersOpen.set(false);
   }
 
   toggleFiltersDropdown(): void {
-    this.isFiltersOpen = !this.isFiltersOpen;
-    this.isActionsOpen = false;
+    this.isFiltersOpen.update((v) => !v);
+    this.isActionsOpen.set(false);
   }
 
   closeAllDropdowns(): void {
-    this.isActionsOpen = false;
-    this.isFiltersOpen = false;
-  }
-
-  private calculateDropdownPosition(): void {
-    // Position is now handled purely by CSS (position: absolute with top: calc(100% + 4px))
-    // This method is kept for potential future use or scroll handling
-    this.cdr.markForCheck();
+    this.isActionsOpen.set(false);
+    this.isFiltersOpen.set(false);
   }
 
   closeDropdown(): void {
@@ -176,9 +156,10 @@ export class OptionsDropdownComponent implements OnChanges, OnDestroy {
 
   @HostListener('document:click', ['$event'])
   onDocumentClick(event: MouseEvent): void {
+    const dropdownContainer = this.dropdownContainer();
     if (
-      this.dropdownContainer &&
-      !this.dropdownContainer.nativeElement.contains(event.target as Node)
+      dropdownContainer &&
+      !dropdownContainer.nativeElement.contains(event.target as Node)
     ) {
       this.closeAllDropdowns();
     }
@@ -191,25 +172,23 @@ export class OptionsDropdownComponent implements OnChanges, OnDestroy {
 
   @HostListener('window:scroll')
   onWindowScroll(): void {
-    if (this.isActionsOpen || this.isFiltersOpen) {
-      this.calculateDropdownPosition();
-    }
+    // Position is handled purely by CSS — no action needed
   }
 
   onFilterChange(key: string, value: string | number | null): void {
-    this.localFilterValues[key] = value?.toString() || null;
+    this.localFilterValues.update((prev) => ({ ...prev, [key]: value?.toString() || null }));
     this.calculateActiveFiltersCount();
-    this.filterChange$.next();
+    this.debounceTrigger$.next(this.debounceMs());
   }
 
   onMultiFilterChange(key: string, values: (string | number)[]): void {
-    this.localFilterValues[key] = values.map((v) => v.toString());
+    this.localFilterValues.update((prev) => ({ ...prev, [key]: values.map((v) => v.toString()) }));
     this.calculateActiveFiltersCount();
-    this.filterChange$.next();
+    this.debounceTrigger$.next(this.debounceMs());
   }
 
   private emitFilterChange(): void {
-    this.filterChange.emit({ ...this.localFilterValues });
+    this.filterChange.emit({ ...this.localFilterValues() });
   }
 
   onClearAllFilters(): void {
@@ -221,12 +200,12 @@ export class OptionsDropdownComponent implements OnChanges, OnDestroy {
   }
 
   onClearFilter(key: string): void {
-    const filter = this.filters.find((f) => f.key === key);
+    const filter = this.filters().find((f) => f.key === key);
     if (filter) {
       if (filter.type === 'multi-select') {
-        this.localFilterValues[key] = [];
+        this.localFilterValues.update((prev) => ({ ...prev, [key]: [] }));
       } else {
-        this.localFilterValues[key] = null;
+        this.localFilterValues.update((prev) => ({ ...prev, [key]: null }));
       }
       this.calculateActiveFiltersCount();
       // Emit immediately for explicit clear action
@@ -235,7 +214,7 @@ export class OptionsDropdownComponent implements OnChanges, OnDestroy {
   }
 
   hasActiveFilter(key: string): boolean {
-    const value = this.localFilterValues[key];
+    const value = this.localFilterValues()[key];
     if (Array.isArray(value)) {
       return value.length > 0;
     }
@@ -248,18 +227,18 @@ export class OptionsDropdownComponent implements OnChanges, OnDestroy {
   }
 
   get hasActions(): boolean {
-    return this.showActions && this.actions.length > 0;
+    return this.showActions() && this.actions().length > 0;
   }
 
   get hasFilters(): boolean {
-    return this.filters.length > 0;
+    return this.filters().length > 0;
   }
 
   /**
    * Get the current value for a single-select filter
    */
   getFilterValue(key: string): string {
-    const value = this.localFilterValues[key];
+    const value = this.localFilterValues()[key];
     if (typeof value === 'string') {
       return value;
     }
@@ -270,7 +249,7 @@ export class OptionsDropdownComponent implements OnChanges, OnDestroy {
    * Get the current values for a multi-select filter
    */
   getMultiFilterValues(key: string): string[] {
-    const value = this.localFilterValues[key];
+    const value = this.localFilterValues()[key];
     if (Array.isArray(value)) {
       return value;
     }

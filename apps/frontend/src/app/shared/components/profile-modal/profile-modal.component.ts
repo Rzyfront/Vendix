@@ -1,12 +1,6 @@
-import {
-  Component,
-  EventEmitter,
-  inject,
-  Input,
-  OnInit,
-  Output,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, inject, output, input, model, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { DatePipe, UpperCasePipe } from '@angular/common';
 import {
   FormBuilder,
   FormGroup,
@@ -20,7 +14,10 @@ import { AuthFacade } from '../../../core/store/auth/auth.facade';
 import { finalize, take } from 'rxjs';
 import { ButtonComponent } from '../button/button.component';
 import { InputComponent } from '../input/input.component';
-import { SelectorComponent, SelectorOption } from '../selector/selector.component';
+import {
+  SelectorComponent,
+  SelectorOption,
+} from '../selector/selector.component';
 import { ToastService } from '../toast/toast.service';
 import { IconComponent } from '../icon/icon.component';
 import {
@@ -35,7 +32,8 @@ import { environment } from '../../../../environments/environment';
   selector: 'app-profile-modal',
   standalone: true,
   imports: [
-    CommonModule,
+    DatePipe,
+    UpperCasePipe,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
@@ -46,223 +44,302 @@ import { environment } from '../../../../environments/environment';
   template: `
     <app-modal
       [(isOpen)]="isOpen"
-      [title]="isEditing ? 'Editar Perfil' : ''"
-      [subtitle]="isEditing ? 'Actualiza tu información personal' : ''"
+      [title]="isEditing() ? 'Editar Perfil' : ''"
+      [subtitle]="isEditing() ? 'Actualiza tu información personal' : ''"
       [size]="'lg'"
       (closed)="onClose()"
       (opened)="onOpen()"
     >
-      <div *ngIf="!isEditing; else editMode">
-        <!-- ═══ VISTA DE PERFIL (Mobile-First) ═══ -->
-
-        <!-- Profile Header — centered card -->
-        <div class="flex flex-col items-center text-center pt-2 pb-5">
-          <div class="w-20 h-20 md:w-24 md:h-24 rounded-xl overflow-hidden border-2 border-primary-200 mb-3">
-            <img
-              *ngIf="userInfo?.avatar_url"
-              [src]="userInfo.avatar_url"
-              alt="Avatar"
-              class="w-full h-full object-contain"
-            />
+      @if (!isEditing()) {
+        <div>
+          <!-- ═══ VISTA DE PERFIL (Mobile-First) ═══ -->
+          <!-- Profile Header — centered card -->
+          <div class="flex flex-col items-center text-center pt-2 pb-5">
             <div
-              *ngIf="!userInfo?.avatar_url"
-              class="w-full h-full bg-primary-100 flex items-center justify-center text-primary-600 text-2xl md:text-3xl font-bold"
+              class="w-20 h-20 md:w-24 md:h-24 rounded-xl overflow-hidden border-2 border-primary-200 mb-3"
             >
-              {{ getInitials() }}
-            </div>
-          </div>
-          <h3 class="text-lg font-semibold text-gray-900">
-            {{ userInfo?.first_name }} {{ userInfo?.last_name }}
-          </h3>
-          <p class="text-sm text-gray-500">{{ userInfo?.email }}</p>
-        </div>
-
-        <!-- Información Personal — icon rows -->
-        <div class="space-y-2 mb-5">
-          <h4 class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider px-1">
-            Información Personal
-          </h4>
-          <div class="bg-gray-50 rounded-xl border border-gray-100 divide-y divide-gray-100">
-            <!-- Teléfono -->
-            <div class="flex items-center gap-3 px-4 py-3">
-              <app-icon name="phone" [size]="18" class="text-gray-400 flex-shrink-0"></app-icon>
-              <div class="min-w-0">
-                <p class="text-[11px] text-gray-400 leading-tight">Teléfono</p>
-                <p class="text-sm text-gray-900 truncate">{{ userInfo?.phone || 'No registrado' }}</p>
-              </div>
-            </div>
-            <!-- Documento -->
-            <div class="flex items-center gap-3 px-4 py-3">
-              <app-icon name="file-text" [size]="18" class="text-gray-400 flex-shrink-0"></app-icon>
-              <div class="min-w-0">
-                <p class="text-[11px] text-gray-400 leading-tight">Documento</p>
-                <p
-                  *ngIf="userInfo?.document_type && userInfo?.document_number"
-                  class="text-sm text-gray-900 truncate"
+              @if (userInfo()?.avatar_url) {
+                <img
+                  [src]="userInfo().avatar_url"
+                  alt="Avatar"
+                  class="w-full h-full object-contain"
+                />
+              }
+              @if (!userInfo()?.avatar_url) {
+                <div
+                  class="w-full h-full bg-primary-100 flex items-center justify-center text-primary-600 text-2xl md:text-3xl font-bold"
                 >
-                  {{ userInfo?.document_type | uppercase }} {{ userInfo?.document_number }}
-                </p>
-                <p
-                  *ngIf="!userInfo?.document_type || !userInfo?.document_number"
-                  class="text-sm text-gray-400 italic"
-                >
-                  No registrado
-                </p>
-              </div>
+                  {{ getInitials() }}
+                </div>
+              }
             </div>
-            <!-- Miembro desde -->
-            <div class="flex items-center gap-3 px-4 py-3">
-              <app-icon name="calendar" [size]="18" class="text-gray-400 flex-shrink-0"></app-icon>
-              <div class="min-w-0">
-                <p class="text-[11px] text-gray-400 leading-tight">Miembro desde</p>
-                <p class="text-sm text-gray-900">{{ userInfo?.created_at | date: 'mediumDate' }}</p>
-              </div>
-            </div>
+            <h3 class="text-lg font-semibold text-gray-900">
+              {{ userInfo()?.first_name }} {{ userInfo()?.last_name }}
+            </h3>
+            <p class="text-sm text-gray-500">{{ userInfo()?.email }}</p>
           </div>
-        </div>
-
-        <!-- Dirección — compact card -->
-        <div class="space-y-2 mb-5">
-          <h4 class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider px-1">
-            Dirección
-          </h4>
-          <div class="bg-gray-50 rounded-xl border border-gray-100">
-            <div *ngIf="hasAddress; else noAddress">
-              <div class="flex items-start gap-3 px-4 py-3">
-                <app-icon name="map-pin" [size]="18" class="text-gray-400 flex-shrink-0 mt-0.5"></app-icon>
+          <!-- Información Personal — icon rows -->
+          <div class="space-y-2 mb-5">
+            <h4
+              class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider px-1"
+            >
+              Información Personal
+            </h4>
+            <div
+              class="bg-gray-50 rounded-xl border border-gray-100 divide-y divide-gray-100"
+            >
+              <!-- Teléfono -->
+              <div class="flex items-center gap-3 px-4 py-3">
+                <app-icon
+                  name="phone"
+                  [size]="18"
+                  class="text-gray-400 flex-shrink-0"
+                ></app-icon>
                 <div class="min-w-0">
-                  <p class="text-sm text-gray-900">{{ addressInfo?.address_line_1 }}</p>
-                  <p *ngIf="addressInfo?.address_line_2" class="text-sm text-gray-500">
-                    {{ addressInfo?.address_line_2 }}
+                  <p class="text-[11px] text-gray-400 leading-tight">
+                    Teléfono
                   </p>
-                  <p class="text-xs text-gray-400 mt-1">
-                    {{ addressInfo?.city }}<span *ngIf="addressInfo?.state">, {{ addressInfo?.state }}</span>
+                  <p class="text-sm text-gray-900 truncate">
+                    {{ userInfo()?.phone || 'No registrado' }}
                   </p>
-                  <p class="text-xs text-gray-400">
-                    {{ addressInfo?.country }}
-                    <span *ngIf="addressInfo?.postal_code"> · {{ addressInfo?.postal_code }}</span>
+                </div>
+              </div>
+              <!-- Documento -->
+              <div class="flex items-center gap-3 px-4 py-3">
+                <app-icon
+                  name="file-text"
+                  [size]="18"
+                  class="text-gray-400 flex-shrink-0"
+                ></app-icon>
+                <div class="min-w-0">
+                  <p class="text-[11px] text-gray-400 leading-tight">
+                    Documento
+                  </p>
+                  @if (
+                    userInfo()?.document_type && userInfo()?.document_number
+                  ) {
+                    <p class="text-sm text-gray-900 truncate">
+                      {{ userInfo()?.document_type | uppercase }}
+                      {{ userInfo()?.document_number }}
+                    </p>
+                  }
+                  @if (
+                    !userInfo()?.document_type || !userInfo()?.document_number
+                  ) {
+                    <p class="text-sm text-gray-400 italic">No registrado</p>
+                  }
+                </div>
+              </div>
+              <!-- Miembro desde -->
+              <div class="flex items-center gap-3 px-4 py-3">
+                <app-icon
+                  name="calendar"
+                  [size]="18"
+                  class="text-gray-400 flex-shrink-0"
+                ></app-icon>
+                <div class="min-w-0">
+                  <p class="text-[11px] text-gray-400 leading-tight">
+                    Miembro desde
+                  </p>
+                  <p class="text-sm text-gray-900">
+                    {{ userInfo()?.created_at | date: 'mediumDate' }}
                   </p>
                 </div>
               </div>
             </div>
-            <ng-template #noAddress>
-              <div class="flex flex-col items-center py-6 px-4">
-                <app-icon name="map-pin" [size]="24" class="text-gray-300 mb-2"></app-icon>
-                <p class="text-sm text-gray-400 mb-2">No hay dirección registrada</p>
+          </div>
+          <!-- Dirección — compact card -->
+          <div class="space-y-2 mb-5">
+            <h4
+              class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider px-1"
+            >
+              Dirección
+            </h4>
+            <div class="bg-gray-50 rounded-xl border border-gray-100">
+              @if (hasAddress()) {
+                <div>
+                  <div class="flex items-start gap-3 px-4 py-3">
+                    <app-icon
+                      name="map-pin"
+                      [size]="18"
+                      class="text-gray-400 flex-shrink-0 mt-0.5"
+                    ></app-icon>
+                    <div class="min-w-0">
+                      <p class="text-sm text-gray-900">
+                        {{ addressInfo()?.address_line_1 }}
+                      </p>
+                      @if (addressInfo()?.address_line_2) {
+                        <p class="text-sm text-gray-500">
+                          {{ addressInfo()?.address_line_2 }}
+                        </p>
+                      }
+                      <p class="text-xs text-gray-400 mt-1">
+                        {{ addressInfo()?.city }}
+                        @if (addressInfo()?.state) {
+                          <span>, {{ addressInfo()?.state }}</span>
+                        }
+                      </p>
+                      <p class="text-xs text-gray-400">
+                        {{ addressInfo()?.country }}
+                        @if (addressInfo()?.postal_code) {
+                          <span> · {{ addressInfo()?.postal_code }}</span>
+                        }
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              } @else {
+                <div class="flex flex-col items-center py-6 px-4">
+                  <app-icon
+                    name="map-pin"
+                    [size]="24"
+                    class="text-gray-300 mb-2"
+                  ></app-icon>
+                  <p class="text-sm text-gray-400 mb-2">
+                    No hay dirección registrada
+                  </p>
+                  <button
+                    type="button"
+                    class="text-sm font-medium text-primary-600 hover:text-primary-700"
+                    (click)="enableEditMode()"
+                  >
+                    Agregar dirección
+                  </button>
+                </div>
+              }
+            </div>
+          </div>
+          <!-- Cuenta — icon rows -->
+          <div class="space-y-2 mb-2">
+            <h4
+              class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider px-1"
+            >
+              Cuenta
+            </h4>
+            <div
+              class="bg-gray-50 rounded-xl border border-gray-100 divide-y divide-gray-100"
+            >
+              <!-- Username -->
+              <div class="flex items-center gap-3 px-4 py-3">
+                <app-icon
+                  name="user"
+                  [size]="18"
+                  class="text-gray-400 flex-shrink-0"
+                ></app-icon>
+                <div class="min-w-0 flex-grow">
+                  <p class="text-[11px] text-gray-400 leading-tight">Usuario</p>
+                  <p class="text-sm text-gray-900 truncate">
+                    {{ userInfo()?.username || userInfo()?.email }}
+                  </p>
+                </div>
+              </div>
+              <!-- Change password trigger -->
+              <div class="px-4 py-3">
                 <button
                   type="button"
-                  class="text-sm font-medium text-primary-600 hover:text-primary-700"
-                  (click)="enableEditMode()"
+                  class="flex items-center gap-3 text-sm font-medium w-full"
+                  [class]="
+                    showPasswordSection()
+                      ? 'text-gray-500'
+                      : 'text-primary-600 hover:text-primary-700'
+                  "
+                  (click)="togglePasswordSection()"
                 >
-                  Agregar dirección
+                  <app-icon
+                    name="lock"
+                    [size]="18"
+                    class="flex-shrink-0"
+                  ></app-icon>
+                  @if (!showPasswordSection()) {
+                    <span>Cambiar contraseña</span>
+                  }
+                  @if (showPasswordSection()) {
+                    <span>Cancelar cambio</span>
+                  }
                 </button>
               </div>
-            </ng-template>
-          </div>
-        </div>
-
-        <!-- Cuenta — icon rows -->
-        <div class="space-y-2 mb-2">
-          <h4 class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider px-1">
-            Cuenta
-          </h4>
-          <div class="bg-gray-50 rounded-xl border border-gray-100 divide-y divide-gray-100">
-            <!-- Username -->
-            <div class="flex items-center gap-3 px-4 py-3">
-              <app-icon name="user" [size]="18" class="text-gray-400 flex-shrink-0"></app-icon>
-              <div class="min-w-0 flex-grow">
-                <p class="text-[11px] text-gray-400 leading-tight">Usuario</p>
-                <p class="text-sm text-gray-900 truncate">{{ userInfo?.username || userInfo?.email }}</p>
-              </div>
             </div>
-            <!-- Change password trigger -->
-            <div class="px-4 py-3">
-              <button
-                type="button"
-                class="flex items-center gap-3 text-sm font-medium w-full"
-                [class]="showPasswordSection ? 'text-gray-500' : 'text-primary-600 hover:text-primary-700'"
-                (click)="togglePasswordSection()"
-              >
-                <app-icon name="lock" [size]="18" class="flex-shrink-0"></app-icon>
-                <span *ngIf="!showPasswordSection">Cambiar contraseña</span>
-                <span *ngIf="showPasswordSection">Cancelar cambio</span>
-              </button>
-            </div>
-          </div>
-
-          <!-- Password form (expandable) -->
-          <div
-            *ngIf="showPasswordSection"
-            class="bg-white border border-gray-200 rounded-xl p-4"
-          >
-            <form
-              [formGroup]="passwordForm"
-              (ngSubmit)="onChangePassword()"
-              class="space-y-3"
-            >
-              <app-input
-                label="Contraseña Actual"
-                formControlName="current_password"
-                type="password"
-                placeholder="••••••"
-                [error]="getPasswordError('current_password')"
-              ></app-input>
-              <app-input
-                label="Nueva Contraseña"
-                formControlName="new_password"
-                type="password"
-                placeholder="••••••"
-                [error]="getPasswordError('new_password')"
-              ></app-input>
-              <app-input
-                label="Confirmar Contraseña"
-                formControlName="confirm_password"
-                type="password"
-                placeholder="••••••"
-                [error]="getPasswordError('confirm_password')"
-              ></app-input>
-              <div class="flex justify-end pt-1">
-                <app-button
-                  variant="primary"
-                  type="submit"
-                  [loading]="savingPassword"
-                  [disabled]="passwordForm.invalid"
+            <!-- Password form (expandable) -->
+            @if (showPasswordSection()) {
+              <div class="bg-white border border-gray-200 rounded-xl p-4">
+                <form
+                  [formGroup]="passwordForm"
+                  (ngSubmit)="onChangePassword()"
+                  class="space-y-3"
                 >
-                  Actualizar
-                </app-button>
+                  <app-input
+                    label="Contraseña Actual"
+                    formControlName="current_password"
+                    type="password"
+                    placeholder="••••••"
+                    [error]="getPasswordError('current_password')"
+                  ></app-input>
+                  <app-input
+                    label="Nueva Contraseña"
+                    formControlName="new_password"
+                    type="password"
+                    placeholder="••••••"
+                    [error]="getPasswordError('new_password')"
+                  ></app-input>
+                  <app-input
+                    label="Confirmar Contraseña"
+                    formControlName="confirm_password"
+                    type="password"
+                    placeholder="••••••"
+                    [error]="getPasswordError('confirm_password')"
+                  ></app-input>
+                  <div class="flex justify-end pt-1">
+                    <app-button
+                      variant="primary"
+                      type="submit"
+                      [loading]="savingPassword()"
+                      [disabled]="passwordForm.invalid"
+                    >
+                      Actualizar
+                    </app-button>
+                  </div>
+                </form>
               </div>
-            </form>
+            }
           </div>
         </div>
-      </div>
-
-      <!-- ═══ MODO EDICIÓN ═══ -->
-      <ng-template #editMode>
+      }
+      @if (isEditing()) {
         <form
           [formGroup]="profileForm"
           (ngSubmit)="onSubmit()"
           class="space-y-5"
         >
           <!-- Foto de Perfil -->
-          <div class="flex flex-col items-center gap-3 sm:flex-row sm:items-start sm:gap-4">
+          <div
+            class="flex flex-col items-center gap-3 sm:flex-row sm:items-start sm:gap-4"
+          >
             <div
               class="relative w-20 h-20 rounded-xl overflow-hidden border-2 border-primary-200 cursor-pointer group flex-shrink-0"
               (click)="avatarInput.click()"
             >
-              <img
-                *ngIf="avatarPreview || userInfo?.avatar_url"
-                [src]="avatarPreview || userInfo?.avatar_url"
-                alt="Avatar"
-                class="w-full h-full object-contain"
-              />
+              @if (avatarPreview() || userInfo()?.avatar_url) {
+                <img
+                  [src]="avatarPreview() || userInfo()?.avatar_url"
+                  alt="Avatar"
+                  class="w-full h-full object-contain"
+                />
+              }
+              @if (!avatarPreview() && !userInfo()?.avatar_url) {
+                <div
+                  class="w-full h-full bg-primary-100 flex items-center justify-center text-primary-600 text-2xl font-bold"
+                >
+                  {{ getInitials() }}
+                </div>
+              }
               <div
-                *ngIf="!avatarPreview && !userInfo?.avatar_url"
-                class="w-full h-full bg-primary-100 flex items-center justify-center text-primary-600 text-2xl font-bold"
+                class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
               >
-                {{ getInitials() }}
-              </div>
-              <div class="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                <app-icon name="camera" [size]="20" class="text-white"></app-icon>
+                <app-icon
+                  name="camera"
+                  [size]="20"
+                  class="text-white"
+                ></app-icon>
               </div>
             </div>
             <input
@@ -277,28 +354,31 @@ import { environment } from '../../../../environments/environment';
                 type="button"
                 class="text-primary-600 hover:text-primary-700 text-sm font-medium"
                 (click)="avatarInput.click()"
-                [disabled]="uploadingAvatar"
+                [disabled]="uploadingAvatar()"
               >
-                {{ uploadingAvatar ? 'Subiendo...' : 'Cambiar foto' }}
+                {{ uploadingAvatar() ? 'Subiendo...' : 'Cambiar foto' }}
               </button>
-              <span class="text-xs text-gray-400">JPG, PNG o WebP. Máx 5MB</span>
-              <button
-                *ngIf="avatarPreview || userInfo?.avatar_url"
-                type="button"
-                class="text-red-500 hover:text-red-600 text-xs font-medium"
-                (click)="removeAvatar()"
-                [disabled]="uploadingAvatar"
+              <span class="text-xs text-gray-400"
+                >JPG, PNG o WebP. Máx 5MB</span
               >
-                Eliminar foto
-              </button>
+              @if (avatarPreview() || userInfo()?.avatar_url) {
+                <button
+                  type="button"
+                  class="text-red-500 hover:text-red-600 text-xs font-medium"
+                  (click)="removeAvatar()"
+                  [disabled]="uploadingAvatar()"
+                >
+                  Eliminar foto
+                </button>
+              }
             </div>
           </div>
-
           <div class="border-t border-gray-100"></div>
-
           <!-- Información Personal -->
           <div class="space-y-3">
-            <h4 class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">
+            <h4
+              class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider"
+            >
               Información Personal
             </h4>
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -343,12 +423,12 @@ import { environment } from '../../../../environments/environment';
               ></app-input>
             </div>
           </div>
-
           <div class="border-t border-gray-100"></div>
-
           <!-- Dirección -->
           <div formGroupName="address" class="space-y-3">
-            <h4 class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider">
+            <h4
+              class="text-[11px] font-semibold text-gray-400 uppercase tracking-wider"
+            >
               Dirección
             </h4>
             <div class="grid grid-cols-1 gap-3">
@@ -401,34 +481,63 @@ import { environment } from '../../../../environments/environment';
             </div>
           </div>
         </form>
-      </ng-template>
+      }
+
+      <!-- ═══ MODO EDICIÓN ═══ -->
 
       <!-- ═══ FOOTER ═══ -->
-      <div slot="footer" class="grid gap-2 sm:flex sm:justify-end sm:gap-3 w-full">
-        <ng-container *ngIf="!isEditing">
-          <app-button class="order-1 sm:order-2" variant="primary" iconName="edit" [fullWidth]="true" (click)="enableEditMode()">
+      <div
+        slot="footer"
+        class="grid gap-2 sm:flex sm:justify-end sm:gap-3 w-full"
+      >
+        @if (!isEditing()) {
+          <app-button
+            class="order-1 sm:order-2"
+            variant="primary"
+            iconName="edit"
+            [fullWidth]="true"
+            (click)="enableEditMode()"
+          >
             Editar Perfil
           </app-button>
-          <app-button class="order-2 sm:order-1 sm:!w-auto" variant="secondary" [fullWidth]="true" (click)="onClose()">
+          <app-button
+            class="order-2 sm:order-1 sm:!w-auto"
+            variant="secondary"
+            [fullWidth]="true"
+            (click)="onClose()"
+          >
             Cerrar
           </app-button>
-        </ng-container>
-        <ng-container *ngIf="isEditing">
-          <app-button class="order-1 sm:order-2" variant="primary" [fullWidth]="true" (click)="onSubmit()" [loading]="saving" [disabled]="profileForm.invalid">
+        }
+        @if (isEditing()) {
+          <app-button
+            class="order-1 sm:order-2"
+            variant="primary"
+            [fullWidth]="true"
+            (click)="onSubmit()"
+            [loading]="saving()"
+            [disabled]="profileForm.invalid"
+          >
             Guardar Cambios
           </app-button>
-          <app-button class="order-2 sm:order-1 sm:!w-auto" variant="secondary" [fullWidth]="true" (click)="cancelEditMode()">
+          <app-button
+            class="order-2 sm:order-1 sm:!w-auto"
+            variant="secondary"
+            [fullWidth]="true"
+            (click)="cancelEditMode()"
+          >
             Cancelar
           </app-button>
-        </ng-container>
+        }
       </div>
     </app-modal>
   `,
   styles: [],
 })
-export class ProfileModalComponent implements OnInit {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
+export class ProfileModalComponent {
+  private destroyRef = inject(DestroyRef);
+  readonly isOpen = model(false);
+  readonly isOpenChange = output<boolean>();
 
   private fb = inject(FormBuilder);
   private http = inject(HttpClient);
@@ -440,22 +549,22 @@ export class ProfileModalComponent implements OnInit {
   profileForm: FormGroup;
   passwordForm: FormGroup;
 
-  loading = false;
-  saving = false;
-  savingPassword = false;
-  isInitialLoad = true; // Flag to track initial profile load
+  readonly loading = signal(false);
+  readonly saving = signal(false);
+  readonly savingPassword = signal(false);
+  readonly isInitialLoad = signal(true); // Flag to track initial profile load
 
-  isEditing = false;
-  showPasswordSection = false;
+  readonly isEditing = signal(false);
+  readonly showPasswordSection = signal(false);
 
   // Avatar upload state
-  avatarPreview: string | null = null;
-  uploadingAvatar = false;
+  readonly avatarPreview = signal<string | null>(null);
+  readonly uploadingAvatar = signal(false);
   pendingAvatarKey: string | null = null;
 
-  userInfo: any = null;
-  addressInfo: any = null;
-  hasAddress = false;
+  readonly userInfo = signal<any>(null);
+  readonly addressInfo = signal<any>(null);
+  readonly hasAddress = signal(false);
 
   countries: Country[] = [];
   departments: Department[] = [];
@@ -497,56 +606,48 @@ export class ProfileModalComponent implements OnInit {
       },
       { validators: this.passwordMatchValidator },
     );
-  }
 
-  ngOnInit() {
-    // Subscribe to user state to have immediate data
-    this.authFacade.user$.subscribe((user) => {
+    this.authFacade.user$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((user) => {
       if (user) {
         this.updateLocalUserInfo(user);
       }
     });
 
-    // Load countries for the selects
     this.countries = this.countryService.getCountries();
 
-    // Setup cascade logic like onboarding
     const countryControl = this.profileForm.get('address.country_code');
     const depControl = this.profileForm.get('address.state_province');
     const cityControl = this.profileForm.get('address.city');
 
     if (countryControl && depControl && cityControl) {
-      // Load departments when country changes to Colombia
-      countryControl.valueChanges.subscribe((code: string) => {
+      countryControl.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((code: string) => {
         if (code === 'CO') {
           this.loadDepartments();
-          depControl.enable(); // ✅ Enable department control
+          depControl.enable();
           if (depControl.value) {
-            cityControl.enable(); // ✅ Enable city control if department selected
+            cityControl.enable();
           }
         } else {
           this.departments = [];
           this.cities = [];
           depControl.setValue('');
           cityControl.setValue('');
-          depControl.disable(); // ✅ Disable department control
-          cityControl.disable(); // ✅ Disable city control
+          depControl.disable();
+          cityControl.disable();
         }
       });
 
-      // Load cities when department changes
-      depControl.valueChanges.subscribe((depId: number) => {
+      depControl.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((depId: number) => {
         if (depId) {
           this.loadCities(depId);
-          cityControl.enable(); // ✅ Enable city control
+          cityControl.enable();
         } else {
           this.cities = [];
           cityControl.setValue('');
-          cityControl.disable(); // ✅ Disable city control
+          cityControl.disable();
         }
       });
 
-      // Set initial disabled state
       if (countryControl.value === 'CO') {
         depControl.enable();
         if (depControl.value) {
@@ -559,7 +660,6 @@ export class ProfileModalComponent implements OnInit {
         cityControl.disable();
       }
 
-      // If Colombia is already selected, load departments
       if (countryControl.value === 'CO') {
         this.loadDepartments();
       }
@@ -567,41 +667,43 @@ export class ProfileModalComponent implements OnInit {
   }
 
   onOpen() {
-    this.isEditing = false;
-    this.showPasswordSection = false;
+    this.isEditing.set(false);
+    this.showPasswordSection.set(false);
     this.passwordForm.reset();
     this.loadProfile();
   }
 
   onClose() {
-    this.isOpen = false;
+    this.isOpen.set(false);
     this.isOpenChange.emit(false);
-    this.isEditing = false;
-    this.showPasswordSection = false;
+    this.isEditing.set(false);
+    this.showPasswordSection.set(false);
   }
 
   async enableEditMode() {
-    this.isEditing = true;
+    this.isEditing.set(true);
     // Reset avatar state
-    this.avatarPreview = null;
+    this.avatarPreview.set(null);
     this.pendingAvatarKey = null;
 
     // Ensure form is populated with current data
-    if (this.userInfo) {
+    const info = this.userInfo();
+    if (info) {
       this.profileForm.patchValue({
-        first_name: this.userInfo.first_name,
-        last_name: this.userInfo.last_name,
-        email: this.userInfo.email,
-        phone: this.userInfo.phone,
-        document_type: this.userInfo.document_type,
-        document_number: this.userInfo.document_number,
+        first_name: info.first_name,
+        last_name: info.last_name,
+        email: info.email,
+        phone: info.phone,
+        document_type: info.document_type,
+        document_number: info.document_number,
         avatar_url: '', // Will be set only if changed
       });
     }
 
-    if (this.addressInfo) {
+    const addr = this.addressInfo();
+    if (addr) {
       // For editing, we need to convert names to IDs
-      const countryCode = this.addressInfo?.country;
+      const countryCode = addr?.country;
 
       let stateProvinceId = '';
       let cityId = '';
@@ -613,7 +715,7 @@ export class ProfileModalComponent implements OnInit {
 
           // Now find IDs corresponding to saved names
           const department = this.departments.find(
-            (d) => d.name === this.addressInfo?.state,
+            (d) => d.name === addr?.state,
           );
 
           if (department) {
@@ -623,9 +725,7 @@ export class ProfileModalComponent implements OnInit {
             await this.loadCities(department.id);
 
             // Once we have the cities, find the city
-            const city = this.cities.find(
-              (c) => c.name === this.addressInfo.city,
-            );
+            const city = this.cities.find((c) => c.name === addr.city);
 
             if (city) {
               cityId = city.id.toString();
@@ -639,27 +739,27 @@ export class ProfileModalComponent implements OnInit {
 
       this.profileForm.patchValue({
         address: {
-          address_line_1: this.addressInfo.address_line_1,
-          address_line_2: this.addressInfo.address_line_2,
+          address_line_1: addr.address_line_1,
+          address_line_2: addr.address_line_2,
           country_code: countryCode,
           state_province: stateProvinceId, // ID, not name
           city: cityId, // ID, not name
-          postal_code: this.addressInfo.postal_code,
+          postal_code: addr.postal_code,
         },
       });
     }
   }
 
   cancelEditMode() {
-    this.isEditing = false;
-    this.avatarPreview = null;
+    this.isEditing.set(false);
+    this.avatarPreview.set(null);
     this.pendingAvatarKey = null;
     this.loadProfile();
   }
 
   loadProfile() {
     // Prevent concurrent loads
-    if (this.loading) {
+    if (this.loading()) {
       return;
     }
 
@@ -668,16 +768,16 @@ export class ProfileModalComponent implements OnInit {
       return;
     }
 
-    this.loading = true;
+    this.loading.set(true);
     this.authService
       .getProfile()
       .pipe(
         finalize(() => {
-          this.loading = false;
-          this.isInitialLoad = false; // Mark initial load as complete
+          this.loading.set(false);
+          this.isInitialLoad.set(false); // Mark initial load as complete
         }),
       )
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (response) => {
           const userData = response.data || response.user || response;
           this.updateLocalUserInfo(userData);
@@ -686,7 +786,7 @@ export class ProfileModalComponent implements OnInit {
           console.error('Error loading profile:', err);
 
           // Durante carga inicial, no mostrar toasts para evitar molestar al usuario al cargar la página
-          if (this.isInitialLoad) {
+          if (this.isInitialLoad()) {
             // Solo loggear el error, no mostrar toast
             return;
           }
@@ -715,7 +815,7 @@ export class ProfileModalComponent implements OnInit {
       return;
     }
 
-    this.userInfo = user;
+    this.userInfo.set(user);
 
     // Handle addresses array - take primary address or first one
     if (
@@ -729,25 +829,25 @@ export class ProfileModalComponent implements OnInit {
         user.addresses[0];
 
       // Map backend field names to frontend expected names
-      this.addressInfo = {
+      this.addressInfo.set({
         address_line_1: primaryAddress.address_line1,
         address_line_2: primaryAddress.address_line2,
         city: primaryAddress.city,
         state: primaryAddress.state_province,
         country: primaryAddress.country_code,
         postal_code: primaryAddress.postal_code,
-      };
-      this.hasAddress = true;
+      });
+      this.hasAddress.set(true);
     } else {
-      this.addressInfo = null;
-      this.hasAddress = false;
+      this.addressInfo.set(null);
+      this.hasAddress.set(false);
     }
   }
 
   onSubmit() {
     if (this.profileForm.invalid) return;
 
-    this.saving = true;
+    this.saving.set(true);
     const formValue = this.profileForm.value;
 
     // Convert IDs back to names for backend
@@ -802,10 +902,10 @@ export class ProfileModalComponent implements OnInit {
 
     this.authService
       .updateProfile(payload)
-      .pipe(finalize(() => (this.saving = false)))
-      .subscribe({
+      .pipe(finalize(() => this.saving.set(false)))
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (response) => {
-          this.isEditing = false;
+          this.isEditing.set(false);
           this.loadProfile();
           this.toastService.success('¡Perfil guardado correctamente!');
         },
@@ -841,15 +941,15 @@ export class ProfileModalComponent implements OnInit {
   onChangePassword() {
     if (this.passwordForm.invalid) return;
 
-    this.savingPassword = true;
+    this.savingPassword.set(true);
     const { current_password, new_password } = this.passwordForm.value;
 
     this.authService
       .changePassword(current_password, new_password)
-      .pipe(finalize(() => (this.savingPassword = false)))
-      .subscribe({
+      .pipe(finalize(() => this.savingPassword.set(false)))
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: () => {
-          this.showPasswordSection = false;
+          this.showPasswordSection.set(false);
           this.passwordForm.reset();
           this.toastService.success('Contraseña actualizada exitosamente');
         },
@@ -863,8 +963,8 @@ export class ProfileModalComponent implements OnInit {
   }
 
   togglePasswordSection() {
-    this.showPasswordSection = !this.showPasswordSection;
-    if (!this.showPasswordSection) {
+    this.showPasswordSection.update((v) => !v);
+    if (!this.showPasswordSection()) {
       this.passwordForm.reset();
     }
   }
@@ -918,19 +1018,19 @@ export class ProfileModalComponent implements OnInit {
   }
 
   get documentTypeOptions(): SelectorOption[] {
-    return this.documentTypes.map(t => ({ value: t.value, label: t.label }));
+    return this.documentTypes.map((t) => ({ value: t.value, label: t.label }));
   }
 
   get countryOptions(): SelectorOption[] {
-    return this.countries.map(c => ({ value: c.code, label: c.name }));
+    return this.countries.map((c) => ({ value: c.code, label: c.name }));
   }
 
   get departmentOptions(): SelectorOption[] {
-    return this.departments.map(d => ({ value: d.id, label: d.name }));
+    return this.departments.map((d) => ({ value: d.id, label: d.name }));
   }
 
   get cityOptions(): SelectorOption[] {
-    return this.cities.map(c => ({ value: c.id, label: c.name }));
+    return this.cities.map((c) => ({ value: c.id, label: c.name }));
   }
 
   passwordMatchValidator(g: FormGroup) {
@@ -940,13 +1040,10 @@ export class ProfileModalComponent implements OnInit {
   }
 
   getInitials(): string {
-    if (!this.userInfo) return '';
-    const first = this.userInfo?.first_name
-      ? this.userInfo.first_name.charAt(0)
-      : '';
-    const last = this.userInfo?.last_name
-      ? this.userInfo.last_name.charAt(0)
-      : '';
+    const info = this.userInfo();
+    if (!info) return '';
+    const first = info?.first_name ? info.first_name.charAt(0) : '';
+    const last = info?.last_name ? info.last_name.charAt(0) : '';
     return (first + last).toUpperCase();
   }
 
@@ -972,30 +1069,30 @@ export class ProfileModalComponent implements OnInit {
     // Show local preview immediately
     const reader = new FileReader();
     reader.onload = () => {
-      this.avatarPreview = reader.result as string;
+      this.avatarPreview.set(reader.result as string);
     };
     reader.readAsDataURL(file);
 
     // Upload to S3
-    this.uploadingAvatar = true;
+    this.uploadingAvatar.set(true);
     const formData = new FormData();
     formData.append('file', file);
     formData.append('entityType', 'avatars');
 
-    this.http.post<any>(`${environment.apiUrl}/upload`, formData).subscribe({
+    this.http.post<any>(`${environment.apiUrl}/upload`, formData).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         // Store the key for saving later
         this.pendingAvatarKey = response.key;
         // Use the signed URL for preview
-        this.avatarPreview = response.url;
-        this.uploadingAvatar = false;
+        this.avatarPreview.set(response.url);
+        this.uploadingAvatar.set(false);
         this.toastService.success('Imagen cargada correctamente');
       },
       error: (err) => {
         console.error('Error uploading avatar:', err);
-        this.avatarPreview = null;
+        this.avatarPreview.set(null);
         this.pendingAvatarKey = null;
-        this.uploadingAvatar = false;
+        this.uploadingAvatar.set(false);
         this.toastService.error('Error al subir la imagen');
       },
     });
@@ -1005,7 +1102,7 @@ export class ProfileModalComponent implements OnInit {
   }
 
   removeAvatar() {
-    this.avatarPreview = null;
+    this.avatarPreview.set(null);
     this.pendingAvatarKey = null;
     // Mark avatar for removal by setting to null in form
     this.profileForm.patchValue({ avatar_url: null });

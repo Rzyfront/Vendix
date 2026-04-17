@@ -1,140 +1,193 @@
 <div class="catalog-page">
-    <!-- Header -->
-    <div class="catalog-header">
-        <div class="catalog-header-row">
-            <h2 class="catalog-title">
-                @if (search_term) {
-                {{ search_term }}: {{ total_products }} Resultados
-                } @else {
-                Productos ({{ total_products }})
-                }
-            </h2>
+  <!-- Header -->
+  <div class="catalog-header">
+    <div class="catalog-header-row">
+      <h2 class="catalog-title">
+        @if (search_term()) {
+          {{ search_term() }}: {{ total_products() }} Resultados
+        } @else {
+          Productos ({{ total_products() }})
+        }
+      </h2>
 
-            <div class="catalog-controls">
-                <select [(ngModel)]="sort_by" (ngModelChange)="onSortChange()" class="sort-select">
-                    <option value="newest">Más recientes</option>
-                    <option value="oldest">Menos recientes</option>
-                    <option value="name">Nombre A-Z</option>
-                    <option value="price_asc">Precio: menor a mayor</option>
-                    <option value="price_desc">Precio: mayor a menor</option>
-                </select>
+      <div class="catalog-controls">
+        <select
+          [(ngModel)]="sort_by"
+          (ngModelChange)="onSortChange()"
+          class="sort-select"
+        >
+          <option value="newest">Más recientes</option>
+          <option value="oldest">Menos recientes</option>
+          <option value="name">Nombre A-Z</option>
+          <option value="price_asc">Precio: menor a mayor</option>
+          <option value="price_desc">Precio: mayor a menor</option>
+        </select>
 
-                <button class="filter-toggle" (click)="toggleFilters()">
-                    <app-icon name="filter" [size]="14" />
-                    Filtros
-                </button>
-            </div>
+        <button class="filter-toggle" (click)="toggleFilters()">
+          <app-icon name="filter" [size]="14" />
+          Filtros
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <div class="catalog-content">
+    <!-- Sidebar Filters -->
+    <aside class="catalog-sidebar" [class.open]="show_filters()">
+      <div class="sidebar-header">
+        <h3>Filtros</h3>
+        <button class="close-filters" (click)="toggleFilters()">
+          <app-icon name="x" [size]="18" />
+        </button>
+      </div>
+
+      <!-- Categories -->
+      <div class="filter-section">
+        <label>Categorías</label>
+        <ul class="filter-options-list">
+          <li
+            [class.active]="!selected_category_id()"
+            (click)="onCategorySelect(null)"
+          >
+            Todas las categorías
+          </li>
+          @for (cat of categories(); track cat.id) {
+            <li
+              [class.active]="selected_category_id() === cat.id"
+              (click)="onCategorySelect(cat.id)"
+            >
+              {{ cat.name }}
+            </li>
+          }
+        </ul>
+      </div>
+
+      <!-- Brands -->
+      <div class="filter-section">
+        <label>Marcas</label>
+        <ul class="filter-options-list">
+          <li
+            [class.active]="!selected_brand_id()"
+            (click)="onBrandSelect(null)"
+          >
+            Todas las marcas
+          </li>
+          @for (brand of brands(); track brand.id) {
+            <li
+              [class.active]="selected_brand_id() === brand.id"
+              (click)="onBrandSelect(brand.id)"
+            >
+              {{ brand.name }}
+            </li>
+          }
+        </ul>
+      </div>
+
+      <!-- Price Range -->
+      <div class="filter-section">
+        <label>Precio</label>
+        <div class="price-inputs">
+          <app-input
+            type="number"
+            [(ngModel)]="min_price"
+            placeholder="Mín"
+            size="sm"
+            customWrapperClass="!mt-0"
+          ></app-input>
+          <app-input
+            type="number"
+            [(ngModel)]="max_price"
+            placeholder="Máx"
+            size="sm"
+            customWrapperClass="!mt-0"
+          ></app-input>
         </div>
-    </div>
+        <app-button
+          variant="primary"
+          size="sm"
+          [fullWidth]="true"
+          (clicked)="applyPriceFilter()"
+          >Aplicar</app-button
+        >
+      </div>
 
-    <div class="catalog-content">
-        <!-- Sidebar Filters -->
-        <aside class="catalog-sidebar" [class.open]="show_filters">
-            <div class="sidebar-header">
-                <h3>Filtros</h3>
-                <button class="close-filters" (click)="toggleFilters()">
-                    <app-icon name="x" [size]="18" />
-                </button>
-            </div>
+      <!-- Clear Filters -->
+      <app-button
+        variant="ghost"
+        size="sm"
+        [fullWidth]="true"
+        (clicked)="clearFilters()"
+      >
+        Limpiar filtros
+      </app-button>
+    </aside>
 
-            <!-- Categories -->
-            <div class="filter-section">
-                <label>Categorías</label>
-                <ul class="filter-options-list">
-                    <li [class.active]="!selected_category_id" (click)="onCategorySelect(null)">
-                        Todas las categorías
-                    </li>
-                    @for (cat of categories; track cat.id) {
-                    <li [class.active]="selected_category_id === cat.id" (click)="onCategorySelect(cat.id)">
-                        {{ cat.name }}
-                    </li>
-                    }
-                </ul>
+    <!-- Products Grid -->
+    <main class="catalog-main">
+      <!-- Loading -->
+      @if (is_loading()) {
+        <div class="loading-grid">
+          @for (i of [1, 2, 3, 4, 5, 6, 7, 8]; track i) {
+            <div class="skeleton-card">
+              <div class="skeleton-image"></div>
+              <div class="skeleton-text"></div>
+              <div class="skeleton-text short"></div>
             </div>
-
-            <!-- Brands -->
-            <div class="filter-section">
-                <label>Marcas</label>
-                <ul class="filter-options-list">
-                    <li [class.active]="!selected_brand_id" (click)="onBrandSelect(null)">
-                        Todas las marcas
-                    </li>
-                    @for (brand of brands; track brand.id) {
-                    <li [class.active]="selected_brand_id === brand.id" (click)="onBrandSelect(brand.id)">
-                        {{ brand.name }}
-                    </li>
-                    }
-                </ul>
-            </div>
-
-            <!-- Price Range -->
-            <div class="filter-section">
-                <label>Precio</label>
-                <div class="price-inputs">
-                    <app-input type="number" [(ngModel)]="min_price" placeholder="Mín" size="sm" customWrapperClass="!mt-0"></app-input>
-                    <app-input type="number" [(ngModel)]="max_price" placeholder="Máx" size="sm" customWrapperClass="!mt-0"></app-input>
-                </div>
-                <app-button variant="primary" size="sm" [fullWidth]="true" (clicked)="applyPriceFilter()">Aplicar</app-button>
-            </div>
-
-            <!-- Clear Filters -->
-            <app-button variant="ghost" size="sm" [fullWidth]="true" (clicked)="clearFilters()">
-                Limpiar filtros
-            </app-button>
-        </aside>
-
-        <!-- Products Grid -->
-        <main class="catalog-main">
-            <!-- Loading -->
-            @if (is_loading) {
-            <div class="loading-grid">
-                @for (i of [1,2,3,4,5,6,7,8]; track i) {
-                <div class="skeleton-card">
-                    <div class="skeleton-image"></div>
-                    <div class="skeleton-text"></div>
-                    <div class="skeleton-text short"></div>
-                </div>
-                }
-            </div>
-            } @else {
-            <!-- Products -->
-            @if (products.length > 0) {
-            <div class="products-grid">
-                @for (product of products; track product.id) {
-                <app-product-card [product]="product" [in_wishlist]="isInWishlist(product.id)" (add_to_cart)="onAddToCart($event)"
-                    (toggle_wishlist)="onToggleWishlist($event)" (quick_view)="onQuickView($event)" (share)="onShare($event)" />
-                }
-            </div>
-            } @else {
-            <div class="empty-state">
-                <app-icon name="search" [size]="48" />
-                <h3>No se encontraron productos</h3>
-                <p>Intenta cambiar los filtros de búsqueda</p>
-                <button (click)="clearFilters()">Limpiar filtros</button>
-            </div>
+          }
+        </div>
+      } @else {
+        <!-- Products -->
+        @if (products().length > 0) {
+          <div class="products-grid">
+            @for (product of products(); track product.id) {
+              <app-product-card
+                [product]="product"
+                [in_wishlist]="isInWishlist(product.id)"
+                (add_to_cart)="onAddToCart($event)"
+                (toggle_wishlist)="onToggleWishlist($event)"
+                (quick_view)="onQuickView($event)"
+                (share)="onShare($event)"
+              />
             }
+          </div>
+        } @else {
+          <div class="empty-state">
+            <app-icon name="search" [size]="48" />
+            <h3>No se encontraron productos</h3>
+            <p>Intenta cambiar los filtros de búsqueda</p>
+            <button (click)="clearFilters()">Limpiar filtros</button>
+          </div>
+        }
 
-            <!-- Pagination -->
-            <app-pagination
-              [currentPage]="current_page"
-              [totalPages]="total_pages"
-              [total]="total_products"
-              [limit]="limit"
-              (pageChange)="goToPage($event)"
-            />
-            }
-        </main>
-    </div>
+        <!-- Pagination -->
+        <app-pagination
+          [currentPage]="current_page()"
+          [totalPages]="total_pages()"
+          [total]="total_products()"
+          [limit]="limit()"
+          (pageChange)="goToPage($event)"
+        />
+      }
+    </main>
+  </div>
 </div>
 
 <!-- Mobile filter overlay -->
-@if (show_filters) {
-<div class="filter-overlay" (click)="toggleFilters()"></div>
+@if (show_filters()) {
+  <div class="filter-overlay" (click)="toggleFilters()"></div>
 }
 
 <!-- Product Quick View Modal -->
-<app-product-quick-view-modal [isOpen]="quickViewOpen" [productSlug]="selectedProductSlug"
-    (closed)="quickViewOpen = false" (addedToCart)="onModalAddedToCart($event)" />
+<app-product-quick-view-modal
+  [isOpen]="quickViewOpen()"
+  [productSlug]="selectedProductSlug()"
+  (closed)="quickViewOpen.set(false)"
+  (addedToCart)="onModalAddedToCart($event)"
+/>
 
 <!-- Share Modal -->
-<app-share-modal [isOpen]="shareModalOpen" [product]="shareProduct" (closed)="onShareModalClosed()" />
+<app-share-modal
+  [isOpen]="shareModalOpen()"
+  [product]="shareProduct()"
+  (closed)="onShareModalClosed()"
+/>

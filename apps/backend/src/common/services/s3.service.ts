@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
     S3Client,
@@ -11,7 +11,7 @@ import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Upload } from '@aws-sdk/lib-storage';
 import * as sharp from 'sharp';
 import { ImageContext, IMAGE_PRESETS } from '../config/image-presets';
-import { extractS3KeyFromUrl, isS3Key } from '../helpers/s3-url.helper';
+import { extractS3KeyFromUrl, isS3Key, isSafeS3Key } from '../helpers/s3-url.helper';
 
 @Injectable()
 export class S3Service {
@@ -174,6 +174,7 @@ export class S3Service {
      */
     async getPresignedUrl(key: string, expiresIn = 3600): Promise<string> {
         try {
+            this.validateS3Key(key);
             const command = new GetObjectCommand({
                 Bucket: this.bucketName,
                 Key: key,
@@ -192,6 +193,7 @@ export class S3Service {
      */
     async deleteFile(key: string): Promise<void> {
         try {
+            this.validateS3Key(key);
             const command = new DeleteObjectCommand({
                 Bucket: this.bucketName,
                 Key: key,
@@ -397,6 +399,17 @@ export class S3Service {
         } catch (error) {
             this.logger.error(`Error downloading image from S3: ${error.message}`);
             throw error;
+        }
+    }
+
+    /**
+     * Validates that an S3 key does not contain path traversal sequences.
+     * Defense-in-depth: called before any S3 read/delete operation.
+     * @throws BadRequestException if the key contains path traversal patterns
+     */
+    private validateS3Key(key: string): void {
+        if (!isSafeS3Key(key)) {
+            throw new BadRequestException('Invalid S3 key: path traversal detected');
         }
     }
 }

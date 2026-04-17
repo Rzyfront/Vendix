@@ -1,5 +1,5 @@
-import { Component, Input, Output, EventEmitter, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject, input, output } from '@angular/core';
+
 import {
   FormGroup,
   FormBuilder,
@@ -24,7 +24,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
 @Component({
   selector: 'app-store-edit-modal',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, ButtonComponent, ModalComponent, InputComponent, SelectorComponent, TextareaComponent],
+  imports: [ReactiveFormsModule, ButtonComponent, ModalComponent, InputComponent, SelectorComponent, TextareaComponent],
   styles: [
     `
       :host {
@@ -34,14 +34,14 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
       title="Editar Tienda"
       subtitle="Actualiza la información de la tienda seleccionada"
     >
-      @if (store) {
+      @if (store()) {
         <ng-container>
       <form [formGroup]="editForm" class="space-y-6">
         <!-- Store Information -->
@@ -168,9 +168,9 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
         </app-button>
         <app-button
           (clicked)="onSubmit()"
-          [disabled]="!editForm.valid || !settingsForm.valid || isSubmitting"
+          [disabled]="!editForm.valid || !settingsForm.valid || isSubmitting()"
           variant="primary"
-          [loading]="isSubmitting"
+          [loading]="isSubmitting()"
         >
           Actualizar Tienda
         </app-button>
@@ -182,13 +182,13 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
 })
 export class StoreEditModalComponent {
   private currencyFormatService = inject(CurrencyFormatService);
-  @Input() isOpen = false;
-  @Input() isSubmitting = false;
-  @Input() store?: StoreListItem;
+  readonly isOpen = input(false);
+  readonly isSubmitting = input(false);
+  readonly store = input<StoreListItem>();
 
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() submit = new EventEmitter<any>();
-  @Output() cancel = new EventEmitter<void>();
+  readonly isOpenChange = output<boolean>();
+  readonly submit = output<any>();
+  readonly cancel = output<void>();
 
   editForm: FormGroup;
   settingsForm: FormGroup;
@@ -241,49 +241,54 @@ export class StoreEditModalComponent {
   }
 
   ngOnChanges(): void {
-    if (this.store) {
+    const store = this.store();
+    if (store) {
       this.editForm.patchValue({
-        id: this.store.id,
-        name: this.store.name,
-        description: this.store.description || '',
-        domain: this.store.domain,
-        email: this.store.email,
-        phone: this.store.phone || '',
+        id: store.id,
+        name: store.name,
+        description: store.description || '',
+        domain: store.domain,
+        email: store.email,
+        phone: store.phone || '',
         address: {
           street:
-            (typeof this.store.address === 'object'
-              ? this.store.address?.street
+            (typeof store.address === 'object'
+              ? store.address?.street
               : '') || '',
           city:
-            (typeof this.store.address === 'object'
-              ? this.store.address?.city
+            (typeof store.address === 'object'
+              ? store.address?.city
               : '') || '',
           state:
-            (typeof this.store.address === 'object'
-              ? this.store.address?.state
+            (typeof store.address === 'object'
+              ? store.address?.state
               : '') || '',
           zipCode:
-            (typeof this.store.address === 'object'
-              ? this.store.address?.zipCode
+            (typeof store.address === 'object'
+              ? store.address?.zipCode
               : '') || '',
           country:
-            (typeof this.store.address === 'object'
-              ? this.store.address?.country
+            (typeof store.address === 'object'
+              ? store.address?.country
               : '') || '',
         },
-        status: this.store.status,
-        logoUrl: this.store.logo_url || '',
-        bannerUrl: this.store.banner_url || '',
+        status: store.status,
+        logoUrl: store.logo_url || '',
+        bannerUrl: store.banner_url || '',
       });
 
-      if (this.store.settings) {
-        this.settingsForm.patchValue(this.store.settings);
+      if (store.settings) {
+        this.settingsForm.patchValue(store.settings);
       }
     }
   }
 
   onCancel(): void {
     this.isOpenChange.emit(false);
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.cancel.emit();
   }
 

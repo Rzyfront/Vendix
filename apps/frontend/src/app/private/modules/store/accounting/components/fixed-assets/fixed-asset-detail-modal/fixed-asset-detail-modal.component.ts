@@ -1,6 +1,8 @@
-import { Component, Input, Output, EventEmitter, OnChanges, SimpleChanges, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, input, output, inject, effect, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { DatePipe, CurrencyPipe } from '@angular/common';
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
+import { firstValueFrom } from 'rxjs';
 
 import { AccountingService } from '../../../services/accounting.service';
 import {
@@ -20,7 +22,8 @@ import {
   selector: 'vendix-fixed-asset-detail-modal',
   standalone: true,
   imports: [
-    CommonModule,
+    DatePipe,
+    CurrencyPipe,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
@@ -29,35 +32,35 @@ import {
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onClose()"
-      [title]="asset?.name || 'Detalle del Activo'"
+      [title]="asset()?.name || 'Detalle del Activo'"
       size="xl"
     >
-      @if (asset) {
+      @if (asset()) {
         <div class="p-4 space-y-6 max-h-[70vh] overflow-y-auto">
 
           <!-- Asset Info -->
           <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
               <p class="text-xs text-gray-500">Numero</p>
-              <p class="text-sm font-mono font-semibold">{{ asset.asset_number }}</p>
+              <p class="text-sm font-mono font-semibold">{{ asset()?.asset_number }}</p>
             </div>
             <div>
               <p class="text-xs text-gray-500">Categoria</p>
-              <p class="text-sm font-medium">{{ asset.category?.name || '—' }}</p>
+              <p class="text-sm font-medium">{{ asset()?.category?.name || '—' }}</p>
             </div>
             <div>
               <p class="text-xs text-gray-500">Estado</p>
               <span class="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full"
-                    [class]="getStatusClass(asset.status)">
-                {{ getStatusLabel(asset.status) }}
+                    [class]="getStatusClass(asset()?.status ?? '')">
+                {{ getStatusLabel(asset()?.status ?? '') }}
               </span>
             </div>
             <div>
               <p class="text-xs text-gray-500">Metodo</p>
-              <p class="text-sm">{{ asset.depreciation_method === 'straight_line' ? 'Linea Recta' : 'Saldo Decreciente' }}</p>
+              <p class="text-sm">{{ asset()?.depreciation_method === 'straight_line' ? 'Linea Recta' : 'Saldo Decreciente' }}</p>
             </div>
           </div>
 
@@ -65,19 +68,19 @@ import {
           <div class="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-gray-50 rounded-lg">
             <div>
               <p class="text-xs text-gray-500">Costo Adquisicion</p>
-              <p class="text-sm font-semibold font-mono">{{ asset.acquisition_cost | currency:'COP':'symbol-narrow':'1.0-0' }}</p>
+              <p class="text-sm font-semibold font-mono">{{ asset()?.acquisition_cost | currency:'COP':'symbol-narrow':'1.0-0' }}</p>
             </div>
             <div>
               <p class="text-xs text-gray-500">Deprec. Acumulada</p>
-              <p class="text-sm font-semibold font-mono text-red-500">{{ asset.accumulated_depreciation | currency:'COP':'symbol-narrow':'1.0-0' }}</p>
+              <p class="text-sm font-semibold font-mono text-red-500">{{ asset()?.accumulated_depreciation | currency:'COP':'symbol-narrow':'1.0-0' }}</p>
             </div>
             <div>
               <p class="text-xs text-gray-500">Valor en Libros</p>
-              <p class="text-sm font-bold font-mono text-primary">{{ (asset.book_value ?? 0) | currency:'COP':'symbol-narrow':'1.0-0' }}</p>
+              <p class="text-sm font-bold font-mono text-primary">{{ (asset()?.book_value ?? 0) | currency:'COP':'symbol-narrow':'1.0-0' }}</p>
             </div>
             <div>
               <p class="text-xs text-gray-500">Valor Residual</p>
-              <p class="text-sm font-semibold font-mono">{{ asset.salvage_value | currency:'COP':'symbol-narrow':'1.0-0' }}</p>
+              <p class="text-sm font-semibold font-mono">{{ asset()?.salvage_value | currency:'COP':'symbol-narrow':'1.0-0' }}</p>
             </div>
           </div>
 
@@ -85,28 +88,28 @@ import {
           <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
               <p class="text-xs text-gray-500">Fecha Adquisicion</p>
-              <p class="text-sm">{{ asset.acquisition_date | date:'dd/MM/yyyy' }}</p>
+              <p class="text-sm">{{ asset()?.acquisition_date | date:'dd/MM/yyyy' }}</p>
             </div>
             <div>
               <p class="text-xs text-gray-500">Inicio Depreciacion</p>
-              <p class="text-sm">{{ asset.depreciation_start_date ? (asset.depreciation_start_date | date:'dd/MM/yyyy') : '—' }}</p>
+              <p class="text-sm">{{ asset()?.depreciation_start_date ? (asset()?.depreciation_start_date | date:'dd/MM/yyyy') : '—' }}</p>
             </div>
             <div>
               <p class="text-xs text-gray-500">Vida Util</p>
-              <p class="text-sm">{{ asset.useful_life_months }} meses</p>
+              <p class="text-sm">{{ asset()?.useful_life_months }} meses</p>
             </div>
-            @if (asset.description) {
+            @if (asset()?.description) {
               <div>
                 <p class="text-xs text-gray-500">Descripcion</p>
-                <p class="text-sm">{{ asset.description }}</p>
+                <p class="text-sm">{{ asset()?.description }}</p>
               </div>
             }
           </div>
 
-          @if (asset.notes) {
+          @if (asset()?.notes) {
             <div>
               <p class="text-xs text-gray-500">Notas</p>
-              <p class="text-sm text-gray-700">{{ asset.notes }}</p>
+              <p class="text-sm text-gray-700">{{ asset()?.notes }}</p>
             </div>
           }
 
@@ -208,7 +211,7 @@ import {
           }
 
           <!-- Actions (only for active assets) -->
-          @if (asset.status === 'active') {
+          @if (asset()?.status === 'active') {
             <div class="border-t border-border pt-4">
               <h4 class="text-sm font-semibold text-gray-700 mb-3">Acciones</h4>
 
@@ -267,11 +270,12 @@ import {
     </app-modal>
   `,
 })
-export class FixedAssetDetailModalComponent implements OnChanges {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Input() asset: FixedAsset | null = null;
-  @Output() assetUpdated = new EventEmitter<void>();
+export class FixedAssetDetailModalComponent {
+  private destroyRef = inject(DestroyRef);
+  readonly isOpen = input(false);
+  readonly isOpenChange = output<boolean>();
+  readonly asset = input<FixedAsset | null>(null);
+  readonly assetUpdated = output<void>();
 
   private accounting_service = inject(AccountingService);
   private toast_service = inject(ToastService);
@@ -291,81 +295,75 @@ export class FixedAssetDetailModalComponent implements OnChanges {
     disposal_amount: [0, [Validators.required, Validators.min(0)]],
   });
 
-  ngOnChanges(changes: SimpleChanges): void {
-    if (changes['isOpen'] && this.isOpen && this.asset) {
-      this.active_tab = 'schedule';
-      this.show_dispose_form = false;
-      this.loadSchedule();
-      this.loadHistory();
+  constructor() {
+    effect(() => {
+      if (this.isOpen() && this.asset()) {
+        this.active_tab = 'schedule';
+        this.show_dispose_form = false;
+        this.loadSchedule();
+        this.loadHistory();
+      }
+    });
+  }
+
+  private async loadSchedule(): Promise<void> {
+    if (!this.asset()) return;
+    this.is_loading_schedule = true;
+    try {
+      const res = await firstValueFrom(this.accounting_service.getDepreciationSchedule(this.asset()!.id));
+      this.schedule = res.data;
+      this.is_loading_schedule = false;
+    } catch {
+      this.is_loading_schedule = false;
     }
   }
 
-  private loadSchedule(): void {
-    if (!this.asset) return;
-    this.is_loading_schedule = true;
-    this.accounting_service.getDepreciationSchedule(this.asset.id).subscribe({
-      next: (res) => {
-        this.schedule = res.data;
-        this.is_loading_schedule = false;
-      },
-      error: () => {
-        this.is_loading_schedule = false;
-      },
-    });
-  }
-
-  private loadHistory(): void {
-    if (!this.asset) return;
+  private async loadHistory(): Promise<void> {
+    if (!this.asset()) return;
     this.is_loading_history = true;
-    this.accounting_service.getDepreciationHistory(this.asset.id).subscribe({
-      next: (res) => {
-        this.history = res.data;
-        this.is_loading_history = false;
-      },
-      error: () => {
-        this.is_loading_history = false;
-      },
-    });
+    try {
+      const res = await firstValueFrom(this.accounting_service.getDepreciationHistory(this.asset()!.id));
+      this.history = res.data;
+      this.is_loading_history = false;
+    } catch {
+      this.is_loading_history = false;
+    }
   }
 
-  onRetire(): void {
-    if (!this.asset) return;
+  async onRetire(): Promise<void> {
+    if (!this.asset()) return;
     if (!confirm('¿Estas seguro de retirar este activo? Esta accion no se puede deshacer.')) return;
 
-    this.accounting_service.retireAsset(this.asset.id).subscribe({
-      next: () => {
-        this.toast_service.show({ variant: 'success', description: 'Activo retirado correctamente' });
-        this.assetUpdated.emit();
-        this.onClose();
-      },
-      error: () => {
-        this.toast_service.show({ variant: 'error', description: 'Error al retirar el activo' });
-      },
-    });
+    try {
+      await firstValueFrom(this.accounting_service.retireAsset(this.asset()!.id));
+      this.toast_service.show({ variant: 'success', description: 'Activo retirado correctamente' });
+      this.assetUpdated.emit();
+      this.onClose();
+    } catch {
+      this.toast_service.show({ variant: 'error', description: 'Error al retirar el activo' });
+    }
   }
 
-  onDispose(): void {
-    if (!this.asset || this.dispose_form.invalid) return;
+  async onDispose(): Promise<void> {
+    if (!this.asset() || this.dispose_form.invalid) return;
     this.is_disposing = true;
 
     const values = this.dispose_form.getRawValue();
-    this.accounting_service
-      .disposeAsset(this.asset.id, {
-        disposal_date: values.disposal_date!,
-        disposal_amount: Number(values.disposal_amount),
-      })
-      .subscribe({
-        next: () => {
-          this.toast_service.show({ variant: 'success', description: 'Activo dado de baja correctamente' });
-          this.is_disposing = false;
-          this.assetUpdated.emit();
-          this.onClose();
-        },
-        error: () => {
-          this.toast_service.show({ variant: 'error', description: 'Error al dar de baja el activo' });
-          this.is_disposing = false;
-        },
-      });
+    try {
+      await firstValueFrom(
+        this.accounting_service.disposeAsset(this.asset()!.id, {
+          disposal_date: values.disposal_date!,
+          disposal_amount: Number(values.disposal_amount),
+        }),
+      );
+      this.toast_service.show({ variant: 'success', description: 'Activo dado de baja correctamente' });
+      this.is_disposing = false;
+      this.assetUpdated.emit();
+      this.onClose();
+    } catch {
+      this.toast_service.show({ variant: 'error', description: 'Error al dar de baja el activo' });
+      this.is_disposing = false;
+    }
   }
 
   onClose(): void {

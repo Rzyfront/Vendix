@@ -4,41 +4,41 @@
   <!-- Steps indicator -->
   <div class="steps">
     @if (!cartHasOnlyServices) {
-      <div class="step" [class.active]="step >= 1" [class.completed]="step > 1">
+      <div class="step" [class.active]="step() >= 1" [class.completed]="step() > 1">
         <span class="step-number">1</span>
         <span class="step-label">Direccion</span>
       </div>
-      <div class="step-line" [class.completed]="step > 1"></div>
+      <div class="step-line" [class.completed]="step() > 1"></div>
     }
 
     @if (cartHasBookableServices) {
       <div
         class="step"
-        [class.active]="step >= bookingStep!"
-        [class.completed]="step > bookingStep!"
+        [class.active]="step() >= bookingStep!"
+        [class.completed]="step() > bookingStep!"
       >
         <span class="step-number">{{ bookingStep }}</span>
         <span class="step-label">Reserva</span>
       </div>
-      <div class="step-line" [class.completed]="step > bookingStep!"></div>
+      <div class="step-line" [class.completed]="step() > bookingStep!"></div>
     }
 
     <div
       class="step"
-      [class.active]="step >= paymentStep"
-      [class.completed]="step > paymentStep"
+      [class.active]="step() >= paymentStep"
+      [class.completed]="step() > paymentStep"
     >
       <span class="step-number">{{ paymentStep }}</span>
       <span class="step-label">Pago</span>
     </div>
-    <div class="step-line" [class.completed]="step > paymentStep"></div>
-    <div class="step" [class.active]="step >= confirmStep">
+    <div class="step-line" [class.completed]="step() > paymentStep"></div>
+    <div class="step" [class.active]="step() >= confirmStep">
       <span class="step-number">{{ confirmStep }}</span>
       <span class="step-label">Confirmar</span>
     </div>
   </div>
 
-  @if (is_loading) {
+  @if (is_loading()) {
     <div class="loading">
       <div class="spinner"></div>
       <p>Cargando...</p>
@@ -47,17 +47,17 @@
     <div class="checkout-content">
       <div class="checkout-main">
         <!-- Step 1: Address (hidden for service-only carts) -->
-        @if (step === 1 && !cartHasOnlyServices) {
+        @if (step() === 1 && !cartHasOnlyServices) {
           <div class="checkout-section">
             <h2>Direccion de Envio</h2>
 
-            @if (addresses.length > 0) {
+            @if (addresses().length > 0) {
               <div class="address-list">
-                @for (addr of addresses; track addr.id) {
+                @for (addr of addresses(); track addr.id) {
                   <div
                     class="address-card"
                     [class.selected]="
-                      selected_address_id === addr.id && !use_new_address
+                      selected_address_id() === addr.id && !use_new_address()
                     "
                     (click)="selectAddress(addr.id)"
                   >
@@ -65,7 +65,7 @@
                       <span
                         class="radio"
                         [class.checked]="
-                          selected_address_id === addr.id && !use_new_address
+                          selected_address_id() === addr.id && !use_new_address()
                         "
                       ></span>
                     </div>
@@ -84,13 +84,13 @@
 
                 <div
                   class="address-card new"
-                  [class.selected]="use_new_address"
+                  [class.selected]="use_new_address()"
                   (click)="selectNewAddress()"
                 >
                   <div class="address-radio">
                     <span
                       class="radio"
-                      [class.checked]="use_new_address"
+                      [class.checked]="use_new_address()"
                     ></span>
                   </div>
                   <div class="address-info">
@@ -101,7 +101,7 @@
               </div>
             }
 
-            @if (use_new_address) {
+            @if (use_new_address()) {
               <form [formGroup]="address_form" class="address-form">
                 <app-input
                   label="Direccion"
@@ -132,12 +132,12 @@
                     formControlName="state_province"
                     [options]="departmentOptions"
                     [placeholder]="
-                      loading_departments
+                      loading_departments()
                         ? 'Cargando...'
                         : 'Selecciona un departamento'
                     "
                     [disabled]="
-                      loading_departments || departmentOptions.length === 0
+                      loading_departments() || departmentOptions.length === 0
                     "
                     [errorText]="getFieldError('state_province')"
                   ></app-selector>
@@ -149,9 +149,9 @@
                     formControlName="city"
                     [options]="cityOptions"
                     [placeholder]="
-                      loading_cities ? 'Cargando...' : 'Selecciona una ciudad'
+                      loading_cities() ? 'Cargando...' : 'Selecciona una ciudad'
                     "
-                    [disabled]="loading_cities || cityOptions.length === 0"
+                    [disabled]="loading_cities() || cityOptions.length === 0"
                     [errorText]="getFieldError('city')"
                     [required]="true"
                   ></app-selector>
@@ -191,7 +191,7 @@
         }
 
         <!-- Booking Step: shown only when cart has bookable services -->
-        @if (bookingStep !== null && step === bookingStep) {
+        @if (bookingStep !== null && step() === bookingStep) {
           <div class="checkout-section">
             <h2>Reserva de Horario</h2>
             <p class="booking-description">
@@ -217,7 +217,7 @@
         }
 
         <!-- Payment Step -->
-        @if (step === paymentStep) {
+        @if (step() === paymentStep) {
           <div class="checkout-section">
             @if (!cartHasOnlyServices) {
               <h2>Opciones de Envio</h2>
@@ -261,16 +261,16 @@
             <h2>Metodo de Pago</h2>
 
             <div class="payment-list">
-              @for (method of payment_methods; track method.id) {
+              @for (method of payment_methods(); track method.id) {
                 <div
                   class="payment-card"
-                  [class.selected]="selected_payment_method_id === method.id"
+                  [class.selected]="selected_payment_method_id() === method.id"
                   (click)="selectPaymentMethod(method.id)"
                 >
                   <div class="payment-radio">
                     <span
                       class="radio"
-                      [class.checked]="selected_payment_method_id === method.id"
+                      [class.checked]="selected_payment_method_id() === method.id"
                     ></span>
                   </div>
                   @if (method.logo_url) {
@@ -289,7 +289,7 @@
             </div>
 
             <!-- Wompi Info Panel -->
-            @if (isWompiPayment) {
+            @if (isWompiPayment()) {
               <div class="wompi-info-panel">
                 <div class="wompi-info-header">
                   <app-icon name="shield-check" [size]="20"></app-icon>
@@ -305,7 +305,7 @@
         }
 
         <!-- Confirm Step -->
-        @if (step === confirmStep) {
+        @if (step() === confirmStep) {
           <div class="checkout-section">
             <h2>Confirmar Pedido</h2>
 
@@ -313,7 +313,7 @@
               @if (!cartHasOnlyServices) {
                 <div class="confirm-block">
                   <h3>Direccion de Envio</h3>
-                  @if (use_new_address) {
+                  @if (use_new_address()) {
                     <p>{{ address_form.value.address_line1 }}</p>
                     @if (address_form.value.address_line2) {
                       <p>{{ address_form.value.address_line2 }}</p>
@@ -328,8 +328,8 @@
                     }
                     <p>Tel: {{ address_form.value.phone_number }}</p>
                   } @else {
-                    @for (addr of addresses; track addr.id) {
-                      @if (addr.id === selected_address_id) {
+                    @for (addr of addresses(); track addr.id) {
+                      @if (addr.id === selected_address_id()) {
                         <p>{{ addr.address_line1 }}</p>
                         @if (addr.address_line2) {
                           <p>{{ addr.address_line2 }}</p>
@@ -358,8 +358,8 @@
 
               <div class="confirm-block">
                 <h3>Metodo de Pago</h3>
-                @for (method of payment_methods; track method.id) {
-                  @if (method.id === selected_payment_method_id) {
+                @for (method of payment_methods(); track method.id) {
+                  @if (method.id === selected_payment_method_id()) {
                     <p>{{ method.name }}</p>
                   }
                 }
@@ -376,15 +376,15 @@
           </div>
         }
 
-        @if (error_message) {
+        @if (error_message()) {
           <div class="error-message">
             <i class="pi pi-exclamation-circle"></i>
-            {{ error_message }}
+            {{ error_message() }}
           </div>
         }
 
         <div class="checkout-actions">
-          @if (step > 1) {
+          @if (step() > 1) {
             <app-button variant="outline" (clicked)="prevStep()">
               <app-icon slot="icon" name="arrow-left" [size]="16"></app-icon>
               Anterior
@@ -396,37 +396,37 @@
             </app-button>
           }
 
-          @if (step < confirmStep) {
+          @if (step() < confirmStep) {
             <app-button
               variant="primary"
               (clicked)="nextStep()"
               [disabled]="
                 bookingStep !== null &&
-                step === bookingStep &&
+                step() === bookingStep &&
                 !allBookingSlotsSelected
               "
             >
               Continuar
               <app-icon slot="icon" name="arrow-right" [size]="16"></app-icon>
             </app-button>
-          } @else if (step >= confirmStep) {
+          } @else if (step() >= confirmStep) {
             <app-button
               variant="primary"
               (clicked)="placeOrder()"
-              [loading]="is_submitting || wompiWidgetLoading"
-              [disabled]="is_submitting || wompiWidgetLoading"
+              [loading]="is_submitting() || wompiWidgetLoading()"
+              [disabled]="is_submitting() || wompiWidgetLoading()"
             >
-              @if (!is_submitting && !wompiWidgetLoading) {
+              @if (!is_submitting() && !wompiWidgetLoading()) {
                 <app-icon
                   slot="icon"
-                  [name]="isWompiPayment ? 'shield-check' : 'check'"
+                  [name]="isWompiPayment() ? 'shield-check' : 'check'"
                   [size]="16"
                 ></app-icon>
               }
               {{
-                is_submitting || wompiWidgetLoading
+                is_submitting() || wompiWidgetLoading()
                   ? "Procesando..."
-                  : isWompiPayment
+                  : isWompiPayment()
                     ? "Pagar con Wompi"
                     : "Confirmar Pedido"
               }}
@@ -440,9 +440,9 @@
         <div class="summary-card">
           <h3>Resumen</h3>
 
-          @if (cart) {
+          @if (cart()) {
             <div class="summary-items">
-              @for (item of cart.items; track item.id) {
+              @for (item of cart()!.items; track item.id) {
                 <div class="summary-item">
                   <span class="item-qty">{{ item.quantity }}x</span>
                   <span class="item-name">{{ item.product.name }}</span>
@@ -457,7 +457,7 @@
 
             <div class="summary-row">
               <span>Subtotal</span>
-              <span>{{ cart.subtotal | currency }}</span>
+              <span>{{ cart()!.subtotal | currency }}</span>
             </div>
             @if (!cartHasOnlyServices) {
               <div class="summary-row">
@@ -472,7 +472,7 @@
 
             <div class="summary-row total">
               <span>Total</span>
-              <span>{{ cart.subtotal + shipping_cost | currency }}</span>
+              <span>{{ cart()!.subtotal + shipping_cost | currency }}</span>
             </div>
           }
         </div>
@@ -480,7 +480,7 @@
     </div>
   }
 
-  @if (recommendedProducts().length > 0 && !is_submitting) {
+  @if (recommendedProducts().length > 0 && !is_submitting()) {
     <div class="checkout-offers">
       <app-product-carousel
         title="Agrega ofertas imperdibles a tu compra"
@@ -492,13 +492,13 @@
   }
 
   <app-product-quick-view-modal
-    [isOpen]="quickViewOpen"
-    [productSlug]="selectedProductSlug"
-    (closed)="quickViewOpen = false"
+    [isOpen]="quickViewOpen()"
+    [productSlug]="selectedProductSlug()"
+    (closed)="quickViewOpen.set(false)"
     (addedToCart)="onAddToCartFromSlider($event)"
   />
 
-  @if (wompiWidgetLoading) {
+  @if (wompiWidgetLoading()) {
     <div class="wompi-loading-overlay">
       <div class="spinner"></div>
       <p>Preparando pago seguro...</p>

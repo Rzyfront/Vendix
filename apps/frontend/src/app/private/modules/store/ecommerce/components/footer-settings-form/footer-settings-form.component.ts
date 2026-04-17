@@ -1,6 +1,13 @@
-import { Component, EventEmitter, inject, Input, OnChanges, OnInit, Output, SimpleChanges } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { FormArray, FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
+import {Component, inject, input, output, OnChanges, OnInit, SimpleChanges, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
+import {
+  FormArray,
+  FormBuilder,
+  FormGroup,
+  ReactiveFormsModule,
+  Validators,
+} from '@angular/forms';
 import { debounceTime, filter, skip } from 'rxjs';
 
 import {
@@ -21,7 +28,6 @@ import {
   selector: 'app-footer-settings-form',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     InputComponent,
     IconComponent,
@@ -30,10 +36,11 @@ import {
   templateUrl: './footer-settings-form.component.html',
 })
 export class FooterSettingsFormComponent implements OnInit, OnChanges {
+  private destroyRef = inject(DestroyRef);
   private fb = inject(FormBuilder);
 
-  @Input() initialData?: FooterSettings;
-  @Output() valueChange = new EventEmitter<FooterSettings>();
+  readonly initialData = input<FooterSettings | undefined>(undefined);
+  readonly valueChange = output<FooterSettings>();
 
   footerForm!: FormGroup;
 
@@ -53,9 +60,10 @@ export class FooterSettingsFormComponent implements OnInit, OnChanges {
 
   ngOnInit(): void {
     this.createForm();
-    if (this.initialData) {
+    const data = this.initialData();
+    if (data) {
       this.isPatching = true;
-      this.patchForm(this.initialData);
+      this.patchForm(data);
       this.isPatching = false;
     }
 
@@ -65,7 +73,7 @@ export class FooterSettingsFormComponent implements OnInit, OnChanges {
         filter(() => !this.isPatching),
         debounceTime(300),
       )
-      .subscribe(() => {
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
         if (this.footerForm.valid) {
           this.valueChange.emit(this.getFormValue());
         }
@@ -73,9 +81,13 @@ export class FooterSettingsFormComponent implements OnInit, OnChanges {
   }
 
   ngOnChanges(changes: SimpleChanges): void {
-    if (changes['initialData'] && !changes['initialData'].firstChange && this.footerForm) {
+    if (
+      changes['initialData'] &&
+      !changes['initialData'].firstChange &&
+      this.footerForm
+    ) {
       this.isPatching = true;
-      this.patchForm(this.initialData);
+      this.patchForm(this.initialData());
       this.isPatching = false;
     }
   }

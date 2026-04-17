@@ -1,10 +1,10 @@
 import { Component } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 
 @Component({
   selector: 'vendix-expense-reports',
   standalone: true,
-  imports: [CommonModule],
+  imports: [],
   template: `
     <div class="expense-reports">
       <h2>Expense Reports</h2>

@@ -1,12 +1,13 @@
 import {
   Component,
-  OnInit,
-  OnDestroy,
   signal,
+  computed,
   HostListener,
+  inject,
+  DestroyRef,
 } from '@angular/core';
-import { Subject, takeUntil } from 'rxjs';
-import { CommonModule } from '@angular/common';
+import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
+
 import { Router, ActivatedRoute } from '@angular/router';
 import { Store } from '@ngrx/store';
 
@@ -66,11 +67,19 @@ import { PosHeaderDropdownComponent } from './components/pos-header-dropdown.com
 import { ReservationFormModalComponent } from '../reservations/components/reservation-form-modal/reservation-form-modal.component';
 import { PosAISummaryModalComponent } from './components/pos-ai-summary-modal.component';
 
+const DEFAULT_CART_SUMMARY: CartSummary = {
+  subtotal: 0,
+  taxAmount: 0,
+  discountAmount: 0,
+  total: 0,
+  itemCount: 0,
+  totalItems: 0,
+};
+
 @Component({
   selector: 'app-pos',
   standalone: true,
   imports: [
-    CommonModule,
     ButtonComponent,
     IconComponent,
     SpinnerComponent,
@@ -102,7 +111,7 @@ import { PosAISummaryModalComponent } from './components/pos-ai-summary-modal.co
       <!-- POS Stats (hidden on mobile and in quotation mode) -->
       @if (!isQuotationMode() && !isLayawayMode()) {
         <div class="flex-none hidden lg:block pb-4">
-          <app-pos-stats [cartState]="cartState"></app-pos-stats>
+          <app-pos-stats [cartState]="cartState()"></app-pos-stats>
         </div>
       }
 
@@ -167,82 +176,83 @@ import { PosAISummaryModalComponent } from './components/pos-ai-summary-modal.co
               <!-- Mobile/Tablet/Small desktop: Compact dropdown -->
               <div class="flex xl:hidden">
                 <app-pos-header-dropdown
-                  [customer]="selectedCustomer"
-                  [scheduleEnabled]="enableScheduleValidation"
-                  [isWithinHours]="!isActuallyOutOfHours"
+                  [customer]="selectedCustomer()"
+                  [scheduleEnabled]="enableScheduleValidation()"
+                  [isWithinHours]="!isActuallyOutOfHours()"
                   [isDayClosed]="isTodayClosed"
                   [todayHours]="todaySchedule"
-                  [cashSession]="activeSession"
-                  [showCashOpenButton]="cashRegisterEnabled"
+                  [cashSession]="activeSession()"
+                  [showCashOpenButton]="cashRegisterEnabled()"
                   (customerClicked)="onOpenCustomerModal()"
                   (clearCustomer)="onClearCustomer()"
-                  (scheduleClicked)="showScheduleModal = true"
-                  (cashOpenClicked)="showSessionOpenModal = true"
-                  (cashCloseClicked)="showSessionCloseModal = true"
-                  (cashMovementClicked)="showCashMovementModal = true"
-                  (cashDetailClicked)="showSessionDetailModal = true"
+                  (scheduleClicked)="showScheduleModal.set(true)"
+                  (cashOpenClicked)="showSessionOpenModal.set(true)"
+                  (cashCloseClicked)="showSessionCloseModal.set(true)"
+                  (cashMovementClicked)="showCashMovementModal.set(true)"
+                  (cashDetailClicked)="showSessionDetailModal.set(true)"
                 ></app-pos-header-dropdown>
               </div>
 
               <!-- Desktop: Full expanded view -->
               <div class="hidden xl:flex items-center gap-2 xl:gap-3">
                 <!-- Customer Badge -->
-                <div
-                  *ngIf="selectedCustomer"
-                  class="group flex items-center gap-2.5 self-stretch bg-gradient-to-r from-primary-light/50 to-primary-light/30 px-3 rounded-lg cursor-pointer hover:from-primary-light/70 hover:to-primary-light/50 transition-all border border-primary/30 shadow-sm"
-                  (click)="onOpenCustomerModal()"
-                >
+                @if (selectedCustomer()) {
                   <div
-                    class="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-primary flex-shrink-0"
+                    class="group flex items-center gap-2.5 self-stretch bg-gradient-to-r from-primary-light/50 to-primary-light/30 px-3 rounded-lg cursor-pointer hover:from-primary-light/70 hover:to-primary-light/50 transition-all border border-primary/30 shadow-sm"
+                    (click)="onOpenCustomerModal()"
                   >
-                    <app-icon name="user" [size]="16"></app-icon>
-                  </div>
-                  <div class="flex flex-col min-w-0 flex-1">
-                    <span
-                      class="font-semibold text-text-primary text-sm leading-tight truncate"
-                      [title]="selectedCustomer.name"
-                      >{{ selectedCustomer.name }}</span
+                    <div
+                      class="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-primary flex-shrink-0"
                     >
-                    <span
-                      class="text-xs text-text-secondary leading-tight truncate"
-                      [title]="selectedCustomer.email"
-                      >{{ selectedCustomer.email }}</span
+                      <app-icon name="user" [size]="16"></app-icon>
+                    </div>
+                    <div class="flex flex-col min-w-0 flex-1">
+                      <span
+                        class="font-semibold text-text-primary text-sm leading-tight truncate"
+                        [title]="selectedCustomer()?.name"
+                        >{{ selectedCustomer()?.name }}</span
+                      >
+                      <span
+                        class="text-xs text-text-secondary leading-tight truncate"
+                        [title]="selectedCustomer()?.email"
+                        >{{ selectedCustomer()?.email }}</span
+                      >
+                    </div>
+                    <div
+                      class="w-6 h-6 rounded-full hover:bg-surface/60 flex items-center justify-center transition-colors flex-shrink-0"
+                      (click)="$event.stopPropagation(); onClearCustomer()"
                     >
+                      <app-icon
+                        name="x"
+                        [size]="14"
+                        class="text-text-secondary group-hover:text-destructive transition-colors"
+                      ></app-icon>
+                    </div>
                   </div>
-                  <div
-                    class="w-6 h-6 rounded-full hover:bg-surface/60 flex items-center justify-center transition-colors flex-shrink-0"
-                    (click)="$event.stopPropagation(); onClearCustomer()"
-                  >
-                    <app-icon
-                      name="x"
-                      [size]="14"
-                      class="text-text-secondary group-hover:text-destructive transition-colors"
-                    ></app-icon>
-                  </div>
-                </div>
+                }
 
                 <!-- Schedule Indicator -->
-                @if (enableScheduleValidation) {
+                @if (enableScheduleValidation()) {
                   <app-pos-schedule-indicator
-                    [isWithinHours]="!isActuallyOutOfHours"
+                    [isWithinHours]="!isActuallyOutOfHours()"
                     [todayHours]="todaySchedule"
                     [isDayClosed]="isTodayClosed"
-                    [enabled]="enableScheduleValidation"
-                    (clicked)="showScheduleModal = true"
+                    [enabled]="enableScheduleValidation()"
+                    (clicked)="showScheduleModal.set(true)"
                   ></app-pos-schedule-indicator>
                 }
 
-                <!-- Cash Register Session Status Bar -->
-                @if (cashRegisterEnabled) {
+                @if (cashRegisterEnabled()) {
                   <app-pos-session-status-bar
-                    [session]="activeSession"
+                    [session]="activeSession()"
                     [showOpenButton]="true"
-                    (openClicked)="showSessionOpenModal = true"
-                    (closeClicked)="showSessionCloseModal = true"
-                    (movementClicked)="showCashMovementModal = true"
-                    (detailClicked)="showSessionDetailModal = true"
+                    (openClicked)="showSessionOpenModal.set(true)"
+                    (closeClicked)="showSessionCloseModal.set(true)"
+                    (movementClicked)="showCashMovementModal.set(true)"
+                    (detailClicked)="showSessionDetailModal.set(true)"
                   ></app-pos-session-status-bar>
                 }
+
               </div>
             </div>
           </div>
@@ -252,7 +262,7 @@ import { PosAISummaryModalComponent } from './components/pos-ai-summary-modal.co
         <div
           class="flex-1 flex flex-col p-3 lg:p-6 min-h-0 overflow-hidden pos-main-content relative"
         >
-          @if (isOutOfHours && !canBypassSchedule) {
+          @if (isOutOfHours() && !canBypassSchedule()) {
             <!-- Out of hours overlay -->
             <div
               class="absolute inset-0 z-40 bg-surface/90 backdrop-blur-sm flex items-center justify-center p-4"
@@ -274,12 +284,12 @@ import { PosAISummaryModalComponent } from './components/pos-ai-summary-modal.co
                   </h2>
                   <p class="text-text-secondary text-sm leading-relaxed">
                     {{
-                      outOfHoursMessage ||
+                      outOfHoursMessage() ||
                         'El punto de venta está fuera del horario de atención configurado. No se podrán realizar ventas hasta dentro del horario establecido.'
                     }}
                   </p>
 
-                  @if (nextOpenTime) {
+                  @if (nextOpenTime()) {
                     <div
                       class="bg-primary/5 border border-primary/20 rounded-xl p-4 w-full mt-2 flex flex-col items-center"
                     >
@@ -288,7 +298,7 @@ import { PosAISummaryModalComponent } from './components/pos-ai-summary-modal.co
                         >Próxima apertura</span
                       >
                       <span class="text-lg font-bold text-primary">{{
-                        nextOpenTime
+                        nextOpenTime()
                       }}</span>
                     </div>
                   }
@@ -330,10 +340,10 @@ import { PosAISummaryModalComponent } from './components/pos-ai-summary-modal.co
             <div class="flex-[2] min-h-0 min-w-0 overflow-hidden">
               <app-pos-product-selection
                 class="h-full block"
-                [refreshTrigger]="productRefreshCounter"
-                [selectedCustomer]="selectedCustomer"
-                [queueEnabled]="queueEnabled"
-                [queueCount]="queueCount"
+                [refreshTrigger]="productRefreshCounter()"
+                [selectedCustomer]="selectedCustomer()"
+                [queueEnabled]="queueEnabled()"
+                [queueCount]="queueCount()"
                 (productSelected)="onProductSelected($event)"
                 (productAddedToCart)="onProductAddedToCart($event)"
                 (bookingRequired)="onBookingRequired($event)"
@@ -362,8 +372,8 @@ import { PosAISummaryModalComponent } from './components/pos-ai-summary-modal.co
           <div class="lg:hidden flex-1 min-h-0 pb-20">
             <app-pos-product-selection
               class="h-full block"
-              [refreshTrigger]="productRefreshCounter"
-              [selectedCustomer]="selectedCustomer"
+              [refreshTrigger]="productRefreshCounter()"
+              [selectedCustomer]="selectedCustomer()"
               (productSelected)="onProductSelected($event)"
               (productAddedToCart)="onProductAddedToCart($event)"
               (bookingRequired)="onBookingRequired($event)"
@@ -374,25 +384,26 @@ import { PosAISummaryModalComponent } from './components/pos-ai-summary-modal.co
       </div>
 
       <!-- Mobile Footer (visible on mobile and tablet for sidebar sync) -->
-      <app-pos-mobile-footer
-        *ngIf="isMobile() || isTablet()"
-        [cartSummary]="cartSummary"
-        [itemCount]="cartItems.length"
-        [isTablet]="isTablet()"
-        [isQuotationMode]="isQuotationMode()"
-        [isLayawayMode]="isLayawayMode()"
-        (viewCart)="onOpenCartModal()"
-        (saveDraft)="onSaveDraft()"
-        (shipping)="onShipping()"
-        (checkout)="onCheckout()"
-        (quote)="onQuote()"
-        (layaway)="onLayaway()"
-      ></app-pos-mobile-footer>
+      @if (isMobile() || isTablet()) {
+        <app-pos-mobile-footer
+          [cartSummary]="cartSummary()"
+          [itemCount]="cartItems().length"
+          [isTablet]="isTablet()"
+          [isQuotationMode]="isQuotationMode()"
+          [isLayawayMode]="isLayawayMode()"
+          (viewCart)="onOpenCartModal()"
+          (saveDraft)="onSaveDraft()"
+          (shipping)="onShipping()"
+          (checkout)="onCheckout()"
+          (quote)="onQuote()"
+          (layaway)="onLayaway()"
+        ></app-pos-mobile-footer>
+      }
 
       <!-- Mobile Cart Modal -->
       <app-pos-cart-modal
-        [isOpen]="showCartModal && (isMobile() || isTablet())"
-        [cartState]="cartState"
+        [isOpen]="showCartModal() && (isMobile() || isTablet())"
+        [cartState]="cartState()"
         (closed)="onCloseCartModal()"
         (itemQuantityChanged)="onCartItemQuantityChanged($event)"
         (itemRemoved)="onCartItemRemoved($event)"
@@ -403,26 +414,27 @@ import { PosAISummaryModalComponent } from './components/pos-ai-summary-modal.co
       ></app-pos-cart-modal>
 
       <!-- Loading Overlay -->
-      <div
-        *ngIf="loading"
-        class="fixed inset-0 z-50 bg-surface/80 backdrop-blur-sm flex items-center justify-center"
-      >
-        <app-card class="w-auto min-w-[200px]" [padding]="true">
-          <div class="flex flex-col items-center py-6 px-4">
-            <app-spinner [size]="'lg'" color="primary"></app-spinner>
-            <p class="mt-4 text-text-primary font-medium text-sm">
-              Procesando solicitud...
-            </p>
-          </div>
-        </app-card>
-      </div>
+      @if (loading()) {
+        <div
+          class="fixed inset-0 z-50 bg-surface/80 backdrop-blur-sm flex items-center justify-center"
+        >
+          <app-card class="w-auto min-w-[200px]" [padding]="true">
+            <div class="flex flex-col items-center py-6 px-4">
+              <app-spinner [size]="'lg'" color="primary"></app-spinner>
+              <p class="mt-4 text-text-primary font-medium text-sm">
+                Procesando solicitud...
+              </p>
+            </div>
+          </app-card>
+        </div>
+      }
 
       <!-- Modals -->
       <app-pos-customer-modal
-        [isOpen]="showCustomerModal"
-        [customer]="editingCustomer"
-        [queueEnabled]="queueEnabled"
-        [openInQueueMode]="openInQueueMode"
+        [isOpen]="showCustomerModal()"
+        [customer]="editingCustomer()"
+        [queueEnabled]="queueEnabled()"
+        [openInQueueMode]="openInQueueMode()"
         (closed)="onCustomerModalClosed()"
         (customerCreated)="onCustomerCreated($event)"
         (customerUpdated)="onCustomerUpdated($event)"
@@ -430,8 +442,8 @@ import { PosAISummaryModalComponent } from './components/pos-ai-summary-modal.co
       ></app-pos-customer-modal>
 
       <app-pos-payment-interface
-        [isOpen]="showPaymentModal"
-        [cartState]="cartState"
+        [isOpen]="showPaymentModal()"
+        [cartState]="cartState()"
         (closed)="onPaymentModalClosed()"
         (paymentCompleted)="onPaymentCompleted($event)"
         (requestCustomer)="onOpenCustomerModal()"
@@ -439,86 +451,97 @@ import { PosAISummaryModalComponent } from './components/pos-ai-summary-modal.co
       ></app-pos-payment-interface>
 
       <app-pos-shipping-modal
-        [isOpen]="showShippingModal"
-        [cartState]="cartState"
+        [isOpen]="showShippingModal()"
+        [cartState]="cartState()"
         (closed)="onShippingModalClosed()"
         (shippingCompleted)="onShippingCompleted($event)"
         (customerSelected)="onPaymentCustomerSelected($event)"
       ></app-pos-shipping-modal>
 
       <app-pos-order-confirmation
-        [isOpen]="showOrderConfirmation"
-        [orderData]="completedOrder"
+        [isOpen]="showOrderConfirmation()"
+        [orderData]="completedOrder()"
         (closed)="onOrderConfirmationClosed()"
         (newSale)="onStartNewSale()"
         (viewDetail)="onViewOrderDetail($event)"
       ></app-pos-order-confirmation>
 
       <!-- Cash Register Modals -->
-      @if (cashRegisterEnabled) {
-        <app-pos-session-open-modal
-          [isOpen]="showSessionOpenModal"
-          (isOpenChange)="showSessionOpenModal = $event"
-          (sessionOpened)="onSessionOpened($event)"
-        ></app-pos-session-open-modal>
+      @if (cashRegisterEnabled()) {
+        @defer (when showSessionOpenModal()) {
+          <app-pos-session-open-modal
+            [isOpen]="showSessionOpenModal()"
+            (isOpenChange)="showSessionOpenModal.set($event)"
+            (sessionOpened)="onSessionOpened($event)"
+          ></app-pos-session-open-modal>
+        }
 
-        <app-pos-session-close-modal
-          [isOpen]="showSessionCloseModal"
-          [session]="activeSession"
-          (isOpenChange)="showSessionCloseModal = $event"
-          (sessionClosed)="onSessionClosed($event)"
-        ></app-pos-session-close-modal>
+        @defer (when showSessionCloseModal()) {
+          <app-pos-session-close-modal
+            [isOpen]="showSessionCloseModal()"
+            [session]="activeSession()"
+            (isOpenChange)="showSessionCloseModal.set($event)"
+            (sessionClosed)="onSessionClosed($event)"
+          ></app-pos-session-close-modal>
+        }
 
-        <app-pos-ai-summary-modal
-          [isOpen]="showAISummaryModal"
-          [sessionId]="closedSessionIdForSummary"
-          (isOpenChange)="showAISummaryModal = $event"
-        ></app-pos-ai-summary-modal>
+        @defer (when showAISummaryModal()) {
+          <app-pos-ai-summary-modal
+            [isOpen]="showAISummaryModal()"
+            [sessionId]="closedSessionIdForSummary()"
+            (isOpenChange)="showAISummaryModal.set($event)"
+          ></app-pos-ai-summary-modal>
+        }
 
-        <app-pos-cash-movement-modal
-          [isOpen]="showCashMovementModal"
-          [sessionId]="activeSession?.id || null"
-          (isOpenChange)="showCashMovementModal = $event"
-          (movementCreated)="onMovementCreated($event)"
-        ></app-pos-cash-movement-modal>
+        @defer (when showCashMovementModal()) {
+          <app-pos-cash-movement-modal
+            [isOpen]="showCashMovementModal()"
+            [sessionId]="activeSession()?.id || null"
+            (isOpenChange)="showCashMovementModal.set($event)"
+            (movementCreated)="onMovementCreated($event)"
+          ></app-pos-cash-movement-modal>
+        }
 
-        <app-pos-session-detail-modal
-          [isOpen]="showSessionDetailModal"
-          [session]="activeSession"
-          (isOpenChange)="showSessionDetailModal = $event"
-        ></app-pos-session-detail-modal>
+        @defer (when showSessionDetailModal()) {
+          <app-pos-session-detail-modal
+            [isOpen]="showSessionDetailModal()"
+            [session]="activeSession()"
+            (isOpenChange)="showSessionDetailModal.set($event)"
+          ></app-pos-session-detail-modal>
+        }
       }
 
-      <!-- Schedule Modal -->
-      <app-pos-schedule-modal
-        [isOpen]="showScheduleModal"
-        [businessHours]="businessHours"
-        [isWithinHours]="!isActuallyOutOfHours"
-        [todayKey]="todayKey"
-        (isOpenChange)="showScheduleModal = $event"
-        (goToSettings)="showScheduleModal = false; goToSettings()"
-      ></app-pos-schedule-modal>
+      @defer (when showScheduleModal()) {
+        <app-pos-schedule-modal
+          [isOpen]="showScheduleModal()"
+          [businessHours]="businessHours()"
+          [isWithinHours]="!isActuallyOutOfHours()"
+          [todayKey]="todayKey"
+          (isOpenChange)="showScheduleModal.set($event)"
+          (goToSettings)="showScheduleModal.set(false); goToSettings()"
+        ></app-pos-schedule-modal>
+      }
 
-      <!-- Reservation Modal from POS Cart -->
-      <app-reservation-form-modal
-        [isOpen]="showReservationModal"
-        [initialProduct]="pendingBookingProduct"
-        [initialCustomer]="selectedCustomer"
-        [posMode]="true"
-        (closed)="onBookingModalClosed()"
-        (created)="onBookingCreated($event)"
-      ></app-reservation-form-modal>
+      @defer (when showReservationModal()) {
+        <app-reservation-form-modal
+          [isOpen]="showReservationModal()"
+          [initialProduct]="pendingBookingProduct()"
+          [initialCustomer]="selectedCustomer()"
+          [posMode]="true"
+          (closed)="onBookingModalClosed()"
+          (created)="onBookingCreated($event)"
+        ></app-reservation-form-modal>
+      }
 
-      <!-- Layaway Config Modal -->
-      @if (showLayawayConfigModal()) {
+      @defer (when showLayawayConfigModal()) {
         <app-layaway-config-modal
-          [cartItems]="cartState?.items || []"
-          [cartTotal]="cartSummary.total"
-          [customer]="selectedCustomer"
-          [isSaving]="loading"
+          [cartItems]="cartState()?.items || []"
+          [cartTotal]="cartSummary().total"
+          [customer]="selectedCustomer()"
+          [isSaving]="loading()"
           (save)="onLayawayConfigSave($event)"
           (close)="showLayawayConfigModal.set(false)"
-        />
+        ></app-layaway-config-modal>
       }
     </div>
   `,
@@ -625,36 +648,29 @@ import { PosAISummaryModalComponent } from './components/pos-ai-summary-modal.co
     `,
   ],
 })
-export class PosComponent implements OnInit, OnDestroy {
-  cartState: CartState | null = null;
-  selectedCustomer: PosCustomer | null = null;
-  loading: boolean = false;
+export class PosComponent {
+  cartState = signal<CartState | null>(null);
+  cartItems = computed(() => this.cartState()?.items ?? []);
+  cartSummary = computed(
+    () => this.cartState()?.summary ?? DEFAULT_CART_SUMMARY,
+  );
+  selectedCustomer = signal<PosCustomer | null>(null);
+  loading = signal(false);
 
-  showCustomerModal = false;
-  editingCustomer: PosCustomer | null = null;
+  showCustomerModal = signal(false);
+  editingCustomer = signal<PosCustomer | null>(null);
 
-  showPaymentModal = false;
-  selectedPaymentMethod: any = null;
+  showPaymentModal = signal(false);
 
-  showShippingModal = false;
+  showShippingModal = signal(false);
 
-  showOrderConfirmation = false;
-  productRefreshCounter = 0;
-  showCartModal = false;
+  showOrderConfirmation = signal(false);
+  productRefreshCounter = signal(0);
+  showCartModal = signal(false);
 
-  currentOrderId: string | null = null;
-  currentOrderNumber: string | null = null;
-  completedOrder: any = null;
-
-  public cartItems: CartItem[] = [];
-  public cartSummary: CartSummary = {
-    subtotal: 0,
-    taxAmount: 0,
-    discountAmount: 0,
-    total: 0,
-    itemCount: 0,
-    totalItems: 0,
-  };
+  currentOrderId = signal<string | null>(null);
+  currentOrderNumber = signal<string | null>(null);
+  completedOrder = signal<any>(null);
 
   // Edit mode
   isEditMode = signal(false);
@@ -662,17 +678,17 @@ export class PosComponent implements OnInit, OnDestroy {
   editingOrderNumber = signal<string | null>(null);
 
   // Cash Register
-  cashRegisterEnabled = false;
-  activeSession: CashRegisterSession | null = null;
-  showSessionOpenModal = false;
-  showSessionCloseModal = false;
-  showCashMovementModal = false;
-  showSessionDetailModal = false;
-  showAISummaryModal = false;
-  closedSessionIdForSummary: number | null = null;
+  cashRegisterEnabled = signal(false);
+  activeSession = signal<CashRegisterSession | null>(null);
+  showSessionOpenModal = signal(false);
+  showSessionCloseModal = signal(false);
+  showCashMovementModal = signal(false);
+  showSessionDetailModal = signal(false);
+  showAISummaryModal = signal(false);
+  closedSessionIdForSummary = signal<number | null>(null);
 
   // Schedule
-  showScheduleModal = false;
+  showScheduleModal = signal(false);
 
   /** Key of the current day (e.g. 'monday') based on store timezone */
   get todayKey(): string {
@@ -687,7 +703,7 @@ export class PosComponent implements OnInit, OnDestroy {
     ];
     try {
       const now = new Date(
-        new Date().toLocaleString('en-US', { timeZone: this.storeTimezone }),
+        new Date().toLocaleString('en-US', { timeZone: this.storeTimezone() }),
       );
       return days[now.getDay()];
     } catch {
@@ -695,26 +711,24 @@ export class PosComponent implements OnInit, OnDestroy {
     }
   }
 
-  /** Today's business hours from the config, or null if closed */
   get todaySchedule(): { open: string; close: string } | null {
-    const hours = this.businessHours[this.todayKey];
+    const hours = this.businessHours()[this.todayKey];
     if (!hours || !hours.open || !hours.close) return null;
     return hours;
   }
 
-  /** Whether today is explicitly marked as closed */
   get isTodayClosed(): boolean {
     return this.todaySchedule === null;
   }
 
   // Customer Queue
-  queueEnabled = false;
-  queueCount = 0;
-  openInQueueMode = false;
+  queueEnabled = signal(false);
+  queueCount = signal(0);
+  openInQueueMode = signal(false);
 
   // Booking desde POS
-  showReservationModal = false;
-  pendingBookingProduct: any = null;
+  showReservationModal = signal(false);
+  pendingBookingProduct = signal<any>(null);
 
   // Quotation mode
   isQuotationMode = signal(false);
@@ -731,45 +745,64 @@ export class PosComponent implements OnInit, OnDestroy {
   isTablet = signal(false);
 
   // Store settings for schedule validation
-  storeSettingsSubscription: any;
-  enableScheduleValidation = false;
-  businessHours: Record<string, { open: string; close: string }> = {};
+  enableScheduleValidation = signal(false);
+  businessHours = signal<Record<string, { open: string; close: string }>>({});
 
   // Admin bypass for schedule validation
-  isAdmin = false;
-  canBypassSchedule = false;
-  scheduleStatusChecked = false;
+  isAdmin = signal(false);
+  canBypassSchedule = signal(false);
+  scheduleStatusChecked = signal(false);
 
   // Schedule UI State
-  isOutOfHours = false;
-  isActuallyOutOfHours = false;
-  nextOpenTime?: string;
-  outOfHoursMessage?: string;
-  scheduleHandledByBackend = false;
-  storeTimezone = 'America/Bogota';
+  isOutOfHours = signal(false);
+  isActuallyOutOfHours = signal(false);
+  nextOpenTime = signal<string | undefined>(undefined);
+  outOfHoursMessage = signal<string | undefined>(undefined);
+  scheduleHandledByBackend = signal(false);
+  storeTimezone = signal('America/Bogota');
 
   // Store domain for QR URL construction
   private storeDomainHostname: string | null = null;
 
-  private destroy$ = new Subject<void>();
+  private destroyRef = inject(DestroyRef);
+  private cartService = inject(PosCartService);
+  private customerService = inject(PosCustomerService);
+  private paymentService = inject(PosPaymentService);
+  private toastService = inject(ToastService);
+  private dialogService = inject(DialogService);
+  private router = inject(Router);
+  private store = inject(Store);
+  private route = inject(ActivatedRoute);
+  private posOrderService = inject(PosOrderService);
+  private ordersService = inject(StoreOrdersService);
+  private settingsService = inject(StoreSettingsService);
+  private quotationsService = inject(QuotationsService);
+  private layawayService = inject(LayawayApiService);
+  private cashRegisterService = inject(PosCashRegisterService);
+  private queueService = inject(PosQueueService);
 
-  constructor(
-    private cartService: PosCartService,
-    private customerService: PosCustomerService,
-    private paymentService: PosPaymentService,
-    private toastService: ToastService,
-    private dialogService: DialogService,
-    private router: Router,
-    private store: Store,
-    private route: ActivatedRoute,
-    private posOrderService: PosOrderService,
-    private ordersService: StoreOrdersService,
-    private settingsService: StoreSettingsService,
-    private quotationsService: QuotationsService,
-    private layawayService: LayawayApiService,
-    private cashRegisterService: PosCashRegisterService,
-    private queueService: PosQueueService,
-  ) {}
+  constructor() {
+    this.checkMobile();
+    this.setupSubscriptions();
+    this.loadStoreSettings();
+    this.checkEditMode();
+    this.checkQuotationMode();
+    this.checkLayawayMode();
+    this.validateScheduleOnInit();
+
+    this.store
+      .select(selectUserDomainHostname)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((hostname) => {
+        this.storeDomainHostname = hostname;
+      });
+
+    this.paymentService.sessionRequired$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        this.showSessionOpenModal.set(true);
+      });
+  }
 
   @HostListener('window:resize')
   onResize(): void {
@@ -783,31 +816,6 @@ export class PosComponent implements OnInit, OnDestroy {
     this.isTablet.set(width >= 768 && width < 1024);
   }
 
-  ngOnInit(): void {
-    this.checkMobile();
-    this.setupSubscriptions();
-    this.loadStoreSettings();
-    this.checkEditMode();
-    this.checkQuotationMode();
-    this.checkLayawayMode();
-    this.validateScheduleOnInit();
-
-    // Resolve store domain for invoice QR URL construction
-    this.store
-      .select(selectUserDomainHostname)
-      .pipe(takeUntil(this.destroy$))
-      .subscribe((hostname) => {
-        this.storeDomainHostname = hostname;
-      });
-
-    // Listen for lazy session validation from payment service
-    this.paymentService.sessionRequired$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe(() => {
-        this.showSessionOpenModal = true;
-      });
-  }
-
   /**
    * Valida el horario de atención al iniciar el componente
    * Usa el endpoint del backend para obtener el estado con info de admin
@@ -815,36 +823,35 @@ export class PosComponent implements OnInit, OnDestroy {
   private validateScheduleOnInit(): void {
     this.settingsService
       .getScheduleStatus()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           if (response?.success && response?.data) {
             const status = response.data;
-            this.isAdmin = status.isAdmin || false;
-            this.canBypassSchedule = status.canBypass || false;
-            this.scheduleStatusChecked = true;
-            this.scheduleHandledByBackend = true;
+            this.isAdmin.set(status.isAdmin || false);
+            this.canBypassSchedule.set(status.canBypass || false);
+            this.scheduleStatusChecked.set(true);
+            this.scheduleHandledByBackend.set(true);
 
-            // Si está fuera de horario y no es admin
-            if (!status.isWithinBusinessHours && !this.canBypassSchedule) {
-              this.isOutOfHours = true;
-              this.isActuallyOutOfHours = true;
-              this.nextOpenTime = status.nextOpenTime;
-              this.outOfHoursMessage = status.message;
-            }
-            // Si está fuera de horario pero es admin, mostrar warning info
-            else if (!status.isWithinBusinessHours && this.canBypassSchedule) {
-              this.isActuallyOutOfHours = true;
+            if (!status.isWithinBusinessHours && !this.canBypassSchedule()) {
+              this.isOutOfHours.set(true);
+              this.isActuallyOutOfHours.set(true);
+              this.nextOpenTime.set(status.nextOpenTime);
+              this.outOfHoursMessage.set(status.message);
+            } else if (
+              !status.isWithinBusinessHours &&
+              this.canBypassSchedule()
+            ) {
+              this.isActuallyOutOfHours.set(true);
               this.showAdminScheduleWarning(status.message ?? '');
             } else {
-              this.isActuallyOutOfHours = false;
+              this.isActuallyOutOfHours.set(false);
             }
           }
         },
         error: (err) => {
           console.error('Error validating schedule:', err);
-          // En caso de error, permitir acceso pero usar validación local
-          this.scheduleStatusChecked = true;
+          this.scheduleStatusChecked.set(true);
         },
       });
   }
@@ -869,72 +876,58 @@ export class PosComponent implements OnInit, OnDestroy {
     );
   }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
   private setupSubscriptions(): void {
-    this.cartService.cartState
-      .pipe(takeUntil(this.destroy$))
+    toObservable(this.cartService.cartState)
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((cartState: CartState) => {
-        this.cartState = cartState;
-        this.cartItems = cartState?.items || [];
-        this.cartSummary = cartState?.summary || {
-          subtotal: 0,
-          taxAmount: 0,
-          discountAmount: 0,
-          total: 0,
-          itemCount: 0,
-          totalItems: 0,
-        };
+        this.cartState.set(cartState);
       });
 
     this.cartService.customer
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((customer: PosCustomer | null) => {
-        this.selectedCustomer = customer;
+        this.selectedCustomer.set(customer);
       });
 
-    this.cartService.loading
-      .pipe(takeUntil(this.destroy$))
+    toObservable(this.cartService.loading)
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((loading: boolean) => {
-        this.loading = Boolean(loading);
+        this.loading.set(Boolean(loading));
       });
   }
 
   get isEmpty(): boolean {
-    return !this.cartState || this.cartState.items.length === 0;
+    return !this.cartState() || this.cartState()!.items.length === 0;
   }
 
   onOpenCustomerModal(): void {
-    this.editingCustomer = null;
-    this.showCustomerModal = true;
+    this.editingCustomer.set(null);
+    this.showCustomerModal.set(true);
   }
 
   onClearCustomer(): void {
     this.customerService.clearSelectedCustomer();
     this.cartService
       .setCustomer(null)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => {
         this.toastService.info('Cliente removido de la venta');
       });
   }
 
   onCustomerModalClosed(): void {
-    this.showCustomerModal = false;
-    this.editingCustomer = null;
-    this.openInQueueMode = false;
+    this.showCustomerModal.set(false);
+    this.editingCustomer.set(null);
+    this.openInQueueMode.set(false);
   }
 
   onCustomerCreated(customer: PosCustomer): void {
     this.customerService.selectCustomer(customer);
     this.cartService
       .setCustomer(customer)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => {
-        this.showCustomerModal = false;
+        this.showCustomerModal.set(false);
         this.toastService.success('Cliente agregado correctamente');
       });
   }
@@ -943,9 +936,9 @@ export class PosComponent implements OnInit, OnDestroy {
     this.customerService.selectCustomer(customer);
     this.cartService
       .setCustomer(customer)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => {
-        this.showCustomerModal = false;
+        this.showCustomerModal.set(false);
         this.toastService.success('Cliente actualizado correctamente');
       });
   }
@@ -954,9 +947,9 @@ export class PosComponent implements OnInit, OnDestroy {
     this.customerService.selectCustomer(customer);
     this.cartService
       .setCustomer(customer)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => {
-        this.showCustomerModal = false;
+        this.showCustomerModal.set(false);
         this.toastService.success('Cliente asignado correctamente');
       });
   }
@@ -966,7 +959,7 @@ export class PosComponent implements OnInit, OnDestroy {
     this.customerService.selectCustomer(customer);
     this.cartService
       .setCustomer(customer)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => {
         this.toastService.success('Cliente asignado correctamente');
       });
@@ -981,45 +974,45 @@ export class PosComponent implements OnInit, OnDestroy {
   onClearCart(): void {
     this.cartService
       .clearCart()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.success('Carrito vaciado');
         },
         error: (error: any) => {
-          this.loading = false;
+          this.loading.set(false);
           this.toastService.error(error.message || 'Error al vaciar carrito');
         },
       });
   }
 
   onSaveDraft(): void {
-    if (!this.cartState || this.isEmpty) return;
+    if (!this.cartState() || this.isEmpty) return;
 
-    this.loading = true;
+    this.loading.set(true);
 
     const createdBy = 'current_user';
 
     this.paymentService
-      .saveDraft(this.cartState, createdBy)
-      .pipe(takeUntil(this.destroy$))
+      .saveDraft(this.cartState()!, createdBy)
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: any) => {
-          this.loading = false;
+          this.loading.set(false);
           this.toastService.success(
             response.message || 'Borrador guardado correctamente',
           );
           this.onClearCart();
         },
         error: (error: any) => {
-          this.loading = false;
+          this.loading.set(false);
           this.toastService.error(error.message || 'Error al guardar borrador');
         },
       });
   }
 
   onQuote(): void {
-    if (!this.selectedCustomer) {
+    if (!this.selectedCustomer()) {
       this.toastService.warning(
         'Debes asignar un cliente para crear una cotización',
       );
@@ -1027,13 +1020,13 @@ export class PosComponent implements OnInit, OnDestroy {
       return;
     }
 
-    if (!this.cartState || this.isEmpty) {
+    if (!this.cartState() || this.isEmpty) {
       this.toastService.warning('El carrito está vacío');
       return;
     }
 
-    this.loading = true;
-    const items = this.cartState.items.map((item) => ({
+    this.loading.set(true);
+    const items = this.cartState()!.items.map((item) => ({
       product_id:
         typeof item.product.id === 'string'
           ? parseInt(item.product.id, 10)
@@ -1047,7 +1040,9 @@ export class PosComponent implements OnInit, OnDestroy {
     }));
 
     const dto = {
-      customer_id: this.selectedCustomer ? this.selectedCustomer.id : undefined,
+      customer_id: this.selectedCustomer()
+        ? this.selectedCustomer()!.id
+        : undefined,
       channel: 'pos' as const,
       items,
       notes: '',
@@ -1058,9 +1053,9 @@ export class PosComponent implements OnInit, OnDestroy {
       ? this.quotationsService.updateQuotation(Number(editId), dto as any)
       : this.quotationsService.createQuotation(dto as any);
 
-    obs$.pipe(takeUntil(this.destroy$)).subscribe({
+    obs$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (res: any) => {
-        this.loading = false;
+        this.loading.set(false);
         const qNumber =
           res?.data?.quotation_number || res?.quotation_number || '';
         this.toastService.success(
@@ -1074,7 +1069,7 @@ export class PosComponent implements OnInit, OnDestroy {
         }
       },
       error: (err: any) => {
-        this.loading = false;
+        this.loading.set(false);
         this.toastService.error(
           err?.error?.message || 'Error al crear cotización',
         );
@@ -1083,7 +1078,7 @@ export class PosComponent implements OnInit, OnDestroy {
   }
 
   onLayaway(): void {
-    if (!this.selectedCustomer) {
+    if (!this.selectedCustomer()) {
       this.toastService.warning(
         'Debes asignar un cliente para crear un plan separé',
       );
@@ -1091,7 +1086,7 @@ export class PosComponent implements OnInit, OnDestroy {
       return;
     }
 
-    if (!this.cartState || this.isEmpty) {
+    if (!this.cartState() || this.isEmpty) {
       this.toastService.warning('El carrito está vacío');
       return;
     }
@@ -1100,12 +1095,12 @@ export class PosComponent implements OnInit, OnDestroy {
   }
 
   onLayawayConfigSave(config: any): void {
-    if (!this.cartState || !this.selectedCustomer) return;
+    if (!this.cartState() || !this.selectedCustomer()) return;
 
-    this.loading = true;
+    this.loading.set(true);
     this.showLayawayConfigModal.set(false);
 
-    const items = this.cartState.items.map((item) => ({
+    const items = this.cartState()!.items.map((item) => ({
       product_id:
         typeof item.product.id === 'string'
           ? parseInt(item.product.id, 10)
@@ -1118,7 +1113,7 @@ export class PosComponent implements OnInit, OnDestroy {
     }));
 
     const dto: CreateLayawayRequest = {
-      customer_id: this.selectedCustomer.id,
+      customer_id: this.selectedCustomer()!.id,
       down_payment_amount: config.down_payment_amount || 0,
       notes: config.notes || undefined,
       internal_notes: config.internal_notes || undefined,
@@ -1128,10 +1123,10 @@ export class PosComponent implements OnInit, OnDestroy {
 
     this.layawayService
       .create(dto)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res: any) => {
-          this.loading = false;
+          this.loading.set(false);
           const planNumber = res?.data?.plan_number || res?.plan_number || '';
           this.toastService.success(
             `Plan Separé ${planNumber} creado correctamente`,
@@ -1140,7 +1135,7 @@ export class PosComponent implements OnInit, OnDestroy {
           this.router.navigate(['/admin/orders/layaway']);
         },
         error: (err: any) => {
-          this.loading = false;
+          this.loading.set(false);
           this.toastService.error(
             err?.error?.message || 'Error al crear plan separé',
           );
@@ -1149,41 +1144,41 @@ export class PosComponent implements OnInit, OnDestroy {
   }
 
   onCheckout(): void {
-    if (!this.cartState || this.isEmpty) return;
+    if (!this.cartState() || this.isEmpty) return;
 
     if (this.isEditMode()) {
       this.updateExistingOrder();
       return;
     }
 
-    // Open payment modal instead of processing directly
-    this.showPaymentModal = true;
+    this.showPaymentModal.set(true);
   }
 
   onPaymentModalClosed(): void {
-    this.showPaymentModal = false;
-    this.selectedPaymentMethod = null;
+    this.showPaymentModal.set(false);
   }
 
   onPaymentCompleted(paymentData: any): void {
-    if (!this.cartState || this.isEmpty) return;
+    if (!this.cartState() || this.isEmpty) return;
 
-    this.loading = false;
-    this.showPaymentModal = false;
+    this.loading.set(false);
+    this.showPaymentModal.set(false);
 
     if (paymentData.success) {
-      this.currentOrderId = paymentData.order?.id;
-      this.currentOrderNumber = paymentData.order?.order_number;
+      this.currentOrderId.set(paymentData.order?.id);
+      this.currentOrderNumber.set(paymentData.order?.order_number);
 
-      // Enrich completedOrder with cart state data before clearing it
-      this.completedOrder = {
+      const cs = this.cartState();
+      const csm = this.cartSummary();
+      const sc = this.selectedCustomer();
+
+      this.completedOrder.set({
         ...(paymentData.order || {}),
         isCreditSale: !!paymentData.isCreditSale,
         isAnonymousSale: !!paymentData.isAnonymousSale,
-        // Ensure we have current cart details for the ticket
         items:
           paymentData.order?.items ||
-          this.cartState?.items.map((item) => ({
+          cs?.items.map((item) => ({
             product_id: item.product.id,
             product_name: item.product.name,
             quantity: item.quantity,
@@ -1196,59 +1191,44 @@ export class PosComponent implements OnInit, OnDestroy {
             weight: item.weight || undefined,
             weight_unit: item.weight_unit || undefined,
           })),
-        subtotal: paymentData.order?.subtotal || this.cartSummary.subtotal,
-        tax_amount: paymentData.order?.tax_amount || this.cartSummary.taxAmount,
+        subtotal: paymentData.order?.subtotal || csm.subtotal,
+        tax_amount: paymentData.order?.tax_amount || csm.taxAmount,
         discount_amount:
-          paymentData.order?.discount_amount || this.cartSummary.discountAmount,
-        total_amount: paymentData.order?.total_amount || this.cartSummary.total,
-        // For anonymous sales, use "Consumidor Final" as customer name
-        // For regular sales, use customer data from backend or selected customer
+          paymentData.order?.discount_amount || csm.discountAmount,
+        total_amount: paymentData.order?.total_amount || csm.total,
         customer_name: paymentData.isAnonymousSale
           ? 'Consumidor Final'
           : paymentData.order?.customer_name ||
-            (this.selectedCustomer
-              ? `${this.selectedCustomer.first_name} ${this.selectedCustomer.last_name}`
-              : ''),
+            (sc ? `${sc.first_name} ${sc.last_name}` : ''),
         customer_email:
-          !paymentData.isAnonymousSale && this.selectedCustomer?.email
-            ? this.selectedCustomer.email
+          !paymentData.isAnonymousSale && sc?.email
+            ? sc.email
             : paymentData.order?.customer_email || '',
-        // For anonymous sales, use "000" as tax ID
         customer_tax_id: paymentData.isAnonymousSale
           ? '000'
-          : paymentData.order?.customer_tax_id ||
-            this.selectedCustomer?.document_number ||
-            '',
-        customer: paymentData.order?.customer || this.selectedCustomer,
+          : paymentData.order?.customer_tax_id || sc?.document_number || '',
+        customer: paymentData.order?.customer || sc,
         payment: paymentData.order?.payment || paymentData.payment,
         invoiceDataToken: paymentData.order?.invoice_data_token,
         invoiceDataQrUrl:
           paymentData.order?.invoice_data_token && this.storeDomainHostname
             ? `${window.location.protocol}//${this.storeDomainHostname}/factura/${paymentData.order.invoice_data_token}`
             : undefined,
-      };
+      });
 
-      this.showOrderConfirmation = true;
+      this.showOrderConfirmation.set(true);
       const successMessage = paymentData.isCreditSale
         ? 'Venta a crédito procesada correctamente'
         : 'Venta procesada correctamente';
 
       this.toastService.success(successMessage);
       this.onClearCart();
-      this.productRefreshCounter++;
+      this.productRefreshCounter.update((v) => v + 1);
 
-      // Consume queue entry if customer came from virtual queue
-      if (
-        this.selectedCustomer?.fromQueue &&
-        this.selectedCustomer?.queueEntryId &&
-        paymentData.order?.id
-      ) {
+      if (sc?.fromQueue && sc?.queueEntryId && paymentData.order?.id) {
         this.queueService
-          .consumeEntry(
-            this.selectedCustomer.queueEntryId,
-            paymentData.order.id,
-          )
-          .pipe(takeUntil(this.destroy$))
+          .consumeEntry(sc.queueEntryId, paymentData.order.id)
+          .pipe(takeUntilDestroyed(this.destroyRef))
           .subscribe({
             error: (err: any) =>
               console.error('Error consuming queue entry:', err),
@@ -1258,29 +1238,28 @@ export class PosComponent implements OnInit, OnDestroy {
   }
 
   onOrderConfirmationClosed(): void {
-    this.showOrderConfirmation = false;
-    this.completedOrder = null;
+    this.showOrderConfirmation.set(false);
+    this.completedOrder.set(null);
   }
 
   onStartNewSale(): void {
-    this.showOrderConfirmation = false;
-    this.completedOrder = null;
+    this.showOrderConfirmation.set(false);
+    this.completedOrder.set(null);
     this.onClearCart();
   }
 
   onBookingRequired(product: any): void {
-    this.pendingBookingProduct = product;
-    this.showReservationModal = true;
+    this.pendingBookingProduct.set(product);
+    this.showReservationModal.set(true);
   }
 
   onBookingCreated(event?: any): void {
-    this.showReservationModal = false;
+    this.showReservationModal.set(false);
 
     const reservationCustomer = event?.customer || event;
     const booking = event?.booking;
 
-    // Si el modal retornó un cliente y no había uno en la orden, sincronizarlo al POS
-    if (reservationCustomer && !this.selectedCustomer) {
+    if (reservationCustomer && !this.selectedCustomer()) {
       const posCustomer: PosCustomer = {
         id: reservationCustomer.id,
         email: reservationCustomer.email || '',
@@ -1294,11 +1273,10 @@ export class PosComponent implements OnInit, OnDestroy {
       this.customerService.selectCustomer(posCustomer);
       this.cartService
         .setCustomer(posCustomer)
-        .pipe(takeUntil(this.destroy$))
+        .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe();
     }
 
-    // Registrar pending booking en el carrito
     if (booking) {
       this.cartService
         .addPendingBooking({
@@ -1307,7 +1285,7 @@ export class PosComponent implements OnInit, OnDestroy {
           product_id: booking.product_id || booking.product?.id,
           product_name:
             booking.product?.name ||
-            this.pendingBookingProduct?.name ||
+            this.pendingBookingProduct()?.name ||
             'Servicio',
           customer_id: booking.customer_id || booking.customer?.id,
           date: booking.date,
@@ -1315,38 +1293,38 @@ export class PosComponent implements OnInit, OnDestroy {
           end_time: booking.end_time,
           provider_name: booking.provider?.display_name,
         })
-        .pipe(takeUntil(this.destroy$))
+        .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe();
     }
 
-    if (this.pendingBookingProduct) {
+    if (this.pendingBookingProduct()) {
       this.cartService
-        .addToCart({ product: this.pendingBookingProduct, quantity: 1 })
-        .pipe(takeUntil(this.destroy$))
+        .addToCart({ product: this.pendingBookingProduct(), quantity: 1 })
+        .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: () => {
             this.toastService.success(
               'Reserva creada y servicio agregado al carrito',
             );
-            this.pendingBookingProduct = null;
+            this.pendingBookingProduct.set(null);
           },
           error: () => {
             this.toastService.error(
               'Reserva creada, pero no se pudo agregar al carrito',
             );
-            this.pendingBookingProduct = null;
+            this.pendingBookingProduct.set(null);
           },
         });
     }
   }
 
   onBookingModalClosed(): void {
-    this.showReservationModal = false;
-    this.pendingBookingProduct = null;
+    this.showReservationModal.set(false);
+    this.pendingBookingProduct.set(null);
   }
 
   onViewOrderDetail(orderId: string): void {
-    const targetOrderId = orderId || this.currentOrderId;
+    const targetOrderId = orderId || this.currentOrderId();
     if (!targetOrderId) {
       this.toastService.error(
         'No se pudo determinar la orden para mostrar el detalle',
@@ -1354,18 +1332,18 @@ export class PosComponent implements OnInit, OnDestroy {
       return;
     }
 
-    this.showOrderConfirmation = false;
-    this.completedOrder = null;
+    this.showOrderConfirmation.set(false);
+    this.completedOrder.set(null);
     this.router.navigate(['/admin/orders', targetOrderId]);
   }
 
   // Mobile Cart Modal Methods
   onOpenCartModal(): void {
-    this.showCartModal = true;
+    this.showCartModal.set(true);
   }
 
   onCloseCartModal(): void {
-    this.showCartModal = false;
+    this.showCartModal.set(false);
   }
 
   onCartItemQuantityChanged(event: { itemId: string; quantity: number }): void {
@@ -1376,7 +1354,7 @@ export class PosComponent implements OnInit, OnDestroy {
 
     this.cartService
       .updateCartItem({ itemId: event.itemId, quantity: event.quantity })
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         error: (error: any) => {
           this.toastService.error(
@@ -1389,7 +1367,7 @@ export class PosComponent implements OnInit, OnDestroy {
   onCartItemRemoved(itemId: string): void {
     this.cartService
       .removeFromCart(itemId)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.success('Producto eliminado del carrito');
@@ -1403,49 +1381,53 @@ export class PosComponent implements OnInit, OnDestroy {
   }
 
   onSaveDraftFromModal(): void {
-    this.showCartModal = false;
+    this.showCartModal.set(false);
     this.onSaveDraft();
   }
 
   onCheckoutFromModal(): void {
-    this.showCartModal = false;
+    this.showCartModal.set(false);
     this.onCheckout();
   }
 
   // Shipping Modal Methods
   onShipping(): void {
-    if (!this.cartState || this.isEmpty) {
+    if (!this.cartState() || this.isEmpty) {
       this.toastService.warning('El carrito está vacío');
       return;
     }
-    this.showShippingModal = true;
+    this.showShippingModal.set(true);
   }
 
   onShippingFromModal(): void {
-    this.showCartModal = false;
+    this.showCartModal.set(false);
     this.onShipping();
   }
 
   onShippingModalClosed(): void {
-    this.showShippingModal = false;
+    this.showShippingModal.set(false);
   }
 
   onShippingCompleted(shippingData: any): void {
-    if (!this.cartState || this.isEmpty) return;
+    if (!this.cartState() || this.isEmpty) return;
 
-    this.loading = false;
-    this.showShippingModal = false;
+    this.loading.set(false);
+    this.showShippingModal.set(false);
 
     if (shippingData.success) {
-      this.currentOrderId = shippingData.order?.id;
-      this.currentOrderNumber = shippingData.order?.order_number;
+      this.currentOrderId.set(shippingData.order?.id);
+      this.currentOrderNumber.set(shippingData.order?.order_number);
 
-      this.completedOrder = {
+      const cs = this.cartState();
+      const csm = this.cartSummary();
+      const sc = this.selectedCustomer();
+
+      this.completedOrder.set({
         ...(shippingData.order || {}),
         isShippingSale: true,
         items:
           shippingData.order?.items ||
-          this.cartState?.items.map((item) => ({
+          cs?.items.map((item) => ({
             product_id: item.product.id,
             product_name: item.product.name,
             quantity: item.quantity,
@@ -1458,46 +1440,30 @@ export class PosComponent implements OnInit, OnDestroy {
             weight: item.weight || undefined,
             weight_unit: item.weight_unit || undefined,
           })),
-        subtotal: shippingData.order?.subtotal || this.cartSummary.subtotal,
-        tax_amount:
-          shippingData.order?.tax_amount || this.cartSummary.taxAmount,
+        subtotal: shippingData.order?.subtotal || csm.subtotal,
+        tax_amount: shippingData.order?.tax_amount || csm.taxAmount,
         discount_amount:
-          shippingData.order?.discount_amount ||
-          this.cartSummary.discountAmount,
-        total_amount:
-          shippingData.order?.total_amount || this.cartSummary.total,
-        customer_name: this.selectedCustomer
-          ? `${this.selectedCustomer.first_name} ${this.selectedCustomer.last_name}`
+          shippingData.order?.discount_amount || csm.discountAmount,
+        total_amount: shippingData.order?.total_amount || csm.total,
+        customer_name: sc
+          ? `${sc.first_name} ${sc.last_name}`
           : shippingData.order?.customer_name || '',
-        customer_email:
-          this.selectedCustomer?.email ||
-          shippingData.order?.customer_email ||
-          '',
+        customer_email: sc?.email || shippingData.order?.customer_email || '',
         customer_tax_id:
-          this.selectedCustomer?.document_number ||
-          shippingData.order?.customer_tax_id ||
-          '',
-        customer: shippingData.order?.customer || this.selectedCustomer,
+          sc?.document_number || shippingData.order?.customer_tax_id || '',
+        customer: shippingData.order?.customer || sc,
         payment: shippingData.order?.payment || shippingData.payment,
-      };
+      });
 
-      this.showOrderConfirmation = true;
+      this.showOrderConfirmation.set(true);
       this.toastService.success('Orden con envío creada correctamente');
       this.onClearCart();
-      this.productRefreshCounter++;
+      this.productRefreshCounter.update((v) => v + 1);
 
-      // Consume queue entry if customer came from virtual queue
-      if (
-        this.selectedCustomer?.fromQueue &&
-        this.selectedCustomer?.queueEntryId &&
-        shippingData.order?.id
-      ) {
+      if (sc?.fromQueue && sc?.queueEntryId && shippingData.order?.id) {
         this.queueService
-          .consumeEntry(
-            this.selectedCustomer.queueEntryId,
-            shippingData.order.id,
-          )
-          .pipe(takeUntil(this.destroy$))
+          .consumeEntry(sc.queueEntryId, shippingData.order.id)
+          .pipe(takeUntilDestroyed(this.destroyRef))
           .subscribe({
             error: (err: any) =>
               console.error('Error consuming queue entry:', err),
@@ -1508,7 +1474,7 @@ export class PosComponent implements OnInit, OnDestroy {
 
   private checkEditMode(): void {
     this.route.queryParams
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((params) => {
         const editOrderId = params['editOrder'];
         if (editOrderId) {
@@ -1519,7 +1485,7 @@ export class PosComponent implements OnInit, OnDestroy {
 
   private checkQuotationMode(): void {
     this.route.queryParams
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((params) => {
         const mode = params['mode'];
         const editQuotationId = params['editQuotation'];
@@ -1539,7 +1505,7 @@ export class PosComponent implements OnInit, OnDestroy {
 
   private checkLayawayMode(): void {
     this.route.queryParams
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((params) => {
         const mode = params['mode'];
         if (mode === 'layaway') {
@@ -1551,10 +1517,10 @@ export class PosComponent implements OnInit, OnDestroy {
   }
 
   private loadQuotationForEditing(quotationId: string): void {
-    this.loading = true;
+    this.loading.set(true);
     this.quotationsService
       .getQuotationById(Number(quotationId))
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: any) => {
           const quotation = response?.data || response;
@@ -1574,10 +1540,9 @@ export class PosComponent implements OnInit, OnDestroy {
             taxAmount: item.tax_amount_item || 0,
           }));
 
-          // Load items into cart
           this.cartService
             .clearCart()
-            .pipe(takeUntil(this.destroy$))
+            .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe(() => {
               items.forEach((item: any) => {
                 this.cartService
@@ -1585,12 +1550,11 @@ export class PosComponent implements OnInit, OnDestroy {
                     product: item.product,
                     quantity: item.quantity,
                   })
-                  .pipe(takeUntil(this.destroy$))
+                  .pipe(takeUntilDestroyed(this.destroyRef))
                   .subscribe();
               });
             });
 
-          // Set customer if available
           if (quotation.customer) {
             const customer: PosCustomer = {
               id: quotation.customer.id,
@@ -1606,18 +1570,18 @@ export class PosComponent implements OnInit, OnDestroy {
             this.customerService.selectCustomer(customer);
             this.cartService
               .setCustomer(customer)
-              .pipe(takeUntil(this.destroy$))
+              .pipe(takeUntilDestroyed(this.destroyRef))
               .subscribe();
           }
 
           this.editingQuotationId.set(quotationId);
-          this.loading = false;
+          this.loading.set(false);
           this.toastService.info(
             `Editando Cotización #${quotation.quotation_number}`,
           );
         },
         error: () => {
-          this.loading = false;
+          this.loading.set(false);
           this.toastService.error('Error al cargar cotización');
           this.router.navigate(['/admin/orders/quotations']);
         },
@@ -1625,16 +1589,16 @@ export class PosComponent implements OnInit, OnDestroy {
   }
 
   private loadOrderForEditing(orderId: string): void {
-    this.loading = true;
+    this.loading.set(true);
     this.ordersService
       .getOrderById(orderId)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: any) => {
           const order = response.data || response;
 
           if (order.state !== 'created') {
-            this.loading = false;
+            this.loading.set(false);
             this.toastService.error(
               'Solo se pueden editar ordenes en estado "Creada"',
             );
@@ -1642,20 +1606,19 @@ export class PosComponent implements OnInit, OnDestroy {
             return;
           }
 
-          // Load order items into cart
           this.cartService
             .loadFromOrder(order)
-            .pipe(takeUntil(this.destroy$))
+            .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe({
               next: () => {
                 this.isEditMode.set(true);
                 this.editingOrderId.set(orderId);
                 this.editingOrderNumber.set(order.order_number);
-                this.loading = false;
+                this.loading.set(false);
                 this.toastService.info(`Editando Orden #${order.order_number}`);
               },
               error: (err) => {
-                this.loading = false;
+                this.loading.set(false);
                 this.toastService.error(
                   'Error al cargar los productos de la orden',
                 );
@@ -1663,7 +1626,7 @@ export class PosComponent implements OnInit, OnDestroy {
             });
         },
         error: (err) => {
-          this.loading = false;
+          this.loading.set(false);
           this.toastService.error('Error al cargar la orden para edición');
           this.router.navigate(['/admin/orders']);
         },
@@ -1671,25 +1634,25 @@ export class PosComponent implements OnInit, OnDestroy {
   }
 
   private updateExistingOrder(): void {
-    if (!this.cartState || !this.editingOrderId()) return;
+    if (!this.cartState() || !this.editingOrderId()) return;
 
-    this.loading = true;
+    this.loading.set(true);
     this.posOrderService
-      .updateOrderItems(this.editingOrderId()!, this.cartState)
-      .pipe(takeUntil(this.destroy$))
+      .updateOrderItems(this.editingOrderId()!, this.cartState()!)
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
-          this.loading = false;
+          this.loading.set(false);
           this.toastService.success('Orden actualizada exitosamente');
           this.cartService
             .clearCart()
-            .pipe(takeUntil(this.destroy$))
+            .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe();
           this.isEditMode.set(false);
           this.router.navigate(['/admin/orders', this.editingOrderId()]);
         },
         error: (err) => {
-          this.loading = false;
+          this.loading.set(false);
           this.toastService.error(
             err.message || 'Error al actualizar la orden',
           );
@@ -1698,22 +1661,22 @@ export class PosComponent implements OnInit, OnDestroy {
   }
 
   private loadStoreSettings(): void {
-    this.storeSettingsSubscription = this.store
+    this.store
       .select(selectStoreSettings)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((storeSettings: any) => {
         const settings = storeSettings;
         if (settings?.general?.timezone) {
-          this.storeTimezone = settings.general.timezone;
+          this.storeTimezone.set(settings.general.timezone);
         }
         if (settings?.pos) {
-          this.enableScheduleValidation =
-            settings.pos.enable_schedule_validation || false;
-          this.businessHours = settings.pos.business_hours || {};
+          this.enableScheduleValidation.set(
+            settings.pos.enable_schedule_validation || false,
+          );
+          this.businessHours.set(settings.pos.business_hours || {});
 
-          // Initialize cash register feature
           const crEnabled = settings.pos.cash_register?.enabled || false;
-          this.cashRegisterEnabled = crEnabled;
+          this.cashRegisterEnabled.set(crEnabled);
           this.cashRegisterService.setFeatureEnabled(crEnabled);
           this.paymentService.setRequireSessionForSales(
             settings.pos.cash_register?.require_session_for_sales || false,
@@ -1722,25 +1685,22 @@ export class PosComponent implements OnInit, OnDestroy {
             this.initCashRegisterSession();
           }
 
-          // Initialize customer queue feature from NgRx (may be stale)
           const cqEnabled = settings.pos.customer_queue?.enabled || false;
-          this.queueEnabled = cqEnabled;
+          this.queueEnabled.set(cqEnabled);
           if (cqEnabled) {
             this.initQueueSubscription();
           }
 
-          // Fallback: si NgRx no tiene cash_register (localStorage desactualizado),
-          // consultar directamente al backend
           if (!settings.pos.cash_register) {
             this.settingsService
               .getSettings()
-              .pipe(takeUntil(this.destroy$))
+              .pipe(takeUntilDestroyed(this.destroyRef))
               .subscribe((response) => {
                 const freshSettings = response?.data;
                 if (freshSettings?.pos?.cash_register) {
                   const crFresh =
                     freshSettings.pos.cash_register.enabled || false;
-                  this.cashRegisterEnabled = crFresh;
+                  this.cashRegisterEnabled.set(crFresh);
                   this.cashRegisterService.setFeatureEnabled(crFresh);
                   this.paymentService.setRequireSessionForSales(
                     freshSettings.pos.cash_register.require_session_for_sales ||
@@ -1753,34 +1713,33 @@ export class PosComponent implements OnInit, OnDestroy {
               });
           }
 
-          // Always fetch fresh settings for customer_queue (may not be in NgRx state)
           if (!cqEnabled) {
             this.settingsService
               .getSettings()
-              .pipe(takeUntil(this.destroy$))
+              .pipe(takeUntilDestroyed(this.destroyRef))
               .subscribe((response) => {
                 const freshSettings = response?.data;
                 if (freshSettings?.pos?.customer_queue?.enabled) {
-                  this.queueEnabled = true;
+                  this.queueEnabled.set(true);
                   this.initQueueSubscription();
                 }
               });
           }
 
-          // Only apply local fallback if backend hasn't handled schedule validation
           if (
-            !this.scheduleHandledByBackend &&
-            this.scheduleStatusChecked &&
-            this.enableScheduleValidation
+            !this.scheduleHandledByBackend() &&
+            this.scheduleStatusChecked() &&
+            this.enableScheduleValidation()
           ) {
             const localOutOfHours = !this.isWithinBusinessHours();
             if (localOutOfHours) {
-              this.isActuallyOutOfHours = true;
-              if (!this.canBypassSchedule) {
-                this.isOutOfHours = true;
-                this.nextOpenTime = this.getLocalNextOpenDay();
-                this.outOfHoursMessage =
-                  'El punto de venta está fuera del horario de atención configurado (Validación local).';
+              this.isActuallyOutOfHours.set(true);
+              if (!this.canBypassSchedule()) {
+                this.isOutOfHours.set(true);
+                this.nextOpenTime.set(this.getLocalNextOpenDay());
+                this.outOfHoursMessage.set(
+                  'El punto de venta está fuera del horario de atención configurado (Validación local).',
+                );
               }
             }
           }
@@ -1789,31 +1748,29 @@ export class PosComponent implements OnInit, OnDestroy {
   }
 
   private initQueueSubscription(): void {
-    // Load initial queue count
-    this.queueService.loadQueue().pipe(takeUntil(this.destroy$)).subscribe();
+    this.queueService
+      .loadQueue()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe();
 
-    // Subscribe to count changes
     this.queueService.waitingCount
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((count) => {
-        this.queueCount = count;
+        this.queueCount.set(count);
       });
   }
 
   onOpenQueueModal(): void {
-    this.editingCustomer = null;
-    this.openInQueueMode = true;
-    this.showCustomerModal = true;
+    this.editingCustomer.set(null);
+    this.openInQueueMode.set(true);
+    this.showCustomerModal.set(true);
   }
 
-  /**
-   * Gets day/hour/minute in the store's timezone using Intl.DateTimeFormat
-   */
   private getDateInTimezone(): { day: number; hours: number; minutes: number } {
     const now = new Date();
     try {
       const parts = new Intl.DateTimeFormat('en-US', {
-        timeZone: this.storeTimezone,
+        timeZone: this.storeTimezone(),
         weekday: 'short',
         hour: 'numeric',
         minute: 'numeric',
@@ -1852,7 +1809,7 @@ export class PosComponent implements OnInit, OnDestroy {
   }
 
   private isWithinBusinessHours(): boolean {
-    if (!this.enableScheduleValidation) {
+    if (!this.enableScheduleValidation()) {
       return true;
     }
 
@@ -1868,7 +1825,7 @@ export class PosComponent implements OnInit, OnDestroy {
     ];
     const currentDayName = dayNames[day];
 
-    const todayHours = this.businessHours?.[currentDayName];
+    const todayHours = this.businessHours()?.[currentDayName];
 
     if (!todayHours) {
       return true;
@@ -1889,9 +1846,6 @@ export class PosComponent implements OnInit, OnDestroy {
     return currentTime >= openTime && currentTime <= closeTime;
   }
 
-  /**
-   * Iterates business hours to find the next open day for the local fallback
-   */
   private getLocalNextOpenDay(): string {
     const dayNames = [
       'sunday',
@@ -1915,9 +1869,8 @@ export class PosComponent implements OnInit, OnDestroy {
     const { day, hours, minutes } = this.getDateInTimezone();
     const curMinutes = hours * 60 + minutes;
 
-    // Check if today opens later
     const todayName = dayNames[day];
-    const todayHours = this.businessHours?.[todayName];
+    const todayHours = this.businessHours()?.[todayName];
     if (
       todayHours &&
       todayHours.open !== 'closed' &&
@@ -1932,7 +1885,7 @@ export class PosComponent implements OnInit, OnDestroy {
     for (let i = 1; i <= 7; i++) {
       const dayIndex = (day + i) % 7;
       const dayName = dayNames[dayIndex];
-      const bh = this.businessHours?.[dayName];
+      const bh = this.businessHours()?.[dayName];
       if (bh && bh.open !== 'closed' && bh.close !== 'closed') {
         return `${spanishDays[dayName]} ${bh.open} - ${bh.close}`;
       }
@@ -1941,35 +1894,27 @@ export class PosComponent implements OnInit, OnDestroy {
     return 'Consultar configuración';
   }
 
-  // =============================================
-  // Cash Register Methods
-  // =============================================
-
   private initCashRegisterSession(): void {
     this.cashRegisterService
       .fetchActiveSession()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((session) => {
-        this.activeSession = session;
-        // Status bar shows session state — no auto-pop modal.
-        // User can open session voluntarily via status bar button,
-        // or will be prompted at the moment of a transactional action.
+        this.activeSession.set(session);
       });
   }
 
   onSessionOpened(session: CashRegisterSession): void {
-    this.activeSession = session;
-    this.showSessionOpenModal = false;
+    this.activeSession.set(session);
+    this.showSessionOpenModal.set(false);
     this.toastService.success(`Caja "${session.register?.name}" abierta`);
   }
 
   onSessionClosed(session: CashRegisterSession): void {
-    this.activeSession = null;
-    this.showSessionCloseModal = false;
+    this.activeSession.set(null);
+    this.showSessionCloseModal.set(false);
 
-    // Open AI summary modal
-    this.closedSessionIdForSummary = session.id;
-    this.showAISummaryModal = true;
+    this.closedSessionIdForSummary.set(session.id);
+    this.showAISummaryModal.set(true);
 
     const diff = Number(session.difference || 0);
     const diffStr =
@@ -1982,6 +1927,6 @@ export class PosComponent implements OnInit, OnDestroy {
   }
 
   onMovementCreated(_movement: any): void {
-    this.showCashMovementModal = false;
+    this.showCashMovementModal.set(false);
   }
 }

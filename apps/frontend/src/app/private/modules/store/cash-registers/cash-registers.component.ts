@@ -1,5 +1,4 @@
-import { Component, OnInit, OnDestroy, signal, computed, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, signal, computed, inject, DestroyRef } from '@angular/core';
 import {
   FormsModule,
   FormBuilder,
@@ -7,7 +6,7 @@ import {
   Validators,
   ReactiveFormsModule,
 } from '@angular/forms';
-import { Subject, takeUntil } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CardComponent } from '../../../../shared/components/card/card.component';
 import {
   ToastService,
@@ -39,7 +38,6 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
   selector: 'app-cash-registers',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     CardComponent,
@@ -374,9 +372,12 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
     `,
   ],
 })
-export class CashRegistersComponent implements OnInit, OnDestroy {
-  private destroy$ = new Subject<void>();
-  private currencyService = inject(CurrencyFormatService);
+export class CashRegistersComponent {
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly currencyService = inject(CurrencyFormatService);
+  private readonly cash_register_service = inject(PosCashRegisterService);
+  private readonly toast_service = inject(ToastService);
+  private readonly dialog_service = inject(DialogService);
 
   // Tabs configuration
   readonly tabs: ScrollableTab[] = [
@@ -699,28 +700,16 @@ export class CashRegistersComponent implements OnInit, OnDestroy {
     },
   ];
 
-  constructor(
-    private fb: FormBuilder,
-    private cash_register_service: PosCashRegisterService,
-    private toast_service: ToastService,
-    private dialog_service: DialogService,
-  ) {
-    this.register_form = this.fb.group({
+  constructor() {
+    const fb = inject(FormBuilder);
+    this.register_form = fb.group({
       name: ['', [Validators.required, Validators.maxLength(100)]],
       code: ['', [Validators.required, Validators.maxLength(50)]],
       description: [''],
       default_opening_amount: [0, [Validators.min(0)]],
     });
-  }
-
-  ngOnInit(): void {
     this.loadRegisters();
     this.loadSessions();
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
   }
 
   // Tab change handler
@@ -743,7 +732,7 @@ export class CashRegistersComponent implements OnInit, OnDestroy {
     this.is_loading_registers.set(true);
     this.cash_register_service
       .getCashRegisters()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (data) => {
           this.registers.set(data);
@@ -761,7 +750,7 @@ export class CashRegistersComponent implements OnInit, OnDestroy {
     this.is_loading_sessions.set(true);
     this.cash_register_service
       .getSessionHistory({ limit: 50 })
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (result) => {
           this.sessions.set(result.data);
@@ -817,7 +806,7 @@ export class CashRegistersComponent implements OnInit, OnDestroy {
       ? this.cash_register_service.updateRegister(editing.id, data)
       : this.cash_register_service.createRegister(data);
 
-    obs$.pipe(takeUntil(this.destroy$)).subscribe({
+    obs$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.is_saving_register.set(false);
         this.closeRegisterModal();
@@ -850,7 +839,7 @@ export class CashRegistersComponent implements OnInit, OnDestroy {
         if (confirmed) {
           this.cash_register_service
             .deleteRegister(register.id)
-            .pipe(takeUntil(this.destroy$))
+            .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe({
               next: () => {
                 this.toast_service.success('Caja desactivada correctamente');

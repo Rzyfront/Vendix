@@ -1,16 +1,5 @@
-import {
-  Component,
-  ChangeDetectionStrategy,
-  HostListener,
-  inject,
-  input,
-  output,
-  signal,
-  computed,
-  OnInit,
-  OnDestroy,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, HostListener, inject, input, output, signal, computed, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { switchMap, of } from 'rxjs';
 
 import {
@@ -41,7 +30,6 @@ import { ReviewStepComponent } from './review-step.component';
   selector: 'app-dispatch-note-wizard',
   standalone: true,
   imports: [
-    CommonModule,
     ModalComponent,
     ButtonComponent,
     IconComponent,
@@ -52,7 +40,6 @@ import { ReviewStepComponent } from './review-step.component';
     ReviewStepComponent,
   ],
   providers: [DispatchNoteWizardService],
-  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <app-modal
       [isOpen]="isOpen()"
@@ -226,6 +213,7 @@ import { ReviewStepComponent } from './review-step.component';
   `,
 })
 export class DispatchNoteWizardComponent {
+  private destroyRef = inject(DestroyRef);
   readonly wizardService = inject(DispatchNoteWizardService);
   private readonly dispatchNotesService = inject(DispatchNotesService);
   private readonly toast = inject(ToastService);
@@ -309,7 +297,7 @@ export class DispatchNoteWizardComponent {
 
     if (action === 'draft') {
       // draft: solo crear
-      create$.subscribe({
+      create$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (note) => this._onCreateSuccess(note, 'draft'),
         error: (err) => this._onCreateError(err),
       });
@@ -327,7 +315,7 @@ export class DispatchNoteWizardComponent {
               ),
           ),
         )
-        .subscribe({
+        .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
           next: ({ note, partial }) => this._onCreateSuccess(note, partial),
           error: (err) => this._onCreateError(err, 'confirm'),
         });
@@ -354,7 +342,7 @@ export class DispatchNoteWizardComponent {
             ),
           ),
         )
-        .subscribe({
+        .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
           next: ({ note, partial }) => this._onCreateSuccess(note, partial),
           error: (err) => this._onCreateError(err, 'invoice'),
         });

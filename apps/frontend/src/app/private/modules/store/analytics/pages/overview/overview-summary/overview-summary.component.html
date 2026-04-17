@@ -1,6 +1,6 @@
 <div>
   <!-- Stats Cards -->
-  @if (loading$ | async) {
+  @if (loading()) {
     <div class="stats-container">
       @for (i of [1, 2, 3, 4]; track i) {
         <div
@@ -17,8 +17,8 @@
     >
       <app-stats
         title="Ingresos Totales"
-        [value]="(summary$ | async)?.total_income | currency"
-        [smallText]="getGrowthText((summary$ | async)?.income_growth)"
+        [value]="summary()?.total_income | currency"
+        [smallText]="getGrowthText(summary()?.income_growth)"
         iconName="dollar-sign"
         iconBgColor="bg-green-100"
         iconColor="text-green-600"
@@ -26,8 +26,8 @@
 
       <app-stats
         title="Gastos Totales"
-        [value]="(summary$ | async)?.total_expenses | currency"
-        [smallText]="getGrowthText((summary$ | async)?.expenses_growth)"
+        [value]="summary()?.total_expenses | currency"
+        [smallText]="getGrowthText(summary()?.expenses_growth)"
         iconName="trending-down"
         iconBgColor="bg-red-100"
         iconColor="text-red-600"
@@ -35,8 +35,8 @@
 
       <app-stats
         title="Impuestos Recaudados"
-        [value]="(summary$ | async)?.total_taxes | currency"
-        [smallText]="getGrowthText((summary$ | async)?.taxes_growth)"
+        [value]="summary()?.total_taxes | currency"
+        [smallText]="getGrowthText(summary()?.taxes_growth)"
         iconName="landmark"
         iconBgColor="bg-amber-100"
         iconColor="text-amber-600"
@@ -44,8 +44,8 @@
 
       <app-stats
         title="Ganancia Neta"
-        [value]="(summary$ | async)?.net_profit | currency"
-        [smallText]="getGrowthText((summary$ | async)?.net_profit_growth)"
+        [value]="summary()?.net_profit | currency"
+        [smallText]="getGrowthText(summary()?.net_profit_growth)"
         iconName="wallet"
         iconBgColor="bg-purple-100"
         iconColor="text-purple-600"
@@ -103,14 +103,20 @@
         >
       </div>
       <div class="px-4 pt-4 pb-3">
-        @if (loading$ | async) {
+        @if (loading()) {
           <div class="h-64 flex items-center justify-center">
             <div
               class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
             ></div>
           </div>
         } @else {
-          <app-chart [options]="gaugeChartOptions" size="medium"></app-chart>
+          @defer (on viewport) {
+            <app-chart [options]="gaugeChartOptions" size="medium"></app-chart>
+          } @placeholder {
+            <div
+              class="h-64 bg-surface-secondary animate-pulse rounded-xl"
+            ></div>
+          }
 
           <!-- Range Legend -->
           <div class="space-y-1.5">
@@ -146,15 +152,15 @@
           <!-- Dynamic Status -->
           <div
             class="mt-2.5 p-2.5 rounded-lg"
-            [ngClass]="getBreakevenBgColor((summary$ | async)?.breakeven_ratio)"
+            [ngClass]="getBreakevenBgColor(summary()?.breakeven_ratio)"
           >
             <p
               class="text-[11px] leading-snug font-semibold"
               [ngClass]="
-                getBreakevenTextColor((summary$ | async)?.breakeven_ratio)
+                getBreakevenTextColor(summary()?.breakeven_ratio)
               "
             >
-              {{ getBreakevenStatusText((summary$ | async)?.breakeven_ratio) }}
+              {{ getBreakevenStatusText(summary()?.breakeven_ratio) }}
             </p>
           </div>
         }
@@ -178,17 +184,23 @@
         >
       </div>
       <div class="p-4">
-        @if (loadingTrends$ | async) {
+        @if (loadingTrends()) {
           <div class="h-80 flex items-center justify-center">
             <div
               class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
             ></div>
           </div>
         } @else {
-          <app-chart
-            [options]="comparativeChartOptions"
-            size="large"
-          ></app-chart>
+          @defer (on viewport) {
+            <app-chart
+              [options]="comparativeChartOptions"
+              size="large"
+            ></app-chart>
+          } @placeholder {
+            <div
+              class="h-80 bg-surface-secondary animate-pulse rounded-xl"
+            ></div>
+          }
         }
       </div>
     </app-card>

@@ -1,8 +1,8 @@
-import { Component, Input, Output, EventEmitter, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject, input, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
+import { toSignal } from '@angular/core/rxjs-interop';
 
 import { Invoice } from '../../interfaces/invoice.interface';
 import * as InvoicingActions from '../../state/actions/invoicing.actions';
@@ -37,7 +37,6 @@ import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
   selector: 'app-invoice-list',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     InputsearchComponent,
     OptionsDropdownComponent,
@@ -46,18 +45,18 @@ import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
     IconComponent,
     PaginationComponent,
     EmptyStateComponent,
-    CardComponent,
-  ],
+    CardComponent
+],
   templateUrl: './invoice-list.component.html',
 })
 export class InvoiceListComponent {
-  @Input() invoices: Invoice[] = [];
-  @Input() loading = false;
+  readonly invoices = input<Invoice[]>([]);
+  readonly loading = input<boolean>(false);
 
-  @Output() create = new EventEmitter<void>();
-  @Output() view = new EventEmitter<Invoice>();
-  @Output() resolutions = new EventEmitter<void>();
-  @Output() refresh = new EventEmitter<void>();
+  readonly create = output<void>();
+  readonly view = output<Invoice>();
+  readonly resolutions = output<void>();
+  readonly refresh = output<void>();
 
   private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
@@ -67,11 +66,12 @@ export class InvoiceListComponent {
   statusFilter$: Observable<string> = this.store.select(selectStatusFilter);
   typeFilter$: Observable<string> = this.store.select(selectTypeFilter);
   meta$ = this.store.select(selectInvoicesMeta);
+  readonly meta = toSignal(this.meta$, { initialValue: null as any });
   page$ = this.store.select(selectPage);
 
   // Local tracking for template binding
-  searchTerm = '';
-  filterValues: FilterValues = {};
+  readonly searchTerm = signal('');
+  readonly filterValues = signal<FilterValues>({});
 
   // Filter configuration for the options dropdown
   filterConfigs: FilterConfig[] = [
@@ -220,12 +220,12 @@ export class InvoiceListComponent {
 
   // Event handlers — dispatch NgRx actions instead of local state
   onSearchChange(term: string): void {
-    this.searchTerm = term;
+    this.searchTerm.set(term);
     this.store.dispatch(InvoicingActions.setSearch({ search: term }));
   }
 
   onFilterChange(values: FilterValues): void {
-    this.filterValues = { ...values };
+    this.filterValues.set({ ...values });
     const statusFilter = (values['status'] as string) || '';
     const typeFilter = (values['invoice_type'] as string) || '';
     this.store.dispatch(InvoicingActions.setStatusFilter({ statusFilter }));
@@ -233,8 +233,8 @@ export class InvoiceListComponent {
   }
 
   onClearFilters(): void {
-    this.searchTerm = '';
-    this.filterValues = {};
+    this.searchTerm.set('');
+    this.filterValues.set({});
     this.store.dispatch(InvoicingActions.clearFilters());
   }
 
@@ -284,9 +284,9 @@ export class InvoiceListComponent {
 
   get hasFilters(): boolean {
     return !!(
-      this.searchTerm ||
-      this.filterValues['status'] ||
-      this.filterValues['invoice_type']
+      this.searchTerm() ||
+      this.filterValues()['status'] ||
+      this.filterValues()['invoice_type']
     );
   }
 

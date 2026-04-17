@@ -1,8 +1,11 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, OnInit, signal,
+  DestroyRef,
+  inject} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import { SuperAdminDashboardService } from './services/super-admin-dashboard.service';
-import { Subject } from 'rxjs';
-import { takeUntil } from 'rxjs/operators';
+
+
 import { StatsComponent } from '../../../../shared/components';
 
 interface StatCard {
@@ -37,66 +40,67 @@ interface ChartData {
 @Component({
   selector: 'app-super-admin-dashboard',
   standalone: true,
-  imports: [CommonModule, StatsComponent],
+  imports: [StatsComponent],
   template: `
     <div style="background-color: var(--color-background);">
       <!-- Stats Cards -->
       <div class="stats-container">
-        <app-stats
-          *ngFor="let stat of statsData"
-          [title]="stat.title"
-          [value]="stat.value"
-          [smallText]="getTrendText(stat.change)"
-          [iconName]="stat.icon"
-          [iconBgColor]="stat.iconBgColor"
-          [iconColor]="stat.iconColor"
-        ></app-stats>
+        @for (stat of statsData(); track stat) {
+          <app-stats
+            [title]="stat.title"
+            [value]="stat.value"
+            [smallText]="getTrendText(stat.change)"
+            [iconName]="stat.icon"
+            [iconBgColor]="stat.iconBgColor"
+            [iconColor]="stat.iconColor"
+          ></app-stats>
+        }
       </div>
-
+    
       <!-- Charts Section -->
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
         <div
           class="lg:col-span-2 rounded-card shadow-card"
           style="background: var(--color-surface); border: 1px solid var(--color-border);"
-        >
+          >
           <div
             class="flex justify-between items-center p-6"
             style="border-bottom: 1px solid var(--color-border);"
-          >
+            >
             <div class="flex items-center gap-3">
               <div
                 class="w-10 h-10 rounded-lg flex items-center justify-center shadow-card"
                 style="background: linear-gradient(135deg, rgba(126, 215, 165, 0.8) 0%, rgba(126, 215, 165, 0.6) 100%);"
-              >
+                >
                 <i class="fas fa-chart-line text-white"></i>
               </div>
               <h3
                 class="text-lg font-semibold"
                 style="color: var(--color-text-primary);"
-              >
+                >
                 Resumen de Crecimiento
               </h3>
             </div>
             <div
               class="flex gap-2 rounded-lg p-1.5"
               style="background: rgba(126, 215, 165, 0.08);"
-            >
+              >
               <button
                 class="px-3 py-1.5 text-xs rounded-md font-medium transition-colors"
                 style="background: var(--color-primary); color: white;"
-              >
+                >
                 7D
               </button>
               <button
                 class="px-3 py-1.5 text-xs rounded-md font-medium transition-colors hover:bg-white/50"
                 style="color: var(--color-text-secondary);"
-              >
+                >
                 30D
               </button>
               <button
                 class="px-3 py-1.5 text-xs rounded-md font-medium transition-colors hover:bg-white/50"
                 style="color: var(--color-text-secondary);"
-              >
+                >
                 90D
               </button>
             </div>
@@ -109,7 +113,7 @@ interface ChartData {
                   <p
                     class="text-2xl font-bold"
                     style="color: var(--color-primary);"
-                  >
+                    >
                     1,367
                   </p>
                   <p class="text-xs" style="color: var(--color-text-muted);">
@@ -120,7 +124,7 @@ interface ChartData {
                   <p
                     class="text-lg font-semibold"
                     style="color: var(--color-primary);"
-                  >
+                    >
                     +23.5%
                   </p>
                   <p class="text-xs" style="color: var(--color-text-muted);">
@@ -131,7 +135,7 @@ interface ChartData {
                   <p
                     class="text-lg font-semibold"
                     style="color: var(--color-accent);"
-                  >
+                    >
                     256
                   </p>
                   <p class="text-xs" style="color: var(--color-text-muted);">
@@ -140,70 +144,71 @@ interface ChartData {
                 </div>
               </div>
             </div>
-
+    
             <!-- Main Chart -->
             <div class="relative h-52">
               <!-- Grid Lines -->
               <div
                 class="absolute inset-0 flex flex-col justify-between opacity-30"
-              >
-                <div
-                  class="border-b"
-                  style="border-color: var(--color-border);"
-                ></div>
-                <div
-                  class="border-b"
-                  style="border-color: var(--color-border);"
-                ></div>
-                <div
-                  class="border-b"
-                  style="border-color: var(--color-border);"
-                ></div>
-                <div
-                  class="border-b"
-                  style="border-color: var(--color-border);"
-                ></div>
-              </div>
-
-              <!-- Bars -->
-              <div
-                class="absolute inset-0 flex items-end justify-between gap-3 px-4"
-                *ngIf="chartData.datasets.length > 0"
-              >
-                <div
-                  *ngFor="let bar of chartData.datasets[0].data; let i = index"
-                  class="flex-1 rounded-t-lg min-h-4 transition-all duration-500 hover:shadow-lg relative group cursor-pointer"
-                  style="background: linear-gradient(to top, rgba(126, 215, 165, 0.6) 0%, rgba(126, 215, 165, 0.3) 100%);"
-                  [style.height.%]="getBarHeight(bar)"
                 >
-                  <!-- Value Tooltip -->
-                  <div
-                    class="absolute -top-12 left-1/2 transform -translate-x-1/2 rounded-lg opacity-0 group-hover:opacity-100 transition-all duration-300 whitespace-nowrap shadow-lg z-20 p-2 text-xs"
-                    style="background: var(--color-surface); border: 1px solid var(--color-border); color: var(--color-text-primary);"
-                  >
-                    <div class="font-semibold">{{ bar }}</div>
-                    <div style="color: var(--color-text-muted);">
-                      {{ chartData.labels[i] }}
-                    </div>
-                    <div
-                      class="absolute bottom-0 left-1/2 transform -translate-x-1/2 translate-y-1/2 rotate-45 w-2 h-2"
-                      style="background: var(--color-surface); border-right: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border);"
-                    ></div>
-                  </div>
-
-                  <!-- Bar Animation -->
-                  <div
-                    class="absolute inset-0 rounded-t-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-                    style="background: linear-gradient(to top, rgba(126, 215, 165, 0.8) 0%, rgba(126, 215, 165, 0.4) 100%);"
-                  ></div>
-                </div>
+                <div
+                  class="border-b"
+                  style="border-color: var(--color-border);"
+                ></div>
+                <div
+                  class="border-b"
+                  style="border-color: var(--color-border);"
+                ></div>
+                <div
+                  class="border-b"
+                  style="border-color: var(--color-border);"
+                ></div>
+                <div
+                  class="border-b"
+                  style="border-color: var(--color-border);"
+                ></div>
               </div>
-
+    
+              <!-- Bars -->
+              @if (chartData().datasets.length > 0) {
+                <div
+                  class="absolute inset-0 flex items-end justify-between gap-3 px-4"
+                  >
+                  @for (bar of chartData().datasets[0].data; track $index; let i = $index) {
+                    <div
+                      class="flex-1 rounded-t-lg min-h-4 transition-all duration-500 hover:shadow-lg relative group cursor-pointer"
+                      style="background: linear-gradient(to top, rgba(126, 215, 165, 0.6) 0%, rgba(126, 215, 165, 0.3) 100%);"
+                      [style.height.%]="getBarHeight(bar)"
+                      >
+                      <!-- Value Tooltip -->
+                      <div
+                        class="absolute -top-12 left-1/2 transform -translate-x-1/2 rounded-lg opacity-0 group-hover:opacity-100 transition-all duration-300 whitespace-nowrap shadow-lg z-20 p-2 text-xs"
+                        style="background: var(--color-surface); border: 1px solid var(--color-border); color: var(--color-text-primary);"
+                        >
+                        <div class="font-semibold">{{ bar }}</div>
+                        <div style="color: var(--color-text-muted);">
+                          {{ chartData().labels[i] }}
+                        </div>
+                        <div
+                          class="absolute bottom-0 left-1/2 transform -translate-x-1/2 translate-y-1/2 rotate-45 w-2 h-2"
+                          style="background: var(--color-surface); border-right: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border);"
+                        ></div>
+                      </div>
+                      <!-- Bar Animation -->
+                      <div
+                        class="absolute inset-0 rounded-t-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+                        style="background: linear-gradient(to top, rgba(126, 215, 165, 0.8) 0%, rgba(126, 215, 165, 0.4) 100%);"
+                      ></div>
+                    </div>
+                  }
+                </div>
+              }
+    
               <!-- Y-axis Labels -->
               <div
                 class="absolute left-0 top-0 h-full flex flex-col justify-between text-xs -ml-10"
                 style="color: var(--color-text-muted);"
-              >
+                >
                 <span>250</span>
                 <span>200</span>
                 <span>150</span>
@@ -212,375 +217,363 @@ interface ChartData {
                 <span>0</span>
               </div>
             </div>
-
+    
             <!-- X-axis Labels -->
             <div class="flex justify-between mt-6 px-4">
-              <span
-                *ngFor="let label of chartData.labels"
-                class="text-xs font-medium px-3 py-1.5 rounded-md transition-colors cursor-pointer"
-                style="color: var(--color-text-secondary); background: rgba(126, 215, 165, 0.08);"
-                class="hover:bg-opacity-20"
-                >{{ label }}</span
-              >
-            </div>
-          </div>
-        </div>
-
-        <div
-          class="bg-gradient-to-br from-white via-green-50/20 to-emerald-50/10 border border-green-100/50 rounded-2xl p-6 shadow-xl"
-        >
-          <div class="flex items-center gap-3 mb-6">
-            <div
-              class="w-10 h-10 rounded-lg flex items-center justify-center shadow-card"
-              style="background: linear-gradient(135deg, rgba(126, 215, 165, 0.8) 0%, rgba(126, 215, 165, 0.6) 100%);"
-            >
-              <i class="fas fa-heartbeat text-white"></i>
-            </div>
-            <h3
-              class="text-lg font-semibold"
-              style="color: var(--color-text-primary);"
-            >
-              Salud del Sistema
-            </h3>
-          </div>
-          <div class="grid grid-cols-2 gap-4">
-            <div
-              class="flex items-center gap-3 rounded-lg p-4 transition-all duration-200 hover:shadow-md"
-              style="background: rgba(126, 215, 165, 0.08);"
-            >
-              <i
-                class="fas fa-server w-10 h-10 rounded-lg flex items-center justify-center text-sm shadow-card text-white"
-                style="background: linear-gradient(135deg, rgba(126, 215, 165, 0.8) 0%, rgba(126, 215, 165, 0.6) 100%);"
-              ></i>
-              <div>
-                <p
-                  class="text-lg font-bold"
-                  style="color: var(--color-text-primary);"
-                >
-                  99.9%
-                </p>
-                <p
-                  class="text-xs font-medium"
-                  style="color: var(--color-text-muted);"
-                >
-                  Tiempo Activo
-                </p>
-              </div>
-            </div>
-            <div
-              class="flex items-center gap-3 rounded-lg p-4 transition-all duration-200 hover:shadow-md"
-              style="background: rgba(6, 182, 212, 0.08);"
-            >
-              <i
-                class="fas fa-tachometer-alt w-10 h-10 rounded-lg flex items-center justify-center text-sm shadow-card text-white"
-                style="background: linear-gradient(135deg, rgba(6, 182, 212, 0.8) 0%, rgba(6, 182, 212, 0.6) 100%);"
-              ></i>
-              <div>
-                <p
-                  class="text-lg font-bold"
-                  style="color: var(--color-text-primary);"
-                >
-                  0.8s
-                </p>
-                <p
-                  class="text-xs font-medium"
-                  style="color: var(--color-text-muted);"
-                >
-                  Respuesta
-                </p>
-              </div>
-            </div>
-            <div
-              class="flex items-center gap-3 rounded-lg p-4 transition-all duration-200 hover:shadow-md"
-              style="background: rgba(139, 92, 246, 0.08);"
-            >
-              <i
-                class="fas fa-database w-10 h-10 rounded-lg flex items-center justify-center text-sm shadow-card text-white"
-                style="background: linear-gradient(135deg, rgba(139, 92, 246, 0.8) 0%, rgba(139, 92, 246, 0.6) 100%);"
-              ></i>
-              <div>
-                <p
-                  class="text-lg font-bold"
-                  style="color: var(--color-text-primary);"
-                >
-                  8.7TB
-                </p>
-                <p
-                  class="text-xs font-medium"
-                  style="color: var(--color-text-muted);"
-                >
-                  Storage
-                </p>
-              </div>
-            </div>
-            <div
-              class="flex items-center gap-3 rounded-lg p-4 transition-all duration-200 hover:shadow-md"
-              style="background: rgba(126, 215, 165, 0.08);"
-            >
-              <i
-                class="fas fa-shield-alt w-10 h-10 rounded-lg flex items-center justify-center text-sm shadow-card text-white"
-                style="background: linear-gradient(135deg, rgba(126, 215, 165, 0.8) 0%, rgba(126, 215, 165, 0.6) 100%);"
-              ></i>
-              <div>
-                <p
-                  class="text-lg font-bold"
-                  style="color: var(--color-text-primary);"
-                >
-                  A+
-                </p>
-                <p
-                  class="text-xs font-medium"
-                  style="color: var(--color-text-muted);"
-                >
-                  Security
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Activity Section -->
-      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div
-          class="rounded-card shadow-card"
-          style="background: var(--color-surface); border: 1px solid var(--color-border);"
-        >
-          <div
-            class="flex justify-between items-center p-6"
-            style="border-bottom: 1px solid var(--color-border);"
-          >
-            <h3
-              class="text-lg font-semibold"
-              style="color: var(--color-text-primary);"
-            >
-              Actividad Reciente
-            </h3>
-            <button
-              class="text-xs px-3 py-1.5 rounded-md font-medium transition-colors hover:bg-opacity-10"
-              style="color: var(--color-primary); background: rgba(126, 215, 165, 0.1);"
-            >
-              Ver todo
-            </button>
-          </div>
-          <div class="p-6">
-            <div
-              *ngFor="let activity of recentActivities.slice(0, 4)"
-              class="flex gap-4 py-4 transition-colors -mx-2 px-2 rounded-lg"
-              style="border-bottom: 1px solid var(--color-border);"
-              [class.last:border-b-0]="true"
-              [style.background]="'rgba(126, 215, 165, 0.05)'"
-              class="hover:bg-opacity-10"
-            >
-              <div
-                class="w-10 h-10 rounded-lg flex items-center justify-center text-sm flex-shrink-0 shadow-card"
-                style="background: linear-gradient(135deg, rgba(126, 215, 165, 0.2) 0%, rgba(126, 215, 165, 0.1) 100%); color: var(--color-primary);"
-              >
-                <i class="fas {{ activity.icon }}"></i>
-              </div>
-              <div class="flex-1">
-                <p
-                  class="text-sm font-semibold mb-1"
-                  style="color: var(--color-text-primary);"
-                >
-                  {{ activity.title }}
-                </p>
-                <p
-                  class="text-xs mb-2"
-                  style="color: var(--color-text-secondary);"
-                >
-                  {{ activity.description }}
-                </p>
-                <p
-                  class="text-xs font-medium"
-                  style="color: var(--color-text-muted);"
-                >
-                  {{ activity.timestamp }}
-                </p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div
-          class="rounded-card shadow-card"
-          style="background: var(--color-surface); border: 1px solid var(--color-border);"
-        >
-          <div
-            class="flex justify-between items-center p-6"
-            style="border-bottom: 1px solid var(--color-border);"
-          >
-            <h3
-              class="text-lg font-semibold"
-              style="color: var(--color-text-primary);"
-            >
-              Principales Organizaciones
-            </h3>
-            <button
-              class="p-2 rounded-lg transition-colors hover:bg-opacity-10"
-              style="color: var(--color-text-secondary); background: rgba(126, 215, 165, 0.05);"
-            >
-              <i class="fas fa-sync-alt text-sm"></i>
-            </button>
-          </div>
-          <div class="p-6">
-            <div
-              *ngFor="let org of topOrganizations.slice(0, 5); let i = index"
-              class="flex items-center gap-4 py-4 transition-colors -mx-2 px-2 rounded-lg"
-              style="border-bottom: 1px solid var(--color-border);"
-              [class.last:border-b-0]="true"
-              [style.background]="'rgba(126, 215, 165, 0.05)'"
-              class="hover:bg-opacity-10"
-            >
-              <span
-                class="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold flex-shrink-0 shadow-card text-white"
-                style="background: linear-gradient(135deg, rgba(126, 215, 165, 0.8) 0%, rgba(126, 215, 165, 0.6) 100%);"
-                >{{ i + 1 }}</span
-              >
-              <div class="flex-1">
-                <p
-                  class="text-sm font-semibold mb-1"
-                  style="color: var(--color-text-primary);"
-                >
-                  {{ org.name }}
-                </p>
-                <p
-                  class="text-xs font-medium"
-                  style="color: var(--color-text-secondary);"
-                >
-                  {{ org.stores }} stores •
-                  {{ org.users.toLocaleString() }} users
-                </p>
-              </div>
-              <div class="flex items-center gap-1">
-                <i
-                  class="fas text-xs"
-                  [class.fa-arrow-up]="org.growth > 0"
-                  [class.fa-arrow-down]="org.growth < 0"
-                  [style.color]="
-                    org.growth > 0
-                      ? 'var(--color-primary)'
-                      : 'var(--color-destructive)'
-                  "
-                ></i>
+              @for (label of chartData().labels; track label) {
                 <span
-                  class="text-xs font-bold"
+                  class="text-xs font-medium px-3 py-1.5 rounded-md transition-colors cursor-pointer"
+                  style="color: var(--color-text-secondary); background: rgba(126, 215, 165, 0.08);"
+                  class="hover:bg-opacity-20"
+                  >{{ label }}</span
+                  >
+                }
+              </div>
+            </div>
+          </div>
+    
+          <div
+            class="bg-gradient-to-br from-white via-green-50/20 to-emerald-50/10 border border-green-100/50 rounded-2xl p-6 shadow-xl"
+            >
+            <div class="flex items-center gap-3 mb-6">
+              <div
+                class="w-10 h-10 rounded-lg flex items-center justify-center shadow-card"
+                style="background: linear-gradient(135deg, rgba(126, 215, 165, 0.8) 0%, rgba(126, 215, 165, 0.6) 100%);"
+                >
+                <i class="fas fa-heartbeat text-white"></i>
+              </div>
+              <h3
+                class="text-lg font-semibold"
+                style="color: var(--color-text-primary);"
+                >
+                Salud del Sistema
+              </h3>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+              <div
+                class="flex items-center gap-3 rounded-lg p-4 transition-all duration-200 hover:shadow-md"
+                style="background: rgba(126, 215, 165, 0.08);"
+                >
+                <i
+                  class="fas fa-server w-10 h-10 rounded-lg flex items-center justify-center text-sm shadow-card text-white"
+                  style="background: linear-gradient(135deg, rgba(126, 215, 165, 0.8) 0%, rgba(126, 215, 165, 0.6) 100%);"
+                ></i>
+                <div>
+                  <p
+                    class="text-lg font-bold"
+                    style="color: var(--color-text-primary);"
+                    >
+                    99.9%
+                  </p>
+                  <p
+                    class="text-xs font-medium"
+                    style="color: var(--color-text-muted);"
+                    >
+                    Tiempo Activo
+                  </p>
+                </div>
+              </div>
+              <div
+                class="flex items-center gap-3 rounded-lg p-4 transition-all duration-200 hover:shadow-md"
+                style="background: rgba(6, 182, 212, 0.08);"
+                >
+                <i
+                  class="fas fa-tachometer-alt w-10 h-10 rounded-lg flex items-center justify-center text-sm shadow-card text-white"
+                  style="background: linear-gradient(135deg, rgba(6, 182, 212, 0.8) 0%, rgba(6, 182, 212, 0.6) 100%);"
+                ></i>
+                <div>
+                  <p
+                    class="text-lg font-bold"
+                    style="color: var(--color-text-primary);"
+                    >
+                    0.8s
+                  </p>
+                  <p
+                    class="text-xs font-medium"
+                    style="color: var(--color-text-muted);"
+                    >
+                    Respuesta
+                  </p>
+                </div>
+              </div>
+              <div
+                class="flex items-center gap-3 rounded-lg p-4 transition-all duration-200 hover:shadow-md"
+                style="background: rgba(139, 92, 246, 0.08);"
+                >
+                <i
+                  class="fas fa-database w-10 h-10 rounded-lg flex items-center justify-center text-sm shadow-card text-white"
+                  style="background: linear-gradient(135deg, rgba(139, 92, 246, 0.8) 0%, rgba(139, 92, 246, 0.6) 100%);"
+                ></i>
+                <div>
+                  <p
+                    class="text-lg font-bold"
+                    style="color: var(--color-text-primary);"
+                    >
+                    8.7TB
+                  </p>
+                  <p
+                    class="text-xs font-medium"
+                    style="color: var(--color-text-muted);"
+                    >
+                    Storage
+                  </p>
+                </div>
+              </div>
+              <div
+                class="flex items-center gap-3 rounded-lg p-4 transition-all duration-200 hover:shadow-md"
+                style="background: rgba(126, 215, 165, 0.08);"
+                >
+                <i
+                  class="fas fa-shield-alt w-10 h-10 rounded-lg flex items-center justify-center text-sm shadow-card text-white"
+                  style="background: linear-gradient(135deg, rgba(126, 215, 165, 0.8) 0%, rgba(126, 215, 165, 0.6) 100%);"
+                ></i>
+                <div>
+                  <p
+                    class="text-lg font-bold"
+                    style="color: var(--color-text-primary);"
+                    >
+                    A+
+                  </p>
+                  <p
+                    class="text-xs font-medium"
+                    style="color: var(--color-text-muted);"
+                    >
+                    Security
+                  </p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+    
+        <!-- Activity Section -->
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div
+            class="rounded-card shadow-card"
+            style="background: var(--color-surface); border: 1px solid var(--color-border);"
+            >
+            <div
+              class="flex justify-between items-center p-6"
+              style="border-bottom: 1px solid var(--color-border);"
+              >
+              <h3
+                class="text-lg font-semibold"
+                style="color: var(--color-text-primary);"
+                >
+                Actividad Reciente
+              </h3>
+              <button
+                class="text-xs px-3 py-1.5 rounded-md font-medium transition-colors hover:bg-opacity-10"
+                style="color: var(--color-primary); background: rgba(126, 215, 165, 0.1);"
+                >
+                Ver todo
+              </button>
+            </div>
+            <div class="p-6">
+              @for (activity of recentActivities().slice(0, 4); track activity) {
+                <div
+                  class="flex gap-4 py-4 transition-colors -mx-2 px-2 rounded-lg"
+                  style="border-bottom: 1px solid var(--color-border);"
+                  [class.last:border-b-0]="true"
+                  [style.background]="'rgba(126, 215, 165, 0.05)'"
+                  class="hover:bg-opacity-10"
+                  >
+                  <div
+                    class="w-10 h-10 rounded-lg flex items-center justify-center text-sm flex-shrink-0 shadow-card"
+                    style="background: linear-gradient(135deg, rgba(126, 215, 165, 0.2) 0%, rgba(126, 215, 165, 0.1) 100%); color: var(--color-primary);"
+                    >
+                    <i class="fas {{ activity.icon }}"></i>
+                  </div>
+                  <div class="flex-1">
+                    <p
+                      class="text-sm font-semibold mb-1"
+                      style="color: var(--color-text-primary);"
+                      >
+                      {{ activity.title }}
+                    </p>
+                    <p
+                      class="text-xs mb-2"
+                      style="color: var(--color-text-secondary);"
+                      >
+                      {{ activity.description }}
+                    </p>
+                    <p
+                      class="text-xs font-medium"
+                      style="color: var(--color-text-muted);"
+                      >
+                      {{ activity.timestamp }}
+                    </p>
+                  </div>
+                </div>
+              }
+            </div>
+          </div>
+    
+          <div
+            class="rounded-card shadow-card"
+            style="background: var(--color-surface); border: 1px solid var(--color-border);"
+            >
+            <div
+              class="flex justify-between items-center p-6"
+              style="border-bottom: 1px solid var(--color-border);"
+              >
+              <h3
+                class="text-lg font-semibold"
+                style="color: var(--color-text-primary);"
+                >
+                Principales Organizaciones
+              </h3>
+              <button
+                class="p-2 rounded-lg transition-colors hover:bg-opacity-10"
+                style="color: var(--color-text-secondary); background: rgba(126, 215, 165, 0.05);"
+                >
+                <i class="fas fa-sync-alt text-sm"></i>
+              </button>
+            </div>
+            <div class="p-6">
+              @for (org of topOrganizations().slice(0, 5); track org; let i = $index) {
+                <div
+                  class="flex items-center gap-4 py-4 transition-colors -mx-2 px-2 rounded-lg"
+                  style="border-bottom: 1px solid var(--color-border);"
+                  [class.last:border-b-0]="true"
+                  [style.background]="'rgba(126, 215, 165, 0.05)'"
+                  class="hover:bg-opacity-10"
+                  >
+                  <span
+                    class="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold flex-shrink-0 shadow-card text-white"
+                    style="background: linear-gradient(135deg, rgba(126, 215, 165, 0.8) 0%, rgba(126, 215, 165, 0.6) 100%);"
+                    >{{ i + 1 }}</span
+                    >
+                    <div class="flex-1">
+                      <p
+                        class="text-sm font-semibold mb-1"
+                        style="color: var(--color-text-primary);"
+                        >
+                        {{ org.name }}
+                      </p>
+                      <p
+                        class="text-xs font-medium"
+                        style="color: var(--color-text-secondary);"
+                        >
+                        {{ org.stores }} stores •
+                        {{ org.users.toLocaleString() }} users
+                      </p>
+                    </div>
+                    <div class="flex items-center gap-1">
+                      <i
+                        class="fas text-xs"
+                        [class.fa-arrow-up]="org.growth > 0"
+                        [class.fa-arrow-down]="org.growth < 0"
                   [style.color]="
                     org.growth > 0
                       ? 'var(--color-primary)'
                       : 'var(--color-destructive)'
                   "
-                >
-                  {{ getAbsValue(org.growth) }}%
-                </span>
+                      ></i>
+                      <span
+                        class="text-xs font-bold"
+                  [style.color]="
+                    org.growth > 0
+                      ? 'var(--color-primary)'
+                      : 'var(--color-destructive)'
+                  "
+                        >
+                        {{ getAbsValue(org.growth) }}%
+                      </span>
+                    </div>
+                  </div>
+                }
               </div>
             </div>
           </div>
         </div>
-      </div>
-    </div>
-  `,
-  styles: [],
-})
-export class DashboardComponent implements OnInit, OnDestroy {
-  private destroy$ = new Subject<void>();
-  isLoading = false;
+    `,
+  styles: []})
+export class DashboardComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
+readonly isLoading = signal(false);
 
-  statsData: StatCard[] = [];
-  chartData: ChartData = {
+  readonly statsData = signal<StatCard[]>([]);
+  readonly chartData = signal<ChartData>({
     labels: [],
-    datasets: [],
-  };
-  recentActivities: ActivityItem[] = [];
-  topOrganizations: any[] = [];
+    datasets: []});
+  readonly recentActivities = signal<ActivityItem[]>([]);
+  readonly topOrganizations = signal<any[]>([]);
 
   constructor(private superAdminDashboardService: SuperAdminDashboardService) { }
 
   ngOnInit(): void {
     this.loadDashboardData();
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  private loadDashboardData(): void {
-    this.isLoading = true;
+private loadDashboardData(): void {
+    this.isLoading.set(true);
 
     this.superAdminDashboardService
       .getDashboardStats()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (data) => {
           this.updateStatsData(data);
           this.updateChartData(data);
           this.updateRecentActivities(data);
           this.updateTopOrganizations(data);
-          this.isLoading = false;
+          this.isLoading.set(false);
         },
         error: (error) => {
           console.error('Error loading dashboard data:', error);
-          this.isLoading = false;
-        },
-      });
+          this.isLoading.set(false);
+        }});
   }
 
   private updateStatsData(data: any): void {
-    this.statsData = [
+    this.statsData.set([
       {
         title: 'Total de Organizaciones',
         value: data.totalOrganizations?.toLocaleString() || '0',
         change: data.organizationGrowth || 0,
         icon: 'building',
         iconBgColor: 'bg-green-100',
-        iconColor: 'text-green-600',
-      },
+        iconColor: 'text-green-600'},
       {
         title: 'Total de Usuarios',
         value: data.totalUsers?.toLocaleString() || '0',
         change: data.userGrowth || 0,
         icon: 'users',
         iconBgColor: 'bg-cyan-100',
-        iconColor: 'text-cyan-600',
-      },
+        iconColor: 'text-cyan-600'},
       {
         title: 'Tiendas Activas',
         value: data.activeStores?.toLocaleString() || '0',
         change: data.storeGrowth || 0,
         icon: 'store',
         iconBgColor: 'bg-emerald-100',
-        iconColor: 'text-emerald-600',
-      },
+        iconColor: 'text-emerald-600'},
       {
         title: 'Crecimiento de la Plataforma',
         value: `${data.platformGrowth || 0}%`,
         change: data.platformGrowth || 0,
         icon: 'trending-up',
         iconBgColor: 'bg-purple-100',
-        iconColor: 'text-purple-600',
-      },
-    ];
+        iconColor: 'text-purple-600'},
+    ]);
   }
 
   private updateChartData(data: any): void {
     if (data.weeklyData) {
-      this.chartData = {
+      this.chartData.set({
         labels: data.weeklyData.map((item: any) => item.week),
         datasets: [
           {
             label: 'Nuevas Organizaciones',
             data: data.weeklyData.map((item: any) => item.organizations),
             borderColor: '#3b82f6',
-            backgroundColor: '#3b82f6',
-          },
-        ],
-      };
+            backgroundColor: '#3b82f6'},
+        ]});
     }
   }
 
   private updateRecentActivities(data: any): void {
-    this.recentActivities =
+    this.recentActivities.set(
       data.recentActivities?.map((activity: any) => ({
         id: activity.id,
         type: activity.type,
@@ -588,12 +581,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
         description: activity.entityName,
         timestamp: this.formatTimestamp(activity.timestamp),
         icon: this.getActivityIcon(activity.type),
-        color: this.getActivityColor(activity.type),
-      })) || [];
+        color: this.getActivityColor(activity.type)})) || [],
+    );
   }
 
   private updateTopOrganizations(data: any): void {
-    this.topOrganizations = data.topOrganizations || [];
+    this.topOrganizations.set(data.topOrganizations || []);
   }
 
   private formatTimestamp(timestamp: Date | string): string {
@@ -617,8 +610,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       organization: 'fa-building',
       user: 'fa-user',
       store: 'fa-store',
-      domain: 'fa-globe',
-    };
+      domain: 'fa-globe'};
     return icons[type as keyof typeof icons] || 'fa-info-circle';
   }
 
@@ -627,8 +619,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       organization: '#7ed7a5',
       user: '#06b6d4',
       store: '#10b981',
-      domain: '#f59e0b',
-    };
+      domain: '#f59e0b'};
     return colors[type as keyof typeof colors] || '#6b7280';
   }
 
@@ -645,7 +636,8 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   getBarHeight(bar: number): number {
-    const maxValue = Math.max(...this.chartData.datasets[0].data);
+    const maxValue = Math.max(...this.chartData().datasets[0].data);
+    if (!maxValue) return 0;
     return (bar / maxValue) * 100;
   }
 }

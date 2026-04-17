@@ -1,11 +1,5 @@
-import {
-  Component,
-  ChangeDetectionStrategy,
-  signal,
-  computed,
-  inject,
-  OnInit,
-} from '@angular/core';
+import {Component, ChangeDetectionStrategy, signal, computed, inject, OnInit, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
@@ -31,6 +25,18 @@ import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-h
 import { environment } from '../../../../../../../environments/environment';
 import { DynamicFieldComponent } from '../../../../ecommerce/pages/data-collection-form/components/dynamic-field/dynamic-field.component';
 import { getItemWidth } from '../../utils/item-width.util';
+import { SpinnerComponent } from '../../../../../../shared/components/spinner/spinner.component';
+import { EmptyStateComponent } from '../../../../../../shared/components/empty-state/empty-state.component';
+import { BadgeComponent } from '../../../../../../shared/components/badge/badge.component';
+import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
+import { InputComponent } from '../../../../../../shared/components/input/input.component';
+import { TextareaComponent } from '../../../../../../shared/components/textarea/textarea.component';
+import { SelectorComponent } from '../../../../../../shared/components/selector/selector.component';
+import { SettingToggleComponent } from '../../../../../../shared/components/setting-toggle/setting-toggle.component';
+import {
+  ScrollableTabsComponent,
+  ScrollableTab,
+} from '../../../../../../shared/components/scrollable-tabs/scrollable-tabs.component';
 
 interface ItemForm {
   metadata_field_id: number;
@@ -80,14 +86,21 @@ interface Selection {
     IconPickerComponent,
     StickyHeaderComponent,
     DynamicFieldComponent,
+    SpinnerComponent,
+    EmptyStateComponent,
+    BadgeComponent,
+    ButtonComponent,
+    InputComponent,
+    TextareaComponent,
+    SelectorComponent,
+    SettingToggleComponent,
+    ScrollableTabsComponent,
   ],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     @if (loading()) {
       <div class="flex items-center justify-center h-64">
-        <div
-          class="w-6 h-6 border-2 border-primary border-t-transparent rounded-full animate-spin"
-        ></div>
+        <app-spinner size="md" />
       </div>
     } @else if (template()) {
       <app-sticky-header
@@ -105,7 +118,7 @@ interface Selection {
           <!-- Preview Mode: Full width -->
           <div
             class="flex-1 overflow-y-auto"
-            style="background: var(--color-background, #f4f4f4)"
+            style="background: var(--color-background)"
           >
             <!-- Preview content -->
             <div class="px-4 sm:px-6 py-6">
@@ -233,19 +246,12 @@ interface Selection {
                   </div>
                 }
                 @if (step.sections.length === 0) {
-                  <div class="text-center py-12">
-                    <app-icon
-                      name="file-text"
-                      [size]="32"
-                      color="var(--color-text-muted)"
-                    ></app-icon>
-                    <p
-                      class="text-sm mt-2"
-                      style="color: var(--color-text-muted)"
-                    >
-                      Sin campos en este paso
-                    </p>
-                  </div>
+                  <app-empty-state
+                    icon="file-text"
+                    title="Sin campos"
+                    description="Este paso no tiene campos asignados."
+                    [showActionButton]="false"
+                  />
                 }
               }
             </div>
@@ -257,82 +263,38 @@ interface Selection {
           <div class="flex-1 lg:w-[65%] overflow-y-auto p-4 sm:p-6 space-y-4">
             <!-- Tab Bar -->
             @if (formData().use_tabs) {
-              <div
-                class="flex items-center gap-1 overflow-x-auto pb-2"
-                style="border-bottom: 1px solid var(--color-border)"
-              >
-                @for (tab of formData().tabs; track $index; let ti = $index) {
-                  <div
-                    class="flex items-center gap-1.5 px-3 py-2 cursor-pointer text-sm whitespace-nowrap shrink-0 rounded-t-lg transition-colors"
-                    [style.border-bottom]="
-                      activeTabIndex() === ti
-                        ? '2px solid var(--color-primary)'
-                        : '2px solid transparent'
-                    "
-                    [style.color]="
-                      activeTabIndex() === ti
-                        ? 'var(--color-primary)'
-                        : 'var(--color-text-muted)'
-                    "
-                    [style.background]="
-                      activeTabIndex() === ti
-                        ? 'var(--color-surface)'
-                        : 'transparent'
-                    "
-                    (click)="selectTab(ti)"
-                  >
-                    <input
-                      type="text"
-                      class="bg-transparent border-none outline-none text-sm font-medium w-28"
-                      [style.color]="
-                        activeTabIndex() === ti
-                          ? 'var(--color-primary)'
-                          : 'var(--color-text-muted)'
-                      "
-                      [ngModel]="tab.title"
-                      (ngModelChange)="updateTabTitle(ti, $event)"
-                      placeholder="Pestana..."
-                      (click)="$event.stopPropagation(); selectTab(ti)"
-                    />
-                    <button
-                      class="p-0.5 rounded-full shrink-0 hover:bg-red-50"
-                      style="color: var(--color-text-muted)"
-                      (click)="$event.stopPropagation(); removeTab(ti)"
-                    >
-                      <app-icon name="x" [size]="12"></app-icon>
-                    </button>
-                  </div>
+              <div class="flex items-center gap-2 mb-3">
+                <div class="flex-1 min-w-0">
+                  <app-scrollable-tabs
+                    [tabs]="editorTabsList()"
+                    [activeTab]="activeTabId()"
+                    size="sm"
+                    (tabChange)="selectTabById($event)"
+                  />
+                </div>
+                <app-button variant="ghost" size="sm" (clicked)="addTab()">
+                  <app-icon name="plus" [size]="14" slot="icon"></app-icon>
+                  Pestaña
+                </app-button>
+                @if (formData().tabs.length > 0) {
+                  <app-button variant="ghost" size="sm" (clicked)="removeTab(activeTabIndex())">
+                    <app-icon name="trash-2" [size]="14" slot="icon"></app-icon>
+                  </app-button>
                 }
-                <button
-                  class="flex items-center gap-1 px-2 py-1.5 text-xs font-medium shrink-0 rounded-lg"
-                  style="color: var(--color-primary)"
-                  (click)="addTab()"
-                >
-                  <app-icon name="plus" [size]="14"></app-icon>
-                  Pestana
-                </button>
               </div>
             }
 
             <!-- Sections -->
             @if (activeSections().length === 0) {
-              <div
-                class="text-center py-12 border rounded-xl border-dashed"
-                style="border-color: var(--color-border)"
-              >
-                <app-icon
-                  name="layers"
-                  [size]="32"
-                  color="var(--color-text-muted)"
-                ></app-icon>
-                <p class="text-sm mt-2" style="color: var(--color-text-muted)">
-                  {{
-                    formData().use_tabs && !formData().tabs.length
-                      ? 'Agrega una pestana primero.'
-                      : 'No hay secciones. Agrega una para organizar los campos.'
-                  }}
-                </p>
-              </div>
+              <app-empty-state
+                icon="layers"
+                [title]="formData().use_tabs && !formData().tabs.length ? 'Agrega una pestaña primero' : 'No hay secciones'"
+                [description]="formData().use_tabs && !formData().tabs.length ? 'Crea una pestaña para comenzar a agregar secciones.' : 'Agrega secciones para organizar los campos del formulario.'"
+                [showActionButton]="!formData().use_tabs || formData().tabs.length > 0"
+                actionButtonText="Agregar Sección"
+                actionButtonIcon="plus"
+                (actionClick)="addSection()"
+              />
             }
 
             @for (section of activeSections(); track $index; let si = $index) {
@@ -350,14 +312,10 @@ interface Selection {
             }
 
             <!-- Add Section Button -->
-            <button
-              class="w-full flex items-center justify-center gap-2 py-3 border-2 border-dashed rounded-xl text-sm font-medium transition-colors"
-              style="border-color: var(--color-border); color: var(--color-text-muted)"
-              (click)="addSection()"
-            >
-              <app-icon name="plus" [size]="16"></app-icon>
-              Agregar Seccion
-            </button>
+            <app-button variant="outline" [fullWidth]="true" (clicked)="addSection()">
+              <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+              Agregar Sección
+            </app-button>
           </div>
 
           <!-- Right Properties Panel (35%) -->
@@ -387,89 +345,46 @@ interface Selection {
                         (valueChange)="updateFormData('icon', $event)"
                         placeholder="Icono"
                       />
-                      <input
-                        type="text"
-                        class="flex-1 px-3 py-2 border rounded-lg text-sm"
-                        style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text)"
-                        [ngModel]="formData().name"
-                        (ngModelChange)="updateFormData('name', $event)"
-                        placeholder="Nombre de la plantilla"
-                      />
+                      <div class="flex-1">
+                        <app-input
+                          [ngModel]="formData().name"
+                          (ngModelChange)="updateFormData('name', $event)"
+                          placeholder="Nombre de la plantilla"
+                        />
+                      </div>
                     </div>
                   </div>
-                  <div>
-                    <label
-                      class="block text-xs font-medium mb-1"
-                      style="color: var(--color-text)"
-                      >Descripcion</label
-                    >
-                    <textarea
-                      class="w-full px-3 py-2 border rounded-lg text-sm resize-none"
-                      rows="2"
-                      style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text)"
-                      [ngModel]="formData().description"
-                      (ngModelChange)="updateFormData('description', $event)"
-                      placeholder="Descripcion opcional"
-                    ></textarea>
-                  </div>
+                  <app-textarea
+                    label="Descripción"
+                    [ngModel]="formData().description"
+                    (ngModelChange)="updateFormData('description', $event)"
+                    [rows]="2"
+                    placeholder="Descripción opcional"
+                  />
                   <div class="grid grid-cols-2 gap-3">
-                    <div>
-                      <label
-                        class="block text-xs font-medium mb-1"
-                        style="color: var(--color-text)"
-                        >Tipo de Entidad</label
-                      >
-                      <select
-                        class="w-full px-3 py-2 border rounded-lg text-sm"
-                        style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text)"
-                        [ngModel]="formData().entity_type"
-                        (ngModelChange)="updateFormData('entity_type', $event)"
-                      >
-                        <option value="customer">Cliente</option>
-                        <option value="booking">Reserva</option>
-                        <option value="order">Orden</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label
-                        class="block text-xs font-medium mb-1"
-                        style="color: var(--color-text)"
-                        >Estado</label
-                      >
-                      <select
-                        class="w-full px-3 py-2 border rounded-lg text-sm"
-                        style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text)"
-                        [ngModel]="formData().status"
-                        (ngModelChange)="updateFormData('status', $event)"
-                      >
-                        <option value="active">Activo</option>
-                        <option value="inactive">Inactivo</option>
-                        <option value="archived">Archivado</option>
-                      </select>
-                    </div>
+                    <app-selector
+                      label="Tipo de Entidad"
+                      [ngModel]="formData().entity_type"
+                      (ngModelChange)="updateFormData('entity_type', $event)"
+                      [options]="entityTypeOptions"
+                    />
+                    <app-selector
+                      label="Estado"
+                      [ngModel]="formData().status"
+                      (ngModelChange)="updateFormData('status', $event)"
+                      [options]="statusOptions"
+                    />
                   </div>
-                  <label class="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      class="w-4 h-4 rounded"
-                      [ngModel]="formData().is_default"
-                      (ngModelChange)="updateFormData('is_default', $event)"
-                    />
-                    <span class="text-sm" style="color: var(--color-text)"
-                      >Plantilla por defecto</span
-                    >
-                  </label>
-                  <label class="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      class="w-4 h-4 rounded"
-                      [ngModel]="formData().use_tabs"
-                      (ngModelChange)="updateFormData('use_tabs', $event)"
-                    />
-                    <span class="text-sm" style="color: var(--color-text)"
-                      >Organizar con pestanas</span
-                    >
-                  </label>
+                  <app-setting-toggle
+                    label="Plantilla por defecto"
+                    [ngModel]="formData().is_default"
+                    (ngModelChange)="updateFormData('is_default', $event)"
+                  />
+                  <app-setting-toggle
+                    label="Organizar con pestañas"
+                    [ngModel]="formData().use_tabs"
+                    (ngModelChange)="updateFormData('use_tabs', $event)"
+                  />
 
                   <!-- Products -->
                   <div>
@@ -488,30 +403,19 @@ interface Selection {
                             <span class="font-medium">{{
                               getProductName(pid)
                             }}</span>
-                            <button
-                              class="p-0.5 rounded-full"
-                              style="color: var(--color-text-muted)"
-                              (click)="removeProduct(pid)"
-                            >
-                              <app-icon name="x" [size]="10"></app-icon>
-                            </button>
+                            <app-button variant="ghost" size="xsm" (clicked)="removeProduct(pid)">
+                              <app-icon name="x" [size]="10" slot="icon"></app-icon>
+                            </app-button>
                           </div>
                         }
                       </div>
                     }
-                    <select
-                      class="w-full px-2 py-1.5 border rounded-lg text-xs"
-                      style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text)"
-                      (change)="onProductSelect($event)"
-                    >
-                      <option value="">+ Vincular producto...</option>
-                      @for (
-                        product of getUnselectedProducts();
-                        track product.id
-                      ) {
-                        <option [value]="product.id">{{ product.name }}</option>
-                      }
-                    </select>
+                    <app-selector
+                      [ngModel]="''"
+                      (ngModelChange)="onProductSelectByValue($event)"
+                      [options]="getUnselectedProductOptions()"
+                      placeholder="+ Vincular producto..."
+                    />
                   </div>
                 </div>
               </div>
@@ -531,20 +435,11 @@ interface Selection {
                   <!-- Tab Properties -->
                   @if (selection()?.type === 'tab') {
                     <div class="space-y-3">
-                      <div>
-                        <label
-                          class="block text-xs font-medium mb-1"
-                          style="color: var(--color-text)"
-                          >Titulo</label
-                        >
-                        <input
-                          type="text"
-                          class="w-full px-3 py-2 border rounded-lg text-sm"
-                          style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text)"
-                          [ngModel]="selectedTab()?.title"
-                          (ngModelChange)="updateSelectedTab('title', $event)"
-                        />
-                      </div>
+                      <app-input
+                        label="Título"
+                        [ngModel]="selectedTab()?.title"
+                        (ngModelChange)="updateSelectedTab('title', $event)"
+                      />
                       <div>
                         <label
                           class="block text-xs font-medium mb-1"
@@ -559,7 +454,7 @@ interface Selection {
                       </div>
                       <p class="text-xs" style="color: var(--color-text-muted)">
                         {{ selectedTab()?.sections?.length || 0 }} secciones en
-                        esta pestana
+                        esta pestaña
                       </p>
                     </div>
                   }
@@ -567,39 +462,18 @@ interface Selection {
                   <!-- Section Properties -->
                   @if (selection()?.type === 'section') {
                     <div class="space-y-3">
-                      <div>
-                        <label
-                          class="block text-xs font-medium mb-1"
-                          style="color: var(--color-text)"
-                          >Titulo</label
-                        >
-                        <input
-                          type="text"
-                          class="w-full px-3 py-2 border rounded-lg text-sm"
-                          style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text)"
-                          [ngModel]="selectedSection()?.title"
-                          (ngModelChange)="
-                            updateSelectedSection('title', $event)
-                          "
-                        />
-                      </div>
-                      <div>
-                        <label
-                          class="block text-xs font-medium mb-1"
-                          style="color: var(--color-text)"
-                          >Descripcion</label
-                        >
-                        <textarea
-                          class="w-full px-3 py-2 border rounded-lg text-sm resize-none"
-                          rows="2"
-                          style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text)"
-                          [ngModel]="selectedSection()?.description"
-                          (ngModelChange)="
-                            updateSelectedSection('description', $event)
-                          "
-                          placeholder="Descripcion de la seccion"
-                        ></textarea>
-                      </div>
+                      <app-input
+                        label="Título"
+                        [ngModel]="selectedSection()?.title"
+                        (ngModelChange)="updateSelectedSection('title', $event)"
+                      />
+                      <app-textarea
+                        label="Descripción"
+                        [ngModel]="selectedSection()?.description"
+                        (ngModelChange)="updateSelectedSection('description', $event)"
+                        [rows]="2"
+                        placeholder="Descripción de la sección"
+                      />
                       <div>
                         <label
                           class="block text-xs font-medium mb-1"
@@ -647,25 +521,12 @@ interface Selection {
                           </span>
                         </div>
                       </div>
-                      <div>
-                        <label
-                          class="block text-xs font-medium mb-1"
-                          style="color: var(--color-text)"
-                          >Ancho</label
-                        >
-                        <select
-                          class="w-full px-3 py-2 border rounded-lg text-sm"
-                          style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text)"
-                          [ngModel]="selectedItem()?.width"
-                          (ngModelChange)="updateSelectedItem('width', $event)"
-                        >
-                          <option value="100">100%</option>
-                          <option value="75">75%</option>
-                          <option value="50">50%</option>
-                          <option value="33">33%</option>
-                          <option value="25">25%</option>
-                        </select>
-                      </div>
+                      <app-selector
+                        label="Ancho"
+                        [ngModel]="selectedItem()?.width"
+                        (ngModelChange)="updateSelectedItem('width', $event)"
+                        [options]="widthOptions"
+                      />
                       <div>
                         <label
                           class="block text-xs font-medium mb-1"
@@ -678,83 +539,38 @@ interface Selection {
                           placeholder="Icono campo"
                         />
                       </div>
-                      <label class="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          class="w-4 h-4 rounded"
-                          [ngModel]="selectedItem()?.is_required"
-                          (ngModelChange)="
-                            updateSelectedItem('is_required', $event)
-                          "
-                        />
-                        <span class="text-sm" style="color: var(--color-text)"
-                          >Requerido</span
-                        >
-                      </label>
-                      <label class="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          class="w-4 h-4 rounded"
-                          [ngModel]="selectedItem()?.include_in_summary"
-                          (ngModelChange)="
-                            updateSelectedItem('include_in_summary', $event)
-                          "
-                        />
-                        <span class="text-sm" style="color: var(--color-text)"
-                          >Incluir en resumen</span
-                        >
-                      </label>
-                      <div>
-                        <label
-                          class="block text-xs font-medium mb-1"
-                          style="color: var(--color-text)"
-                          >Texto de ayuda</label
-                        >
-                        <input
-                          type="text"
-                          class="w-full px-3 py-2 border rounded-lg text-sm"
-                          style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text)"
-                          [ngModel]="selectedItem()?.help_text"
-                          (ngModelChange)="
-                            updateSelectedItem('help_text', $event)
-                          "
-                          placeholder="Texto de ayuda para el campo"
-                        />
-                      </div>
-                      <div>
-                        <label
-                          class="block text-xs font-medium mb-1"
-                          style="color: var(--color-text)"
-                          >Placeholder</label
-                        >
-                        <input
-                          type="text"
-                          class="w-full px-3 py-2 border rounded-lg text-sm"
-                          style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text)"
-                          [ngModel]="selectedItem()?.placeholder"
-                          (ngModelChange)="
-                            updateSelectedItem('placeholder', $event)
-                          "
-                          placeholder="Placeholder del campo"
-                        />
-                      </div>
+                      <app-setting-toggle
+                        label="Requerido"
+                        [ngModel]="selectedItem()?.is_required"
+                        (ngModelChange)="updateSelectedItem('is_required', $event)"
+                      />
+                      <app-setting-toggle
+                        label="Incluir en resumen"
+                        [ngModel]="selectedItem()?.include_in_summary"
+                        (ngModelChange)="updateSelectedItem('include_in_summary', $event)"
+                      />
+                      <app-input
+                        label="Texto de ayuda"
+                        [ngModel]="selectedItem()?.help_text"
+                        (ngModelChange)="updateSelectedItem('help_text', $event)"
+                        placeholder="Texto de ayuda para el campo"
+                      />
+                      <app-input
+                        label="Placeholder"
+                        [ngModel]="selectedItem()?.placeholder"
+                        (ngModelChange)="updateSelectedItem('placeholder', $event)"
+                        placeholder="Placeholder del campo"
+                      />
                     </div>
                   }
                 </div>
               } @else {
-                <div class="text-center py-6">
-                  <app-icon
-                    name="mouse-pointer-click"
-                    [size]="24"
-                    color="var(--color-text-muted)"
-                  ></app-icon>
-                  <p
-                    class="text-xs mt-2"
-                    style="color: var(--color-text-muted)"
-                  >
-                    Selecciona un elemento para ver sus propiedades
-                  </p>
-                </div>
+                <app-empty-state
+                  icon="mouse-pointer-click"
+                  title="Sin selección"
+                  description="Selecciona un elemento del canvas para ver sus propiedades."
+                  [showActionButton]="false"
+                />
               }
             </div>
           </div>
@@ -798,14 +614,10 @@ interface Selection {
               [size]="14"
               color="var(--color-text-muted)"
             ></app-icon>
-            <input
-              type="text"
-              class="flex-1 px-2 py-1 border rounded text-sm font-medium"
-              style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text)"
+            <app-input
+              class="flex-1"
               [ngModel]="section.title"
-              (ngModelChange)="
-                updateSectionTitle(si, $event, isChild, parentIndex)
-              "
+              (ngModelChange)="updateSectionTitle(si, $event, isChild, parentIndex)"
               placeholder="Nombre de la seccion"
               (click)="$event.stopPropagation()"
             />
@@ -816,24 +628,15 @@ interface Selection {
                 color="var(--color-text-muted)"
               ></app-icon>
             }
-            <span
-              class="text-xs px-2 py-0.5 rounded-full"
-              style="background: var(--color-surface); color: var(--color-text-muted)"
+            <app-badge variant="neutral">{{ section.items.length }} campos</app-badge>
+            <app-button
+              variant="ghost"
+              size="xsm"
+              (click)="$event.stopPropagation()"
+              (clicked)="isChild ? removeChildSection(parentIndex, si) : removeSection(si)"
             >
-              {{ section.items.length }} campos
-            </span>
-            <button
-              class="p-1 rounded-lg transition-colors hover:bg-red-50"
-              style="color: #ef4444"
-              (click)="
-                $event.stopPropagation();
-                isChild
-                  ? removeChildSection(parentIndex, si)
-                  : removeSection(si)
-              "
-            >
-              <app-icon name="trash-2" [size]="14"></app-icon>
-            </button>
+              <app-icon name="trash-2" [size]="14" slot="icon" style="color: var(--color-error)"></app-icon>
+            </app-button>
           </div>
 
           <!-- Section Body (expandable) -->
@@ -868,31 +671,18 @@ interface Selection {
                         style="color: var(--color-text)"
                         >{{ getFieldLabel(item.metadata_field_id) }}</span
                       >
-                      <span
-                        class="px-1.5 py-0.5 rounded text-xs"
-                        style="background: var(--color-surface); color: var(--color-text-muted)"
-                      >
-                        {{ item.width }}%
-                      </span>
+                      <app-badge variant="neutral">{{ item.width }}%</app-badge>
                       @if (item.is_required) {
-                        <span
-                          class="px-1.5 py-0.5 rounded text-xs"
-                          style="background: #fef2f2; color: #991b1b"
-                          >Req</span
-                        >
+                        <app-badge variant="error">Req</app-badge>
                       }
-                      <button
-                        class="p-0.5 rounded-full transition-colors hover:bg-red-50"
-                        style="color: var(--color-text-muted)"
-                        (click)="
-                          $event.stopPropagation();
-                          isChild
-                            ? removeFieldFromChildSection(parentIndex, si, fi)
-                            : removeFieldFromSection(si, fi)
-                        "
+                      <app-button
+                        variant="ghost"
+                        size="xsm"
+                        (click)="$event.stopPropagation()"
+                        (clicked)="isChild ? removeFieldFromChildSection(parentIndex, si, fi) : removeFieldFromSection(si, fi)"
                       >
-                        <app-icon name="x" [size]="12"></app-icon>
-                      </button>
+                        <app-icon name="x" [size]="12" slot="icon"></app-icon>
+                      </app-button>
                     </div>
                   }
                 </div>
@@ -911,29 +701,12 @@ interface Selection {
                 0
               ) {
                 <div>
-                  <select
-                    class="w-full px-2 py-1.5 border rounded-lg text-xs"
-                    style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text)"
-                    (change)="
-                      isChild
-                        ? onFieldSelectChild(parentIndex, si, $event)
-                        : onFieldSelect(si, $event)
-                    "
-                  >
-                    <option value="">+ Agregar campo...</option>
-                    @for (
-                      field of getAvailableFieldsForSection(
-                        si,
-                        isChild,
-                        parentIndex
-                      );
-                      track field.id
-                    ) {
-                      <option [value]="field.id">
-                        {{ field.label }} ({{ field.field_type }})
-                      </option>
-                    }
-                  </select>
+                  <app-selector
+                    [ngModel]="''"
+                    (ngModelChange)="isChild ? onFieldSelectByValue(parentIndex, si, $event) : onFieldSelectByValue(-1, si, $event)"
+                    [options]="getFieldOptionsForSection(si, isChild, parentIndex)"
+                    placeholder="+ Agregar campo..."
+                  />
                 </div>
               }
 
@@ -957,14 +730,10 @@ interface Selection {
                   ></ng-container>
                 }
 
-                <button
-                  class="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium"
-                  style="color: var(--color-primary)"
-                  (click)="addChildSection(si)"
-                >
-                  <app-icon name="plus" [size]="12"></app-icon>
-                  Subseccion
-                </button>
+                <app-button variant="ghost" size="sm" (clicked)="addChildSection(si)">
+                  <app-icon name="plus" [size]="12" slot="icon"></app-icon>
+                  Subsección
+                </app-button>
               }
             </div>
           }
@@ -974,6 +743,7 @@ interface Selection {
   `,
 })
 export class TemplateEditorComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private templatesService = inject(DataCollectionTemplatesService);
@@ -992,6 +762,27 @@ export class TemplateEditorComponent implements OnInit {
   showPreview = signal(false);
   previewStep = signal(0);
   getItemWidth = getItemWidth;
+
+  // Options for selectors
+  entityTypeOptions = [
+    { value: 'customer', label: 'Cliente' },
+    { value: 'booking', label: 'Reserva' },
+    { value: 'order', label: 'Orden' },
+  ];
+
+  statusOptions = [
+    { value: 'active', label: 'Activo' },
+    { value: 'inactive', label: 'Inactivo' },
+    { value: 'archived', label: 'Archivado' },
+  ];
+
+  widthOptions = [
+    { value: '100', label: '100%' },
+    { value: '75', label: '75%' },
+    { value: '50', label: '50%' },
+    { value: '33', label: '33%' },
+    { value: '25', label: '25%' },
+  ];
 
   formData = signal<{
     name: string;
@@ -1065,8 +856,8 @@ export class TemplateEditorComponent implements OnInit {
   selectionTypeLabel = computed(() => {
     const s = this.selection();
     if (!s) return '';
-    if (s.type === 'tab') return 'Propiedades de Pestana';
-    if (s.type === 'section') return 'Propiedades de Seccion';
+    if (s.type === 'tab') return 'Propiedades de Pestaña';
+    if (s.type === 'section') return 'Propiedades de Sección';
     return 'Propiedades del Campo';
   });
 
@@ -1089,6 +880,17 @@ export class TemplateEditorComponent implements OnInit {
     return section?.items[s.itemIndex!] ?? null;
   });
 
+  // Computed for scrollable tabs
+  readonly editorTabsList = computed<ScrollableTab[]>(() =>
+    this.formData().tabs.map((tab, i) => ({
+      id: String(i),
+      label: tab.title || `Pestaña ${i + 1}`,
+      icon: tab.icon || undefined,
+    }))
+  );
+
+  readonly activeTabId = computed(() => String(this.activeTabIndex()));
+
   ngOnInit() {
     const id = Number(this.route.snapshot.paramMap.get('id'));
     if (!id) {
@@ -1097,7 +899,7 @@ export class TemplateEditorComponent implements OnInit {
       return;
     }
 
-    this.templatesService.getOne(id).subscribe({
+    this.templatesService.getOne(id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (t) => {
         this.template.set(t);
         this.initFormData(t);
@@ -1249,10 +1051,10 @@ export class TemplateEditorComponent implements OnInit {
 
     const productIds = this.selectedProductIds();
 
-    this.templatesService.update(t.id, payload).subscribe({
+    this.templatesService.update(t.id, payload).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         if (productIds.length >= 0) {
-          this.templatesService.assignProducts(t.id, productIds).subscribe({
+          this.templatesService.assignProducts(t.id, productIds).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
             next: () => {
               this.saving.set(false);
               this.toastService.success('Plantilla actualizada');
@@ -1353,6 +1155,10 @@ export class TemplateEditorComponent implements OnInit {
   selectTab(index: number) {
     this.activeTabIndex.set(index);
     this.selection.set({ type: 'tab', tabIndex: index });
+  }
+
+  selectTabById(tabId: string): void {
+    this.selectTab(Number(tabId));
   }
 
   addTab() {
@@ -1536,6 +1342,23 @@ export class TemplateEditorComponent implements OnInit {
       this.addFieldToChildSection(parentIndex, childIndex, fieldId);
       select.value = '';
     }
+  }
+
+  onFieldSelectByValue(parentIndex: number, sectionIndex: number, value: string | number | null) {
+    const fieldId = parseInt(String(value), 10);
+    if (!fieldId) return;
+    if (parentIndex >= 0) {
+      this.addFieldToChildSection(parentIndex, sectionIndex, fieldId);
+    } else {
+      this.addFieldToSection(sectionIndex, fieldId);
+    }
+  }
+
+  getFieldOptionsForSection(si: number, isChild: boolean, parentIndex: number) {
+    return this.getAvailableFieldsForSection(si, isChild, parentIndex).map((f) => ({
+      value: String(f.id),
+      label: `${f.label} (${f.field_type})`,
+    }));
   }
 
   addFieldToSection(sectionIndex: number, fieldId: number) {
@@ -1783,6 +1606,13 @@ export class TemplateEditorComponent implements OnInit {
     );
   }
 
+  getUnselectedProductOptions() {
+    return this.getUnselectedProducts().map((p) => ({
+      value: String(p.id),
+      label: p.name,
+    }));
+  }
+
   onProductSelect(event: Event) {
     const select = event.target as HTMLSelectElement;
     const productId = parseInt(select.value, 10);
@@ -1792,6 +1622,13 @@ export class TemplateEditorComponent implements OnInit {
     select.value = '';
   }
 
+  onProductSelectByValue(value: string | number | null) {
+    const productId = parseInt(String(value), 10);
+    if (productId && !this.selectedProductIds().includes(productId)) {
+      this.selectedProductIds.update((ids) => [...ids, productId]);
+    }
+  }
+
   removeProduct(id: number) {
     this.selectedProductIds.update((ids) => ids.filter((pid) => pid !== id));
   }
@@ -1799,7 +1636,7 @@ export class TemplateEditorComponent implements OnInit {
   // --- Data Loading ---
 
   private loadAvailableFields() {
-    this.fieldsService.getFields().subscribe({
+    this.fieldsService.getFields().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (fields) => this.availableFields.set(fields),
       error: () => {},
     });
@@ -1809,7 +1646,7 @@ export class TemplateEditorComponent implements OnInit {
     this.http
       .get<any>(`${environment.apiUrl}/store/products?limit=200`)
       .pipe(map((r) => r.data))
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (products) => this.availableProducts.set(products),
         error: () => {},
       });

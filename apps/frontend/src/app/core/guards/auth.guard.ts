@@ -7,7 +7,6 @@ import {
   UrlTree,
 } from '@angular/router';
 import { Observable, of } from 'rxjs';
-import { catchError, switchMap, take } from 'rxjs/operators';
 import { AuthFacade } from '../store/auth/auth.facade';
 import { ConfigFacade } from '../store/config';
 import { ToastService } from '../../shared/components/toast/toast.service';
@@ -52,41 +51,30 @@ export class AuthGuard implements CanActivate {
     }
 
     // 3. Check if authenticated
-    return this.authFacade.isAuthenticated$.pipe(
-      take(1),
-      switchMap((isAuthenticated) => {
-        if (!isAuthenticated) {
-          // Solo mostrar toast si NO estamos en proceso de logout
-          if (!this.sessionService.shouldSuppressNotifications()) {
-            this.toastService.warning(
-              'Debes iniciar sesión para acceder a esta página',
-            );
-          }
-          return of(this.router.createUrlTree(['/auth/login']));
-        }
+    const isAuthenticated = this.authFacade.isAuthenticated();
+    if (!isAuthenticated) {
+      // Solo mostrar toast si NO estamos en proceso de logout
+      if (!this.sessionService.shouldSuppressNotifications()) {
+        this.toastService.warning(
+          'Debes iniciar sesión para acceder a esta página',
+        );
+      }
+      return of(this.router.createUrlTree(['/auth/login']));
+    }
 
-        // 4. Check role-based permissions
-        const hasPermission = this.hasRolePermission(path);
-        if (!hasPermission) {
-          // Solo mostrar toast si NO estamos en proceso de logout
-          if (!this.sessionService.shouldSuppressNotifications()) {
-            this.toastService.error(
-              'No tienes permisos para acceder a esta página',
-            );
-          }
-          return of(this.getDashboardUrl());
-        }
+    // 4. Check role-based permissions
+    const hasPermission = this.hasRolePermission(path);
+    if (!hasPermission) {
+      // Solo mostrar toast si NO estamos en proceso de logout
+      if (!this.sessionService.shouldSuppressNotifications()) {
+        this.toastService.error(
+          'No tienes permisos para acceder a esta página',
+        );
+      }
+      return of(this.getDashboardUrl());
+    }
 
-        return of(true);
-      }),
-      catchError((error) => {
-        // Solo mostrar toast si NO estamos en proceso de logout
-        if (!this.sessionService.shouldSuppressNotifications()) {
-          this.toastService.error('Error verificando autenticación');
-        }
-        return of(this.router.createUrlTree(['/']));
-      }),
-    );
+    return of(true);
   }
 
   /**
@@ -136,11 +124,14 @@ export class AuthGuard implements CanActivate {
 
     // Admin & Store routes
     if (path.startsWith('/admin') || path.startsWith('/store')) {
-      const env = this.configFacade.getCurrentConfig()?.domainConfig?.environment;
+      const env =
+        this.configFacade.getCurrentConfig()?.domainConfig?.environment;
 
       // ORG_ADMIN: only owner and admin
       if (env === 'ORG_ADMIN') {
-        return userRoles.some((r) => ['super_admin', 'admin', 'owner'].includes(r));
+        return userRoles.some((r) =>
+          ['super_admin', 'admin', 'owner'].includes(r),
+        );
       }
 
       // STORE_ADMIN: any role except customer (panel_ui handles granular visibility)

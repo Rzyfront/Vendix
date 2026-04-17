@@ -32,12 +32,13 @@ export class RequestContextInterceptor implements NestInterceptor {
       const roles =
         user.user_roles?.map((ur) => ur.roles?.name).filter(Boolean) || [];
 
-      contextObj.user_id = user.id;
+      contextObj.user_id = user.id || user.user_id;
       contextObj.organization_id = user.organization_id;
       contextObj.store_id = user.store_id;
-      contextObj.roles = roles;
-      contextObj.is_super_admin = roles.includes('super_admin');
-      contextObj.is_owner = roles.includes('owner');
+      contextObj.roles = user.roles || roles;
+      contextObj.permissions = user.permissions || [];
+      contextObj.is_super_admin = user.is_super_admin || contextObj.roles.includes('super_admin');
+      contextObj.is_owner = user.is_owner || contextObj.roles.includes('owner');
       contextObj.email = user.email;
     }
 

@@ -1,0 +1,43 @@
+meta {
+  name: Check Stock Availability
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{baseUrl}}/mcp/tools/call
+  body: json {
+    "name": "check_stock_availability",
+    "arguments": {
+      "product_id": 1,
+      "quantity": 5
+    }
+  }
+  headers: {
+    Authorization: Bearer {{authToken}}
+    Content-Type: application/json
+  }
+}
+
+tests {
+  test("check_stock_availability returns success", function() {
+    expect(res.status).to.equal(200);
+    const parsed = JSON.parse(res.body.content[0].text);
+    expect(parsed).to.have.property('is_available');
+    expect(parsed).to.have.property('total_available');
+    expect(parsed).to.have.property('required');
+    expect(parsed).to.have.property('locations');
+    expect(parsed.required).to.equal(5);
+  });
+
+  test("Summary reflects availability", function() {
+    const parsed = JSON.parse(res.body.content[0].text);
+    expect(parsed).to.have.property('summary');
+    if (parsed.is_available) {
+      expect(parsed.summary).to.include('available');
+      expect(parsed).to.have.property('suggested_allocation');
+    } else {
+      expect(parsed.summary).to.include('Insufficient');
+    }
+  });
+}

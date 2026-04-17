@@ -1,12 +1,12 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
-import { CommonModule, DatePipe } from '@angular/common';
+import { Component, input, output } from '@angular/core';
+import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Promotion } from '../../interfaces/promotion.interface';
 
 @Component({
   selector: 'app-promotions-list',
   standalone: true,
-  imports: [CommonModule, FormsModule, DatePipe],
+  imports: [DatePipe, FormsModule],
   template: `
     <div class="bg-white rounded-lg border border-gray-200 shadow-sm">
       <!-- Header -->
@@ -26,14 +26,14 @@ import { Promotion } from '../../interfaces/promotion.interface';
           <div class="flex-1">
             <input
               type="text"
-              [ngModel]="searchValue"
+              [ngModel]="searchValue()"
               (ngModelChange)="onSearchInput($event)"
               placeholder="Buscar por nombre o codigo..."
               class="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
             />
           </div>
           <select
-            [ngModel]="stateFilterValue"
+            [ngModel]="stateFilterValue()"
             (ngModelChange)="stateFilterChange.emit($event)"
             class="px-3 py-2 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary/20 focus:border-primary outline-none"
           >
@@ -49,7 +49,7 @@ import { Promotion } from '../../interfaces/promotion.interface';
       </div>
 
       <!-- Loading -->
-      @if (loading) {
+      @if (loading()) {
         <div class="p-8 text-center">
           <div class="inline-block w-6 h-6 border-2 border-gray-300 border-t-primary rounded-full animate-spin"></div>
           <p class="mt-2 text-sm text-gray-500">Cargando promociones...</p>
@@ -57,7 +57,7 @@ import { Promotion } from '../../interfaces/promotion.interface';
       }
 
       <!-- Empty State -->
-      @if (!loading && (!promotions || promotions.length === 0)) {
+      @if (!loading() && (!promotions() || promotions()!.length === 0)) {
         <div class="p-8 text-center">
           <div class="inline-flex items-center justify-center w-12 h-12 bg-gray-100 rounded-full mb-3">
             <svg class="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -70,9 +70,9 @@ import { Promotion } from '../../interfaces/promotion.interface';
       }
 
       <!-- Mobile Cards -->
-      @if (!loading && promotions && promotions.length > 0) {
+      @if (!loading() && promotions() && promotions()!.length > 0) {
         <div class="block lg:hidden divide-y divide-gray-200">
-          @for (promo of promotions; track promo.id) {
+          @for (promo of promotions(); track promo.id) {
             <div class="p-4">
               <div class="flex items-start justify-between mb-2">
                 <div>
@@ -164,7 +164,7 @@ import { Promotion } from '../../interfaces/promotion.interface';
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-200">
-              @for (promo of promotions; track promo.id) {
+              @for (promo of promotions(); track promo.id) {
                 <tr class="hover:bg-gray-50 transition-colors">
                   <td class="px-4 py-3">
                     <div>
@@ -257,24 +257,24 @@ import { Promotion } from '../../interfaces/promotion.interface';
         </div>
 
         <!-- Pagination -->
-        @if (meta && meta.total_pages > 1) {
+        @if (meta() && meta()!.total_pages > 1) {
           <div class="flex items-center justify-between px-4 py-3 border-t border-gray-200">
             <p class="text-xs text-gray-500">
-              Mostrando {{ ((meta.page - 1) * meta.limit) + 1 }} -
-              {{ meta.page * meta.limit > meta.total ? meta.total : meta.page * meta.limit }}
-              de {{ meta.total }}
+              Mostrando {{ ((meta()!.page - 1) * meta()!.limit) + 1 }} -
+              {{ meta()!.page * meta()!.limit > meta()!.total ? meta()!.total : meta()!.page * meta()!.limit }}
+              de {{ meta()!.total }}
             </p>
             <div class="flex gap-1">
               <button
-                [disabled]="meta.page <= 1"
-                (click)="pageChange.emit(meta.page - 1)"
+                [disabled]="meta()!.page <= 1"
+                (click)="pageChange.emit(meta()!.page - 1)"
                 class="px-3 py-1 text-xs font-medium text-gray-600 bg-gray-100 rounded hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 Anterior
               </button>
               <button
-                [disabled]="meta.page >= meta.total_pages"
-                (click)="pageChange.emit(meta.page + 1)"
+                [disabled]="meta()!.page >= meta()!.total_pages"
+                (click)="pageChange.emit(meta()!.page + 1)"
                 class="px-3 py-1 text-xs font-medium text-gray-600 bg-gray-100 rounded hover:bg-gray-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
                 Siguiente
@@ -295,21 +295,21 @@ import { Promotion } from '../../interfaces/promotion.interface';
   ],
 })
 export class PromotionsListComponent {
-  @Input() promotions: Promotion[] | null = [];
-  @Input() loading: boolean | null = false;
-  @Input() meta: any = null;
-  @Input() searchValue = '';
-  @Input() stateFilterValue = '';
+  readonly promotions = input<Promotion[] | null>([]);
+  readonly loading = input<boolean | null>(false);
+  readonly meta = input<any>(null);
+  readonly searchValue = input('');
+  readonly stateFilterValue = input('');
 
-  @Output() create = new EventEmitter<void>();
-  @Output() edit = new EventEmitter<Promotion>();
-  @Output() activate = new EventEmitter<number>();
-  @Output() pause = new EventEmitter<number>();
-  @Output() cancel = new EventEmitter<number>();
-  @Output() delete = new EventEmitter<number>();
-  @Output() pageChange = new EventEmitter<number>();
-  @Output() searchChange = new EventEmitter<string>();
-  @Output() stateFilterChange = new EventEmitter<string>();
+  readonly create = output<void>();
+  readonly edit = output<Promotion>();
+  readonly activate = output<number>();
+  readonly pause = output<number>();
+  readonly cancel = output<number>();
+  readonly delete = output<number>();
+  readonly pageChange = output<number>();
+  readonly searchChange = output<string>();
+  readonly stateFilterChange = output<string>();
 
   private search_timer: any;
 

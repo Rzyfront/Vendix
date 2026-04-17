@@ -1,5 +1,6 @@
-import { Component, input, output, signal, inject, ChangeDetectionStrategy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, input, output, signal, inject, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import {
   ModalComponent,
   ButtonComponent,
@@ -14,12 +15,12 @@ import { finalize } from 'rxjs';
 @Component({
   selector: 'app-reschedule-modal',
   standalone: true,
-  imports: [CommonModule, ModalComponent, ButtonComponent, IconComponent, SpinnerComponent],
+  imports: [ModalComponent, ButtonComponent, IconComponent, SpinnerComponent],
   templateUrl: './reschedule-modal.component.html',
   styleUrls: ['./reschedule-modal.component.scss'],
-  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class RescheduleModalComponent {
+  private destroyRef = inject(DestroyRef);
   private reservationsService = inject(ReservationsService);
   private toastService = inject(ToastService);
 
@@ -73,7 +74,7 @@ export class RescheduleModalComponent {
     this.loadingSlots.set(true);
     this.reservationsService.getAvailability(b.product_id, date, date, b.provider_id)
       .pipe(finalize(() => this.loadingSlots.set(false)))
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (slots) => this.slots.set(slots.filter(s => s.total_available > 0)),
         error: () => this.slots.set([]),
       });
@@ -94,7 +95,7 @@ export class RescheduleModalComponent {
       start_time: slot.start_time,
       end_time: slot.end_time,
     }).pipe(finalize(() => this.submitting.set(false)))
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: () => {
           this.toastService.success('Reserva reprogramada exitosamente');
           this.rescheduled.emit();

@@ -1,0 +1,54 @@
+meta {
+  name: Create Stock Adjustment
+  type: http
+  seq: 8
+}
+
+post {
+  url: {{baseUrl}}/mcp/tools/call
+  body: json {
+    "name": "create_stock_adjustment",
+    "arguments": {
+      "product_id": 1,
+      "location_id": 1,
+      "quantity_after": 50,
+      "adjustment_type": "count_variance",
+      "reason": "Physical count correction via MCP"
+    }
+  }
+  headers: {
+    Authorization: Bearer {{authToken}}
+    Content-Type: application/json
+  }
+}
+
+tests {
+  test("create_stock_adjustment returns success", function() {
+    expect(res.status).to.equal(200);
+    const parsed = JSON.parse(res.body.content[0].text);
+    expect(parsed).to.have.property('summary');
+    expect(parsed).to.have.property('data');
+  });
+
+  test("Adjustment data has required fields", function() {
+    const parsed = JSON.parse(res.body.content[0].text);
+    if (parsed.data) {
+      const adj = parsed.data;
+      expect(adj).to.have.property('id');
+      expect(adj).to.have.property('product_id');
+      expect(adj).to.have.property('location_id');
+      expect(adj).to.have.property('type');
+      expect(adj).to.have.property('quantity_before');
+      expect(adj).to.have.property('quantity_after', 50);
+      expect(adj).to.have.property('quantity_change');
+      expect(adj).to.have.property('status');
+      expect(adj).to.have.property('created_at');
+    }
+  });
+
+  test("Summary describes the adjustment", function() {
+    const parsed = JSON.parse(res.body.content[0].text);
+    expect(parsed.summary).to.include('count_variance');
+    expect(parsed.summary).to.include('50');
+  });
+}

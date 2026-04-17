@@ -1,7 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, of } from 'rxjs';
-import { take, map, catchError, tap } from 'rxjs/operators';
+import { catchError } from 'rxjs/operators';
 import { AuthFacade } from '../store/auth/auth.facade';
 import { GlobalFacade } from '../store/global.facade';
 import { AppEnvironment } from '../models/domain-config.interface';
@@ -40,25 +40,21 @@ export class EnvironmentContextService {
    * Obtiene el contexto completo del entorno actual
    */
   getCurrentEnvironmentContext(): Observable<EnvironmentContext> {
-    return this.authFacade.user$.pipe(
-      take(1),
-      map((user) => {
-        const userRoles = user?.roles || [];
-        const userPermissions = user?.permissions || [];
-        const currentEnvironment = this.getCurrentEnvironmentFromUser(user);
+    const user = this.authFacade.user();
+    const userRoles = user?.roles || [];
+    const userPermissions = user?.permissions || [];
+    const currentEnvironment = this.getCurrentEnvironmentFromUser(user);
 
-        return {
-          currentEnvironment,
-          userRoles,
-          userPermissions,
-          organizationSlug: user?.organization?.slug,
-          storeSlug: user?.store?.slug,
-          canSwitchToOrganization: this.canSwitchToOrganization(user),
-          canSwitchToStore: this.canSwitchToStore(user),
-          availableStores: user?.stores || [],
-        };
-      }),
-    );
+    return of({
+      currentEnvironment,
+      userRoles,
+      userPermissions,
+      organizationSlug: user?.organization?.slug,
+      storeSlug: user?.store?.slug,
+      canSwitchToOrganization: this.canSwitchToOrganization(user),
+      canSwitchToStore: this.canSwitchToStore(user),
+      availableStores: user?.stores || [],
+    });
   }
 
   /**
@@ -235,9 +231,7 @@ export class EnvironmentContextService {
   // Métodos privados
 
   private getCurrentUserFromAuth(): any {
-    let user: any = null;
-    this.authFacade.user$.pipe(take(1)).subscribe((u) => (user = u));
-    return user;
+    return this.authFacade.user() ?? null;
   }
 
   private getCurrentEnvironmentFromUser(user: any): AppEnvironment {

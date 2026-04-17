@@ -1,14 +1,15 @@
-import { Component, OnInit, OnDestroy, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { Subject, takeUntil, finalize } from 'rxjs';
+import {Component, OnInit, inject, signal,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
+import { finalize } from 'rxjs';
 import { TicketListComponent, CreateTicketModalComponent } from './components';
 import { StatsComponent } from '../../../../../shared/components/stats/stats.component';
 import { SupportService } from './services/support.service';
 import {
   Ticket,
   TicketStats,
-  CreateTicketRequest,
-} from './models/ticket.model';
+  CreateTicketRequest} from './models/ticket.model';
 import { ToastService } from '../../../../../shared/components';
 import { Router, ActivatedRoute } from '@angular/router';
 import { FilterValues } from '../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
@@ -16,19 +17,16 @@ import { FilterValues } from '../../../../../shared/components/options-dropdown/
 @Component({
   selector: 'app-support-settings',
   standalone: true,
-  imports: [
-    CommonModule,
-    StatsComponent,
-    TicketListComponent,
-    CreateTicketModalComponent,
-  ],
+  imports: [StatsComponent, TicketListComponent, CreateTicketModalComponent],
   template: `
     <div class="w-full">
       <!-- Stats Grid -->
-      <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
+      <div
+        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+      >
         <app-stats
           title="Total Tickets"
-          [value]="stats?.total || 0"
+          [value]="stats()?.total || 0"
           smallText="Todos los tickets"
           iconName="ticket"
           iconBgColor="bg-primary/10"
@@ -37,7 +35,7 @@ import { FilterValues } from '../../../../../shared/components/options-dropdown/
 
         <app-stats
           title="Abiertos"
-          [value]="stats?.open_tickets || 0"
+          [value]="stats()?.open_tickets || 0"
           smallText="Tickets en proceso"
           iconName="message-circle"
           iconBgColor="bg-green-100"
@@ -46,7 +44,7 @@ import { FilterValues } from '../../../../../shared/components/options-dropdown/
 
         <app-stats
           title="Resueltos"
-          [value]="stats?.resolved || 0"
+          [value]="stats()?.resolved || 0"
           smallText="Tickets cerrados"
           iconName="check-circle"
           iconBgColor="bg-purple-100"
@@ -55,7 +53,7 @@ import { FilterValues } from '../../../../../shared/components/options-dropdown/
 
         <app-stats
           title="Problemas"
-          [value]="stats?.by_category?.['PROBLEM'] || 0"
+          [value]="stats()?.by_category?.['PROBLEM'] || 0"
           smallText="Tickets de problema"
           iconName="alert-circle"
           iconBgColor="bg-orange-100"
@@ -65,9 +63,9 @@ import { FilterValues } from '../../../../../shared/components/options-dropdown/
 
       <!-- List -->
       <app-ticket-list
-        [tickets]="tickets"
-        [loading]="loading"
-        [totalItems]="totalItems"
+        [tickets]="tickets()"
+        [loading]="loading()"
+        [totalItems]="totalItems()"
         [page]="page"
         [limit]="limit"
         (search)="onSearch($event)"
@@ -77,55 +75,45 @@ import { FilterValues } from '../../../../../shared/components/options-dropdown/
         (viewDetail)="openTicketDetail($event)"
       ></app-ticket-list>
 
-      <!-- Create Modal -->
-      <app-create-ticket-modal
-        [isOpen]="isCreateModalOpen"
-        [loading]="actionLoading"
-        (isOpenChange)="isCreateModalOpen = $event"
-        (closed)="closeCreateModal()"
-        (save)="onCreateTicket($event)"
-      ></app-create-ticket-modal>
+      @defer (when isCreateModalOpen) {
+        <app-create-ticket-modal
+          [isOpen]="isCreateModalOpen"
+          (isOpenChange)="isCreateModalOpen = $event"
+          (closed)="closeCreateModal()"
+        ></app-create-ticket-modal>
+      }
     </div>
-  `,
-})
-export class SupportSettingsComponent implements OnInit, OnDestroy {
+  `})
+export class SupportSettingsComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private supportService = inject(SupportService);
   private toastService = inject(ToastService);
   private router = inject(Router);
   private route = inject(ActivatedRoute);
 
-  stats: TicketStats | null = null;
-  tickets: Ticket[] = [];
+  readonly stats = signal<TicketStats | null>(null);
+  readonly tickets = signal<Ticket[]>([]);
 
-  loading = false;
+  readonly loading = signal(false);
   actionLoading = false;
 
   // Pagination
   page = 1;
   limit = 10;
-  totalItems = 0;
+  readonly totalItems = signal(0);
   searchQuery = '';
   filters: FilterValues = {};
 
   // Modal
   isCreateModalOpen = false;
-
-  private destroy$ = new Subject<void>();
-
-  ngOnInit(): void {
+ngOnInit(): void {
     this.loadStats();
     this.loadTickets();
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  loadStats() {
+loadStats() {
     this.supportService
       .getTicketStats()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (statsData: any) => {
           // Service already returns data unwrapped
@@ -138,22 +126,23 @@ export class SupportSettingsComponent implements OnInit, OnDestroy {
             overdue: statsData?.overdue || 0,
             avg_resolution_time: statsData?.avg_resolution_time || 0,
             // Computed fields
-            open_tickets: (byStatus.NEW || 0) + (byStatus.OPEN || 0) + (byStatus.IN_PROGRESS || 0),
+            open_tickets:
+              (byStatus.NEW || 0) +
+              (byStatus.OPEN || 0) +
+              (byStatus.IN_PROGRESS || 0),
             resolved: (byStatus.RESOLVED || 0) + (byStatus.CLOSED || 0),
             pending: byStatus.WAITING_RESPONSE || 0,
-            my_tickets: 0,
-          };
-          this.stats = computedStats;
+            my_tickets: 0};
+          this.stats.set(computedStats);
         },
         error: (error: any) => {
           console.error('Error loading stats:', error);
           this.toastService.error('Error al cargar estadísticas');
-        },
-      });
+        }});
   }
 
   loadTickets() {
-    this.loading = true;
+    this.loading.set(true);
     this.supportService
       .getTickets({
         page: this.page,
@@ -161,22 +150,20 @@ export class SupportSettingsComponent implements OnInit, OnDestroy {
         search: this.searchQuery || undefined,
         status: (this.filters['status'] as string) || undefined,
         priority: (this.filters['priority'] as string) || undefined,
-        category: (this.filters['category'] as string) || undefined,
-      })
+        category: (this.filters['category'] as string) || undefined})
       .pipe(
-        takeUntil(this.destroy$),
-        finalize(() => (this.loading = false)),
+        takeUntilDestroyed(this.destroyRef),
+        finalize(() => this.loading.set(false)),
       )
       .subscribe({
         next: (response: any) => {
-          this.tickets = response.data;
-          this.totalItems = response.meta.total;
+          this.tickets.set(response.data);
+          this.totalItems.set(response.meta.total);
         },
         error: (err: any) => {
           console.error(err);
           this.toastService.error('Error al cargar tickets');
-        },
-      });
+        }});
   }
 
   onSearch(query: string) {
@@ -210,12 +197,14 @@ export class SupportSettingsComponent implements OnInit, OnDestroy {
     this.supportService
       .createTicket(data)
       .pipe(
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
         finalize(() => (this.actionLoading = false)),
       )
       .subscribe({
         next: () => {
-          this.toastService.success('¡Ticket creado exitosamente! Te responderemos pronto.');
+          this.toastService.success(
+            '¡Ticket creado exitosamente! Te responderemos pronto.',
+          );
           this.closeCreateModal();
           this.loadTickets();
           this.loadStats();
@@ -223,8 +212,7 @@ export class SupportSettingsComponent implements OnInit, OnDestroy {
         error: (err) => {
           console.error(err);
           this.toastService.error('Error al crear ticket. Intenta nuevamente.');
-        },
-      });
+        }});
   }
 
   openTicketDetail(ticket: Ticket) {

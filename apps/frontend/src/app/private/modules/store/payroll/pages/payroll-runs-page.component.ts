@@ -1,21 +1,19 @@
-import { Component, OnInit, OnDestroy, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject, DestroyRef } from '@angular/core';
+import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import { Store } from '@ngrx/store';
 import { Actions, ofType } from '@ngrx/effects';
-import { Observable, Subject } from 'rxjs';
-import { takeUntil, filter } from 'rxjs/operators';
+import { Observable } from 'rxjs';
+import { filter } from 'rxjs/operators';
 
 import {
   loadPayrollRuns,
   loadPayrollRunStats,
   loadPayrollRun,
-  cancelPayrollRunSuccess,
-} from '../state/actions/payroll.actions';
+  cancelPayrollRunSuccess } from '../state/actions/payroll.actions';
 import {
   selectPayrollRuns,
   selectPayrollRunsLoading,
-  selectCurrentPayrollRun,
-} from '../state/selectors/payroll.selectors';
+  selectCurrentPayrollRun } from '../state/selectors/payroll.selectors';
 import { PayrollRun } from '../interfaces/payroll.interface';
 
 import { PayrollStatsComponent } from '../components/payroll-stats/payroll-stats.component';
@@ -28,7 +26,6 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
   selector: 'vendix-payroll-runs-page',
   standalone: true,
   imports: [
-    CommonModule,
     PayrollStatsComponent,
     PayrollRunListComponent,
     PayrollRunCreateComponent,
@@ -36,13 +33,15 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
   ],
   template: `
     <div class="w-full">
-      <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
+      <div
+        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+      >
         <vendix-payroll-stats view="payroll-runs"></vendix-payroll-stats>
       </div>
 
       <app-payroll-run-list
-        [payrollRuns]="(payrollRuns$ | async) || []"
-        [loading]="(payrollRunsLoading$ | async) || false"
+        [payrollRuns]="payrollRuns() || []"
+        [loading]="payrollRunsLoading() || false"
         (create)="openPayrollRunCreateModal()"
         (detail)="viewPayrollRun($event)"
         (refresh)="refreshPayrollRuns()"
@@ -57,49 +56,51 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
         [payrollRun]="selectedPayrollRun"
       ></vendix-payroll-run-detail>
     </div>
-  `,
-})
-export class PayrollRunsPageComponent implements OnInit, OnDestroy {
+  ` })
+export class PayrollRunsPageComponent {
   private store = inject(Store);
   private actions$ = inject(Actions);
   private currencyService = inject(CurrencyFormatService);
-  private destroy$ = new Subject<void>();
-
-  payrollRuns$: Observable<PayrollRun[]> = this.store.select(selectPayrollRuns);
-  payrollRunsLoading$: Observable<boolean> = this.store.select(selectPayrollRunsLoading);
+  private destroyRef = inject(DestroyRef);
+readonly payrollRuns = toSignal(this.store.select(selectPayrollRuns), {
+    initialValue: [] as PayrollRun[] });
+  readonly payrollRunsLoading = toSignal(
+    this.store.select(selectPayrollRunsLoading),
+    { initialValue: false },
+  );
 
   isPayrollRunCreateModalOpen = false;
   isPayrollRunDetailModalOpen = false;
   selectedPayrollRun: PayrollRun | null = null;
 
   constructor() {
-    this.store.select(selectCurrentPayrollRun).pipe(
-      takeUntil(this.destroy$),
-      filter((run): run is PayrollRun => run !== null),
-    ).subscribe((run) => {
-      if (this.isPayrollRunDetailModalOpen && this.selectedPayrollRun?.id === run.id) {
-        this.selectedPayrollRun = run;
-      }
-    });
-
-    // Close detail modal after cancel succeeds (the detail component no longer closes it immediately)
-    this.actions$.pipe(
-      ofType(cancelPayrollRunSuccess),
-      takeUntil(this.destroy$),
-    ).subscribe(() => {
-      this.isPayrollRunDetailModalOpen = false;
-    });
-  }
-
-  ngOnInit(): void {
     this.currencyService.loadCurrency();
     this.store.dispatch(loadPayrollRuns());
     this.store.dispatch(loadPayrollRunStats());
-  }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
+    this.store
+      .select(selectCurrentPayrollRun)
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        filter((run): run is PayrollRun => run !== null),
+      )
+      .subscribe((run) => {
+        if (
+          this.isPayrollRunDetailModalOpen &&
+          this.selectedPayrollRun?.id === run.id
+        ) {
+          this.selectedPayrollRun = run;
+        }
+      });
+
+    this.actions$
+      .pipe(ofType(cancelPayrollRunSuccess), takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        this.isPayrollRunDetailModalOpen = false;
+      });
+
+    this.destroyRef.onDestroy(() => {
+    });
   }
 
   openPayrollRunCreateModal(): void {

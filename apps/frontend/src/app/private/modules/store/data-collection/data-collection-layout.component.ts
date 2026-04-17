@@ -1,45 +1,57 @@
-import { Component, ChangeDetectionStrategy } from '@angular/core';
-import { RouterModule } from '@angular/router';
-import { IconComponent } from '../../../../shared/components/icon/icon.component';
+import { Component, ChangeDetectionStrategy, computed, inject } from '@angular/core';
+import { RouterModule, Router, NavigationEnd } from '@angular/router';
+import { toSignal } from '@angular/core/rxjs-interop';
+import { filter, map, startWith } from 'rxjs/operators';
+import { ScrollableTabsComponent, ScrollableTab } from '../../../../shared/components/scrollable-tabs/scrollable-tabs.component';
 
 @Component({
   selector: 'app-data-collection-layout',
   standalone: true,
-  imports: [RouterModule, IconComponent],
+  imports: [RouterModule, ScrollableTabsComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div>
-      <!-- Tab Navigation -->
-      <div class="border-b px-4 sm:px-6" style="border-color: var(--color-border); background: var(--color-surface)">
-        <nav class="flex gap-1 -mb-px overflow-x-auto">
-          @for (tab of tabs; track tab.route) {
-            <a [routerLink]="tab.route"
-               routerLinkActive="active-tab"
-               class="flex items-center gap-1.5 px-4 py-3 text-sm font-medium border-b-2 border-transparent whitespace-nowrap transition-colors"
-               [style.color]="'var(--color-text-muted)'"
-               [routerLinkActiveOptions]="{ exact: false }">
-              <app-icon [name]="tab.icon" [size]="15"></app-icon>
-              {{ tab.label }}
-            </a>
-          }
-        </nav>
+      <!-- Sticky Tabs Navigation -->
+      <div class="sticky top-0 z-30 backdrop-blur-md shadow-sm" style="background: color-mix(in srgb, var(--color-surface) 85%, transparent); border-bottom: 1px solid var(--color-border)">
+        <app-scrollable-tabs
+          [tabs]="tabs"
+          [activeTab]="activeTabId()"
+          size="sm"
+          ariaLabel="Módulo de Recolección de Datos"
+          (tabChange)="onTabChange($event)"
+        />
       </div>
-
       <!-- Page Content -->
       <router-outlet />
     </div>
   `,
-  styles: [`
-    :host ::ng-deep .active-tab {
-      border-bottom-color: var(--color-primary) !important;
-      color: var(--color-primary) !important;
-    }
-  `],
 })
 export class DataCollectionLayoutComponent {
-  tabs = [
-    { label: 'Campos', icon: 'database', route: './fields' },
-    { label: 'Plantillas', icon: 'layout-template', route: './templates' },
-    { label: 'Formularios', icon: 'inbox', route: './submissions' },
+  private readonly router = inject(Router);
+
+  tabs: ScrollableTab[] = [
+    { id: 'fields', label: 'Campos', icon: 'database' },
+    { id: 'templates', label: 'Plantillas', icon: 'layout-template' },
+    { id: 'submissions', label: 'Formularios', icon: 'inbox' },
   ];
+
+  private readonly url = toSignal(
+    this.router.events.pipe(
+      filter((e) => e instanceof NavigationEnd),
+      map((e) => (e as NavigationEnd).urlAfterRedirects),
+      startWith(this.router.url),
+    ),
+    { initialValue: this.router.url },
+  );
+
+  readonly activeTabId = computed(() => {
+    const url = this.url();
+    if (url.includes('templates')) return 'templates';
+    if (url.includes('submissions')) return 'submissions';
+    return 'fields';
+  });
+
+  onTabChange(tabId: string): void {
+    this.router.navigate(['/admin/data-collection/' + tabId]);
+  }
 }

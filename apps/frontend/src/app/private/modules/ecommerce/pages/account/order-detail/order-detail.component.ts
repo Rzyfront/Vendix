@@ -1,15 +1,15 @@
-import {
-  Component,
+import {Component,
   OnInit,
   OnDestroy,
   inject,
-  ChangeDetectionStrategy,
-  ChangeDetectorRef,
-} from '@angular/core';
+  signal,
+  computed,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { RouterModule, ActivatedRoute } from '@angular/router';
-import { Subject } from 'rxjs';
-import { takeUntil } from 'rxjs/operators';
+
+
 import { AccountService, OrderDetail } from '../../../services/account.service';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
@@ -19,22 +19,62 @@ import { ToastService } from '../../../../../../shared/components/toast/toast.se
   selector: 'app-order-detail',
   standalone: true,
   imports: [CommonModule, RouterModule, IconComponent, CurrencyPipe],
-  changeDetection: ChangeDetectionStrategy.OnPush,
   templateUrl: './order-detail.component.html',
-  styleUrls: ['./order-detail.component.scss'],
-})
+  styleUrls: ['./order-detail.component.scss'] })
 export class OrderDetailComponent implements OnInit, OnDestroy {
-  order: OrderDetail | null = null;
-  is_loading = true;
-  is_new_order = false;
+  private destroyRef = inject(DestroyRef);
+  readonly order = signal<OrderDetail | null>(null);
+  readonly is_loading = signal(true);
+  readonly is_new_order = signal(false);
 
   // Wompi callback state
-  verifyingWompiPayment = false;
+  readonly verifyingWompiPayment = signal(false);
   wompiPaymentVerified = false;
+
+  readonly totalItems = computed(() => {
+    const o = this.order();
+    if (!o) return 0;
+    return o.items.reduce((sum, item) => sum + item.quantity, 0);
+  });
+
+  readonly hasOnlyServices = computed(() => {
+    const o = this.order();
+    if (!o) return false;
+    return o.items.every((item) => item.product_type === 'service');
+  });
+
+  readonly hasServiceItems = computed(() => {
+    const o = this.order();
+    if (!o) return false;
+    return o.items.some((item) => item.product_type === 'service');
+  });
+
+  readonly hasPhysicalItems = computed(() => {
+    const o = this.order();
+    if (!o) return false;
+    return o.items.some((item) => item.product_type !== 'service');
+  });
+
+  readonly postPurchaseMessage = computed(() => {
+    const o = this.order();
+    if (o?.bookings?.length) {
+      const count = o.bookings.length;
+      const suffix = count === 1 ? 'reserva confirmada' : 'reservas confirmadas';
+      if (this.hasPhysicalItems()) {
+        return `Tienes ${count} ${suffix}. Los productos serán enviados a tu dirección.`;
+      }
+      return `Tienes ${count} ${suffix}. Revisa los detalles abajo.`;
+    }
+    if (this.hasOnlyServices()) {
+      return 'Recibirás instrucciones para tu servicio por correo electrónico.';
+    }
+    if (this.hasServiceItems() && this.hasPhysicalItems()) {
+      return 'Los productos serán enviados y recibirás instrucciones para los servicios.';
+    }
+    return 'Te notificaremos cuando esté en camino.';
+  });
   private wompiPollTimer: ReturnType<typeof setInterval> | null = null;
-  private destroy$ = new Subject<void>();
-  private toast = inject(ToastService);
-  private cdr = inject(ChangeDetectorRef);
+private toast = inject(ToastService);
 
   constructor(
     private account_service: AccountService,
@@ -43,14 +83,14 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
 
   ngOnInit(): void {
     const order_id = this.route.snapshot.params['id'];
-    this.is_new_order = this.route.snapshot.queryParams['success'] === 'true';
+    this.is_new_order.set(this.route.snapshot.queryParams['success'] === 'true');
 
     // Handle Wompi payment callback
     this.route.queryParams
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((params) => {
         if (params['wompi_callback'] === 'true' && !this.wompiPaymentVerified) {
-          this.verifyingWompiPayment = true;
+          this.verifyingWompiPayment.set(true);
           this.pollOrderPaymentStatus(+order_id);
         }
       });
@@ -59,9 +99,8 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
   }
 
   ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-    if (this.wompiPollTimer) {
+
+if (this.wompiPollTimer) {
       clearInterval(this.wompiPollTimer);
     }
   }
@@ -80,16 +119,17 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
       this.account_service.getOrderDetail(orderId).subscribe({
         next: (response) => {
           if (response.success) {
-            this.order = response.data;
+            this.order.set(response.data);
+            const currentOrder = response.data;
 
             // Check if any payment is no longer pending
-            const hasCompletedPayment = this.order.payments?.some(
+            const hasCompletedPayment = currentOrder.payments?.some(
               (p: any) =>
                 p.state === 'completed' ||
                 p.state === 'paid' ||
                 p.state === 'succeeded',
             );
-            const hasFailedPayment = this.order.payments?.some(
+            const hasFailedPayment = currentOrder.payments?.some(
               (p: any) => p.state === 'failed' || p.state === 'declined',
             );
 
@@ -98,10 +138,10 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
               hasFailedPayment ||
               attempts >= maxAttempts
             ) {
-              this.verifyingWompiPayment = false;
+              this.verifyingWompiPayment.set(false);
               this.wompiPaymentVerified = true;
               if (hasCompletedPayment) {
-                this.is_new_order = true;
+                this.is_new_order.set(true);
               }
               if (
                 !hasCompletedPayment &&
@@ -118,12 +158,11 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
                 this.wompiPollTimer = null;
               }
             }
-            this.cdr.markForCheck();
           }
         },
         error: () => {
           if (attempts >= maxAttempts) {
-            this.verifyingWompiPayment = false;
+            this.verifyingWompiPayment.set(false);
             this.toast.warning(
               'No pudimos verificar el estado del pago. Recarga la página en unos minutos para ver la actualización.',
               'Verificación interrumpida',
@@ -132,33 +171,23 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
               clearInterval(this.wompiPollTimer);
               this.wompiPollTimer = null;
             }
-            this.cdr.markForCheck();
           }
-        },
-      });
+        } });
     }, 5000); // Poll every 5 seconds
   }
 
   loadOrder(order_id: number): void {
-    this.is_loading = true;
+    this.is_loading.set(true);
     this.account_service.getOrderDetail(order_id).subscribe({
       next: (response) => {
         if (response.success) {
-          this.order = response.data;
+          this.order.set(response.data);
         }
-        this.is_loading = false;
-        this.cdr.markForCheck();
+        this.is_loading.set(false);
       },
       error: () => {
-        this.is_loading = false;
-        this.cdr.markForCheck();
-      },
-    });
-  }
-
-  get totalItems(): number {
-    if (!this.order) return 0;
-    return this.order.items.reduce((sum, item) => sum + item.quantity, 0);
+        this.is_loading.set(false);
+      } });
   }
 
   getVariantLabel(item: any): string {
@@ -180,8 +209,7 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
       shipped: 'Enviado',
       delivered: 'Entregado',
       completed: 'Completado',
-      cancelled: 'Cancelado',
-    };
+      cancelled: 'Cancelado' };
     return labels[state] || state;
   }
 
@@ -193,8 +221,7 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
       shipped: 'info',
       delivered: 'success',
       completed: 'success',
-      cancelled: 'error',
-    };
+      cancelled: 'error' };
     return classes[state] || 'default';
   }
 
@@ -206,8 +233,7 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
       shipped: 'truck',
       delivered: 'package-check',
       completed: 'check-circle',
-      cancelled: 'circle-x',
-    };
+      cancelled: 'circle-x' };
     return icons[state] || 'circle';
   }
 
@@ -217,8 +243,7 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
       cash: 'Efectivo',
       card: 'Tarjeta',
       transfer: 'Transferencia',
-      cash_on_delivery: 'Contra entrega',
-    };
+      cash_on_delivery: 'Contra entrega' };
     return labels[method] || method;
   }
 
@@ -228,46 +253,8 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
       cash: 'banknote',
       card: 'credit-card',
       transfer: 'send',
-      cash_on_delivery: 'coins',
-    };
+      cash_on_delivery: 'coins' };
     return icons[method] || 'credit-card';
-  }
-
-  /** Whether the order contains only service items */
-  get hasOnlyServices(): boolean {
-    if (!this.order) return false;
-    return this.order.items.every((item) => item.product_type === 'service');
-  }
-
-  /** Whether the order contains at least one service item */
-  get hasServiceItems(): boolean {
-    if (!this.order) return false;
-    return this.order.items.some((item) => item.product_type === 'service');
-  }
-
-  /** Whether the order contains at least one physical item */
-  get hasPhysicalItems(): boolean {
-    if (!this.order) return false;
-    return this.order.items.some((item) => item.product_type !== 'service');
-  }
-
-  /** Returns the appropriate post-purchase message */
-  get postPurchaseMessage(): string {
-    if (this.order?.bookings?.length) {
-      const count = this.order.bookings.length;
-      const suffix = count === 1 ? 'reserva confirmada' : 'reservas confirmadas';
-      if (this.hasPhysicalItems) {
-        return `Tienes ${count} ${suffix}. Los productos serán enviados a tu dirección.`;
-      }
-      return `Tienes ${count} ${suffix}. Revisa los detalles abajo.`;
-    }
-    if (this.hasOnlyServices) {
-      return 'Recibirás instrucciones para tu servicio por correo electrónico.';
-    }
-    if (this.hasServiceItems && this.hasPhysicalItems) {
-      return 'Los productos serán enviados y recibirás instrucciones para los servicios.';
-    }
-    return 'Te notificaremos cuando esté en camino.';
   }
 
   /** Returns the item type label for badge display */
@@ -286,8 +273,7 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
       confirmed: 'Confirmada',
       completed: 'Completada',
       cancelled: 'Cancelada',
-      no_show: 'No asistió',
-    };
+      no_show: 'No asistió' };
     return labels[status] || status;
   }
 
@@ -297,12 +283,11 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
       confirmed: 'info',
       completed: 'success',
       cancelled: 'error',
-      no_show: 'error',
-    };
+      no_show: 'error' };
     return classes[status] || 'default';
   }
 
   getInvoiceUrl(): string {
-    return this.order?.invoice_url || '#';
+    return this.order()?.invoice_url || '#';
   }
 }

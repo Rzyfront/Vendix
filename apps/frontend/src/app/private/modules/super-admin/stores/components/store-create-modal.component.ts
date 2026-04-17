@@ -1,5 +1,5 @@
 import { Component, inject, input, output } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 
@@ -18,13 +18,12 @@ import {
   selector: 'app-store-create-modal',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     ModalComponent,
     InputComponent,
-    ButtonComponent,
-  ],
+    ButtonComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen()"

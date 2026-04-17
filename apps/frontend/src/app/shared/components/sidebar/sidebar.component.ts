@@ -1,18 +1,16 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
+  input,
+  output,
+  signal,
+  effect,
+  inject,
+  DestroyRef,
   Renderer2,
-  OnDestroy,
   ElementRef,
   AfterViewInit,
-  ChangeDetectorRef,
-  OnChanges,
-  SimpleChanges,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { RouterModule, Router } from '@angular/router'; // Updated import
+import { RouterModule, Router } from '@angular/router';
 import { IconComponent } from '../icon/icon.component';
 import { TooltipComponent } from '../tooltip/tooltip.component';
 
@@ -31,55 +29,58 @@ export interface MenuItem {
 @Component({
   selector: 'app-sidebar',
   standalone: true,
-  imports: [CommonModule, RouterModule, IconComponent, TooltipComponent],
+  imports: [RouterModule, IconComponent, TooltipComponent],
   template: `
     <!-- Mobile Backdrop -->
-    <div
-      *ngIf="isMobile && isMobileOpen"
-      class="sidebar-backdrop"
-      [class.sidebar-backdrop-open]="isMobileOpen"
-      (click)="closeMobileSidebar()"
-      aria-hidden="true"
-    ></div>
+    @if (isMobile() && isMobileOpen()) {
+      <div
+        class="sidebar-backdrop"
+        [class.sidebar-backdrop-open]="isMobileOpen()"
+        (click)="closeMobileSidebar()"
+        aria-hidden="true"
+      ></div>
+    }
 
     <!-- Sidebar -->
     <aside
       [class]="getSidebarClasses()"
-      [attr.aria-hidden]="isMobile && !isMobileOpen ? 'true' : null"
+      [attr.aria-hidden]="isMobile() && !isMobileOpen() ? 'true' : null"
       [attr.aria-label]="
-        isMobile ? 'Mobile navigation sidebar' : 'Desktop navigation sidebar'
+        isMobile() ? 'Mobile navigation sidebar' : 'Desktop navigation sidebar'
       "
-      [attr.inert]="isMobile && !isMobileOpen ? 'true' : null"
+      [attr.inert]="isMobile() && !isMobileOpen() ? 'true' : null"
       role="navigation"
     >
       <!-- Mobile Close Button -->
-      <button
-        *ngIf="isMobile"
-        class="sidebar-mobile-close"
-        (click)="closeMobileSidebar()"
-        aria-label="Close sidebar"
-      >
-        <app-icon name="x" [size]="16"></app-icon>
-      </button>
+      @if (isMobile()) {
+        <button
+          class="sidebar-mobile-close"
+          (click)="closeMobileSidebar()"
+          aria-label="Close sidebar"
+        >
+          <app-icon name="x" [size]="16"></app-icon>
+        </button>
+      }
 
       <!-- Logo Section -->
       <div class="sidebar-header">
-        <div class="logo-container" [class.logo-placeholder]="!logoUrl">
-          <img
-            *ngIf="logoUrl"
-            [src]="logoUrl"
-            alt="Store logo"
-            class="w-full h-full object-contain"
-          />
-          <app-icon
-            *ngIf="!logoUrl"
-            name="store"
-            [size]="20"
-            class="text-primary-foreground"
-          ></app-icon>
+        <div class="logo-container" [class.logo-placeholder]="!logoUrl()">
+          @if (logoUrl()) {
+            <img
+              [src]="logoUrl()"
+              alt="Store logo"
+              class="w-full h-full object-contain"
+            />
+          } @else {
+            <app-icon
+              name="store"
+              [size]="20"
+              class="text-primary-foreground"
+            ></app-icon>
+          }
         </div>
         <div class="logo-text-container">
-          <h1 class="org-name">{{ title }}</h1>
+          <h1 class="org-name">{{ title() }}</h1>
           <div class="vlink-container">
             <a
               [href]="vlinkUrl"
@@ -87,7 +88,7 @@ export interface MenuItem {
               rel="noopener noreferrer"
               class="vlink"
             >
-              <span class="truncate">{{ vlink }}</span>
+              <span class="truncate">{{ vlink() }}</span>
               <app-icon name="link-2" [size]="12"></app-icon>
             </a>
             <app-tooltip
@@ -95,9 +96,9 @@ export interface MenuItem {
               position="right"
               color="primary"
               size="sm"
-              [visible]="showPromoTooltip"
+              [visible]="showPromoTooltip()"
             >
-              {{ showPromoTooltip ? 'Descubre tu propio entorno personalizado' : vlink + ' commerce' }}
+              {{ showPromoTooltip() ? 'Descubre tu propio entorno personalizado' : vlink() + ' commerce' }}
             </app-tooltip>
           </div>
         </div>
@@ -106,98 +107,115 @@ export interface MenuItem {
       <!-- Menu Items -->
       <nav class="menu-wrapper">
         <ul class="menu-list">
-          <li *ngFor="let item of menuItems">
-            <ng-container *ngIf="!item.children">
-              <a
-                [routerLink]="item.route"
-                [queryParams]="item.queryParams || null"
-                routerLinkActive="active"
-                #rla="routerLinkActive"
-                [class.active]="rla.isActive"
-                class="menu-item"
-                (click)="onMenuItemClick()"
-              >
-                <app-icon
-                  [name]="item.icon"
-                  [size]="item.iconSize || 18"
-                  class="flex-shrink-0"
-                ></app-icon>
-                <span class="menu-text">{{ item.label }}</span>
-                <span *ngIf="item.badge" class="badge">{{ item.badge }}</span>
-              </a>
-            </ng-container>
-
-            <ng-container *ngIf="item.children">
-              <button (click)="toggleSubmenu(item.label)" class="menu-item">
-                <app-icon
-                  [name]="item.icon"
-                  [size]="item.iconSize || 18"
-                  class="flex-shrink-0"
-                ></app-icon>
-                <span class="menu-text">{{ item.label }}</span>
-                <app-icon
-                  name="chevron-right"
-                  [size]="14"
-                  class="chevron"
-                  [class.rotated]="isSubmenuOpen(item.label)"
-                ></app-icon>
-              </button>
-              <ul class="submenu" [class.open]="isSubmenuOpen(item.label)">
-                <li *ngFor="let child of item.children" class="submenu-item">
-                  <ng-container *ngIf="child.action">
-                    <button
-                      (click)="child.action(child); onMenuItemClick()"
-                      class="submenu-item-button"
-                    >
-                      <span>{{ child.label }}</span>
-                    </button>
-                  </ng-container>
-                  <ng-container *ngIf="!child.action">
-                    <a
-                      [routerLink]="child.route"
-                      [queryParams]="child.queryParams || null"
-                      routerLinkActive="active"
-                      #rlaChild="routerLinkActive"
-                      [class.active]="rlaChild.isActive"
-                      (click)="onMenuItemClick()"
-                    >
-                      <span>{{ child.label }}</span>
-                    </a>
-                  </ng-container>
-                </li>
-              </ul>
-            </ng-container>
-          </li>
+          @for (item of menuItems(); track item.label) {
+            <li>
+              @if (!item.children) {
+                <a
+                  [routerLink]="item.route"
+                  [queryParams]="item.queryParams || null"
+                  routerLinkActive="active"
+                  #rla="routerLinkActive"
+                  [class.active]="rla.isActive"
+                  class="menu-item"
+                  (click)="onMenuItemClick()"
+                >
+                  <app-icon
+                    [name]="item.icon"
+                    [size]="item.iconSize || 18"
+                    class="flex-shrink-0"
+                  ></app-icon>
+                  <span class="menu-text">{{ item.label }}</span>
+                  @if (item.badge) {
+                    <span class="badge">{{ item.badge }}</span>
+                  }
+                </a>
+              } @else {
+                <button (click)="toggleSubmenu(item.label)" class="menu-item">
+                  <app-icon
+                    [name]="item.icon"
+                    [size]="item.iconSize || 18"
+                    class="flex-shrink-0"
+                  ></app-icon>
+                  <span class="menu-text">{{ item.label }}</span>
+                  <app-icon
+                    name="chevron-right"
+                    [size]="14"
+                    class="chevron"
+                    [class.rotated]="isSubmenuOpen(item.label)"
+                  ></app-icon>
+                </button>
+                <ul class="submenu" [class.open]="isSubmenuOpen(item.label)">
+                  @for (child of item.children; track child.label) {
+                    <li class="submenu-item">
+                      @if (child.action) {
+                        <button
+                          (click)="child.action(child); onMenuItemClick()"
+                          class="submenu-item-button"
+                        >
+                          <span>{{ child.label }}</span>
+                        </button>
+                      } @else {
+                        <a
+                          [routerLink]="child.route"
+                          [queryParams]="child.queryParams || null"
+                          routerLinkActive="active"
+                          #rlaChild="routerLinkActive"
+                          [class.active]="rlaChild.isActive"
+                          (click)="onMenuItemClick()"
+                        >
+                          <span>{{ child.label }}</span>
+                        </a>
+                      }
+                    </li>
+                  }
+                </ul>
+              }
+            </li>
+          }
         </ul>
       </nav>
 
       <!-- Footer Section -->
-      <div *ngIf="showFooter" class="sidebar-footer">
-        <ng-content select="[slot=footer]"></ng-content>
-      </div>
+      @if (showFooter()) {
+        <div class="sidebar-footer">
+          <ng-content select="[slot=footer]"></ng-content>
+        </div>
+      }
     </aside>
   `,
   styleUrls: ['./sidebar.component.scss'],
 })
-export class SidebarComponent implements OnDestroy, AfterViewInit, OnChanges {
-  @Input() menuItems: MenuItem[] = [];
-  @Input() title: string = 'Vendix Corp';
-  @Input() vlink: string = 'vlink-slug';
-  @Input() domainHostname: string | null = null;
-  @Input() logoUrl: string | null = null;
-  @Input() collapsed: boolean = false;
-  @Input() isOpen: boolean = false;
-  @Input() showFooter: boolean = false;
-  @Input() isVendixDomain: boolean = false;
-  @Input() shimmer: boolean = false;
-  @Output() expandSidebar = new EventEmitter<void>();
+export class SidebarComponent implements AfterViewInit {
+  // --- Inputs ---
+  readonly menuItems = input<MenuItem[]>([]);
+  readonly title = input<string>('Vendix Corp');
+  readonly vlink = input<string>('vlink-slug');
+  readonly domainHostname = input<string | null>(null);
+  readonly logoUrl = input<string | null>(null);
+  readonly collapsed = input<boolean>(false);
+  readonly isOpen = input<boolean>(false);
+  readonly showFooter = input<boolean>(false);
+  readonly isVendixDomain = input<boolean>(false);
+  readonly shimmer = input<boolean>(false);
 
-  isMobile = false;
-  isMobileOpen = false;
-  showPromoTooltip = false;
+  // --- Outputs ---
+  readonly expandSidebar = output<void>();
+
+  // --- Dependencies ---
+  private readonly renderer = inject(Renderer2);
+  private readonly elementRef = inject(ElementRef);
+  private readonly router = inject(Router);
+  private readonly destroyRef = inject(DestroyRef);
+
+  // --- State signals ---
+  readonly isMobile = signal(false);
+  readonly isMobileOpen = signal(false);
+  readonly showPromoTooltip = signal(false);
+
+  // --- Private state ---
   private promoTooltipTimeout: any;
   private promoTooltipHideTimeout: any;
-  private openSubmenus: Set<string> = new Set();
+  private readonly openSubmenus = signal<Set<string>>(new Set());
   private resizeListener: () => void;
   private documentClickListener?: () => void;
   private keydownListener?: () => void;
@@ -205,66 +223,62 @@ export class SidebarComponent implements OnDestroy, AfterViewInit, OnChanges {
 
   // Getter para construir la URL del vlink
   get vlinkUrl(): string {
-    if (this.domainHostname) {
+    const hostname = this.domainHostname();
+    if (hostname) {
       // Si tenemos un hostname de dominio, construir la URL completa
       const protocol = window.location.protocol; // http: o https:
-      return `${protocol}//${this.domainHostname}`;
+      return `${protocol}//${hostname}`;
     }
     // Fallback a la ruta relativa original
-    return '/' + this.vlink;
+    return '/' + this.vlink();
   }
 
-  constructor(
-    private renderer: Renderer2,
-    private elementRef: ElementRef,
-    private cdr: ChangeDetectorRef,
-    private router: Router, // Injected Router
-  ) {
+  constructor() {
     // Initialize mobile detection
     this.checkMobile();
     this.resizeListener = this.renderer.listen('window', 'resize', () => {
       this.checkMobile();
     });
+
+    // React to collapsed input changes: clear open submenus when collapsed
+    effect(() => {
+      if (this.collapsed()) {
+        this.openSubmenus.set(new Set());
+      }
+    });
+
+    // Cleanup on destroy
+    this.destroyRef.onDestroy(() => {
+      if (this.resizeListener) {
+        this.resizeListener();
+      }
+      if (this.promoTooltipTimeout) {
+        clearTimeout(this.promoTooltipTimeout);
+      }
+      if (this.promoTooltipHideTimeout) {
+        clearTimeout(this.promoTooltipHideTimeout);
+      }
+      this.removeEventListeners();
+      this.removeBodyScrollLock();
+    });
   }
 
-  ngAfterViewInit() {
+  ngAfterViewInit(): void {
     // Setup focusable elements for accessibility
     this.updateFocusableElements();
 
     // Auto-show promotional tooltip for Vendix domains
-    if (this.isVendixDomain) {
+    if (this.isVendixDomain()) {
       this.showPromoTooltipOnMount();
     }
   }
 
-  ngOnChanges(changes: SimpleChanges) {
-    if (changes['collapsed'] && changes['collapsed'].currentValue === true) {
-      this.openSubmenus.clear();
-    }
-  }
-
-  ngOnDestroy() {
-    if (this.resizeListener) {
-      this.resizeListener();
-    }
-    if (this.promoTooltipTimeout) {
-      clearTimeout(this.promoTooltipTimeout);
-    }
-    if (this.promoTooltipHideTimeout) {
-      clearTimeout(this.promoTooltipHideTimeout);
-    }
-    this.removeEventListeners();
-    this.removeBodyScrollLock();
-  }
-
   private showPromoTooltipOnMount(): void {
     this.promoTooltipTimeout = setTimeout(() => {
-      this.showPromoTooltip = true;
-      this.cdr.detectChanges();
+      this.showPromoTooltip.set(true);
 
       this.promoTooltipHideTimeout = setTimeout(() => {
-        this.showPromoTooltip = false;
-        this.cdr.detectChanges();
+        this.showPromoTooltip.set(false);
       }, 5000);
     }, 200);
   }
@@ -299,12 +313,12 @@ export class SidebarComponent implements OnDestroy, AfterViewInit, OnChanges {
     ) as HTMLElement[];
   }
 
-  private checkMobile() {
-    const wasMobile = this.isMobile;
-    this.isMobile = window.innerWidth < 768;
+  private checkMobile(): void {
+    const wasMobile = this.isMobile();
+    this.isMobile.set(window.innerWidth < 768);
 
     // Close mobile sidebar if switching from mobile to desktop
-    if (wasMobile && !this.isMobile && this.isMobileOpen) {
+    if (wasMobile && !this.isMobile() && this.isMobileOpen()) {
       this.closeMobileSidebar();
     }
   }
@@ -312,17 +326,17 @@ export class SidebarComponent implements OnDestroy, AfterViewInit, OnChanges {
   getSidebarClasses(): string {
     const classes = ['sidebar'];
 
-    if (this.collapsed) {
+    if (this.collapsed()) {
       classes.push('collapsed');
     }
 
-    if (this.shimmer) {
+    if (this.shimmer()) {
       classes.push('shimmer-active');
     }
 
-    if (this.isMobile) {
+    if (this.isMobile()) {
       classes.push('sidebar-mobile');
-      if (this.isMobileOpen) {
+      if (this.isMobileOpen()) {
         classes.push('sidebar-mobile-open');
       }
     }
@@ -330,21 +344,17 @@ export class SidebarComponent implements OnDestroy, AfterViewInit, OnChanges {
     return classes.join(' ');
   }
 
-  toggleSidebar() {
-    if (this.isMobile) {
-      this.isMobileOpen ? this.closeMobileSidebar() : this.openMobileSidebar();
+  toggleSidebarState(): void {
+    if (this.isMobile()) {
+      this.isMobileOpen() ? this.closeMobileSidebar() : this.openMobileSidebar();
     }
     // For desktop, the collapsed state is controlled by the parent
   }
 
-  openMobileSidebar() {
-    if (!this.isMobile) return;
+  openMobileSidebar(): void {
+    if (!this.isMobile()) return;
 
-    this.isMobileOpen = true;
-
-    // Forzar detección de cambios de Angular
-    this.cdr.detectChanges();
-
+    this.isMobileOpen.set(true);
     this.addBodyScrollLock();
 
     // Delay setup of event listeners to avoid immediate triggering from event bubbling
@@ -361,10 +371,10 @@ export class SidebarComponent implements OnDestroy, AfterViewInit, OnChanges {
     }, 100);
   }
 
-  closeMobileSidebar() {
-    if (!this.isMobileOpen) return;
+  closeMobileSidebar(): void {
+    if (!this.isMobileOpen()) return;
 
-    this.isMobileOpen = false;
+    this.isMobileOpen.set(false);
     this.removeBodyScrollLock();
     this.removeEventListeners();
 
@@ -398,18 +408,18 @@ export class SidebarComponent implements OnDestroy, AfterViewInit, OnChanges {
     );
   }
 
-  private onDocumentClick(event: MouseEvent) {
+  private onDocumentClick(event: MouseEvent): void {
     const sidebar = this.elementRef.nativeElement.querySelector('.sidebar');
     const target = event.target as HTMLElement;
 
     // Close if clicking outside the sidebar
-    if (sidebar && !sidebar.contains(target) && this.isMobileOpen) {
+    if (sidebar && !sidebar.contains(target) && this.isMobileOpen()) {
       this.closeMobileSidebar();
     }
   }
 
-  private onKeydown(event: KeyboardEvent) {
-    if (!this.isMobileOpen) return;
+  private onKeydown(event: KeyboardEvent): void {
+    if (!this.isMobileOpen()) return;
 
     switch (event.key) {
       case 'Escape':
@@ -452,29 +462,31 @@ export class SidebarComponent implements OnDestroy, AfterViewInit, OnChanges {
     this.renderer.removeClass(document.body, 'sidebar-mobile-open');
   }
 
-  onMenuItemClick() {
+  onMenuItemClick(): void {
     // Close mobile sidebar when menu item is clicked
-    if (this.isMobile) {
+    if (this.isMobile()) {
       setTimeout(() => {
         this.closeMobileSidebar();
       }, 150); // Small delay to allow navigation to start
     }
   }
 
-  toggleSubmenu(menuLabel: string) {
+  toggleSubmenu(menuLabel: string): void {
     // Auto-expand if collapsed and has children (PC only)
-    if (this.collapsed && !this.isMobile) {
+    if (this.collapsed() && !this.isMobile()) {
       this.expandSidebar.emit();
       // We want to open this submenu after expansion, so we add it.
       // The exclusive logic below will handle clearing others.
     }
 
-    if (this.openSubmenus.has(menuLabel)) {
-      this.openSubmenus.delete(menuLabel);
+    const current = this.openSubmenus();
+    if (current.has(menuLabel)) {
+      const next = new Set(current);
+      next.delete(menuLabel);
+      this.openSubmenus.set(next);
     } else {
       // Exclusive Accordion: Close all other submenus
-      this.openSubmenus.clear();
-      this.openSubmenus.add(menuLabel);
+      this.openSubmenus.set(new Set([menuLabel]));
 
       // Auto-navigate to first child with valid route
       this.navigateToFirstChild(menuLabel);
@@ -483,7 +495,7 @@ export class SidebarComponent implements OnDestroy, AfterViewInit, OnChanges {
 
   private navigateToFirstChild(menuLabel: string): void {
     // Find the menu item by label
-    const menuItem = this.menuItems.find((item) => item.label === menuLabel);
+    const menuItem = this.menuItems().find((item) => item.label === menuLabel);
 
     if (!menuItem?.children?.length) {
       return;
@@ -500,6 +512,6 @@ export class SidebarComponent implements OnDestroy, AfterViewInit, OnChanges {
   }
 
   isSubmenuOpen(menuLabel: string): boolean {
-    return this.openSubmenus.has(menuLabel);
+    return this.openSubmenus().has(menuLabel);
   }
 }

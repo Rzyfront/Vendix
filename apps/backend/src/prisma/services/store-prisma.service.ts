@@ -177,7 +177,6 @@ export class StorePrismaService extends BasePrismaService {
       'data_collection_sections', // Relational
       'data_collection_items', // Relational
       'data_collection_template_products', // Relational
-      'data_collection_responses', // Relational
       'booking_reminder_logs', // Relational
     ];
 
@@ -320,7 +319,6 @@ export class StorePrismaService extends BasePrismaService {
       data_collection_sections: { template: { store_id: context.store_id } },
       data_collection_items: { section: { template: { store_id: context.store_id } } },
       data_collection_template_products: { template: { store_id: context.store_id } },
-      data_collection_responses: { submission: { store_id: context.store_id } },
       booking_reminder_logs: { booking: { store_id: context.store_id } },
     };
 
@@ -1010,10 +1008,6 @@ export class StorePrismaService extends BasePrismaService {
 
   get data_collection_submissions() {
     return this.scoped_client.data_collection_submissions;
-  }
-
-  get data_collection_responses() {
-    return this.scoped_client.data_collection_responses;
   }
 
   get data_collection_tabs() {

@@ -1,8 +1,7 @@
-import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject, signal, DestroyRef } from '@angular/core';
+import { DecimalPipe, DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Subject } from 'rxjs';
-import { takeUntil } from 'rxjs/operators';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { AdminReviewsService } from './services/reviews.service';
 import { Review, ReviewStats, ReviewFilters } from './models/review.model';
@@ -28,7 +27,8 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
   selector: 'app-reviews',
   standalone: true,
   imports: [
-    CommonModule,
+    DecimalPipe,
+    DatePipe,
     FormsModule,
     StatsComponent,
     CardComponent,
@@ -337,9 +337,9 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
     `,
   ],
 })
-export class ReviewsComponent implements OnInit, OnDestroy {
+export class ReviewsComponent {
   private reviewsService = inject(AdminReviewsService);
-  private destroy$ = new Subject<void>();
+  private destroyRef = inject(DestroyRef);
 
   // State signals
   reviews = signal<Review[]>([]);
@@ -509,20 +509,15 @@ export class ReviewsComponent implements OnInit, OnDestroy {
     },
   ];
 
-  ngOnInit(): void {
+  constructor() {
     this.loadStats();
     this.loadReviews();
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
   }
 
   loadStats(): void {
     this.reviewsService
       .getStats()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.stats.set(res.data || res);
@@ -535,7 +530,7 @@ export class ReviewsComponent implements OnInit, OnDestroy {
     this.loading.set(true);
     this.reviewsService
       .getAll(this.filters())
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.reviews.set(res.data || []);
@@ -579,7 +574,7 @@ export class ReviewsComponent implements OnInit, OnDestroy {
   onApprove(review: Review): void {
     this.reviewsService
       .approve(review.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.loadReviews();
@@ -593,7 +588,7 @@ export class ReviewsComponent implements OnInit, OnDestroy {
   onReject(review: Review): void {
     this.reviewsService
       .reject(review.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.loadReviews();
@@ -609,7 +604,7 @@ export class ReviewsComponent implements OnInit, OnDestroy {
       return;
     this.reviewsService
       .delete(review.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.loadReviews();
@@ -636,13 +631,13 @@ export class ReviewsComponent implements OnInit, OnDestroy {
 
     this.reviewsService
       .createResponse(review.id, this.responseContent().trim())
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           // Reload the detail
           this.reviewsService
             .getOne(review.id)
-            .pipe(takeUntil(this.destroy$))
+            .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe({
               next: (res) => {
                 this.selectedReview.set(res.data || res);
@@ -659,12 +654,12 @@ export class ReviewsComponent implements OnInit, OnDestroy {
     if (!confirm('\u00bfEliminar la respuesta?')) return;
     this.reviewsService
       .deleteResponse(reviewId)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.reviewsService
             .getOne(reviewId)
-            .pipe(takeUntil(this.destroy$))
+            .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe({
               next: (res) => this.selectedReview.set(res.data || res),
             });

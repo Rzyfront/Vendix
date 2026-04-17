@@ -1,16 +1,12 @@
-import {
-  Component,
-  Input,
-  Output,
-  EventEmitter,
-  OnInit,
-  OnChanges,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, OnInit, OnChanges, input, output } from '@angular/core';
+
 import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
 import { ToggleComponent } from '../../../../../../../shared/components/toggle/toggle.component';
-import { SelectorComponent, SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
+import {
+  SelectorComponent,
+  SelectorOption,
+} from '../../../../../../../shared/components/selector/selector.component';
 
 export interface InventorySettings {
   low_stock_threshold: number;
@@ -26,13 +22,13 @@ import { LucideAngularModule } from 'lucide-angular';
 @Component({
   selector: 'app-inventory-settings-form',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, InputComponent, SelectorComponent],
+  imports: [ReactiveFormsModule, InputComponent, SelectorComponent],
   templateUrl: './inventory-settings-form.component.html',
   styleUrls: ['./inventory-settings-form.component.scss'],
 })
 export class InventorySettingsForm implements OnInit, OnChanges {
-  @Input() settings!: InventorySettings;
-  @Output() settingsChange = new EventEmitter<InventorySettings>();
+  readonly settings = input.required<InventorySettings>();
+  readonly settingsChange = output<InventorySettings>();
 
   form: FormGroup = new FormGroup({
     low_stock_threshold: new FormControl(10),
@@ -84,8 +80,9 @@ export class InventorySettingsForm implements OnInit, OnChanges {
   }
 
   patchForm() {
-    if (this.settings) {
-      this.form.patchValue(this.settings);
+    const currentSettings = this.settings();
+    if (currentSettings) {
+      this.form.patchValue(currentSettings);
     }
   }
 

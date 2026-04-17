@@ -1,16 +1,15 @@
 import {
   Component,
-  OnInit,
   inject,
-  ChangeDetectorRef,
   HostListener,
   DestroyRef,
+  signal,
 } from '@angular/core';
 import { Title } from '@angular/platform-browser';
-import { CommonModule } from '@angular/common';
+import { CurrencyPipe } from '@angular/common';
 import { RouterModule, Router } from '@angular/router';
 import { map } from 'rxjs/operators';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { AuthFacade } from '../../../core/store';
 import { TenantFacade } from '../../../core/store';
 import { CartService } from '../../modules/ecommerce/services/cart.service';
@@ -70,7 +69,6 @@ interface FooterSettings {
   selector: 'app-store-ecommerce-layout',
   standalone: true,
   imports: [
-    CommonModule,
     RouterModule,
     SearchAutocompleteComponent,
     IconComponent,
@@ -79,34 +77,35 @@ interface FooterSettings {
     InfoModalComponent,
     FaqModalComponent,
     ButtonComponent,
+    CurrencyPipe,
   ],
   templateUrl: './store-ecommerce-layout.component.html',
   styleUrls: ['./store-ecommerce-layout.component.scss'],
 })
-export class StoreEcommerceLayoutComponent implements OnInit {
-  store_name = 'Tienda';
-  store_logo: string | null = null;
-  show_user_menu = false;
-  show_mobile_menu = false;
-  is_auth_modal_open = false;
-  auth_modal_mode: 'login' | 'register' = 'login';
+export class StoreEcommerceLayoutComponent {
+  readonly store_name = signal('Tienda');
+  readonly store_logo = signal<string | null>(null);
+  readonly show_user_menu = signal(false);
+  readonly show_mobile_menu = signal(false);
+  readonly is_auth_modal_open = signal(false);
+  readonly auth_modal_mode = signal<'login' | 'register'>('login');
 
   // Footer settings
-  footer_settings: FooterSettings | null = null;
-  show_about_modal = false;
-  show_faq_modal = false;
-  show_shipping_modal = false;
-  show_returns_modal = false;
+  readonly footer_settings = signal<FooterSettings | null>(null);
+  readonly show_about_modal = signal(false);
+  readonly show_faq_modal = signal(false);
+  readonly show_shipping_modal = signal(false);
+  readonly show_returns_modal = signal(false);
 
   // Default links when no footer config exists
-  default_links: FooterLink[] = [
+  readonly default_links: FooterLink[] = [
     { label: 'Productos', url: '/products', is_external: false },
     { label: 'Novedades', url: '/new', is_external: false },
     { label: 'Ofertas', url: '/sale', is_external: false },
   ];
 
   // Current year for copyright
-  current_year = new Date().getFullYear();
+  readonly current_year = new Date().getFullYear();
 
   // Inject dependencies first, then create observables
   private auth_facade = inject(AuthFacade);
@@ -115,23 +114,26 @@ export class StoreEcommerceLayoutComponent implements OnInit {
   private wishlist_service = inject(WishlistService);
   private store_ui_service = inject(StoreUiService);
   private router = inject(Router);
-  private cdr = inject(ChangeDetectorRef);
   private destroy_ref = inject(DestroyRef);
   private title_service = inject(Title); // Inject Title service
 
   // Expose observables for AsyncPipe (after injection)
   is_authenticated$ = this.auth_facade.isAuthenticated$;
+  readonly is_authenticated = toSignal(this.is_authenticated$, { initialValue: false });
   user_name$ = this.auth_facade.user$.pipe(
     map((user) => (user ? `${user.first_name} ${user.last_name}`.trim() : '')),
   );
+  readonly user_name = toSignal(this.user_name$, { initialValue: '' });
   cart_badge$ = this.cart_service.cart$.pipe(
     map((cart) => {
       const count = cart?.item_count || 0;
       return { show: count > 0, count };
     }),
   );
+  readonly cart_badge = toSignal(this.cart_badge$, { initialValue: { show: false, count: 0 } });
   cart$ = this.cart_service.cart$;
-  show_cart_dropdown = false;
+  readonly cart = toSignal(this.cart$, { initialValue: null as any });
+  readonly show_cart_dropdown = signal(false);
 
   // Wishlist badge observable
   wishlist_badge$ = this.wishlist_service.wishlist$.pipe(
@@ -140,49 +142,43 @@ export class StoreEcommerceLayoutComponent implements OnInit {
       count: wishlist?.item_count || 0,
     })),
   );
+  readonly wishlist_badge = toSignal(this.wishlist_badge$, { initialValue: { show: false, count: 0 } });
 
   // Cart animation and tooltip state
-  is_animating = false;
-  show_added_tooltip = false;
+  readonly is_animating = signal(false);
+  readonly show_added_tooltip = signal(false);
   private animation_timeout: any;
   private tooltip_timeout: any;
   private close_timer: any;
 
   // Wishlist animation and tooltip state
-  is_wishlist_animating = false;
-  show_wishlist_added_tooltip = false;
+  readonly is_wishlist_animating = signal(false);
+  readonly show_wishlist_added_tooltip = signal(false);
   private wishlist_animation_timeout: any;
   private wishlist_tooltip_timeout: any;
 
-  ngOnInit(): void {
+  constructor() {
     // Get store info from domain resolution reactively
     this.domain_service.domainConfig$
       .pipe(takeUntilDestroyed(this.destroy_ref))
       .subscribe((domainConfig: any) => {
         if (!domainConfig) return;
 
-        // La configuración está estructurada en customConfig.ecommerce y customConfig.branding
         const customConfig = domainConfig.customConfig || {};
         const ecommerceConfig = customConfig.ecommerce || {};
         const tenantConfig =
           this.domain_service.getCurrentTenantConfig() || ({} as any);
 
-        // Resolver nombre de la tienda
-        this.store_name =
+        const resolvedName =
           domainConfig.store_slug ||
           this.domain_service.getCurrentStore()?.name ||
           'Tienda';
+        this.store_name.set(resolvedName);
 
-        // Update Browser Tab Title
-        if (this.store_name && this.store_name !== 'Tienda') {
-          this.title_service.setTitle(this.store_name);
+        if (resolvedName && resolvedName !== 'Tienda') {
+          this.title_service.setTitle(resolvedName);
         }
 
-        // Resolver Logo con prioridad:
-        // 1. store_logo_url (logo de la tienda, firmado desde el backend)
-        // 2. customConfig.ecommerce.inicio.logo_url (configuración específica del ecommerce)
-        // 3. customConfig.branding.logo_url (configuración de branding)
-        // 4. tenantConfig.branding.logo_url (standardizer backend)
         const storeLogo = domainConfig.store_logo_url;
         const inicioLogo = ecommerceConfig.inicio?.logo_url;
         const brandingLogo =
@@ -190,12 +186,12 @@ export class StoreEcommerceLayoutComponent implements OnInit {
         const tenantLogo =
           tenantConfig.branding?.logo_url || tenantConfig.branding?.logo?.url;
 
-        this.store_logo =
-          storeLogo || inicioLogo || brandingLogo || tenantLogo || null;
+        this.store_logo.set(
+          storeLogo || inicioLogo || brandingLogo || tenantLogo || null,
+        );
 
-        // Load footer settings from ecommerce config
         if (ecommerceConfig.footer) {
-          this.footer_settings = ecommerceConfig.footer;
+          this.footer_settings.set(ecommerceConfig.footer);
         }
       });
 
@@ -203,9 +199,8 @@ export class StoreEcommerceLayoutComponent implements OnInit {
     this.store_ui_service.openAuthModal$
       .pipe(takeUntilDestroyed(this.destroy_ref))
       .subscribe((mode) => {
-        this.auth_modal_mode = mode;
-        this.is_auth_modal_open = true;
-        this.cdr.detectChanges();
+        this.auth_modal_mode.set(mode);
+        this.is_auth_modal_open.set(true);
       });
 
     // Subscribe to cart item added events
@@ -225,78 +220,69 @@ export class StoreEcommerceLayoutComponent implements OnInit {
 
   private triggerCartAnimation(): void {
     // Reset if already playing
-    this.is_animating = false;
-    this.show_added_tooltip = false;
+    this.is_animating.set(false);
+    this.show_added_tooltip.set(false);
     clearTimeout(this.animation_timeout);
     clearTimeout(this.tooltip_timeout);
-    this.cdr.detectChanges(); // Force update to reset classes
 
-    // Trigger animation
     requestAnimationFrame(() => {
-      this.is_animating = true;
-      this.show_added_tooltip = true;
-      this.cdr.detectChanges();
+      this.is_animating.set(true);
+      this.show_added_tooltip.set(true);
 
       // Stop shaking after 500ms
       this.animation_timeout = setTimeout(() => {
-        this.is_animating = false;
-        this.cdr.detectChanges();
+        this.is_animating.set(false);
       }, 500);
 
       // Hide tooltip after 3000ms
       this.tooltip_timeout = setTimeout(() => {
-        this.show_added_tooltip = false;
-        this.cdr.detectChanges();
+        this.show_added_tooltip.set(false);
       }, 3000);
     });
   }
 
   private triggerWishlistAnimation(): void {
     // Reset if already playing
-    this.is_wishlist_animating = false;
-    this.show_wishlist_added_tooltip = false;
+    this.is_wishlist_animating.set(false);
+    this.show_wishlist_added_tooltip.set(false);
     clearTimeout(this.wishlist_animation_timeout);
     clearTimeout(this.wishlist_tooltip_timeout);
-    this.cdr.detectChanges();
 
-    // Trigger animation
     requestAnimationFrame(() => {
-      this.is_wishlist_animating = true;
-      this.show_wishlist_added_tooltip = true;
-      this.cdr.detectChanges();
+      this.is_wishlist_animating.set(true);
+      this.show_wishlist_added_tooltip.set(true);
 
       // Stop shaking after 500ms
       this.wishlist_animation_timeout = setTimeout(() => {
-        this.is_wishlist_animating = false;
-        this.cdr.detectChanges();
+        this.is_wishlist_animating.set(false);
       }, 500);
 
       // Hide tooltip after 3000ms
       this.wishlist_tooltip_timeout = setTimeout(() => {
-        this.show_wishlist_added_tooltip = false;
-        this.cdr.detectChanges();
+        this.show_wishlist_added_tooltip.set(false);
       }, 3000);
     });
   }
 
   toggleUserMenu(): void {
-    this.show_user_menu = !this.show_user_menu;
+    this.show_user_menu.update((v) => !v);
   }
 
   onCartEnter(): void {
     clearTimeout(this.close_timer);
-    this.show_cart_dropdown = true;
+    this.show_cart_dropdown.set(true);
   }
 
   onCartLeave(): void {
+    // Zoneless: setTimeout valido para debounce real (300ms evita parpadeo del dropdown).
+    // La mutacion del signal show_cart_dropdown dispara CD automaticamente.
     this.close_timer = setTimeout(() => {
-      this.show_cart_dropdown = false;
-      this.cdr.detectChanges();
+      this.show_cart_dropdown.set(false);
     }, 300);
   }
 
   toggleMobileMenu(): void {
-    this.show_mobile_menu = !this.show_mobile_menu;
+    this.show_mobile_menu.update((v) => !v);
   }
 
   goToCart(): void {
@@ -309,32 +295,34 @@ export class StoreEcommerceLayoutComponent implements OnInit {
 
   goToAccount(): void {
     this.router.navigate(['/account']);
-    this.show_user_menu = false;
+    this.show_user_menu.set(false);
   }
 
   goToOrders(): void {
     this.router.navigate(['/account/orders']);
-    this.show_user_menu = false;
+    this.show_user_menu.set(false);
   }
 
   logout(): void {
     this.auth_facade.logout({ redirect: false });
-    this.show_user_menu = false;
+    this.show_user_menu.set(false);
     this.router.navigate(['/']);
   }
 
   login(): void {
-    this.auth_modal_mode = 'login';
-    this.is_auth_modal_open = true;
-    this.show_user_menu = false;
-    this.cdr.detectChanges();
+    this.auth_modal_mode.set('login');
+    this.is_auth_modal_open.set(true);
+    this.show_user_menu.set(false);
   }
 
   register(): void {
-    this.auth_modal_mode = 'register';
-    this.is_auth_modal_open = true;
-    this.show_user_menu = false;
-    this.cdr.detectChanges();
+    this.auth_modal_mode.set('register');
+    this.is_auth_modal_open.set(true);
+    this.show_user_menu.set(false);
+  }
+
+  closeAuthModal(): void {
+    this.is_auth_modal_open.set(false);
   }
 
   // Close user menu when clicking outside (same pattern as admin layouts)
@@ -343,19 +331,19 @@ export class StoreEcommerceLayoutComponent implements OnInit {
     const target = event.target as HTMLElement;
     const userMenuContainer = document.querySelector('.user-menu-container');
     if (
-      this.show_user_menu &&
+      this.show_user_menu() &&
       userMenuContainer &&
       !userMenuContainer.contains(target)
     ) {
-      this.show_user_menu = false;
+      this.show_user_menu.set(false);
     }
   }
 
   // Close user menu on Escape key
   @HostListener('document:keydown.escape')
   onEscapeKey(): void {
-    if (this.show_user_menu) {
-      this.show_user_menu = false;
+    if (this.show_user_menu()) {
+      this.show_user_menu.set(false);
     }
   }
 
@@ -363,90 +351,88 @@ export class StoreEcommerceLayoutComponent implements OnInit {
     if (newQuantity === item.quantity) return;
     if (newQuantity <= 0) {
       this.removeCartItem(item);
+      return;
+    }
+    if (this.is_authenticated()) {
+      this.cart_service
+        .updateItem(item.id, newQuantity)
+        .pipe(takeUntilDestroyed(this.destroy_ref))
+        .subscribe();
     } else {
-      const sub = this.is_authenticated$.subscribe((isAuth) => {
-        if (isAuth) {
-          this.cart_service.updateItem(item.id, newQuantity).subscribe();
-        } else {
-          this.cart_service.updateLocalCartItem(
-            item.product_id,
-            newQuantity,
-            item.product_variant_id || undefined,
-          );
-        }
-      });
-      sub.unsubscribe();
+      this.cart_service.updateLocalCartItem(
+        item.product_id,
+        newQuantity,
+        item.product_variant_id || undefined,
+      );
     }
   }
 
   removeCartItem(item: any): void {
-    const sub = this.is_authenticated$.subscribe((isAuth) => {
-      if (isAuth) {
-        this.cart_service.removeItem(item.id).subscribe();
-      } else {
-        this.cart_service.removeFromLocalCart(
-          item.product_id,
-          item.product_variant_id || undefined,
-        );
-      }
-    });
-    sub.unsubscribe();
+    if (this.is_authenticated()) {
+      this.cart_service
+        .removeItem(item.id)
+        .pipe(takeUntilDestroyed(this.destroy_ref))
+        .subscribe();
+    } else {
+      this.cart_service.removeFromLocalCart(
+        item.product_id,
+        item.product_variant_id || undefined,
+      );
+    }
   }
 
   clearCart(): void {
-    const sub = this.is_authenticated$.subscribe((isAuth) => {
-      if (isAuth) {
-        this.cart_service.clearCart().subscribe();
-      } else {
-        this.cart_service.clearLocalCart();
-      }
-    });
-    sub.unsubscribe();
+    if (this.is_authenticated()) {
+      this.cart_service
+        .clearCart()
+        .pipe(takeUntilDestroyed(this.destroy_ref))
+        .subscribe();
+    } else {
+      this.cart_service.clearLocalCart();
+    }
   }
 
   // Footer helper methods
   hasValidSocialLink(platform: 'facebook' | 'instagram' | 'tiktok'): boolean {
-    const account = this.footer_settings?.social?.[platform];
+    const account = this.footer_settings()?.social?.[platform];
     return !!(account?.url && account.url.trim() !== '' && account.url !== '#');
   }
 
   getFooterLinks(): FooterLink[] {
-    return this.footer_settings?.links?.length
-      ? this.footer_settings.links
-      : this.default_links;
+    const settings = this.footer_settings();
+    return settings?.links?.length ? settings.links : this.default_links;
   }
 
   hasAboutUs(): boolean {
+    const settings = this.footer_settings();
     return !!(
-      this.footer_settings?.store_info?.about_us &&
-      this.footer_settings.store_info.about_us.trim() !== ''
+      settings?.store_info?.about_us &&
+      settings.store_info.about_us.trim() !== ''
     );
   }
 
   hasFaq(): boolean {
-    return !!(
-      this.footer_settings?.help?.faq &&
-      this.footer_settings.help.faq.length > 0
-    );
+    const settings = this.footer_settings();
+    return !!(settings?.help?.faq && settings.help.faq.length > 0);
   }
 
   hasShippingInfo(): boolean {
+    const settings = this.footer_settings();
     return !!(
-      this.footer_settings?.help?.shipping_info &&
-      this.footer_settings.help.shipping_info.trim() !== ''
+      settings?.help?.shipping_info &&
+      settings.help.shipping_info.trim() !== ''
     );
   }
 
   hasReturnsInfo(): boolean {
+    const settings = this.footer_settings();
     return !!(
-      this.footer_settings?.help?.returns_info &&
-      this.footer_settings.help.returns_info.trim() !== ''
+      settings?.help?.returns_info &&
+      settings.help.returns_info.trim() !== ''
     );
   }
 
   getTagline(): string {
-    return (
-      this.footer_settings?.store_info?.tagline || 'Tu tienda de confianza'
-    );
+    return this.footer_settings()?.store_info?.tagline || 'Tu tienda de confianza';
   }
 }

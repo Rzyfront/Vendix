@@ -5,6 +5,7 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 import { MetadataValuesService } from '../metadata/metadata-values.service';
 import { AIEngineService } from '../../../ai-engine/ai-engine.service';
+import { resolveEntityId, buildEntityQueries, EntityContext } from './utils/entity-resolver.util';
 import { CreateSubmissionDto } from './dto/create-submission.dto';
 import { FieldResponseDto } from './dto/submit-response.dto';
 import { Observable } from 'rxjs';
@@ -47,7 +48,6 @@ export class SubmissionsService {
         },
       } as any,
     },
-    responses: { include: { field: true } },
     booking: {
       include: {
         product: { select: { id: true, name: true, service_instructions: true } },
@@ -111,38 +111,58 @@ export class SubmissionsService {
       throw new VendixHttpException(ErrorCodes.DCOL_TOKEN_002);
     }
 
-    return submission;
+    return this.populateResponsesFromMetadata(submission);
   }
 
   async saveStepResponses(token: string, stepIndex: number, responses: FieldResponseDto[]) {
     const submission = await this.getByToken(token);
 
+    // Build entity context from submission
+    const entityCtx: EntityContext = {
+      customer_id: submission.customer_id,
+      booking_id: submission.booking_id,
+      order_id: (submission.booking as any)?.order_id ?? null,
+    };
+
+    // Group responses by entity_type for batch writes
+    const byEntity = new Map<string, { entityType: string; entityId: number; values: any[] }>();
+
     for (const resp of responses) {
-      await this.prisma.withoutScope().data_collection_responses.upsert({
-        where: {
-          submission_id_field_id: {
-            submission_id: submission.id,
-            field_id: resp.field_id,
-          },
-        },
-        create: {
-          submission_id: submission.id,
-          field_id: resp.field_id,
-          value_text: resp.value_text,
-          value_number: resp.value_number,
-          value_date: resp.value_date ? new Date(resp.value_date) : undefined,
-          value_bool: resp.value_bool,
-          value_json: resp.value_json ?? undefined,
-        },
-        update: {
-          value_text: resp.value_text,
-          value_number: resp.value_number,
-          value_date: resp.value_date ? new Date(resp.value_date) : undefined,
-          value_bool: resp.value_bool,
-          value_json: resp.value_json ?? undefined,
-          updated_at: new Date(),
-        },
+      // Look up the field to get its entity_type
+      const field = await this.prisma.withoutScope().entity_metadata_fields.findUnique({
+        where: { id: resp.field_id },
+        select: { id: true, entity_type: true },
       });
+      if (!field) continue;
+
+      const entityId = resolveEntityId(field.entity_type, entityCtx);
+      if (!entityId) {
+        this.logger.warn(`Cannot resolve entity for field ${resp.field_id} (${field.entity_type})`);
+        continue;
+      }
+
+      const key = `${field.entity_type}:${entityId}`;
+      if (!byEntity.has(key)) {
+        byEntity.set(key, { entityType: field.entity_type, entityId, values: [] });
+      }
+      byEntity.get(key)!.values.push({
+        field_id: resp.field_id,
+        value_text: resp.value_text,
+        value_number: resp.value_number,
+        value_date: resp.value_date,
+        value_bool: resp.value_bool,
+        value_json: resp.value_json,
+      });
+    }
+
+    // Write to entity_metadata_values
+    for (const [, group] of byEntity) {
+      await this.metadataValues.setValuesUnscoped(
+        submission.store_id,
+        group.entityType,
+        group.entityId,
+        group.values,
+      );
     }
 
     // Update current step
@@ -158,7 +178,6 @@ export class SubmissionsService {
     const submission = await this.prisma.withoutScope().data_collection_submissions.findUnique({
       where: { token },
       include: {
-        responses: { include: { field: true } },
         booking: true,
       },
     });
@@ -168,78 +187,47 @@ export class SubmissionsService {
       throw new VendixHttpException(ErrorCodes.DCOL_TOKEN_002);
     }
 
-    // Validate required fields
+    // Build entity context
+    const entityCtx: EntityContext = {
+      customer_id: submission.customer_id,
+      booking_id: submission.booking_id,
+      order_id: (submission.booking as any)?.order_id ?? null,
+    };
+
+    // Validate required fields from entity_metadata_values
     const template = await this.prisma.withoutScope().data_collection_templates.findUnique({
       where: { id: submission.template_id },
       include: {
         sections: {
           include: {
-            items: { where: { is_required: true } },
-            child_sections: { include: { items: { where: { is_required: true } } } },
+            items: { where: { is_required: true }, include: { metadata_field: true } },
+            child_sections: { include: { items: { where: { is_required: true }, include: { metadata_field: true } } } },
           },
         } as any,
       },
     });
 
     if (template) {
-      const requiredFieldIds = (template as any).sections.flatMap((s: any) => [
-        ...s.items.map((i: any) => i.metadata_field_id),
-        ...(s.child_sections || []).flatMap((cs: any) => cs.items.map((i: any) => i.metadata_field_id)),
+      const requiredItems = (template as any).sections.flatMap((s: any) => [
+        ...s.items,
+        ...(s.child_sections || []).flatMap((cs: any) => cs.items),
       ]);
-      const respondedFieldIds = submission.responses.map((r: any) => r.field_id);
-      const missing = requiredFieldIds.filter((id: number) => !respondedFieldIds.includes(id));
+
+      // Load all metadata values for this context
+      const allValues: any[] = [];
+      for (const q of buildEntityQueries(entityCtx)) {
+        const vals = await this.metadataValues.getValuesByStoreAndEntity(submission.store_id, q.entityType, q.entityId);
+        allValues.push(...vals);
+      }
+      const answeredFieldIds = new Set(allValues.map((v: any) => v.field_id));
+
+      const missing = requiredItems.filter((item: any) => !answeredFieldIds.has(item.metadata_field_id));
       if (missing.length > 0) {
         throw new BadRequestException(`Faltan campos obligatorios: ${missing.length} campos sin responder`);
       }
     }
 
-    // Copy responses to entity_metadata_values
-    for (const response of submission.responses) {
-      const field = response.field;
-      let entityId: number;
-
-      if (field.entity_type === 'customer' && submission.customer_id) {
-        entityId = submission.customer_id;
-      } else if (field.entity_type === 'booking' && submission.booking_id) {
-        entityId = submission.booking_id;
-      } else if (field.entity_type === 'order' && submission.booking?.order_id) {
-        entityId = submission.booking.order_id;
-      } else {
-        this.logger.warn(`Cannot resolve entity_id for field ${field.id} (${field.entity_type}), skipping`);
-        continue;
-      }
-
-      await this.prisma.withoutScope().entity_metadata_values.upsert({
-        where: {
-          field_id_entity_type_entity_id: {
-            field_id: field.id,
-            entity_type: field.entity_type,
-            entity_id: entityId,
-          },
-        },
-        create: {
-          store_id: submission.store_id,
-          field_id: field.id,
-          entity_type: field.entity_type,
-          entity_id: entityId,
-          value_text: response.value_text,
-          value_number: response.value_number,
-          value_date: response.value_date,
-          value_bool: response.value_bool,
-          value_json: response.value_json as any,
-        },
-        update: {
-          value_text: response.value_text,
-          value_number: response.value_number,
-          value_date: response.value_date,
-          value_bool: response.value_bool,
-          value_json: response.value_json as any,
-          updated_at: new Date(),
-        },
-      });
-    }
-
-    // Always mark as completed — data is saved, that's what matters
+    // Mark as completed — data already in entity_metadata_values
     const updated = await this.prisma.withoutScope().data_collection_submissions.update({
       where: { id: submission.id },
       data: {
@@ -259,11 +247,12 @@ export class SubmissionsService {
       customer_id: submission.customer_id,
     });
 
-    // Try AI prediagnosis in background — doesn't affect completion status
+    // Try AI prediagnosis in background
     try {
       const aiApp = await this.aiEngine.getApplication('consultation_prediagnosis');
       if (aiApp?.is_active) {
-        const variables = await this.buildPrediagnosisVariables(submission.id);
+        const fullSubmission = await this.findOne(submission.id);
+        const variables = await this.buildPrediagnosisVariables(fullSubmission);
         const result = await this.aiEngine.run('consultation_prediagnosis', variables);
         if ((result as any)?.text) {
           await this.savePrediagnosis(submission.id, (result as any).text);
@@ -303,7 +292,8 @@ export class SubmissionsService {
 
     // Compute public form URL using the store's ecommerce domain
     const formUrl = await this.buildPublicFormUrl(submission.store_id, submission.token);
-    return { ...submission, form_url: formUrl };
+    const populated = await this.populateResponsesFromMetadata(submission);
+    return { ...populated, form_url: formUrl };
   }
 
   private async buildPublicFormUrl(storeId: number, token: string): Promise<string> {
@@ -325,11 +315,12 @@ export class SubmissionsService {
   }
 
   async getSubmissionByBooking(bookingId: number) {
-    return this.prisma.data_collection_submissions.findFirst({
+    const submission = await this.prisma.data_collection_submissions.findFirst({
       where: { booking_id: bookingId },
       include: this.SUBMISSION_INCLUDE,
       orderBy: { created_at: 'desc' },
     });
+    return this.populateResponsesFromMetadata(submission);
   }
 
   async savePrediagnosis(submissionId: number, markdown: string) {
@@ -395,6 +386,60 @@ export class SubmissionsService {
         }
       })();
     });
+  }
+
+  private async populateResponsesFromMetadata(submission: any): Promise<any> {
+    if (!submission) return submission;
+
+    const entityCtx: EntityContext = {
+      customer_id: submission.customer_id,
+      booking_id: submission.booking_id,
+      order_id: submission.booking?.order_id ?? null,
+    };
+
+    // Collect all template field IDs
+    const templateFieldIds = new Set<number>();
+    const collectFields = (sections: any[]) => {
+      for (const s of sections || []) {
+        for (const item of s.items || []) {
+          templateFieldIds.add(item.metadata_field_id);
+        }
+        collectFields(s.child_sections || []);
+      }
+    };
+    if (submission.template) {
+      collectFields(submission.template.sections || []);
+      for (const tab of submission.template.tabs || []) {
+        collectFields(tab.sections || []);
+      }
+    }
+
+    // Load metadata values from all relevant entities
+    const allValues: any[] = [];
+    for (const q of buildEntityQueries(entityCtx)) {
+      const vals = await this.metadataValues.getValuesByStoreAndEntity(
+        submission.store_id, q.entityType, q.entityId,
+      );
+      allValues.push(...vals);
+    }
+
+    // Filter to only fields in this template and reshape
+    const responses = allValues
+      .filter((v: any) => templateFieldIds.size === 0 || templateFieldIds.has(v.field_id))
+      .map((v: any) => ({
+        id: v.id,
+        field_id: v.field_id,
+        field: v.field,
+        value_text: v.value_text,
+        value_number: v.value_number,
+        value_date: v.value_date,
+        value_bool: v.value_bool,
+        value_json: v.value_json,
+        created_at: v.created_at,
+        updated_at: v.updated_at,
+      }));
+
+    return { ...submission, responses };
   }
 
   async buildPrediagnosisVariables(submission: any): Promise<Record<string, string>> {

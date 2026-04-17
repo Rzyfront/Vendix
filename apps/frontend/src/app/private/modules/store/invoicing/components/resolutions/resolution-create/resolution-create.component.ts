@@ -1,5 +1,4 @@
-import { Component, Input, Output, EventEmitter, inject, OnChanges, SimpleChanges } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject, input, output, signal, effect } from '@angular/core';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
 import { InvoiceResolution } from '../../../interfaces/invoice.interface';
@@ -12,7 +11,6 @@ import { InputComponent } from '../../../../../../../shared/components/input/inp
   selector: 'vendix-resolution-create',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
@@ -20,10 +18,10 @@ import { InputComponent } from '../../../../../../../shared/components/input/inp
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onClose()"
-      [title]="isEditing ? 'Editar Resolución' : 'Nueva Resolución'"
+      [title]="isEditing() ? 'Editar Resolución' : 'Nueva Resolución'"
       size="md"
     >
       <div class="p-4">
@@ -115,29 +113,27 @@ import { InputComponent } from '../../../../../../../shared/components/input/inp
           <app-button
             variant="primary"
             (clicked)="onSubmit()"
-            [disabled]="resolutionForm.invalid || submitting"
-            [loading]="submitting">
-            {{ isEditing ? 'Actualizar' : 'Crear' }} Resolución
+            [disabled]="resolutionForm.invalid || submitting()"
+            [loading]="submitting()">
+            {{ isEditing() ? 'Actualizar' : 'Crear' }} Resolución
           </app-button>
         </div>
       </div>
     </app-modal>
   `
 })
-export class ResolutionCreateComponent implements OnChanges {
-  @Input() isOpen = false;
-  @Input() resolution: InvoiceResolution | null = null;
-  @Output() isOpenChange = new EventEmitter<boolean>();
+export class ResolutionCreateComponent {
+  readonly isOpen = input<boolean>(false);
+  readonly resolution = input<InvoiceResolution | null>(null);
+  readonly isOpenChange = output<boolean>();
 
-  submitting = false;
+  readonly submitting = signal(false);
   resolutionForm: FormGroup;
 
   private fb = inject(FormBuilder);
   private store = inject(Store);
 
-  get isEditing(): boolean {
-    return !!this.resolution;
-  }
+  readonly isEditing = () => !!this.resolution();
 
   constructor() {
     this.resolutionForm = this.fb.group({
@@ -150,23 +146,24 @@ export class ResolutionCreateComponent implements OnChanges {
       valid_to: ['', [Validators.required]],
       technical_key: [''],
     });
-  }
 
-  ngOnChanges(changes: SimpleChanges): void {
-    if (changes['resolution'] && this.resolution) {
-      this.resolutionForm.patchValue({
-        resolution_number: this.resolution.resolution_number,
-        prefix: this.resolution.prefix,
-        range_from: this.resolution.range_from,
-        range_to: this.resolution.range_to,
-        resolution_date: this.resolution.resolution_date?.split('T')[0] || '',
-        valid_from: this.resolution.valid_from?.split('T')[0] || '',
-        valid_to: this.resolution.valid_to?.split('T')[0] || '',
-        technical_key: this.resolution.technical_key || '',
-      });
-    } else if (changes['resolution'] && !this.resolution) {
-      this.resolutionForm.reset();
-    }
+    effect(() => {
+      const res = this.resolution();
+      if (res) {
+        this.resolutionForm.patchValue({
+          resolution_number: res.resolution_number,
+          prefix: res.prefix,
+          range_from: res.range_from,
+          range_to: res.range_to,
+          resolution_date: res.resolution_date?.split('T')[0] || '',
+          valid_from: res.valid_from?.split('T')[0] || '',
+          valid_to: res.valid_to?.split('T')[0] || '',
+          technical_key: res.technical_key || '',
+        });
+      } else {
+        this.resolutionForm.reset();
+      }
+    });
   }
 
   onSubmit(): void {
@@ -175,7 +172,7 @@ export class ResolutionCreateComponent implements OnChanges {
       return;
     }
 
-    this.submitting = true;
+    this.submitting.set(true);
     const formValue = this.resolutionForm.value;
 
     const payload = {
@@ -189,9 +186,10 @@ export class ResolutionCreateComponent implements OnChanges {
       technical_key: formValue.technical_key || undefined,
     };
 
-    if (this.isEditing && this.resolution) {
+    const res = this.resolution();
+    if (this.isEditing() && res) {
       this.store.dispatch(updateResolution({
-        id: this.resolution.id,
+        id: res.id,
         resolution: payload,
       }));
     } else {
@@ -200,7 +198,7 @@ export class ResolutionCreateComponent implements OnChanges {
       }));
     }
 
-    this.submitting = false;
+    this.submitting.set(false);
     this.resolutionForm.reset();
     this.onClose();
   }

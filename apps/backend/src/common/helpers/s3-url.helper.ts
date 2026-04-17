@@ -152,6 +152,27 @@ export function isSignedS3Url(urlOrKey: string | null | undefined): boolean {
  * @param value - A potential key or URL
  * @returns true if the value looks like an S3 key, false if it's a URL
  */
+/**
+ * Checks if an S3 key is safe (no path traversal patterns).
+ * Returns true if the key is safe, false otherwise.
+ */
+export function isSafeS3Key(key: string): boolean {
+  if (!key || typeof key !== 'string') return false;
+
+  let decoded: string;
+  try {
+    decoded = decodeURIComponent(key);
+  } catch {
+    return false;
+  }
+
+  if (decoded.includes('\0') || key.includes('%00')) return false;
+  if (decoded.includes('..\\') || decoded.includes('../') || key.includes('../')) return false;
+  if (decoded.split('/').some((s) => s === '..')) return false;
+
+  return true;
+}
+
 export function isS3Key(value: string | null | undefined): boolean {
   if (!value) {
     return false;

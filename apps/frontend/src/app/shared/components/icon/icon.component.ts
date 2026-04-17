@@ -1,5 +1,5 @@
-import { CommonModule } from '@angular/common';
-import { ChangeDetectionStrategy, Component, Input } from '@angular/core';
+
+import { Component, input } from '@angular/core';
 import { LucideAngularModule } from 'lucide-angular';
 import { ICON_REGISTRY, IconName } from './icons.registry';
 
@@ -12,14 +12,14 @@ import { ICON_REGISTRY, IconName } from './icons.registry';
 @Component({
   selector: 'app-icon',
   standalone: true,
-  imports: [CommonModule, LucideAngularModule],
+  imports: [LucideAngularModule],
   template: `
     <i-lucide
       [img]="iconData"
-      [size]="size"
-      [color]="color"
-      [class]="cls"
-      [style.animation]="spin ? 'spin 1s linear infinite' : 'none'"
+      [size]="size()"
+      [color]="color()"
+      [class]="cls()"
+      [style.animation]="spin() ? 'spin 1s linear infinite' : 'none'"
     ></i-lucide>
   `,
   styles: [
@@ -34,16 +34,15 @@ import { ICON_REGISTRY, IconName } from './icons.registry';
       }
     `,
   ],
-  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class IconComponent {
-  @Input({ required: true }) name!: IconName;
-  @Input() size: number | string = 16;
-  @Input() color?: string;
-  @Input('class') cls = '';
-  @Input() spin: boolean = false;
+  readonly name = input.required<IconName>();
+  readonly size = input<number | string>(16);
+  readonly color = input<string>();
+  readonly cls = input('', { alias: "class" });
+  readonly spin = input<boolean>(false);
 
   get iconData() {
-    return ICON_REGISTRY[this.name] || ICON_REGISTRY['default'];
+    return ICON_REGISTRY[this.name()] || ICON_REGISTRY['default'];
   }
 }

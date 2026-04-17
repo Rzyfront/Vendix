@@ -1,10 +1,9 @@
-import { Component, inject, OnInit, OnDestroy, computed, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject, DestroyRef, computed, signal } from '@angular/core';
+
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { Store } from '@ngrx/store';
-import { Subject, takeUntil } from 'rxjs';
-import { toSignal } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { CurrencyPipe, DatePipe, DecimalPipe, PercentPipe } from '@angular/common';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ResponsiveDataViewComponent, TableColumn, ItemListCardConfig } from '../../../../../../shared/components/responsive-data-view/responsive-data-view.component';
@@ -45,7 +44,6 @@ import * as AccountingActions from '../../../accounting/state/actions/accounting
   selector: 'vendix-report-detail',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     IconComponent,
     ResponsiveDataViewComponent,
@@ -59,16 +57,16 @@ import * as AccountingActions from '../../../accounting/state/actions/accounting
     CardComponent,
     StatsComponent,
     EmptyStateComponent,
-    PaginationComponent,
-  ],
+    PaginationComponent
+],
   templateUrl: './report-detail.component.html',
   styleUrls: ['./report-detail.component.scss'],
 })
-export class ReportDetailComponent implements OnInit, OnDestroy {
+export class ReportDetailComponent {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private store = inject(Store);
-  private destroy$ = new Subject<void>();
+  private destroyRef = inject(DestroyRef);
 
   // State from NgRx
   report = toSignal(this.store.select(selectSelectedReport));
@@ -184,9 +182,13 @@ export class ReportDetailComponent implements OnInit, OnDestroy {
     if (actionId === 'full-view') this.goToFullView();
   }
 
-  ngOnInit(): void {
+  constructor() {
+    this.destroyRef.onDestroy(() => {
+      this.store.dispatch(ReportsActions.clearReport());
+    });
+
     this.route.paramMap
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((params) => {
         const reportId = params.get('reportId');
         if (reportId) {
@@ -197,12 +199,6 @@ export class ReportDetailComponent implements OnInit, OnDestroy {
           }
         }
       });
-  }
-
-  ngOnDestroy(): void {
-    this.store.dispatch(ReportsActions.clearReport());
-    this.destroy$.next();
-    this.destroy$.complete();
   }
 
   goBack(): void {

@@ -1,16 +1,16 @@
 import {
   Component,
   OnInit,
-  OnDestroy,
+  DestroyRef,
   signal,
   computed,
   inject,
   ChangeDetectionStrategy,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
-import { Subject, takeUntil } from 'rxjs';
 
 import {
   EcommerceBookingService,
@@ -41,7 +41,7 @@ import { CurrencyPipe } from '../../../../../shared/pipes/currency';
   styleUrls: ['./booking.component.scss'],
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class BookingComponent implements OnInit, OnDestroy {
+export class BookingComponent implements OnInit {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private bookingService = inject(EcommerceBookingService);
@@ -50,7 +50,7 @@ export class BookingComponent implements OnInit, OnDestroy {
   private authFacade = inject(AuthFacade);
   private toast = inject(ToastService);
 
-  private destroy$ = new Subject<void>();
+  private destroyRef = inject(DestroyRef);
 
   // State
   currentStep = signal(0);
@@ -225,11 +225,11 @@ export class BookingComponent implements OnInit, OnDestroy {
 
     // Check auth state
     this.authFacade.isAuthenticated$
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((auth) => {
         this.isLoggedIn.set(auth);
       });
-    this.authFacade.user$.pipe(takeUntil(this.destroy$)).subscribe((user) => {
+    this.authFacade.user$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((user) => {
       this.currentUser.set(user);
       if (user) {
         this.guestName.set(
@@ -242,11 +242,6 @@ export class BookingComponent implements OnInit, OnDestroy {
 
     this.loadProduct();
     this.loadAvailabilityForMonth();
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
   }
 
   // --- Data loading ---

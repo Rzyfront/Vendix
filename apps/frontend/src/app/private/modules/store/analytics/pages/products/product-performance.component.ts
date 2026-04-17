@@ -1,8 +1,10 @@
-import { Component, OnInit, OnDestroy, inject } from '@angular/core';
+import {Component, OnInit, OnDestroy, inject,
+  DestroyRef} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { Store } from '@ngrx/store';
-import { Observable, Subject, combineLatest, takeUntil } from 'rxjs';
+import { Observable, combineLatest } from 'rxjs';
+import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
 
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
@@ -11,20 +13,17 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
 import { OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
 import {
   FilterConfig,
-  FilterValues,
-} from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
+  FilterValues } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import {
   CurrencyPipe,
-  CurrencyFormatService,
-} from '../../../../../../shared/pipes/currency/currency.pipe';
+  CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
 
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import {
   ProductsSummary,
   TopSellingProduct,
-  ProductTrend,
-} from '../../interfaces/products-analytics.interface';
+  ProductTrend } from '../../interfaces/products-analytics.interface';
 
 import * as ProductsActions from './state/products-analytics.actions';
 import * as ProductsSelectors from './state/products-analytics.selectors';
@@ -47,14 +46,12 @@ import { getDefaultStartDate, getDefaultEndDate, formatChartPeriod } from '../..
     ExportButtonComponent,
   ],
   templateUrl: './product-performance.component.html',
-  styleUrls: ['./product-performance.component.scss'],
-})
+  styleUrls: ['./product-performance.component.scss'] })
 export class ProductPerformanceComponent implements OnInit, OnDestroy {
+  private destroyRef = inject(DestroyRef);
   private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
-  private destroy$ = new Subject<void>();
-
-  // Observables from store
+// Observables from store
   summary$: Observable<ProductsSummary | null> = this.store.select(
     ProductsSelectors.selectSummary,
   );
@@ -83,6 +80,12 @@ export class ProductPerformanceComponent implements OnInit, OnDestroy {
     ProductsSelectors.selectGranularity,
   );
 
+  readonly summary = toSignal(this.summary$, { initialValue: null });
+  readonly loading = toSignal(this.loading$, { initialValue: false });
+  readonly loadingTopSellers = toSignal(this.loadingTopSellers$, { initialValue: false });
+  readonly loadingTrends = toSignal(this.loadingTrends$, { initialValue: false });
+  readonly exporting = toSignal(this.exporting$, { initialValue: false });
+
   // Chart options
   topSellersChartOptions: EChartsOption = {};
   unitsTrendChartOptions: EChartsOption = {};
@@ -93,14 +96,12 @@ export class ProductPerformanceComponent implements OnInit, OnDestroy {
       key: 'date_from',
       label: 'Desde',
       type: 'date',
-      defaultValue: getDefaultStartDate(),
-    },
+      defaultValue: getDefaultStartDate() },
     {
       key: 'date_to',
       label: 'Hasta',
       type: 'date',
-      defaultValue: getDefaultEndDate(),
-    },
+      defaultValue: getDefaultEndDate() },
     {
       key: 'granularity',
       label: 'Granularidad',
@@ -113,8 +114,7 @@ export class ProductPerformanceComponent implements OnInit, OnDestroy {
         { value: 'year', label: 'Por Año' },
       ],
       placeholder: 'Seleccionar',
-      defaultValue: 'day',
-    },
+      defaultValue: 'day' },
   ];
 
   filterValues: FilterValues = {};
@@ -129,32 +129,30 @@ export class ProductPerformanceComponent implements OnInit, OnDestroy {
 
     // Sync store state → filterValues for the options dropdown
     combineLatest([this.dateRange$, this.granularity$])
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(([dateRange, granularity]) => {
         this.filterValues = {
           date_from: dateRange.start_date || null,
           date_to: dateRange.end_date || null,
-          granularity: granularity || 'day',
-        };
+          granularity: granularity || 'day' };
       });
 
     // Subscribe to trends to build chart
     combineLatest([this.trends$, this.granularity$])
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(([trends, granularity]) => {
         this.updateTrendsChart(trends, granularity);
       });
 
     // Subscribe to top sellers to build chart
-    this.topSellers$.pipe(takeUntil(this.destroy$)).subscribe((topSellers) => {
+    this.topSellers$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((topSellers) => {
       this.updateTopSellersChart(topSellers);
     });
   }
 
   ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-    this.store.dispatch(ProductsActions.clearProductsAnalyticsState());
+
+this.store.dispatch(ProductsActions.clearProductsAnalyticsState());
   }
 
   onFilterChange(values: FilterValues): void {
@@ -172,9 +170,7 @@ export class ProductPerformanceComponent implements OnInit, OnDestroy {
           dateRange: {
             start_date: dateFrom || '',
             end_date: dateTo || '',
-            preset: 'custom',
-          },
-        }),
+            preset: 'custom' } }),
       );
     }
 
@@ -191,9 +187,7 @@ export class ProductPerformanceComponent implements OnInit, OnDestroy {
         dateRange: {
           start_date: getDefaultStartDate(),
           end_date: getDefaultEndDate(),
-          preset: 'thisMonth',
-        },
-      }),
+          preset: 'thisMonth' } }),
     );
     this.store.dispatch(ProductsActions.setGranularity({ granularity: 'day' }));
   }
@@ -230,26 +224,22 @@ export class ProductPerformanceComponent implements OnInit, OnDestroy {
           const data = params[0];
           const trend = trends[data.dataIndex];
           return `${data.name}<br/>Unidades: ${data.value}<br/>Ingresos: ${this.currencyService.format(trend.revenue)}`;
-        },
-      },
+        } },
       grid: {
         left: '3%',
         right: '4%',
         bottom: '3%',
-        containLabel: true,
-      },
+        containLabel: true },
       xAxis: {
         type: 'category',
         data: labels,
         axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary },
-      },
+        axisLabel: { color: textSecondary } },
       yAxis: {
         type: 'value',
         axisLine: { show: false },
         axisLabel: { color: textSecondary },
-        splitLine: { lineStyle: { color: borderColor } },
-      },
+        splitLine: { lineStyle: { color: borderColor } } },
       series: [
         {
           name: 'Unidades',
@@ -266,14 +256,10 @@ export class ProductPerformanceComponent implements OnInit, OnDestroy {
               colorStops: [
                 { offset: 0, color: `${purpleColor}4D` },
                 { offset: 1, color: `${purpleColor}0D` },
-              ],
-            },
-          },
+              ] } },
           lineStyle: { color: purpleColor, width: 2 },
-          itemStyle: { color: purpleColor },
-        },
-      ],
-    };
+          itemStyle: { color: purpleColor } },
+      ] };
   }
 
   private updateTopSellersChart(topSellers: TopSellingProduct[]): void {
@@ -305,27 +291,23 @@ export class ProductPerformanceComponent implements OnInit, OnDestroy {
           const data = params[0];
           const product = reversed[data.dataIndex];
           return `<strong>${product.product_name}</strong><br/>Unidades: ${data.value}<br/>Ingresos: ${this.currencyService.format(product.revenue)}`;
-        },
-      },
+        } },
       grid: {
         left: '3%',
         right: '6%',
         bottom: '3%',
         top: '3%',
-        containLabel: true,
-      },
+        containLabel: true },
       xAxis: {
         type: 'value',
         axisLine: { show: false },
         axisLabel: { color: textSecondary },
-        splitLine: { lineStyle: { color: borderColor } },
-      },
+        splitLine: { lineStyle: { color: borderColor } } },
       yAxis: {
         type: 'category',
         data: names,
         axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary, fontSize: 11 },
-      },
+        axisLabel: { color: textSecondary, fontSize: 11 } },
       series: [
         {
           name: 'Unidades',
@@ -333,11 +315,8 @@ export class ProductPerformanceComponent implements OnInit, OnDestroy {
           data: units,
           itemStyle: {
             color: primaryColor,
-            borderRadius: [0, 4, 4, 0],
-          },
-          barMaxWidth: 30,
-        },
-      ],
-    };
+            borderRadius: [0, 4, 4, 0] },
+          barMaxWidth: 30 },
+      ] };
   }
 }

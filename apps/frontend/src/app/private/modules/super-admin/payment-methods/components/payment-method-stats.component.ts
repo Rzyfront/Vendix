@@ -1,12 +1,12 @@
 import { Component, input } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { PaymentMethodStats } from '../interfaces/payment-method.interface';
 import { StatsComponent } from '../../../../../shared/components/index';
 
 @Component({
   selector: 'app-payment-method-stats',
   standalone: true,
-  imports: [CommonModule, StatsComponent],
+  imports: [StatsComponent],
   template: `
     <div class="stats-container">
       <app-stats

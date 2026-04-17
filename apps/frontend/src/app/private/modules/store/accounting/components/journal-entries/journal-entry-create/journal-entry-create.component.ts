@@ -1,5 +1,6 @@
-import { Component, Input, Output, EventEmitter, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input, output, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { DecimalPipe } from '@angular/common';
 import { ReactiveFormsModule, FormBuilder, FormArray, Validators } from '@angular/forms';
 import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
@@ -28,7 +29,7 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
   selector: 'vendix-journal-entry-create',
   standalone: true,
   imports: [
-    CommonModule,
+    DecimalPipe,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
@@ -39,7 +40,7 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onClose()"
       title="Nuevo Asiento Contable"
@@ -203,8 +204,8 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
           <app-button
             variant="primary"
             (clicked)="onSubmit()"
-            [disabled]="form.invalid || !is_balanced || is_submitting"
-            [loading]="is_submitting"
+            [disabled]="form.invalid || !is_balanced || is_submitting()"
+            [loading]="is_submitting()"
           >
             Crear Asiento
           </app-button>
@@ -213,9 +214,9 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
     </app-modal>
   `,
 })
-export class JournalEntryCreateComponent implements OnInit {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
+export class JournalEntryCreateComponent {
+  readonly isOpen = input(false);
+  readonly isOpenChange = output<boolean>();
 
   private fb = inject(FormBuilder);
   private store = inject(Store);
@@ -223,7 +224,7 @@ export class JournalEntryCreateComponent implements OnInit {
   leaf_accounts$: Observable<ChartAccount[]> = this.store.select(selectLeafAccounts);
   open_periods$: Observable<FiscalPeriod[]> = this.store.select(selectOpenFiscalPeriods);
 
-  is_submitting = false;
+  is_submitting = signal(false);
   account_options: { value: any; label: string }[] = [];
   fiscal_period_options: { value: any; label: string }[] = [];
 
@@ -269,22 +270,21 @@ export class JournalEntryCreateComponent implements OnInit {
     return Math.abs(this.total_debit - this.total_credit) < 0.01 && this.total_debit > 0;
   }
 
-  ngOnInit(): void {
-    this.leaf_accounts$.subscribe((accounts) => {
+  constructor() {
+    this.leaf_accounts$.pipe(takeUntilDestroyed()).subscribe((accounts) => {
       this.account_options = accounts.map((a) => ({
         value: a.id,
         label: `${a.code} - ${a.name}`,
       }));
     });
 
-    this.open_periods$.subscribe((periods) => {
+    this.open_periods$.pipe(takeUntilDestroyed()).subscribe((periods) => {
       this.fiscal_period_options = periods.map((p) => ({
         value: p.id,
         label: p.name,
       }));
     });
 
-    // Set default date to today
     const today = toLocalDateString();
     this.form.patchValue({ entry_date: today });
   }
@@ -327,7 +327,7 @@ export class JournalEntryCreateComponent implements OnInit {
   onSubmit(): void {
     if (this.form.invalid || !this.is_balanced) return;
 
-    this.is_submitting = true;
+    this.is_submitting.set(true);
     const values = this.form.getRawValue();
 
     const dto: CreateJournalEntryDto = {
@@ -344,7 +344,7 @@ export class JournalEntryCreateComponent implements OnInit {
     };
 
     this.store.dispatch(createEntry({ entry: dto }));
-    this.is_submitting = false;
+    this.is_submitting.set(false);
     this.onClose();
   }
 

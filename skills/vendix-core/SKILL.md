@@ -18,6 +18,8 @@ Use this skill when:
 - Understanding the Vendix architecture
 - Adding dependencies across apps
 
+> **⚠️ Frontend work**: Cualquier edición bajo `apps/frontend/` requiere invocar **`vendix-zoneless-signals`** (CRITICAL). Vendix es Angular 20 Zoneless + Signals — violar esos patrones produce bugs silenciosos de CD.
+
 ## Critical Patterns
 
 ### Pattern 1: Monorepo Structure

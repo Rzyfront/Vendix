@@ -1,11 +1,5 @@
-import {
-  Component,
-  OnInit,
-  ChangeDetectionStrategy,
-  signal,
-  computed,
-  inject,
-} from '@angular/core';
+import {Component, OnInit, ChangeDetectionStrategy, signal, computed, inject, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { ActivatedRoute } from '@angular/router';
 import { HttpClient } from '@angular/common/http';
@@ -390,6 +384,7 @@ import { getItemWidth, getItemWidthClass, DEFAULT_TEMPLATE_ICON, DEFAULT_SECTION
   `,
 })
 export class DataCollectionFormComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private route = inject(ActivatedRoute);
   private http = inject(HttpClient);
 
@@ -444,7 +439,7 @@ export class DataCollectionFormComponent implements OnInit {
   private loadSubmission(token: string) {
     this.http
       .get<any>(`${environment.apiUrl}/ecommerce/data-collection/${token}`)
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (res) => {
           const data = res.data;
           this.submission.set(data);
@@ -510,7 +505,7 @@ export class DataCollectionFormComponent implements OnInit {
           responses,
         },
       )
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: () => {
           this.currentStep.update((s) => s + 1);
           this.saving.set(false);
@@ -540,14 +535,14 @@ export class DataCollectionFormComponent implements OnInit {
           responses,
         },
       )
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: () => {
           this.http
             .post<any>(
               `${environment.apiUrl}/ecommerce/data-collection/${token}/submit`,
               {},
             )
-            .subscribe({
+            .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
               next: () => {
                 this.submitted.set(true);
                 this.submitting.set(false);

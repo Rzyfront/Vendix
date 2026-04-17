@@ -1,5 +1,6 @@
-import { Component, Input, Output, EventEmitter, inject, signal, computed, ViewChild } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, input, output, inject, signal, computed, ViewChild, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import { FormsModule } from '@angular/forms';
 import {
   ModalComponent,
@@ -18,18 +19,17 @@ import { BankAccount, ColumnMappingConfig } from '../../interfaces/accounting.in
   selector: 'vendix-statement-import-modal',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ModalComponent,
     ButtonComponent,
     IconComponent,
     SelectorComponent,
     StepsLineComponent,
-    FileUploadDropzoneComponent,
-  ],
+    FileUploadDropzoneComponent
+],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
@@ -263,10 +263,11 @@ import { BankAccount, ColumnMappingConfig } from '../../interfaces/accounting.in
   `,
 })
 export class StatementImportModalComponent {
-  @Input() isOpen = false;
-  @Input() bankAccounts: BankAccount[] = [];
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() importComplete = new EventEmitter<void>();
+  private destroyRef = inject(DestroyRef);
+  readonly isOpen = input(false);
+  readonly bankAccounts = input<BankAccount[]>([]);
+  readonly isOpenChange = output<boolean>();
+  readonly importComplete = output<void>();
 
   @ViewChild('dropzone') dropzoneRef!: FileUploadDropzoneComponent;
 
@@ -314,7 +315,7 @@ export class StatementImportModalComponent {
   ];
 
   bankAccountOptions = computed(() =>
-    this.bankAccounts
+    this.bankAccounts()
       .filter((a) => a.status === 'active')
       .map((a) => ({
         value: a.id,
@@ -456,7 +457,7 @@ export class StatementImportModalComponent {
     if (!file || !this.selectedAccountId) return;
 
     this.importing.set(true);
-    this.reconciliationService.importStatement(this.selectedAccountId, file).subscribe({
+    this.reconciliationService.importStatement(this.selectedAccountId, file).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (res) => {
         this.importing.set(false);
         this.importResult.set(res.data);

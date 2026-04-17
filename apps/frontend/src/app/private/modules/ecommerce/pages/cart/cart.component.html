@@ -1,12 +1,12 @@
 <div class="cart-page">
     <h1>Mi Carrito</h1>
 
-    @if (is_loading) {
+    @if (is_loading()) {
     <div class="loading">
         <div class="spinner"></div>
         <p>Cargando carrito...</p>
     </div>
-    } @else if (!cart || cart.items.length === 0) {
+    } @else if (!cart() || cart()!.items.length === 0) {
     <div class="empty-cart">
         <app-icon name="shopping-cart" [size]="64" class="text-muted"></app-icon>
         <h2>Tu carrito está vacío</h2>
@@ -15,11 +15,11 @@
             Ver productos
         </app-button>
     </div>
-    } @else {
+    } @else if (cart(); as cart) {
     <div class="cart-content">
         <div class="cart-items">
             @for (item of cart.items; track item.id) {
-            <div class="cart-item" [class.updating]="updating_item_id === item.id">
+            <div class="cart-item" [class.updating]="updating_item_id() === item.id">
                 <div class="item-image">
                     @if (item.product.image_url) {
                     <img [src]="item.product.image_url" [alt]="item.product.name">
@@ -45,7 +45,7 @@
 
                 <div class="item-quantity">
                     <app-quantity-control [value]="item.quantity" [min]="1" [size]="'md'"
-                        [disabled]="updating_item_id === item.id"
+                        [disabled]="updating_item_id() === item.id"
                         (valueChange)="updateQuantity(item, $event)"></app-quantity-control>
                 </div>
 
@@ -82,17 +82,17 @@
                 </div>
 
                 <app-button variant="primary" [fullWidth]="true" (clicked)="proceedToCheckout()">
-                    @if (!is_authenticated) {
+                    @if (!is_authenticated()) {
                     Iniciar sesión para comprar
                     } @else {
                     Finalizar compra
                     }
                 </app-button>
 
-                @if (whatsappEnabled) {
+                @if (whatsappEnabled()) {
                 <app-button variant="primary" [fullWidth]="true"
-                    [loading]="is_whatsapp_loading"
-                    [disabled]="is_whatsapp_loading"
+                    [loading]="is_whatsapp_loading()"
+                    [disabled]="is_whatsapp_loading()"
                     customClasses="!bg-[#25D366] hover:!bg-[#1da851] !border-[#25D366]"
                     (clicked)="whatsappCheckout()">
                     <div class="flex items-center justify-center gap-2">
@@ -115,6 +115,6 @@
         (quick_view)="onQuickView($event)" (add_to_cart)="onAddToCartFromSlider($event)" />
     }
 
-    <app-product-quick-view-modal [isOpen]="quickViewOpen" [productSlug]="selectedProductSlug"
-        (closed)="quickViewOpen = false" (addedToCart)="onAddToCartFromSlider($event)" />
+    <app-product-quick-view-modal [isOpen]="quickViewOpen()" [productSlug]="selectedProductSlug()"
+        (closed)="quickViewOpen.set(false)" (addedToCart)="onAddToCartFromSlider($event)" />
 </div>

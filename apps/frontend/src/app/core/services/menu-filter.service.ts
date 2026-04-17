@@ -59,7 +59,6 @@ export class MenuFilterService {
     Remisiones: 'orders_dispatch_notes',
     'Plan Separe': 'orders_layaway',
     Reservas: 'orders_reservations',
-    Consultas: 'orders_consultations',
 
     // STORE_ADMIN - Inventario (padre + submódulos)
     Inventario: 'inventory',
@@ -87,6 +86,10 @@ export class MenuFilterService {
     Ventas: 'analytics_sales',
     Tráfico: 'analytics_traffic',
     Rendimiento: 'analytics_performance',
+    'Analíticas de Inventario': 'analytics_inventory',
+    'Analíticas de Productos': 'analytics_products',
+    'Analíticas de Clientes': 'analytics_customers',
+    Financiero: 'analytics_financial',
 
     // STORE_ADMIN - Reportes
     Reportes: ['reports', 'accounting_reports'],

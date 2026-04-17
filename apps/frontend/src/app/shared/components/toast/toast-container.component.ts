@@ -1,52 +1,59 @@
-import { Component, computed, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject } from '@angular/core';
+import { NgClass } from '@angular/common';
 import { ToastService } from './toast.service';
+import { IconComponent } from '../icon/icon.component';
+import type { IconName } from '../icon/icons.registry';
 
 @Component({
   selector: 'app-toast-container',
   standalone: true,
-  imports: [CommonModule],
+  imports: [NgClass, IconComponent],
   template: `
     <div
       class="fixed top-4 right-4 z-[10000] flex flex-col gap-3 w-80 max-w-[90vw]"
-    >
-      <div
-        *ngFor="let t of toasts()"
-        class="group overflow-hidden rounded-lg border shadow-lg backdrop-blur-sm toast-item"
+      >
+      @for (t of toasts(); track t.id) {
+        <div
+          class="group overflow-hidden rounded-lg border ring-1 ring-black/10 backdrop-blur-sm toast-item"
         [ngClass]="[
           variantClasses(t.variant),
           t.leaving ? 'toast-leave' : 'toast-enter',
         ]"
-        [style.--toast-duration]="t.duration + 'ms'"
-      >
-        <div class="p-4">
-          <div class="flex items-start gap-3">
-            <div class="mt-0.5">
-              <span [innerHTML]="iconFor(t.variant)"></span>
+          [style.--toast-duration]="t.duration + 'ms'"
+          >
+          <div class="p-4">
+            <div class="flex items-start gap-3">
+              <div class="mt-0.5">
+                <app-icon
+                  [name]="iconName(t.variant)"
+                  [size]="20"
+                  [color]="iconColor(t.variant)"
+                ></app-icon>
+              </div>
+              <div class="flex-1">
+                @if (t.title) {
+                  <p class="text-sm font-semibold">{{ t.title }}</p>
+                }
+                @if (t.description) {
+                  <p class="text-sm text-[var(--color-text-secondary)] mt-0.5">
+                    {{ t.description }}
+                  </p>
+                }
+              </div>
+              <button
+                class="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
+                (click)="dismiss(t.id)"
+                aria-label="Close"
+                >
+                ×
+              </button>
             </div>
-            <div class="flex-1">
-              @if (t.title) {
-                <p class="text-sm font-semibold">{{ t.title }}</p>
-              }
-              @if (t.description) {
-                <p class="text-sm text-[var(--color-text-secondary)] mt-0.5">
-                  {{ t.description }}
-                </p>
-              }
-            </div>
-            <button
-              class="text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)]"
-              (click)="dismiss(t.id)"
-              aria-label="Close"
-            >
-              ×
-            </button>
           </div>
+          <div class="h-1 toast-progress" [ngClass]="barClasses(t.variant)"></div>
         </div>
-        <div class="h-1 toast-progress" [ngClass]="barClasses(t.variant)"></div>
-      </div>
+      }
     </div>
-  `,
+    `,
 })
 export class ToastContainerComponent {
   private toast = inject(ToastService);
@@ -86,53 +93,23 @@ export class ToastContainerComponent {
     }
   }
 
-  iconFor(variant: string) {
-    const base = 'w-5 h-5';
-    if (variant === 'success')
-      return this.getSafeSvg(
-        'success',
-        base,
-        'M16.707 5.293a1 1 0 00-1.414-1.414L8 11.172 4.707 7.879a1 1 0 10-1.414 1.414l4 4a1 1 0 001.414 0l8-8z',
-      );
-    if (variant === 'warning')
-      return this.getSafeSvg(
-        'warning',
-        base,
-        'M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l6.518 11.593c.75 1.335-.213 2.993-1.742 2.993H3.48c-1.53 0-2.492-1.658-1.743-2.993L8.257 3.1zM11 13a1 1 0 10-2 0 1 1 0 002 0zm-1-6a1 1 0 00-1 1v2a1 1 0 102 0V8a1 1 0 00-1-1z',
-      );
-    if (variant === 'error')
-      return this.getSafeSvg(
-        'error',
-        base,
-        'M10 18a8 8 0 100-16 8 8 0 000 16zm3-9a1 1 0 00-1-1H8a1 1 0 100 2h4a1 1 0 001-1zm-1 4a1 1 0 11-2 0 1 1 0 012 0z',
-      );
-    if (variant === 'info')
-      return this.getSafeSvg(
-        'info',
-        base,
-        'M18 10a8 8 0 11-16 0 8 8 0 0116 0zM9 9a1 1 0 112 0v4a1 1 0 11-2 0V9zm1-4a1 1 0 100 2 1 1 0 000-2z',
-      );
-    return this.getSafeSvg(
-      'default',
-      base,
-      'M10 18a8 8 0 100-16 8 8 0 000 16z',
-    );
+  iconColor(variant: string): string {
+    switch (variant) {
+      case 'success': return '#16a34a';
+      case 'warning': return '#d97706';
+      case 'error': return '#dc2626';
+      case 'info': return '#2563eb';
+      default: return '#4b5563';
+    }
   }
 
-  private getSafeSvg(
-    variant: string,
-    baseClass: string,
-    pathData: string,
-  ): string {
-    const colors: Record<string, string> = {
-      success: '#16a34a',
-      warning: '#d97706',
-      error: '#dc2626',
-      info: '#2563eb',
-      default: '#4b5563',
-    };
-
-    const color = colors[variant] || colors['default'];
-    return `<svg class="${baseClass}" fill="${color}" viewBox="0 0 20 20"><path d="${pathData}"/></svg>`;
+  iconName(variant: string): IconName {
+    switch (variant) {
+      case 'success': return 'check-circle';
+      case 'warning': return 'alert-triangle';
+      case 'error': return 'x-circle';
+      case 'info': return 'info';
+      default: return 'circle';
+    }
   }
 }

@@ -1,8 +1,14 @@
-import { Component, Output, EventEmitter, Input, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
+import { Component, model, inject, signal, DestroyRef } from '@angular/core';
+
+import {
+  FormBuilder,
+  FormGroup,
+  Validators,
+  ReactiveFormsModule,
+} from '@angular/forms';
 import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { createEmployee } from '../../../state/actions/payroll.actions';
 import { selectEmployeesLoading } from '../../../state/selectors/payroll.selectors';
 import { AvailableUser } from '../../../interfaces/payroll.interface';
@@ -10,14 +16,16 @@ import { PayrollService } from '../../../services/payroll.service';
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
-import { SelectorComponent, SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
+import {
+  SelectorComponent,
+  SelectorOption,
+} from '../../../../../../../shared/components/selector/selector.component';
 import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
 
 @Component({
   selector: 'vendix-employee-create',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
@@ -26,30 +34,44 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
-      (isOpenChange)="isOpenChange.emit($event)"
+      [isOpen]="isOpen()"
+      (isOpenChange)="isOpen.set($event)"
       (cancel)="onClose()"
       title="Nuevo Empleado"
       size="lg"
     >
       <div class="p-4">
-        <form [formGroup]="employeeForm" (ngSubmit)="onSubmit()" class="space-y-6">
-
+        <form
+          [formGroup]="employeeForm"
+          (ngSubmit)="onSubmit()"
+          class="space-y-6"
+        >
           <!-- Link User (optional) -->
           <div class="mb-2">
-            <h3 class="text-sm font-semibold text-text-primary mb-3 uppercase tracking-wide">Vincular con Usuario</h3>
+            <h3
+              class="text-sm font-semibold text-text-primary mb-3 uppercase tracking-wide"
+            >
+              Vincular con Usuario
+            </h3>
             <app-selector
               label="Usuario del sistema (opcional)"
               formControlName="user_id"
-              [options]="availableUsers"
+              [options]="availableUsers()"
               placeholder="Seleccionar usuario..."
             ></app-selector>
-            <p class="text-xs text-text-secondary mt-1">Al seleccionar un usuario, se autocompletaran los datos personales.</p>
+            <p class="text-xs text-text-secondary mt-1">
+              Al seleccionar un usuario, se autocompletaran los datos
+              personales.
+            </p>
           </div>
 
           <!-- Personal Data -->
           <div>
-            <h3 class="text-sm font-semibold text-text-primary mb-3 uppercase tracking-wide">Datos Personales</h3>
+            <h3
+              class="text-sm font-semibold text-text-primary mb-3 uppercase tracking-wide"
+            >
+              Datos Personales
+            </h3>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <app-input
                 label="Nombre"
@@ -86,7 +108,11 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
 
           <!-- Employment Data -->
           <div>
-            <h3 class="text-sm font-semibold text-text-primary mb-3 uppercase tracking-wide">Datos Laborales</h3>
+            <h3
+              class="text-sm font-semibold text-text-primary mb-3 uppercase tracking-wide"
+            >
+              Datos Laborales
+            </h3>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <app-input
                 label="Fecha de Ingreso"
@@ -127,7 +153,11 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
 
           <!-- Compensation -->
           <div>
-            <h3 class="text-sm font-semibold text-text-primary mb-3 uppercase tracking-wide">Compensación</h3>
+            <h3
+              class="text-sm font-semibold text-text-primary mb-3 uppercase tracking-wide"
+            >
+              Compensación
+            </h3>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <app-input
                 label="Salario Base"
@@ -165,7 +195,11 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
 
           <!-- Social Security -->
           <div>
-            <h3 class="text-sm font-semibold text-text-primary mb-3 uppercase tracking-wide">Seguridad Social</h3>
+            <h3
+              class="text-sm font-semibold text-text-primary mb-3 uppercase tracking-wide"
+            >
+              Seguridad Social
+            </h3>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <app-input
                 label="EPS (Salud)"
@@ -202,41 +236,41 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
               ></app-input>
             </div>
           </div>
-
         </form>
       </div>
 
       <!-- Footer -->
       <div slot="footer">
-        <div class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
-          <app-button
-            variant="outline"
-            (clicked)="onClose()">
+        <div
+          class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100"
+        >
+          <app-button variant="outline" (clicked)="onClose()">
             Cancelar
           </app-button>
 
           <app-button
             variant="primary"
             (clicked)="onSubmit()"
-            [disabled]="employeeForm.invalid || submitting"
-            [loading]="submitting">
+            [disabled]="employeeForm.invalid || submitting()"
+            [loading]="submitting()"
+          >
             Guardar Empleado
           </app-button>
         </div>
       </div>
     </app-modal>
-  `
+  `,
 })
 export class EmployeeCreateComponent {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
+  readonly isOpen = model<boolean>(false);
 
   private payrollService = inject(PayrollService);
+  private destroyRef = inject(DestroyRef);
 
   employeeForm: FormGroup;
   loading$: Observable<boolean>;
-  submitting = false;
-  availableUsers: SelectorOption[] = [];
+  readonly submitting = signal(false);
+  readonly availableUsers = signal<SelectorOption[]>([]);
   private availableUsersData: AvailableUser[] = [];
 
   documentTypeOptions: SelectorOption[] = [
@@ -275,7 +309,7 @@ export class EmployeeCreateComponent {
 
   constructor(
     private fb: FormBuilder,
-    private store: Store
+    private store: Store,
   ) {
     this.loading$ = this.store.select(selectEmployeesLoading);
 
@@ -310,22 +344,28 @@ export class EmployeeCreateComponent {
 
     this.loadAvailableUsers();
 
-    this.employeeForm.get('user_id')!.valueChanges.subscribe((value) => {
-      this.onUserSelected(value);
-    });
+    this.employeeForm
+      .get('user_id')!
+      .valueChanges.pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((value) => {
+        this.onUserSelected(value);
+      });
   }
 
   loadAvailableUsers(): void {
-    this.payrollService.getAvailableUsers().subscribe((res) => {
-      this.availableUsersData = res.data;
-      this.availableUsers = [
-        { value: '', label: 'Sin vincular (datos manuales)' },
-        ...res.data.map((user) => ({
-          value: user.id,
-          label: `${user.first_name} ${user.last_name} (${user.email})`,
-        })),
-      ];
-    });
+    this.payrollService
+      .getAvailableUsers()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((res) => {
+        this.availableUsersData = res.data;
+        this.availableUsers.set([
+          { value: '', label: 'Sin vincular (datos manuales)' },
+          ...res.data.map((user) => ({
+            value: user.id,
+            label: `${user.first_name} ${user.last_name} (${user.email})`,
+          })),
+        ]);
+      });
   }
 
   onUserSelected(value: any): void {
@@ -347,34 +387,38 @@ export class EmployeeCreateComponent {
       return;
     }
 
-    this.submitting = true;
+    this.submitting.set(true);
     const formValue = this.employeeForm.value;
 
-    this.store.dispatch(createEmployee({
-      employee: {
-        first_name: formValue.first_name,
-        last_name: formValue.last_name,
-        document_type: formValue.document_type,
-        document_number: formValue.document_number,
-        hire_date: formValue.hire_date,
-        contract_type: formValue.contract_type,
-        position: formValue.position || undefined,
-        department: formValue.department || undefined,
-        cost_center: formValue.cost_center || undefined,
-        base_salary: Number(formValue.base_salary),
-        payment_frequency: formValue.payment_frequency,
-        bank_name: formValue.bank_name || undefined,
-        bank_account_number: formValue.bank_account_number || undefined,
-        health_provider: formValue.health_provider || undefined,
-        pension_fund: formValue.pension_fund || undefined,
-        arl_risk_level: formValue.arl_risk_level ? Number(formValue.arl_risk_level) : undefined,
-        severance_fund: formValue.severance_fund || undefined,
-        compensation_fund: formValue.compensation_fund || undefined,
-        user_id: formValue.user_id || undefined,
-      }
-    }));
+    this.store.dispatch(
+      createEmployee({
+        employee: {
+          first_name: formValue.first_name,
+          last_name: formValue.last_name,
+          document_type: formValue.document_type,
+          document_number: formValue.document_number,
+          hire_date: formValue.hire_date,
+          contract_type: formValue.contract_type,
+          position: formValue.position || undefined,
+          department: formValue.department || undefined,
+          cost_center: formValue.cost_center || undefined,
+          base_salary: Number(formValue.base_salary),
+          payment_frequency: formValue.payment_frequency,
+          bank_name: formValue.bank_name || undefined,
+          bank_account_number: formValue.bank_account_number || undefined,
+          health_provider: formValue.health_provider || undefined,
+          pension_fund: formValue.pension_fund || undefined,
+          arl_risk_level: formValue.arl_risk_level
+            ? Number(formValue.arl_risk_level)
+            : undefined,
+          severance_fund: formValue.severance_fund || undefined,
+          compensation_fund: formValue.compensation_fund || undefined,
+          user_id: formValue.user_id || undefined,
+        },
+      }),
+    );
 
-    this.submitting = false;
+    this.submitting.set(false);
     this.resetForm();
     this.onClose();
   }
@@ -391,6 +435,6 @@ export class EmployeeCreateComponent {
   }
 
   onClose() {
-    this.isOpenChange.emit(false);
+    this.isOpen.set(false);
   }
 }

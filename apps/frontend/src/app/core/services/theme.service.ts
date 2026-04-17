@@ -1,6 +1,6 @@
-import { Injectable, Inject, DOCUMENT, PLATFORM_ID } from '@angular/core';
+import { Injectable, Inject, DOCUMENT, PLATFORM_ID, signal } from '@angular/core';
+import { toObservable } from '@angular/core/rxjs-interop';
 import { isPlatformBrowser } from '@angular/common';
-import { BehaviorSubject } from 'rxjs';
 import { BrandingConfig, ThemeConfig } from '../models/tenant-config.interface';
 import { AppConfig } from './app-config.service';
 import { ColorUtils } from '../utils/color.utils';
@@ -9,8 +9,8 @@ import { ColorUtils } from '../utils/color.utils';
   providedIn: 'root',
 })
 export class ThemeService {
-  private currentThemeSubject = new BehaviorSubject<ThemeConfig | null>(null);
-  public currentTheme$ = this.currentThemeSubject.asObservable();
+  readonly currentTheme = signal<ThemeConfig | null>(null);
+  public currentTheme$ = toObservable(this.currentTheme);
 
   private loadedFonts = new Set<string>();
   private injectedStyleElements = new Map<string, HTMLStyleElement>();
@@ -178,7 +178,7 @@ export class ThemeService {
     });
 
     // If there was branding applied, re-apply it from current subject
-    const currentTheme = this.currentThemeSubject.value;
+    const currentTheme = this.currentTheme();
     // Note: currentTheme might be null if only branding was applied via applyBranding
     // In this codebase, branding seems to be the main way now.
   }
@@ -223,7 +223,7 @@ export class ThemeService {
     if (themeConfig.fontFamily) {
       await this.loadFont(themeConfig.fontFamily);
     }
-    this.currentThemeSubject.next(themeConfig);
+    this.currentTheme.set(themeConfig);
   }
 
   /**
@@ -444,7 +444,7 @@ export class ThemeService {
     // Limpiar fuentes cargadas (no removemos los <link> de fuentes por simplicidad)
     this.loadedFonts.clear();
 
-    this.currentThemeSubject.next(null);
+    this.currentTheme.set(null);
   }
 
   /**

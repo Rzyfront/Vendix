@@ -1,31 +1,18 @@
-import {
-  Component,
-  EventEmitter,
-  Output,
-  OnInit,
-  OnDestroy,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, output, inject, DestroyRef } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import {
-  Subject,
-  debounceTime,
-  distinctUntilChanged,
-  takeUntil,
-  Observable,
-} from 'rxjs';
+import { Subject, debounceTime, distinctUntilChanged, Observable } from 'rxjs';
+import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import {
   PosProductService,
   SearchFilters,
   Product,
   Category,
-  Brand,
-} from '../services/pos-product.service';
+  Brand } from '../services/pos-product.service';
 
 @Component({
   selector: 'app-pos-product-search',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [FormsModule],
   template: `
     <div class="product-search-container">
       <div class="search-header">
@@ -41,14 +28,15 @@ import {
               (keyup.enter)="performSearch()"
               (keyup.escape)="clearSearch()"
             />
-            <button
-              *ngIf="searchQuery"
-              class="clear-search-btn"
-              (click)="clearSearch()"
-              type="button"
-            >
-              <i class="fas fa-times"></i>
-            </button>
+            @if (searchQuery) {
+              <button
+                class="clear-search-btn"
+                (click)="clearSearch()"
+                type="button"
+              >
+                <i class="fas fa-times"></i>
+              </button>
+            }
           </div>
         </div>
 
@@ -61,148 +49,143 @@ import {
           >
             <i class="fas fa-filter"></i>
             Filtros
-            <span *ngIf="activeFiltersCount > 0" class="filter-count">
-              {{ activeFiltersCount }}
-            </span>
+            @if (activeFiltersCount > 0) {
+              <span class="filter-count">
+                {{ activeFiltersCount }}
+              </span>
+            }
           </button>
         </div>
       </div>
 
-      <div class="search-filters" *ngIf="showFilters">
-        <div class="filters-grid">
-          <div class="filter-group">
-            <label for="category-filter">Categoría</label>
-            <select
-              id="category-filter"
-              class="filter-select"
-              [(ngModel)]="filters.category"
-              (change)="applyFilters()"
-            >
-              <option value="">Todas las categorías</option>
-              <option
-                *ngFor="let category of categories$ | async"
-                [value]="category.id"
-              >
-                {{ category.name }}
-              </option>
-            </select>
-          </div>
-
-          <div class="filter-group">
-            <label for="brand-filter">Marca</label>
-            <select
-              id="brand-filter"
-              class="filter-select"
-              [(ngModel)]="filters.brand"
-              (change)="applyFilters()"
-            >
-              <option value="">Todas las marcas</option>
-              <option *ngFor="let brand of brands$ | async" [value]="brand.id">
-                {{ brand.name }}
-              </option>
-            </select>
-          </div>
-
-          <div class="filter-group">
-            <label for="min-price-filter">Precio Mínimo</label>
-            <input
-              type="number"
-              id="min-price-filter"
-              class="filter-input"
-              [(ngModel)]="filters.minPrice"
-              (change)="applyFilters()"
-              placeholder="0.00"
-              step="0.01"
-              min="0"
-            />
-          </div>
-
-          <div class="filter-group">
-            <label for="max-price-filter">Precio Máximo</label>
-            <input
-              type="number"
-              id="max-price-filter"
-              class="filter-input"
-              [(ngModel)]="filters.maxPrice"
-              (change)="applyFilters()"
-              placeholder="999.99"
-              step="0.01"
-              min="0"
-            />
-          </div>
-
-          <div class="filter-group">
-            <label class="checkbox-label">
-              <input
-                type="checkbox"
-                [(ngModel)]="filters.inStock"
+      @if (showFilters) {
+        <div class="search-filters">
+          <div class="filters-grid">
+            <div class="filter-group">
+              <label for="category-filter">Categoría</label>
+              <select
+                id="category-filter"
+                class="filter-select"
+                [(ngModel)]="filters.category"
                 (change)="applyFilters()"
+              >
+                <option value="">Todas las categorías</option>
+                @for (category of categories(); track category.id) {
+                  <option [value]="category.id">
+                    {{ category.name }}
+                  </option>
+                }
+              </select>
+            </div>
+            <div class="filter-group">
+              <label for="brand-filter">Marca</label>
+              <select
+                id="brand-filter"
+                class="filter-select"
+                [(ngModel)]="filters.brand"
+                (change)="applyFilters()"
+              >
+                <option value="">Todas las marcas</option>
+                @for (brand of brands(); track brand.id) {
+                  <option [value]="brand.id">
+                    {{ brand.name }}
+                  </option>
+                }
+              </select>
+            </div>
+            <div class="filter-group">
+              <label for="min-price-filter">Precio Mínimo</label>
+              <input
+                type="number"
+                id="min-price-filter"
+                class="filter-input"
+                [(ngModel)]="filters.minPrice"
+                (change)="applyFilters()"
+                placeholder="0.00"
+                step="0.01"
+                min="0"
               />
-              Solo productos con stock
-            </label>
+            </div>
+            <div class="filter-group">
+              <label for="max-price-filter">Precio Máximo</label>
+              <input
+                type="number"
+                id="max-price-filter"
+                class="filter-input"
+                [(ngModel)]="filters.maxPrice"
+                (change)="applyFilters()"
+                placeholder="999.99"
+                step="0.01"
+                min="0"
+              />
+            </div>
+            <div class="filter-group">
+              <label class="checkbox-label">
+                <input
+                  type="checkbox"
+                  [(ngModel)]="filters.inStock"
+                  (change)="applyFilters()"
+                />
+                Solo productos con stock
+              </label>
+            </div>
+            <div class="filter-group">
+              <label for="sort-filter">Ordenar por</label>
+              <select
+                id="sort-filter"
+                class="filter-select"
+                [(ngModel)]="filters.sortBy"
+                (change)="applyFilters()"
+              >
+                <option value="">Relevancia</option>
+                <option value="name">Nombre</option>
+                <option value="price">Precio</option>
+                <option value="stock">Stock</option>
+                <option value="createdAt">Fecha de creación</option>
+              </select>
+            </div>
+            @if (filters.sortBy) {
+              <div class="filter-group">
+                <label for="sort-order">Orden</label>
+                <select
+                  id="sort-order"
+                  class="filter-select"
+                  [(ngModel)]="filters.sortOrder"
+                  (change)="applyFilters()"
+                >
+                  <option value="asc">Ascendente</option>
+                  <option value="desc">Descendente</option>
+                </select>
+              </div>
+            }
           </div>
-
-          <div class="filter-group">
-            <label for="sort-filter">Ordenar por</label>
-            <select
-              id="sort-filter"
-              class="filter-select"
-              [(ngModel)]="filters.sortBy"
-              (change)="applyFilters()"
+          <div class="filter-actions">
+            <button
+              class="btn btn-secondary"
+              (click)="clearFilters()"
+              type="button"
             >
-              <option value="">Relevancia</option>
-              <option value="name">Nombre</option>
-              <option value="price">Precio</option>
-              <option value="stock">Stock</option>
-              <option value="createdAt">Fecha de creación</option>
-            </select>
-          </div>
-
-          <div class="filter-group" *ngIf="filters.sortBy">
-            <label for="sort-order">Orden</label>
-            <select
-              id="sort-order"
-              class="filter-select"
-              [(ngModel)]="filters.sortOrder"
-              (change)="applyFilters()"
-            >
-              <option value="asc">Ascendente</option>
-              <option value="desc">Descendente</option>
-            </select>
+              Limpiar Filtros
+            </button>
           </div>
         </div>
+      }
 
-        <div class="filter-actions">
-          <button
-            class="btn btn-secondary"
-            (click)="clearFilters()"
-            type="button"
-          >
-            Limpiar Filtros
-          </button>
-        </div>
-      </div>
-
-      <div
-        class="search-suggestions"
-        *ngIf="
-          showSuggestions &&
-          (suggestions$ | async)?.length &&
-          (suggestions$ | async)!.length > 0
-        "
-      >
-        <div class="suggestions-list">
-          <div
-            *ngFor="let suggestion of suggestions$ | async"
-            class="suggestion-item"
-            (click)="selectSuggestion(suggestion)"
-          >
-            <i class="fas fa-history"></i>
-            {{ suggestion }}
+      @if (showSuggestions && suggestions()!.length > 0) {
+        <div class="search-suggestions">
+          <div class="suggestions-list">
+            @for (suggestion of suggestions(); track suggestion) {
+              <div
+                class="suggestion-item"
+                (click)="selectSuggestion(suggestion)"
+              >
+                <i class="fas fa-history"></i>
+                {{ suggestion }}
+              </div>
+            }
           </div>
         </div>
-      </div>
-
+      }
     </div>
   `,
   styles: [
@@ -447,11 +430,11 @@ import {
         }
       }
     `,
-  ],
-})
-export class PosProductSearchComponent implements OnInit, OnDestroy {
-  @Output() search = new EventEmitter<SearchFilters>();
-  @Output() productSelected = new EventEmitter<Product>();
+  ] })
+export class PosProductSearchComponent {
+  private destroyRef = inject(DestroyRef);
+  readonly search = output<SearchFilters>();
+  readonly productSelected = output<Product>();
 
   searchQuery: string = '';
   showFilters: boolean = false;
@@ -465,34 +448,25 @@ export class PosProductSearchComponent implements OnInit, OnDestroy {
     maxPrice: undefined,
     inStock: false,
     sortBy: undefined,
-    sortOrder: 'asc',
-  };
-
-  categories$!: Observable<Category[]>;
-  brands$!: Observable<Brand[]>;
-  suggestions$!: Observable<string[]>;
+    sortOrder: 'asc' };
 
   private searchSubject = new Subject<string>();
-  private destroy$ = new Subject<void>();
+private productService = inject(PosProductService);
 
-  constructor(private productService: PosProductService) {}
+  readonly categories = toSignal(this.productService.getCategories(), {
+    initialValue: [] as Category[] });
+  readonly brands = toSignal(this.productService.getBrands(), {
+    initialValue: [] as Brand[] });
+  readonly suggestions = toSignal(this.productService.getSearchHistory(), {
+    initialValue: [] as string[] });
 
-  ngOnInit(): void {
-    this.categories$ = this.productService.getCategories();
-    this.brands$ = this.productService.getBrands();
-    this.suggestions$ = this.productService.getSearchHistory();
-
-    this.searchSubject
-      .pipe(debounceTime(300), distinctUntilChanged(), takeUntil(this.destroy$))
+  constructor() {
+this.searchSubject
+      .pipe(debounceTime(300), distinctUntilChanged(), takeUntilDestroyed(this.destroyRef))
       .subscribe((query) => {
         this.filters.query = query;
         this.performSearch();
       });
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
   }
 
   onSearchInput(event: Event): void {
@@ -534,8 +508,7 @@ export class PosProductSearchComponent implements OnInit, OnDestroy {
       maxPrice: undefined,
       inStock: false,
       sortBy: undefined,
-      sortOrder: 'asc',
-    };
+      sortOrder: 'asc' };
     this.performSearch();
   }
 

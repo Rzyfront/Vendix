@@ -1,11 +1,10 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
   OnChanges,
+  input,
+  output
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 
@@ -20,16 +19,15 @@ import { OrganizationListItem } from '../interfaces/organization.interface';
   selector: 'app-organization-edit-modal',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     ModalComponent,
     InputComponent,
-    ButtonComponent,
-  ],
+    ButtonComponent
+],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
@@ -179,8 +177,8 @@ import { OrganizationListItem } from '../interfaces/organization.interface';
           <app-button
             variant="primary"
             (clicked)="onSubmit()"
-            [disabled]="organizationForm.invalid || isSubmitting"
-            [loading]="isSubmitting"
+            [disabled]="organizationForm.invalid || isSubmitting()"
+            [loading]="isSubmitting()"
           >
             Update Organization
           </app-button>
@@ -190,13 +188,13 @@ import { OrganizationListItem } from '../interfaces/organization.interface';
   `,
 })
 export class OrganizationEditModalComponent implements OnChanges {
-  @Input() isOpen = false;
-  @Input() isSubmitting = false;
-  @Input() organization?: OrganizationListItem;
+  readonly isOpen = input(false);
+  readonly isSubmitting = input(false);
+  readonly organization = input<OrganizationListItem>();
 
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() submit = new EventEmitter<any>();
-  @Output() cancel = new EventEmitter<void>();
+  readonly isOpenChange = output<boolean>();
+  readonly submit = output<any>();
+  readonly cancel = output<void>();
 
   organizationForm!: FormGroup;
 
@@ -219,17 +217,18 @@ export class OrganizationEditModalComponent implements OnChanges {
   }
 
   ngOnChanges(): void {
-    if (this.organization && this.organizationForm) {
+    const organization = this.organization();
+    if (organization && this.organizationForm) {
       this.organizationForm.patchValue({
-        name: this.organization.name,
-        email: this.organization.email,
+        name: organization.name,
+        email: organization.email,
         phone: '',
         website: '',
         description: '',
         legalName: '',
         taxId: '',
-        state: this.organization.status,
-        mode: this.organization.mode || 'production',
+        state: organization.status,
+        mode: organization.mode || 'production',
       });
     }
   }
@@ -245,7 +244,7 @@ export class OrganizationEditModalComponent implements OnChanges {
 
     const formData = this.organizationForm.value;
     const organizationData = {
-      id: this.organization?.id,
+      id: this.organization()?.id,
       name: formData.name,
       email: formData.email,
       phone: formData.phone || undefined,

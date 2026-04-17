@@ -1,10 +1,10 @@
 <app-modal
-  [isOpen]="isOpen"
+  [isOpen]="isOpen()"
   [size]="'xl'"
   [title]="'Procesar Pago'"
   [subtitle]="'Selecciona método de pago y cliente'"
   (closed)="onModalClosed()"
->
+  >
   <!-- Main Content -->
   <div class="payment-content">
     <!-- Resumen Section -->
@@ -16,48 +16,57 @@
 
       <!-- Product List -->
       <div class="product-list">
-        <div *ngFor="let item of cartState?.items" class="product-item">
-          <span class="product-name">{{ item.product.name }}<span *ngIf="item.variant_display_name" style="font-size: 0.85em; opacity: 0.7;"> - {{ item.variant_display_name }}</span></span>
-          <span class="product-qty" *ngIf="item.is_weight_product; else unitQty">
-            {{ item.weight }} {{ item.weight_unit || 'kg' }}
-          </span>
-          <ng-template #unitQty>
-            <span class="product-qty">x{{ item.quantity }}</span>
-          </ng-template>
-        </div>
-        <div *ngIf="!cartState?.items?.length" class="empty-cart">
-          El carrito está vacío
-        </div>
+        @for (item of cartState()?.items; track item) {
+          <div class="product-item">
+            <span class="product-name">{{ item.product.name }}@if (item.variant_display_name) {
+              <span style="font-size: 0.85em; opacity: 0.7;"> - {{ item.variant_display_name }}</span>
+            }</span>
+            @if (item.is_weight_product) {
+              <span class="product-qty">
+                {{ item.weight }} {{ item.weight_unit || 'kg' }}
+              </span>
+            } @else {
+              <span class="product-qty">x{{ item.quantity }}</span>
+            }
+          </div>
+        }
+        @if (!cartState()?.items?.length) {
+          <div class="empty-cart">
+            El carrito está vacío
+          </div>
+        }
       </div>
 
       <!-- Summary Details -->
       <div class="summary-details">
         <div class="summary-row">
           <span>Productos</span>
-          <span class="summary-value">{{ cartState?.summary?.itemCount || 0 }}</span>
+          <span class="summary-value">{{ cartState()?.summary?.itemCount || 0 }}</span>
         </div>
         <div class="summary-row">
           <span>Cantidad</span>
-          <span class="summary-value">{{ cartState?.summary?.totalItems || 0 }}</span>
+          <span class="summary-value">{{ cartState()?.summary?.totalItems || 0 }}</span>
         </div>
         <div class="summary-row">
           <span>Subtotal</span>
-          <span class="summary-value">{{ cartState?.summary?.subtotal || 0 | currency }}</span>
+          <span class="summary-value">{{ cartState()?.summary?.subtotal || 0 | currency }}</span>
         </div>
         <div class="summary-row">
           <span>Impuestos</span>
-          <span class="summary-value">{{ cartState?.summary?.taxAmount || 0 | currency }}</span>
+          <span class="summary-value">{{ cartState()?.summary?.taxAmount || 0 | currency }}</span>
         </div>
-        <div *ngIf="(cartState?.summary?.discountAmount ?? 0) > 0" class="summary-row">
-          <span>Descuento</span>
-          <span class="summary-value discount">-{{ cartState?.summary?.discountAmount | currency }}</span>
-        </div>
+        @if ((cartState()?.summary?.discountAmount ?? 0) > 0) {
+          <div class="summary-row">
+            <span>Descuento</span>
+            <span class="summary-value discount">-{{ cartState()?.summary?.discountAmount | currency }}</span>
+          </div>
+        }
       </div>
 
       <!-- Total -->
       <div class="total-section">
         <p class="total-label">Total a Pagar</p>
-        <p class="total-amount">{{ cartState?.summary?.total || 0 | currency }}</p>
+        <p class="total-amount">{{ cartState()?.summary?.total || 0 | currency }}</p>
       </div>
     </section>
 
@@ -69,404 +78,450 @@
       </div>
 
       <!-- Sub-section: Forma de Pago -->
-      <div class="collapsible-subsection" [class.collapsed]="paymentFormCollapsed">
+      <div class="collapsible-subsection" [class.collapsed]="paymentFormCollapsed()">
         <div class="subsection-header" (click)="togglePaymentFormCollapsed()">
           <div style="display: flex; align-items: center; gap: 8px;">
             <app-icon name="layers" [size]="16" class="section-icon"></app-icon>
             <h2 class="section-title" style="margin: 0;">Forma de Pago</h2>
           </div>
           <div style="display: flex; align-items: center; gap: 8px;">
-            <span *ngIf="paymentFormCollapsed" class="collapsed-badge">
-              <app-icon [name]="paymentState.paymentForm === 'contado' ? 'zap' : 'clock'" [size]="14"></app-icon>
-              {{ paymentState.paymentForm === 'contado' ? 'Contado' : 'Crédito' }}
-            </span>
-            <app-icon [name]="paymentFormCollapsed ? 'chevron-down' : 'chevron-up'" [size]="16" style="color: var(--color-text-muted);"></app-icon>
+            @if (paymentFormCollapsed()) {
+              <span class="collapsed-badge">
+                <app-icon [name]="paymentState().paymentForm === 'contado' ? 'zap' : 'clock'" [size]="14"></app-icon>
+                {{ paymentState().paymentForm === 'contado' ? 'Contado' : 'Crédito' }}
+              </span>
+            }
+            <app-icon [name]="paymentFormCollapsed() ? 'chevron-down' : 'chevron-up'" [size]="16" style="color: var(--color-text-muted);"></app-icon>
           </div>
         </div>
 
-        <div class="subsection-body" *ngIf="!paymentFormCollapsed">
-          <div class="tab-headers">
-            <button type="button" class="tab-btn"
-              [class.active]="paymentState.paymentForm === 'contado'"
-              (click)="setPaymentForm('contado')">
-              <app-icon name="zap" [size]="16"></app-icon>
-              <span>Contado</span>
-            </button>
-            <button type="button" class="tab-btn"
-              [class.active]="paymentState.paymentForm === 'credito'"
-              (click)="setPaymentForm('credito')">
-              <app-icon name="clock" [size]="16"></app-icon>
-              <span>Crédito</span>
-            </button>
-          </div>
-        </div>
-
-        <!-- Crédito Config — outside subsection-body so it stays visible when tabs collapse -->
-        <div *ngIf="paymentState.paymentForm === 'credito'" class="tab-content">
-          <div class="credit-config">
-            <div *ngIf="!cartState?.customer" class="credit-warning">
-              <app-icon name="alert-triangle" [size]="18"></app-icon>
-              <span>Se requiere un cliente para ventas a crédito</span>
-            </div>
-
-            <!-- Tipo de Crédito -->
-            <div class="credit-field">
-              <label>Tipo de Crédito</label>
-              <div class="frequency-grid">
-                <button *ngFor="let opt of creditTypeOptions" type="button"
-                  class="frequency-btn"
-                  [class.selected]="creditType === opt.value"
-                  (click)="creditType = opt.value; updateCreditCalculations()">
-                  {{ opt.label }}
-                </button>
-              </div>
-            </div>
-
-            <div class="credit-field">
-              <label>Abono inicial (opcional)</label>
-              <input appCurrencyInput [(ngModel)]="creditInitialPayment" (ngModelChange)="updateCreditCalculations()" placeholder="0.00"/>
-              <span class="hint">Se descuenta del total antes de generar cuotas</span>
-            </div>
-
-            <div *ngIf="creditInitialPayment > 0" class="payment-methods-grid mini">
-              <button *ngFor="let method of paymentMethods" type="button"
-                class="payment-method-btn mini"
-                [class.selected]="creditInitialPaymentMethod?.id === method.id"
-                (click)="selectCreditInitialPaymentMethod(method)">
-                <app-icon [name]="method.icon" [size]="18"></app-icon>
-                <span class="method-name">{{ method.name }}</span>
+        @if (!paymentFormCollapsed()) {
+          <div class="subsection-body">
+            <div class="tab-headers">
+              <button type="button" class="tab-btn"
+                [class.active]="paymentState().paymentForm === 'contado'"
+                (click)="setPaymentForm('contado')">
+                <app-icon name="zap" [size]="16"></app-icon>
+                <span>Contado</span>
+              </button>
+              <button type="button" class="tab-btn"
+                [class.active]="paymentState().paymentForm === 'credito'"
+                (click)="setPaymentForm('credito')">
+                <app-icon name="clock" [size]="16"></app-icon>
+                <span>Crédito</span>
               </button>
             </div>
+          </div>
+        }
 
-            <!-- Campos de cuotas (solo para tipo 'installments') -->
-            <ng-container *ngIf="creditType === 'installments'">
+        <!-- Crédito Config  -->
+        @if (paymentState().paymentForm === 'credito') {
+          <div class="tab-content">
+            <div class="credit-config">
+              @if (!cartState()?.customer) {
+                <div class="credit-warning">
+                  <app-icon name="alert-triangle" [size]="18"></app-icon>
+                  <span>Se requiere un cliente para ventas a crédito</span>
+                </div>
+              }
+              <!-- Tipo de Crédito -->
               <div class="credit-field">
-                <label>Periodicidad</label>
+                <label>Tipo de Crédito</label>
                 <div class="frequency-grid">
-                  <button *ngFor="let opt of frequencyOptions" type="button"
-                    class="frequency-btn"
-                    [class.selected]="creditFrequency === opt.value"
-                    (click)="creditFrequency = opt.value; updateCreditCalculations()">
-                    {{ opt.label }}
-                  </button>
+                  @for (opt of creditTypeOptions; track opt) {
+                    <button type="button"
+                      class="frequency-btn"
+                      [class.selected]="creditType() === opt.value"
+                      (click)="creditType.set(opt.value); updateCreditCalculations()">
+                      {{ opt.label }}
+                    </button>
+                  }
                 </div>
               </div>
-
               <div class="credit-field">
-                <label>Número de cuotas</label>
-                <input type="number" [(ngModel)]="creditNumInstallments" (ngModelChange)="updateCreditCalculations()" min="1" max="60"/>
+                <label>Abono inicial (opcional)</label>
+                <input appCurrencyInput [(ngModel)]="creditInitialPayment" (ngModelChange)="updateCreditCalculations()" placeholder="0.00"/>
+                <span class="hint">Se descuenta del total antes de generar cuotas</span>
               </div>
-
-              <div class="credit-field">
-                <label>Fecha primera cuota</label>
-                <input type="date" [(ngModel)]="creditFirstDate" (ngModelChange)="updateCreditCalculations()"/>
-              </div>
-            </ng-container>
-
-            <div class="credit-field">
-              <label>Tasa de interés anual (%) (opcional)</label>
-              <input type="number" [(ngModel)]="creditInterestRate" (ngModelChange)="updateCreditCalculations()" min="0" step="0.1" placeholder="0"/>
-            </div>
-
-            <!-- Tipo de Interés (solo visible si hay tasa > 0) -->
-            <div *ngIf="creditInterestRate > 0" class="credit-field">
-              <label>Tipo de Interés</label>
-              <div class="frequency-grid">
-                <button *ngFor="let opt of interestTypeOptions" type="button"
-                  class="frequency-btn"
-                  [class.selected]="creditInterestType === opt.value"
-                  (click)="creditInterestType = opt.value; updateCreditCalculations()">
-                  {{ opt.label }}
-                </button>
-              </div>
-            </div>
-
-            <div class="credit-balance">
-              <span>Saldo a financiar</span>
-              <span>{{ creditRemainingBalance | currency }}</span>
-            </div>
-
-            <!-- Interest Breakdown -->
-            <div *ngIf="creditInterestRate > 0 && creditType === 'installments' && creditInstallmentsPreview.length > 0" style="margin-top: 8px; padding: 10px; background: #f9fafb; border-radius: 10px; border: 1px solid #e5e7eb;">
-              <div style="display: flex; justify-content: space-between; font-size: 12px; color: #6b7280; padding: 3px 0;">
-                <span>Tasa anual</span>
-                <span style="font-weight: 600; color: #374151;">{{ getAnnualRate() }}% {{ creditInterestType === 'compound' ? '(Compuesto)' : '(Simple)' }}</span>
-              </div>
-              <div style="display: flex; justify-content: space-between; font-size: 12px; color: #6b7280; padding: 3px 0;">
-                <span>Tasa {{ getPeriodicLabel() }}</span>
-                <span style="font-weight: 600; color: #374151;">{{ getPeriodicRate() }}%</span>
-              </div>
-              <div style="display: flex; justify-content: space-between; font-size: 12px; padding: 3px 0;">
-                <span style="color: #6b7280;">Interés total</span>
-                <span style="font-weight: 700; color: #ef4444;">+ {{ getInterestAmount() | currency }} ({{ getEffectivePercent() }}%)</span>
-              </div>
-              <div style="display: flex; justify-content: space-between; font-size: 13px; font-weight: 700; padding: 6px 0 2px; margin-top: 4px; border-top: 1px solid #e5e7eb;">
-                <span>Total a pagar en cuotas</span>
-                <span>{{ getTotalInstallments() | currency }}</span>
-              </div>
-            </div>
-
-            <div *ngIf="creditType === 'installments' && creditInstallmentsPreview.length > 0" class="installments-preview">
-              <div *ngFor="let inst of creditInstallmentsPreview; let i = index" class="installment-row">
-                <div class="installment-left">
-                  <span class="installment-number">{{ i + 1 }}</span>
-                  <span class="installment-date">{{ inst.due_date }}</span>
+              @if (creditInitialPayment() > 0) {
+                <div class="payment-methods-grid mini">
+                  @for (method of paymentMethods(); track method) {
+                    <button type="button"
+                      class="payment-method-btn mini"
+                      [class.selected]="creditInitialPaymentMethod()?.id === method.id"
+                      (click)="selectCreditInitialPaymentMethod(method)">
+                      <app-icon [name]="method.icon" [size]="18"></app-icon>
+                      <span class="method-name">{{ method.name }}</span>
+                    </button>
+                  }
                 </div>
-                <span class="installment-amount">{{ inst.amount | currency }}</span>
+              }
+              <!-- Campos de cuotas (solo para tipo 'installments') -->
+              @if (creditType() === 'installments') {
+                <div class="credit-field">
+                  <label>Periodicidad</label>
+                  <div class="frequency-grid">
+                    @for (opt of frequencyOptions; track opt) {
+                      <button type="button"
+                        class="frequency-btn"
+                        [class.selected]="creditFrequency() === opt.value"
+                        (click)="creditFrequency.set(opt.value); updateCreditCalculations()">
+                        {{ opt.label }}
+                      </button>
+                    }
+                  </div>
+                </div>
+                <div class="credit-field">
+                  <label>Número de cuotas</label>
+                  <input type="number" [(ngModel)]="creditNumInstallments" (ngModelChange)="updateCreditCalculations()" min="1" max="60"/>
+                </div>
+                <div class="credit-field">
+                  <label>Fecha primera cuota</label>
+                  <input type="date" [(ngModel)]="creditFirstDate" (ngModelChange)="updateCreditCalculations()"/>
+                </div>
+              }
+              <div class="credit-field">
+                <label>Tasa de interés anual (%) (opcional)</label>
+                <input type="number" [(ngModel)]="creditInterestRate" (ngModelChange)="updateCreditCalculations()" min="0" step="0.1" placeholder="0"/>
               </div>
+              <!-- Tipo de Interés (solo visible si hay tasa > 0) -->
+              @if (creditInterestRate() > 0) {
+                <div class="credit-field">
+                  <label>Tipo de Interés</label>
+                  <div class="frequency-grid">
+                    @for (opt of interestTypeOptions; track opt) {
+                      <button type="button"
+                        class="frequency-btn"
+                        [class.selected]="creditInterestType() === opt.value"
+                        (click)="creditInterestType.set(opt.value); updateCreditCalculations()">
+                        {{ opt.label }}
+                      </button>
+                    }
+                  </div>
+                </div>
+              }
+              <div class="credit-balance">
+                <span>Saldo a financiar</span>
+                <span>{{ creditRemainingBalance() | currency }}</span>
+              </div>
+              <!-- Interest Breakdown -->
+              @if (creditInterestRate() > 0 && creditType() === 'installments' && creditInstallmentsPreview().length > 0) {
+                <div style="margin-top: 8px; padding: 10px; background: #f9fafb; border-radius: 10px; border: 1px solid #e5e7eb;">
+                  <div style="display: flex; justify-content: space-between; font-size: 12px; color: #6b7280; padding: 3px 0;">
+                    <span>Tasa anual</span>
+                    <span style="font-weight: 600; color: #374151;">{{ getAnnualRate() }}% {{ creditInterestType() === 'compound' ? '(Compuesto)' : '(Simple)' }}</span>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; font-size: 12px; color: #6b7280; padding: 3px 0;">
+                    <span>Tasa {{ getPeriodicLabel() }}</span>
+                    <span style="font-weight: 600; color: #374151;">{{ getPeriodicRate() }}%</span>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; font-size: 12px; padding: 3px 0;">
+                    <span style="color: #6b7280;">Interés total</span>
+                    <span style="font-weight: 700; color: #ef4444;">+ {{ getInterestAmount() | currency }} ({{ getEffectivePercent() }}%)</span>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; font-size: 13px; font-weight: 700; padding: 6px 0 2px; margin-top: 4px; border-top: 1px solid #e5e7eb;">
+                    <span>Total a pagar en cuotas</span>
+                    <span>{{ getTotalInstallments() | currency }}</span>
+                  </div>
+                </div>
+              }
+              @if (creditType() === 'installments' && creditInstallmentsPreview().length > 0) {
+                <div class="installments-preview">
+                  @for (inst of creditInstallmentsPreview(); track inst; let i = $index) {
+                    <div class="installment-row">
+                      <div class="installment-left">
+                        <span class="installment-number">{{ i + 1 }}</span>
+                        <span class="installment-date">{{ inst.due_date }}</span>
+                      </div>
+                      <span class="installment-amount">{{ inst.amount | currency }}</span>
+                    </div>
+                  }
+                </div>
+              }
             </div>
           </div>
-        </div>
+        }
       </div>
 
       <!-- Sub-section: Método de pago (only when contado) -->
-      <div *ngIf="paymentState.paymentForm === 'contado'" class="collapsible-subsection" [class.collapsed]="paymentMethodCollapsed">
-        <div class="subsection-header" (click)="togglePaymentMethodCollapsed()">
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <app-icon name="wallet" [size]="16" class="section-icon"></app-icon>
-            <h2 class="section-title" style="margin: 0;">Método de pago</h2>
-          </div>
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <span *ngIf="paymentMethodCollapsed && paymentState.selectedMethod" class="collapsed-badge">
-              <app-icon [name]="paymentState.selectedMethod.icon" [size]="14"></app-icon>
-              {{ paymentState.selectedMethod.name }}
-            </span>
-            <app-icon [name]="paymentMethodCollapsed ? 'chevron-down' : 'chevron-up'" [size]="16" style="color: var(--color-text-muted);"></app-icon>
-          </div>
-        </div>
-
-        <div class="subsection-body" *ngIf="!paymentMethodCollapsed">
-          <div *ngIf="paymentMethods.length > 0; else noPaymentMethods" class="payment-methods-grid">
-            <button
-              *ngFor="let method of paymentMethods"
-              type="button"
-              (click)="selectPaymentMethod(method)"
-              class="payment-method-btn"
-              [class.selected]="paymentState.selectedMethod?.id === method.id"
-            >
-              <app-icon [name]="method.icon" [size]="24"></app-icon>
-              <span class="method-name">{{ method.name }}</span>
-            </button>
-          </div>
-
-          <ng-template #noPaymentMethods>
-            <div class="no-methods">
-              <app-icon name="credit-card" [size]="24"></app-icon>
-              <p>No hay métodos configurados</p>
-              <button class="configure-link" (click)="navigateToSettings()">Configurar ahora</button>
+      @if (paymentState().paymentForm === 'contado') {
+        <div class="collapsible-subsection" [class.collapsed]="paymentMethodCollapsed()">
+          <div class="subsection-header" (click)="togglePaymentMethodCollapsed()">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <app-icon name="wallet" [size]="16" class="section-icon"></app-icon>
+              <h2 class="section-title" style="margin: 0;">Método de pago</h2>
             </div>
-          </ng-template>
-        </div>
-
-        <!-- Cash Input (visible even when grid collapsed) -->
-        <div *ngIf="paymentState.selectedMethod?.type === 'cash'" class="cash-section">
-          <div class="cash-inputs">
-            <div class="cash-input-group">
-              <label>Monto Recibido</label>
-              <div class="cash-input" [class.error]="isCashAmountInsufficient">
-                <span class="currency">{{ currencySymbol() }}</span>
-                <input
-                  appCurrencyInput
-                  [formControl]="cashReceivedControl"
-                  placeholder="0.00"
-                />
-              </div>
-              <span *ngIf="isCashAmountInsufficient" class="error-text">
-                Faltan: {{ missingAmount | currency }}
-              </span>
-            </div>
-            <div class="cash-input-group">
-              <label>Cambio</label>
-              <div class="change-display">
-                <span>{{ paymentState.change | currency }}</span>
-                <app-icon name="coins" [size]="18"></app-icon>
-              </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              @if (paymentMethodCollapsed() && paymentState().selectedMethod) {
+                <span class="collapsed-badge">
+                  <app-icon [name]="paymentState().selectedMethod?.icon ?? ''" [size]="14"></app-icon>
+                  {{ paymentState().selectedMethod?.name }}
+                </span>
+              }
+              <app-icon [name]="paymentMethodCollapsed() ? 'chevron-down' : 'chevron-up'" [size]="16" style="color: var(--color-text-muted);"></app-icon>
             </div>
           </div>
-
-          <!-- Quick Amounts -->
-          <div *ngIf="showOnscreenKeypad" class="quick-amounts">
-            <button type="button" (click)="setHalfAmount()" class="quick-btn">
-              <span>1/2 Pago</span>
-              <span class="quick-value">{{ (cartState?.summary?.total || 0) / 2 | currency }}</span>
-            </button>
-            <button type="button" (click)="setFullAmount()" class="quick-btn primary">
-              <span>Total</span>
-              <app-icon name="check" [size]="16"></app-icon>
-            </button>
-          </div>
-
-          <!-- Numeric Keypad -->
-          <div *ngIf="showOnscreenKeypad" class="keypad">
-            <button *ngFor="let num of [1, 2, 3, 4, 5, 6, 7, 8, 9]" type="button" (click)="appendNumber(num)" class="keypad-btn">
-              {{ num }}
-            </button>
-            <button type="button" (click)="clearCashAmount()" class="keypad-btn clear">C</button>
-            <button type="button" (click)="appendNumber(0)" class="keypad-btn">0</button>
-            <button type="button" (click)="backspace()" class="keypad-btn">
-              <app-icon name="delete" [size]="20"></app-icon>
-            </button>
-          </div>
-        </div>
-
-        <!-- Wallet Balance Display -->
-        <div *ngIf="paymentState.selectedMethod?.type === 'wallet'" class="wallet-section">
-          <div *ngIf="walletLoading" class="text-center" style="padding: 12px 0;">
-            <div class="spinner" style="width: 24px; height: 24px; border-width: 2px; margin: 0 auto 8px;"></div>
-            <p style="font-size: 13px; color: var(--color-text-muted); margin: 0;">Consultando saldo...</p>
-          </div>
-          <div *ngIf="!walletLoading && walletInfo" class="wallet-balance-display"
-               [style.background]="walletInfo.available >= (cartState?.summary?.total || 0) ? 'rgba(var(--color-success-rgb), 0.1)' : 'rgba(var(--color-error-rgb), 0.1)'"
-               [style.border]="walletInfo.available >= (cartState?.summary?.total || 0) ? '2px solid rgba(var(--color-success-rgb), 0.3)' : '2px solid rgba(var(--color-error-rgb), 0.3)'"
-               style="display: flex; justify-content: space-between; align-items: center; padding: 12px; border-radius: 10px;">
-            <span style="font-weight: 600; color: var(--color-text-primary);">Saldo disponible:</span>
-            <span style="font-size: 18px; font-weight: 700;"
-                  [style.color]="walletInfo.available >= (cartState?.summary?.total || 0) ? 'var(--color-success)' : 'var(--color-error)'">
-              {{ walletInfo.available | currency }}
-            </span>
-          </div>
-          <p *ngIf="!walletLoading && walletInfo && walletInfo.available < (cartState?.summary?.total || 0)"
-             style="font-size: 12px; color: var(--color-error); margin: 8px 0 0 0;">
-            Saldo insuficiente para cubrir el total de {{ cartState?.summary?.total | currency }}
-          </p>
-          <div *ngIf="!walletLoading && !walletInfo" style="text-align: center; padding: 12px 0;">
-            <p style="font-size: 13px; color: var(--color-text-muted); margin: 0;">
-              El cliente no tiene saldo en su wallet.
-            </p>
-          </div>
-        </div>
-
-        <!-- Reference Input (visible even when grid collapsed) -->
-        <div *ngIf="paymentState.selectedMethod?.requiresReference && !isWompiSelected()" class="reference-section">
-          <div class="reference-header">
-            <app-icon [name]="paymentState.selectedMethod?.icon || 'credit-card'" [size]="28"></app-icon>
-            <p>Ingresa el número de referencia</p>
-          </div>
-          <app-input
-            [formControl]="referenceControl"
-            [label]="paymentState.selectedMethod?.referenceLabel || 'Referencia'"
-            [placeholder]="'Ingresa la referencia'"
-            [size]="'lg'"
-            [error]="getReferenceError()"
-          ></app-input>
-        </div>
-
-        <!-- Wompi Sub-Method Selector -->
-        <div *ngIf="isWompiSelected() && !wompiAwaitingPayment" class="wompi-section">
-          <ng-container *ngIf="!selectedWompiSubMethod">
-            <p class="section-label">Selecciona el método de pago</p>
-            <div class="wompi-submethods-grid">
-              <button
-                *ngFor="let sub of wompiSubMethods"
-                type="button"
-                class="wompi-submethod-btn"
-                [style.--wompi-color]="sub.color"
-                (click)="selectWompiSubMethod(sub.key)">
-                <app-icon [name]="sub.icon" [size]="24"></app-icon>
-                <span class="submethod-label">{{ sub.label }}</span>
-                <span class="submethod-desc">{{ sub.description }}</span>
-              </button>
+          @if (!paymentMethodCollapsed()) {
+            <div class="subsection-body">
+              @if (paymentMethods().length > 0) {
+                <div class="payment-methods-grid">
+                  @for (method of paymentMethods(); track method) {
+                    <button
+                      type="button"
+                      (click)="selectPaymentMethod(method)"
+                      class="payment-method-btn"
+                      [class.selected]="paymentState().selectedMethod?.id === method.id"
+                      >
+                      <app-icon [name]="method.icon" [size]="24"></app-icon>
+                      <span class="method-name">{{ method.name }}</span>
+                    </button>
+                  }
+                </div>
+              } @else {
+                <div class="no-methods">
+                  <app-icon name="credit-card" [size]="24"></app-icon>
+                  <p>No hay métodos configurados</p>
+                  <button class="configure-link" (click)="navigateToSettings()">Configurar ahora</button>
+                </div>
+              }
             </div>
-          </ng-container>
-
-          <!-- Nequi Phone Input -->
-          <div *ngIf="selectedWompiSubMethod === 'NEQUI'" class="wompi-form">
-            <div class="wompi-form-header" style="border-color: #E6007E">
-              <app-icon name="smartphone" [size]="20"></app-icon>
-              <span>Pago con Nequi</span>
-              <button type="button" class="wompi-back-btn" (click)="selectedWompiSubMethod = null">
-                <app-icon name="arrow-left" [size]="16"></app-icon>
-              </button>
-            </div>
-            <app-input
-              label="Número de celular"
-              placeholder="3001234567"
-              [formControl]="nequiPhoneControl">
-            </app-input>
-            <span *ngIf="nequiPhoneControl.touched && nequiPhoneControl.invalid" class="field-error">
-              Ingresa un número de celular colombiano válido (10 dígitos, inicia con 3)
-            </span>
-          </div>
-
-          <!-- PSE Form -->
-          <div *ngIf="selectedWompiSubMethod === 'PSE'" class="wompi-form">
-            <div class="wompi-form-header" style="border-color: #003DA5">
-              <app-icon name="landmark" [size]="20"></app-icon>
-              <span>Transferencia PSE</span>
-              <button type="button" class="wompi-back-btn" (click)="selectedWompiSubMethod = null">
-                <app-icon name="arrow-left" [size]="16"></app-icon>
-              </button>
-            </div>
-            <div class="wompi-form-fields">
-              <div class="form-row">
-                <label class="form-label">Tipo de persona</label>
-                <div class="toggle-buttons">
-                  <button type="button"
-                    [class.active]="pseForm.value.userType === 0"
-                    (click)="pseForm.patchValue({ userType: 0 })">Natural</button>
-                  <button type="button"
-                    [class.active]="pseForm.value.userType === 1"
-                    (click)="pseForm.patchValue({ userType: 1 })">Jurídica</button>
+          }
+          <!-- Cash Input (visible even when grid collapsed) -->
+          @if (paymentState().selectedMethod?.type === 'cash') {
+            <div class="cash-section">
+              <div class="cash-inputs">
+                <div class="cash-input-group">
+                  <label>Monto Recibido</label>
+                  <div class="cash-input" [class.error]="isCashAmountInsufficient">
+                    <span class="currency">{{ currencySymbol() }}</span>
+                    <input
+                      appCurrencyInput
+                      [formControl]="cashReceivedControl"
+                      placeholder="0.00"
+                      />
+                  </div>
+                  @if (isCashAmountInsufficient) {
+                    <span class="error-text">
+                      Faltan: {{ missingAmount | currency }}
+                    </span>
+                  }
+                </div>
+                <div class="cash-input-group">
+                  <label>Cambio</label>
+                  <div class="change-display">
+                    <span>{{ paymentState().change | currency }}</span>
+                    <app-icon name="coins" [size]="18"></app-icon>
+                  </div>
                 </div>
               </div>
-              <div class="form-row">
-                <app-selector
-                  label="Tipo de documento"
-                  [options]="[{value: 'CC', label: 'CC'}, {value: 'CE', label: 'CE'}, {value: 'NIT', label: 'NIT'}, {value: 'PP', label: 'PP'}, {value: 'TI', label: 'TI'}]"
-                  [formControl]="pseForm.controls.userLegalIdType">
-                </app-selector>
+              <!-- Quick Amounts -->
+              @if (showOnscreenKeypad()) {
+                <div class="quick-amounts">
+                  <button type="button" (click)="setHalfAmount()" class="quick-btn">
+                    <span>1/2 Pago</span>
+                    <span class="quick-value">{{ (cartState()?.summary?.total || 0) / 2 | currency }}</span>
+                  </button>
+                  <button type="button" (click)="setFullAmount()" class="quick-btn primary">
+                    <span>Total</span>
+                    <app-icon name="check" [size]="16"></app-icon>
+                  </button>
+                </div>
+              }
+              <!-- Numeric Keypad -->
+              @if (showOnscreenKeypad()) {
+                <div class="keypad">
+                  @for (num of [1, 2, 3, 4, 5, 6, 7, 8, 9]; track num) {
+                    <button type="button" (click)="appendNumber(num)" class="keypad-btn">
+                      {{ num }}
+                    </button>
+                  }
+                  <button type="button" (click)="clearCashAmount()" class="keypad-btn clear">C</button>
+                  <button type="button" (click)="appendNumber(0)" class="keypad-btn">0</button>
+                  <button type="button" (click)="backspace()" class="keypad-btn">
+                    <app-icon name="delete" [size]="20"></app-icon>
+                  </button>
+                </div>
+              }
+            </div>
+          }
+          <!-- Wallet Balance Display -->
+          @if (paymentState().selectedMethod?.type === 'wallet') {
+            <div class="wallet-section">
+              @if (walletLoading()) {
+                <div class="text-center" style="padding: 12px 0;">
+                  <div class="spinner" style="width: 24px; height: 24px; border-width: 2px; margin: 0 auto 8px;"></div>
+                  <p style="font-size: 13px; color: var(--color-text-muted); margin: 0;">Consultando saldo...</p>
+                </div>
+              }
+              @if (!walletLoading() && walletInfo()) {
+                <div class="wallet-balance-display"
+                  [style.background]="(walletInfo()?.available ?? 0) >= (cartState()?.summary?.total || 0) ? 'rgba(var(--color-success-rgb), 0.1)' : 'rgba(var(--color-error-rgb), 0.1)'"
+                  [style.border]="(walletInfo()?.available ?? 0) >= (cartState()?.summary?.total || 0) ? '2px solid rgba(var(--color-success-rgb), 0.3)' : '2px solid rgba(var(--color-error-rgb), 0.3)'"
+                  style="display: flex; justify-content: space-between; align-items: center; padding: 12px; border-radius: 10px;">
+                  <span style="font-weight: 600; color: var(--color-text-primary);">Saldo disponible:</span>
+                  <span style="font-size: 18px; font-weight: 700;"
+                    [style.color]="(walletInfo()?.available ?? 0) >= (cartState()?.summary?.total || 0) ? 'var(--color-success)' : 'var(--color-error)'">
+                    {{ walletInfo()?.available | currency }}
+                  </span>
+                </div>
+              }
+              @if (!walletLoading() && walletInfo() && (walletInfo()?.available ?? 0) < (cartState()?.summary?.total || 0)) {
+                <p
+                  style="font-size: 12px; color: var(--color-error); margin: 8px 0 0 0;">
+                  Saldo insuficiente para cubrir el total de {{ cartState()?.summary?.total | currency }}
+                </p>
+              }
+              @if (!walletLoading() && !walletInfo()) {
+                <div style="text-align: center; padding: 12px 0;">
+                  <p style="font-size: 13px; color: var(--color-text-muted); margin: 0;">
+                    El cliente no tiene saldo en su wallet.
+                  </p>
+                </div>
+              }
+            </div>
+          }
+          <!-- Reference Input (visible even when grid collapsed) -->
+          @if (paymentState().selectedMethod?.requiresReference && !isWompiSelected()) {
+            <div class="reference-section">
+              <div class="reference-header">
+                <app-icon [name]="paymentState().selectedMethod?.icon || 'credit-card'" [size]="28"></app-icon>
+                <p>Ingresa el número de referencia</p>
               </div>
-              <div class="form-row">
-                <app-input
-                  label="Número de documento"
-                  placeholder="123456789"
-                  [formControl]="pseForm.controls.userLegalId">
-                </app-input>
-              </div>
-              <div class="form-row">
-                <app-selector
-                  label="Banco"
-                  [options]="pseBankOptions"
-                  placeholder="Selecciona tu banco"
-                  [formControl]="pseForm.controls.financialInstitutionCode">
-                </app-selector>
+              <app-input
+                [formControl]="referenceControl"
+                [label]="paymentState().selectedMethod?.referenceLabel || 'Referencia'"
+                [placeholder]="'Ingresa la referencia'"
+                [size]="'lg'"
+                [error]="getReferenceError()"
+              ></app-input>
+            </div>
+          }
+          <!-- Wompi Sub-Method Selector -->
+          @if (isWompiSelected() && !wompiAwaitingPayment()) {
+            <div class="wompi-section">
+              @if (!selectedWompiSubMethod()) {
+                <p class="section-label">Selecciona el método de pago</p>
+                <div class="wompi-submethods-grid">
+                  @for (sub of wompiSubMethods; track sub) {
+                    <button
+                      type="button"
+                      class="wompi-submethod-btn"
+                      [style.--wompi-color]="sub.color"
+                      (click)="selectWompiSubMethod(sub.key)">
+                      <app-icon [name]="sub.icon" [size]="24"></app-icon>
+                      <span class="submethod-label">{{ sub.label }}</span>
+                      <span class="submethod-desc">{{ sub.description }}</span>
+                    </button>
+                  }
+                </div>
+              }
+              <!-- Nequi Phone Input -->
+              @if (selectedWompiSubMethod() === 'NEQUI') {
+                <div class="wompi-form">
+                  <div class="wompi-form-header" style="border-color: #E6007E">
+                    <app-icon name="smartphone" [size]="20"></app-icon>
+                    <span>Pago con Nequi</span>
+                    <button type="button" class="wompi-back-btn" (click)="selectedWompiSubMethod.set(null)">
+                      <app-icon name="arrow-left" [size]="16"></app-icon>
+                    </button>
+                  </div>
+                  <app-input
+                    label="Número de celular"
+                    placeholder="3001234567"
+                    [formControl]="nequiPhoneControl">
+                  </app-input>
+                  @if (nequiPhoneControl.touched && nequiPhoneControl.invalid) {
+                    <span class="field-error">
+                      Ingresa un número de celular colombiano válido (10 dígitos, inicia con 3)
+                    </span>
+                  }
+                </div>
+              }
+              <!-- PSE Form -->
+              @if (selectedWompiSubMethod() === 'PSE') {
+                <div class="wompi-form">
+                  <div class="wompi-form-header" style="border-color: #003DA5">
+                    <app-icon name="landmark" [size]="20"></app-icon>
+                    <span>Transferencia PSE</span>
+                    <button type="button" class="wompi-back-btn" (click)="selectedWompiSubMethod.set(null)">
+                      <app-icon name="arrow-left" [size]="16"></app-icon>
+                    </button>
+                  </div>
+                  <div class="wompi-form-fields">
+                    <div class="form-row">
+                      <label class="form-label">Tipo de persona</label>
+                      <div class="toggle-buttons">
+                        <button type="button"
+                          [class.active]="pseForm.value.userType === 0"
+                        (click)="pseForm.patchValue({ userType: 0 })">Natural</button>
+                        <button type="button"
+                          [class.active]="pseForm.value.userType === 1"
+                        (click)="pseForm.patchValue({ userType: 1 })">Jurídica</button>
+                      </div>
+                    </div>
+                    <div class="form-row">
+                      <app-selector
+                        label="Tipo de documento"
+                        [options]="[{value: 'CC', label: 'CC'}, {value: 'CE', label: 'CE'}, {value: 'NIT', label: 'NIT'}, {value: 'PP', label: 'PP'}, {value: 'TI', label: 'TI'}]"
+                        [formControl]="pseForm.controls.userLegalIdType">
+                      </app-selector>
+                    </div>
+                    <div class="form-row">
+                      <app-input
+                        label="Número de documento"
+                        placeholder="123456789"
+                        [formControl]="pseForm.controls.userLegalId">
+                      </app-input>
+                    </div>
+                    <div class="form-row">
+                      <app-selector
+                        label="Banco"
+                        [options]="pseBankOptions()"
+                        placeholder="Selecciona tu banco"
+                        [formControl]="pseForm.controls.financialInstitutionCode">
+                      </app-selector>
+                    </div>
+                  </div>
+                </div>
+              }
+              <!-- Bancolombia Transfer -->
+              @if (selectedWompiSubMethod() === 'BANCOLOMBIA_TRANSFER') {
+                <div class="wompi-form">
+                  <div class="wompi-form-header" style="border-color: #FDDA24">
+                    <app-icon name="building-2" [size]="20"></app-icon>
+                    <span>Transferencia Bancolombia</span>
+                    <button type="button" class="wompi-back-btn" (click)="selectedWompiSubMethod.set(null)">
+                      <app-icon name="arrow-left" [size]="16"></app-icon>
+                    </button>
+                  </div>
+                  <p class="wompi-info-text">Serás redirigido a Bancolombia para completar el pago.</p>
+                </div>
+              }
+            </div>
+          }
+          <!-- Wompi Awaiting Payment UI -->
+          @if (wompiAwaitingPayment()) {
+            <div class="wompi-awaiting">
+              <app-spinner></app-spinner>
+              <p class="awaiting-message">{{ wompiAwaitingMessage() }}</p>
+              <div class="awaiting-actions">
+                <app-button
+                  label="Verificar Estado"
+                  variant="outline"
+                  size="sm"
+                  (clicked)="startWompiPolling()">
+                </app-button>
+                <app-button
+                  label="Cancelar Espera"
+                  variant="ghost"
+                  size="sm"
+                  (clicked)="cancelWompiAwait()">
+                </app-button>
               </div>
             </div>
-          </div>
-
-          <!-- Bancolombia Transfer -->
-          <div *ngIf="selectedWompiSubMethod === 'BANCOLOMBIA_TRANSFER'" class="wompi-form">
-            <div class="wompi-form-header" style="border-color: #FDDA24">
-              <app-icon name="building-2" [size]="20"></app-icon>
-              <span>Transferencia Bancolombia</span>
-              <button type="button" class="wompi-back-btn" (click)="selectedWompiSubMethod = null">
-                <app-icon name="arrow-left" [size]="16"></app-icon>
-              </button>
-            </div>
-            <p class="wompi-info-text">Serás redirigido a Bancolombia para completar el pago.</p>
-          </div>
+          }
         </div>
-
-        <!-- Wompi Awaiting Payment UI -->
-        <div *ngIf="wompiAwaitingPayment" class="wompi-awaiting">
-          <app-spinner></app-spinner>
-          <p class="awaiting-message">{{ wompiAwaitingMessage }}</p>
-          <div class="awaiting-actions">
-            <app-button
-              label="Verificar Estado"
-              variant="outline"
-              size="sm"
-              (clicked)="startWompiPolling()">
-            </app-button>
-            <app-button
-              label="Cancelar Espera"
-              variant="ghost"
-              size="sm"
-              (clicked)="cancelWompiAwait()">
-            </app-button>
-          </div>
-        </div>
-      </div>
+      }
     </section>
 
     <!-- Tipo de Venta Section -->
@@ -479,131 +534,144 @@
       <!-- Sale Type Options -->
       <div class="sale-type-options">
         <!-- Anonymous Sale Option -->
-        <button
-          *ngIf="allowAnonymousSales && paymentState.paymentForm !== 'credito'"
-          type="button"
-          class="sale-type-btn"
-          [class.selected]="paymentState.isAnonymousSale"
-          (click)="toggleAnonymousSale(true)"
-        >
-          <div class="radio-indicator">
-            <div *ngIf="paymentState.isAnonymousSale" class="radio-dot"></div>
-          </div>
-          <app-icon name="user-x" [size]="20"></app-icon>
-          <div class="sale-type-info">
-            <span class="sale-type-name">Venta Anónima</span>
-            <span class="sale-type-desc">Sin cliente asociado</span>
-          </div>
-        </button>
+        @if (allowAnonymousSales() && paymentState().paymentForm !== 'credito') {
+          <button
+            type="button"
+            class="sale-type-btn"
+            [class.selected]="paymentState().isAnonymousSale"
+            (click)="toggleAnonymousSale(true)"
+            >
+            <div class="radio-indicator">
+              @if (paymentState().isAnonymousSale) {
+                <div class="radio-dot"></div>
+              }
+            </div>
+            <app-icon name="user-x" [size]="20"></app-icon>
+            <div class="sale-type-info">
+              <span class="sale-type-name">Venta Anónima</span>
+              <span class="sale-type-desc">Sin cliente asociado</span>
+            </div>
+          </button>
+        }
 
         <!-- Customer Sale Option -->
         <button
           type="button"
           class="sale-type-btn"
-          [class.selected]="!paymentState.isAnonymousSale"
+          [class.selected]="!paymentState().isAnonymousSale"
           (click)="toggleAnonymousSale(false)"
-        >
+          >
           <div class="radio-indicator">
-            <div *ngIf="!paymentState.isAnonymousSale" class="radio-dot"></div>
+            @if (!paymentState().isAnonymousSale) {
+              <div class="radio-dot"></div>
+            }
           </div>
           <app-icon name="user" [size]="20"></app-icon>
           <div class="sale-type-info">
             <span class="sale-type-name">Con Cliente</span>
-            <span class="sale-type-desc">{{ cartState?.customer ? customerDisplayName : 'Seleccionar cliente' }}</span>
+            <span class="sale-type-desc">{{ cartState()?.customer ? customerDisplayName : 'Seleccionar cliente' }}</span>
           </div>
         </button>
       </div>
 
       <!-- Selected Customer Display -->
-      <div *ngIf="!paymentState.isAnonymousSale && cartState?.customer" class="selected-customer">
-        <div class="customer-avatar">
-          <app-icon name="user-check" [size]="16"></app-icon>
+      @if (!paymentState().isAnonymousSale && cartState()?.customer) {
+        <div class="selected-customer">
+          <div class="customer-avatar">
+            <app-icon name="user-check" [size]="16"></app-icon>
+          </div>
+          <div class="customer-info">
+            <span class="customer-name">{{ customerDisplayName }}</span>
+            <span class="customer-email">{{ customerEmail }}</span>
+          </div>
+          <button type="button" class="change-customer-btn" (click)="openCustomerSelector()">
+            <app-icon name="edit-2" [size]="14"></app-icon>
+          </button>
         </div>
-        <div class="customer-info">
-          <span class="customer-name">{{ customerDisplayName }}</span>
-          <span class="customer-email">{{ customerEmail }}</span>
-        </div>
-        <button type="button" class="change-customer-btn" (click)="openCustomerSelector()">
-          <app-icon name="edit-2" [size]="14"></app-icon>
-        </button>
-      </div>
+      }
 
       <!-- Select Customer Button -->
-      <button
-        *ngIf="!paymentState.isAnonymousSale && !cartState?.customer && !showCustomerSelector"
-        type="button"
-        class="select-customer-btn"
-        (click)="openCustomerSelector()"
-      >
-        <app-icon name="user-plus" [size]="18"></app-icon>
-        <span>Seleccionar Cliente</span>
-      </button>
+      @if (!paymentState().isAnonymousSale && !cartState()?.customer && !showCustomerSelector()) {
+        <button
+          type="button"
+          class="select-customer-btn"
+          (click)="openCustomerSelector()"
+          >
+          <app-icon name="user-plus" [size]="18"></app-icon>
+          <span>Seleccionar Cliente</span>
+        </button>
+      }
 
       <!-- Customer Selector Panel -->
-      <div *ngIf="showCustomerSelector" class="customer-selector">
-        <div class="selector-header">
-          <span>Buscar Cliente</span>
-          <button type="button" (click)="closeCustomerSelector()">
-            <app-icon name="x" [size]="16"></app-icon>
-          </button>
-        </div>
-
-        <app-input
-          [placeholder]="'Buscar por nombre, email o documento...'"
-          [size]="'sm'"
-          (inputChange)="onCustomerSearch($event)"
-        ></app-input>
-
-        <!-- Search Results -->
-        <div *ngIf="!showCreateCustomerForm && customerSearchResults.length > 0" class="search-results">
-          <button
-            *ngFor="let customer of customerSearchResults"
-            type="button"
-            class="customer-result"
-            (click)="selectCustomer(customer)"
-          >
-            <span class="result-name">{{ customer.first_name }} {{ customer.last_name }}</span>
-            <span class="result-email">{{ customer.email }}</span>
-          </button>
-        </div>
-
-        <!-- Create Customer Button - Always visible when not in create mode -->
-        <div *ngIf="!showCreateCustomerForm" class="create-customer-action">
-          <button type="button" class="create-customer-btn" (click)="switchToCreateCustomer()">
-            <app-icon name="user-plus" [size]="16"></app-icon>
-            <span>Crear nuevo cliente</span>
-          </button>
-        </div>
-
-        <!-- Create Customer Form -->
-        <div *ngIf="showCreateCustomerForm" class="create-customer-form">
-          <h5>Nuevo Cliente</h5>
-          <app-input [formControl]="customerEmailControl" [label]="'Email'" [placeholder]="'correo@ejemplo.com'" [size]="'sm'"></app-input>
-          <div class="form-row">
-            <app-input [formControl]="customerFirstNameControl" [label]="'Nombre'" [placeholder]="'Juan'" [size]="'sm'"></app-input>
-            <app-input [formControl]="customerLastNameControl" [label]="'Apellido'" [placeholder]="'Pérez'" [size]="'sm'"></app-input>
+      @if (showCustomerSelector()) {
+        <div class="customer-selector">
+          <div class="selector-header">
+            <span>Buscar Cliente</span>
+            <button type="button" (click)="closeCustomerSelector()">
+              <app-icon name="x" [size]="16"></app-icon>
+            </button>
           </div>
-          <app-input [formControl]="customerPhoneControl" [label]="'Teléfono'" [placeholder]="'+1 234 5678'" [size]="'sm'"></app-input>
-          <div class="form-row">
-            <app-selector [formControl]="customerDocumentTypeControl" [label]="'Tipo Doc.'" [placeholder]="'Seleccionar'" [size]="'sm'" [options]="documentTypeOptions"></app-selector>
-            <app-input [formControl]="customerDocumentNumberControl" [label]="'Número Doc.'" [placeholder]="'12345678'" [size]="'sm'"></app-input>
-          </div>
-          <div class="form-actions">
-            <button type="button" class="btn-create" (click)="onCreateCustomer()">Crear</button>
-            <button type="button" class="btn-cancel" (click)="switchToCustomerSearch()">Cancelar</button>
-          </div>
+          <app-input
+            [placeholder]="'Buscar por nombre, email o documento...'"
+            [size]="'sm'"
+            (inputChange)="onCustomerSearch($event)"
+          ></app-input>
+          <!-- Search Results -->
+          @if (!showCreateCustomerForm() && customerSearchResults().length > 0) {
+            <div class="search-results">
+              @for (customer of customerSearchResults(); track customer) {
+                <button
+                  type="button"
+                  class="customer-result"
+                  (click)="selectCustomer(customer)"
+                  >
+                  <span class="result-name">{{ customer.first_name }} {{ customer.last_name }}</span>
+                  <span class="result-email">{{ customer.email }}</span>
+                </button>
+              }
+            </div>
+          }
+          <!-- Create Customer Button - Always visible when not in create mode -->
+          @if (!showCreateCustomerForm()) {
+            <div class="create-customer-action">
+              <button type="button" class="create-customer-btn" (click)="switchToCreateCustomer()">
+                <app-icon name="user-plus" [size]="16"></app-icon>
+                <span>Crear nuevo cliente</span>
+              </button>
+            </div>
+          }
+          <!-- Create Customer Form -->
+          @if (showCreateCustomerForm()) {
+            <div class="create-customer-form">
+              <h5>Nuevo Cliente</h5>
+              <app-input [formControl]="customerEmailControl" [label]="'Email'" [placeholder]="'correo@ejemplo.com'" [size]="'sm'"></app-input>
+              <div class="form-row">
+                <app-input [formControl]="customerFirstNameControl" [label]="'Nombre'" [placeholder]="'Juan'" [size]="'sm'"></app-input>
+                <app-input [formControl]="customerLastNameControl" [label]="'Apellido'" [placeholder]="'Pérez'" [size]="'sm'"></app-input>
+              </div>
+              <app-input [formControl]="customerPhoneControl" [label]="'Teléfono'" [placeholder]="'+1 234 5678'" [size]="'sm'"></app-input>
+              <div class="form-row">
+                <app-selector [formControl]="customerDocumentTypeControl" [label]="'Tipo Doc.'" [placeholder]="'Seleccionar'" [size]="'sm'" [options]="documentTypeOptions"></app-selector>
+                <app-input [formControl]="customerDocumentNumberControl" [label]="'Número Doc.'" [placeholder]="'12345678'" [size]="'sm'"></app-input>
+              </div>
+              <div class="form-actions">
+                <button type="button" class="btn-create" (click)="onCreateCustomer()">Crear</button>
+                <button type="button" class="btn-cancel" (click)="switchToCustomerSearch()">Cancelar</button>
+              </div>
+            </div>
+          }
         </div>
-      </div>
+      }
     </section>
   </div>
 
   <!-- Footer Buttons -->
   <div slot="footer" class="payment-footer">
     <div class="footer-row">
-      <button type="button" class="btn-cancel-payment" (click)="onModalClosed()" [disabled]="paymentState.isProcessing">
+      <button type="button" class="btn-cancel-payment" (click)="onModalClosed()" [disabled]="paymentState().isProcessing">
         Cancelar
       </button>
-      <button type="button" class="btn-draft" (click)="saveAsDraft()" [disabled]="paymentState.isProcessing">
+      <button type="button" class="btn-draft" (click)="saveAsDraft()" [disabled]="paymentState().isProcessing">
         <app-icon name="save" [size]="16"></app-icon>
         Borrador
       </button>
@@ -612,12 +680,16 @@
       type="button"
       class="btn-confirm"
       (click)="processPayment()"
-      [disabled]="!canProcessPayment() || paymentState.isProcessing"
-      [class.loading]="paymentState.isProcessing"
-    >
-      <app-icon *ngIf="!paymentState.isProcessing" name="check-circle" [size]="20"></app-icon>
-      <span *ngIf="paymentState.isProcessing" class="spinner"></span>
-      {{ paymentState.paymentForm === 'credito' ? 'Crear Venta a Crédito' : isWompiSelected() ? 'Pagar con Wompi' : paymentState.selectedMethod?.type === 'cash' ? 'Cobrar' : paymentState.selectedMethod?.type === 'wallet' ? 'Pagar con Wallet' : 'Confirmar Pago' }}
+      [disabled]="!canProcessPayment() || paymentState().isProcessing"
+      [class.loading]="paymentState().isProcessing"
+      >
+      @if (!paymentState().isProcessing) {
+        <app-icon name="check-circle" [size]="20"></app-icon>
+      }
+      @if (paymentState().isProcessing) {
+        <span class="spinner"></span>
+      }
+      {{ paymentState().paymentForm === 'credito' ? 'Crear Venta a Crédito' : isWompiSelected() ? 'Pagar con Wompi' : paymentState().selectedMethod?.type === 'cash' ? 'Cobrar' : paymentState().selectedMethod?.type === 'wallet' ? 'Pagar con Wallet' : 'Confirmar Pago' }}
     </button>
   </div>
 </app-modal>

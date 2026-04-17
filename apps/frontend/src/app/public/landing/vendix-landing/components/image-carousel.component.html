@@ -1,5 +1,5 @@
 <div class="hero-carousel">
-  @for (slide of slides; track slide.image; let i = $index) {
+  @for (slide of slides(); track slide.image; let i = $index) {
     <div class="carousel-slide {{ i === 0 ? 'active' : '' }}">
       <img
         [src]="slide.image"
@@ -49,7 +49,7 @@
 
   <!-- Carousel Indicators -->
   <div class="carousel-indicators">
-    @for (slide of slides; track slide.image; let i = $index) {
+    @for (slide of slides(); track slide.image; let i = $index) {
       <button
         class="indicator {{ i === 0 ? 'active' : '' }}"
         (click)="goToSlide(i)"

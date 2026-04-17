@@ -1,14 +1,15 @@
-import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, OnInit, inject, signal,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import { RouterModule } from '@angular/router';
-import { Subject, takeUntil } from 'rxjs';
+
 
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { TableColumn } from '../../../../../../shared/components/table/table.component';
 import {
   ResponsiveDataViewComponent,
-  ItemListCardConfig,
-} from '../../../../../../shared/components/index';
+  ItemListCardConfig} from '../../../../../../shared/components/index';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
@@ -20,21 +21,19 @@ import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
 import {
   SalesByCustomer,
-  SalesAnalyticsQueryDto,
-} from '../../interfaces/sales-analytics.interface';
+  SalesAnalyticsQueryDto} from '../../interfaces/sales-analytics.interface';
 
 @Component({
   selector: 'vendix-sales-by-customer',
   standalone: true,
   imports: [
-    CommonModule,
     RouterModule,
     CardComponent,
     ResponsiveDataViewComponent,
     IconComponent,
     DateRangeFilterComponent,
-    ExportButtonComponent,
-  ],
+    ExportButtonComponent
+],
   template: `
     <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
       <!-- Header -->
@@ -104,22 +103,19 @@ import {
         </div>
       </app-card>
     </div>
-  `,
-})
-export class SalesByCustomerComponent implements OnInit, OnDestroy {
+  `})
+export class SalesByCustomerComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private analyticsService = inject(AnalyticsService);
   private toastService = inject(ToastService);
   private currencyService = inject(CurrencyFormatService);
-  private destroy$ = new Subject<void>();
-
-  loading = signal(true);
+loading = signal(true);
   exporting = signal(false);
   data = signal<SalesByCustomer[]>([]);
   dateRange = signal<DateRangeFilter>({
     start_date: getDefaultStartDate(),
     end_date: getDefaultEndDate(),
-    preset: 'thisMonth',
-  });
+    preset: 'thisMonth'});
 
   columns: TableColumn[] = [
     { key: 'customer_name', label: 'Cliente', sortable: true, priority: 1 },
@@ -128,16 +124,14 @@ export class SalesByCustomerComponent implements OnInit, OnDestroy {
       label: 'Email',
       sortable: true,
       priority: 2,
-      width: '200px',
-    },
+      width: '200px'},
     {
       key: 'total_orders',
       label: 'Órdenes',
       sortable: true,
       align: 'right',
       priority: 1,
-      width: '100px',
-    },
+      width: '100px'},
     {
       key: 'total_spent',
       label: 'Total Gastado',
@@ -145,8 +139,7 @@ export class SalesByCustomerComponent implements OnInit, OnDestroy {
       align: 'right',
       priority: 1,
       width: '140px',
-      transform: (val) => this.formatCurrency(val),
-    },
+      transform: (val) => this.formatCurrency(val)},
     {
       key: 'average_order_value',
       label: 'Ticket Prom.',
@@ -154,8 +147,7 @@ export class SalesByCustomerComponent implements OnInit, OnDestroy {
       align: 'right',
       priority: 2,
       width: '120px',
-      transform: (val) => this.formatCurrency(val),
-    },
+      transform: (val) => this.formatCurrency(val)},
     {
       key: 'last_order_date',
       label: 'Última Compra',
@@ -164,8 +156,7 @@ export class SalesByCustomerComponent implements OnInit, OnDestroy {
       priority: 2,
       width: '120px',
       transform: (val) =>
-        val ? new Date(val).toLocaleDateString('es-CO') : '-',
-    },
+        val ? new Date(val).toLocaleDateString('es-CO') : '-'},
   ];
 
   cardConfig: ItemListCardConfig = {
@@ -175,27 +166,18 @@ export class SalesByCustomerComponent implements OnInit, OnDestroy {
       {
         key: 'total_orders',
         label: 'Órdenes',
-        transform: (val: any) => `${val} órdenes`,
-      },
+        transform: (val: any) => `${val} órdenes`},
       {
         key: 'total_spent',
         label: 'Total',
-        transform: (val: any) => this.formatCurrency(val),
-      },
-    ],
-  };
+        transform: (val: any) => this.formatCurrency(val)},
+    ]};
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
     this.loadData();
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  onDateRangeChange(range: DateRangeFilter): void {
+onDateRangeChange(range: DateRangeFilter): void {
     this.dateRange.set(range);
     this.loadData();
   }
@@ -204,12 +186,11 @@ export class SalesByCustomerComponent implements OnInit, OnDestroy {
     this.loading.set(true);
     const query: SalesAnalyticsQueryDto = {
       date_range: this.dateRange(),
-      limit: 50,
-    };
+      limit: 50};
 
     this.analyticsService
       .getSalesByCustomer(query)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           this.data.set(response.data);
@@ -218,15 +199,14 @@ export class SalesByCustomerComponent implements OnInit, OnDestroy {
         error: () => {
           this.toastService.error('Error al cargar ventas por cliente');
           this.loading.set(false);
-        },
-      });
+        }});
   }
 
   exportReport(): void {
     this.exporting.set(true);
     this.analyticsService
       .exportSalesAnalytics({ date_range: this.dateRange() })
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (blob) => {
           const url = window.URL.createObjectURL(blob);
@@ -240,8 +220,7 @@ export class SalesByCustomerComponent implements OnInit, OnDestroy {
         error: () => {
           this.toastService.error('Error al exportar');
           this.exporting.set(false);
-        },
-      });
+        }});
   }
 
   formatCurrency(value: number): string {

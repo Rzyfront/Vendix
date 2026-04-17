@@ -1,19 +1,18 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
+  input,
+  output,
   ChangeDetectionStrategy,
   OnInit,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { ButtonComponent, IconComponent } from '../../index';
 
 @Component({
   selector: 'app-app-config-step',
   standalone: true,
-  imports: [CommonModule, FormsModule, ReactiveFormsModule, IconComponent],
+  imports: [FormsModule, ReactiveFormsModule, IconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [
     `
@@ -503,7 +502,7 @@ import { ButtonComponent, IconComponent } from '../../index';
     `,
   ],
   template: `
-    <div class="step-content app-config-step" [formGroup]="formGroup">
+    <div class="step-content app-config-step" [formGroup]="formGroup()">
       <div class="app-config-container">
         <!-- Header -->
         <div class="app-config-header">
@@ -713,10 +712,10 @@ import { ButtonComponent, IconComponent } from '../../index';
   `,
 })
 export class AppConfigStepComponent implements OnInit {
-  @Input() formGroup: any;
-  @Output() nextStep = new EventEmitter<void>();
-  @Output() skipStep = new EventEmitter<void>();
-  @Output() previousStep = new EventEmitter<void>();
+  readonly formGroup = input<any>(null);
+  readonly nextStep = output<void>();
+  readonly skipStep = output<void>();
+  readonly previousStep = output<void>();
 
   // Color properties
   primaryColor: string = '#7ed7a5';
@@ -724,15 +723,16 @@ export class AppConfigStepComponent implements OnInit {
   tertiaryColor: string = '#f59e0b';
 
   ngOnInit(): void {
-    if (this.formGroup) {
-      if (this.formGroup.get('primary_color')?.value) {
-        this.primaryColor = this.formGroup.get('primary_color').value;
+    const fg = this.formGroup();
+    if (fg) {
+      if (fg.get('primary_color')?.value) {
+        this.primaryColor = fg.get('primary_color').value;
       }
-      if (this.formGroup.get('secondary_color')?.value) {
-        this.secondaryColor = this.formGroup.get('secondary_color').value;
+      if (fg.get('secondary_color')?.value) {
+        this.secondaryColor = fg.get('secondary_color').value;
       }
-      if (this.formGroup.get('accent_color')?.value) {
-        this.tertiaryColor = this.formGroup.get('accent_color').value;
+      if (fg.get('accent_color')?.value) {
+        this.tertiaryColor = fg.get('accent_color').value;
       }
     }
   }
@@ -800,15 +800,16 @@ export class AppConfigStepComponent implements OnInit {
   }
 
   private updateFormColors(): void {
-    if (this.formGroup) {
-      if (this.formGroup.get('primary_color')) {
-        this.formGroup.get('primary_color').setValue(this.primaryColor);
+    const fg = this.formGroup();
+    if (fg) {
+      if (fg.get('primary_color')) {
+        fg.get('primary_color').setValue(this.primaryColor);
       }
-      if (this.formGroup.get('secondary_color')) {
-        this.formGroup.get('secondary_color').setValue(this.secondaryColor);
+      if (fg.get('secondary_color')) {
+        fg.get('secondary_color').setValue(this.secondaryColor);
       }
-      if (this.formGroup.get('accent_color')) {
-        this.formGroup.get('accent_color').setValue(this.tertiaryColor);
+      if (fg.get('accent_color')) {
+        fg.get('accent_color').setValue(this.tertiaryColor);
       }
     }
   }

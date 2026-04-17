@@ -1,24 +1,21 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
   forwardRef,
-  OnInit,
-  OnDestroy,
-  ChangeDetectionStrategy,
   HostListener,
   ElementRef,
-  ChangeDetectorRef,
+  inject,
+  signal,
+  computed,
+  input,
+  output,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   ControlValueAccessor,
   NG_VALUE_ACCESSOR,
   FormsModule,
   ReactiveFormsModule,
 } from '@angular/forms';
-import { Subject } from 'rxjs';
 import { IconComponent } from '../icon/icon.component';
 import { FormStyleVariant } from '../../types/form.types';
 
@@ -35,7 +32,7 @@ export type MultiSelectorSize = 'sm' | 'md' | 'lg';
 @Component({
   selector: 'app-multi-selector',
   standalone: true,
-  imports: [CommonModule, FormsModule, ReactiveFormsModule, IconComponent],
+  imports: [FormsModule, ReactiveFormsModule, IconComponent],
   providers: [
     {
       provide: NG_VALUE_ACCESSOR,
@@ -45,189 +42,195 @@ export type MultiSelectorSize = 'sm' | 'md' | 'lg';
   ],
   template: `
     <div class="w-full">
-      <label
-        *ngIf="label"
-        [class]="labelClasses"
-        [class.opacity-50]="disabled"
-      >
-        {{ label }}
-        <span *ngIf="required" class="text-[var(--color-destructive)] ml-0.5">*</span>
-      </label>
-
+      @if (label()) {
+        <label
+          [class]="labelClasses"
+          [class.opacity-50]="disabled()"
+          >
+          {{ label() }}
+          @if (required()) {
+            <span class="text-[var(--color-destructive)] ml-0.5">*</span>
+          }
+        </label>
+      }
+    
       <div class="relative">
         <!-- Trigger Button -->
         <button
           type="button"
-          [disabled]="disabled"
+          [disabled]="disabled()"
           (click)="toggleDropdown()"
           [class]="triggerClasses"
-          [class.border-border]="!errorText"
-          [class.border-destructive]="errorText"
-        >
+          [class.border-border]="!errorText()"
+          [class.border-destructive]="errorText()"
+          >
           <div class="flex flex-wrap gap-1.5 items-center">
             <!-- Selected chips -->
-            <span
-              *ngFor="let value of selectedValues"
+            @for (value of selectedValues(); track value) {
+              <span
               class="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium
                      bg-primary-50 text-primary-600 border border-primary-200"
-              style="border-radius: var(--radius-sm);"
-            >
-              {{ getOptionLabel(value) }}
-              <button
-                type="button"
-                (click)="removeValue(value, $event)"
-                class="hover:text-primary-800 transition-colors"
-              >
-                <app-icon name="x" [size]="12"></app-icon>
-              </button>
-            </span>
-            
+                style="border-radius: var(--radius-sm);"
+                >
+                {{ getOptionLabel(value) }}
+                <button
+                  type="button"
+                  (click)="removeValue(value, $event)"
+                  class="hover:text-primary-800 transition-colors"
+                  >
+                  <app-icon name="x" [size]="12"></app-icon>
+                </button>
+              </span>
+            }
+    
             <!-- Placeholder -->
-            <span
-              *ngIf="selectedValues.length === 0"
-              class="text-[var(--color-text-secondary)]"
-            >
-              {{ placeholder }}
-            </span>
+            @if (selectedValues().length === 0) {
+              <span
+                class="text-[var(--color-text-secondary)]"
+                >
+                {{ placeholder() }}
+              </span>
+            }
           </div>
-          
+    
           <!-- Chevron -->
           <div class="absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none text-[var(--color-text-secondary)]">
-            <app-icon [name]="isOpen ? 'chevron-up' : 'chevron-down'" [size]="16"></app-icon>
+            <app-icon [name]="isOpen() ? 'chevron-up' : 'chevron-down'" [size]="16"></app-icon>
           </div>
         </button>
-
+    
         <!-- Dropdown -->
-        <div
-          *ngIf="isOpen"
-          class="absolute z-50 w-full mt-1 bg-[var(--color-surface)] border border-border shadow-lg max-h-60 overflow-auto"
-          style="border-radius: var(--radius-sm);"
-        >
-          <!-- Search input -->
-          <div class="p-2 border-b border-border sticky top-0 bg-[var(--color-surface)]">
-            <input
-              type="text"
-              [(ngModel)]="searchTerm"
-              (input)="onSearch()"
+        @if (isOpen()) {
+          <div
+            class="absolute z-50 w-full mt-1 bg-[var(--color-surface)] border border-border shadow-lg max-h-60 overflow-auto"
+            style="border-radius: var(--radius-sm);"
+            >
+            <!-- Search input -->
+            <div class="p-2 border-b border-border sticky top-0 bg-[var(--color-surface)]">
+              <input
+                type="text"
+                [ngModel]="searchTerm()"
+                (ngModelChange)="onSearch($event)"
               class="w-full px-3 py-1.5 text-sm border border-border
                      focus:outline-none focus:ring-1 focus:ring-secondary/40 focus:border-primary
                      bg-[var(--color-surface)] text-[var(--color-text-primary)]"
-              style="border-radius: var(--radius-sm);"
-              placeholder="Buscar..."
-            />
-          </div>
-
-          <!-- Options -->
-          <div class="py-1">
-            <button
-              *ngFor="let option of filteredOptions"
-              type="button"
-              [disabled]="option.disabled"
-              (click)="toggleOption(option)"
+                style="border-radius: var(--radius-sm);"
+                placeholder="Buscar..."
+                />
+            </div>
+            <!-- Options -->
+            <div class="py-1">
+              @for (option of filteredOptions(); track option) {
+                <button
+                  type="button"
+                  [disabled]="option.disabled"
+                  (click)="toggleOption(option)"
               class="w-full px-3 py-2 text-left text-sm flex items-center gap-2 transition-colors
                      hover:bg-[var(--color-surface-hover)] disabled:opacity-50 disabled:cursor-not-allowed"
-              [class.bg-primary-50]="isSelected(option.value)"
-              [class.font-semibold]="isSelected(option.value)"
-            >
-              <!-- Checkbox indicator -->
-              <div
-                class="w-4 h-4 border flex items-center justify-center transition-colors shadow-sm"
-                [class.border-primary-600]="isSelected(option.value)"
-                [class.bg-primary-600]="isSelected(option.value)"
-                [class.border-gray-300]="!isSelected(option.value)"
-                style="border-radius: var(--radius-sm);"
-              >
-                <app-icon
-                  *ngIf="isSelected(option.value)"
-                  name="check"
-                  [size]="12"
-                  class="text-white"
-                ></app-icon>
-              </div>
-              
-              <span class="flex-1 text-[var(--color-text-primary)]" [class.text-primary-700]="isSelected(option.value)">{{ option.label }}</span>
-              
-              <span *ngIf="option.description" class="text-xs text-[var(--color-text-secondary)]">
-                {{ option.description }}
-              </span>
-            </button>
-
-            <div
-              *ngIf="filteredOptions.length === 0"
-              class="px-3 py-4 text-center text-sm text-[var(--color-text-secondary)]"
-            >
-              No se encontraron opciones
+                  [class.bg-primary-50]="isSelected(option.value)"
+                  [class.font-semibold]="isSelected(option.value)"
+                  >
+                  <!-- Checkbox indicator -->
+                  <div
+                    class="w-4 h-4 border flex items-center justify-center transition-colors shadow-sm"
+                    [class.border-primary-600]="isSelected(option.value)"
+                    [class.bg-primary-600]="isSelected(option.value)"
+                    [class.border-gray-300]="!isSelected(option.value)"
+                    style="border-radius: var(--radius-sm);"
+                    >
+                    @if (isSelected(option.value)) {
+                      <app-icon
+                        name="check"
+                        [size]="12"
+                        class="text-white"
+                      ></app-icon>
+                    }
+                  </div>
+                  <span class="flex-1 text-[var(--color-text-primary)]" [class.text-primary-700]="isSelected(option.value)">{{ option.label }}</span>
+                  @if (option.description) {
+                    <span class="text-xs text-[var(--color-text-secondary)]">
+                      {{ option.description }}
+                    </span>
+                  }
+                </button>
+              }
+              @if (filteredOptions().length === 0) {
+                <div
+                  class="px-3 py-4 text-center text-sm text-[var(--color-text-secondary)]"
+                  >
+                  No se encontraron opciones
+                </div>
+              }
             </div>
           </div>
-        </div>
+        }
       </div>
-
+    
       <!-- Help/Error text -->
-      <div *ngIf="helpText || errorText" class="mt-1 text-sm">
-        <span *ngIf="helpText && !errorText" class="text-[var(--color-text-secondary)]">
-          {{ helpText }}
-        </span>
-        <span *ngIf="errorText" class="text-[var(--color-destructive)] flex items-center gap-1 font-medium">
-          <app-icon name="alert-circle" [size]="12"></app-icon>
-          {{ errorText }}
-        </span>
-      </div>
+      @if (helpText() || errorText()) {
+        <div class="mt-1 text-sm">
+          @if (helpText() && !errorText()) {
+            <span class="text-[var(--color-text-secondary)]">
+              {{ helpText() }}
+            </span>
+          }
+          @if (errorText()) {
+            <span class="text-[var(--color-destructive)] flex items-center gap-1 font-medium">
+              <app-icon name="alert-circle" [size]="12"></app-icon>
+              {{ errorText() }}
+            </span>
+          }
+        </div>
+      }
     </div>
-  `,
+    `,
   styles: [`
     :host {
       display: block;
     }
   `],
-  changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class MultiSelectorComponent implements ControlValueAccessor, OnInit, OnDestroy {
-  @Input() label = '';
-  @Input() placeholder = 'Seleccionar...';
-  @Input() helpText = '';
-  @Input() errorText = '';
-  @Input() required = false;
-  @Input() disabled = false;
-  @Input() size: MultiSelectorSize = 'md';
-  @Input() styleVariant: FormStyleVariant = 'modern';
-  @Input() options: MultiSelectorOption[] = [];
+export class MultiSelectorComponent implements ControlValueAccessor {
+  private elementRef = inject(ElementRef);
 
-  @Output() valueChange = new EventEmitter<(string | number)[]>();
+  readonly label = input<string>('');
+  readonly placeholder = input<string>('Seleccionar...');
+  readonly helpText = input<string>('');
+  readonly errorText = input<string>('');
+  readonly required = input<boolean>(false);
+  readonly disabled = input<boolean>(false);
+  readonly size = input<MultiSelectorSize>('md');
+  readonly styleVariant = input<FormStyleVariant>('modern');
+  readonly options = input<MultiSelectorOption[]>([]);
 
-  selectedValues: (string | number)[] = [];
-  isOpen = false;
-  searchTerm = '';
-  filteredOptions: MultiSelectorOption[] = [];
+  readonly valueChange = output<(string | number)[]>();
 
-  private destroy$ = new Subject<void>();
+  readonly selectedValues = signal<(string | number)[]>([]);
+  readonly isOpen = signal<boolean>(false);
+  readonly searchTerm = signal<string>('');
+
+  readonly filteredOptions = computed(() => {
+    const term = this.searchTerm().toLowerCase();
+    if (!term) return this.options();
+    return this.options().filter(
+      o => o.label.toLowerCase().includes(term) ||
+        (o.description && o.description.toLowerCase().includes(term))
+    );
+  });
+
   private onChange: (value: (string | number)[]) => void = () => { };
   private onTouched: () => void = () => { };
-
-  constructor(
-    private elementRef: ElementRef,
-    private cdr: ChangeDetectorRef
-  ) { }
-
-  ngOnInit(): void {
-    this.filteredOptions = [...this.options];
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
 
   @HostListener('document:click', ['$event'])
   onDocumentClick(event: MouseEvent): void {
     if (!this.elementRef.nativeElement.contains(event.target)) {
-      this.isOpen = false;
+      this.isOpen.set(false);
     }
   }
 
   // ControlValueAccessor
   writeValue(value: (string | number)[] | null): void {
-    this.selectedValues = value || [];
-    this.cdr.markForCheck();
+    this.selectedValues.set(value || []);
   }
 
   registerOnChange(fn: (value: (string | number)[]) => void): void {
@@ -238,69 +241,64 @@ export class MultiSelectorComponent implements ControlValueAccessor, OnInit, OnD
     this.onTouched = fn;
   }
 
-  setDisabledState(isDisabled: boolean): void {
-    this.disabled = isDisabled;
+  setDisabledState(_isDisabled: boolean): void {
+    // disabled is managed via input() signal — no action needed
   }
 
   // UI Methods
   toggleDropdown(): void {
-    if (this.disabled) return;
-    this.isOpen = !this.isOpen;
-    if (this.isOpen) {
-      this.searchTerm = '';
-      this.filteredOptions = [...this.options];
+    if (this.disabled()) return;
+    if (!this.isOpen()) {
+      this.searchTerm.set('');
     }
+    this.isOpen.update(v => !v);
   }
 
   toggleOption(option: MultiSelectorOption): void {
     if (option.disabled) return;
 
-    const index = this.selectedValues.findIndex(v => v == option.value);
+    const current = this.selectedValues();
+    const index = current.findIndex(v => v == option.value);
     if (index === -1) {
-      this.selectedValues = [...this.selectedValues, option.value];
+      this.selectedValues.set([...current, option.value]);
     } else {
-      this.selectedValues = this.selectedValues.filter(v => v != option.value);
+      this.selectedValues.set(current.filter(v => v != option.value));
     }
 
     this.emitChange();
-    this.cdr.markForCheck();
   }
 
   removeValue(value: string | number, event: MouseEvent): void {
     event.stopPropagation();
-    this.selectedValues = this.selectedValues.filter(v => v != value);
+    this.selectedValues.update(current => current.filter(v => v != value));
     this.emitChange();
-    this.cdr.markForCheck();
   }
 
   isSelected(value: string | number): boolean {
-    return this.selectedValues.some(v => v == value);
+    return this.selectedValues().some(v => v == value);
   }
 
   getOptionLabel(value: string | number): string {
-    const option = this.options.find(o => o.value === value);
+    const option = this.options().find(o => o.value === value);
     return option?.label || String(value);
   }
 
-  onSearch(): void {
-    const term = this.searchTerm.toLowerCase();
-    this.filteredOptions = this.options.filter(
-      o => o.label.toLowerCase().includes(term) ||
-        (o.description && o.description.toLowerCase().includes(term))
-    );
+  onSearch(term: string): void {
+    this.searchTerm.set(term);
   }
 
   private emitChange(): void {
-    this.onChange(this.selectedValues);
+    const current = this.selectedValues();
+    this.onChange(current);
     this.onTouched();
-    this.valueChange.emit(this.selectedValues);
+    this.valueChange.emit(current);
   }
 
   // CSS class getters
   get labelClasses(): string {
     const baseClasses = ['block', 'font-medium', 'mb-2'];
 
-    if (this.styleVariant === 'modern') {
+    if (this.styleVariant() === 'modern') {
       return [
         ...baseClasses,
         'text-[11px]',
@@ -341,10 +339,10 @@ export class MultiSelectorComponent implements ControlValueAccessor, OnInit, OnD
       lg: ['min-h-12', 'sm:min-h-[52px]'],
     };
 
-    if (this.styleVariant === 'modern') {
+    if (this.styleVariant() === 'modern') {
       return [
         ...baseClasses,
-        ...sizeClasses[this.size],
+        ...sizeClasses[this.size()],
         'rounded-xl',
         '!bg-[var(--color-background)]',
         'focus:!bg-[var(--color-surface)]',
@@ -355,7 +353,7 @@ export class MultiSelectorComponent implements ControlValueAccessor, OnInit, OnD
     // Classic: with ring focus
     return [
       ...baseClasses,
-      ...sizeClasses[this.size],
+      ...sizeClasses[this.size()],
       'rounded-xl',
       'focus:ring-2',
       'focus:ring-secondary/40',

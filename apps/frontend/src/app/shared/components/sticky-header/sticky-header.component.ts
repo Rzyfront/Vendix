@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, input, output } from '@angular/core';
+import { Component, input, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { IconComponent } from '../icon/icon.component';
@@ -23,7 +23,6 @@ export type StickyHeaderBadgeColor = 'green' | 'blue' | 'yellow' | 'gray' | 'red
     imports: [CommonModule, RouterLink, IconComponent, ButtonComponent],
     templateUrl: './sticky-header.component.html',
     styleUrls: [],
-    changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class StickyHeaderComponent {
     title = input.required<string>();

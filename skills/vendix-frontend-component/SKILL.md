@@ -8,6 +8,8 @@ metadata:
 
 # Vendix Frontend Component Pattern
 
+> **⚠️ PREREQUISITO CRÍTICO**: Vendix es **Zoneless + Signals** (Angular 20). Antes de crear o editar cualquier componente, invocar **`vendix-zoneless-signals`** — define signals obligatorios para estado UI, patrones CVA con signals, antipatrones (NgZone, markForCheck, @Input/@Output legacy, take(1).subscribe síncrono, signal sin invocar).
+
 ## REGLA CRITICA — Reutilizacion Obligatoria
 
 > **OBLIGATORIO — Antes de crear un componente nuevo, SIEMPRE verificar si ya existe uno existente.**
@@ -227,6 +229,89 @@ readonly items = input<MyItem[]>([]);
 
 ---
 
+## Signal API — Patrones Angular 20 (Zoneless)
+
+### Inputs y Outputs con Signals (PREFERIDO en codigo nuevo)
+
+```typescript
+import { Component, input, output, model, signal, computed, inject } from '@angular/core';
+
+@Component({
+  selector: 'app-my-component',
+  standalone: true,
+  changeDetection: ChangeDetectionStrategy.OnPush, // Recomendado
+  template: `...`,
+})
+export class MyComponent {
+  // --- Inputs ---
+  readonly label = input<string>('');           // Opcional con default
+  readonly items = input.required<Item[]>();    // Requerido — error en compilacion si falta
+  readonly disabled = input<boolean>(false);
+
+  // --- Outputs ---
+  readonly itemSelected = output<Item>();
+  readonly closed = output<void>();
+
+  // --- Two-way binding (reemplaza @Input setter + @Output EventEmitter) ---
+  readonly isOpen = model<boolean>(false);
+  readonly value = model<string>('');
+
+  // --- Estado local ---
+  readonly isLoading = signal(false);
+  readonly count = signal(0);
+
+  // --- Computados ---
+  readonly hasItems = computed(() => this.items().length > 0);
+  readonly displayLabel = computed(() => this.label() || 'Sin etiqueta');
+
+  // --- Uso ---
+  selectItem(item: Item): void {
+    this.itemSelected.emit(item);  // output() emite igual que EventEmitter
+  }
+
+  close(): void {
+    this.isOpen.set(false);        // model() se actualiza con .set()
+  }
+}
+```
+
+### Uso desde el padre
+
+```html
+<!-- input() — property binding normal -->
+<app-my-component [label]="'Titulo'" [items]="myItems()" />
+
+<!-- output() — event binding normal -->
+<app-my-component (itemSelected)="onSelect($event)" />
+
+<!-- model() — two-way binding -->
+<app-my-component [(isOpen)]="showModal" [(value)]="searchTerm" />
+```
+
+### Patrones legacy — aun funcionales pero NO usar en codigo nuevo
+
+```typescript
+// LEGACY — Compatible pero obsoleto en Vendix
+@Input() label: string = '';
+@Output() selected = new EventEmitter<Item>();
+// Usar solo cuando se modifica un componente existente que ya usa este patron
+```
+
+### ChangeDetectorRef en Zoneless
+
+Con Zoneless activo en Vendix, los signals disparan CD automaticamente:
+
+```typescript
+// Con signals — NO necesitas markForCheck()
+readonly count = signal(0);
+increment() { this.count.update(v => v + 1); } // CD automatico
+
+// Si usas datos no-signal con OnPush (ej: respuesta HTTP directa)
+// markForCheck() sigue siendo un escape hatch valido, pero preferir migrar a signals
+```
+
+---
+
 ## Patrones de Componente
 
 ### Componente Standalone
@@ -273,13 +358,18 @@ readonly featureChanged = output<string>();
 ### Two-Way Binding
 
 ```typescript
-// Child
-readonly value = input<string>("");
+// Child — con model() (preferido, Angular 20)
+readonly value = model<string>('');
+
+// Child — con input/output manual (legacy, aun funcional)
+readonly value = input<string>('');
 readonly valueChange = output<string>();
 
-// Parent
+// Parent — identico en ambos casos
 template: `<app-custom-input [(value)]="myValue" />`
 ```
+
+> **Angular 20**: Los ejemplos anteriores que usan decoradores `@Input()/@Output()` son por compatibilidad historica. En codigo nuevo, usar la Signal API: `input()`, `output()`, `model()`.
 
 ---
 

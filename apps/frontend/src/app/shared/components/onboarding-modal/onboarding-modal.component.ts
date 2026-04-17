@@ -1,15 +1,16 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
-  OnInit,
-  OnDestroy,
   ChangeDetectionStrategy,
-  ChangeDetectorRef,
-  ViewChild,
+  signal,
+  computed,
+  inject,
+  DestroyRef,
+  model,
+  output,
+  viewChild,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import {
   FormsModule,
   ReactiveFormsModule,
@@ -32,8 +33,6 @@ import { OnboardingWizardService } from '../../../core/services/onboarding-wizar
 import { AuthFacade } from '../../../core/store/auth/auth.facade';
 import { ToastService } from '../toast/toast.service';
 import { EnvironmentSwitchService } from '../../../core/services/environment-switch.service';
-import { CountryService } from '../../../services/country.service';
-import { Subject, takeUntil } from 'rxjs';
 
 interface WizardStep {
   id: number;
@@ -46,7 +45,6 @@ interface WizardStep {
   selector: 'app-onboarding-modal',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     ModalComponent,
@@ -59,284 +57,294 @@ interface WizardStep {
     StoreSetupStepComponent,
     AppConfigStepComponent,
     CompletionStepComponent,
-    TermsStepComponent,
-  ],
+    TermsStepComponent
+],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <app-modal
       [(isOpen)]="isOpen"
-      [title]="currentStepInfo?.title || ''"
-      [subtitle]="currentStepInfo?.description || ''"
+      [title]="currentStepInfo()?.title || ''"
+      [subtitle]="currentStepInfo()?.description || ''"
       size="xl-mid"
       [showCloseButton]="false"
       [closeOnBackdrop]="false"
       (closed)="onClosed()"
-    >
+      >
       <!-- Progress Bar -->
-      <div class="mb-6" *ngIf="businessType">
-        <div class="flex justify-between items-center mb-2">
-          <span class="text-sm text-[var(--color-text-secondary)]"
-            >Paso {{ currentStep }} de {{ steps.length }}</span
-          >
-          <span class="text-sm text-[var(--color-text-secondary)]"
-            >{{ Math.round(progress) }}%</span
-          >
-        </div>
-        <div class="w-full bg-[var(--color-background)] rounded-full h-2">
-          <div
-            class="bg-[var(--color-primary)] h-2 rounded-full transition-all duration-300 ease-out"
-            [style.width.%]="progress"
-          ></div>
-        </div>
-      </div>
-
-      <!-- Step Content -->
-      <div class="min-h-[300px] sm:min-h-[400px]">
-        <!-- Step 1: Welcome & App Type Selection (Obligatorio) -->
-        <ng-container *ngIf="currentStep === 1">
-          <app-welcome-step
-            [userFirstName]="userName"
-            (businessTypeSelected)="onBusinessTypeSelected($event)"
-            (selectionChanged)="onSelectionChanged()"
-          ></app-welcome-step>
-        </ng-container>
-
-        <!-- Step 2: Email Verification (Obligatorio) -->
-        <ng-container *ngIf="currentStep === 2 && businessType">
-          <app-email-verification-step
-            (nextStep)="nextStep()"
-            (previousStep)="previousStep()"
-          ></app-email-verification-step>
-        </ng-container>
-
-        <!-- Step 3: User Setup with Address (Obligatorio) -->
-        <ng-container *ngIf="currentStep === 3 && businessType">
-          <app-user-setup-step
-            [formGroup]="userForm"
-            (previousStep)="previousStep()"
-          ></app-user-setup-step>
-        </ng-container>
-
-        <!-- Store Flow (Steps 4-6) -->
-        <ng-container *ngIf="businessType === 'STORE' && currentStep > 3">
-          <!-- Step 4: Store Setup -->
-          <ng-container *ngIf="currentStep === 4">
-            <app-store-setup-step
-              [formGroup]="storeForm"
-              (previousStep)="previousStep()"
-            ></app-store-setup-step>
-          </ng-container>
-
-          <!-- Step 5: App Configuration -->
-          <ng-container *ngIf="currentStep === 5">
-            <app-app-config-step
-              [formGroup]="appConfigForm"
-              (previousStep)="previousStep()"
-            ></app-app-config-step>
-          </ng-container>
-
-          <!-- Step 6: Terms & Conditions -->
-          <ng-container *ngIf="currentStep === 6">
-            <app-terms-step
-              (completed)="onTermsAccepted()"
-              (back)="previousStep()"
-            ></app-terms-step>
-          </ng-container>
-
-          <!-- Step 7: Completion -->
-          <ng-container *ngIf="currentStep === 7">
-            <app-completion-step
-              [wizardData]="wizardData"
-              [isCompleting]="isSubmitting"
-              (complete)="completeWizard()"
-              (goBack)="previousStep()"
-            ></app-completion-step>
-          </ng-container>
-        </ng-container>
-
-        <!-- Organization Flow (Steps 4-8) -->
-        <ng-container
-          *ngIf="businessType === 'ORGANIZATION' && currentStep > 3"
-        >
-          <!-- Step 4: Organization Setup -->
-          <ng-container *ngIf="currentStep === 4">
-            <app-organization-setup-step
-              [formGroup]="organizationForm"
-              [isAutoGenerated]="false"
-              (previousStep)="previousStep()"
-            ></app-organization-setup-step>
-          </ng-container>
-
-          <!-- Step 5: Store Setup (Preloaded with organization data) -->
-          <ng-container *ngIf="currentStep === 5">
-            <app-store-setup-step
-              [formGroup]="storeForm"
-              (previousStep)="previousStep()"
-            ></app-store-setup-step>
-          </ng-container>
-
-          <!-- Step 6: App Configuration -->
-          <ng-container *ngIf="currentStep === 6">
-            <app-app-config-step
-              [formGroup]="appConfigForm"
-              (previousStep)="previousStep()"
-            ></app-app-config-step>
-          </ng-container>
-
-          <!-- Step 7: Terms & Conditions -->
-          <ng-container *ngIf="currentStep === 7">
-            <app-terms-step
-              (completed)="onTermsAccepted()"
-              (back)="previousStep()"
-            ></app-terms-step>
-          </ng-container>
-
-          <!-- Step 8: Completion -->
-          <ng-container *ngIf="currentStep === 8">
-            <app-completion-step
-              [wizardData]="wizardData"
-              [isCompleting]="isSubmitting"
-              (complete)="completeWizard()"
-              (goBack)="previousStep()"
-            ></app-completion-step>
-          </ng-container>
-        </ng-container>
-      </div>
-
-      <!-- Unified Footer Navigation - Always visible except on step 1 without business type -->
-      <div class="onboarding-footer" slot="footer" *ngIf="showFooter">
-        <!-- Left side: Back button + Skip -->
-        <div class="flex items-center gap-2">
-          <app-button
-            *ngIf="canGoBack && !isCompletionStep"
-            variant="outline"
-            size="xsm"
-            (clicked)="previousStep()"
-          >
-            <app-icon name="arrow-left" size="14" slot="icon"></app-icon>
-            <ng-container *ngIf="!isTermsStep">Anterior</ng-container>
-          </app-button>
-        </div>
-
-        <!-- Right side: Next/Complete/Terms Actions -->
-        <div class="flex items-center gap-2">
-          <!-- Terms step: Accept All button -->
-          <app-button
-            *ngIf="isTermsStep && termsStep"
-            variant="outline"
-            size="xsm"
-            [disabled]="termsStep.submitting"
-            (clicked)="termsStep.acceptAllAndSubmit()"
-          >
-            <app-icon name="check-check" size="14" slot="icon"></app-icon>
-            Aceptar todo
-          </app-button>
-
-          <!-- Completion step: Go to store button -->
-          <app-button
-            *ngIf="isCompletionStep"
-            variant="primary"
-            size="xsm"
-            [disabled]="isSubmitting || isProcessing"
-            (clicked)="completeWizard()"
-          >
-            {{ isSubmitting ? 'Finalizando...' : 'Ir a mi tienda' }}
-            <app-icon
-              name="arrow-right"
-              size="14"
-              slot="icon"
-              *ngIf="!isSubmitting"
-            ></app-icon>
-            <app-icon
-              name="loader-2"
-              size="14"
-              slot="icon"
-              [spin]="true"
-              *ngIf="isSubmitting"
-            ></app-icon>
-          </app-button>
-
-          <!-- Regular next button (not on completion or terms) -->
-          <app-button
-            *ngIf="!isCompletionStep && !isTermsStep"
-            variant="primary"
-            size="xsm"
-            (clicked)="nextStep()"
+      @if (businessType()) {
+        <div class="mb-6">
+          <div class="flex justify-between items-center mb-2">
+            <span class="text-sm text-[var(--color-text-secondary)]"
+              >Paso {{ currentStep() }} de {{ steps().length }}</span
+              >
+              <span class="text-sm text-[var(--color-text-secondary)]"
+                >{{ Math.round(progress()) }}%</span
+                >
+              </div>
+              <div class="w-full bg-[var(--color-background)] rounded-full h-2">
+                <div
+                  class="bg-[var(--color-primary)] h-2 rounded-full transition-all duration-300 ease-out"
+                  [style.width.%]="progress()"
+                ></div>
+              </div>
+            </div>
+          }
+    
+          <!-- Step Content -->
+          <div class="min-h-[300px] sm:min-h-[400px]">
+            <!-- Step 1: Welcome & App Type Selection (Obligatorio) -->
+            @if (currentStep() === 1) {
+              <app-welcome-step
+                [userFirstName]="userName()"
+                (businessTypeSelected)="onBusinessTypeSelected($event)"
+                (selectionChanged)="onSelectionChanged()"
+              ></app-welcome-step>
+            }
+    
+            <!-- Step 2: Email Verification (Obligatorio) -->
+            @if (currentStep() === 2 && businessType()) {
+              <app-email-verification-step
+                (nextStep)="nextStep()"
+                (previousStep)="previousStep()"
+              ></app-email-verification-step>
+            }
+    
+            <!-- Step 3: User Setup with Address (Obligatorio) -->
+            @if (currentStep() === 3 && businessType()) {
+              <app-user-setup-step
+                [formGroup]="userForm"
+                (previousStep)="previousStep()"
+              ></app-user-setup-step>
+            }
+    
+            <!-- Store Flow (Steps 4-6) -->
+            @if (businessType() === 'STORE' && currentStep() > 3) {
+              <!-- Step 4: Store Setup -->
+              @if (currentStep() === 4) {
+                <app-store-setup-step
+                  [formGroup]="storeForm"
+                  (previousStep)="previousStep()"
+                ></app-store-setup-step>
+              }
+              <!-- Step 5: App Configuration -->
+              @if (currentStep() === 5) {
+                <app-app-config-step
+                  [formGroup]="appConfigForm"
+                  (previousStep)="previousStep()"
+                ></app-app-config-step>
+              }
+              <!-- Step 6: Terms & Conditions -->
+              @if (currentStep() === 6) {
+                <app-terms-step
+                  (completed)="onTermsAccepted()"
+                  (back)="previousStep()"
+                ></app-terms-step>
+              }
+              <!-- Step 7: Completion -->
+              @if (currentStep() === 7) {
+                <app-completion-step
+                  [wizardData]="wizardData()"
+                  [isCompleting]="isSubmitting()"
+                  (complete)="completeWizard()"
+                  (goBack)="previousStep()"
+                ></app-completion-step>
+              }
+            }
+    
+            <!-- Organization Flow (Steps 4-8) -->
+            @if (businessType() === 'ORGANIZATION' && currentStep() > 3) {
+              <!-- Step 4: Organization Setup -->
+              @if (currentStep() === 4) {
+                <app-organization-setup-step
+                  [formGroup]="organizationForm"
+                  [isAutoGenerated]="false"
+                  (previousStep)="previousStep()"
+                ></app-organization-setup-step>
+              }
+              <!-- Step 5: Store Setup (Preloaded with organization data) -->
+              @if (currentStep() === 5) {
+                <app-store-setup-step
+                  [formGroup]="storeForm"
+                  (previousStep)="previousStep()"
+                ></app-store-setup-step>
+              }
+              <!-- Step 6: App Configuration -->
+              @if (currentStep() === 6) {
+                <app-app-config-step
+                  [formGroup]="appConfigForm"
+                  (previousStep)="previousStep()"
+                ></app-app-config-step>
+              }
+              <!-- Step 7: Terms & Conditions -->
+              @if (currentStep() === 7) {
+                <app-terms-step
+                  (completed)="onTermsAccepted()"
+                  (back)="previousStep()"
+                ></app-terms-step>
+              }
+              <!-- Step 8: Completion -->
+              @if (currentStep() === 8) {
+                <app-completion-step
+                  [wizardData]="wizardData()"
+                  [isCompleting]="isSubmitting()"
+                  (complete)="completeWizard()"
+                  (goBack)="previousStep()"
+                ></app-completion-step>
+              }
+            }
+          </div>
+    
+          <!-- Unified Footer Navigation - Always visible except on step 1 without business type -->
+          @if (showFooter()) {
+            <div class="onboarding-footer" slot="footer">
+              <!-- Left side: Back button + Skip -->
+              <div class="flex items-center gap-2">
+                @if (canGoBack() && !isCompletionStep()) {
+                  <app-button
+                    variant="outline"
+                    size="xsm"
+                    (clicked)="previousStep()"
+                    >
+                    <app-icon name="arrow-left" size="14" slot="icon"></app-icon>
+                    @if (!isTermsStep()) {
+                      Anterior
+                    }
+                  </app-button>
+                }
+              </div>
+              <!-- Right side: Next/Complete/Terms Actions -->
+              <div class="flex items-center gap-2">
+                <!-- Terms step: Accept All button -->
+                @if (isTermsStep() && termsStep()) {
+                  <app-button
+                    variant="outline"
+                    size="xsm"
+                    [disabled]="termsStep()!.submitting()"
+                    (clicked)="termsStep()!.acceptAllAndSubmit()"
+                    >
+                    <app-icon name="check-check" size="14" slot="icon"></app-icon>
+                    Aceptar todo
+                  </app-button>
+                }
+                <!-- Completion step: Go to store button -->
+                @if (isCompletionStep()) {
+                  <app-button
+                    variant="primary"
+                    size="xsm"
+                    [disabled]="isSubmitting() || isProcessing()"
+                    (clicked)="completeWizard()"
+                    >
+                    {{ isSubmitting() ? 'Finalizando...' : 'Ir a mi tienda' }}
+                    @if (!isSubmitting()) {
+                      <app-icon
+                        name="arrow-right"
+                        size="14"
+                        slot="icon"
+                      ></app-icon>
+                    }
+                    @if (isSubmitting()) {
+                      <app-icon
+                        name="loader-2"
+                        size="14"
+                        slot="icon"
+                        [spin]="true"
+                      ></app-icon>
+                    }
+                  </app-button>
+                }
+                <!-- Regular next button (not on completion or terms) -->
+                @if (!isCompletionStep() && !isTermsStep()) {
+                  <app-button
+                    variant="primary"
+                    size="xsm"
+                    (clicked)="nextStep()"
             [disabled]="
-              isSubmitting || isProcessing || !canProceedFromCurrentStep
+              isSubmitting() || isProcessing() || !canProceedFromCurrentStep()
             "
-          >
-            {{ nextButtonText }}
-            <app-icon
-              name="arrow-right"
-              size="14"
-              slot="icon"
-              *ngIf="!isSubmitting"
-            ></app-icon>
-            <app-icon
-              name="loader-2"
-              size="14"
-              slot="icon"
-              [spin]="true"
-              *ngIf="isSubmitting"
-            ></app-icon>
-          </app-button>
-
-          <!-- Terms step: Accept selected button -->
-          <app-button
-            *ngIf="isTermsStep && termsStep"
-            variant="primary"
-            size="xsm"
-            [disabled]="!termsStep.allAccepted || termsStep.submitting"
-            (clicked)="termsStep.submitAcceptances()"
-          >
-            {{ termsStep.submitting ? 'Procesando...' : 'Continuar' }}
-            <app-icon
-              name="arrow-right"
-              size="14"
-              slot="icon"
-              *ngIf="!termsStep.submitting"
-            ></app-icon>
-            <app-icon
-              name="loader-2"
-              size="14"
-              slot="icon"
-              [spin]="true"
-              *ngIf="termsStep.submitting"
-            ></app-icon>
-          </app-button>
-        </div>
-      </div>
-    </app-modal>
-  `,
+                    >
+                    {{ nextButtonText() }}
+                    @if (!isSubmitting()) {
+                      <app-icon
+                        name="arrow-right"
+                        size="14"
+                        slot="icon"
+                      ></app-icon>
+                    }
+                    @if (isSubmitting()) {
+                      <app-icon
+                        name="loader-2"
+                        size="14"
+                        slot="icon"
+                        [spin]="true"
+                      ></app-icon>
+                    }
+                  </app-button>
+                }
+                <!-- Terms step: Accept selected button -->
+                @if (isTermsStep() && termsStep()) {
+                  <app-button
+                    variant="primary"
+                    size="xsm"
+                    [disabled]="!termsStep()!.allAccepted || termsStep()!.submitting()"
+                    (clicked)="termsStep()!.submitAcceptances()"
+                    >
+                    {{ termsStep()!.submitting() ? 'Procesando...' : 'Continuar' }}
+                    @if (!termsStep()!.submitting()) {
+                      <app-icon
+                        name="arrow-right"
+                        size="14"
+                        slot="icon"
+                      ></app-icon>
+                    }
+                    @if (termsStep()!.submitting()) {
+                      <app-icon
+                        name="loader-2"
+                        size="14"
+                        slot="icon"
+                        [spin]="true"
+                      ></app-icon>
+                    }
+                  </app-button>
+                }
+              </div>
+            </div>
+          }
+        </app-modal>
+    `,
   styleUrls: ['./onboarding-modal.component.scss'],
 })
-export class OnboardingModalComponent implements OnInit, OnDestroy {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() completed = new EventEmitter<void>();
+export class OnboardingModalComponent {
+  // --- Two-way binding ---
+  readonly isOpen = model<boolean>(false);
 
-  @ViewChild(TermsStepComponent) termsStep?: TermsStepComponent;
-  @ViewChild(EmailVerificationStepComponent)
-  emailVerificationStep?: EmailVerificationStepComponent;
-  @ViewChild(WelcomeStepComponent)
-  welcomeStep?: WelcomeStepComponent;
+  // --- Outputs ---
+  readonly completed = output<void>();
 
-  private destroy$ = new Subject<void>();
+  // --- ViewChild as signals ---
+  readonly termsStep = viewChild(TermsStepComponent);
+  readonly emailVerificationStep = viewChild(EmailVerificationStepComponent);
+  readonly welcomeStep = viewChild(WelcomeStepComponent);
 
-  // Prevent multiple simultaneous actions (public for template access)
-  isProcessing = false;
+  // --- Services ---
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly fb = inject(FormBuilder);
+  private readonly wizardService = inject(OnboardingWizardService);
+  private readonly authFacade = inject(AuthFacade);
+  private readonly toastService = inject(ToastService);
+  private readonly envSwitchService = inject(EnvironmentSwitchService);
 
-  currentStep = 1;
-  isEmailVerified = false;
-  isSubmitting = false;
-  wizardData: any = {};
-  wizardStatus: any = null; // Store full status from backend
-  businessType: 'STORE' | 'ORGANIZATION' | null = null;
-  userName: string = '';
+
+  // --- State signals ---
+  readonly isProcessing = signal(false);
+  readonly currentStep = signal(1);
+  readonly isSubmitting = signal(false);
+  readonly wizardData = signal<any>({});
+  readonly wizardStatus = signal<any>(null);
+  readonly businessType = signal<'STORE' | 'ORGANIZATION' | null>(null);
+  readonly userName = signal('');
 
   // Dynamic steps based on business type
-  steps: WizardStep[] = [];
+  readonly steps = signal<WizardStep[]>([]);
 
   // Store-specific steps (6 steps total - Store first, organization auto-generated)
   storeSteps: WizardStep[] = [
@@ -445,42 +453,31 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
   // Math utility for template
   readonly Math = Math;
 
-  constructor(
-    private fb: FormBuilder,
-    private wizardService: OnboardingWizardService,
-    private authFacade: AuthFacade,
-    private cdr: ChangeDetectorRef,
-    private toastService: ToastService,
-    private envSwitchService: EnvironmentSwitchService,
-    private countryService: CountryService,
-  ) {
+  constructor() {
     this.initializeForms();
-  }
-
-  ngOnInit(): void {
     this.loadUserData();
     this.subscribeToWizardData();
   }
 
   onBusinessTypeSelected(event: { type: 'STORE' | 'ORGANIZATION' }): void {
-    if (this.isProcessing) return;
-    this.isProcessing = true;
+    if (this.isProcessing()) return;
+    this.isProcessing.set(true);
 
-    this.businessType = event.type;
+    this.businessType.set(event.type);
 
     // Smart Check: Skip if already selected same type
     const currentAppType =
-      this.wizardStatus?.user_settings?.config?.selected_app_type;
+      this.wizardStatus()?.user_settings?.config?.selected_app_type;
     const newAppType = event.type === 'STORE' ? 'STORE_ADMIN' : 'ORG_ADMIN';
 
     if (currentAppType === newAppType) {
-      this.steps =
-        event.type === 'STORE' ? this.storeSteps : this.organizationSteps;
+      this.steps.set(
+        event.type === 'STORE' ? this.storeSteps : this.organizationSteps,
+      );
       this.updateAppConfigForm();
       this.updateFormBasedOnBusinessType();
       this.wizardService.nextStep();
-      this.isProcessing = false;
-      this.cdr.markForCheck();
+      this.isProcessing.set(false);
       return;
     }
 
@@ -497,15 +494,15 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
           );
 
           // Update local state
-          this.steps =
-            event.type === 'STORE' ? this.storeSteps : this.organizationSteps;
+          this.steps.set(
+            event.type === 'STORE' ? this.storeSteps : this.organizationSteps,
+          );
           this.updateAppConfigForm();
           this.updateFormBasedOnBusinessType();
 
           // Move to next step
           this.wizardService.nextStep();
-          this.isProcessing = false;
-          this.cdr.markForCheck(); // Trigger change detection
+          this.isProcessing.set(false);
         },
         error: (error) => {
           console.error('Error selecting app type:', error);
@@ -513,18 +510,17 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
             error?.error?.message || 'Error al seleccionar tipo de negocio',
             'Error',
           );
-          this.isProcessing = false;
-          this.cdr.markForCheck(); // Trigger change detection
+          this.isProcessing.set(false);
         },
       });
   }
 
   onSelectionChanged(): void {
-    this.cdr.markForCheck();
+    // No-op: signals trigger CD automatically
   }
 
   private updateAppConfigForm(): void {
-    if (this.businessType === 'STORE') {
+    if (this.businessType() === 'STORE') {
       this.appConfigForm.patchValue({
         app_type: 'STORE_ADMIN',
       });
@@ -536,13 +532,13 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
   }
 
   private updateFormBasedOnBusinessType(): void {
-    if (this.businessType === 'STORE') {
+    if (this.businessType() === 'STORE') {
       // For single store, organization is auto-generated in backend when store is created
       // No need to populate organization form since it won't be shown
-    } else if (this.businessType === 'ORGANIZATION') {
+    } else if (this.businessType() === 'ORGANIZATION') {
       // For organization first, preload store form with organization data
       this.organizationForm.valueChanges
-        .pipe(takeUntil(this.destroy$))
+        .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe((orgData) => {
           if (orgData.name) {
             // Extract base name without "Org" if exists
@@ -555,11 +551,6 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
           }
         });
     }
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
   }
 
   private initializeForms(): void {
@@ -623,7 +614,7 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
   private setupDataPreloading(): void {
     // User address → Store address preloading
     this.userForm.valueChanges
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((userData) => {
         if (
           userData.address_line1 ||
@@ -647,7 +638,7 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
 
     // User address → Organization address preloading
     this.userForm.valueChanges
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((userData) => {
         // For organization, we can preload phone if available
         if (userData.phone && !this.organizationForm.value.phone) {
@@ -662,7 +653,7 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
 
     // Organization address → Store address preloading
     this.organizationForm.valueChanges
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((orgData) => {
         if (orgData.name) {
           // Extract base name without "Org" if exists
@@ -680,79 +671,80 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
   }
 
   private loadUserData(): void {
-    this.authFacade.user$.pipe(takeUntil(this.destroy$)).subscribe((user) => {
-      if (user) {
-        // Set user name for welcome greeting
-        this.userName = user.first_name || 'Usuario';
+    this.authFacade.user$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((user) => {
+        if (user) {
+          // Set user name for welcome greeting
+          this.userName.set(user.first_name || 'Usuario');
 
-        // Pre-fill user form with personal information
-        if (user.first_name)
-          this.userForm.patchValue({ first_name: user.first_name });
-        if (user.last_name)
-          this.userForm.patchValue({ last_name: user.last_name });
-        if (user.phone) this.userForm.patchValue({ phone: user.phone });
+          // Pre-fill user form with personal information
+          if (user.first_name)
+            this.userForm.patchValue({ first_name: user.first_name });
+          if (user.last_name)
+            this.userForm.patchValue({ last_name: user.last_name });
+          if (user.phone) this.userForm.patchValue({ phone: user.phone });
 
-        // Pre-fill user address if available
-        if (user.addresses && user.addresses.length > 0) {
-          const primaryAddress =
-            user.addresses.find((addr: any) => addr.is_primary) ||
-            user.addresses[0];
-          if (primaryAddress) {
-            this.userForm.patchValue({
-              address_line1: primaryAddress.address_line1 || '',
-              address_line2: primaryAddress.address_line2 || '',
-              city: primaryAddress.city || '',
-              state_province: primaryAddress.state_province || '',
-              postal_code: primaryAddress.postal_code || '',
-              country_code: primaryAddress.country_code || 'CO',
+          // Pre-fill user address if available
+          if (user.addresses && user.addresses.length > 0) {
+            const primaryAddress =
+              user.addresses.find((addr: any) => addr.is_primary) ||
+              user.addresses[0];
+            if (primaryAddress) {
+              this.userForm.patchValue({
+                address_line1: primaryAddress.address_line1 || '',
+                address_line2: primaryAddress.address_line2 || '',
+                city: primaryAddress.city || '',
+                state_province: primaryAddress.state_province || '',
+                postal_code: primaryAddress.postal_code || '',
+                country_code: primaryAddress.country_code || 'CO',
+              });
+            }
+          }
+
+          // Pre-fill organization form
+          if (user.organizations?.name) {
+            this.organizationForm.patchValue({
+              name: user.organizations.name,
+              description: user.organizations.description || '',
+              legal_name: user.organizations.legal_name || '',
+              tax_id: user.organizations.tax_id || '',
+              email: user.organizations.email || user.email,
+              phone: user.organizations.phone || user.phone,
+              website: user.organizations.website || '',
             });
           }
         }
-
-        // Pre-fill organization form
-        if (user.organizations?.name) {
-          this.organizationForm.patchValue({
-            name: user.organizations.name,
-            description: user.organizations.description || '',
-            legal_name: user.organizations.legal_name || '',
-            tax_id: user.organizations.tax_id || '',
-            email: user.organizations.email || user.email,
-            phone: user.organizations.phone || user.phone,
-            website: user.organizations.website || '',
-          });
-        }
-      }
-    });
+      });
   }
 
   private subscribeToWizardData(): void {
     this.wizardService.currentStep$
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((step) => {
-        this.currentStep = step;
-        this.cdr.markForCheck(); // Trigger change detection
+        this.currentStep.set(step);
       });
 
     // Load wizard status from backend to sync current step - only once on init
     this.wizardService.getWizardStatus().subscribe({
       next: (response) => {
         if (response.success && response.data) {
-          this.wizardStatus = response.data; // Save status for smart navigation
+          this.wizardStatus.set(response.data); // Save status for smart navigation
           // Set business type based on selected app type
           const userSettings = response.data.user_settings?.config;
           const selectedAppType = userSettings?.selected_app_type;
 
           if (selectedAppType) {
-            this.businessType =
+            const resolvedType: 'STORE' | 'ORGANIZATION' =
               selectedAppType === 'STORE_ADMIN' ? 'STORE' : 'ORGANIZATION';
+            this.businessType.set(resolvedType);
 
             // Sync service state
             this.wizardService.setAppType(selectedAppType);
 
-            this.steps =
-              this.businessType === 'STORE'
-                ? this.storeSteps
-                : this.organizationSteps;
+            this.steps.set(
+              resolvedType === 'STORE' ? this.storeSteps : this.organizationSteps,
+            );
             this.updateAppConfigForm();
             this.updateFormBasedOnBusinessType();
 
@@ -768,7 +760,6 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
           if (response.data.current_step) {
             this.wizardService.goToStep(response.data.current_step);
           }
-          this.cdr.markForCheck(); // Trigger change detection
         }
       },
       error: (error) => {
@@ -777,138 +768,125 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
     });
   }
 
-  get currentStepInfo(): WizardStep | undefined {
-    return this.steps.find((s) => s.id === this.currentStep);
-  }
+  readonly currentStepInfo = computed<WizardStep | undefined>(() =>
+    this.steps().find((s) => s.id === this.currentStep()),
+  );
 
-  get progress(): number {
+  readonly progress = computed<number>(() => {
     // If no business type selected yet, show 0%
-    if (!this.businessType) return 0;
-    return (this.currentStep / this.steps.length) * 100;
-  }
+    if (!this.businessType()) return 0;
+    return (this.currentStep() / this.steps().length) * 100;
+  });
 
-  get canGoBack(): boolean {
-    return this.currentStep > 1;
-  }
+  readonly canGoBack = computed<boolean>(() => this.currentStep() > 1);
 
-  get canGoNext(): boolean {
-    return this.currentStep < this.steps.length;
-  }
+  readonly canGoNext = computed<boolean>(
+    () => this.currentStep() < this.steps().length,
+  );
 
   /**
    * Check if the user can proceed from the current step.
    * Step 1: Business type must be selected
    * Step 2: Email must be verified
    */
-  get canProceedFromCurrentStep(): boolean {
+  readonly canProceedFromCurrentStep = computed<boolean>(() => {
     // Step 1 requires business type selection
-    if (this.currentStep === 1) {
-      // Use !! to check truthiness - handles both null and undefined
-      return !!this.welcomeStep?.selectedType || !!this.businessType;
+    if (this.currentStep() === 1) {
+      return !!this.welcomeStep()?.selectedType || !!this.businessType();
     }
     // Step 2 is email verification - require verified email
-    if (this.currentStep === 2) {
-      return this.emailVerificationStep?.isEmailVerified ?? false;
+    if (this.currentStep() === 2) {
+      return this.emailVerificationStep()?.isEmailVerified ?? false;
     }
     return true;
-  }
+  });
 
-  get isTermsStep(): boolean {
-    return (
-      (this.businessType === 'STORE' && this.currentStep === 6) ||
-      (this.businessType === 'ORGANIZATION' && this.currentStep === 7)
-    );
-  }
+  readonly isTermsStep = computed<boolean>(
+    () =>
+      (this.businessType() === 'STORE' && this.currentStep() === 6) ||
+      (this.businessType() === 'ORGANIZATION' && this.currentStep() === 7),
+  );
 
-  get isCompletionStep(): boolean {
-    return (
-      (this.businessType === 'STORE' && this.currentStep === 7) ||
-      (this.businessType === 'ORGANIZATION' && this.currentStep === 8)
-    );
-  }
+  readonly isCompletionStep = computed<boolean>(
+    () =>
+      (this.businessType() === 'STORE' && this.currentStep() === 7) ||
+      (this.businessType() === 'ORGANIZATION' && this.currentStep() === 8),
+  );
 
   /**
    * Determines whether to show the unified footer navigation.
    * Hidden on step 1 (welcome step handles its own navigation via card selection).
    */
-  get showFooter(): boolean {
-    return this.currentStep > 1;
-  }
+  readonly showFooter = computed<boolean>(() => this.currentStep() > 1);
 
   /**
    * Dynamic text for the next button based on current step.
    */
-  get nextButtonText(): string {
-    if (this.isSubmitting) {
-      return 'Procesando...';
-    }
-    // Step 1
-    if (this.currentStep === 1) {
-      return 'Continuar';
-    }
+  readonly nextButtonText = computed<string>(() => {
+    if (this.isSubmitting()) return 'Procesando...';
+    if (this.currentStep() === 1) return 'Continuar';
     return 'Siguiente';
-  }
+  });
 
   nextStep(): void {
-    if (!this.canGoNext || this.isProcessing) return;
+    if (!this.canGoNext() || this.isProcessing()) return;
 
     // Handle form submission based on current step
-    switch (this.currentStep) {
-      case 1: // Welcome - Business Type Selection
-        const selectedType = this.welcomeStep?.selectedType;
+    switch (this.currentStep()) {
+      case 1: { // Welcome - Business Type Selection
+        const selectedType = this.welcomeStep()?.selectedType;
         if (selectedType) {
           this.onBusinessTypeSelected({ type: selectedType });
         } else {
-          this.isProcessing = false;
+          this.isProcessing.set(false);
         }
         break;
+      }
       case 3: // User Setup
-        this.isProcessing = true;
+        this.isProcessing.set(true);
         this.submitUserSetup();
         break;
       case 4: // Store Setup or Organization Setup (conditional)
-        this.isProcessing = true;
-        if (this.businessType === 'STORE') {
+        this.isProcessing.set(true);
+        if (this.businessType() === 'STORE') {
           this.submitStoreSetup();
         } else {
           this.submitOrganizationSetup();
         }
         break;
       case 5: // App Configuration (Store flow) or Store Setup (Org flow)
-        this.isProcessing = true;
-        if (this.businessType === 'STORE') {
+        this.isProcessing.set(true);
+        if (this.businessType() === 'STORE') {
           this.submitAppConfig();
         } else {
           this.submitStoreSetup();
         }
         break;
       case 6: // App Configuration (Org flow) or Terms (Store flow)
-        if (this.businessType === 'STORE') {
+        if (this.businessType() === 'STORE') {
           // Store flow: step 6 is Terms, handled by component
-          this.isProcessing = false;
+          this.isProcessing.set(false);
         } else {
-          this.isProcessing = true;
+          this.isProcessing.set(true);
           this.submitAppConfig();
         }
         break;
       case 7: // Terms (Org flow) or Completion (Store flow)
-        if (this.businessType === 'STORE') {
+        if (this.businessType() === 'STORE') {
           // Store flow: step 7 is completion
-          this.isProcessing = true;
+          this.isProcessing.set(true);
           this.wizardService.nextStep();
-          this.isProcessing = false;
-          this.cdr.markForCheck();
+          this.isProcessing.set(false);
         } else {
           // Org flow: step 7 is Terms, handled by component
-          this.isProcessing = false;
+          this.isProcessing.set(false);
         }
         break;
       default:
         // For steps without form submission, just move to next step
-        this.isProcessing = true;
+        this.isProcessing.set(true);
         this.wizardService.nextStep();
-        this.isProcessing = false;
-        this.cdr.markForCheck();
+        this.isProcessing.set(false);
     }
   }
 
@@ -917,7 +895,7 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
   }
 
   previousStep(): void {
-    if (this.canGoBack && !this.isProcessing) {
+    if (this.canGoBack() && !this.isProcessing()) {
       this.wizardService.previousStep();
     }
   }
@@ -929,38 +907,34 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
         this.userForm.get(key)?.markAsTouched();
       });
       this.toastService.warning('Por favor completa los campos requeridos');
-      this.isProcessing = false;
-      this.cdr.markForCheck();
+      this.isProcessing.set(false);
       return;
     }
 
-    this.isSubmitting = true;
-    this.cdr.markForCheck();
+    this.isSubmitting.set(true);
     const userData = this.userForm.value;
 
     // Smart Check: Skip if already done and form not modified
     if (
-      this.wizardStatus?.has_user_data &&
-      this.wizardStatus?.has_user_address &&
+      this.wizardStatus()?.has_user_data &&
+      this.wizardStatus()?.has_user_address &&
       this.userForm.pristine
     ) {
-      this.isSubmitting = false;
-      this.isProcessing = false;
+      this.isSubmitting.set(false);
+      this.isProcessing.set(false);
       this.wizardService.nextStep();
-      this.cdr.markForCheck();
       return;
     }
 
     this.wizardService.setupUser(userData).subscribe({
       next: (response) => {
-        this.isSubmitting = false;
-        this.isProcessing = false;
+        this.isSubmitting.set(false);
+        this.isProcessing.set(false);
         if (response.success) {
-          this.wizardData.user = userData;
+          this.wizardData.update((d) => ({ ...d, user: userData }));
           this.toastService.success('Perfil actualizado correctamente');
           // The service already calls nextStep() automatically
         }
-        this.cdr.markForCheck();
       },
       error: (error) =>
         this.handleOnboardingError(error, 'Error al configurar tu perfil'),
@@ -975,38 +949,34 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
       this.toastService.warning(
         'Por favor completa los campos requeridos de la tienda',
       );
-      this.isProcessing = false;
-      this.cdr.markForCheck();
+      this.isProcessing.set(false);
       return;
     }
 
-    this.isSubmitting = true;
-    this.cdr.markForCheck();
+    this.isSubmitting.set(true);
     const storeData = this.storeForm.value;
 
     // Smart Check
     if (
-      this.wizardStatus?.has_store &&
-      this.wizardStatus?.has_store_address &&
+      this.wizardStatus()?.has_store &&
+      this.wizardStatus()?.has_store_address &&
       this.storeForm.pristine
     ) {
-      this.isSubmitting = false;
-      this.isProcessing = false;
+      this.isSubmitting.set(false);
+      this.isProcessing.set(false);
       this.wizardService.nextStep();
-      this.cdr.markForCheck();
       return;
     }
 
     this.wizardService.setupStore(storeData).subscribe({
       next: (response) => {
-        this.isSubmitting = false;
-        this.isProcessing = false;
+        this.isSubmitting.set(false);
+        this.isProcessing.set(false);
         if (response.success) {
-          this.wizardData.store = storeData;
+          this.wizardData.update((d) => ({ ...d, store: storeData }));
           this.toastService.success('Tienda configurada correctamente');
           // The service already calls nextStep() automatically
         }
-        this.cdr.markForCheck();
       },
       error: (error) =>
         this.handleOnboardingError(error, 'Error al configurar la tienda'),
@@ -1021,34 +991,30 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
       this.toastService.warning(
         'Por favor completa los campos requeridos de la organización',
       );
-      this.isProcessing = false;
-      this.cdr.markForCheck();
+      this.isProcessing.set(false);
       return;
     }
 
-    this.isSubmitting = true;
-    this.cdr.markForCheck();
+    this.isSubmitting.set(true);
     const organizationData = this.organizationForm.value;
 
     // Smart Check
-    if (this.wizardStatus?.has_organization && this.organizationForm.pristine) {
-      this.isSubmitting = false;
-      this.isProcessing = false;
+    if (this.wizardStatus()?.has_organization && this.organizationForm.pristine) {
+      this.isSubmitting.set(false);
+      this.isProcessing.set(false);
       this.wizardService.nextStep();
-      this.cdr.markForCheck();
       return;
     }
 
     this.wizardService.setupOrganization(organizationData).subscribe({
       next: (response) => {
-        this.isSubmitting = false;
-        this.isProcessing = false;
+        this.isSubmitting.set(false);
+        this.isProcessing.set(false);
         if (response.success) {
-          this.wizardData.organization = organizationData;
+          this.wizardData.update((d) => ({ ...d, organization: organizationData }));
           this.toastService.success('Organización creada correctamente');
           // The service already calls nextStep() automatically
         }
-        this.cdr.markForCheck();
       },
       error: (error) =>
         this.handleOnboardingError(
@@ -1066,24 +1032,21 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
       this.toastService.warning(
         'Por favor completa la configuración de la aplicación',
       );
-      this.isProcessing = false;
-      this.cdr.markForCheck();
+      this.isProcessing.set(false);
       return;
     }
 
-    this.isSubmitting = true;
-    this.cdr.markForCheck();
+    this.isSubmitting.set(true);
     const formData = this.appConfigForm.value;
 
     // Smart Check
     if (
-      this.wizardStatus?.step_app_config_completed &&
+      this.wizardStatus()?.step_app_config_completed &&
       this.appConfigForm.pristine
     ) {
-      this.isSubmitting = false;
-      this.isProcessing = false;
+      this.isSubmitting.set(false);
+      this.isProcessing.set(false);
       this.wizardService.nextStep();
-      this.cdr.markForCheck();
       return;
     }
 
@@ -1116,14 +1079,13 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
 
     this.wizardService.setupAppConfig(appConfigData).subscribe({
       next: (response) => {
-        this.isSubmitting = false;
-        this.isProcessing = false;
+        this.isSubmitting.set(false);
+        this.isProcessing.set(false);
         if (response.success) {
-          this.wizardData.appConfig = appConfigData;
+          this.wizardData.update((d) => ({ ...d, appConfig: appConfigData }));
           this.toastService.success('Configuración guardada correctamente');
           // The service already calls nextStep() automatically
         }
-        this.cdr.markForCheck();
       },
       error: (error) =>
         this.handleOnboardingError(error, 'Error al guardar la configuración'),
@@ -1131,10 +1093,9 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
   }
 
   async completeWizard(): Promise<void> {
-    if (this.isProcessing) return;
-    this.isProcessing = true;
-    this.isSubmitting = true;
-    this.cdr.markForCheck();
+    if (this.isProcessing()) return;
+    this.isProcessing.set(true);
+    this.isSubmitting.set(true);
 
     try {
       const response = await this.wizardService.completeWizard().toPromise();
@@ -1143,7 +1104,7 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
         // Get app type from service or fallback to local state
         const app_type =
           this.wizardService.getAppType() ||
-          (this.businessType === 'STORE' ? 'STORE_ADMIN' : 'ORG_ADMIN');
+          (this.businessType() === 'STORE' ? 'STORE_ADMIN' : 'ORG_ADMIN');
 
         if (app_type === 'STORE_ADMIN') {
           const store_slug = this.wizardService.getCreatedStoreSlug();
@@ -1202,9 +1163,8 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
     } catch (error: any) {
       this.handleOnboardingError(error, 'Error al completar la configuración');
     } finally {
-      this.isSubmitting = false;
-      this.isProcessing = false;
-      this.cdr.markForCheck();
+      this.isSubmitting.set(false);
+      this.isProcessing.set(false);
     }
   }
 
@@ -1214,8 +1174,8 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
    */
   private handleOnboardingError(error: any, defaultMessage: string): void {
     console.error('Onboarding Error:', error);
-    this.isSubmitting = false;
-    this.isProcessing = false;
+    this.isSubmitting.set(false);
+    this.isProcessing.set(false);
 
     // Check for "Missing steps" error specifically
     const errorMessage = error?.error?.message || error?.message || '';
@@ -1275,13 +1235,11 @@ export class OnboardingModalComponent implements OnInit, OnDestroy {
     }
 
     this.toastService.error(displayMessage, 'Error');
-    this.cdr.markForCheck();
   }
 
   close(): void {
-    if (!this.isProcessing) {
-      this.isOpen = false;
-      this.isOpenChange.emit(false);
+    if (!this.isProcessing()) {
+      this.isOpen.set(false);
     }
   }
 

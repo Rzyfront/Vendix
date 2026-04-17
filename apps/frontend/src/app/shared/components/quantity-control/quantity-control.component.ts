@@ -1,5 +1,5 @@
-import { Component, Input, Output, EventEmitter, OnChanges } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, effect, input, output } from '@angular/core';
+
 import { FormsModule } from '@angular/forms';
 import { IconComponent } from '../icon/icon.component';
 import { FormStyleVariant } from '../../types/form.types';
@@ -13,28 +13,28 @@ export type QuantityControlSize = 'sm' | 'md' | 'lg';
 @Component({
   selector: 'app-quantity-control',
   standalone: true,
-  imports: [CommonModule, IconComponent, FormsModule],
+  imports: [IconComponent, FormsModule],
   template: `
     <div
       [class]="containerClasses"
-    >
+      >
       <button
-        [class.px-2.5]="size === 'sm'"
-        [class.px-3]="size === 'md'"
-        [class.px-4]="size === 'lg'"
+        [class.px-2.5]="size() === 'sm'"
+        [class.px-3]="size() === 'md'"
+        [class.px-4]="size() === 'lg'"
         class="hover:bg-muted h-full flex items-center justify-center shrink-0 text-text-secondary transition-colors"
         (click)="decrease()"
         type="button"
-        [disabled]="disabled || loading || displayValue <= min"
-      >
+        [disabled]="disabled() || loading() || displayValue <= min()"
+        >
         <app-icon [name]="'minus'" [size]="iconSize"></app-icon>
       </button>
-
-      <ng-container *ngIf="editable; else readOnlyDisplay">
+    
+      @if (editable()) {
         <input
-          [class.w-12]="size === 'sm'"
-          [class.w-16]="size === 'md'"
-          [class.w-20]="size === 'lg'"
+          [class.w-12]="size() === 'sm'"
+          [class.w-16]="size() === 'md'"
+          [class.w-20]="size() === 'lg'"
           class="shrink min-w-[24px] text-center text-xs font-bold text-text-primary bg-transparent border-0 outline-none p-0 h-full focus:ring-0"
           type="text"
           inputmode="numeric"
@@ -45,34 +45,33 @@ export type QuantityControlSize = 'sm' | 'md' | 'lg';
           (keydown)="onKeyDown($event)"
           (keydown.enter)="onEnter()"
           (paste)="onPaste($event)"
-          [disabled]="disabled || loading"
-        />
-      </ng-container>
-
-      <ng-template #readOnlyDisplay>
+          [disabled]="disabled() || loading()"
+          />
+      } @else {
         <span
-          [class.min-w-[28px]]="size === 'sm'"
-          [class.min-w-[36px]]="size === 'md'"
-          [class.min-w-[44px]]="size === 'lg'"
+          [class.min-w-[28px]]="size() === 'sm'"
+          [class.min-w-[36px]]="size() === 'md'"
+          [class.min-w-[44px]]="size() === 'lg'"
           class="shrink text-center text-xs font-bold text-text-primary"
-        >
+          >
           {{ displayValue }}
         </span>
-      </ng-template>
-
+      }
+    
+    
       <button
-        [class.px-2.5]="size === 'sm'"
-        [class.px-3]="size === 'md'"
-        [class.px-4]="size === 'lg'"
+        [class.px-2.5]="size() === 'sm'"
+        [class.px-3]="size() === 'md'"
+        [class.px-4]="size() === 'lg'"
         class="hover:bg-muted h-full flex items-center justify-center shrink-0 text-text-secondary transition-colors"
         (click)="increase()"
         type="button"
-        [disabled]="disabled || loading || (max !== null && displayValue >= max)"
-      >
+        [disabled]="disabled() || loading() || isAtMax()"
+        >
         <app-icon [name]="'plus'" [size]="iconSize"></app-icon>
       </button>
     </div>
-  `,
+    `,
   styles: [
     `
     :host {
@@ -94,42 +93,40 @@ export type QuantityControlSize = 'sm' | 'md' | 'lg';
     `,
   ],
 })
-export class QuantityControlComponent implements OnChanges {
-  @Input() value = 1;
-  @Input() min = 1;
-  @Input() max: number | null = null;
-  @Input() step = 1;
-  @Input() editable = true;
-  @Input() disabled = false;
-  @Input() loading = false;
-  @Input() size: QuantityControlSize = 'sm';
-  @Input() styleVariant: FormStyleVariant = 'modern';
+export class QuantityControlComponent {
+  readonly value = input(1);
+  readonly min = input(1);
+  readonly max = input<number | null>(null);
+  readonly step = input(1);
+  readonly editable = input(true);
+  readonly disabled = input(false);
+  readonly loading = input(false);
+  readonly size = input<QuantityControlSize>('sm');
+  readonly styleVariant = input<FormStyleVariant>('modern');
 
-  @Output() valueChange = new EventEmitter<number>();
+  readonly valueChange = output<number>();
 
-  /**
-   * The value displayed in the input
-   * This is kept separate from 'value' to handle user typing
-   */
   displayValue = 1;
 
-  /**
-   * Tracks if user is currently editing the input
-   * When true, we don't sync displayValue from value input
-   */
   private isEditing = false;
 
-  ngOnChanges(): void {
-    // Only sync from parent if user is not actively editing
-    // This prevents overwriting user's input while they type
-    if (!this.isEditing && this.displayValue !== this.value) {
-      this.displayValue = this.value;
-    }
+  constructor() {
+    effect(() => {
+      const val = this.value();
+      if (!this.isEditing && this.displayValue !== val) {
+        this.displayValue = val;
+      }
+    });
   }
 
   get iconSize(): number {
     const sizeMap: Record<QuantityControlSize, number> = { sm: 12, md: 14, lg: 16 };
-    return sizeMap[this.size];
+    return sizeMap[this.size()];
+  }
+
+  isAtMax(): boolean {
+    const maxVal = this.max();
+    return maxVal !== null && this.displayValue >= maxVal;
   }
 
   get containerClasses(): string {
@@ -149,11 +146,11 @@ export class QuantityControlComponent implements OnChanges {
       lg: 'h-11',
     };
 
-    if (this.styleVariant === 'modern') {
+    if (this.styleVariant() === 'modern') {
       // Modern: larger border-radius (12px)
       return [
         ...baseClasses,
-        heightClasses[this.size],
+        heightClasses[this.size()],
         'rounded-xl',
       ].join(' ');
     }
@@ -161,24 +158,25 @@ export class QuantityControlComponent implements OnChanges {
     // Classic: same border-radius as modern (0.75rem / 12px)
     return [
       ...baseClasses,
-      heightClasses[this.size],
+      heightClasses[this.size()],
       'rounded-xl',
     ].join(' ');
   }
 
   decrease(): void {
-    if (this.disabled || this.loading) return;
+    if (this.disabled() || this.loading()) return;
 
-    const newValue = Math.max(this.min, this.displayValue - this.step);
+    const newValue = Math.max(this.min(), this.displayValue - this.step());
     this.emitValue(newValue);
   }
 
   increase(): void {
-    if (this.disabled || this.loading) return;
+    if (this.disabled() || this.loading()) return;
 
-    const newValue = this.max !== null
-      ? Math.min(this.max, this.displayValue + this.step)
-      : this.displayValue + this.step;
+    const max = this.max();
+    const newValue = max !== null
+      ? Math.min(max, this.displayValue + this.step())
+      : this.displayValue + this.step();
 
     this.emitValue(newValue);
   }
@@ -191,7 +189,7 @@ export class QuantityControlComponent implements OnChanges {
 
     // If empty, set to minimum
     if (stringValue === '' || stringValue === '-') {
-      this.displayValue = this.min;
+      this.displayValue = this.min();
       return;
     }
 
@@ -266,14 +264,15 @@ export class QuantityControlComponent implements OnChanges {
   private commitValue(): void {
     let constrainedValue = this.displayValue;
 
-    if (this.displayValue < this.min) {
-      constrainedValue = this.min;
-    } else if (this.max !== null && this.displayValue > this.max) {
-      constrainedValue = this.max;
+    const max = this.max();
+    if (this.displayValue < this.min()) {
+      constrainedValue = this.min();
+    } else if (max !== null && this.displayValue > max) {
+      constrainedValue = max;
     }
 
     // Only emit if value actually changed
-    if (constrainedValue !== this.value) {
+    if (constrainedValue !== this.value()) {
       this.emitValue(constrainedValue);
     } else {
       // Still update displayValue in case constraints were applied

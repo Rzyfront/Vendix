@@ -1,5 +1,5 @@
 import { Component, inject, OnInit, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { Store } from '@ngrx/store';
 import { StatsComponent } from '../../../../../shared/components/stats/stats.component';
 import { InputsearchComponent } from '../../../../../shared/components/inputsearch/inputsearch.component';
@@ -34,7 +34,6 @@ import { StoreUser, StoreUserState } from './interfaces/store-user.interface';
   selector: 'app-store-users-settings',
   standalone: true,
   imports: [
-    CommonModule,
     StatsComponent,
     InputsearchComponent,
     ResponsiveDataViewComponent,
@@ -153,14 +152,14 @@ import { StoreUser, StoreUserState } from './interfaces/store-user.interface';
       </app-card>
     </div>
 
-    <!-- Create Modal -->
-    <app-store-user-create-modal
-      [(isOpen)]="showCreateModal"
-      (onUserCreated)="onUserCreated()"
-    />
+    @defer (when showCreateModal) {
+      <app-store-user-create-modal
+        [(isOpen)]="showCreateModal"
+        (onUserCreated)="onUserCreated()"
+      />
+    }
 
-    <!-- Edit Modal -->
-    @if (editingUser()) {
+    @defer (when showEditModal && editingUser()) {
       <app-store-user-edit-modal
         [user]="editingUser()!"
         [(isOpen)]="showEditModal"

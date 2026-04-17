@@ -1,11 +1,11 @@
-import { Component, OnInit, OnDestroy, PLATFORM_ID, Inject } from '@angular/core';
-import { CommonModule, isPlatformBrowser } from '@angular/common';
+import { Component, OnInit, OnDestroy, PLATFORM_ID, Inject, signal } from '@angular/core';
+import { isPlatformBrowser } from '@angular/common';
 import { RouterModule } from '@angular/router';
 
 @Component({
   selector: 'app-hero-carousel',
   standalone: true,
-  imports: [CommonModule, RouterModule],
+  imports: [RouterModule],
   templateUrl: './hero-carousel.component.html',
   styleUrls: ['./hero-carousel.component.scss'],
 })
@@ -105,6 +105,9 @@ export class HeroCarouselComponent implements OnInit, OnDestroy {
     grabCursor: true,
   };
 
+  readonly currentSlideIndex = signal(0);
+  private autoplayInterval: any;
+
   ngOnInit() {
     // Only start autoplay in the browser — setInterval prevents SSR app stability
     if (this.isBrowser) {
@@ -112,20 +115,18 @@ export class HeroCarouselComponent implements OnInit, OnDestroy {
     }
   }
 
-  currentSlideIndex = 0;
-  private autoplayInterval: any;
-
   nextSlide() {
-    this.currentSlideIndex = (this.currentSlideIndex + 1) % this.slides.length;
+    this.currentSlideIndex.set((this.currentSlideIndex() + 1) % this.slides.length);
   }
 
   previousSlide() {
-    this.currentSlideIndex =
-      (this.currentSlideIndex - 1 + this.slides.length) % this.slides.length;
+    this.currentSlideIndex.set(
+      (this.currentSlideIndex() - 1 + this.slides.length) % this.slides.length
+    );
   }
 
   goToSlide(index: number) {
-    this.currentSlideIndex = index;
+    this.currentSlideIndex.set(index);
     this.resetAutoplay();
   }
 

@@ -1,0 +1,17 @@
+meta {
+  name: Presigned URL - Path Traversal ../
+  type: http
+  seq: 2
+}
+
+get {
+  url: http://{{url}}/upload/presigned-url?key=organizations/tech-solutions-2/../../other-org/secrets.txt
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("path traversal with ../ is rejected", function() {
+    expect(res.status).to.equal(400);
+  });
+}

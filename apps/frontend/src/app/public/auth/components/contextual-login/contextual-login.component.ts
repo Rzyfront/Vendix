@@ -1,25 +1,31 @@
-import { Component, OnInit, OnDestroy, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {
+  Component,
+  OnInit,
+  inject,
+  signal,
+  computed,
+  effect,
+} from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
+
 import { RouterModule, Router } from '@angular/router';
 import {
   FormBuilder,
   FormGroup,
   Validators,
-  ReactiveFormsModule,
-} from '@angular/forms';
+  ReactiveFormsModule} from '@angular/forms';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import { TenantFacade } from '../../../../core/store/tenant/tenant.facade';
 import { ConfigFacade } from '../../../../core/store/config';
-import { takeUntil } from 'rxjs/operators';
-import { Subject } from 'rxjs';
+
+
 import { ToastService } from '../../../../shared/components/toast/toast.service';
 import { extractApiErrorMessage } from '../../../../core/utils/api-error-handler';
 import {
   InputComponent,
   ButtonComponent,
   CardComponent,
-  IconComponent,
-} from '../../../../shared/components';
+  IconComponent} from '../../../../shared/components';
 
 export type LoginState =
   | 'idle'
@@ -52,14 +58,13 @@ export interface OrganizationCandidate {
   selector: 'app-contextual-login',
   standalone: true,
   imports: [
-    CommonModule,
     RouterModule,
     ReactiveFormsModule,
     InputComponent,
     ButtonComponent,
     CardComponent,
-    IconComponent,
-  ],
+    IconComponent
+],
   template: `
     <div
       class="min-h-screen flex flex-col justify-center px-4 py-6 sm:px-6 sm:py-12 lg:px-8 bg-[var(--color-background)]"
@@ -70,12 +75,12 @@ export interface OrganizationCandidate {
           <div
             class="mx-auto flex items-center justify-center space-x-2 sm:space-x-3 mb-3 sm:mb-4"
           >
-            @if (logoUrl) {
+            @if (logoUrl()) {
               <div
                 class="w-8 h-8 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center overflow-hidden"
               >
                 <img
-                  [src]="logoUrl"
+                  [src]="logoUrl()"
                   alt="Logo"
                   class="w-full h-full object-contain"
                 />
@@ -101,7 +106,7 @@ export interface OrganizationCandidate {
             <h1
               class="text-lg sm:text-xl font-semibold text-[var(--color-text-primary)]"
             >
-              {{ displayName || 'Vendix' }}
+              {{ displayName() || 'Vendix' }}
             </h1>
           </div>
 
@@ -110,14 +115,14 @@ export interface OrganizationCandidate {
           >
             {{ loginTitle }}
           </h2>
-          @if (displayName) {
+          @if (displayName()) {
             <p
               class="mt-1 sm:mt-2 mb-2 text-sm text-[var(--color-text-secondary)]"
             >
-              {{ contextDescription }}
+              {{ contextDescription() }}
             </p>
           }
-          @if (!displayName) {
+          @if (!displayName()) {
             <p class="mt-1 mb-2 text-sm text-[var(--color-text-muted)]">
               {{ defaultDescription }}
             </p>
@@ -125,6 +130,7 @@ export interface OrganizationCandidate {
         </div>
 
         <!-- Login Form -->
+        @if (contextType() !== null) {
         <app-card
           shadow="md"
           class="!mt-6 sm:!mt-8"
@@ -139,10 +145,10 @@ export interface OrganizationCandidate {
           >
             <div class="space-y-4">
               <!-- Vlink Field (only for Vendix context) -->
-              @if (contextType === 'vendix') {
+              @if (contextType() === 'vendix') {
                 <div
                   class="vlink-field"
-                  [class.show-tooltip]="showVlinkTooltip"
+                  [class.show-tooltip]="showVlinkTooltip()"
                 >
                   <app-input
                     label="V-link"
@@ -181,7 +187,7 @@ export interface OrganizationCandidate {
             </div>
 
             <!-- Error Display -->
-            @if (hasError && loginState !== 'disambiguation_required') {
+            @if (hasError() && loginState() !== 'disambiguation_required') {
               <div
                 class="rounded-md bg-[rgba(239, 68, 68, 0.1)] p-4 border border-[rgba(239, 68, 68, 0.2)]"
               >
@@ -203,7 +209,7 @@ export interface OrganizationCandidate {
                     <h3
                       class="text-sm font-medium text-[var(--color-destructive)]"
                     >
-                      {{ errorMessage }}
+                      {{ errorMessage() }}
                     </h3>
                   </div>
                 </div>
@@ -215,13 +221,13 @@ export interface OrganizationCandidate {
               type="submit"
               variant="primary"
               size="md"
-              [disabled]="!isFormValid"
-              [loading]="isLoading"
+              [disabled]="!isFormValid()"
+              [loading]="isLoading()"
               [fullWidth]="true"
               [showTextWhileLoading]="true"
               class="mt-4 w-full"
             >
-              @if (isLoading) {
+              @if (isLoading()) {
                 Iniciando sesión...
               } @else {
                 Iniciar Sesión
@@ -239,6 +245,7 @@ export interface OrganizationCandidate {
             </div>
           </form>
         </app-card>
+        }
 
         <!-- Back to Landing -->
         <div class="text-center mt-3 sm:mt-4">
@@ -251,7 +258,7 @@ export interface OrganizationCandidate {
         </div>
 
         <!-- Additional Links -->
-        @if (contextType === 'vendix') {
+        @if (contextType() === 'vendix') {
           <div
             class="text-center text-sm text-[var(--color-text-secondary)] mt-1"
           >
@@ -268,11 +275,11 @@ export interface OrganizationCandidate {
         }
 
         <!-- Context Info -->
-        @if (displayName) {
+        @if (displayName()) {
           <div
             class="text-center text-xs text-[var(--color-text-muted)] mt-2 sm:mt-3"
           >
-            <p>{{ contextFooter }}</p>
+            <p>{{ contextFooter() }}</p>
             <p class="mt-0.5">Powered by Vendix</p>
           </div>
         }
@@ -280,7 +287,7 @@ export interface OrganizationCandidate {
     </div>
 
     <!-- Disambiguation Modal -->
-    @if (showDisambiguationModal && disambiguationCandidates.length > 0) {
+    @if (showDisambiguationModal() && disambiguationCandidates().length > 0) {
       <div
         class="fixed inset-0 z-50 overflow-y-auto"
         aria-labelledby="modal-title"
@@ -327,7 +334,7 @@ export interface OrganizationCandidate {
             <!-- Body -->
             <div class="p-4 max-h-80 overflow-y-auto">
               <ul class="space-y-2">
-                @for (org of disambiguationCandidates; track org.slug) {
+                @for (org of disambiguationCandidates(); track org.slug) {
                   <li>
                     <button
                       type="button"
@@ -460,23 +467,24 @@ export interface OrganizationCandidate {
         }
       }
     `,
-  ],
-})
-export class ContextualLoginComponent implements OnInit, OnDestroy {
+  ]})
+export class ContextualLoginComponent implements OnInit {
   loginForm: FormGroup;
-  loginState: LoginState = 'idle';
-  loginError: LoginError | null = null;
-  apiErrorMessage: string | null = null;
-  contextType: 'vendix' | 'organization' | 'store' = 'vendix';
-  displayName: string = '';
-  logoUrl: string = '';
-  showVlinkTooltip = true;
+  private readonly formStatus;
 
-  // Disambiguation state
-  showDisambiguationModal = false;
-  disambiguationCandidates: OrganizationCandidate[] = [];
+  readonly loginState = signal<LoginState>('idle');
+  readonly loginError = signal<LoginError | null>(null);
+  readonly apiErrorMessage = signal<string | null>(null);
+  readonly contextType = signal<'vendix' | 'organization' | 'store' | null>(
+    null,
+  );
+  readonly displayName = signal<string>('');
+  readonly logoUrl = signal<string>('');
+  readonly showVlinkTooltip = signal(true);
 
-  private destroy$ = new Subject<void>();
+  readonly showDisambiguationModal = signal(false);
+  readonly disambiguationCandidates = signal<OrganizationCandidate[]>([]);
+
   private toast = inject(ToastService);
   private appConfigFacade = inject(ConfigFacade);
 
@@ -490,26 +498,20 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
       email: ['', [Validators.required, Validators.email]],
       password: ['', [Validators.required, Validators.minLength(6)]],
     });
-  }
 
-  ngOnInit(): void {
-    this.loadAuthContext();
-    this.verifyAllowedContext();
+    this.formStatus = toSignal(this.loginForm.statusChanges, {
+      initialValue: this.loginForm.status,
+    });
 
-    // Auto-hide V-link tooltip after 3 seconds
-    setTimeout(() => {
-      this.showVlinkTooltip = false;
-    }, 3000);
+    effect(() => {
+      if (this.authFacade.authLoading()) {
+        this.loginState.set('loading');
+      }
+    });
 
-    this.authFacade.loading$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe((loading) => {
-        if (loading) this.loginState = 'loading';
-      });
-
-    this.authFacade.error$.pipe(takeUntil(this.destroy$)).subscribe((error) => {
+    effect(() => {
+      const error = this.authFacade.authError();
       if (error) {
-        // Check for disambiguation required (HTTP 300)
         if (this.isDisambiguationError(error)) {
           this.handleDisambiguationRequired(error);
         } else {
@@ -522,65 +524,59 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
       }
     });
 
-    this.authFacade.isAuthenticated$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe((isAuth) => {
-        if (isAuth) {
-          const welcomeMessage = this.getWelcomeMessage();
-          this.toast.success(welcomeMessage);
-          this.loginState = 'success';
-        }
-      });
+    effect(() => {
+      if (this.authFacade.isAuthenticated()) {
+        const welcomeMessage = this.getWelcomeMessage();
+        this.toast.success(welcomeMessage);
+        this.loginState.set('success');
+      }
+    });
+
+    effect(() => {
+      const appConfig = this.appConfigFacade.appConfig();
+      if (!appConfig) return;
+      this.applyAuthContext(appConfig);
+    });
   }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
+  ngOnInit(): void {
+    setTimeout(() => {
+      this.showVlinkTooltip.set(false);
+    }, 3000);
   }
 
-  private loadAuthContext(): void {
-    const appConfig = this.appConfigFacade.getCurrentConfig();
-    if (!appConfig) {
+  private applyAuthContext(appConfig: any): void {
+    const allowedEnvs = ['VENDIX_LANDING', 'ORG_LANDING', 'STORE_LANDING'];
+    const domainConfig = appConfig.domainConfig;
+    const env = domainConfig.environment;
+
+    if (env && !allowedEnvs.includes(env)) {
+      this.router.navigate(['/']);
       return;
     }
 
-    const domainConfig = appConfig.domainConfig;
-    // Use environment (AppType) as source of truth
-    const env = domainConfig.environment;
     if (env === 'VENDIX_LANDING' || env === 'VENDIX_ADMIN') {
-      this.contextType = 'vendix';
-      this.displayName = 'Vendix Platform';
+      this.contextType.set('vendix');
+      this.displayName.set('Vendix Platform');
       this.loginForm.get('vlink')?.setValidators([Validators.required]);
     } else if (env === 'ORG_ADMIN' || env === 'ORG_LANDING') {
-      this.contextType = 'organization';
-      this.displayName = domainConfig.organization_slug || '';
+      this.contextType.set('organization');
+      this.displayName.set(domainConfig.organization_slug || '');
       this.loginForm.get('vlink')?.clearValidators();
     } else if (
       ['STORE_ADMIN', 'STORE_LANDING', 'STORE_ECOMMERCE'].includes(env)
     ) {
-      this.contextType = 'store';
-      this.displayName = domainConfig.store_slug || '';
+      this.contextType.set('store');
+      this.displayName.set(domainConfig.store_slug || '');
       this.loginForm.get('vlink')?.clearValidators();
     }
     this.loginForm.get('vlink')?.updateValueAndValidity();
-    this.logoUrl = appConfig.branding?.logo?.url || '';
-    if (!this.logoUrl && domainConfig.isMainVendixDomain) {
-      this.logoUrl = 'vlogo.png';
-    }
-  }
 
-  /**
-   * Defensive check: Verify that the current app type is allowed to access auth routes.
-   * This serves as a fallback in case the LandingOnlyGuard fails or is bypassed.
-   */
-  private verifyAllowedContext(): void {
-    const allowedEnvs = ['VENDIX_LANDING', 'ORG_LANDING', 'STORE_LANDING'];
-    const env =
-      this.appConfigFacade.getCurrentConfig()?.domainConfig?.environment;
-
-    if (env && !allowedEnvs.includes(env)) {
-      this.router.navigate(['/']);
+    let logo = appConfig.branding?.logo?.url || '';
+    if (!logo && domainConfig.isMainVendixDomain) {
+      logo = 'vlogo.png';
     }
+    this.logoUrl.set(logo);
   }
 
   /**
@@ -598,21 +594,16 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
     );
   }
 
-  /**
-   * Handle disambiguation required response
-   */
   private handleDisambiguationRequired(error: any): void {
     const errorData = error?.error || error?.data || error;
     const candidates = errorData?.candidates || [];
 
     if (candidates.length > 0) {
-      this.disambiguationCandidates = candidates;
-      this.showDisambiguationModal = true;
-      this.loginState = 'disambiguation_required';
-      // Clear loading state since we're showing the modal
+      this.disambiguationCandidates.set(candidates);
+      this.showDisambiguationModal.set(true);
+      this.loginState.set('disambiguation_required');
       this.authFacade.setLoading(false);
     } else {
-      // Fallback to regular error if no candidates
       this.handleLoginError('No se encontraron organizaciones con ese nombre');
     }
   }
@@ -622,9 +613,9 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
   }
 
   private setLoginError(error: LoginError): void {
-    this.loginState = error.type;
-    this.loginError = error;
-    this.apiErrorMessage = error.message;
+    this.loginState.set(error.type);
+    this.loginError.set(error);
+    this.apiErrorMessage.set(error.message);
     this.toast.error(
       error.apiError || error.message,
       'Error de inicio de sesión',
@@ -633,25 +624,26 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
   }
 
   private clearError(): void {
-    this.loginState = 'idle';
-    this.loginError = null;
-    this.apiErrorMessage = null;
+    this.loginState.set('idle');
+    this.loginError.set(null);
+    this.apiErrorMessage.set(null);
   }
 
   onSubmit(): void {
-    if (this.loginForm.valid && this.loginState !== 'loading') {
-      this.apiErrorMessage = null;
-      this.loginError = null;
+    if (this.loginForm.valid && this.loginState() !== 'loading') {
+      this.apiErrorMessage.set(null);
+      this.loginError.set(null);
       const { vlink, email, password } = this.loginForm.value;
       let store_slug: string | undefined;
       let organization_slug: string | undefined;
 
-      if (this.contextType === 'vendix') {
+      const ctx = this.contextType();
+      if (ctx === 'vendix') {
         organization_slug = vlink;
-      } else if (this.contextType === 'organization') {
-        organization_slug = this.displayName;
-      } else if (this.contextType === 'store') {
-        store_slug = this.displayName;
+      } else if (ctx === 'organization') {
+        organization_slug = this.displayName();
+      } else if (ctx === 'store') {
+        store_slug = this.displayName();
       }
 
       this.authFacade.login(email, password, store_slug, organization_slug);
@@ -663,26 +655,19 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
     }
   }
 
-  /**
-   * Handle organization selection from disambiguation modal
-   */
   selectOrganization(slug: string): void {
-    this.showDisambiguationModal = false;
-    this.disambiguationCandidates = [];
-    this.loginState = 'idle';
+    this.showDisambiguationModal.set(false);
+    this.disambiguationCandidates.set([]);
+    this.loginState.set('idle');
 
     const { email, password } = this.loginForm.value;
-    // Retry login with the exact slug selected
     this.authFacade.login(email, password, undefined, slug);
   }
 
-  /**
-   * Close disambiguation modal without selection
-   */
   closeDisambiguationModal(): void {
-    this.showDisambiguationModal = false;
-    this.disambiguationCandidates = [];
-    this.loginState = 'idle';
+    this.showDisambiguationModal.set(false);
+    this.disambiguationCandidates.set([]);
+    this.loginState.set('idle');
     this.authFacade.setAuthError(null);
   }
 
@@ -690,62 +675,37 @@ export class ContextualLoginComponent implements OnInit, OnDestroy {
     this.router.navigate(['/auth/forgot-owner-password']);
   }
 
-  get hasError(): boolean {
+  readonly hasError = computed(() => {
+    const s = this.loginState();
     return (
-      this.loginState !== 'idle' &&
-      this.loginState !== 'loading' &&
-      this.loginState !== 'success' &&
-      this.loginState !== 'disambiguation_required'
+      s !== 'idle' &&
+      s !== 'loading' &&
+      s !== 'success' &&
+      s !== 'disambiguation_required'
     );
-  }
-  get isLoading(): boolean {
-    return this.loginState === 'loading';
-  }
-  get isFormValid(): boolean {
-    return this.loginForm.valid && this.loginState !== 'loading';
-  }
-  get errorMessage(): string {
-    return this.loginError?.message || '';
-  }
-  get errorDetails(): string {
-    return this.loginError?.details || '';
-  }
-  get apiError(): string | null {
-    return this.apiErrorMessage || this.loginError?.message || null;
-  }
-  get backgroundClass(): string {
-    return 'bg-[var(--color-background)]';
-  } // Using token
-  get contextInitial(): string {
-    return this.displayName.charAt(0).toUpperCase() || 'V';
-  }
-  get loginTitle(): string {
-    return 'Iniciar Sesión';
-  }
-  get contextDescription(): string {
-    return `en ${this.displayName}`;
-  }
-  get defaultDescription(): string {
-    return 'Plataforma de gestión';
-  }
-  get emailLabel(): string {
-    return 'Email';
-  }
-  get emailPlaceholder(): string {
-    return 'usuario@email.com';
-  }
-  get contextFooter(): string {
-    return `Acceso a ${this.displayName}`;
-  }
+  });
+  readonly isLoading = computed(() => this.loginState() === 'loading');
+  readonly isFormValid = computed(
+    () => this.formStatus() === 'VALID' && this.loginState() !== 'loading',
+  );
+  readonly errorMessage = computed(() => this.loginError()?.message || '');
+  readonly contextDescription = computed(() => `en ${this.displayName()}`);
+  readonly contextFooter = computed(() => `Acceso a ${this.displayName()}`);
+
+  readonly loginTitle = 'Iniciar Sesión';
+  readonly defaultDescription = 'Plataforma de gestión';
+  readonly emailLabel = 'Email';
+  readonly emailPlaceholder = 'usuario@email.com';
 
   private getWelcomeMessage(): string {
-    switch (this.contextType) {
+    const name = this.displayName();
+    switch (this.contextType()) {
       case 'vendix':
         return '¡Bienvenido a Vendix Platform!';
       case 'organization':
-        return `¡Bienvenido a ${this.displayName || 'tu organización'}!`;
+        return `¡Bienvenido a ${name || 'tu organización'}!`;
       case 'store':
-        return `¡Bienvenido a ${this.displayName || 'nuestra tienda'}!`;
+        return `¡Bienvenido a ${name || 'nuestra tienda'}!`;
       default:
         return '¡Bienvenido!';
     }

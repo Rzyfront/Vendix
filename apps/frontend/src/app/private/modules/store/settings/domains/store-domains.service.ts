@@ -1,7 +1,8 @@
-import { Injectable } from '@angular/core';
+import { Injectable, signal } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable, BehaviorSubject } from 'rxjs';
+import { Observable } from 'rxjs';
 import { tap, map } from 'rxjs/operators';
+import { toObservable } from '@angular/core/rxjs-interop';
 import { environment } from '../../../../../../environments/environment';
 import {
     StoreDomain,
@@ -18,11 +19,13 @@ import {
 export class StoreDomainsService {
     private readonly api_url = environment.apiUrl;
 
-    private domains_subject = new BehaviorSubject<StoreDomain[]>([]);
-    public domains$ = this.domains_subject.asObservable();
+    // Signals — Angular 20 Zoneless
+    readonly domains = signal<StoreDomain[]>([]);
+    readonly domains$ = toObservable(this.domains);
 
-    private loading_subject = new BehaviorSubject<boolean>(false);
-    public is_loading$ = this.loading_subject.asObservable();
+    readonly loading = signal(false);
+    readonly loading$ = toObservable(this.loading);
+    readonly is_loading$ = this.loading$; // Alias para compatibilidad
 
     constructor(private http: HttpClient) { }
 
@@ -30,7 +33,7 @@ export class StoreDomainsService {
      * Get all domains for the current store with pagination
      */
     getDomains(query?: StoreDomainQueryDto): Observable<PaginatedDomainsResponse> {
-        this.loading_subject.next(true);
+        this.loading.set(true);
 
         let params = new HttpParams();
         if (query?.page) params = params.set('page', query.page.toString());
@@ -44,9 +47,9 @@ export class StoreDomainsService {
             .pipe(
                 tap((response) => {
                     if (response.success && response.data) {
-                        this.domains_subject.next(response.data);
+                        this.domains.set(response.data);
                     }
-                    this.loading_subject.next(false);
+                    this.loading.set(false);
                 }),
             );
     }

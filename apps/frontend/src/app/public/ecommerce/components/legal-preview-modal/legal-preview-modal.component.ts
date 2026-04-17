@@ -1,5 +1,14 @@
-import { Component, EventEmitter, Input, Output, inject, computed, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {
+  Component,
+  model,
+  input,
+  output,
+  inject,
+  computed,
+  signal,
+  effect,
+} from '@angular/core';
+
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { marked } from 'marked';
 import { ModalComponent } from '../../../../shared/components/modal/modal.component';
@@ -9,22 +18,25 @@ import { IconComponent } from '../../../../shared/components/icon/icon.component
 @Component({
   selector: 'app-legal-preview-modal',
   standalone: true,
-  imports: [CommonModule, ModalComponent, ButtonComponent, IconComponent],
+  imports: [ModalComponent, ButtonComponent, IconComponent],
   templateUrl: './legal-preview-modal.component.html',
   styleUrl: './legal-preview-modal.component.scss',
 })
 export class LegalPreviewModalComponent {
-  @Input() isOpen = false;
-  @Input() title = '';
-  @Input() version = '';
+  readonly isOpen = model<boolean>(false);
+  readonly title = input('');
+  readonly version = input('');
 
-  // Use a signal to make the content reactive for the computed value
   private contentSignal = signal('');
-  @Input() set content(value: string) {
-    this.contentSignal.set(value || '');
+  readonly content = input('');
+
+  constructor() {
+    effect(() => {
+      this.contentSignal.set(this.content() || '');
+    });
   }
 
-  @Output() isOpenChange = new EventEmitter<boolean>();
+  readonly isOpenChange = output<boolean>();
 
   private sanitizer = inject(DomSanitizer);
 

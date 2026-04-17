@@ -1,43 +1,38 @@
-import {
-  Component,
+import {Component,
   OnInit,
-  OnDestroy,
   inject,
   input,
   output,
   effect,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import {
   ReactiveFormsModule,
   FormBuilder,
   FormGroup,
-  Validators,
-} from '@angular/forms';
-import { Subject, takeUntil } from 'rxjs';
+  Validators} from '@angular/forms';
+
 import {
   CreatePaymentMethodDto,
   PaymentMethodType,
-  ProcessingFeeType,
-} from '../interfaces/payment-method.interface';
+  ProcessingFeeType} from '../interfaces/payment-method.interface';
 import {
   InputComponent,
   ButtonComponent,
   ModalComponent,
-  SelectorComponent,
-} from '../../../../../shared/components/index';
+  SelectorComponent} from '../../../../../shared/components/index';
 
 @Component({
   selector: 'app-payment-method-create-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     InputComponent,
     ButtonComponent,
     ModalComponent,
-    SelectorComponent,
-  ],
+    SelectorComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen()"
@@ -224,9 +219,9 @@ import {
         display: block;
       }
     `,
-  ],
-})
-export class PaymentMethodCreateModalComponent implements OnInit, OnDestroy {
+  ]})
+export class PaymentMethodCreateModalComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private readonly fb = inject(FormBuilder);
 
   isOpen = input<boolean>(false);
@@ -235,9 +230,7 @@ export class PaymentMethodCreateModalComponent implements OnInit, OnDestroy {
   onPaymentMethodCreated = output<CreatePaymentMethodDto>();
 
   paymentMethodForm: FormGroup;
-  private destroy$ = new Subject<void>();
-
-  typeOptions = [
+typeOptions = [
     { value: PaymentMethodType.CASH, label: 'Efectivo' },
     { value: PaymentMethodType.CARD, label: 'Tarjeta' },
     { value: PaymentMethodType.PAYPAL, label: 'PayPal' },
@@ -264,8 +257,7 @@ export class PaymentMethodCreateModalComponent implements OnInit, OnDestroy {
       processing_fee_value: [null],
       min_amount: [null],
       max_amount: [null],
-      is_active: [true],
-    });
+      is_active: [true]});
 
     effect(() => {
       if (this.isOpen()) {
@@ -275,13 +267,7 @@ export class PaymentMethodCreateModalComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void { }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  toggleStatus(active: boolean): void {
+toggleStatus(active: boolean): void {
     this.paymentMethodForm.patchValue({ is_active: active });
   }
 
@@ -319,7 +305,6 @@ export class PaymentMethodCreateModalComponent implements OnInit, OnDestroy {
       processing_fee_value: null,
       min_amount: null,
       max_amount: null,
-      is_active: true,
-    });
+      is_active: true});
   }
 }

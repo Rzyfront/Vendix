@@ -1,9 +1,10 @@
-import { Injectable, inject, OnDestroy } from '@angular/core';
+import { Injectable, inject, DestroyRef } from '@angular/core';
 import { Router, Routes } from '@angular/router';
 import { Actions, ofType } from '@ngrx/effects';
 import { Store } from '@ngrx/store';
-import { takeUntil, tap } from 'rxjs/operators';
-import { ReplaySubject, Subject } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { tap } from 'rxjs/operators';
+import { ReplaySubject } from 'rxjs';
 import { AppConfig } from './app-config.service';
 import * as ConfigActions from '../store/config/config.actions';
 import { AppType } from '../models/environment.enum';
@@ -13,11 +14,11 @@ import { LandingOnlyGuard } from '../guards/landing-only.guard';
 @Injectable({
   providedIn: 'root',
 })
-export class RouteManagerService implements OnDestroy {
+export class RouteManagerService {
   private router = inject(Router);
   private actions$ = inject(Actions);
   private store = inject(Store);
-  private destroy$ = new Subject<void>();
+  private destroyRef = inject(DestroyRef);
 
   private routesConfigured = new ReplaySubject<boolean>(1);
   public routesConfigured$ = this.routesConfigured.asObservable();
@@ -44,7 +45,7 @@ export class RouteManagerService implements OnDestroy {
       .pipe(
         ofType(ConfigActions.initializeAppSuccess),
         tap(({ config }) => this.configureDynamicRoutes(config)),
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
       )
       .subscribe();
 
@@ -73,7 +74,7 @@ export class RouteManagerService implements OnDestroy {
             }),
           );
         }),
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
       )
       .subscribe();
   }
@@ -198,8 +199,4 @@ export class RouteManagerService implements OnDestroy {
     this.routesConfigured.next(true);
   }
 
-  ngOnDestroy() {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
 }

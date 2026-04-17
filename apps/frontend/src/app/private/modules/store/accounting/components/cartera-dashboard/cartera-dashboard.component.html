@@ -1,4 +1,4 @@
-@if (is_loading) {
+@if (is_loading()) {
   <div class="p-8 text-center">
     <div
       class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
@@ -15,11 +15,11 @@
       </h2>
 
       <!-- AR Stats -->
-      @if (ar_dashboard) {
+      @if (ar_dashboard()) {
         <div class="stats-container mb-4">
           <app-stats
             title="Pendiente"
-            [value]="ar_total_pending"
+            [value]="ar_total_pending()"
             smallText="Total por cobrar"
             iconName="wallet"
             iconBgColor="bg-blue-100"
@@ -27,7 +27,7 @@
           ></app-stats>
           <app-stats
             title="Vencido"
-            [value]="ar_total_overdue"
+            [value]="ar_total_overdue()"
             smallText="Requiere atencion"
             iconName="alert-triangle"
             iconBgColor="bg-red-100"
@@ -35,7 +35,7 @@
           ></app-stats>
           <app-stats
             title="Proximo a Vencer"
-            [value]="ar_due_soon"
+            [value]="ar_due_soon()"
             smallText="Proximos 7 dias"
             iconName="calendar-clock"
             iconBgColor="bg-amber-100"
@@ -43,7 +43,7 @@
           ></app-stats>
           <app-stats
             title="Cobrado este Mes"
-            [value]="ar_collected_month"
+            [value]="ar_collected_month()"
             smallText="Total cobrado"
             iconName="check-circle"
             iconBgColor="bg-emerald-100"
@@ -53,7 +53,8 @@
       }
 
       <!-- AR Aging -->
-      @if (ar_aging && ar_aging.buckets.length > 0) {
+      @if (ar_aging(); as ar_aging) {
+        @if (ar_aging.buckets.length > 0) {
         <app-card [responsive]="true">
           <div class="p-4">
             <h3 class="text-sm font-semibold text-text-primary mb-3">
@@ -67,7 +68,7 @@
                     <div
                       class="h-full rounded-full transition-all duration-300"
                       [class]="getAgingBarColor(i)"
-                      [style.width]="getAgingBarWidth(bucket, ar_aging!)"
+                      [style.width]="getAgingBarWidth(bucket, ar_aging)"
                     ></div>
                   </div>
                   <span class="text-xs font-mono font-medium w-28 text-right shrink-0">
@@ -85,17 +86,18 @@
             </div>
           </div>
         </app-card>
+        }
       }
 
       <!-- AR Upcoming -->
-      @if (ar_upcoming.length > 0) {
+      @if (ar_upcoming().length > 0) {
         <app-card [responsive]="true" class="mt-4">
           <div class="p-4">
             <h3 class="text-sm font-semibold text-text-primary mb-3">
               Proximos Vencimientos (CxC)
             </h3>
             <div class="space-y-2">
-              @for (item of ar_upcoming; track item.id) {
+              @for (item of ar_upcoming(); track item.id) {
                 <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                   <div class="min-w-0">
                     <p class="text-sm font-medium truncate">
@@ -125,11 +127,11 @@
       </h2>
 
       <!-- AP Stats -->
-      @if (ap_dashboard) {
+      @if (ap_dashboard()) {
         <div class="stats-container mb-4">
           <app-stats
             title="Pendiente"
-            [value]="ap_total_pending"
+            [value]="ap_total_pending()"
             smallText="Total por pagar"
             iconName="wallet"
             iconBgColor="bg-orange-100"
@@ -137,7 +139,7 @@
           ></app-stats>
           <app-stats
             title="Vencido"
-            [value]="ap_total_overdue"
+            [value]="ap_total_overdue()"
             smallText="Requiere atencion"
             iconName="alert-triangle"
             iconBgColor="bg-red-100"
@@ -145,7 +147,7 @@
           ></app-stats>
           <app-stats
             title="Proximo a Vencer"
-            [value]="ap_due_soon"
+            [value]="ap_due_soon()"
             smallText="Proximos 7 dias"
             iconName="calendar-clock"
             iconBgColor="bg-amber-100"
@@ -153,7 +155,7 @@
           ></app-stats>
           <app-stats
             title="Pagado este Mes"
-            [value]="ap_paid_month"
+            [value]="ap_paid_month()"
             smallText="Total pagado"
             iconName="check-circle"
             iconBgColor="bg-emerald-100"
@@ -163,7 +165,8 @@
       }
 
       <!-- AP Aging -->
-      @if (ap_aging && ap_aging.buckets.length > 0) {
+      @if (ap_aging(); as ap_aging) {
+        @if (ap_aging.buckets.length > 0) {
         <app-card [responsive]="true">
           <div class="p-4">
             <h3 class="text-sm font-semibold text-text-primary mb-3">
@@ -177,7 +180,7 @@
                     <div
                       class="h-full rounded-full transition-all duration-300"
                       [class]="getAgingBarColor(i)"
-                      [style.width]="getAgingBarWidth(bucket, ap_aging!)"
+                      [style.width]="getAgingBarWidth(bucket, ap_aging)"
                     ></div>
                   </div>
                   <span class="text-xs font-mono font-medium w-28 text-right shrink-0">
@@ -195,17 +198,18 @@
             </div>
           </div>
         </app-card>
+        }
       }
 
       <!-- AP Upcoming -->
-      @if (ap_upcoming.length > 0) {
+      @if (ap_upcoming().length > 0) {
         <app-card [responsive]="true" class="mt-4">
           <div class="p-4">
             <h3 class="text-sm font-semibold text-text-primary mb-3">
               Proximos Vencimientos (CxP)
             </h3>
             <div class="space-y-2">
-              @for (item of ap_upcoming; track item.id) {
+              @for (item of ap_upcoming(); track item.id) {
                 <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
                   <div class="min-w-0">
                     <p class="text-sm font-medium truncate">

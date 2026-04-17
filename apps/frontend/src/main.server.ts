@@ -1,5 +1,5 @@
 import { bootstrapApplication } from '@angular/platform-browser';
-import { App } from './app/app';
+import { AppComponent } from './app/app.component';
 import { config } from './app/app.config.server';
 
 /**
@@ -11,6 +11,6 @@ import { config } from './app/app.config.server';
  * of creating a new one (which would throw NG0401: PLATFORM_NOT_FOUND).
  */
 const bootstrap = (serverContext?: { platformRef?: unknown }) =>
-  bootstrapApplication(App, config, serverContext as any);
+  bootstrapApplication(AppComponent, config, serverContext as any);
 
 export default bootstrap;

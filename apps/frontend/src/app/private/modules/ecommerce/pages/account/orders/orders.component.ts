@@ -1,4 +1,5 @@
-import { Component, OnInit } from '@angular/core';
+import {Component, ChangeDetectionStrategy, OnInit, signal, DestroyRef, inject} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { AccountService, Order } from '../../../services/account.service';
@@ -13,11 +14,12 @@ import { ButtonComponent } from '../../../../../../shared/components/button/butt
   styleUrls: ['./orders.component.scss'],
 })
 export class OrdersComponent implements OnInit {
-  orders: Order[] = [];
-  is_loading = true;
+  private destroyRef = inject(DestroyRef);
+  readonly orders = signal<Order[]>([]);
+  readonly is_loading = signal(true);
 
-  current_page = 1;
-  total_pages = 1;
+  readonly current_page = signal(1);
+  readonly total_pages = signal(1);
 
   constructor(private account_service: AccountService) { }
 
@@ -26,17 +28,17 @@ export class OrdersComponent implements OnInit {
   }
 
   loadOrders(): void {
-    this.is_loading = true;
-    this.account_service.getOrders(this.current_page).subscribe({
+    this.is_loading.set(true);
+    this.account_service.getOrders(this.current_page()).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         if (response.success) {
-          this.orders = response.data;
-          this.total_pages = response.meta?.total_pages || 1;
+          this.orders.set(response.data);
+          this.total_pages.set(response.meta?.total_pages || 1);
         }
-        this.is_loading = false;
+        this.is_loading.set(false);
       },
       error: () => {
-        this.is_loading = false;
+        this.is_loading.set(false);
       },
     });
   }
@@ -70,8 +72,8 @@ export class OrdersComponent implements OnInit {
   }
 
   goToPage(page: number): void {
-    if (page >= 1 && page <= this.total_pages) {
-      this.current_page = page;
+    if (page >= 1 && page <= this.total_pages()) {
+      this.current_page.set(page);
       this.loadOrders();
     }
   }

@@ -1,0 +1,45 @@
+meta {
+  name: Get Stock Levels
+  type: http
+  seq: 1
+}
+
+post {
+  url: {{baseUrl}}/mcp/tools/call
+  body: json {
+    "name": "get_stock_levels",
+    "arguments": {}
+  }
+  headers: {
+    Authorization: Bearer {{authToken}}
+    Content-Type: application/json
+  }
+}
+
+tests {
+  test("get_stock_levels returns success", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body).to.have.property('content');
+    expect(res.body.content).to.be.an('array');
+    expect(res.body.content[0]).to.have.property('type', 'text');
+  });
+
+  test("Response is valid JSON with summary and data", function() {
+    const text = res.body.content[0].text;
+    const parsed = JSON.parse(text);
+    expect(parsed).to.have.property('summary');
+    expect(parsed).to.have.property('data');
+    expect(parsed.data).to.be.an('array');
+  });
+
+  test("Each stock level has required fields", function() {
+    const parsed = JSON.parse(res.body.content[0].text);
+    if (parsed.data.length > 0) {
+      const item = parsed.data[0];
+      expect(item).to.have.property('product_id');
+      expect(item).to.have.property('on_hand');
+      expect(item).to.have.property('reserved');
+      expect(item).to.have.property('available');
+    }
+  });
+}

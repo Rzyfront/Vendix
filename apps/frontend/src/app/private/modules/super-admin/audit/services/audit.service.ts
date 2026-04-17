@@ -1,8 +1,7 @@
-import { Injectable, inject } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import {
   Observable,
-  BehaviorSubject,
   finalize,
   catchError,
   throwError,
@@ -10,6 +9,7 @@ import {
   tap,
   shareReplay,
 } from 'rxjs';
+import { toObservable } from '@angular/core/rxjs-interop';
 import { environment } from '../../../../../../environments/environment';
 import {
   AuditLog,
@@ -34,19 +34,19 @@ export class AuditService {
   private apiUrl = environment.apiUrl;
   private readonly CACHE_TTL = 30000; // 30 segundos
 
-  // Loading states
-  private readonly isLoading$$ = new BehaviorSubject<boolean>(false);
-  private readonly isLoadingStats$$ = new BehaviorSubject<boolean>(false);
+  // Loading states (Signals)
+  readonly isLoading = signal(false);
+  readonly isLoadingStats = signal(false);
 
-  // Exposed observables
-  public readonly isLoading$ = this.isLoading$$.asObservable();
-  public readonly isLoadingStats$ = this.isLoadingStats$$.asObservable();
+  // Observable compatibility layer
+  readonly isLoading$ = toObservable(this.isLoading);
+  readonly isLoadingStats$ = toObservable(this.isLoadingStats);
 
   /**
    * Obtener logs de auditoría con paginación y filtros
    */
   getAuditLogs(query: AuditQueryDto = {}): Observable<AuditLogsResponse> {
-    this.isLoading$$.next(true);
+    this.isLoading.set(true);
 
     let params = new HttpParams();
     if (query.userId) params = params.set('userId', query.userId);
@@ -73,7 +73,7 @@ export class AuditService {
             offset: response.meta?.offset || 0,
           } as AuditLogsResponse;
         }),
-        finalize(() => this.isLoading$$.next(false)),
+        finalize(() => this.isLoading.set(false)),
         catchError((error) => {
           console.error('Error loading audit logs:', error);
           return throwError(() => error);
@@ -87,7 +87,7 @@ export class AuditService {
   getAuditStats(fromDate?: string, toDate?: string): Observable<AuditStats> {
     // Si hay parámetros de fecha, no usar caché
     if (fromDate || toDate) {
-      this.isLoadingStats$$.next(true);
+      this.isLoadingStats.set(true);
 
       let params = new HttpParams();
       if (fromDate) params = params.set('fromDate', fromDate);
@@ -99,7 +99,7 @@ export class AuditService {
           map((response) => {
             return response.data as AuditStats;
           }),
-          finalize(() => this.isLoadingStats$$.next(false)),
+          finalize(() => this.isLoadingStats.set(false)),
           catchError((error) => {
             console.error('Error loading audit stats:', error);
             return throwError(() => error);
@@ -114,7 +114,7 @@ export class AuditService {
       return auditStatsCache.observable;
     }
 
-    this.isLoadingStats$$.next(true);
+    this.isLoadingStats.set(true);
 
     const observable$ = this.http
       .get<any>(`${this.apiUrl}/superadmin/admin/audit/stats`)
@@ -123,7 +123,7 @@ export class AuditService {
         map((response) => {
           return response.data as AuditStats;
         }),
-        finalize(() => this.isLoadingStats$$.next(false)),
+        finalize(() => this.isLoadingStats.set(false)),
         catchError((error) => {
           console.error('Error loading audit stats:', error);
           return throwError(() => error);

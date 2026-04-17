@@ -1,8 +1,9 @@
-import { Component, OnInit, OnDestroy, computed, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, DestroyRef, computed, inject, signal } from '@angular/core';
+import { NgClass } from '@angular/common';
 import { ReactiveFormsModule, FormBuilder, FormGroup, Validators } from '@angular/forms';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
-import { Subject, takeUntil, forkJoin } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { forkJoin } from 'rxjs';
 import { StoreOrdersService } from '../../services/store-orders.service';
 import {
   Order,
@@ -46,7 +47,6 @@ export interface LifecycleStep {
   selector: 'app-order-details-page',
   standalone: true,
   imports: [
-    CommonModule,
     RouterModule,
     ReactiveFormsModule,
     AlertBannerComponent,
@@ -59,11 +59,13 @@ export interface LifecycleStep {
     OrderPaymentModalComponent,
     OrderRefundModalComponent,
     TimelineComponent,
+    NgClass,
   ],
   templateUrl: './order-details-page.component.html',
   styleUrls: ['./order-details-page.component.css'],
 })
-export class OrderDetailsPageComponent implements OnInit, OnDestroy {
+export class OrderDetailsPageComponent {
+  private destroyRef = inject(DestroyRef);
   orderId: string | null = null;
   order = signal<Order | null>(null);
   orderRefunds = signal<RefundRecord[]>([]);
@@ -631,21 +633,19 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
     { id: 'print', label: 'Imprimir', variant: 'outline', icon: 'printer' },
   ]);
 
-  private destroy$ = new Subject<void>();
+  private route = inject(ActivatedRoute);
+  private router = inject(Router);
+  private fb = inject(FormBuilder);
+  private ordersService = inject(StoreOrdersService);
+  private dialogService = inject(DialogService);
+  private toastService = inject(ToastService);
+  private paymentMethodsService = inject(PaymentMethodsService);
+  public shippingMethodsService = inject(ShippingMethodsService);
+  private currencyService = inject(CurrencyFormatService);
+  private authFacade = inject(AuthFacade);
+  private ticketService = inject(PosTicketService);
 
-  constructor(
-    private route: ActivatedRoute,
-    private router: Router,
-    private fb: FormBuilder,
-    private ordersService: StoreOrdersService,
-    private dialogService: DialogService,
-    private toastService: ToastService,
-    private paymentMethodsService: PaymentMethodsService,
-    public shippingMethodsService: ShippingMethodsService,
-    private currencyService: CurrencyFormatService,
-    private authFacade: AuthFacade,
-    private ticketService: PosTicketService,
-  ) {
+  constructor() {
     this.currencySymbol = this.currencyService.currencySymbol;
     this.isPrivilegedUser.set(this.authFacade.isAdmin() || this.authFacade.isOwner());
 
@@ -668,20 +668,13 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
     this.cancelForm = this.fb.group({
       reason: ['', [Validators.required, Validators.minLength(3)]],
     });
-  }
 
-  ngOnInit(): void {
-    this.route.paramMap.pipe(takeUntil(this.destroy$)).subscribe((params) => {
+    this.route.paramMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
       this.orderId = params.get('id');
       if (this.orderId) {
         this.loadData();
       }
     });
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
   }
 
   loadData(): void {
@@ -694,7 +687,7 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
       order: this.ordersService.getOrderById(this.orderId),
       timeline: this.ordersService.getOrderTimeline(this.orderId),
     })
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: ({ order, timeline }) => {
           const orderData = (order as any).data || order;
@@ -750,7 +743,7 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
   loadPaymentMethods(): void {
     this.paymentMethodsService
       .getStorePaymentMethods({ state: PaymentMethodState.ENABLED, limit: 50 })
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res: any) => {
           const methods = res?.data || res || [];
@@ -766,7 +759,7 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
     if (!this.orderId) return;
     this.ordersService
       .getOrderRefunds(this.orderId)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (refunds) => {
           this.orderRefunds.set(
@@ -848,7 +841,7 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
       : this.ordersService.flowPayOrder(this.orderId, dto);
 
     request$
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.showPayModal.set(false);
@@ -890,7 +883,7 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
       ? this.ordersService.updateOrderStatus(this.orderId, 'shipped')
       : this.ordersService.flowShipOrder(this.orderId, dto);
 
-    request$.pipe(takeUntil(this.destroy$)).subscribe({
+    request$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.showShipModal.set(false);
         this.isProcessingAction.set(false);
@@ -932,7 +925,7 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
       ? this.ordersService.updateOrderStatus(this.orderId, 'delivered')
       : this.ordersService.flowDeliverOrder(this.orderId, dto);
 
-    request$.pipe(takeUntil(this.destroy$)).subscribe({
+    request$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.showDeliverModal.set(false);
         this.isProcessingAction.set(false);
@@ -948,7 +941,7 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
             this.toastService.success('Orden entregada. Finalizando...');
             this.ordersService
               .flowConfirmDelivery(this.orderId)
-              .pipe(takeUntil(this.destroy$))
+              .pipe(takeUntilDestroyed(this.destroyRef))
               .subscribe({
                 next: () => {
                   this.toastService.success('Orden finalizada exitosamente');
@@ -995,7 +988,7 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
         this.isProcessingAction.set(true);
         this.ordersService
           .flowConfirmPayment(this.orderId)
-          .pipe(takeUntil(this.destroy$))
+          .pipe(takeUntilDestroyed(this.destroyRef))
           .subscribe({
             next: () => {
               this.isProcessingAction.set(false);
@@ -1027,7 +1020,7 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
         this.isProcessingAction.set(true);
         this.ordersService
           .flowConfirmDelivery(this.orderId)
-          .pipe(takeUntil(this.destroy$))
+          .pipe(takeUntilDestroyed(this.destroyRef))
           .subscribe({
             next: () => {
               this.isProcessingAction.set(false);
@@ -1059,7 +1052,7 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
         this.isProcessingAction.set(true);
         this.ordersService
           .updateOrderStatus(this.orderId, target)
-          .pipe(takeUntil(this.destroy$))
+          .pipe(takeUntilDestroyed(this.destroyRef))
           .subscribe({
             next: () => {
               this.isProcessingAction.set(false);
@@ -1085,7 +1078,7 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
     this.isProcessingAction.set(true);
     this.ordersService
       .flowCancelOrder(this.orderId, this.cancelForm.value)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.showCancelModal.set(false);
@@ -1255,7 +1248,7 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
       this.isLoadingShippingMethods.set(true);
       this.shippingMethodsService
         .getStoreShippingMethods()
-        .pipe(takeUntil(this.destroy$))
+        .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: (methods) => {
             this.shippingMethods.set(methods.filter(m => m.is_active));
@@ -1289,7 +1282,7 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
 
     this.ordersService
       .assignShippingMethod(this.orderId, dto)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.isProcessingAction.set(false);
@@ -1329,7 +1322,7 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
         this.isProcessingAction.set(true);
         this.ordersService
           .flowForgiveInstallment(this.orderId, installmentId)
-          .pipe(takeUntil(this.destroy$))
+          .pipe(takeUntilDestroyed(this.destroyRef))
           .subscribe({
             next: () => {
               this.isProcessingAction.set(false);
@@ -1399,7 +1392,7 @@ export class OrderDetailsPageComponent implements OnInit, OnDestroy {
         this.isProcessingAction.set(true);
         this.ordersService
           .flowCancelPayment(this.orderId, { reason: 'Cancelado desde panel de administración' })
-          .pipe(takeUntil(this.destroy$))
+          .pipe(takeUntilDestroyed(this.destroyRef))
           .subscribe({
             next: () => {
               this.isProcessingAction.set(false);

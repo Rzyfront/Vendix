@@ -1,12 +1,10 @@
 import {
   Component,
-  ChangeDetectionStrategy,
   inject,
   input,
   output,
   signal,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
 
 import {
   IconComponent,
@@ -20,12 +18,10 @@ import type { DispatchNote } from '../../interfaces/dispatch-note.interface';
   selector: 'app-dispatch-wizard-review-step',
   standalone: true,
   imports: [
-    CommonModule,
     IconComponent,
     ButtonComponent,
     CurrencyPipe,
   ],
-  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="space-y-2.5">
       @if (!created()) {

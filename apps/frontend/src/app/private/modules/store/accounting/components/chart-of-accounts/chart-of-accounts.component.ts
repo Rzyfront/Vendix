@@ -1,7 +1,7 @@
-import { Component, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject, computed, signal } from '@angular/core';
+import { NgTemplateOutlet } from '@angular/common';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { Store } from '@ngrx/store';
-import { Observable, map, combineLatest, BehaviorSubject } from 'rxjs';
 
 import { ChartAccount } from '../../interfaces/accounting.interface';
 import {
@@ -29,7 +29,7 @@ interface AccountStats {
   selector: 'vendix-chart-of-accounts',
   standalone: true,
   imports: [
-    CommonModule,
+    NgTemplateOutlet,
     AccountCreateComponent,
     ButtonComponent,
     CardComponent,
@@ -43,7 +43,7 @@ interface AccountStats {
       <div
         class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
       >
-        @if (stats$ | async; as stats) {
+        @if (stats(); as stats) {
           <app-stats
             title="Total Cuentas"
             [value]="stats.total"
@@ -80,7 +80,11 @@ interface AccountStats {
       </div>
 
       <!-- Unified Container: Search Header + Data -->
-      <app-card [responsive]="true" [padding]="false" customClasses="md:min-h-[400px]">
+      <app-card
+        [responsive]="true"
+        [padding]="false"
+        customClasses="md:min-h-[400px]"
+      >
         <!-- Search Header -->
         <div
           class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px]
@@ -93,7 +97,7 @@ interface AccountStats {
               class="text-[13px] font-bold text-gray-600 tracking-wide
                        md:text-lg md:font-semibold md:text-text-primary"
             >
-              Plan de Cuentas ({{ (flatCount$ | async) || 0 }})
+              Plan de Cuentas ({{ flatCount() || 0 }})
             </h2>
             <div class="flex items-center gap-2 w-full md:w-auto">
               <app-inputsearch
@@ -117,7 +121,7 @@ interface AccountStats {
 
         <!-- Data Content -->
         <div class="relative p-2 md:p-4">
-          @if (loading$ | async) {
+          @if (loading()) {
             <div
               class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
             >
@@ -141,7 +145,7 @@ interface AccountStats {
             <div class="col-span-2 text-right">Acciones</div>
           </div>
 
-          @if (filteredAccounts$ | async; as accounts) {
+          @if (filteredAccounts(); as accounts) {
             @if (accounts.length === 0) {
               <div
                 class="flex flex-col items-center justify-center py-16 text-gray-400"
@@ -150,7 +154,7 @@ interface AccountStats {
                 <p class="mt-4 text-base">No se encontraron cuentas</p>
                 <p class="text-sm">
                   {{
-                    searchTerm
+                    searchTerm()
                       ? 'Intenta con otro término de búsqueda.'
                       : 'Crea tu primera cuenta para comenzar.'
                   }}
@@ -175,8 +179,8 @@ interface AccountStats {
       <!-- Account Create/Edit Modal -->
       <vendix-account-create
         [(isOpen)]="is_create_modal_open"
-        [editAccount]="selected_account"
-        [accounts]="(accounts$ | async) || []"
+        [editAccount]="selected_account()"
+        [accounts]="accounts() || []"
       ></vendix-account-create>
     </div>
 
@@ -357,65 +361,63 @@ interface AccountStats {
     </ng-template>
   `,
 })
-export class ChartOfAccountsComponent implements OnInit {
+export class ChartOfAccountsComponent {
   private store = inject(Store);
 
-  accounts$: Observable<ChartAccount[]> = this.store.select(selectAccounts);
-  loading$: Observable<boolean> = this.store.select(selectAccountsLoading);
+  // State via toSignal
+  readonly accounts = toSignal(this.store.select(selectAccounts), {
+    initialValue: [] as ChartAccount[],
+  });
+  readonly loading = toSignal(this.store.select(selectAccountsLoading), {
+    initialValue: false,
+  });
 
-  private search$ = new BehaviorSubject<string>('');
-  searchTerm = '';
+  // Search term as signal
+  readonly searchTerm = signal('');
 
-  // Filtered accounts (tree-aware search)
-  filteredAccounts$: Observable<ChartAccount[]> = combineLatest([
-    this.accounts$,
-    this.search$,
-  ]).pipe(
-    map(([accounts, search]) => {
-      if (!search.trim()) return accounts;
-      return this.filterTree(accounts, search.toLowerCase());
-    }),
-  );
+  // Filtered accounts (tree-aware search) - using computed
+  readonly filteredAccounts = computed(() => {
+    const accounts = this.accounts();
+    const search = this.searchTerm();
+    if (!search.trim()) return accounts;
+    return this.filterTree(accounts, search.toLowerCase());
+  });
 
   // Stats computed from flattened accounts
-  stats$: Observable<AccountStats> = this.accounts$.pipe(
-    map((accounts) => {
-      const flat = this.flattenAccounts(accounts);
-      const types = new Set(flat.map((a) => a.account_type));
-      return {
-        total: flat.length,
-        active: flat.filter((a) => a.is_active).length,
-        accepts_entries: flat.filter((a) => a.accepts_entries).length,
-        types: types.size,
-      };
-    }),
-  );
+  readonly stats = computed(() => {
+    const accounts = this.accounts();
+    const flat = this.flattenAccounts(accounts);
+    const types = new Set(flat.map((a) => a.account_type));
+    return {
+      total: flat.length,
+      active: flat.filter((a) => a.is_active).length,
+      accepts_entries: flat.filter((a) => a.accepts_entries).length,
+      types: types.size,
+    };
+  });
 
-  flatCount$: Observable<number> = this.accounts$.pipe(
-    map((accounts) => this.flattenAccounts(accounts).length),
-  );
+  readonly flatCount = computed(() => {
+    return this.flattenAccounts(this.accounts()).length;
+  });
 
-  is_create_modal_open = false;
-  selected_account: ChartAccount | null = null;
+  readonly is_create_modal_open = signal(false);
+  readonly selected_account = signal<ChartAccount | null>(null);
   expanded_ids = new Set<number>();
 
-  ngOnInit(): void {
-    // Accounts already loaded by parent AccountingComponent
-  }
+  // Accounts already loaded by parent AccountingComponent
 
   onSearch(term: string): void {
-    this.searchTerm = term;
-    this.search$.next(term);
+    this.searchTerm.set(term);
   }
 
   openCreateModal(): void {
-    this.selected_account = null;
-    this.is_create_modal_open = true;
+    this.selected_account.set(null);
+    this.is_create_modal_open.set(true);
   }
 
   editAccount(account: ChartAccount): void {
-    this.selected_account = account;
-    this.is_create_modal_open = true;
+    this.selected_account.set(account);
+    this.is_create_modal_open.set(true);
   }
 
   onDeleteAccount(account: ChartAccount): void {

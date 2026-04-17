@@ -95,14 +95,15 @@
     <!-- Table Container -->
     <div class="relative min-h-[400px] p-2 md:p-4">
       <!-- Loading Overlay -->
-      <div
-        *ngIf="isLoading()"
-        class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
-      >
+      @if (isLoading()) {
         <div
-          class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-        ></div>
-      </div>
+          class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
+        >
+          <div
+            class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+          ></div>
+        </div>
+      }
 
       <!-- Table -->
       <!-- Table -->
@@ -115,62 +116,67 @@
         (sort)="onSortChange($event.column, $event.direction)"
       >
         <!-- Empty State Slot (if table supports it, otherwise after table) -->
-        <div
-          class="p-8 flex justify-center w-full"
-          *ngIf="!isLoading() && currencies().length === 0"
-        >
-          <app-empty-state
-            icon="dollar-sign"
-            [title]="
-              filterForm.get('search')?.value || filterForm.get('state')?.value
-                ? 'Sin resultados'
-                : 'No hay monedas'
-            "
-            [description]="
-              filterForm.get('search')?.value || filterForm.get('state')?.value
-                ? 'Ajusta tus filtros de búsqueda'
-                : 'Comienza creando la primera moneda del sistema'
-            "
-            actionButtonText="Nueva Moneda"
-            [showActionButton]="
-              !filterForm.get('search')?.value &&
-              !filterForm.get('state')?.value
-            "
-            (actionClick)="openCreateModal()"
-          ></app-empty-state>
-        </div>
+        @if (!isLoading() && currencies().length === 0) {
+          <div class="p-8 flex justify-center w-full">
+            <app-empty-state
+              icon="dollar-sign"
+              [title]="
+                filterForm.get('search')?.value ||
+                filterForm.get('state')?.value
+                  ? 'Sin resultados'
+                  : 'No hay monedas'
+              "
+              [description]="
+                filterForm.get('search')?.value ||
+                filterForm.get('state')?.value
+                  ? 'Ajusta tus filtros de búsqueda'
+                  : 'Comienza creando la primera moneda del sistema'
+              "
+              actionButtonText="Nueva Moneda"
+              [showActionButton]="
+                !filterForm.get('search')?.value &&
+                !filterForm.get('state')?.value
+              "
+              (actionClick)="openCreateModal()"
+            ></app-empty-state>
+          </div>
+        }
       </app-responsive-data-view>
     </div>
 
     <!-- Pagination -->
-    <div
-      class="px-6 py-4 border-t border-border bg-muted/30 flex justify-center"
-      *ngIf="currencies().length > 0"
-    >
-      <app-pagination
-        [currentPage]="pagination.page"
-        [totalPages]="pagination.totalPages"
-        [total]="pagination.total"
-        [limit]="pagination.limit"
-        infoStyle="range"
-        (pageChange)="onPageChange($event)"
-      />
-    </div>
+    @if (currencies().length > 0) {
+      <div
+        class="px-6 py-4 border-t border-border bg-muted/30 flex justify-center"
+      >
+        <app-pagination
+          [currentPage]="pagination.page"
+          [totalPages]="pagination.totalPages"
+          [total]="pagination.total"
+          [limit]="pagination.limit"
+          infoStyle="range"
+          (pageChange)="onPageChange($event)"
+        />
+      </div>
+    }
   </app-card>
 </div>
 
-<!-- Modals -->
-<app-currency-create-modal
-  [isOpen]="showCreateModal()"
-  (isOpenChange)="showCreateModal.set($event)"
-  [isSubmitting]="isSubmitting()"
-  (submit)="createCurrency($event)"
-></app-currency-create-modal>
+@defer (when showCreateModal()) {
+  <app-currency-create-modal
+    [isOpen]="showCreateModal()"
+    (isOpenChange)="showCreateModal.set($event)"
+    [isSubmitting]="isSubmitting()"
+    (submit)="createCurrency($event)"
+  ></app-currency-create-modal>
+}
 
-<app-currency-edit-modal
-  [isOpen]="showEditModal()"
-  (isOpenChange)="showEditModal.set($event)"
-  [currency]="selectedCurrency()"
-  [isSubmitting]="isSubmitting()"
-  (submit)="updateCurrency($event)"
-></app-currency-edit-modal>
+@defer (when showEditModal()) {
+  <app-currency-edit-modal
+    [isOpen]="showEditModal()"
+    (isOpenChange)="showEditModal.set($event)"
+    [currency]="selectedCurrency()"
+    [isSubmitting]="isSubmitting()"
+    (submit)="updateCurrency($event)"
+  ></app-currency-edit-modal>
+}

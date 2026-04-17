@@ -1,5 +1,6 @@
-import { Component, OnInit, inject, signal, computed } from '@angular/core';
-import { CommonModule, CurrencyPipe } from '@angular/common';
+import {Component, inject, signal, computed, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { CurrencyPipe } from '@angular/common';
 import { Router } from '@angular/router';
 import {
   ButtonComponent,
@@ -19,7 +20,6 @@ import { StatementImportModalComponent } from './statement-import-modal.componen
   selector: 'vendix-bank-accounts',
   standalone: true,
   imports: [
-    CommonModule,
     ButtonComponent,
     IconComponent,
     StatsComponent,
@@ -325,7 +325,8 @@ import { StatementImportModalComponent } from './statement-import-modal.componen
     </div>
   `,
 })
-export class BankAccountsComponent implements OnInit {
+export class BankAccountsComponent {
+  private destroyRef = inject(DestroyRef);
   private reconciliationService = inject(BankReconciliationService);
   private dialogService = inject(DialogService);
   private toastService = inject(ToastService);
@@ -362,13 +363,13 @@ export class BankAccountsComponent implements OnInit {
     };
   });
 
-  ngOnInit(): void {
+  constructor() {
     this.loadAccounts();
   }
 
   loadAccounts(): void {
     this.loading.set(true);
-    this.reconciliationService.getBankAccounts().subscribe({
+    this.reconciliationService.getBankAccounts().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (res) => {
         this.accounts.set(res.data || []);
         this.loading.set(false);
@@ -404,7 +405,7 @@ export class BankAccountsComponent implements OnInit {
       })
       .then((confirmed) => {
         if (!confirmed) return;
-        this.reconciliationService.deleteBankAccount(account.id).subscribe({
+        this.reconciliationService.deleteBankAccount(account.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
           next: () => {
             this.toastService.success('Cuenta bancaria eliminada');
             this.loadAccounts();

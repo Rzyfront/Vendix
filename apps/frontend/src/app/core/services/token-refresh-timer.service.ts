@@ -1,6 +1,7 @@
-import { Injectable, inject, OnDestroy } from '@angular/core';
+import {Injectable, inject, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Subscription, timer, EMPTY } from 'rxjs';
-import { tap, catchError, take } from 'rxjs/operators';
+import { tap, catchError } from 'rxjs/operators';
 import { AuthService } from './auth.service';
 import { Store } from '@ngrx/store';
 import * as AuthActions from '../store/auth/auth.actions';
@@ -14,12 +15,17 @@ import * as AuthActions from '../store/auth/auth.actions';
  * - At 80% of the token lifetime (whichever is smaller)
  */
 @Injectable({ providedIn: 'root' })
-export class TokenRefreshTimerService implements OnDestroy {
+export class TokenRefreshTimerService {
   private timerSubscription?: Subscription;
   private isRefreshing = false;
 
   private authService = inject(AuthService);
   private store = inject(Store);
+  private destroyRef = inject(DestroyRef);
+
+  constructor() {
+    this.destroyRef.onDestroy(() => this.stopTimer());
+  }
 
   /**
    * Starts the proactive refresh timer based on token expiration time.
@@ -50,7 +56,7 @@ export class TokenRefreshTimerService implements OnDestroy {
       return;
     }
 
-    this.timerSubscription = timer(finalRefreshTime).subscribe(() => {
+    this.timerSubscription = timer(finalRefreshTime).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
       this.proactiveRefresh();
     });
   }
@@ -70,7 +76,6 @@ export class TokenRefreshTimerService implements OnDestroy {
     this.authService
       .refreshToken()
       .pipe(
-        take(1),
         tap((response) => {
           this.isRefreshing = false;
 
@@ -103,7 +108,7 @@ export class TokenRefreshTimerService implements OnDestroy {
           return EMPTY;
         }),
       )
-      .subscribe();
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
   }
 
   /**
@@ -115,9 +120,5 @@ export class TokenRefreshTimerService implements OnDestroy {
       this.timerSubscription.unsubscribe();
       this.timerSubscription = undefined;
     }
-  }
-
-  ngOnDestroy(): void {
-    this.stopTimer();
   }
 }

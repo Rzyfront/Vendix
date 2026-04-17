@@ -1,7 +1,8 @@
-import { Injectable, inject } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { Observable, BehaviorSubject, finalize, catchError, throwError, map } from 'rxjs';
+import { Observable, finalize, catchError, throwError, map } from 'rxjs';
 import { tap, shareReplay } from 'rxjs/operators';
+import { toObservable } from '@angular/core/rxjs-interop';
 import { environment } from '../../../../../../environments/environment';
 import {
     AuditQueryDto,
@@ -25,17 +26,15 @@ export class AuditService {
     private apiUrl = environment.apiUrl;
     private readonly CACHE_TTL = 30000; // 30 segundos
 
-    private isLoading$ = new BehaviorSubject<boolean>(false);
-
-    get isLoading() {
-        return this.isLoading$.asObservable();
-    }
+    // Signal para estado de carga — Angular 20 Zoneless
+    readonly isLoading = signal<boolean>(false);
+    readonly isLoading$ = toObservable(this.isLoading);
 
     /**
      * Obtener logs de auditoría
      */
     getAuditLogs(query: AuditQueryDto = {}): Observable<PaginatedAuditResponse> {
-        this.isLoading$.next(true);
+        this.isLoading.set(true);
 
         let params = new HttpParams();
         if (query.page) params = params.set('page', query.page.toString());
@@ -44,7 +43,7 @@ export class AuditService {
         // Pagination to offset calculation if needed, but backend takes limit/offset usually or page/limit if standard.
         // Assuming backend standard pagination or mapper similar to users service.
         // Checking backend controller: it takes limit and offset.
-        // Users service maps page/limit -> backend pagination. 
+        // Users service maps page/limit -> backend pagination.
         // Backend controller logic seemed to use limit/offset directly in findMany.
         // We should map page -> offset.
         if (query.page && query.limit) {
@@ -86,7 +85,7 @@ export class AuditService {
                         }
                     } as PaginatedAuditResponse;
                 }),
-                finalize(() => this.isLoading$.next(false)),
+                finalize(() => this.isLoading.set(false)),
                 catchError((error) => {
                     console.error('Error loading audit logs:', error);
                     return throwError(() => error);

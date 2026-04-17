@@ -1,14 +1,6 @@
-import {
-  Component,
-  Input,
-  EventEmitter,
-  Output,
-  OnChanges,
-  SimpleChanges,
-  ChangeDetectionStrategy,
-  ChangeDetectorRef,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, input, output, model, signal, effect, inject, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { DecimalPipe } from '@angular/common';
 import { Router } from '@angular/router';
 import {
   FormBuilder,
@@ -50,7 +42,7 @@ import { TaxQuickCreateComponent } from './tax-quick-create.component';
   selector: 'app-product-create-modal',
   standalone: true,
   imports: [
-    CommonModule,
+    DecimalPipe,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
@@ -65,18 +57,27 @@ import { TaxQuickCreateComponent } from './tax-quick-create.component';
   ],
   templateUrl: './product-create-modal/product-create-modal.component.html',
   styleUrls: ['./product-create-modal/product-create-modal.component.scss'],
-  changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class ProductCreateModalComponent implements OnChanges {
-  @Input() isOpen = false;
-  @Input() isSubmitting = false;
-  @Input() product: Product | null = null;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() submit = new EventEmitter<any>();
-  @Output() cancel = new EventEmitter<void>();
+export class ProductCreateModalComponent {
+  private destroyRef = inject(DestroyRef);
+  private fb = inject(FormBuilder);
+  private productsService = inject(ProductsService);
+  private categoriesService = inject(CategoriesService);
+  private brandsService = inject(BrandsService);
+  private taxesService = inject(TaxesService);
+  private toastService = inject(ToastService);
+  private router = inject(Router);
+  private dialogService = inject(DialogService);
+  private currencyService = inject(CurrencyFormatService);
+
+  readonly isOpen = model<boolean>(false);
+  readonly isSubmitting = input<boolean>(false);
+  readonly product = input<Product | null>(null);
+  readonly submit = output<any>();
+  readonly cancel = output<void>();
 
   get isEditMode(): boolean {
-    return !!this.product;
+    return !!this.product();
   }
 
   productForm: FormGroup;
@@ -85,43 +86,35 @@ export class ProductCreateModalComponent implements OnChanges {
   taxCategoryOptions: MultiSelectorOption[] = [];
 
   // Quick create modals state
-  isCategoryCreateOpen = false;
-  isBrandCreateOpen = false;
-  isTaxCategoryCreateOpen = false;
+  isCategoryCreateOpen = signal(false);
+  isBrandCreateOpen = signal(false);
+  isTaxCategoryCreateOpen = signal(false);
 
   private allTaxCategories: TaxCategory[] = [];
 
-  constructor(
-    private fb: FormBuilder,
-    private productsService: ProductsService,
-    private categoriesService: CategoriesService,
-    private brandsService: BrandsService,
-    private taxesService: TaxesService,
-    private toastService: ToastService,
-    private router: Router,
-    private dialogService: DialogService,
-    private currencyService: CurrencyFormatService,
-    private cdr: ChangeDetectorRef,
-  ) {
+  constructor() {
     this.productForm = this.createForm();
-  }
 
-  ngOnChanges(changes: SimpleChanges): void {
-    if (changes['product']) {
-      if (this.product) {
+    // React to product input changes
+    effect(() => {
+      const prod = this.product();
+      if (prod) {
         this.populateForm();
       } else {
         this.resetForm();
       }
-    }
+    });
 
-    if (changes['isOpen'] && this.isOpen) {
-      this.currencyService.loadCurrency();
-      this.loadCategoriesAndBrands();
-      if (!this.product) {
-        this.resetForm();
+    // React to isOpen changes
+    effect(() => {
+      if (this.isOpen()) {
+        this.currencyService.loadCurrency();
+        this.loadCategoriesAndBrands();
+        if (!this.product()) {
+          this.resetForm();
+        }
       }
-    }
+    });
   }
 
   private createForm(): FormGroup {
@@ -202,29 +195,30 @@ export class ProductCreateModalComponent implements OnChanges {
 
   // Populate form when product data is available (edit mode)
   private populateForm(): void {
-    if (!this.product) return;
+    const prod = this.product();
+    if (!prod) return;
 
     this.productForm.patchValue({
-      name: this.product.name,
-      base_price: this.product.base_price,
-      stock_quantity: this.product.stock_quantity || 0,
-      track_inventory: this.product.track_inventory !== false,
+      name: prod.name,
+      base_price: prod.base_price,
+      stock_quantity: prod.stock_quantity || 0,
+      track_inventory: prod.track_inventory !== false,
       // Try to get category from new structure or legacy if exists
       category_id:
-        (this.product as any).category_ids?.[0] ||
-        this.product.categories?.[0]?.id ||
+        (prod as any).category_ids?.[0] ||
+        prod.categories?.[0]?.id ||
         null,
-      brand_id: this.product.brand_id || null,
+      brand_id: prod.brand_id || null,
       tax_category_ids:
-        (this.product.product_tax_assignments || []).map(
+        (prod.product_tax_assignments || []).map(
           (ta: any) => ta.tax_category_id,
         ),
-      state: this.product.state || ProductState.ACTIVE,
+      state: prod.state || ProductState.ACTIVE,
     });
   }
 
   private loadCategories(): void {
-    this.categoriesService.getCategories().subscribe({
+    this.categoriesService.getCategories().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (categories: ProductCategory[]) => {
         this.categoryOptions = categories.map((cat: ProductCategory) => ({
           value: cat.id,
@@ -241,7 +235,7 @@ export class ProductCreateModalComponent implements OnChanges {
   }
 
   private loadTaxCategories(): void {
-    this.taxesService.getTaxCategories().subscribe({
+    this.taxesService.getTaxCategories().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (taxCategories: TaxCategory[]) => {
         this.allTaxCategories = taxCategories;
         this.taxCategoryOptions = taxCategories.map((cat: TaxCategory) => {
@@ -255,7 +249,6 @@ export class ProductCreateModalComponent implements OnChanges {
             description: cat.description,
           };
         });
-        this.cdr.markForCheck();
       },
       error: (error: any) => {
         const message = extractApiErrorMessage(error);
@@ -268,7 +261,7 @@ export class ProductCreateModalComponent implements OnChanges {
   }
 
   private loadBrands(): void {
-    this.brandsService.getBrands().subscribe({
+    this.brandsService.getBrands().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (brands: Brand[]) => {
         this.brandOptions = brands.map((brand: Brand) => ({
           value: brand.id,
@@ -295,7 +288,7 @@ export class ProductCreateModalComponent implements OnChanges {
       },
     ];
     this.productForm.patchValue({ category_id: category.id });
-    this.isCategoryCreateOpen = false;
+    this.isCategoryCreateOpen.set(false);
   }
 
   onBrandCreated(brand: Brand): void {
@@ -305,7 +298,7 @@ export class ProductCreateModalComponent implements OnChanges {
       { value: brand.id, label: brand.name, description: brand.description },
     ];
     this.productForm.patchValue({ brand_id: brand.id });
-    this.isBrandCreateOpen = false;
+    this.isBrandCreateOpen.set(false);
   }
 
   onTaxCategoryCreated(taxCategory: TaxCategory): void {
@@ -328,17 +321,16 @@ export class ProductCreateModalComponent implements OnChanges {
     this.productForm.patchValue({
       tax_category_ids: [...currentIds, taxCategory.id],
     });
-    this.isTaxCategoryCreateOpen = false;
-    this.cdr.markForCheck();
+    this.isTaxCategoryCreateOpen.set(false);
   }
 
   onCancel() {
-    this.isOpenChange.emit(false);
+    this.isOpen.set(false);
     this.cancel.emit();
   }
 
   onSubmit() {
-    if (this.productForm.invalid || this.isSubmitting) {
+    if (this.productForm.invalid || this.isSubmitting()) {
       this.productForm.markAllAsTouched();
       return;
     }

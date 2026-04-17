@@ -1,12 +1,12 @@
 import {
   Component,
-  OnInit,
-  ChangeDetectionStrategy,
   signal,
   inject,
   computed,
+  DestroyRef,
 } from '@angular/core';
-import { CommonModule, DatePipe } from '@angular/common';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { DatePipe, NgClass, NgTemplateOutlet } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
 import { ConsultationsService } from '../services/consultations.service';
@@ -33,7 +33,6 @@ import { getItemWidth, getItemWidthClass, DEFAULT_TEMPLATE_ICON, DEFAULT_SECTION
   selector: 'app-consultation-attend',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     IconComponent,
     CardComponent,
@@ -43,8 +42,9 @@ import { getItemWidth, getItemWidthClass, DEFAULT_TEMPLATE_ICON, DEFAULT_SECTION
     StickyHeaderComponent,
     DatePipe,
     DynamicFieldComponent,
+    NgClass,
+    NgTemplateOutlet,
   ],
-  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="min-h-screen">
       @if (loading()) {
@@ -861,11 +861,12 @@ import { getItemWidth, getItemWidthClass, DEFAULT_TEMPLATE_ICON, DEFAULT_SECTION
     </div>
   `,
 })
-export class ConsultationAttendComponent implements OnInit {
+export class ConsultationAttendComponent {
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private consultationsService = inject(ConsultationsService);
   private toastService = inject(ToastService);
+  private destroyRef = inject(DestroyRef);
 
   ctx = signal<ConsultationContext | null>(null);
   loading = signal(true);
@@ -1043,24 +1044,26 @@ export class ConsultationAttendComponent implements OnInit {
     return status === 'completed' || status === 'cancelled';
   });
 
-  ngOnInit() {
+  constructor() {
     const bookingId = +this.route.snapshot.params['bookingId'];
     this.loadContext(bookingId);
   }
 
   loadContext(bookingId: number) {
     this.loading.set(true);
-    this.consultationsService.getContext(bookingId).subscribe({
-      next: (data) => {
-        this.ctx.set(data);
-        this.initFormState(data);
-        this.loading.set(false);
-      },
-      error: (err) => {
-        this.toastService.error(extractApiErrorMessage(err));
-        this.loading.set(false);
-      },
-    });
+    this.consultationsService.getContext(bookingId)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (data) => {
+          this.ctx.set(data);
+          this.initFormState(data);
+          this.loading.set(false);
+        },
+        error: (err) => {
+          this.toastService.error(extractApiErrorMessage(err));
+          this.loading.set(false);
+        },
+      });
   }
 
   private initFormState(data: ConsultationContext) {
@@ -1124,41 +1127,47 @@ export class ConsultationAttendComponent implements OnInit {
       return;
     }
 
-    this.consultationsService.saveResponses(c.booking.id, responses).subscribe({
-      next: () => {
-        this.saving.set(false);
-        this.toastService.success('Consulta guardada');
-      },
-      error: (err) => {
-        this.saving.set(false);
-        this.toastService.error(extractApiErrorMessage(err));
-      },
-    });
+    this.consultationsService.saveResponses(c.booking.id, responses)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.saving.set(false);
+          this.toastService.success('Consulta guardada');
+        },
+        error: (err) => {
+          this.saving.set(false);
+          this.toastService.error(extractApiErrorMessage(err));
+        },
+      });
   }
 
   startConsultation() {
     const c = this.ctx();
     if (!c) return;
-    this.consultationsService.start(c.booking.id).subscribe({
-      next: () => {
-        this.toastService.success('Consulta iniciada');
-        this.loadContext(c.booking.id);
-      },
-      error: (err) => this.toastService.error(extractApiErrorMessage(err)),
-    });
+    this.consultationsService.start(c.booking.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.success('Consulta iniciada');
+          this.loadContext(c.booking.id);
+        },
+        error: (err) => this.toastService.error(extractApiErrorMessage(err)),
+      });
   }
 
   completeConsultation() {
     this.save();
     const c = this.ctx();
     if (!c) return;
-    this.consultationsService.complete(c.booking.id).subscribe({
-      next: () => {
-        this.toastService.success('Consulta completada');
-        this.router.navigate(['/admin/reservations']);
-      },
-      error: (err) => this.toastService.error(extractApiErrorMessage(err)),
-    });
+    this.consultationsService.complete(c.booking.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.success('Consulta completada');
+          this.router.navigate(['/admin/reservations']);
+        },
+        error: (err) => this.toastService.error(extractApiErrorMessage(err)),
+      });
   }
 
   goBack() {

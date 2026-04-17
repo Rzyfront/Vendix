@@ -1,17 +1,16 @@
 <app-modal
-    [isOpen]="isOpen"
-    (isOpenChange)="isOpenChange.emit($event)"
+    [(isOpen)]="isOpen"
     (cancel)="close()"
-    [title]="title"
+    [title]="title()"
     size="md"
 >
     <!-- Body -->
     <div class="modal-body">
         <!-- Error Message -->
-        @if (error_message) {
+        @if (error_message()) {
         <div class="error-message">
             <app-icon name="alert-circle" [size]="18"></app-icon>
-            {{ error_message }}
+            {{ error_message() }}
         </div>
         }
 
@@ -54,9 +53,9 @@
                         <app-selector
                             label="Departamento"
                             formControlName="state_province"
-                            placeholder="{{ loading_departments ? 'Cargando...' : 'Seleccionar' }}"
-                            [options]="department_options"
-                            [disabled]="loading_departments"
+                            placeholder="{{ loading_departments() ? 'Cargando...' : 'Seleccionar' }}"
+                            [options]="department_options()"
+                            [disabled]="loading_departments()"
                             [required]="true">
                         </app-selector>
                     </div>
@@ -74,7 +73,7 @@
                     <app-selector
                         label="País"
                         formControlName="country_code"
-                        [options]="country_options"
+                        [options]="country_options()"
                         [required]="true">
                     </app-selector>
                 </div>
@@ -86,9 +85,9 @@
                     <app-selector
                         label="Ciudad"
                         formControlName="city"
-                        placeholder="{{ loading_cities ? 'Cargando...' : 'Seleccionar' }}"
-                        [options]="city_options"
-                        [disabled]="loading_cities || !address_form.value.state_province"
+                        placeholder="{{ loading_cities() ? 'Cargando...' : 'Seleccionar' }}"
+                        [options]="city_options()"
+                        [disabled]="loading_cities() || !address_form.value.state_province"
                         [required]="true">
                     </app-selector>
                 </div>
@@ -138,16 +137,16 @@
     <!-- Footer -->
     <div slot="footer">
         <div class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
-            <app-button variant="outline" (clicked)="close()" [disabled]="is_saving">
+            <app-button variant="outline" (clicked)="close()" [disabled]="is_saving()">
                 Cancelar
             </app-button>
             <app-button
                 variant="primary"
                 (clicked)="save()"
-                [loading]="is_saving"
-                [disabled]="is_saving || address_form.invalid"
+                [loading]="is_saving()"
+                [disabled]="is_saving() || address_form.invalid"
             >
-                {{ mode === 'create' ? 'Crear dirección' : 'Guardar cambios' }}
+                {{ mode() === 'create' ? 'Crear dirección' : 'Guardar cambios' }}
             </app-button>
         </div>
     </div>

@@ -1,13 +1,14 @@
-import { Component, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, OnInit, inject, signal, DestroyRef } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import {
   FormsModule,
   ReactiveFormsModule,
   FormBuilder,
   FormGroup,
 } from '@angular/forms';
-import { debounceTime, distinctUntilChanged, Subject } from 'rxjs';
-import { takeUntil } from 'rxjs/operators';
+import { debounceTime, distinctUntilChanged, Subject, takeUntil } from 'rxjs';
+
 import { Router } from '@angular/router';
 
 // Import types
@@ -45,7 +46,6 @@ import {
   selector: 'app-support',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     InputsearchComponent,
@@ -62,6 +62,7 @@ import {
   styleUrls: ['./support.component.css'],
 })
 export class SupportComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private router = inject(Router);
   private supportService = inject(SupportService);
   private usersService = inject(UsersService);
@@ -69,10 +70,10 @@ export class SupportComponent implements OnInit {
   private fb = inject(FormBuilder);
 
   // Data
-  tickets: Ticket[] = [];
-  users: any[] = [];
-  loadingUsers = false;
-  ticketStats: TicketStats = {
+  readonly tickets = signal<Ticket[]>([]);
+  readonly users = signal<any[]>([]);
+  readonly loadingUsers = signal(false);
+  readonly ticketStats = signal<TicketStats>({
     total: 0,
     by_status: {},
     by_priority: {},
@@ -82,20 +83,20 @@ export class SupportComponent implements OnInit {
     open_tickets: 0,
     resolved: 0,
     pending: 0,
-  };
+  });
 
   // User search debounce
   private userSearchSubject = new Subject<string>();
   private userSearchDestroy$ = new Subject<void>();
 
   // UI State
-  isLoading = false;
+  readonly isLoading = signal(false);
   isDeleting = false;
   searchQuery = '';
   pagination = { page: 1, limit: 10, total: 0, totalPages: 0 };
 
   // Modals
-  showAssignModal = false;
+  readonly showAssignModal = signal(false);
   selectedTicket: Ticket | null = null;
 
   // Forms
@@ -245,9 +246,6 @@ export class SupportComponent implements OnInit {
     { value: TicketCategory.CHANGE, label: 'Cambio' },
     { value: TicketCategory.QUESTION, label: 'Consulta' },
   ];
-
-  private destroy$ = new Subject<void>();
-
   constructor() {
     this.filterForm = this.fb.group({
       status: [''],
@@ -261,7 +259,11 @@ export class SupportComponent implements OnInit {
 
     // Subscribe to filter changes
     this.filterForm.valueChanges
-      .pipe(debounceTime(300), distinctUntilChanged(), takeUntil(this.destroy$))
+      .pipe(
+        debounceTime(300),
+        distinctUntilChanged(),
+        takeUntilDestroyed(this.destroyRef),
+      )
       .subscribe(() => {
         this.pagination.page = 1;
         this.loadTickets();
@@ -285,8 +287,6 @@ export class SupportComponent implements OnInit {
   }
 
   ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
     this.userSearchDestroy$.next();
     this.userSearchDestroy$.complete();
   }
@@ -294,7 +294,7 @@ export class SupportComponent implements OnInit {
   loadStats(): void {
     this.supportService.getTicketStats().subscribe({
       next: (stats) => {
-        this.ticketStats = stats;
+        this.ticketStats.set(stats);
       },
       error: (err) => {
         console.error('Error loading stats:', err);
@@ -303,7 +303,7 @@ export class SupportComponent implements OnInit {
   }
 
   loadTickets(): void {
-    this.isLoading = true;
+    this.isLoading.set(true);
     const filters = this.filterForm.value;
 
     const queryParams: TicketQueryDto = {
@@ -317,17 +317,17 @@ export class SupportComponent implements OnInit {
 
     this.supportService.getTickets(queryParams).subscribe({
       next: (response) => {
-        this.tickets = response.data;
+        this.tickets.set(response.data);
         this.pagination.total = response.meta.total;
         this.pagination.totalPages =
           response.meta.pages ||
           Math.ceil(this.pagination.total / this.pagination.limit);
-        this.isLoading = false;
+        this.isLoading.set(false);
       },
       error: (err) => {
         console.error('Error loading tickets:', err);
         this.toastService.error('Error al cargar tickets');
-        this.isLoading = false;
+        this.isLoading.set(false);
       },
     });
   }
@@ -349,19 +349,19 @@ export class SupportComponent implements OnInit {
 
   openAssignModal(ticket: Ticket): void {
     this.selectedTicket = ticket;
-    this.showAssignModal = true;
+    this.showAssignModal.set(true);
     this.loadUsers();
   }
 
   loadUsers(search = ''): void {
-    this.loadingUsers = true;
+    this.loadingUsers.set(true);
     this.usersService.getUsers({ search, limit: 50 }).subscribe({
       next: (response) => {
-        this.users = response.data;
-        this.loadingUsers = false;
+        this.users.set(response.data);
+        this.loadingUsers.set(false);
       },
       error: () => {
-        this.loadingUsers = false;
+        this.loadingUsers.set(false);
       },
     });
   }
@@ -391,7 +391,7 @@ export class SupportComponent implements OnInit {
       .subscribe({
         next: () => {
           this.toastService.success('Ticket asignado correctamente');
-          this.showAssignModal = false;
+          this.showAssignModal.set(false);
           this.assignForm.reset();
           this.loadTickets();
         },

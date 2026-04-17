@@ -4,16 +4,16 @@ import {
   output,
   OnInit,
   OnChanges,
-  OnDestroy,
   SimpleChanges,
   inject,
+  DestroyRef,
+  signal,
+  computed,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import {
-  FormsModule,
-  ReactiveFormsModule,
-} from '@angular/forms';
-import { debounceTime, distinctUntilChanged, Subject, takeUntil } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
+import { FormsModule, ReactiveFormsModule } from '@angular/forms';
+import { debounceTime, distinctUntilChanged, Subject } from 'rxjs';
 import {
   Role,
   Permission,
@@ -33,7 +33,6 @@ import {
   selector: 'app-role-permissions-modal',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     ModalComponent,
@@ -80,7 +79,7 @@ import {
               variant="outline"
               size="sm"
               (clicked)="selectAllPermissions()"
-              [disabled]="isLoading"
+              [disabled]="isLoading()"
             >
               Seleccionar todos
             </app-button>
@@ -88,7 +87,7 @@ import {
               variant="outline"
               size="sm"
               (clicked)="deselectAllPermissions()"
-              [disabled]="isLoading"
+              [disabled]="isLoading()"
             >
               Deseleccionar todos
             </app-button>
@@ -96,118 +95,125 @@ import {
         </div>
 
         <!-- Loading state -->
-        <div *ngIf="isLoading" class="flex justify-center py-8">
-          <div
-            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-          ></div>
-        </div>
+        @if (isLoading()) {
+          <div class="flex justify-center py-8">
+            <div
+              class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            ></div>
+          </div>
+        }
 
         <!-- Permissions table -->
-        <div *ngIf="!isLoading" class="permissions-table-container">
-          <div class="overflow-x-auto">
-            <table class="min-w-full divide-y divide-border">
-              <thead class="bg-muted/20">
-                <tr>
-                  <th class="px-4 py-3 text-left">
-                    <input
-                      type="checkbox"
-                      class="permission-checkbox"
-                      [checked]="allPermissionsSelected"
-                      [indeterminate]="somePermissionsSelected"
-                      (change)="toggleAllPermissions($event)"
-                    />
-                  </th>
-                  <th
-                    class="px-4 py-3 text-left text-xs font-medium text-text-primary uppercase tracking-wider"
-                  >
-                    Nombre
-                  </th>
-                  <th
-                    class="px-4 py-3 text-left text-xs font-medium text-text-primary uppercase tracking-wider"
-                  >
-                    Descripción
-                  </th>
-                  <th
-                    class="px-4 py-3 text-left text-xs font-medium text-text-primary uppercase tracking-wider"
-                  >
-                    Ruta
-                  </th>
-                  <th
-                    class="px-4 py-3 text-left text-xs font-medium text-text-primary uppercase tracking-wider"
-                  >
-                    Método
-                  </th>
-                  <th
-                    class="px-4 py-3 text-left text-xs font-medium text-text-primary uppercase tracking-wider"
-                  >
-                    Estado
-                  </th>
-                </tr>
-              </thead>
-              <tbody class="bg-surface divide-y divide-border">
-                <tr
-                  *ngFor="
-                    let permission of filteredPermissions;
-                    trackBy: trackByPermissionId
-                  "
-                  class="hover:bg-muted/10 transition-colors"
-                >
-                  <td class="px-4 py-3">
-                    <input
-                      type="checkbox"
-                      class="permission-checkbox"
-                      [checked]="isPermissionSelected(permission.id)"
-                      (change)="togglePermission(permission.id, $event)"
-                    />
-                  </td>
-                  <td class="px-4 py-3 text-sm font-medium text-text-primary">
-                    {{ permission.name }}
-                  </td>
-                  <td class="px-4 py-3 text-sm text-text-secondary">
-                    {{ permission.description }}
-                  </td>
-                  <td class="px-4 py-3 text-sm text-text-secondary font-mono">
-                    {{ permission.path }}
-                  </td>
-                  <td class="px-4 py-3">
-                    <span
-                      class="method-badge method-{{
-                        permission.method.toLowerCase()
-                      }}"
+        @if (!isLoading()) {
+          <div class="permissions-table-container">
+            <div class="overflow-x-auto">
+              <table class="min-w-full divide-y divide-border">
+                <thead class="bg-muted/20">
+                  <tr>
+                    <th class="px-4 py-3 text-left">
+                      <input
+                        type="checkbox"
+                        class="permission-checkbox"
+                        [checked]="allPermissionsSelected"
+                        [indeterminate]="somePermissionsSelected"
+                        (change)="toggleAllPermissions($event)"
+                      />
+                    </th>
+                    <th
+                      class="px-4 py-3 text-left text-xs font-medium text-text-primary uppercase tracking-wider"
                     >
-                      {{ permission.method }}
-                    </span>
-                  </td>
-                  <td class="px-4 py-3">
-                    <span class="status-badge status-{{ permission.status }}">
-                      {{ getStatusLabel(permission.status) }}
-                    </span>
-                  </td>
-                </tr>
-              </tbody>
-            </table>
+                      Nombre
+                    </th>
+                    <th
+                      class="px-4 py-3 text-left text-xs font-medium text-text-primary uppercase tracking-wider"
+                    >
+                      Descripción
+                    </th>
+                    <th
+                      class="px-4 py-3 text-left text-xs font-medium text-text-primary uppercase tracking-wider"
+                    >
+                      Ruta
+                    </th>
+                    <th
+                      class="px-4 py-3 text-left text-xs font-medium text-text-primary uppercase tracking-wider"
+                    >
+                      Método
+                    </th>
+                    <th
+                      class="px-4 py-3 text-left text-xs font-medium text-text-primary uppercase tracking-wider"
+                    >
+                      Estado
+                    </th>
+                  </tr>
+                </thead>
+                <tbody class="bg-surface divide-y divide-border">
+                  @for (
+                    permission of filteredPermissions();
+                    track trackByPermissionId($index, permission)
+                  ) {
+                    <tr class="hover:bg-muted/10 transition-colors">
+                      <td class="px-4 py-3">
+                        <input
+                          type="checkbox"
+                          class="permission-checkbox"
+                          [checked]="isPermissionSelected(permission.id)"
+                          (change)="togglePermission(permission.id, $event)"
+                        />
+                      </td>
+                      <td
+                        class="px-4 py-3 text-sm font-medium text-text-primary"
+                      >
+                        {{ permission.name }}
+                      </td>
+                      <td class="px-4 py-3 text-sm text-text-secondary">
+                        {{ permission.description }}
+                      </td>
+                      <td
+                        class="px-4 py-3 text-sm text-text-secondary font-mono"
+                      >
+                        {{ permission.path }}
+                      </td>
+                      <td class="px-4 py-3">
+                        <span
+                          class="method-badge method-{{
+                            permission.method.toLowerCase()
+                          }}"
+                        >
+                          {{ permission.method }}
+                        </span>
+                      </td>
+                      <td class="px-4 py-3">
+                        <span
+                          class="status-badge status-{{ permission.status }}"
+                        >
+                          {{ getStatusLabel(permission.status) }}
+                        </span>
+                      </td>
+                    </tr>
+                  }
+                </tbody>
+              </table>
+            </div>
+            <!-- Empty state -->
+            @if (filteredPermissions().length === 0) {
+              <div class="text-center py-8">
+                <app-icon
+                  name="search"
+                  size="48"
+                  class="mx-auto text-text-muted mb-4"
+                ></app-icon>
+                <p class="text-text-secondary">No se encontraron permisos</p>
+              </div>
+            }
           </div>
-
-          <!-- Empty state -->
-          <div
-            *ngIf="filteredPermissions.length === 0"
-            class="text-center py-8"
-          >
-            <app-icon
-              name="search"
-              size="48"
-              class="mx-auto text-text-muted mb-4"
-            ></app-icon>
-            <p class="text-text-secondary">No se encontraron permisos</p>
-          </div>
-        </div>
+        }
 
         <!-- Selected permissions summary -->
         <div class="selected-summary">
           <p class="text-sm text-text-secondary">
-            <span class="font-medium">{{ selectedPermissions.length }}</span>
+            <span class="font-medium">{{ selectedPermissions().length }}</span>
             de
-            <span class="font-medium">{{ filteredPermissions.length }}</span>
+            <span class="font-medium">{{ filteredPermissions().length }}</span>
             permisos seleccionados
           </p>
         </div>
@@ -227,15 +233,17 @@ import {
           [disabled]="isSubmitting() || selectedPermissions.length === 0"
           [loading]="isSubmitting()"
         >
-          <span *ngIf="!isSubmitting()">Guardar Cambios</span>
+          @if (!isSubmitting()) {
+            <span>Guardar Cambios</span>
+          }
         </app-button>
       </div>
     </app-modal>
   `,
   styleUrls: ['./role-permissions-modal.component.scss'],
 })
-export class RolePermissionsModalComponent
-  implements OnInit, OnChanges, OnDestroy {
+export class RolePermissionsModalComponent implements OnInit, OnChanges {
+  private destroyRef = inject(DestroyRef);
   // Signals
   readonly isOpen = input<boolean>(false);
   readonly isSubmitting = input<boolean>(false);
@@ -246,15 +254,38 @@ export class RolePermissionsModalComponent
   readonly submit = output<AssignPermissionsDto>();
   readonly cancel = output<void>();
 
-  permissions: Permission[] = [];
-  filteredPermissions: Permission[] = [];
-  selectedPermissions: number[] = [];
-  isLoading = false;
+  permissions = signal<Permission[]>([]);
+  filteredPermissions = computed(() => {
+    let filtered = this.permissions();
+
+    if (this.selectedModule()) {
+      const mod = this.selectedModule();
+      filtered = filtered.filter((permission) => {
+        const pathParts = permission.path.split('/').filter((part) => part);
+        const moduleFromPath = pathParts.length > 1 ? pathParts[1] : '';
+        return moduleFromPath === mod;
+      });
+    }
+
+    const term = this.searchTerm();
+    if (term) {
+      const lower = term.toLowerCase();
+      filtered = filtered.filter(
+        (permission) =>
+          permission.name.toLowerCase().includes(lower) ||
+          permission.description.toLowerCase().includes(lower) ||
+          permission.path.toLowerCase().includes(lower) ||
+          permission.method.toLowerCase().includes(lower),
+      );
+    }
+
+    return filtered;
+  });
+  selectedPermissions = signal<number[]>([]);
+  isLoading = signal(false);
   searchSubject = new Subject<string>();
-  private destroy$ = new Subject<void>();
   private rolesService = inject(RolesService);
 
-  // Module filter
   availableModules: SelectorOption[] = [
     { value: '', label: 'Todos los módulos' },
     { value: 'addresses', label: 'Direcciones' },
@@ -272,25 +303,23 @@ export class RolePermissionsModalComponent
     { value: 'stores', label: 'Tiendas' },
     { value: 'users', label: 'Usuarios' },
   ];
-  selectedModule = '';
-  searchTerm = '';
+  selectedModule = signal('');
+  searchTerm = signal('');
 
-  constructor() { }
+  constructor() {}
 
   ngOnInit(): void {
     // Setup search debounce
     this.searchSubject
-      .pipe(debounceTime(300), distinctUntilChanged(), takeUntil(this.destroy$))
+      .pipe(
+        debounceTime(300),
+        distinctUntilChanged(),
+        takeUntilDestroyed(this.destroyRef),
+      )
       .subscribe((searchTerm: string) => {
-        this.filterPermissions(searchTerm);
+        this.searchTerm.set(searchTerm);
       });
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
   onOpenChange(isOpen: boolean): void {
     if (!isOpen) {
       this.onCancel();
@@ -310,20 +339,16 @@ export class RolePermissionsModalComponent
     const currentRole = this.role();
     if (!currentRole) return;
 
-    this.isLoading = true;
+    this.isLoading.set(true);
 
-    // Load all permissions
     this.rolesService.getPermissions().subscribe({
       next: (response) => {
-        this.permissions = response.data || [];
-        this.filteredPermissions = [...this.permissions];
-
-        // Load role permissions to pre-select them
+        this.permissions.set(response.data || []);
         this.loadRolePermissions();
       },
       error: (error) => {
         console.error('Error loading permissions:', error);
-        this.isLoading = false;
+        this.isLoading.set(false);
       },
     });
   }
@@ -332,17 +357,15 @@ export class RolePermissionsModalComponent
     const currentRole = this.role();
     if (!currentRole) return;
 
-    // Get role permissions using the dedicated method
     this.rolesService.getRolePermissions(currentRole.id).subscribe({
       next: (permissionIds) => {
-        this.selectedPermissions = permissionIds || [];
-        this.isLoading = false;
-        // Re-filter to ensure everything is in sync if needed, though usually not strictly necessary for checks
+        this.selectedPermissions.set(permissionIds || []);
+        this.isLoading.set(false);
       },
       error: (error) => {
         console.error('Error loading role permissions:', error);
-        this.selectedPermissions = [];
-        this.isLoading = false;
+        this.selectedPermissions.set([]);
+        this.isLoading.set(false);
       },
     });
   }
@@ -352,89 +375,51 @@ export class RolePermissionsModalComponent
   }
 
   onModuleChange(value: string | number | null): void {
-    this.selectedModule = value as string;
-    this.filterPermissions(this.searchTerm);
-  }
-
-  filterPermissions(searchTerm: string): void {
-    this.searchTerm = searchTerm;
-
-    let filtered = this.permissions;
-
-    // Apply module filter first
-    if (this.selectedModule) {
-      filtered = filtered.filter((permission) => {
-        // Extract module from path (e.g., /api/auth/login -> auth)
-        const pathParts = permission.path.split('/').filter((part) => part);
-        const moduleFromPath = pathParts.length > 1 ? pathParts[1] : '';
-
-        return moduleFromPath === this.selectedModule;
-      });
-    }
-
-    // Apply search filter if exists
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      filtered = filtered.filter(
-        (permission) =>
-          permission.name.toLowerCase().includes(term) ||
-          permission.description.toLowerCase().includes(term) ||
-          permission.path.toLowerCase().includes(term) ||
-          permission.method.toLowerCase().includes(term),
-      );
-    }
-
-    this.filteredPermissions = filtered;
+    this.selectedModule.set(value as string);
   }
 
   isPermissionSelected(permissionId: number): boolean {
-    return this.selectedPermissions.includes(permissionId);
+    return this.selectedPermissions().includes(permissionId);
   }
 
   togglePermission(permissionId: number, event: any): void {
     if (event.target.checked) {
-      if (!this.selectedPermissions.includes(permissionId)) {
-        this.selectedPermissions.push(permissionId);
-      }
+      this.selectedPermissions.update((arr) =>
+        arr.includes(permissionId) ? arr : [...arr, permissionId],
+      );
     } else {
-      const index = this.selectedPermissions.indexOf(permissionId);
-      if (index > -1) {
-        this.selectedPermissions.splice(index, 1);
-      }
+      this.selectedPermissions.update((arr) =>
+        arr.filter((x) => x !== permissionId),
+      );
     }
   }
 
   toggleAllPermissions(event: any): void {
     if (event.target.checked) {
-      this.selectedPermissions = this.filteredPermissions.map((p) => p.id);
+      this.selectedPermissions.set(this.filteredPermissions().map((p) => p.id));
     } else {
-      this.selectedPermissions = [];
+      this.selectedPermissions.set([]);
     }
   }
 
   selectAllPermissions(): void {
-    this.selectedPermissions = this.filteredPermissions.map((p) => p.id);
+    this.selectedPermissions.set(this.filteredPermissions().map((p) => p.id));
   }
 
   deselectAllPermissions(): void {
-    this.selectedPermissions = [];
+    this.selectedPermissions.set([]);
   }
 
   get allPermissionsSelected(): boolean {
-    return (
-      this.filteredPermissions.length > 0 &&
-      this.filteredPermissions.every((p) =>
-        this.selectedPermissions.includes(p.id),
-      )
-    );
+    const fp = this.filteredPermissions();
+    const sp = this.selectedPermissions();
+    return fp.length > 0 && fp.every((p) => sp.includes(p.id));
   }
 
   get somePermissionsSelected(): boolean {
-    return (
-      this.filteredPermissions.some((p) =>
-        this.selectedPermissions.includes(p.id),
-      ) && !this.allPermissionsSelected
-    );
+    const fp = this.filteredPermissions();
+    const sp = this.selectedPermissions();
+    return fp.some((p) => sp.includes(p.id)) && !this.allPermissionsSelected;
   }
 
   trackByPermissionId(index: number, permission: Permission): number {
@@ -459,7 +444,7 @@ export class RolePermissionsModalComponent
     if (!currentRole) return;
 
     const permissionData: AssignPermissionsDto = {
-      permission_ids: this.selectedPermissions,
+      permission_ids: this.selectedPermissions(),
     };
 
     this.submit.emit(permissionData);

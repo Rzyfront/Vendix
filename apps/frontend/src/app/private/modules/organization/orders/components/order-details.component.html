@@ -1,484 +1,499 @@
 <app-modal
-  [(isOpen)]="isOpen"
+  [isOpen]="isOpen()"
   [title]="
     'Order Details - ' +
-    (orderDetails?.order_number || order?.order_number || '')
+    (orderDetails()?.order_number || order()?.order_number || '')
   "
   size="lg"
-  
->
-  <div class="space-y-2 md:space-y-4" *ngIf="!isLoading && orderDetails">
-    <!-- Order Header -->
-    <div class="bg-surface rounded-card border border-border p-4">
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-2 md:gap-4">
-        <div>
-          <p class="text-sm text-text-secondary">Número de orden</p>
-          <p class="font-semibold text-text-primary">
-            {{ orderDetails.order_number }}
-          </p>
-        </div>
-        <div>
-          <p class="text-sm text-text-secondary">Fecha del pedido</p>
-          <p class="font-semibold text-text-primary">
-            {{ formatDate(orderDetails.order_date) }}
-          </p>
-        </div>
-        <div>
-          <p class="text-sm text-text-secondary">Importe total</p>
-          <p class="font-semibold text-text-primary">
-            {{ formatCurrency(orderDetails.total_amount) }}
-          </p>
-        </div>
-      </div>
-    </div>
 
-    <!-- Customer & Store Information -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-2 md:p-4">
-      <!-- Customer Info -->
+  >
+  @if (!isLoading() && orderDetails(); as od) {
+    <div class="space-y-2 md:space-y-4">
+      <!-- Order Header -->
       <div class="bg-surface rounded-card border border-border p-4">
-        <h3 class="font-semibold text-text-primary mb-3 flex items-center">
-          <app-icon name="user" [size]="16" class="mr-2"></app-icon>
-          Customer Information
-        </h3>
-        <div class="space-y-2">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-2 md:gap-4">
           <div>
-            <p class="text-sm text-text-secondary">Nombre</p>
-            <p class="font-medium text-text-primary">{{ getCustomerName() }}</p>
-          </div>
-          <div>
-            <p class="text-sm text-text-secondary">Email</p>
-            <p class="font-medium text-text-primary">
-              {{ orderDetails.customer.email }}
+            <p class="text-sm text-text-secondary">Número de orden</p>
+            <p class="font-semibold text-text-primary">
+              {{ od.order_number }}
             </p>
           </div>
-          <div *ngIf="orderDetails.customer.phone">
-            <p class="text-sm text-text-secondary">Teléfono</p>
-            <p class="font-medium text-text-primary">
-              {{ orderDetails.customer.phone }}
+          <div>
+            <p class="text-sm text-text-secondary">Fecha del pedido</p>
+            <p class="font-semibold text-text-primary">
+              {{ formatDate(od.order_date) }}
+            </p>
+          </div>
+          <div>
+            <p class="text-sm text-text-secondary">Importe total</p>
+            <p class="font-semibold text-text-primary">
+              {{ formatCurrency(od.total_amount) }}
             </p>
           </div>
         </div>
       </div>
-
-      <!-- Store Info -->
-      <div class="bg-surface rounded-card border border-border p-4">
-        <h3 class="font-semibold text-text-primary mb-3 flex items-center">
-          <app-icon name="store" [size]="16" class="mr-2"></app-icon>
-          Información de la tienda
-        </h3>
-        <div class="space-y-2">
-          <div>
-            <p class="text-sm text-text-secondary">Nombre de la tienda</p>
-            <p class="font-medium text-text-primary">{{ getStoreName() }}</p>
+      <!-- Customer & Store Information -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-2 md:p-4">
+        <!-- Customer Info -->
+        <div class="bg-surface rounded-card border border-border p-4">
+          <h3 class="font-semibold text-text-primary mb-3 flex items-center">
+            <app-icon name="user" [size]="16" class="mr-2"></app-icon>
+            Customer Information
+          </h3>
+          <div class="space-y-2">
+            <div>
+              <p class="text-sm text-text-secondary">Nombre</p>
+              <p class="font-medium text-text-primary">{{ getCustomerName() }}</p>
+            </div>
+            <div>
+              <p class="text-sm text-text-secondary">Email</p>
+              <p class="font-medium text-text-primary">
+                {{ od.customer.email }}
+              </p>
+            </div>
+            @if (od.customer.phone) {
+              <div>
+                <p class="text-sm text-text-secondary">Teléfono</p>
+                <p class="font-medium text-text-primary">
+                  {{ od.customer.phone }}
+                </p>
+              </div>
+            }
           </div>
-          <div>
-            <p class="text-sm text-text-secondary">Tipo de orden</p>
-            <p class="font-medium text-text-primary">
-              {{ orderDetails.order_type }}
-            </p>
+        </div>
+        <!-- Store Info -->
+        <div class="bg-surface rounded-card border border-border p-4">
+          <h3 class="font-semibold text-text-primary mb-3 flex items-center">
+            <app-icon name="store" [size]="16" class="mr-2"></app-icon>
+            Información de la tienda
+          </h3>
+          <div class="space-y-2">
+            <div>
+              <p class="text-sm text-text-secondary">Nombre de la tienda</p>
+              <p class="font-medium text-text-primary">{{ getStoreName() }}</p>
+            </div>
+            <div>
+              <p class="text-sm text-text-secondary">Tipo de orden</p>
+              <p class="font-medium text-text-primary">
+                {{ od.order_type }}
+              </p>
+            </div>
           </div>
         </div>
       </div>
-    </div>
-
-    <!-- Status Information -->
-    <div class="grid grid-cols-1 md:grid-cols-2 gap-2 md:p-4">
-      <!-- Order Status -->
+      <!-- Status Information -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-2 md:p-4">
+        <!-- Order Status -->
+        <div class="bg-surface rounded-card border border-border p-4">
+          <h3 class="font-semibold text-text-primary mb-3 flex items-center">
+            <app-icon name="info" [size]="16" class="mr-2"></app-icon>
+            Estado del pedido
+          </h3>
+          <div class="space-y-3">
+            <div>
+              <p class="text-sm text-text-secondary">Estado actual</p>
+              <span
+                class="inline-flex px-2 py-1 text-xs font-medium rounded-full"
+                [class]="getStatusColor(od.status)"
+                >
+                {{ od.status }}
+              </span>
+            </div>
+            <div>
+              <p class="text-sm text-text-secondary">Estado del pago</p>
+              <span
+                class="inline-flex px-2 py-1 text-xs font-medium rounded-full"
+                [class]="getPaymentStatusColor(od.payment_status)"
+                >
+                {{ od.payment_status }}
+              </span>
+            </div>
+            @if (od.payment_method) {
+              <div>
+                <p class="text-sm text-text-secondary">Método de pago</p>
+                <p class="font-medium text-text-primary">
+                  {{ od.payment_method }}
+                </p>
+              </div>
+            }
+          </div>
+        </div>
+        <!-- Tracking Information -->
+        <div class="bg-surface rounded-card border border-border p-4">
+          <h3 class="font-semibold text-text-primary mb-3 flex items-center">
+            <app-icon name="truck" [size]="16" class="mr-2"></app-icon>
+            Información de seguimiento
+          </h3>
+          <div class="space-y-3">
+            @if (od.tracking_number) {
+              <div>
+                <p class="text-sm text-text-secondary">El número de rastreo</p>
+                <p class="font-medium text-text-primary">
+                  {{ od.tracking_number }}
+                </p>
+              </div>
+            }
+            @if (od.estimated_delivery) {
+              <div>
+                <p class="text-sm text-text-secondary">Entrega estimada</p>
+                <p class="font-medium text-text-primary">
+                  {{ formatDate(od.estimated_delivery) }}
+                </p>
+              </div>
+            }
+            @if (od.delivered_at) {
+              <div>
+                <p class="text-sm text-text-secondary">Entregado en</p>
+                <p class="font-medium text-text-primary">
+                  {{ formatDate(od.delivered_at) }}
+                </p>
+              </div>
+            }
+          </div>
+        </div>
+      </div>
+      <!-- Order Items -->
       <div class="bg-surface rounded-card border border-border p-4">
         <h3 class="font-semibold text-text-primary mb-3 flex items-center">
-          <app-icon name="info" [size]="16" class="mr-2"></app-icon>
-          Estado del pedido
+          <app-icon name="package" [size]="16" class="mr-2"></app-icon>
+          Artículos del pedido
         </h3>
-        <div class="space-y-3">
+        <div class="overflow-x-auto">
+          <table class="min-w-full divide-y divide-border">
+            <thead class="bg-surface">
+              <tr>
+                <th
+                  class="px-4 py-2 text-left text-xs font-medium text-text-secondary uppercase tracking-wider"
+                  >
+                  Producto
+                </th>
+                <th
+                  class="px-4 py-2 text-left text-xs font-medium text-text-secondary uppercase tracking-wider"
+                  >
+                  SKU
+                </th>
+                <th
+                  class="px-4 py-2 text-center text-xs font-medium text-text-secondary uppercase tracking-wider"
+                  >
+                  Cantidad
+                </th>
+                <th
+                  class="px-4 py-2 text-right text-xs font-medium text-text-secondary uppercase tracking-wider"
+                  >
+                  Precio unitario
+                </th>
+                <th
+                  class="px-4 py-2 text-right text-xs font-medium text-text-secondary uppercase tracking-wider"
+                  >
+                  Total
+                </th>
+              </tr>
+            </thead>
+            <tbody class="bg-surface divide-y divide-border">
+              @for (item of od.items; track item) {
+                <tr>
+                  <td class="px-4 py-2 text-sm text-text-primary">
+                    {{ item.product_name }}
+                  </td>
+                  <td class="px-4 py-2 text-sm text-text-primary">
+                    {{ item.product_sku }}
+                  </td>
+                  <td class="px-4 py-2 text-sm text-text-primary text-center">
+                    {{ item.quantity }}
+                  </td>
+                  <td class="px-4 py-2 text-sm text-text-primary text-right">
+                    {{ formatCurrency(item.unit_price) }}
+                  </td>
+                  <td class="px-4 py-2 text-sm text-text-primary text-right">
+                    {{ formatCurrency(item.total_price) }}
+                  </td>
+                </tr>
+              }
+            </tbody>
+            <tfoot class="bg-surface">
+              <tr>
+                <td
+                  colspan="4"
+                  class="px-4 py-2 text-sm font-medium text-text-primary text-right"
+                  >
+                  Subtotal:
+                </td>
+                <td
+                  class="px-4 py-2 text-sm font-medium text-text-primary text-right"
+                  >
+                  {{ formatCurrency(od.subtotal) }}
+                </td>
+              </tr>
+              @if (od.tax_amount > 0) {
+                <tr>
+                  <td
+                    colspan="4"
+                    class="px-4 py-2 text-sm font-medium text-text-primary text-right"
+                    >
+                    Tax:
+                  </td>
+                  <td
+                    class="px-4 py-2 text-sm font-medium text-text-primary text-right"
+                    >
+                    {{ formatCurrency(od.tax_amount) }}
+                  </td>
+                </tr>
+              }
+              @if (od.shipping_amount > 0) {
+                <tr>
+                  <td
+                    colspan="4"
+                    class="px-4 py-2 text-sm font-medium text-text-primary text-right"
+                    >
+                    Envío:
+                  </td>
+                  <td
+                    class="px-4 py-2 text-sm font-medium text-text-primary text-right"
+                    >
+                    {{ formatCurrency(od.shipping_amount) }}
+                  </td>
+                </tr>
+              }
+              @if (od.discount_amount > 0) {
+                <tr>
+                  <td
+                    colspan="4"
+                    class="px-4 py-2 text-sm font-medium text-text-primary text-right"
+                    >
+                    Descuento:
+                  </td>
+                  <td class="px-4 py-2 text-sm font-medium text-red-600 text-right">
+                    -{{ formatCurrency(od.discount_amount) }}
+                  </td>
+                </tr>
+              }
+              <tr class="border-t-2 border-border">
+                <td
+                  colspan="4"
+                  class="px-4 py-2 text-sm font-bold text-text-primary text-right"
+                  >
+                  Total:
+                </td>
+                <td
+                  class="px-4 py-2 text-sm font-bold text-text-primary text-right"
+                  >
+                  {{ formatCurrency(od.total_amount) }}
+                </td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
+      </div>
+      <!-- Notes -->
+      @if (od.notes) {
+        <div
+          class="bg-surface rounded-card border border-border p-4"
+          >
+          <h3 class="font-semibold text-text-primary mb-3 flex items-center">
+            <app-icon name="file-text" [size]="16" class="mr-2"></app-icon>
+            Notas del pedido
+          </h3>
+          <p class="text-sm text-text-primary">{{ od.notes }}</p>
+        </div>
+      }
+      <!-- Update Form -->
+      <form [formGroup]="updateForm" class="space-y-2 md:space-y-4">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-2 md:gap-4">
           <div>
-            <p class="text-sm text-text-secondary">Estado actual</p>
-            <span
-              class="inline-flex px-2 py-1 text-xs font-medium rounded-full"
-              [class]="getStatusColor(orderDetails.status)"
+            <app-selector
+              label="Estado del pedido"
+              formControlName="status"
+              [options]="orderStatusOptions"
+              placeholder="Seleccionar estado"
+              styleVariant="modern"
+            ></app-selector>
+          </div>
+          <div>
+            <app-selector
+              label="Estado del pago"
+              formControlName="payment_status"
+              [options]="paymentStatusOptions"
+              placeholder="Seleccionar estado de pago"
+              styleVariant="modern"
+            ></app-selector>
+          </div>
+        </div>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-2 md:gap-4">
+          <div>
+            <app-input
+              label="El número de rastreo"
+              formControlName="tracking_number"
+              placeholder="Enter tracking number"
+              styleVariant="modern"
+            ></app-input>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-text-primary mb-1"
+              >Entrega estimada</label
+              >
+              <input
+                type="datetime-local"
+                formControlName="estimated_delivery"
+                class="w-full px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
+                />
+            </div>
+          </div>
+          <div>
+            <app-textarea
+              label="Notas"
+              formControlName="notes"
+              [rows]="3"
+              placeholder="Enter order notes"
+              styleVariant="modern"
+            ></app-textarea>
+          </div>
+        </form>
+      </div>
+    }
+
+    <!-- Loading State -->
+    @if (isLoading()) {
+      <div class="flex items-center justify-center py-8">
+        <div
+          class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+        ></div>
+        <p class="ml-2 text-text-secondary">Cargando detalles del pedido...</p>
+      </div>
+    }
+
+    <!-- Modal Actions -->
+    <div class="flex justify-between items-center pt-4 border-t border-border">
+      <div class="flex gap-2">
+        <app-button
+          variant="outline"
+          size="sm"
+          (clicked)="onPrintInvoice()"
+          [disabled]="isLoading()"
+          >
+          <app-icon name="printer" [size]="16" slot="icon"></app-icon>
+          Imprimir factura
+        </app-button>
+        <app-button
+          variant="outline"
+          size="sm"
+          (clicked)="onPrintPackingSlip()"
+          [disabled]="isLoading()"
+          >
+          <app-icon name="package" [size]="16" slot="icon"></app-icon>
+          Albarán de embalaje
+        </app-button>
+      </div>
+
+      <div class="flex gap-2">
+        @if (canCancelOrder()) {
+          <app-button
+            variant="danger"
+            size="sm"
+            (clicked)="onCancelOrder()"
+            [disabled]="isLoading()"
             >
-              {{ orderDetails.status }}
-            </span>
-          </div>
-          <div>
-            <p class="text-sm text-text-secondary">Estado del pago</p>
-            <span
-              class="inline-flex px-2 py-1 text-xs font-medium rounded-full"
-              [class]="getPaymentStatusColor(orderDetails.payment_status)"
+            <app-icon name="x-circle" [size]="16" slot="icon"></app-icon>
+            Cancelar pedido
+          </app-button>
+        }
+
+        @if (canRefundOrder()) {
+          <app-button
+            variant="secondary"
+            size="sm"
+            (clicked)="onRefundOrder()"
+            [disabled]="isLoading()"
             >
-              {{ orderDetails.payment_status }}
-            </span>
-          </div>
-          <div *ngIf="orderDetails.payment_method">
-            <p class="text-sm text-text-secondary">Método de pago</p>
-            <p class="font-medium text-text-primary">
-              {{ orderDetails.payment_method }}
-            </p>
-          </div>
-        </div>
-      </div>
+            <app-icon name="refresh-cw" [size]="16" slot="icon"></app-icon>
+            Orden de reembolso
+          </app-button>
+        }
 
-      <!-- Tracking Information -->
-      <div class="bg-surface rounded-card border border-border p-4">
-        <h3 class="font-semibold text-text-primary mb-3 flex items-center">
-          <app-icon name="truck" [size]="16" class="mr-2"></app-icon>
-          Información de seguimiento
-        </h3>
-        <div class="space-y-3">
-          <div *ngIf="orderDetails.tracking_number">
-            <p class="text-sm text-text-secondary">El número de rastreo</p>
-            <p class="font-medium text-text-primary">
-              {{ orderDetails.tracking_number }}
-            </p>
-          </div>
-          <div *ngIf="orderDetails.estimated_delivery">
-            <p class="text-sm text-text-secondary">Entrega estimada</p>
-            <p class="font-medium text-text-primary">
-              {{ formatDate(orderDetails.estimated_delivery) }}
-            </p>
-          </div>
-          <div *ngIf="orderDetails.delivered_at">
-            <p class="text-sm text-text-secondary">Entregado en</p>
-            <p class="font-medium text-text-primary">
-              {{ formatDate(orderDetails.delivered_at) }}
-            </p>
-          </div>
-        </div>
+        @if (canDispatchOrder()) {
+          <app-button
+            variant="primary"
+            size="sm"
+            (clicked)="openDispatchModal()"
+            [disabled]="isLoading()"
+            >
+            <app-icon name="truck" [size]="16" slot="icon"></app-icon>
+            Despachar Orden
+          </app-button>
+        }
+
+        <app-button
+          variant="primary"
+          size="sm"
+          (clicked)="onUpdateOrder()"
+          [disabled]="isLoading() || isUpdating() || updateForm.invalid"
+          >
+          <app-icon name="save" [size]="16" slot="icon"></app-icon>
+          {{ isUpdating() ? "Updating..." : "Update Order" }}
+        </app-button>
       </div>
     </div>
+  </app-modal>
 
-    <!-- Order Items -->
-    <div class="bg-surface rounded-card border border-border p-4">
-      <h3 class="font-semibold text-text-primary mb-3 flex items-center">
-        <app-icon name="package" [size]="16" class="mr-2"></app-icon>
-        Artículos del pedido
-      </h3>
-      <div class="overflow-x-auto">
-        <table class="min-w-full divide-y divide-border">
-          <thead class="bg-surface">
-            <tr>
-              <th
-                class="px-4 py-2 text-left text-xs font-medium text-text-secondary uppercase tracking-wider"
-              >
-                Producto
-              </th>
-              <th
-                class="px-4 py-2 text-left text-xs font-medium text-text-secondary uppercase tracking-wider"
-              >
-                SKU
-              </th>
-              <th
-                class="px-4 py-2 text-center text-xs font-medium text-text-secondary uppercase tracking-wider"
-              >
-                Cantidad
-              </th>
-              <th
-                class="px-4 py-2 text-right text-xs font-medium text-text-secondary uppercase tracking-wider"
-              >
-                Precio unitario
-              </th>
-              <th
-                class="px-4 py-2 text-right text-xs font-medium text-text-secondary uppercase tracking-wider"
-              >
-                Total
-              </th>
-            </tr>
-          </thead>
-          <tbody class="bg-surface divide-y divide-border">
-            <tr *ngFor="let item of orderDetails.items">
-              <td class="px-4 py-2 text-sm text-text-primary">
-                {{ item.product_name }}
-              </td>
-              <td class="px-4 py-2 text-sm text-text-primary">
-                {{ item.product_sku }}
-              </td>
-              <td class="px-4 py-2 text-sm text-text-primary text-center">
-                {{ item.quantity }}
-              </td>
-              <td class="px-4 py-2 text-sm text-text-primary text-right">
-                {{ formatCurrency(item.unit_price) }}
-              </td>
-              <td class="px-4 py-2 text-sm text-text-primary text-right">
-                {{ formatCurrency(item.total_price) }}
-              </td>
-            </tr>
-          </tbody>
-          <tfoot class="bg-surface">
-            <tr>
-              <td
-                colspan="4"
-                class="px-4 py-2 text-sm font-medium text-text-primary text-right"
-              >
-                Subtotal:
-              </td>
-              <td
-                class="px-4 py-2 text-sm font-medium text-text-primary text-right"
-              >
-                {{ formatCurrency(orderDetails.subtotal) }}
-              </td>
-            </tr>
-            <tr *ngIf="orderDetails.tax_amount > 0">
-              <td
-                colspan="4"
-                class="px-4 py-2 text-sm font-medium text-text-primary text-right"
-              >
-                Tax:
-              </td>
-              <td
-                class="px-4 py-2 text-sm font-medium text-text-primary text-right"
-              >
-                {{ formatCurrency(orderDetails.tax_amount) }}
-              </td>
-            </tr>
-            <tr *ngIf="orderDetails.shipping_amount > 0">
-              <td
-                colspan="4"
-                class="px-4 py-2 text-sm font-medium text-text-primary text-right"
-              >
-                Envío:
-              </td>
-              <td
-                class="px-4 py-2 text-sm font-medium text-text-primary text-right"
-              >
-                {{ formatCurrency(orderDetails.shipping_amount) }}
-              </td>
-            </tr>
-            <tr *ngIf="orderDetails.discount_amount > 0">
-              <td
-                colspan="4"
-                class="px-4 py-2 text-sm font-medium text-text-primary text-right"
-              >
-                Descuento:
-              </td>
-              <td class="px-4 py-2 text-sm font-medium text-red-600 text-right">
-                -{{ formatCurrency(orderDetails.discount_amount) }}
-              </td>
-            </tr>
-            <tr class="border-t-2 border-border">
-              <td
-                colspan="4"
-                class="px-4 py-2 text-sm font-bold text-text-primary text-right"
-              >
-                Total:
-              </td>
-              <td
-                class="px-4 py-2 text-sm font-bold text-text-primary text-right"
-              >
-                {{ formatCurrency(orderDetails.total_amount) }}
-              </td>
-            </tr>
-          </tfoot>
-        </table>
-      </div>
-    </div>
-
-    <!-- Notes -->
-    <div
-      *ngIf="orderDetails.notes"
-      class="bg-surface rounded-card border border-border p-4"
+  <!-- Dispatch Modal -->
+  <app-modal
+    [(isOpen)]="showDispatchModal"
+    title="Despachar Orden"
+    size="sm"
     >
-      <h3 class="font-semibold text-text-primary mb-3 flex items-center">
-        <app-icon name="file-text" [size]="16" class="mr-2"></app-icon>
-        Notas del pedido
-      </h3>
-      <p class="text-sm text-text-primary">{{ orderDetails.notes }}</p>
-    </div>
+    <div class="space-y-4">
+      <p class="text-sm text-text-secondary">
+        Confirma el despacho de la orden <strong>{{ orderDetails()?.order_number }}</strong>.
+        Puedes agregar información de seguimiento opcional.
+      </p>
 
-    <!-- Update Form -->
-    <form [formGroup]="updateForm" class="space-y-2 md:space-y-4">
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-2 md:gap-4">
-        <div>
-          <app-selector
-            label="Estado del pedido"
-            formControlName="status"
-            [options]="orderStatusOptions"
-            placeholder="Seleccionar estado"
-            styleVariant="modern"
-          ></app-selector>
-        </div>
-
-        <div>
-          <app-selector
-            label="Estado del pago"
-            formControlName="payment_status"
-            [options]="paymentStatusOptions"
-            placeholder="Seleccionar estado de pago"
-            styleVariant="modern"
-          ></app-selector>
-        </div>
-      </div>
-
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-2 md:gap-4">
+      <form [formGroup]="dispatchForm" class="space-y-4">
         <div>
           <app-input
-            label="El número de rastreo"
+            label="Número de Tracking (opcional)"
             formControlName="tracking_number"
-            placeholder="Enter tracking number"
+            placeholder="Ej: 1Z999AA10123456784"
             styleVariant="modern"
           ></app-input>
         </div>
 
         <div>
-          <label class="block text-sm font-medium text-text-primary mb-1"
-            >Entrega estimada</label
-          >
-          <input
-            type="datetime-local"
-            formControlName="estimated_delivery"
-            class="w-full px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
-          />
+          <app-input
+            label="Transportadora (opcional)"
+            formControlName="carrier"
+            placeholder="Ej: FedEx, DHL, Servientrega"
+            styleVariant="modern"
+          ></app-input>
         </div>
-      </div>
 
-      <div>
-        <app-textarea
-          label="Notas"
-          formControlName="notes"
-          [rows]="3"
-          placeholder="Enter order notes"
-          styleVariant="modern"
-        ></app-textarea>
-      </div>
-    </form>
-  </div>
-
-  <!-- Loading State -->
-  <div *ngIf="isLoading" class="flex items-center justify-center py-8">
-    <div
-      class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-    ></div>
-    <p class="ml-2 text-text-secondary">Cargando detalles del pedido...</p>
-  </div>
-
-  <!-- Modal Actions -->
-  <div class="flex justify-between items-center pt-4 border-t border-border">
-    <div class="flex gap-2">
-      <app-button
-        variant="outline"
-        size="sm"
-        (clicked)="onPrintInvoice()"
-        [disabled]="isLoading"
-      >
-        <app-icon name="printer" [size]="16" slot="icon"></app-icon>
-        Imprimir factura
-      </app-button>
-      <app-button
-        variant="outline"
-        size="sm"
-        (clicked)="onPrintPackingSlip()"
-        [disabled]="isLoading"
-      >
-        <app-icon name="package" [size]="16" slot="icon"></app-icon>
-        Albarán de embalaje
-      </app-button>
+        <div>
+          <app-textarea
+            label="Notas de despacho (opcional)"
+            formControlName="notes"
+            [rows]="2"
+            placeholder="Notas adicionales sobre el envío"
+            styleVariant="modern"
+          ></app-textarea>
+        </div>
+      </form>
     </div>
 
-    <div class="flex gap-2">
+    <div class="flex justify-end gap-2 pt-4 border-t border-border">
       <app-button
-        *ngIf="canCancelOrder()"
-        variant="danger"
+        variant="outline"
         size="sm"
-        (clicked)="onCancelOrder()"
-        [disabled]="isLoading"
-      >
-        <app-icon name="x-circle" [size]="16" slot="icon"></app-icon>
-        Cancelar pedido
+        (clicked)="closeDispatchModal()"
+        [disabled]="isDispatching()"
+        >
+        Cancelar
       </app-button>
-
       <app-button
-        *ngIf="canRefundOrder()"
-        variant="secondary"
-        size="sm"
-        (clicked)="onRefundOrder()"
-        [disabled]="isLoading"
-      >
-        <app-icon name="refresh-cw" [size]="16" slot="icon"></app-icon>
-        Orden de reembolso
-      </app-button>
-
-      <app-button
-        *ngIf="canDispatchOrder()"
         variant="primary"
         size="sm"
-        (clicked)="openDispatchModal()"
-        [disabled]="isLoading"
-      >
+        (clicked)="onDispatchOrder()"
+        [disabled]="isDispatching()"
+        >
         <app-icon name="truck" [size]="16" slot="icon"></app-icon>
-        Despachar Orden
-      </app-button>
-
-      <app-button
-        variant="primary"
-        size="sm"
-        (clicked)="onUpdateOrder()"
-        [disabled]="isLoading || isUpdating || updateForm.invalid"
-      >
-        <app-icon name="save" [size]="16" slot="icon"></app-icon>
-        {{ isUpdating ? "Updating..." : "Update Order" }}
+        {{ isDispatching() ? 'Despachando...' : 'Confirmar Despacho' }}
       </app-button>
     </div>
-  </div>
-</app-modal>
-
-<!-- Dispatch Modal -->
-<app-modal
-  [(isOpen)]="showDispatchModal"
-  title="Despachar Orden"
-  size="sm"
->
-  <div class="space-y-4">
-    <p class="text-sm text-text-secondary">
-      Confirma el despacho de la orden <strong>{{ orderDetails?.order_number }}</strong>.
-      Puedes agregar información de seguimiento opcional.
-    </p>
-
-    <form [formGroup]="dispatchForm" class="space-y-4">
-      <div>
-        <app-input
-          label="Número de Tracking (opcional)"
-          formControlName="tracking_number"
-          placeholder="Ej: 1Z999AA10123456784"
-          styleVariant="modern"
-        ></app-input>
-      </div>
-
-      <div>
-        <app-input
-          label="Transportadora (opcional)"
-          formControlName="carrier"
-          placeholder="Ej: FedEx, DHL, Servientrega"
-          styleVariant="modern"
-        ></app-input>
-      </div>
-
-      <div>
-        <app-textarea
-          label="Notas de despacho (opcional)"
-          formControlName="notes"
-          [rows]="2"
-          placeholder="Notas adicionales sobre el envío"
-          styleVariant="modern"
-        ></app-textarea>
-      </div>
-    </form>
-  </div>
-
-  <div class="flex justify-end gap-2 pt-4 border-t border-border">
-    <app-button
-      variant="outline"
-      size="sm"
-      (clicked)="closeDispatchModal()"
-      [disabled]="isDispatching"
-    >
-      Cancelar
-    </app-button>
-    <app-button
-      variant="primary"
-      size="sm"
-      (clicked)="onDispatchOrder()"
-      [disabled]="isDispatching"
-    >
-      <app-icon name="truck" [size]="16" slot="icon"></app-icon>
-      {{ isDispatching ? 'Despachando...' : 'Confirmar Despacho' }}
-    </app-button>
-  </div>
-</app-modal>
+  </app-modal>

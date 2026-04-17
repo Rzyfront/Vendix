@@ -1,5 +1,6 @@
-import { Component, ChangeDetectionStrategy, input, output, computed, signal, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, ChangeDetectionStrategy, input, output, computed, signal, inject, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { environment } from '../../../../../../../../environments/environment';
@@ -9,12 +10,14 @@ import {
   TextareaComponent,
   ToggleComponent,
   IconComponent,
+  ButtonComponent,
+  SpinnerComponent,
 } from '../../../../../../../shared/components';
 
 @Component({
   selector: 'app-dynamic-field',
   standalone: true,
-  imports: [CommonModule, FormsModule, InputComponent, SelectorComponent, TextareaComponent, ToggleComponent, IconComponent],
+  imports: [FormsModule, InputComponent, SelectorComponent, TextareaComponent, ToggleComponent, IconComponent, ButtonComponent, SpinnerComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div>
@@ -24,7 +27,7 @@ import {
           <app-icon [name]="resolvedIcon()" [size]="14" color="var(--color-text-muted)"></app-icon>
           {{ field().label }}
           @if (required()) {
-            <span class="text-red-500 ml-0.5">*</span>
+            <span class="ml-0.5" style="color: var(--color-error)">*</span>
           }
         </label>
       }
@@ -39,7 +42,8 @@ import {
             [size]="'sm'"
             type="text"
             [placeholder]="placeholder()"
-            [value]="value()"
+            [ngModel]="value()"
+            [ngModelOptions]="{ standalone: true }"
             (inputChange)="valueChange.emit($event)"
           />
         }
@@ -48,7 +52,8 @@ import {
             [size]="'sm'"
             type="number"
             [placeholder]="placeholder()"
-            [value]="value()"
+            [ngModel]="value()"
+            [ngModelOptions]="{ standalone: true }"
             [min]="field().options?.min"
             [max]="field().options?.max"
             (inputChange)="valueChange.emit($event)"
@@ -58,7 +63,8 @@ import {
           <app-input
             [size]="'sm'"
             type="date"
-            [value]="value()"
+            [ngModel]="value()"
+            [ngModelOptions]="{ standalone: true }"
             (inputChange)="valueChange.emit($event)"
           />
         }
@@ -67,7 +73,8 @@ import {
             [size]="'sm'"
             type="email"
             [placeholder]="placeholder()"
-            [value]="value()"
+            [ngModel]="value()"
+            [ngModelOptions]="{ standalone: true }"
             (inputChange)="valueChange.emit($event)"
           />
         }
@@ -76,7 +83,8 @@ import {
             [size]="'sm'"
             type="tel"
             [placeholder]="placeholder()"
-            [value]="value()"
+            [ngModel]="value()"
+            [ngModelOptions]="{ standalone: true }"
             (inputChange)="valueChange.emit($event)"
           />
         }
@@ -85,7 +93,8 @@ import {
             [size]="'sm'"
             type="url"
             [placeholder]="placeholder()"
-            [value]="value()"
+            [ngModel]="value()"
+            [ngModelOptions]="{ standalone: true }"
             (inputChange)="valueChange.emit($event)"
           />
         }
@@ -115,25 +124,19 @@ import {
         }
         @case ('file') {
           @if (uploading()) {
-            <div class="w-full px-3 py-2 border rounded-lg text-sm flex items-center gap-2"
+            <div class="w-full px-3 py-2 border rounded-lg flex items-center gap-2"
                  style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text-muted)">
-              <div class="w-4 h-4 border-2 border-t-transparent rounded-full animate-spin"
-                   style="border-color: var(--color-primary); border-top-color: transparent"></div>
+              <app-spinner size="sm" />
               <span class="text-xs">Subiendo archivo...</span>
             </div>
           } @else if (uploadedFileName()) {
-            <div class="w-full px-3 py-2 border rounded-lg text-sm flex items-center justify-between"
+            <div class="w-full px-3 py-2 border rounded-lg flex items-center justify-between"
                  style="border-color: var(--color-border); background: var(--color-surface); color: var(--color-text)">
               <div class="flex items-center gap-2 min-w-0">
                 <app-icon name="check-circle" [size]="14" color="var(--color-primary)"></app-icon>
                 <span class="truncate text-xs">{{ uploadedFileName() }}</span>
               </div>
-              <button type="button"
-                      class="text-xs px-2 py-1 rounded shrink-0"
-                      style="color: var(--color-text-muted)"
-                      (click)="clearFile()">
-                Cambiar
-              </button>
+              <app-button variant="ghost" size="xsm" (clicked)="clearFile()">Cambiar</app-button>
             </div>
           } @else {
             <input type="file"
@@ -143,7 +146,7 @@ import {
                    (change)="onFileChange($event)" />
           }
           @if (uploadError()) {
-            <p class="text-xs mt-1 text-red-500">{{ uploadError() }}</p>
+            <p class="text-xs mt-1" style="color: var(--color-error)">{{ uploadError() }}</p>
           }
         }
       }
@@ -155,6 +158,7 @@ import {
   `,
 })
 export class DynamicFieldComponent {
+  private destroyRef = inject(DestroyRef);
   private http = inject(HttpClient);
 
   field = input.required<any>();
@@ -204,7 +208,7 @@ export class DynamicFieldComponent {
     this.http.post<any>(
       `${environment.apiUrl}/ecommerce/data-collection/${token}/upload`,
       formData,
-    ).subscribe({
+    ).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (res) => {
         const data = res.data || res;
         this.valueChange.emit(data.key);

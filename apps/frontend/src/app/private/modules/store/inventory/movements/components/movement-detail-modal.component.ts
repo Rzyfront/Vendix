@@ -1,5 +1,5 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input, output } from '@angular/core';
+import { DatePipe } from '@angular/common';
 
 // Shared Components
 import {
@@ -18,16 +18,16 @@ import {
 @Component({
   selector: 'app-movement-detail-modal',
   standalone: true,
-  imports: [CommonModule, ModalComponent, ButtonComponent, IconComponent],
+  imports: [DatePipe, ModalComponent, ButtonComponent, IconComponent],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       title="Detalle del Movimiento"
       size="md"
       (closed)="onClose()"
       (isOpenChange)="isOpenChange.emit($event)"
     >
-      @if (movement) {
+      @if (movement()) {
         <div class="space-y-6">
           <!-- Header with Type Badge -->
           <div
@@ -57,21 +57,21 @@ import {
             </h3>
             <div class="p-4 bg-surface rounded-xl border border-border">
               <p class="font-semibold text-text-primary">
-                {{ movement.products?.name || 'Producto desconocido' }}
+                {{ movement()!.products?.name || 'Producto desconocido' }}
               </p>
               <p class="text-sm text-text-secondary mt-1">
-                SKU: {{ movement.products?.sku || 'N/A' }}
+                SKU: {{ movement()!.products?.sku || 'N/A' }}
               </p>
-              @if (movement.product_variants) {
+              @if (movement()!.product_variants) {
                 <p class="text-sm text-primary mt-1">
                   <app-icon
                     name="git-branch"
                     [size]="14"
                     class="inline mr-1"
                   ></app-icon>
-                  Variante: {{ movement.product_variants.sku }}
-                  @if (movement.product_variants.name) {
-                    ({{ movement.product_variants.name }})
+                  Variante: {{ movement()!.product_variants?.sku }}
+                  @if (movement()!.product_variants?.name) {
+                    ({{ movement()!.product_variants?.name }})
                   }
                 </p>
               }
@@ -79,7 +79,7 @@ import {
           </div>
 
           <!-- Locations Section -->
-          @if (movement.from_location || movement.to_location) {
+          @if (movement()!.from_location || movement()!.to_location) {
             <div class="space-y-3">
               <h3
                 class="text-sm font-semibold text-text-secondary uppercase tracking-wide flex items-center gap-2"
@@ -89,32 +89,32 @@ import {
               </h3>
               <div class="p-4 bg-surface rounded-xl border border-border">
                 <div class="flex items-center gap-3">
-                  @if (movement.from_location) {
+                  @if (movement()!.from_location) {
                     <div class="flex-1">
                       <p class="text-xs text-text-muted uppercase">Origen</p>
                       <p class="font-medium text-text-primary">
-                        {{ movement.from_location.name }}
+                        {{ movement()!.from_location?.name }}
                       </p>
                       <p class="text-xs text-text-secondary">
-                        {{ movement.from_location.code }}
+                        {{ movement()!.from_location?.code }}
                       </p>
                     </div>
                   }
-                  @if (movement.from_location && movement.to_location) {
+                  @if (movement()!.from_location && movement()!.to_location) {
                     <app-icon
                       name="arrow-right"
                       [size]="20"
                       class="text-text-muted flex-shrink-0"
                     ></app-icon>
                   }
-                  @if (movement.to_location) {
+                  @if (movement()!.to_location) {
                     <div class="flex-1">
                       <p class="text-xs text-text-muted uppercase">Destino</p>
                       <p class="font-medium text-text-primary">
-                        {{ movement.to_location.name }}
+                        {{ movement()!.to_location?.name }}
                       </p>
                       <p class="text-xs text-text-secondary">
-                        {{ movement.to_location.code }}
+                        {{ movement()!.to_location?.code }}
                       </p>
                     </div>
                   }
@@ -143,14 +143,14 @@ import {
                 class="text-3xl font-bold"
                 [class]="isInbound() ? 'text-success' : 'text-error'"
               >
-                {{ isInbound() ? '+' : '-' }}{{ movement.quantity }}
+                {{ isInbound() ? '+' : '-' }}{{ movement()!.quantity }}
               </p>
               <p class="text-sm text-text-secondary mt-1">unidades</p>
             </div>
           </div>
 
           <!-- Source Order Section -->
-          @if (movement.source_order_type) {
+          @if (movement()!.source_order_type) {
             <div class="space-y-3">
               <h3
                 class="text-sm font-semibold text-text-secondary uppercase tracking-wide flex items-center gap-2"
@@ -163,11 +163,11 @@ import {
                   <span
                     class="px-2 py-1 bg-muted/20 rounded-lg text-sm font-medium text-text-secondary"
                   >
-                    {{ getSourceOrderLabel(movement.source_order_type) }}
+                    {{ getSourceOrderLabel(movement()!.source_order_type!) }}
                   </span>
-                  @if (movement.source_order_id) {
+                  @if (movement()!.source_order_id) {
                     <span class="text-sm text-text-primary font-medium">
-                      #{{ movement.source_order_id }}
+                      #{{ movement()!.source_order_id }}
                     </span>
                   }
                 </div>
@@ -176,7 +176,7 @@ import {
           }
 
           <!-- Reason & Notes Section -->
-          @if (movement.reason || movement.notes) {
+          @if (movement()!.reason || movement()!.notes) {
             <div class="space-y-3">
               <h3
                 class="text-sm font-semibold text-text-secondary uppercase tracking-wide flex items-center gap-2"
@@ -185,17 +185,17 @@ import {
                 Motivo
               </h3>
               <div class="p-4 bg-surface rounded-xl border border-border">
-                @if (movement.reason) {
+                @if (movement()!.reason) {
                   <p class="font-medium text-text-primary">
-                    {{ movement.reason }}
+                    {{ movement()!.reason }}
                   </p>
                 }
-                @if (movement.notes) {
+                @if (movement()!.notes) {
                   <p
                     class="text-sm text-text-secondary"
-                    [class.mt-2]="movement.reason"
+                    [class.mt-2]="movement()!.reason"
                   >
-                    {{ movement.notes }}
+                    {{ movement()!.notes }}
                   </p>
                 }
               </div>
@@ -227,16 +227,16 @@ import {
                   <p class="text-sm text-text-secondary">Registrado por</p>
                   <p class="font-medium text-text-primary">
                     {{
-                      movement.users?.user_name || 'Sistema'
+                      movement()!.users?.user_name || 'Sistema'
                     }}
                   </p>
-                  @if (movement.users?.email) {
+                  @if (movement()!.users?.email) {
                     <p class="text-xs text-text-muted">
-                      {{ movement.users?.email }}
+                      {{ movement()!.users?.email }}
                     </p>
                   }
                   <p class="text-xs text-text-muted mt-1">
-                    {{ movement.created_at | date: 'dd/MM/yyyy HH:mm' }}
+                    {{ movement()!.created_at | date: 'dd/MM/yyyy HH:mm' }}
                   </p>
                 </div>
               </div>
@@ -269,11 +269,11 @@ import {
   `,
 })
 export class MovementDetailModalComponent {
-  @Input() isOpen = false;
-  @Input() movement: InventoryMovement | null = null;
+  readonly isOpen = input(false);
+  readonly movement = input<InventoryMovement | null>(null);
 
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() close = new EventEmitter<void>();
+  readonly isOpenChange = output<boolean>();
+  readonly close = output<void>();
 
   private typeConfig: Record<
     MovementType,
@@ -329,32 +329,32 @@ export class MovementDetailModalComponent {
   };
 
   isInbound(): boolean {
-    if (!this.movement) return false;
+    if (!this.movement()) return false;
     return (
-      this.movement.movement_type === 'stock_in' ||
-      this.movement.movement_type === 'return'
+      this.movement()!.movement_type === 'stock_in' ||
+      this.movement()!.movement_type === 'return'
     );
   }
 
   getTypeLabel(): string {
-    if (!this.movement) return '';
+    if (!this.movement()) return '';
     return (
-      this.typeConfig[this.movement.movement_type]?.label ||
-      this.movement.movement_type
+      this.typeConfig[this.movement()!.movement_type]?.label ||
+      this.movement()!.movement_type
     );
   }
 
   getTypeIcon(): string {
-    if (!this.movement) return 'help-circle';
+    if (!this.movement()) return 'help-circle';
     return (
-      this.typeConfig[this.movement.movement_type]?.icon || 'help-circle'
+      this.typeConfig[this.movement()!.movement_type]?.icon || 'help-circle'
     );
   }
 
   getTypeColorClasses(): string {
-    if (!this.movement) return 'bg-muted/10 text-muted';
+    if (!this.movement()) return 'bg-muted/10 text-muted';
     return (
-      this.typeConfig[this.movement.movement_type]?.colorClass ||
+      this.typeConfig[this.movement()!.movement_type]?.colorClass ||
       'bg-muted/10 text-muted'
     );
   }

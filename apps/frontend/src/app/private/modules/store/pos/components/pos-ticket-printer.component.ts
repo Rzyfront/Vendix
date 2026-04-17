@@ -1,7 +1,7 @@
-import { Component, Input, Output, EventEmitter, OnInit } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, input, output, inject, DestroyRef} from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Observable } from 'rxjs';
+import {toSignal, takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import { PosTicketService } from '../services/pos-ticket.service';
 import {
   TicketData,
@@ -12,7 +12,7 @@ import {
 @Component({
   selector: 'app-pos-ticket-printer',
   standalone: true,
-  imports: [CommonModule, FormsModule],
+  imports: [FormsModule],
   template: `
     <div class="ticket-printer-container">
       <div class="printer-header">
@@ -31,12 +31,11 @@ import {
             [(ngModel)]="selectedPrinter"
             (change)="onPrinterChange()"
           >
-            <option
-              *ngFor="let printer of printers$ | async"
-              [value]="printer.name"
-            >
-              {{ printer.name }} ({{ printer.type }})
-            </option>
+            @for (printer of printers(); track printer.name) {
+              <option [value]="printer.name">
+                {{ printer.name }} ({{ printer.type }})
+              </option>
+            }
           </select>
           <button
             class="test-btn"
@@ -82,9 +81,11 @@ import {
                 [disabled]="!hasCustomerEmail()"
               />
               Enviar por email
-              <span *ngIf="ticketData?.customer?.email" class="customer-info">
-                ({{ ticketData.customer!.email }})
-              </span>
+              @if (ticketData().customer?.email) {
+                <span class="customer-info">
+                  ({{ ticketData()!.customer!.email }})
+                </span>
+              }
             </label>
           </div>
 
@@ -97,9 +98,11 @@ import {
                 [disabled]="!hasCustomerPhone()"
               />
               Enviar por SMS
-              <span *ngIf="ticketData?.customer?.phone" class="customer-info">
-                ({{ ticketData.customer!.phone }})
-              </span>
+              @if (ticketData().customer?.phone) {
+                <span class="customer-info">
+                  ({{ ticketData()!.customer!.phone }})
+                </span>
+              }
             </label>
           </div>
 
@@ -117,10 +120,12 @@ import {
           </div>
         </div>
 
-        <div class="ticket-preview" *ngIf="showPreview">
-          <h4>Vista Previa del Ticket</h4>
-          <div class="preview-container" [innerHTML]="ticketPreview"></div>
-        </div>
+        @if (showPreview) {
+          <div class="ticket-preview">
+            <h4>Vista Previa del Ticket</h4>
+            <div class="preview-container" [innerHTML]="ticketPreview"></div>
+          </div>
+        }
       </div>
 
       <div class="printer-actions">
@@ -402,12 +407,17 @@ import {
     `,
   ],
 })
-export class PosTicketPrinterComponent implements OnInit {
-  @Input() ticketData!: TicketData;
-  @Output() printComplete = new EventEmitter<boolean>();
-  @Output() printerClosed = new EventEmitter<void>();
+export class PosTicketPrinterComponent {
+  private destroyRef = inject(DestroyRef);
+  readonly ticketData = input.required<TicketData>();
+  readonly printComplete = output<boolean>();
+  readonly printerClosed = output<void>();
 
-  printers$!: Observable<PrinterConfig[]>;
+  private ticketService = inject(PosTicketService);
+
+  readonly printers = toSignal(this.ticketService.getPrinterConfig(), {
+    initialValue: [] as PrinterConfig[],
+  });
   selectedPrinter: string = '';
   printOptions: PrintOptions = {
     printReceipt: true,
@@ -421,19 +431,16 @@ export class PosTicketPrinterComponent implements OnInit {
   ticketPreview: string = '';
   printing: boolean = false;
 
-  constructor(private ticketService: PosTicketService) {}
+  constructor() {
+    this.loadPreview();
+  }
 
   hasCustomerEmail(): boolean {
-    return !!this.ticketData?.customer?.email;
+    return !!this.ticketData()?.customer?.email;
   }
 
   hasCustomerPhone(): boolean {
-    return !!this.ticketData?.customer?.phone;
-  }
-
-  ngOnInit(): void {
-    this.printers$ = this.ticketService.getPrinterConfig();
-    this.loadPreview();
+    return !!this.ticketData()?.customer?.phone;
   }
 
   onPrinterChange(): void {
@@ -452,8 +459,9 @@ export class PosTicketPrinterComponent implements OnInit {
   }
 
   private loadPreview(): void {
-    if (this.ticketData) {
-      this.ticketService.previewTicket(this.ticketData).subscribe((preview) => {
+    const data = this.ticketData();
+    if (data) {
+      this.ticketService.previewTicket(data).pipe(takeUntilDestroyed(this.destroyRef)).subscribe((preview) => {
         this.ticketPreview = preview;
       });
     }
@@ -463,7 +471,7 @@ export class PosTicketPrinterComponent implements OnInit {
     if (this.selectedPrinter) {
       this.ticketService
         .testPrinter(this.selectedPrinter)
-        .subscribe((success) => {
+        .pipe(takeUntilDestroyed(this.destroyRef)).subscribe((success) => {
           if (!success) {
             console.error('Error en la prueba de impresión');
           }
@@ -472,7 +480,8 @@ export class PosTicketPrinterComponent implements OnInit {
   }
 
   printTicket(): void {
-    if (!this.ticketData) return;
+    const data = this.ticketData();
+    if (!data) return;
 
     this.printing = true;
 
@@ -481,7 +490,7 @@ export class PosTicketPrinterComponent implements OnInit {
       printer: this.selectedPrinter,
     };
 
-    this.ticketService.printTicket(this.ticketData, options).subscribe({
+    this.ticketService.printTicket(data, options).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (success) => {
         this.printing = false;
         this.printComplete.emit(success);
@@ -498,7 +507,8 @@ export class PosTicketPrinterComponent implements OnInit {
   }
 
   async printOrder(): Promise<void> {
-    if (!this.ticketData) return;
+    const data = this.ticketData();
+    if (!data) return;
 
     const printContent = await this.generatePrintContent();
     const printWindow = window.open('', '_blank');
@@ -510,9 +520,10 @@ export class PosTicketPrinterComponent implements OnInit {
   }
 
   private async generatePrintContent(): Promise<string> {
-    if (!this.ticketData) return '';
+    const data = this.ticketData();
+    if (!data) return '';
 
-    const html = await this.ticketService.generateTicketHTML(this.ticketData);
+    const html = await this.ticketService.generateTicketHTML(data);
 
     return `
       <html>

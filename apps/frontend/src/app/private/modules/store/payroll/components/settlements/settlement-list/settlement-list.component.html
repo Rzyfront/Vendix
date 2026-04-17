@@ -47,36 +47,41 @@
     </div>
 
     <!-- Estado de Carga -->
-    <div *ngIf="isLoading()" class="p-4 md:p-6 text-center">
-      <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-      <p class="mt-2 text-text-secondary">Cargando liquidaciones...</p>
-    </div>
+    @if (isLoading()) {
+      <div class="p-4 md:p-6 text-center">
+        <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        <p class="mt-2 text-text-secondary">Cargando liquidaciones...</p>
+      </div>
+    }
 
     <!-- Estado Vacío -->
-    <app-empty-state
-      *ngIf="!isLoading() && settlements().length === 0"
-      icon="file-minus"
-      title="No hay liquidaciones registradas"
-      description="Comience creando su primera liquidacion."
-      actionButtonText="Crear Liquidacion"
-      [showActionButton]="true"
-      [showRefreshButton]="true"
-      (actionClick)="create.emit()"
-      (refreshClick)="search.emit(searchTerm)">
-    </app-empty-state>
+    @if (!isLoading() && settlements().length === 0) {
+      <app-empty-state
+        icon="file-minus"
+        title="No hay liquidaciones registradas"
+        description="Comience creando su primera liquidacion."
+        actionButtonText="Crear Liquidacion"
+        [showActionButton]="true"
+        [showRefreshButton]="true"
+        (actionClick)="create.emit()"
+        (refreshClick)="search.emit(searchTerm)">
+      </app-empty-state>
+    }
 
     <!-- Settlements List -->
-    <div *ngIf="!isLoading() && settlements().length > 0" class="px-2 pb-2 pt-3 md:p-4">
-      <app-responsive-data-view
-        [data]="settlements()"
-        [columns]="columns"
-        [cardConfig]="cardConfig"
-        [actions]="actions"
-        [loading]="isLoading()"
-        emptyMessage="No hay liquidaciones registradas"
-        emptyIcon="file-minus"
-        (rowClick)="view.emit($event)">
-      </app-responsive-data-view>
-    </div>
+    @if (!isLoading() && settlements().length > 0) {
+      <div class="px-2 pb-2 pt-3 md:p-4">
+        <app-responsive-data-view
+          [data]="settlements()"
+          [columns]="columns"
+          [cardConfig]="cardConfig"
+          [actions]="actions"
+          [loading]="isLoading()"
+          emptyMessage="No hay liquidaciones registradas"
+          emptyIcon="file-minus"
+          (rowClick)="view.emit($event)">
+        </app-responsive-data-view>
+      </div>
+    }
   </app-card>
 </div>
