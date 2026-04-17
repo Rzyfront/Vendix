@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, inject } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
 
 import {
   ChartComponent,
@@ -23,11 +23,15 @@ import { takeUntil } from 'rxjs/operators';
 })
 export class DashboardComponent implements OnInit, OnDestroy {
   private currencyService = inject(CurrencyFormatService);
+  private organizationDashboardService = inject(OrganizationDashboardService);
+  private route = inject(ActivatedRoute);
+  private globalFacade = inject(GlobalFacade);
+
   private destroy$ = new Subject<void>();
-  isLoading = false;
-  organizationId: string = '';
-  dashboardStats: any | null = null; // Using any to avoid strict type issues if interface isn't fully aligned yet, or use OrganizationDashboardStats
-  selectedPeriod: string = '6m';
+  readonly isLoading = signal(false);
+  readonly organizationId = signal<string>('');
+  readonly dashboardStats = signal<any | null>(null);
+  readonly selectedPeriod = signal<string>('6m');
   storeDistributionColors = [
     '#7ed7a5',
     '#06b6d4',
@@ -35,17 +39,12 @@ export class DashboardComponent implements OnInit, OnDestroy {
     '#a855f7',
     '#ec4899',
   ];
-  storeDistributionLegend: any[] = [];
+  readonly storeDistributionLegend = signal<any[]>([]);
   CHART_THEMES = CHART_THEMES;
 
   // Revenue Chart Data - Stacked Line Chart
-  revenueChartData: EChartsOption = {};
-
-  constructor(
-    private organizationDashboardService: OrganizationDashboardService,
-    private route: ActivatedRoute,
-    private globalFacade: GlobalFacade,
-  ) {}
+  readonly revenueChartData = signal<EChartsOption>({});
+  readonly storeDistributionData = signal<EChartsOption>({});
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
@@ -59,13 +58,13 @@ export class DashboardComponent implements OnInit, OnDestroy {
     const orgIdFromUser = context?.user?.organization_id;
 
     if (orgIdFromContext) {
-      this.organizationId = orgIdFromContext;
+      this.organizationId.set(orgIdFromContext);
       this.loadDashboardData();
       return;
     }
 
     if (orgIdFromUser) {
-      this.organizationId = String(orgIdFromUser);
+      this.organizationId.set(String(orgIdFromUser));
       this.loadDashboardData();
       return;
     }
@@ -74,7 +73,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
     const routeId = this.route.snapshot.paramMap.get('id');
 
     if (routeId) {
-      this.organizationId = routeId;
+      this.organizationId.set(routeId);
       this.loadDashboardData();
     } else {
       // Fallback to user context observable
@@ -85,7 +84,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
           const orgId =
             context?.organization?.id || context?.user?.organization_id;
           if (orgId) {
-            this.organizationId = String(orgId);
+            this.organizationId.set(String(orgId));
             this.loadDashboardData();
           }
         });
@@ -98,31 +97,31 @@ export class DashboardComponent implements OnInit, OnDestroy {
   }
 
   private loadDashboardData(): void {
-    if (!this.organizationId) {
+    if (!this.organizationId()) {
       return;
     }
 
-    this.isLoading = true;
+    this.isLoading.set(true);
 
     this.organizationDashboardService
-      .getDashboardStats(this.organizationId, this.selectedPeriod)
+      .getDashboardStats(this.organizationId(), this.selectedPeriod())
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (data) => {
-          this.dashboardStats = data;
+          this.dashboardStats.set(data);
           this.updateRevenueChart(data);
           this.updateStoreDistributionChart(data);
-          this.isLoading = false;
+          this.isLoading.set(false);
         },
         error: (error) => {
           console.error('Error loading organization dashboard data:', error);
-          this.isLoading = false;
+          this.isLoading.set(false);
         },
       });
   }
 
   onPeriodChange(period: string): void {
-    this.selectedPeriod = period;
+    this.selectedPeriod.set(period);
     this.loadDashboardData();
   }
 
@@ -132,23 +131,23 @@ export class DashboardComponent implements OnInit, OnDestroy {
 
   // Helper methods for template
   getRevenueValue(): string {
-    const value = this.dashboardStats?.stats?.revenue?.value || 0;
+    const value = this.dashboardStats()?.stats?.revenue?.value || 0;
     return this.formatCurrency(value);
   }
 
   getRevenueTrendText(): string {
-    const subValue = this.dashboardStats?.stats?.revenue?.sub_value || 0;
+    const subValue = this.dashboardStats()?.stats?.revenue?.sub_value || 0;
     const sign = subValue > 0 ? '+' : '';
     return `${sign}${this.formatCurrency(subValue)} vs mes pasado`;
   }
 
   getRevenueIconBg(): string {
-    const subValue = this.dashboardStats?.stats?.revenue?.sub_value || 0;
+    const subValue = this.dashboardStats()?.stats?.revenue?.sub_value || 0;
     return subValue >= 0 ? 'bg-green-100' : 'bg-red-100';
   }
 
   getRevenueIconColor(): string {
-    const subValue = this.dashboardStats?.stats?.revenue?.sub_value || 0;
+    const subValue = this.dashboardStats()?.stats?.revenue?.sub_value || 0;
     return subValue >= 0 ? 'text-green-600' : 'text-red-600';
   }
 
@@ -161,7 +160,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       const costs = data.profit_trend.map((item: any) => item.costs || 0);
       const profit = data.profit_trend.map((item: any) => item.amount || 0);
 
-      this.revenueChartData = {
+      this.revenueChartData.set({
         tooltip: {
           trigger: 'axis',
           axisPointer: {
@@ -242,7 +241,7 @@ export class DashboardComponent implements OnInit, OnDestroy {
       // Calculate total for percentage
       const total = values.reduce((sum: number, val: number) => sum + val, 0);
 
-      this.storeDistributionData = {
+      this.storeDistributionData.set({
         tooltip: {
           trigger: 'item',
           formatter: '{b}: {c} ({d}%)', // Name: Value (Percent)
@@ -287,20 +286,17 @@ export class DashboardComponent implements OnInit, OnDestroy {
             })),
           },
         ],
-      };
+      });
 
       // Update the display values in the legend
-      this.storeDistributionLegend = data.store_distribution.map(
+      this.storeDistributionLegend.set(data.store_distribution.map(
         (item: any) => ({
           type: item.type.charAt(0).toUpperCase() + item.type.slice(1),
           value: this.formatCurrency(item.revenue || 0),
           percentage:
             total > 0 ? (((item.revenue || 0) / total) * 100).toFixed(1) : '0',
         }),
-      );
+      ));
     }
   }
-
-  // Store Distribution Data - Enhanced Doughnut Chart
-  storeDistributionData: EChartsOption = {};
 }

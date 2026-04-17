@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, signal } from '@angular/core';
+import { Component, OnInit, OnDestroy, signal, model, inject } from '@angular/core';
 
 import { debounceTime, distinctUntilChanged, Subject, takeUntil } from 'rxjs';
 import {
@@ -67,20 +67,25 @@ interface StatItem {
   styleUrls: ['./users.component.css'],
 })
 export class UsersComponent implements OnInit, OnDestroy {
+  private usersService = inject(UsersService);
+  private fb = inject(FormBuilder);
+  private dialogService = inject(DialogService);
+  private toastService = inject(ToastService);
+
   readonly users = signal<User[]>([]);
   readonly userStats = signal<UserStats | null>(null);
   readonly statsItems = signal<StatItem[]>([]);
   readonly isLoading = signal(false);
-  currentUser: User | null = null;
-  showCreateModal = false;
-  showEditModal = false;
-  showConfigModal = false;
-  userForConfig: User | null = null;
-  userToDelete: User | null = null;
-  showDeleteModal = false;
+  readonly currentUser = signal<User | null>(null);
+  readonly showCreateModal = model<boolean>(false);
+  readonly showEditModal = model<boolean>(false);
+  readonly showConfigModal = model<boolean>(false);
+  readonly userForConfig = signal<User | null>(null);
+  readonly userToDelete = signal<User | null>(null);
+  readonly showDeleteModal = signal(false);
+  readonly viewMode = signal<'table' | 'cards'>('table');
   searchSubject = new Subject<string>();
   private destroy$ = new Subject<void>();
-  viewMode: 'table' | 'cards' = 'table';
 
   // Form for filters
   filterForm: FormGroup;
@@ -221,12 +226,7 @@ export class UsersComponent implements OnInit, OnDestroy {
     { value: UserState.ARCHIVED, label: 'Archivado' },
   ];
 
-  constructor(
-    private usersService: UsersService,
-    private fb: FormBuilder,
-    private dialogService: DialogService,
-    private toastService: ToastService,
-  ) {
+  constructor() {
     this.filterForm = this.fb.group({
       search: [''],
       state: [''],
@@ -443,41 +443,41 @@ export class UsersComponent implements OnInit, OnDestroy {
   }
 
   createUser(): void {
-    this.showCreateModal = true;
+    this.showCreateModal.set(true);
   }
 
   onUserCreated(): void {
-    this.showCreateModal = false;
+    this.showCreateModal.set(false);
     this.loadUsers();
     this.loadUserStats();
   }
 
   editUser(user: User): void {
-    this.currentUser = user;
-    this.showEditModal = true;
+    this.currentUser.set(user);
+    this.showEditModal.set(true);
   }
 
   onUserUpdated(): void {
-    this.showEditModal = false;
-    this.currentUser = null;
+    this.showEditModal.set(false);
+    this.currentUser.set(null);
     this.loadUsers();
     this.loadUserStats();
   }
 
   configUser(user: User): void {
-    this.userForConfig = user;
-    this.showConfigModal = true;
+    this.userForConfig.set(user);
+    this.showConfigModal.set(true);
   }
 
   onUserConfigured(): void {
-    this.showConfigModal = false;
-    this.userForConfig = null;
+    this.showConfigModal.set(false);
+    this.userForConfig.set(null);
     this.loadUsers();
     this.loadUserStats();
   }
 
   confirmDelete(user: User): void {
-    this.userToDelete = user;
+    this.userToDelete.set(user);
     this.dialogService
       .confirm({
         title: 'Eliminar Usuario',
@@ -494,11 +494,11 @@ export class UsersComponent implements OnInit, OnDestroy {
   }
 
   deleteUser(): void {
-    if (!this.userToDelete) return;
+    if (!this.userToDelete()) return;
 
-    this.usersService.deleteUser(this.userToDelete.id).subscribe({
+    this.usersService.deleteUser(this.userToDelete()!.id).subscribe({
       next: () => {
-        this.userToDelete = null;
+        this.userToDelete.set(null);
         this.loadUsers();
         this.loadUserStats();
         this.toastService.success('Usuario eliminado exitosamente');
@@ -616,6 +616,6 @@ export class UsersComponent implements OnInit, OnDestroy {
   }
 
   toggleViewMode(): void {
-    this.viewMode = this.viewMode === 'table' ? 'cards' : 'table';
+    this.viewMode.set(this.viewMode() === 'table' ? 'cards' : 'table');
   }
 }

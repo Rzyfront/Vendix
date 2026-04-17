@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, signal, model, computed } from '@angular/core';
 
 import {
   FormsModule,
@@ -77,15 +77,7 @@ interface StatItem {
       <!-- Stats Cards -->
       <div class="stats-container">
         @for (item of statsItems(); track item) {
-          <app-stats
-            [title]="item.title"
-            [value]="item.value"
-            [smallText]="item.smallText"
-            [iconName]="item.iconName"
-            [iconBgColor]="item.iconBgColor"
-            [iconColor]="item.iconColor"
-            >
-          </app-stats>
+          <app-stats [title]="item.title" [value]="item.value" [smallText]="item.smallText" [iconName]="item.iconName" [iconBgColor]="item.iconBgColor" [iconColor]="item.iconColor"></app-stats>
         }
       </div>
     
@@ -251,12 +243,18 @@ interface StatItem {
 })
 export class StoresComponent implements OnInit, OnDestroy {
   private currencyService = inject(CurrencyFormatService);
+  private storesService = inject(OrganizationStoresService);
+  private fb = inject(FormBuilder);
+  private dialogService = inject(DialogService);
+  private toastService = inject(ToastService);
+  private environmentSwitchService = inject(EnvironmentSwitchService);
+
   readonly stores = signal<StoreListItem[]>([]);
   readonly isLoading = signal(false);
   readonly statsItems = signal<StatItem[]>([]);
-  searchTerm = '';
-  selectedState = '';
-  selectedStoreType = '';
+  readonly searchTerm = signal('');
+  readonly selectedState = signal('');
+  readonly selectedStoreType = signal('');
 
   // Table configuration
   tableColumns: TableColumn[] = [
@@ -372,32 +370,30 @@ export class StoresComponent implements OnInit, OnDestroy {
   };
 
   // Modal state
-  isCreateModalOpen = false;
-  isCreatingStore = false;
+  readonly isCreateModalOpen = model<boolean>(false);
+  readonly isCreatingStore = signal(false);
   createStoreForm!: FormGroup;
 
   // Edit Modal state
-  isEditModalOpen = false;
-  isUpdatingStore = false;
-  selectedStore?: StoreListItem;
+  readonly isEditModalOpen = model<boolean>(false);
+  readonly isUpdatingStore = signal(false);
+  readonly selectedStore = signal<StoreListItem | undefined>(undefined);
 
   // Settings Modal state
-  isSettingsModalOpen = false;
-  selectedStoreForSettings?: StoreListItem;
+  readonly isSettingsModalOpen = model<boolean>(false);
+  readonly selectedStoreForSettings = signal<StoreListItem | undefined>(undefined);
 
   // Delete Confirmation Modal state
-  isDeleteModalOpen = false;
-  selectedStoreForDelete: StoreListItem | null = null;
+  readonly isDeleteModalOpen = model<boolean>(false);
+  readonly selectedStoreForDelete = signal<StoreListItem | null>(null);
+
+  readonly hasFilters = computed(() =>
+    !!(this.searchTerm() || this.selectedState() || this.selectedStoreType())
+  );
 
   private destroy$ = new Subject<void>();
 
-  constructor(
-    private storesService: OrganizationStoresService,
-    private fb: FormBuilder,
-    private dialogService: DialogService,
-    private toastService: ToastService,
-    private environmentSwitchService: EnvironmentSwitchService,
-  ) {
+  constructor() {
     this.initializeCreateForm();
   }
 
@@ -416,10 +412,6 @@ export class StoresComponent implements OnInit, OnDestroy {
     });
   }
 
-  get hasFilters(): boolean {
-    return !!(this.searchTerm || this.selectedState || this.selectedStoreType);
-  }
-
   ngOnInit(): void {
     this.currencyService.loadCurrency();
     this.loadStores();
@@ -432,7 +424,7 @@ export class StoresComponent implements OnInit, OnDestroy {
   }
 
   openCreateStoreModal(): void {
-    this.isCreateModalOpen = true;
+    this.isCreateModalOpen.set(true);
     this.createStoreForm.reset({
       name: '',
       slug: '',
@@ -448,7 +440,7 @@ export class StoresComponent implements OnInit, OnDestroy {
   }
 
   onCreateModalCancel(): void {
-    this.isCreateModalOpen = false;
+    this.isCreateModalOpen.set(false);
   }
 
   createStore(storeData?: any | Event): void {
@@ -477,7 +469,7 @@ export class StoresComponent implements OnInit, OnDestroy {
       };
     }
 
-    this.isCreatingStore = true;
+    this.isCreatingStore.set(true);
 
     this.storesService
       .createStore(storeData)
@@ -485,19 +477,19 @@ export class StoresComponent implements OnInit, OnDestroy {
       .subscribe({
         next: (response) => {
           if (response.success && response.data) {
-            this.isCreateModalOpen = false;
+            this.isCreateModalOpen.set(false);
             this.loadStores();
             this.loadStats();
             this.toastService.success('Tienda creada exitosamente');
           } else {
             this.toastService.error('Respuesta inválida al crear la tienda');
           }
-          this.isCreatingStore = false;
+          this.isCreatingStore.set(false);
         },
         error: (error) => {
           console.error('Error creating store:', error);
           this.toastService.error('Error al crear la tienda');
-          this.isCreatingStore = false;
+          this.isCreatingStore.set(false);
         },
       });
   }
@@ -506,17 +498,17 @@ export class StoresComponent implements OnInit, OnDestroy {
     this.isLoading.set(true);
 
     const query = {
-      ...(this.searchTerm && { search: this.searchTerm }),
-      ...(this.selectedState && {
+      ...(this.searchTerm() && { search: this.searchTerm() }),
+      ...(this.selectedState() && {
         is_active:
-          this.selectedState === 'active'
+          this.selectedState() === 'active'
             ? true
-            : this.selectedState === 'inactive'
+            : this.selectedState() === 'inactive'
               ? false
               : undefined,
       }),
-      ...(this.selectedStoreType && {
-        store_type: this.selectedStoreType as StoreType,
+      ...(this.selectedStoreType() && {
+        store_type: this.selectedStoreType() as StoreType,
       }),
     };
 
@@ -564,7 +556,7 @@ export class StoresComponent implements OnInit, OnDestroy {
         next: (response: any) => {
           const data = response.data || {};
 
-          this.statsItems.set([
+          this.statsItems.update((_) => [
             {
               title: 'Total Tiendas',
               value: data.total_stores || 0,
@@ -626,24 +618,24 @@ export class StoresComponent implements OnInit, OnDestroy {
   }
 
   clearFilters(): void {
-    this.searchTerm = '';
-    this.selectedState = '';
-    this.selectedStoreType = '';
+    this.searchTerm.set('');
+    this.selectedState.set('');
+    this.selectedStoreType.set('');
     this.loadStores();
   }
 
   onSearchChange(searchTerm: string): void {
-    this.searchTerm = searchTerm;
+    this.searchTerm.set(searchTerm);
     this.loadStores();
   }
 
   onStoreTypeChange(event: any): void {
-    this.selectedStoreType = event.target.value;
+    this.selectedStoreType.set(event.target.value);
     this.loadStores();
   }
 
   onStateChange(event: any): void {
-    this.selectedState = event.target.value;
+    this.selectedState.set(event.target.value);
     this.loadStores();
   }
 
@@ -655,18 +647,18 @@ export class StoresComponent implements OnInit, OnDestroy {
   }
 
   editStore(store: StoreListItem): void {
-    this.selectedStore = store;
-    this.isEditModalOpen = true;
+    this.selectedStore.set(store);
+    this.isEditModalOpen.set(true);
   }
 
   onEditModalCancel(): void {
-    this.isEditModalOpen = false;
+    this.isEditModalOpen.set(false);
   }
 
   updateStore(storeData: any): void {
-    if (!this.selectedStore) return;
+    if (!this.selectedStore()) return;
 
-    this.isUpdatingStore = true;
+    this.isUpdatingStore.set(true);
 
     const updateData = {
       name: storeData.name,
@@ -683,13 +675,13 @@ export class StoresComponent implements OnInit, OnDestroy {
     };
 
     this.storesService
-      .updateStore(this.selectedStore.id, updateData)
+      .updateStore(this.selectedStore()!.id, updateData)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (response) => {
           if (response.success && response.data) {
-            this.isEditModalOpen = false;
-            this.selectedStore = undefined;
+            this.isEditModalOpen.set(false);
+            this.selectedStore.set(undefined);
             this.loadStores();
             this.loadStats();
             this.toastService.success('Tienda actualizada exitosamente');
@@ -698,12 +690,12 @@ export class StoresComponent implements OnInit, OnDestroy {
               'Respuesta inválida al actualizar la tienda',
             );
           }
-          this.isUpdatingStore = false;
+          this.isUpdatingStore.set(false);
         },
         error: (error) => {
           console.error('Error updating store:', error);
           this.toastService.error('Error al actualizar la tienda');
-          this.isUpdatingStore = false;
+          this.isUpdatingStore.set(false);
         },
       });
   }
@@ -748,30 +740,30 @@ export class StoresComponent implements OnInit, OnDestroy {
   }
 
   deleteStore(store: StoreListItem): void {
-    this.selectedStoreForDelete = store;
-    this.isDeleteModalOpen = true;
+    this.selectedStoreForDelete.set(store);
+    this.isDeleteModalOpen.set(true);
   }
 
   onDeleteModalCancel(): void {
-    this.isDeleteModalOpen = false;
+    this.isDeleteModalOpen.set(false);
   }
 
   confirmDeleteStore(): void {
-    if (!this.selectedStoreForDelete) return;
+    if (!this.selectedStoreForDelete()) return;
 
     this.storesService
-      .deleteStore(this.selectedStoreForDelete.id)
+      .deleteStore(this.selectedStoreForDelete()!.id)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (response) => {
           if (response.success) {
             this.stores.update((list) => list.filter(
-              (s) => s.id !== this.selectedStoreForDelete!.id,
+              (s) => s.id !== this.selectedStoreForDelete()!.id,
             ));
             this.loadStats();
             this.toastService.success('Tienda eliminada exitosamente');
-            this.isDeleteModalOpen = false;
-            this.selectedStoreForDelete = null;
+            this.isDeleteModalOpen.set(false);
+            this.selectedStoreForDelete.set(null);
           } else {
             this.toastService.error(
               'Respuesta inválida al eliminar la tienda',
@@ -786,20 +778,20 @@ export class StoresComponent implements OnInit, OnDestroy {
   }
 
   openSettingsModal(store: StoreListItem): void {
-    this.selectedStoreForSettings = store;
-    this.isSettingsModalOpen = true;
+    this.selectedStoreForSettings.set(store);
+    this.isSettingsModalOpen.set(true);
   }
 
   onSettingsSaved(event?: SettingsSavedEvent): void {
     // Settings were saved successfully in the modal
     // Update only the current store in the list instead of reloading all stores
-    if (this.selectedStoreForSettings && event?.storeName) {
-      const id = this.selectedStoreForSettings.id;
+    if (this.selectedStoreForSettings() && event?.storeName) {
+      const id = this.selectedStoreForSettings()!.id;
       const name = event.storeName;
       this.stores.update((list) =>
         list.map((s) => (s.id === id ? { ...s, name } : s)),
       );
-      this.selectedStoreForSettings.name = name;
+      this.selectedStoreForSettings()!.name = name;
     }
     // Don't reload all stores - the modal handles reloading its own settings
   }

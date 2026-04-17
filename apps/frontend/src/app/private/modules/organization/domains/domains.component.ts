@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, signal, model, computed, inject } from '@angular/core';
 
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { Subject, takeUntil, forkJoin } from 'rxjs';
@@ -73,7 +73,7 @@ interface StoreOption {
     <div class="space-y-6">
       <!-- Stats Cards -->
       <div class="grid grid-cols-4 gap-2 md:gap-4 lg:gap-6">
-        @for (item of statsItems; track item) {
+        @for (item of statsItems(); track item) {
           <app-stats
             [title]="item.title"
             [value]="item.value"
@@ -94,7 +94,7 @@ interface StoreOption {
             >
             <div class="flex-1 min-w-0">
               <h2 class="text-lg font-semibold text-text-primary">
-                Todos los dominios ({{ domains.length }})
+                Todos los dominios ({{ domains().length }})
               </h2>
             </div>
     
@@ -114,7 +114,7 @@ interface StoreOption {
               <select
                 class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
                 (change)="onStatusChange($event)"
-                [value]="selectedStatus"
+                [value]="selectedStatus()"
                 >
                 <option value="">Todos los Estados</option>
                 <option value="active">Activo</option>
@@ -127,7 +127,7 @@ interface StoreOption {
               <select
                 class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
                 (change)="onOwnershipChange($event)"
-                [value]="selectedOwnership"
+                [value]="selectedOwnership()"
                 >
                 <option value="">Todos los Tipos</option>
                 <option value="vendix_subdomain">Subdominio Vendix</option>
@@ -139,10 +139,10 @@ interface StoreOption {
               <select
                 class="px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary text-sm"
                 (change)="onStoreChange($event)"
-                [value]="selectedStoreId"
+                [value]="selectedStoreId()"
                 >
                 <option value="">Todas las Tiendas</option>
-                @for (store of stores; track store) {
+                @for (store of stores(); track store) {
                   <option [value]="store.id">
                     {{ store.name }}
                   </option>
@@ -154,7 +154,7 @@ interface StoreOption {
                   variant="outline"
                   size="sm"
                   (clicked)="refreshDomains()"
-                  [disabled]="isLoading"
+                  [disabled]="isLoading()"
                   title="Actualizar"
                   >
                   <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
@@ -174,7 +174,7 @@ interface StoreOption {
         </div>
     
         <!-- Loading State -->
-        @if (isLoading) {
+        @if (isLoading()) {
           <div class="p-8 text-center">
             <div
               class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
@@ -182,9 +182,9 @@ interface StoreOption {
             <p class="mt-2 text-text-secondary">Cargando dominios...</p>
           </div>
         }
-    
+
         <!-- Empty State -->
-        @if (!isLoading && domains.length === 0) {
+        @if (!isLoading() && domains().length === 0) {
           <app-empty-state
             icon="globe"
             [title]="getEmptyStateTitle()"
@@ -200,14 +200,14 @@ interface StoreOption {
         }
     
         <!-- Domains Table -->
-        @if (!isLoading && domains.length > 0) {
+        @if (!isLoading() && domains().length > 0) {
           <div class="p-6">
             <app-responsive-data-view
-              [data]="domains"
+              [data]="domains()"
               [columns]="tableColumns"
               [cardConfig]="cardConfig"
               [actions]="tableActions"
-              [loading]="isLoading"
+              [loading]="isLoading()"
               emptyMessage="No hay dominios registrados"
               emptyIcon="globe"
               (sort)="onTableSort($event)"
@@ -263,13 +263,17 @@ interface StoreOption {
   ],
 })
 export class DomainsComponent implements OnInit, OnDestroy {
-  domains: Domain[] = [];
-  stores: StoreOption[] = [];
-  isLoading = false;
-  searchTerm = '';
-  selectedStatus = '';
-  selectedOwnership = '';
-  selectedStoreId = '';
+  private domainsService = inject(OrganizationDomainsService);
+  private storesService = inject(OrganizationStoresService);
+  private toastService = inject(ToastService);
+
+  readonly domains = signal<Domain[]>([]);
+  readonly stores = signal<StoreOption[]>([]);
+  readonly isLoading = signal(false);
+  readonly searchTerm = signal('');
+  readonly selectedStatus = signal('');
+  readonly selectedOwnership = signal('');
+  readonly selectedStoreId = signal('');
 
   // Table configuration
   tableColumns: TableColumn[] = [
@@ -469,24 +473,29 @@ export class DomainsComponent implements OnInit, OnDestroy {
     ],
   };
 
-  statsItems: StatItem[] = [];
+  readonly statsItems = signal<StatItem[]>([]);
+
+  // Modal state
+  readonly isCreateModalOpen = model<boolean>(false);
+  readonly isCreatingDomain = signal(false);
+
+  readonly isEditModalOpen = model<boolean>(false);
+  readonly isUpdatingDomain = signal(false);
+  readonly selectedDomain = signal<Domain | null>(null);
+
+  readonly isVerifyModalOpen = model<boolean>(false);
+  readonly isVerifyingDomain = signal(false);
+  readonly selectedDomainForVerify = signal<Domain | null>(null);
+  readonly verificationResult = signal<VerifyDomainResult | null>(null);
+
+  readonly isDeleteModalOpen = model<boolean>(false);
+  readonly selectedDomainForDelete = signal<Domain | null>(null);
+
+  readonly hasFilters = computed(() =>
+    !!(this.searchTerm() || this.selectedStatus() || this.selectedOwnership() || this.selectedStoreId())
+  );
 
   private destroy$ = new Subject<void>();
-
-  constructor(
-    private domainsService: OrganizationDomainsService,
-    private storesService: OrganizationStoresService,
-    private toastService: ToastService,
-  ) {}
-
-  get hasFilters(): boolean {
-    return !!(
-      this.searchTerm ||
-      this.selectedStatus ||
-      this.selectedOwnership ||
-      this.selectedStoreId
-    );
-  }
 
   ngOnInit(): void {
     this.loadInitialData();
@@ -498,7 +507,7 @@ export class DomainsComponent implements OnInit, OnDestroy {
   }
 
   private loadInitialData(): void {
-    this.isLoading = true;
+    this.isLoading.set(true);
 
     forkJoin({
       stores: this.storesService.getStores({}),
@@ -507,18 +516,18 @@ export class DomainsComponent implements OnInit, OnDestroy {
       .subscribe({
         next: (results) => {
           if (results.stores.success && results.stores.data) {
-            this.stores = results.stores.data.map((store: any) => ({
+            this.stores.set(results.stores.data.map((store: any) => ({
               id: store.id,
               name: store.name,
               slug: store.slug,
-            }));
+            })));
           }
           this.loadDomains();
           this.loadStats();
         },
         error: (error) => {
           console.error('Error loading initial data:', error);
-          this.isLoading = false;
+          this.isLoading.set(false);
           this.loadDomains();
           this.loadStats();
         },
@@ -526,15 +535,15 @@ export class DomainsComponent implements OnInit, OnDestroy {
   }
 
   loadDomains(): void {
-    this.isLoading = true;
+    this.isLoading.set(true);
 
     const query: DomainQueryDto = {
-      ...(this.searchTerm && { search: this.searchTerm }),
-      ...(this.selectedStatus && { status: this.selectedStatus as DomainStatus }),
-      ...(this.selectedOwnership && {
-        ownership: this.selectedOwnership as DomainOwnership,
+      ...(this.searchTerm() && { search: this.searchTerm() }),
+      ...(this.selectedStatus() && { status: this.selectedStatus() as DomainStatus }),
+      ...(this.selectedOwnership() && {
+        ownership: this.selectedOwnership() as DomainOwnership,
       }),
-      ...(this.selectedStoreId && { store_id: parseInt(this.selectedStoreId, 10) }),
+      ...(this.selectedStoreId() && { store_id: parseInt(this.selectedStoreId(), 10) }),
     };
 
     this.domainsService
@@ -543,16 +552,16 @@ export class DomainsComponent implements OnInit, OnDestroy {
       .subscribe({
         next: (response) => {
           if (response.success && response.data) {
-            this.domains = response.data;
+            this.domains.set(response.data);
           } else {
-            this.domains = [];
+            this.domains.set([]);
           }
-          this.isLoading = false;
+          this.isLoading.set(false);
         },
         error: (error) => {
           console.error('Error loading domains:', error);
-          this.domains = [];
-          this.isLoading = false;
+          this.domains.set([]);
+          this.isLoading.set(false);
         },
       });
   }
@@ -565,7 +574,7 @@ export class DomainsComponent implements OnInit, OnDestroy {
         next: (response) => {
           const data = response.data || ({} as DomainStats);
 
-          this.statsItems = [
+          this.statsItems.set([
             {
               title: 'Total Dominios',
               value: data.total || 0,
@@ -598,7 +607,7 @@ export class DomainsComponent implements OnInit, OnDestroy {
               iconBgColor: 'bg-purple-100',
               iconColor: 'text-purple-600',
             },
-          ];
+          ]);
         },
         error: (error) => {
           console.error('Error loading stats:', error);
@@ -613,30 +622,30 @@ export class DomainsComponent implements OnInit, OnDestroy {
   }
 
   clearFilters(): void {
-    this.searchTerm = '';
-    this.selectedStatus = '';
-    this.selectedOwnership = '';
-    this.selectedStoreId = '';
+    this.searchTerm.set('');
+    this.selectedStatus.set('');
+    this.selectedOwnership.set('');
+    this.selectedStoreId.set('');
     this.loadDomains();
   }
 
   onSearchChange(searchTerm: string): void {
-    this.searchTerm = searchTerm;
+    this.searchTerm.set(searchTerm);
     this.loadDomains();
   }
 
   onStatusChange(event: Event): void {
-    this.selectedStatus = (event.target as HTMLSelectElement).value;
+    this.selectedStatus.set((event.target as HTMLSelectElement).value);
     this.loadDomains();
   }
 
   onOwnershipChange(event: Event): void {
-    this.selectedOwnership = (event.target as HTMLSelectElement).value;
+    this.selectedOwnership.set((event.target as HTMLSelectElement).value);
     this.loadDomains();
   }
 
   onStoreChange(event: Event): void {
-    this.selectedStoreId = (event.target as HTMLSelectElement).value;
+    this.selectedStoreId.set((event.target as HTMLSelectElement).value);
     this.loadDomains();
   }
 
@@ -649,15 +658,15 @@ export class DomainsComponent implements OnInit, OnDestroy {
 
   // Create Modal
   openCreateModal(): void {
-    this.isCreateModalOpen = true;
+    this.isCreateModalOpen.set(true);
   }
 
   onCreateModalCancel(): void {
-    this.isCreateModalOpen = false;
+    this.isCreateModalOpen.set(false);
   }
 
   createDomain(domainData: CreateDomainDto): void {
-    this.isCreatingDomain = true;
+    this.isCreatingDomain.set(true);
 
     this.domainsService
       .createDomain(domainData)
@@ -665,38 +674,38 @@ export class DomainsComponent implements OnInit, OnDestroy {
       .subscribe({
         next: (response) => {
           if (response.success && response.data) {
-            this.isCreateModalOpen = false;
+            this.isCreateModalOpen.set(false);
             this.loadDomains();
             this.loadStats();
             this.toastService.success('Dominio creado exitosamente');
           } else {
             this.toastService.error('Respuesta inválida al crear el dominio');
           }
-          this.isCreatingDomain = false;
+          this.isCreatingDomain.set(false);
         },
         error: (error) => {
           console.error('Error creating domain:', error);
           this.toastService.error(
             error.error?.message || 'Error al crear el dominio',
           );
-          this.isCreatingDomain = false;
+          this.isCreatingDomain.set(false);
         },
       });
   }
 
   // Edit Modal
   editDomain(domain: Domain): void {
-    this.selectedDomain = domain;
-    this.isEditModalOpen = true;
+    this.selectedDomain.set(domain);
+    this.isEditModalOpen.set(true);
   }
 
   onEditModalCancel(): void {
-    this.isEditModalOpen = false;
-    this.selectedDomain = null;
+    this.isEditModalOpen.set(false);
+    this.selectedDomain.set(null);
   }
 
   updateDomain(event: { hostname: string; data: UpdateDomainDto }): void {
-    this.isUpdatingDomain = true;
+    this.isUpdatingDomain.set(true);
 
     this.domainsService
       .updateDomain(event.hostname, event.data)
@@ -704,22 +713,22 @@ export class DomainsComponent implements OnInit, OnDestroy {
       .subscribe({
         next: (response) => {
           if (response.success && response.data) {
-            this.isEditModalOpen = false;
-            this.selectedDomain = null;
+            this.isEditModalOpen.set(false);
+            this.selectedDomain.set(null);
             this.loadDomains();
             this.loadStats();
             this.toastService.success('Dominio actualizado exitosamente');
           } else {
             this.toastService.error('Respuesta inválida al actualizar el dominio');
           }
-          this.isUpdatingDomain = false;
+          this.isUpdatingDomain.set(false);
         },
         error: (error) => {
           console.error('Error updating domain:', error);
           this.toastService.error(
             error.error?.message || 'Error al actualizar el dominio',
           );
-          this.isUpdatingDomain = false;
+          this.isUpdatingDomain.set(false);
         },
       });
   }
@@ -733,19 +742,19 @@ export class DomainsComponent implements OnInit, OnDestroy {
   }
 
   openVerifyModal(domain: Domain): void {
-    this.selectedDomainForVerify = domain;
-    this.verificationResult = null;
-    this.isVerifyModalOpen = true;
+    this.selectedDomainForVerify.set(domain);
+    this.verificationResult.set(null);
+    this.isVerifyModalOpen.set(true);
   }
 
   onVerifyModalCancel(): void {
-    this.isVerifyModalOpen = false;
-    this.selectedDomainForVerify = null;
-    this.verificationResult = null;
+    this.isVerifyModalOpen.set(false);
+    this.selectedDomainForVerify.set(null);
+    this.verificationResult.set(null);
   }
 
   verifyDomain(hostname: string): void {
-    this.isVerifyingDomain = true;
+    this.isVerifyingDomain.set(true);
 
     this.domainsService
       .verifyDomain(hostname)
@@ -753,34 +762,34 @@ export class DomainsComponent implements OnInit, OnDestroy {
       .subscribe({
         next: (response) => {
           if (response.success && response.data) {
-            this.verificationResult = response.data;
+            this.verificationResult.set(response.data);
             if (response.data.verified) {
               this.loadDomains();
               this.loadStats();
               this.toastService.success('Dominio verificado exitosamente');
             }
           }
-          this.isVerifyingDomain = false;
+          this.isVerifyingDomain.set(false);
         },
         error: (error) => {
           console.error('Error verifying domain:', error);
           this.toastService.error(
             error.error?.message || 'Error al verificar el dominio',
           );
-          this.isVerifyingDomain = false;
+          this.isVerifyingDomain.set(false);
         },
       });
   }
 
   // Delete Modal
   deleteDomain(domain: Domain): void {
-    this.selectedDomainForDelete = domain;
-    this.isDeleteModalOpen = true;
+    this.selectedDomainForDelete.set(domain);
+    this.isDeleteModalOpen.set(true);
   }
 
   onDeleteModalCancel(): void {
-    this.isDeleteModalOpen = false;
-    this.selectedDomainForDelete = null;
+    this.isDeleteModalOpen.set(false);
+    this.selectedDomainForDelete.set(null);
   }
 
   confirmDeleteDomain(hostname: string): void {
@@ -790,11 +799,11 @@ export class DomainsComponent implements OnInit, OnDestroy {
       .subscribe({
         next: (response) => {
           if (response.success) {
-            this.domains = this.domains.filter((d) => d.hostname !== hostname);
+            this.domains.update((list) => list.filter((d) => d.hostname !== hostname));
             this.loadStats();
             this.toastService.success('Dominio eliminado exitosamente');
-            this.isDeleteModalOpen = false;
-            this.selectedDomainForDelete = null;
+            this.isDeleteModalOpen.set(false);
+            this.selectedDomainForDelete.set(null);
           } else {
             this.toastService.error('Respuesta inválida al eliminar el dominio');
           }

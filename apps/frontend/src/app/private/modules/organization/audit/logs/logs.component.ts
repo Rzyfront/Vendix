@@ -1,4 +1,4 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import { Component, OnInit, OnDestroy, signal, model, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, ReactiveFormsModule } from '@angular/forms';
 import { Subject, debounceTime, distinctUntilChanged, takeUntil } from 'rxjs';
@@ -44,10 +44,13 @@ interface StatItem {
   templateUrl: './logs.component.html',
 })
 export class LogsComponent implements OnInit, OnDestroy {
-  logs: AuditLog[] = [];
-  stats: AuditStats | null = null;
-  statsItems: StatItem[] = [];
-  isLoading = false;
+  private auditService = inject(AuditService);
+  private fb = inject(FormBuilder);
+
+  readonly logs = signal<AuditLog[]>([]);
+  readonly stats = signal<AuditStats | null>(null);
+  readonly statsItems = signal<StatItem[]>([]);
+  readonly isLoading = signal(false);
   private destroy$ = new Subject<void>();
 
   // Track active subscriptions to prevent duplicates
@@ -55,8 +58,8 @@ export class LogsComponent implements OnInit, OnDestroy {
   private logsSubscription: any = null;
 
   // Modal State
-  selectedLog: AuditLog | null = null;
-  showDetailModal = false;
+  readonly selectedLog = signal<AuditLog | null>(null);
+  readonly showDetailModal = model<boolean>(false);
 
   // Filter Form
   filterForm: FormGroup;
