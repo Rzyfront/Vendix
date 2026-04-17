@@ -1,8 +1,7 @@
-import { Injectable, inject } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import {
   Observable,
-  BehaviorSubject,
   finalize,
   catchError,
   throwError,
@@ -10,6 +9,7 @@ import {
   tap,
   shareReplay,
 } from 'rxjs';
+import { toObservable } from '@angular/core/rxjs-interop';
 import { environment } from '../../../../../../environments/environment';
 import {
   User,
@@ -33,31 +33,23 @@ export class UsersService {
   private statsCache$: Observable<UserStats> | undefined;
   private statsLastFetch = 0;
 
-  // Estado de carga
-  private isLoading$ = new BehaviorSubject<boolean>(false);
-  private isCreatingUser$ = new BehaviorSubject<boolean>(false);
-  private isUpdatingUser$ = new BehaviorSubject<boolean>(false);
-  private isDeletingUser$ = new BehaviorSubject<boolean>(false);
+  // Estados (Signals)
+  readonly isLoading = signal(false);
+  readonly isCreatingUser = signal(false);
+  readonly isUpdatingUser = signal(false);
+  readonly isDeletingUser = signal(false);
 
-  // Exponer estados como observables
-  get isLoading() {
-    return this.isLoading$.asObservable();
-  }
-  get isCreatingUser() {
-    return this.isCreatingUser$.asObservable();
-  }
-  get isUpdatingUser() {
-    return this.isUpdatingUser$.asObservable();
-  }
-  get isDeletingUser() {
-    return this.isDeletingUser$.asObservable();
-  }
+  // Observable compatibility layer
+  readonly isLoading$ = toObservable(this.isLoading);
+  readonly isCreatingUser$ = toObservable(this.isCreatingUser);
+  readonly isUpdatingUser$ = toObservable(this.isUpdatingUser);
+  readonly isDeletingUser$ = toObservable(this.isDeletingUser);
 
   /**
    * Obtener lista de usuarios con paginación y filtros
    */
   getUsers(query: UserQueryDto = {}): Observable<PaginatedUsersResponse> {
-    this.isLoading$.next(true);
+    this.isLoading.set(true);
 
     let params = new HttpParams();
     if (query.page) params = params.set('page', query.page.toString());
@@ -84,7 +76,7 @@ export class UsersService {
             },
           } as PaginatedUsersResponse;
         }),
-        finalize(() => this.isLoading$.next(false)),
+        finalize(() => this.isLoading.set(false)),
         catchError((error) => {
           console.error('Error loading users:', error);
           return throwError(() => error);
@@ -108,13 +100,13 @@ export class UsersService {
    * Crear nuevo usuario
    */
   createUser(userData: CreateUserDto): Observable<User> {
-    this.isCreatingUser$.next(true);
+    this.isCreatingUser.set(true);
 
     return this.http
       .post<any>(`${this.apiUrl}/superadmin/users`, userData)
       .pipe(
         map((response) => response.data),
-        finalize(() => this.isCreatingUser$.next(false)),
+        finalize(() => this.isCreatingUser.set(false)),
         catchError((error) => {
           console.error('Error creating user:', error);
           return throwError(() => error);
@@ -126,13 +118,13 @@ export class UsersService {
    * Actualizar usuario existente
    */
   updateUser(id: number, userData: UpdateUserDto): Observable<User> {
-    this.isUpdatingUser$.next(true);
+    this.isUpdatingUser.set(true);
 
     return this.http
       .patch<any>(`${this.apiUrl}/superadmin/users/${id}`, userData)
       .pipe(
         map((response) => response.data),
-        finalize(() => this.isUpdatingUser$.next(false)),
+        finalize(() => this.isUpdatingUser.set(false)),
         catchError((error) => {
           console.error('Error updating user:', error);
           return throwError(() => error);
@@ -144,10 +136,10 @@ export class UsersService {
    * Eliminar usuario (Soft delete)
    */
   deleteUser(id: number): Observable<void> {
-    this.isDeletingUser$.next(true);
+    this.isDeletingUser.set(true);
 
     return this.http.delete<void>(`${this.apiUrl}/superadmin/users/${id}`).pipe(
-      finalize(() => this.isDeletingUser$.next(false)),
+      finalize(() => this.isDeletingUser.set(false)),
       catchError((error) => {
         console.error('Error deleting user:', error);
         return throwError(() => error);
@@ -159,13 +151,13 @@ export class UsersService {
    * Archivar usuario
    */
   archiveUser(id: number): Observable<User> {
-    this.isUpdatingUser$.next(true);
+    this.isUpdatingUser.set(true);
 
     return this.http
       .post<any>(`${this.apiUrl}/superadmin/users/${id}/deactivate`, {})
       .pipe(
         map((response) => response.data),
-        finalize(() => this.isUpdatingUser$.next(false)),
+        finalize(() => this.isUpdatingUser.set(false)),
         catchError((error) => {
           console.error('Error archiving user:', error);
           return throwError(() => error);
@@ -177,13 +169,13 @@ export class UsersService {
    * Reactivar usuario
    */
   reactivateUser(id: number): Observable<User> {
-    this.isUpdatingUser$.next(true);
+    this.isUpdatingUser.set(true);
 
     return this.http
       .post<any>(`${this.apiUrl}/superadmin/users/${id}/activate`, {})
       .pipe(
         map((response) => response.data),
-        finalize(() => this.isUpdatingUser$.next(false)),
+        finalize(() => this.isUpdatingUser.set(false)),
         catchError((error) => {
           console.error('Error reactivating user:', error);
           return throwError(() => error);

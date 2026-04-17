@@ -1,6 +1,7 @@
-import { Injectable, inject } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
-import { BehaviorSubject, Observable, finalize, tap, shareReplay } from 'rxjs';
+import { Observable, finalize, tap, shareReplay } from 'rxjs';
+import { toObservable } from '@angular/core/rxjs-interop';
 import { environment } from '../../../../../../environments/environment';
 
 import {
@@ -50,25 +51,17 @@ export class StoresService {
   private readonly http = inject(HttpClient);
   private readonly CACHE_TTL = 30000; // 30 segundos
 
-  // States
-  private isLoading$$ = new BehaviorSubject<boolean>(false);
-  private isCreatingStore$$ = new BehaviorSubject<boolean>(false);
-  private isUpdatingStore$$ = new BehaviorSubject<boolean>(false);
-  private isDeletingStore$$ = new BehaviorSubject<boolean>(false);
+  // States (Signals)
+  readonly isLoading = signal(false);
+  readonly isCreatingStore = signal(false);
+  readonly isUpdatingStore = signal(false);
+  readonly isDeletingStore = signal(false);
 
-  // Observables
-  get isLoading$() {
-    return this.isLoading$$.asObservable();
-  }
-  get isCreatingStore$() {
-    return this.isCreatingStore$$.asObservable();
-  }
-  get isUpdatingStore$() {
-    return this.isUpdatingStore$$.asObservable();
-  }
-  get isDeletingStore$() {
-    return this.isDeletingStore$$.asObservable();
-  }
+  // Observable compatibility layer
+  readonly isLoading$ = toObservable(this.isLoading);
+  readonly isCreatingStore$ = toObservable(this.isCreatingStore);
+  readonly isUpdatingStore$ = toObservable(this.isUpdatingStore);
+  readonly isDeletingStore$ = toObservable(this.isDeletingStore);
 
   /**
    * Get all stores with pagination and filtering
@@ -76,7 +69,7 @@ export class StoresService {
   getStores(
     query?: StoreQueryDto,
   ): Observable<PaginatedResponse<StoreListItem[]>> {
-    this.isLoading$$.next(true);
+    this.isLoading.set(true);
     let params = new HttpParams();
 
     if (query?.page) params = params.set('page', query.page.toString());
@@ -94,7 +87,7 @@ export class StoresService {
 
     return this.http
       .get<PaginatedResponse<StoreListItem[]>>(url, { params })
-      .pipe(finalize(() => this.isLoading$$.next(false)));
+      .pipe(finalize(() => this.isLoading.set(false)));
   }
 
   /**
@@ -119,10 +112,10 @@ export class StoresService {
    * Create a new store
    */
   createStore(data: CreateStoreDto): Observable<ApiResponse<Store>> {
-    this.isCreatingStore$$.next(true);
+    this.isCreatingStore.set(true);
     return this.http
       .post<ApiResponse<Store>>(`${this.apiUrl}/superadmin/stores`, data)
-      .pipe(finalize(() => this.isCreatingStore$$.next(false)));
+      .pipe(finalize(() => this.isCreatingStore.set(false)));
   }
 
   /**
@@ -132,20 +125,20 @@ export class StoresService {
     id: number,
     data: UpdateStoreDto,
   ): Observable<ApiResponse<Store>> {
-    this.isUpdatingStore$$.next(true);
+    this.isUpdatingStore.set(true);
     return this.http
       .patch<ApiResponse<Store>>(`${this.apiUrl}/superadmin/stores/${id}`, data)
-      .pipe(finalize(() => this.isUpdatingStore$$.next(false)));
+      .pipe(finalize(() => this.isUpdatingStore.set(false)));
   }
 
   /**
    * Delete a store
    */
   deleteStore(id: number): Observable<ApiResponse<void>> {
-    this.isDeletingStore$$.next(true);
+    this.isDeletingStore.set(true);
     return this.http
       .delete<ApiResponse<void>>(`${this.apiUrl}/superadmin/stores/${id}`)
-      .pipe(finalize(() => this.isDeletingStore$$.next(false)));
+      .pipe(finalize(() => this.isDeletingStore.set(false)));
   }
 
   /**
@@ -266,13 +259,13 @@ export class StoresService {
     storeId: number,
     settingsData: StoreSettingsUpdateDto,
   ): Observable<ApiResponse<Store['settings']>> {
-    this.isUpdatingStore$$.next(true);
+    this.isUpdatingStore.set(true);
     return this.http
       .patch<ApiResponse<Store['settings']>>(
         `${this.apiUrl}/superadmin/stores/${storeId}/settings`,
         settingsData,
       )
-      .pipe(finalize(() => this.isUpdatingStore$$.next(false)));
+      .pipe(finalize(() => this.isUpdatingStore.set(false)));
   }
 
   /**
