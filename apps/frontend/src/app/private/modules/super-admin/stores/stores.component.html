@@ -143,10 +143,10 @@
         class="px-6 py-4 border-t border-border bg-muted/30 flex justify-center"
       >
         <app-pagination
-          [currentPage]="pagination.page"
-          [totalPages]="pagination.totalPages"
-          [total]="pagination.total"
-          [limit]="pagination.limit"
+          [currentPage]="pagination().page"
+          [totalPages]="pagination().totalPages"
+          [total]="pagination().total"
+          [limit]="pagination().limit"
           infoStyle="range"
           (pageChange)="onPageChange($event)"
         />
@@ -166,7 +166,7 @@
     <app-store-edit-modal
       [(isOpen)]="isEditModalOpen"
       [isSubmitting]="isUpdatingStore()"
-      [store]="selectedStore"
+      [store]="selectedStore() ?? undefined"
       (cancel)="onEditModalCancel()"
     ></app-store-edit-modal>
   }
@@ -175,7 +175,7 @@
     <app-store-settings-modal
       [(isOpen)]="isSettingsModalOpen"
       [isSubmitting]="isUpdatingSettings()"
-      [settings]="selectedStoreForSettings?.settings"
+      [settings]="selectedStoreForSettings()?.settings"
       (submit)="updateStoreSettings($event)"
     ></app-store-settings-modal>
   }

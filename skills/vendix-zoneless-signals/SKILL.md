@@ -3,7 +3,18 @@ name: vendix-zoneless-signals
 description: Patrones Zoneless y Signals en Angular 20 — setup, input/output signals, toSignal en facades, @defer, y antipatrones a evitar.
 metadata:
   scope: [root]
-  auto_invoke: "Creating Angular components, Managing State, Creating or modifying modals in frontend"
+  priority: critical
+  auto_invoke:
+    - "Editing or creating any Angular component under apps/frontend (Zoneless patterns apply)"
+    - "Using input(), output(), model(), signal(), computed(), effect(), or toSignal()"
+    - "Implementing ControlValueAccessor (CVA) in custom form components"
+    - "Debugging stale templates, missing re-renders, or change detection issues"
+    - "Reviewing or replacing NgZone, markForCheck, detectChanges, @Input, @Output, EventEmitter"
+    - "Migrating legacy Angular patterns (BehaviorSubject, take(1).subscribe) to Signals"
+    - "Auditing Zoneless compliance (zoneless-audit.sh) or enforcing CI grep rules"
+    - "Working with @defer, @if, @for control flow blocks in templates"
+    - "Using toSignal() in facades — validating initialValue presence"
+    - "Fixing signal-used-without-invoking bugs (!this.flag vs !this.flag())"
 ---
 
 # Vendix — Zoneless + Signals (Angular 20)
@@ -235,6 +246,8 @@ increment() { this.count.update(v => v + 1); } // CD automático
 | `Subject` con `debounceTime`/`switchMap` | ✅ Legítimo | conservar |
 | Signal usado sin invocar (`!this.disabled`, `if (this.loading)`) | ❌ Antipatrón silencioso | invocar: `!this.disabled()`, `if (this.loading())` |
 | Leer `toSignal()` sin `initialValue` en `ngOnInit` | ❌ Antipatrón | añadir `initialValue` o suscribirse al `$` / usar `effect()` |
+| Campos planos en CVA (`value = false`, `disabled = false` mutados por `writeValue`/`setDisabledState`) | ❌ Antipatrón — CD no dispara, template queda stale | `signal()` en CVA (§9.1) |
+| `output()` emitido sólo desde métodos imperativos cuando depende de un `model()` | ❌ Antipatrón — se pierde en two-way binding | `effect()` que observe el signal y emita en transiciones (§14) |
 
 ---
 
@@ -318,6 +331,84 @@ export class InvoiceListComponent {
 - `{{ search_term }}` → `{{ search_term() }}` (invocar la señal).
 - `[(ngModel)]="flag"` → `model<boolean>(false)` + `[(ngModel)]="flag"` con lectura `flag()`, o migrar a `FormControl` + `[formControl]`.
 - Derivados (ej. `filteredItems`) → `computed(() => ...)`, no recalcular en métodos imperativos.
+
+---
+
+## 9.1. Antipatrón: variables planas dentro de `ControlValueAccessor`
+
+Caso especial de §9, fácil de pasar por alto porque la mutación **no viene del propio componente** sino del callback registrado por el formulario. Aplica a cualquier custom CVA: toggles, inputs custom, selects propios, date pickers, etc.
+
+Con Zoneless, los callbacks `writeValue` y `setDisabledState` que el ReactiveForms invoca sobre el CVA mutan campos desde fuera del ciclo normal de eventos del componente. Si esos campos no son señales, el template **no re-renderiza** aunque el valor cambió.
+
+```typescript
+// ❌ ANTIPATRÓN — campos planos mutados por writeValue / setDisabledState
+@Component({
+  selector: 'app-my-toggle',
+  template: `
+    <div [class.opacity-50]="disabled" (click)="onToggle(!value)">
+      <span [class.on]="value"></span>
+    </div>
+  `,
+  providers: [
+    { provide: NG_VALUE_ACCESSOR, useExisting: forwardRef(() => MyToggleComponent), multi: true },
+  ],
+})
+export class MyToggleComponent implements ControlValueAccessor {
+  value = false;      // ❌ mutado desde writeValue — template NO refleja
+  disabled = false;   // ❌ mutado desde setDisabledState — template NO refleja
+
+  writeValue(v: boolean) { this.value = !!v; }                // CD no dispara
+  setDisabledState(d: boolean) { this.disabled = d; }         // CD no dispara
+}
+```
+
+**Síntomas típicos**
+
+- Click a un toggle "se siente" lento — el estado en memoria cambia pero la UI actualiza recién en el próximo tick disparado por otra señal.
+- Al iterar con `control.patchValue()` / `enable()` / `disable()` sobre múltiples hijos (ej. sincronizar un parent toggle con sus children), el lag se acumula N veces porque cada `writeValue` no dispara CD, y sólo al final un tick natural repinta todo.
+- Un control que el form deshabilita (`control.disable()`) sigue visualmente habilitado hasta que el usuario interactúa con otra parte de la pantalla.
+
+```typescript
+// ✅ CORRECTO — signals en CVA
+@Component({
+  selector: 'app-my-toggle',
+  template: `
+    <div [class.opacity-50]="disabled()" (click)="onToggle(!value())">
+      <span [class.on]="value()"></span>
+    </div>
+  `,
+  providers: [
+    { provide: NG_VALUE_ACCESSOR, useExisting: forwardRef(() => MyToggleComponent), multi: true },
+  ],
+})
+export class MyToggleComponent implements ControlValueAccessor {
+  readonly value = signal(false);
+  readonly disabled = signal(false);
+
+  writeValue(v: boolean) { this.value.set(!!v); }             // CD automático
+  setDisabledState(d: boolean) { this.disabled.set(d); }      // CD automático
+
+  onToggle(v: boolean) {
+    if (this.disabled()) return;
+    this.value.set(v);
+    this.onChange(v);
+  }
+
+  private onChange: (v: boolean) => void = () => {};
+  registerOnChange(fn: (v: boolean) => void) { this.onChange = fn; }
+  registerOnTouched(_: () => void) {}
+}
+```
+
+**Regla**: en un CVA Zoneless, todo campo escrito por `writeValue` o `setDisabledState` que el template lee **debe** ser `signal()`. No hay excepción — ni siquiera para booleans simples. Los callbacks del form son el punto de entrada más común de "mutaciones invisibles para CD".
+
+**Heurística de auditoría** (combinar con `implements ControlValueAccessor`):
+
+```bash
+# Archivos con CVA que declaran campos planos mutables
+grep -rln "implements ControlValueAccessor" apps/frontend/src/app --include="*.ts" \
+  | xargs grep -lnE "^\s+(value|disabled|checked|selected)\s*(:\s*\w+)?\s*=\s*(false|true|'|\"|null|0)"
+```
 
 ---
 
@@ -542,3 +633,89 @@ grep -nE '"(build|serve|server)"' -A 40 apps/frontend/angular.json | grep -c "zo
 # Debe devolver >=1 — zone.js legitimo bajo target test
 grep -nE '"test"' -A 40 apps/frontend/angular.json | grep -c "zone.js"
 ```
+
+---
+
+## 14. Antipatrón: `model()` con outputs manuales que no reaccionan al two-way binding
+
+Con `model()`, el signal se puede mutar desde **dos lados**: el propio componente (`this.foo.set(x)`) y el parent via `[(foo)]="bar"`. Cualquier `output()` derivado del cambio de ese signal debe dispararse con `effect()`, no desde métodos imperativos — si no, los cambios externos quedan mudos.
+
+```typescript
+// ❌ ANTIPATRÓN — opened/closed sólo se emiten desde open()/close() imperativos
+@Component({ selector: 'app-modal', ... })
+export class ModalComponent {
+  readonly isOpen = model<boolean>(false);
+  readonly opened = output<void>();
+  readonly closed = output<void>();
+
+  open() {
+    this.isOpen.set(true);
+    this.opened.emit();   // se emite sólo cuando el propio componente llama open()
+  }
+
+  close() {
+    this.isOpen.set(false);
+    this.closed.emit();   // idem
+  }
+}
+```
+
+```html
+<!-- Parent abre el modal via two-way -->
+<app-modal [(isOpen)]="modalVisible" (opened)="loadData()"></app-modal>
+```
+
+```typescript
+// Parent hace:
+this.modalVisible = true;
+// ↓
+// isOpen del modal cambia a true — pero opened NUNCA emite
+// → loadData() jamás se ejecuta — el contenido del modal queda vacío
+```
+
+**Síntomas típicos**
+
+- Modal que se abre visualmente pero no carga datos / no ejecuta el setup — el binding funciona pero el output callback no dispara.
+- Abrir/cerrar desde el parent "no hace nada reactivo" (solo cambia la visibilidad).
+- Funciona cuando el usuario clickea el botón de cerrar del propio modal (porque llama `close()` imperativo), pero rompe cuando el cierre viene desde afuera.
+
+```typescript
+// ✅ CORRECTO — effect() observa el signal del model y emite outputs en transiciones
+@Component({ selector: 'app-modal', ... })
+export class ModalComponent {
+  readonly isOpen = model<boolean>(false);
+  readonly opened = output<void>();
+  readonly closed = output<void>();
+
+  private previousIsOpen = false;
+
+  constructor() {
+    effect(() => {
+      const open = this.isOpen();
+      if (open !== this.previousIsOpen) {
+        if (open) this.opened.emit();
+        else this.closed.emit();
+        this.previousIsOpen = open;
+      }
+    });
+  }
+
+  open()  { this.isOpen.set(true); }   // el effect se encarga de emitir
+  close() { this.isOpen.set(false); }  // idem
+}
+```
+
+**Regla**: cualquier `output()` semánticamente atado al cambio de un `model()` (o de cualquier signal writable) **debe** emitirse desde un `effect()` que observe la transición, no desde métodos imperativos. Los métodos imperativos se pierden el camino del two-way binding.
+
+**Alternativa — evitar el output redundante**:
+
+Si el parent sólo necesita reaccionar al cambio, suele bastar con el `change` auto-emitido por `model()` (ej. `isOpenChange`):
+
+```html
+<!-- model() genera automáticamente isOpenChange -->
+<app-modal [(isOpen)]="modalVisible"></app-modal>
+<!-- o -->
+<app-modal [isOpen]="modalVisible" (isOpenChange)="onVisibilityChange($event)"></app-modal>
+```
+
+Sólo definir outputs explícitos (`opened`, `closed`) cuando su semántica difiere del cambio crudo del signal (ej. `opened` sólo en la transición `false → true`, no en cada set). Para ese caso sí aplica el patrón con `effect()`.

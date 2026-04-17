@@ -3,7 +3,7 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
-import { Subscription, take } from 'rxjs';
+import { Subscription, firstValueFrom } from 'rxjs';
 
 import {
   PopCartService,
@@ -297,7 +297,7 @@ export class PopComponent implements OnInit, OnDestroy {
     private authFacade: AuthFacade,
   ) {}
 
-  ngOnInit(): void {
+  async ngOnInit(): Promise<void> {
     this.checkMobile();
 
     this.subscriptions.push(
@@ -316,12 +316,11 @@ export class PopComponent implements OnInit, OnDestroy {
       }
     });
 
-    this.route.queryParams.pipe(take(1)).subscribe((params) => {
-      const productId = params['product_id'];
-      if (productId) {
-        this.autoAddProductById(Number(productId));
-      }
-    });
+    const params = await firstValueFrom(this.route.queryParams);
+    const productId = params['product_id'];
+    if (productId) {
+      this.autoAddProductById(Number(productId));
+    }
   }
 
   @HostListener('window:resize')

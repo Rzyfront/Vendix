@@ -266,6 +266,11 @@ export class StoreAdminLayoutComponent {
           icon: 'circle',
           route: '/admin/customers/reviews',
         },
+        {
+          label: 'Recolección de Datos',
+          icon: 'circle',
+          route: '/admin/data-collection',
+        },
       ],
     },
     {
@@ -299,27 +304,22 @@ export class StoreAdminLayoutComponent {
           route: '/admin/analytics/overview',
         },
         {
-          label: 'Centro de Analíticas',
-          icon: 'circle',
-          route: '/admin/analytics',
-        },
-        {
           label: 'Ventas',
           icon: 'circle',
           route: '/admin/analytics/sales/summary',
         },
         {
-          label: 'Inventario',
+          label: 'Analíticas de Inventario',
           icon: 'circle',
           route: '/admin/analytics/inventory/overview',
         },
         {
-          label: 'Productos',
+          label: 'Analíticas de Productos',
           icon: 'circle',
           route: '/admin/analytics/products/performance',
         },
         {
-          label: 'Clientes',
+          label: 'Analíticas de Clientes',
           icon: 'circle',
           route: '/admin/analytics/customers/summary',
         },

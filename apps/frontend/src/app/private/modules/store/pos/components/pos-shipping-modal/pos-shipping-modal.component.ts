@@ -6,6 +6,7 @@ import {
   ElementRef,
   inject,
   effect,
+  signal,
   DestroyRef } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
@@ -876,7 +877,7 @@ export class PosShippingModalComponent {
   showOnscreenKeypad = true;
 
   // Shipping state
-  shippingMethods: PosShippingMethod[] = [];
+  readonly shippingMethods = signal<PosShippingMethod[]>([]);
   selectedShippingMethod: PosShippingMethod | null = null;
   shippingCost = 0;
   calculatedShippingCost: number | null = null;
@@ -1090,7 +1091,7 @@ private customerSearchSubject = new Subject<string>();
       .getShippingMethods()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((methods) => {
-        this.shippingMethods = methods;
+        this.shippingMethods.set(methods);
       });
   }
 

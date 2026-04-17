@@ -1,6 +1,6 @@
 import {Component, OnInit, inject, input, output, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { take } from 'rxjs/operators';
+import { firstValueFrom } from 'rxjs';
 
 import {
   FormBuilder,
@@ -318,7 +318,7 @@ export class ShippingZoneModalComponent implements OnInit {
     }
   }
 
-  onSubmit() {
+  async onSubmit() {
     if (this.form.invalid) return;
 
     this.isSubmitting = true;
@@ -338,26 +338,14 @@ export class ShippingZoneModalComponent implements OnInit {
       ? this.shippingService.updateZone(zone.id, payload)
       : this.shippingService.createZone(payload);
 
-    request$.pipe(take(1)).subscribe({
-      next: () => {
-        this.isSubmitting = false;
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        this.saved.emit();
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        this.close.emit();
-      },
-      error: () => {
-        this.isSubmitting = false;
-        alert('Error al guardar la zona.');
-      },
-    });
+    try {
+      await firstValueFrom(request$);
+      this.isSubmitting = false;
+      this.saved.emit();
+      this.close.emit();
+    } catch (e) {
+      this.isSubmitting = false;
+      alert('Error al guardar la zona.');
+    }
   }
 }

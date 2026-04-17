@@ -2,7 +2,7 @@
 import {Component, Input, OnInit, inject, SimpleChanges, OnChanges, input, output, signal, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
-import { take } from 'rxjs/operators';
+import { firstValueFrom } from 'rxjs';
 import {
   FormBuilder,
   FormGroup,
@@ -665,19 +665,18 @@ export class ShippingRatesComponent implements OnInit, OnChanges {
     }
   }
 
-  loadRates() {
+  async loadRates() {
     const z = this.zone();
     if (!z) return;
     this.loading.set(true);
-    this.shippingService.getRates(z.id).pipe(take(1)).subscribe({
-      next: (data) => {
-        this.rates.set(data);
-        this.loading.set(false);
-      },
-      error: () => {
-        this.loading.set(false);
-      },
-    });
+    try {
+      const data = await firstValueFrom(this.shippingService.getRates(z.id));
+      this.rates.set(data);
+    } catch (e) {
+      console.error('Error loading shipping rates', e);
+    } finally {
+      this.loading.set(false);
+    }
   }
 
   getMethodName(id: number): string {
@@ -703,7 +702,7 @@ export class ShippingRatesComponent implements OnInit, OnChanges {
     }
   }
 
-  onSubmit() {
+  async onSubmit() {
     if (this.form.invalid || !this.zone) return;
 
     this.isSubmitting.set(true);
@@ -721,17 +720,15 @@ export class ShippingRatesComponent implements OnInit, OnChanges {
       ? this.shippingService.updateRate(rate.id, payload)
       : this.shippingService.createRate(payload);
 
-    request$.pipe(take(1)).subscribe({
-      next: () => {
-        this.isSubmitting.set(false);
-        this.loadRates();
-        this.prepareCreate();
-      },
-      error: () => {
-        this.isSubmitting.set(false);
-        alert('Error al guardar la tarifa del sistema');
-      },
-    });
+    try {
+      await firstValueFrom(request$);
+      this.isSubmitting.set(false);
+      this.loadRates();
+      this.prepareCreate();
+    } catch (e) {
+      this.isSubmitting.set(false);
+      alert('Error al guardar la tarifa del sistema');
+    }
   }
 
   deleteRate(id: number) {
@@ -744,15 +741,18 @@ export class ShippingRatesComponent implements OnInit, OnChanges {
         cancelText: 'Cancelar',
         confirmVariant: 'danger',
       })
-      .then((confirmed) => {
+      .then(async (confirmed) => {
         if (confirmed) {
-          this.shippingService.deleteRate(id).pipe(take(1)).subscribe(() => {
+          try {
+            await firstValueFrom(this.shippingService.deleteRate(id));
             this.loadRates();
             if (this.selectedRate()?.id === id) {
               this.selectedRate.set(undefined);
               this.form.reset({ type: ShippingRateType.FLAT, is_active: true });
             }
-          });
+          } catch (e) {
+            console.error('Error deleting shipping rate', e);
+          }
         }
       });
   }

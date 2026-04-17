@@ -3,9 +3,7 @@ import {
   input,
   output,
   inject,
-  DestroyRef,
   signal } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 
@@ -14,7 +12,6 @@ import { ButtonComponent } from '../../../../../shared/components/button/button.
 import { InputComponent } from '../../../../../shared/components/input/input.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { PosScaleService } from '../services/pos-scale.service';
-import { ScaleConnectionStatus } from '../../../../../core/models/store-settings.interface';
 
 @Component({
   selector: 'app-pos-scale-weight-modal',
@@ -174,7 +171,6 @@ import { ScaleConnectionStatus } from '../../../../../core/models/store-settings
     }
   `] })
 export class PosScaleWeightModalComponent {
-  private destroyRef = inject(DestroyRef);
   readonly title = input<string>('Lectura de Báscula');
   readonly message = input<string>('');
   readonly weightUnit = input<string>('kg');
@@ -186,26 +182,13 @@ export class PosScaleWeightModalComponent {
   readonly confirm = output<number>();
   readonly cancel = output<void>();
 
+  private scaleService = inject(PosScaleService);
+
   isOpen = signal(true);
-  currentWeight = signal(0);
-  isStable = signal(false);
-  connectionStatus = signal<ScaleConnectionStatus>('disconnected');
   manualWeight = signal('');
-private scaleService = inject(PosScaleService);
-
-  constructor() {
-    this.scaleService.weight$
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(w => this.currentWeight.set(w));
-
-    this.scaleService.stable$
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(s => this.isStable.set(s));
-
-    this.scaleService.status$
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(st => this.connectionStatus.set(st));
-  }
+  readonly currentWeight = this.scaleService.weight;
+  readonly isStable = this.scaleService.stable;
+  readonly connectionStatus = this.scaleService.status;
 
   get canConfirm(): boolean {
     if (this.connectionStatus() === 'connected') {

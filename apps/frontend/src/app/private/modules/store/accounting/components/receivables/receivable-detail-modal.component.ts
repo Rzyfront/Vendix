@@ -1,7 +1,7 @@
 import {Component, input, output, inject, effect, signal, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
-import { take } from 'rxjs/operators';
+import { firstValueFrom } from 'rxjs';
 
 import { CarteraService } from '../../services/cartera.service';
 import {
@@ -344,20 +344,18 @@ export class ReceivableDetailModalComponent {
     });
   }
 
-  private loadDetail(): void {
+  private async loadDetail(): Promise<void> {
     const rec = this.receivable();
     if (!rec) return;
     this.is_loading.set(true);
-    this.carteraService.getReceivable(rec.id).pipe(take(1)).subscribe({
-      next: (response) => {
-        this.detail.set(response.data);
-        this.is_loading.set(false);
-      },
-      error: () => {
-        this.detail.set(rec);
-        this.is_loading.set(false);
-      },
-    });
+    try {
+      const response = await firstValueFrom(this.carteraService.getReceivable(rec.id));
+      this.detail.set(response.data);
+      this.is_loading.set(false);
+    } catch {
+      this.detail.set(rec);
+      this.is_loading.set(false);
+    }
   }
 
   onClose(): void {

@@ -28,16 +28,16 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl';
         class="fixed inset-0 z-[9999] flex items-center justify-center p-4"
         (dblclick)="onWrapperClick($event)"
       >
-        <!-- Backdrop overlay con blur y oscuridad mejorada -->
+        <!-- Backdrop overlay: bg-only, sin backdrop-filter -->
         <div
-          class="absolute inset-0 backdrop-blur-md bg-black/40 transition-all duration-300 ease-out"
+          class="absolute inset-0 bg-black/50 transition-opacity duration-300 ease-out"
           [class.opacity-100]="isOpen()"
           [class.opacity-0]="!isOpen()"
         ></div>
-        <!-- Modal container con animación mejorada -->
+        <!-- Modal container: animación restringida a transform+opacity -->
         <div
           #modalContainer
-          class="relative transform transition-all duration-300 ease-out"
+          class="relative transform transition-[transform,opacity] duration-300 ease-out"
           [class]="modalClasses()"
           [class.scale-100]="isOpen()"
           [class.scale-95]="!isOpen()"
@@ -46,7 +46,7 @@ export type ModalSize = 'sm' | 'md' | 'lg' | 'xl-mid' | 'xl';
         >
           <!-- Modal content con diseño mejorado -->
           <div
-            class="bg-[var(--color-surface)] rounded-[var(--radius-lg)] shadow-xl overflow-hidden flex flex-col max-h-[90vh] border border-[var(--color-border)] backdrop-blur-sm"
+            class="bg-[var(--color-surface)] rounded-[var(--radius-lg)] shadow-xl overflow-hidden flex flex-col max-h-[90vh] border border-[var(--color-border)]"
           >
             <!-- Header con gradiente sutil -->
             @if (hasHeader()) {
@@ -171,11 +171,21 @@ export class ModalComponent {
 
   readonly hasFooter = computed(() => true);
 
+  private previousIsOpen = false;
+
   constructor(@Inject(PLATFORM_ID) platformId: object) {
     this.isBrowser = isPlatformBrowser(platformId);
 
     effect(() => {
       const open = this.isOpen();
+      if (open !== this.previousIsOpen) {
+        if (open) {
+          this.opened.emit();
+        } else {
+          this.closed.emit();
+        }
+        this.previousIsOpen = open;
+      }
       if (this.isBrowser) {
         document.body.style.overflow = open ? 'hidden' : '';
       }
@@ -205,13 +215,11 @@ export class ModalComponent {
   open(): void {
     if (this.isOpen()) return;
     this.isOpen.set(true);
-    this.opened.emit();
   }
 
   close(): void {
     if (!this.isOpen()) return;
     this.isOpen.set(false);
-    this.closed.emit();
     this.cancel.emit();
   }
 

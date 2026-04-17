@@ -1,6 +1,6 @@
 import { Component, OnInit, DestroyRef, inject, signal, computed } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { take } from 'rxjs/operators';
+import { firstValueFrom } from 'rxjs';
 
 import { RouterModule } from '@angular/router';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
@@ -371,20 +371,18 @@ export class LegalDocumentsComponent implements OnInit {
     );
   }
 
-  loadDocuments() {
+  async loadDocuments() {
     this.loading.set(true);
     // Fetch all for client-side filtering as per original pattern
-    this.service.getSystemDocuments({}).pipe(take(1)).subscribe({
-      next: (docs) => {
-        this.documents.set(docs);
-        this.loading.set(false);
-      },
-      error: (err) => {
-        console.error('Error loading documents', err);
-        this.toast.error('Error al cargar los documentos legales');
-        this.loading.set(false);
-      },
-    });
+    try {
+      const docs = await firstValueFrom(this.service.getSystemDocuments({}));
+      this.documents.set(docs);
+      this.loading.set(false);
+    } catch (err) {
+      console.error('Error loading documents', err);
+      this.toast.error('Error al cargar los documentos legales');
+      this.loading.set(false);
+    }
   }
 
   onSearch(query: string) {
@@ -396,20 +394,18 @@ export class LegalDocumentsComponent implements OnInit {
     this.isModalOpen = true;
   }
 
-  openEditModal(doc: LegalDocument) {
+  async openEditModal(doc: LegalDocument) {
     this.loading.set(true);
-    this.service.getSystemDocument(doc.id).pipe(take(1)).subscribe({
-      next: (fullDoc) => {
-        this.selectedDocument = fullDoc;
-        this.isModalOpen = true;
-        this.loading.set(false);
-      },
-      error: (err) => {
-        console.error('Error loading document details', err);
-        this.toast.error('Error al cargar los detalles del documento');
-        this.loading.set(false);
-      },
-    });
+    try {
+      const fullDoc = await firstValueFrom(this.service.getSystemDocument(doc.id));
+      this.selectedDocument = fullDoc;
+      this.isModalOpen = true;
+      this.loading.set(false);
+    } catch (err) {
+      console.error('Error loading document details', err);
+      this.toast.error('Error al cargar los detalles del documento');
+      this.loading.set(false);
+    }
   }
 
   closeModal() {
@@ -418,50 +414,44 @@ export class LegalDocumentsComponent implements OnInit {
     this.selectedDocument = undefined;
   }
 
-  onSaveDocument(dto: CreateSystemDocumentDto | UpdateSystemDocumentDto) {
+  async onSaveDocument(dto: CreateSystemDocumentDto | UpdateSystemDocumentDto) {
     this.isModalSubmitting = true;
 
     if (this.selectedDocument) {
       // Edit
-      this.service
-        .updateSystemDocument(
-          this.selectedDocument.id,
-          dto as UpdateSystemDocumentDto,
-        )
-        .pipe(take(1))
-        .subscribe({
-          next: () => {
-            this.toast.success('Documento actualizado correctamente');
-            this.closeModal();
-            this.loadDocuments();
-          },
-          error: (err) => {
-            console.error(err);
-            this.isModalSubmitting = false;
-            this.toast.error(
-              this.extractErrorMessage(err, 'Error al actualizar el documento'),
-            );
-          },
-        });
+      try {
+        await firstValueFrom(
+          this.service.updateSystemDocument(
+            this.selectedDocument.id,
+            dto as UpdateSystemDocumentDto,
+          ),
+        );
+        this.toast.success('Documento actualizado correctamente');
+        this.closeModal();
+        this.loadDocuments();
+      } catch (err) {
+        console.error(err);
+        this.isModalSubmitting = false;
+        this.toast.error(
+          this.extractErrorMessage(err, 'Error al actualizar el documento'),
+        );
+      }
     } else {
       // Create
-      this.service
-        .createSystemDocument(dto as CreateSystemDocumentDto)
-        .pipe(take(1))
-        .subscribe({
-          next: () => {
-            this.toast.success('Documento creado correctamente');
-            this.closeModal();
-            this.loadDocuments();
-          },
-          error: (err) => {
-            console.error(err);
-            this.isModalSubmitting = false;
-            this.toast.error(
-              this.extractErrorMessage(err, 'Error al crear el documento'),
-            );
-          },
-        });
+      try {
+        await firstValueFrom(
+          this.service.createSystemDocument(dto as CreateSystemDocumentDto),
+        );
+        this.toast.success('Documento creado correctamente');
+        this.closeModal();
+        this.loadDocuments();
+      } catch (err) {
+        console.error(err);
+        this.isModalSubmitting = false;
+        this.toast.error(
+          this.extractErrorMessage(err, 'Error al crear el documento'),
+        );
+      }
     }
   }
 
@@ -471,29 +461,31 @@ export class LegalDocumentsComponent implements OnInit {
     this.isConfirmOpen = true;
   }
 
-  onConfirmAction() {
+  async onConfirmAction() {
     if (!this.confirmDocument || !this.confirmAction) return;
 
     if (this.confirmAction === 'deactivate') {
-      this.service.deactivateDocument(this.confirmDocument.id).pipe(take(1)).subscribe({
-        next: () => {
-          this.toast.success('Documento desactivado');
-          this.loadDocuments();
-        },
-        error: (err) =>
-          this.toast.error(
-            this.extractErrorMessage(err, 'Error al desactivar'),
-          ),
-      });
+      try {
+        await firstValueFrom(
+          this.service.deactivateDocument(this.confirmDocument.id),
+        );
+        this.toast.success('Documento desactivado');
+        this.loadDocuments();
+      } catch (err) {
+        this.toast.error(
+          this.extractErrorMessage(err, 'Error al desactivar'),
+        );
+      }
     } else {
-      this.service.activateDocument(this.confirmDocument.id).pipe(take(1)).subscribe({
-        next: () => {
-          this.toast.success('Documento activado');
-          this.loadDocuments();
-        },
-        error: (err) =>
-          this.toast.error(this.extractErrorMessage(err, 'Error al activar')),
-      });
+      try {
+        await firstValueFrom(
+          this.service.activateDocument(this.confirmDocument.id),
+        );
+        this.toast.success('Documento activado');
+        this.loadDocuments();
+      } catch (err) {
+        this.toast.error(this.extractErrorMessage(err, 'Error al activar'));
+      }
     }
 
     this.resetConfirmState();

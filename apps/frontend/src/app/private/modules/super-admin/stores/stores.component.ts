@@ -82,9 +82,9 @@ export class StoresComponent implements OnInit, OnChanges {
   // State
   readonly stores = signal<StoreListItem[]>([]);
   readonly isLoading = signal(false);
-  searchTerm = '';
-  selectedOrganization = '';
-  pagination = { page: 1, limit: 10, total: 0, totalPages: 0 };
+  readonly searchTerm = signal('');
+  readonly selectedOrganization = signal('');
+  readonly pagination = signal({ page: 1, limit: 10, total: 0, totalPages: 0 });
 
   // Filter states
   filterForm: FormGroup;
@@ -241,13 +241,13 @@ export class StoresComponent implements OnInit, OnChanges {
   // Edit Modal state
   readonly isEditModalOpen = signal(false);
   readonly isUpdatingStore = signal(false);
-  selectedStore?: StoreListItem;
+  readonly selectedStore = signal<StoreListItem | null>(null);
 
   // Settings Modal state
   readonly isSettingsModalOpen = signal(false);
   readonly isUpdatingSettings = signal(false);
-  selectedStoreForSettings?: StoreListItem;
-private searchSubject = new Subject<string>();
+  readonly selectedStoreForSettings = signal<StoreListItem | null>(null);
+private searchSubject$ = new Subject<string>();
 
   constructor() {
     this.filterForm = this.fb.group({
@@ -263,11 +263,11 @@ private searchSubject = new Subject<string>();
     this.loadStats();
 
     // Set up search debounce
-    this.searchSubject
+    this.searchSubject$
       .pipe(debounceTime(300), distinctUntilChanged(), takeUntilDestroyed(this.destroyRef))
       .subscribe((searchTerm) => {
-        this.searchTerm = searchTerm;
-        this.pagination.page = 1;
+        this.searchTerm.set(searchTerm);
+        this.pagination.update((p) => ({ ...p, page: 1 }));
         this.loadStores();
       });
 
@@ -291,7 +291,7 @@ private searchSubject = new Subject<string>();
     this.filterForm.valueChanges
       .pipe(debounceTime(300), distinctUntilChanged(), takeUntilDestroyed(this.destroyRef))
       .subscribe(() => {
-        this.pagination.page = 1;
+        this.pagination.update((p) => ({ ...p, page: 1 }));
         this.loadStores();
       });
   }
@@ -400,16 +400,18 @@ private initializeCreateForm(): void {
 
   loadStores(): void {
     const filters = this.filterForm.value;
+    const pag = this.pagination();
+    const selectedOrg = this.selectedOrganization();
     const query = {
-      page: this.pagination.page,
-      limit: this.pagination.limit,
+      page: pag.page,
+      limit: pag.limit,
       ...(filters.search && { search: filters.search }),
       ...(filters.is_active && {
         is_active: filters.is_active === 'true'}),
       ...(filters.store_type && {
         store_type: filters.store_type as StoreType}),
-      ...(this.selectedOrganization && {
-        organization_id: parseInt(this.selectedOrganization)}),
+      ...(selectedOrg && {
+        organization_id: parseInt(selectedOrg)}),
       ...(filters.include_non_production === 'all' && {
         include_non_production: true})};
 
@@ -419,10 +421,12 @@ private initializeCreateForm(): void {
       .subscribe({
         next: (response: any) => {
           if (response.meta) {
-            this.pagination.total = response.meta.total || 0;
-            this.pagination.totalPages =
-              response.meta.totalPages ||
-              Math.ceil(this.pagination.total / this.pagination.limit);
+            this.pagination.update((p) => ({
+              ...p,
+              total: response.meta.total || 0,
+              totalPages:
+                response.meta.totalPages ||
+                Math.ceil((response.meta.total || 0) / p.limit)}));
           }
           if (response.success && response.data) {
             this.stores.set(
@@ -505,7 +509,7 @@ private initializeCreateForm(): void {
       store_type: '',
       is_active: '',
       include_non_production: ''});
-    this.selectedOrganization = '';
+    this.selectedOrganization.set('');
   }
 
   onStoreTypeChange(value: string): void {
@@ -517,33 +521,34 @@ private initializeCreateForm(): void {
   }
 
   openSettingsModal(store: StoreListItem): void {
-    this.selectedStoreForSettings = store;
+    this.selectedStoreForSettings.set(store);
     this.isSettingsModalOpen.set(true);
   }
 
   onSettingsModalChange(isOpen: boolean): void {
     this.isSettingsModalOpen.set(isOpen);
     if (!isOpen) {
-      this.selectedStoreForSettings = undefined;
+      this.selectedStoreForSettings.set(null);
     }
   }
 
   onSettingsModalCancel(): void {
     this.isSettingsModalOpen.set(false);
-    this.selectedStoreForSettings = undefined;
+    this.selectedStoreForSettings.set(null);
   }
 
   updateStoreSettings(settingsData: any): void {
-    if (!this.selectedStoreForSettings) return;
+    const current = this.selectedStoreForSettings();
+    if (!current) return;
 
     this.storesService
-      .updateStoreSettings(this.selectedStoreForSettings.id, settingsData)
+      .updateStoreSettings(current.id, settingsData)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           if (response.success && response.data) {
             this.isSettingsModalOpen.set(false);
-            this.selectedStoreForSettings = undefined;
+            this.selectedStoreForSettings.set(null);
             this.toastService.success('Configuración actualizada exitosamente');
           } else {
             this.toastService.error(
@@ -561,7 +566,7 @@ private initializeCreateForm(): void {
   }
 
   onPageChange(page: number): void {
-    this.pagination.page = page;
+    this.pagination.update((p) => ({ ...p, page }));
     this.loadStores();
   }
 
@@ -637,24 +642,25 @@ private initializeCreateForm(): void {
   viewStore(store: StoreListItem): void {}
 
   editStore(store: StoreListItem): void {
-    this.selectedStore = store;
+    this.selectedStore.set(store);
     this.isEditModalOpen.set(true);
   }
 
   onEditModalChange(isOpen: boolean): void {
     this.isEditModalOpen.set(isOpen);
     if (!isOpen) {
-      this.selectedStore = undefined;
+      this.selectedStore.set(null);
     }
   }
 
   onEditModalCancel(): void {
     this.isEditModalOpen.set(false);
-    this.selectedStore = undefined;
+    this.selectedStore.set(null);
   }
 
   updateStore(storeData: any): void {
-    if (!this.selectedStore) return;
+    const current = this.selectedStore();
+    if (!current) return;
 
     const updateData = {
       name: storeData.name,
@@ -670,13 +676,13 @@ private initializeCreateForm(): void {
       store_type: storeData.store_type || StoreType.PHYSICAL};
 
     this.storesService
-      .updateStore(this.selectedStore.id, updateData)
+      .updateStore(current.id, updateData)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           if (response.success && response.data) {
             this.isEditModalOpen.set(false);
-            this.selectedStore = undefined;
+            this.selectedStore.set(null);
             this.loadStores();
             this.loadStats();
             this.toastService.success('Tienda actualizada exitosamente');

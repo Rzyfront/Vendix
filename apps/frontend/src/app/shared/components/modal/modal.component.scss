@@ -90,7 +90,6 @@
     var(--color-surface),
     var(--color-surface) 95%
   );
-  backdrop-filter: blur(8px);
 
   .modal-title {
     font-size: var(--fs-xl);
@@ -158,7 +157,6 @@
   justify-content: flex-end;
   align-items: center;
   padding: 1rem 1.5rem;
-  backdrop-filter: blur(4px);
 
   // Soporte para botones en el footer usando tokens
   .btn {
@@ -333,7 +331,6 @@
   box-shadow:
     var(--shadow-xl),
     0 0 0 1px var(--color-border);
-  backdrop-filter: blur(8px);
 }
 
 // Efecto de brillo sutil en el borde del modal

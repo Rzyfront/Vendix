@@ -8,6 +8,8 @@ metadata:
 
 # Vendix Frontend Modal Pattern
 
+> **⚠️ PREREQUISITO CRÍTICO**: Invocar **`vendix-zoneless-signals`** — el two-way binding de `model()` y el antipatrón de `output()` manuales con `model()` (§14) son el corazón del patrón modal. Sin signals, `[(isOpen)]` falla silenciosamente.
+
 > **Tip**: Antes de usar app-modal, consulta su README en `apps/frontend/src/app/shared/components/modal/README.md` para conocer sus inputs, outputs, gotchas y patrones de uso.
 
 This skill describes the standard pattern for implementing modals in Vendix, using `app-modal` and the Modal-First architecture.

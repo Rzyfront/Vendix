@@ -6,8 +6,8 @@ import {
   createComponent,
   DestroyRef,
   inject,
+  signal,
 } from '@angular/core';
-import { BehaviorSubject } from 'rxjs';
 import {
   ScaleDeviceConfig,
   ScaleConnectionStatus,
@@ -35,9 +35,13 @@ const STABILITY_READINGS = 3;
 @Injectable({ providedIn: 'root' })
 export class PosScaleService implements OnDestroy {
   private destroyRef = inject(DestroyRef);
-  readonly weight$ = new BehaviorSubject<number>(0);
-  readonly status$ = new BehaviorSubject<ScaleConnectionStatus>('disconnected');
-  readonly stable$ = new BehaviorSubject<boolean>(false);
+  private readonly _weight = signal<number>(0);
+  private readonly _status = signal<ScaleConnectionStatus>('disconnected');
+  private readonly _stable = signal<boolean>(false);
+
+  readonly weight = this._weight.asReadonly();
+  readonly status = this._status.asReadonly();
+  readonly stable = this._stable.asReadonly();
 
   private config: ScaleDeviceConfig = { ...DEFAULT_CONFIG };
   private port: SerialPort | null = null;
@@ -62,7 +66,7 @@ export class PosScaleService implements OnDestroy {
     if (!this.isWebSerialSupported()) return false;
     if (this.port) await this.disconnect();
 
-    this.status$.next('connecting');
+    this._status.set('connecting');
 
     try {
       this.port = await navigator.serial.requestPort();
@@ -73,11 +77,11 @@ export class PosScaleService implements OnDestroy {
         parity: this.config.parity,
       });
 
-      this.status$.next('connected');
+      this._status.set('connected');
       this.startReadLoop();
       return true;
     } catch (err) {
-      this.status$.next(
+      this._status.set(
         err instanceof DOMException && err.name === 'NotFoundError'
           ? 'disconnected'
           : 'error',
@@ -105,18 +109,18 @@ export class PosScaleService implements OnDestroy {
     }
     this.port = null;
 
-    this.weight$.next(0);
-    this.stable$.next(false);
+    this._weight.set(0);
+    this._stable.set(false);
     this.recentReadings = [];
-    this.status$.next('disconnected');
+    this._status.set('disconnected');
   }
 
   isConnected(): boolean {
-    return this.status$.value === 'connected';
+    return this._status() === 'connected';
   }
 
   getCurrentWeight(): number {
-    return this.weight$.value;
+    return this._weight();
   }
 
   async tryAutoReconnect(): Promise<void> {
@@ -126,7 +130,7 @@ export class PosScaleService implements OnDestroy {
       const ports = await navigator.serial.getPorts();
       if (ports.length > 0) {
         this.port = ports[0];
-        this.status$.next('connecting');
+        this._status.set('connecting');
 
         await this.port.open({
           baudRate: this.config.baud_rate,
@@ -135,12 +139,12 @@ export class PosScaleService implements OnDestroy {
           parity: this.config.parity,
         });
 
-        this.status$.next('connected');
+        this._status.set('connected');
         this.startReadLoop();
       }
     } catch {
       this.port = null;
-      this.status$.next('disconnected');
+      this._status.set('disconnected');
     }
   }
 
@@ -235,8 +239,8 @@ export class PosScaleService implements OnDestroy {
     this.reader = null;
     await streamClosed;
 
-    if (this.status$.value === 'connected') {
-      this.status$.next('error');
+    if (this._status() === 'connected') {
+      this._status.set('error');
     }
   }
 
@@ -257,7 +261,7 @@ export class PosScaleService implements OnDestroy {
     }
 
     if (weight !== null && !isNaN(weight)) {
-      this.weight$.next(weight);
+      this._weight.set(weight);
       this.updateStability(weight, isStable);
     }
   }
@@ -308,7 +312,7 @@ export class PosScaleService implements OnDestroy {
     }
 
     if (protocolStable) {
-      this.stable$.next(true);
+      this._stable.set(true);
       return;
     }
 
@@ -316,9 +320,9 @@ export class PosScaleService implements OnDestroy {
     if (this.recentReadings.length >= STABILITY_READINGS) {
       const max = Math.max(...this.recentReadings);
       const min = Math.min(...this.recentReadings);
-      this.stable$.next(max - min <= STABILITY_TOLERANCE);
+      this._stable.set(max - min <= STABILITY_TOLERANCE);
     } else {
-      this.stable$.next(false);
+      this._stable.set(false);
     }
   }
 }

@@ -2,7 +2,7 @@ import {Component, input, output, inject, effect, DestroyRef} from '@angular/cor
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DatePipe, CurrencyPipe } from '@angular/common';
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
-import { take } from 'rxjs/operators';
+import { firstValueFrom } from 'rxjs';
 
 import { AccountingService } from '../../../services/accounting.service';
 import {
@@ -306,73 +306,64 @@ export class FixedAssetDetailModalComponent {
     });
   }
 
-  private loadSchedule(): void {
+  private async loadSchedule(): Promise<void> {
     if (!this.asset()) return;
     this.is_loading_schedule = true;
-    this.accounting_service.getDepreciationSchedule(this.asset()!.id).pipe(take(1)).subscribe({
-      next: (res) => {
-        this.schedule = res.data;
-        this.is_loading_schedule = false;
-      },
-      error: () => {
-        this.is_loading_schedule = false;
-      },
-    });
+    try {
+      const res = await firstValueFrom(this.accounting_service.getDepreciationSchedule(this.asset()!.id));
+      this.schedule = res.data;
+      this.is_loading_schedule = false;
+    } catch {
+      this.is_loading_schedule = false;
+    }
   }
 
-  private loadHistory(): void {
+  private async loadHistory(): Promise<void> {
     if (!this.asset()) return;
     this.is_loading_history = true;
-    this.accounting_service.getDepreciationHistory(this.asset()!.id).pipe(take(1)).subscribe({
-      next: (res) => {
-        this.history = res.data;
-        this.is_loading_history = false;
-      },
-      error: () => {
-        this.is_loading_history = false;
-      },
-    });
+    try {
+      const res = await firstValueFrom(this.accounting_service.getDepreciationHistory(this.asset()!.id));
+      this.history = res.data;
+      this.is_loading_history = false;
+    } catch {
+      this.is_loading_history = false;
+    }
   }
 
-  onRetire(): void {
+  async onRetire(): Promise<void> {
     if (!this.asset()) return;
     if (!confirm('¿Estas seguro de retirar este activo? Esta accion no se puede deshacer.')) return;
 
-    this.accounting_service.retireAsset(this.asset()!.id).pipe(take(1)).subscribe({
-      next: () => {
-        this.toast_service.show({ variant: 'success', description: 'Activo retirado correctamente' });
-        this.assetUpdated.emit();
-        this.onClose();
-      },
-      error: () => {
-        this.toast_service.show({ variant: 'error', description: 'Error al retirar el activo' });
-      },
-    });
+    try {
+      await firstValueFrom(this.accounting_service.retireAsset(this.asset()!.id));
+      this.toast_service.show({ variant: 'success', description: 'Activo retirado correctamente' });
+      this.assetUpdated.emit();
+      this.onClose();
+    } catch {
+      this.toast_service.show({ variant: 'error', description: 'Error al retirar el activo' });
+    }
   }
 
-  onDispose(): void {
+  async onDispose(): Promise<void> {
     if (!this.asset() || this.dispose_form.invalid) return;
     this.is_disposing = true;
 
     const values = this.dispose_form.getRawValue();
-    this.accounting_service
-      .disposeAsset(this.asset()!.id, {
-        disposal_date: values.disposal_date!,
-        disposal_amount: Number(values.disposal_amount),
-      })
-      .pipe(take(1))
-      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-        next: () => {
-          this.toast_service.show({ variant: 'success', description: 'Activo dado de baja correctamente' });
-          this.is_disposing = false;
-          this.assetUpdated.emit();
-          this.onClose();
-        },
-        error: () => {
-          this.toast_service.show({ variant: 'error', description: 'Error al dar de baja el activo' });
-          this.is_disposing = false;
-        },
-      });
+    try {
+      await firstValueFrom(
+        this.accounting_service.disposeAsset(this.asset()!.id, {
+          disposal_date: values.disposal_date!,
+          disposal_amount: Number(values.disposal_amount),
+        }),
+      );
+      this.toast_service.show({ variant: 'success', description: 'Activo dado de baja correctamente' });
+      this.is_disposing = false;
+      this.assetUpdated.emit();
+      this.onClose();
+    } catch {
+      this.toast_service.show({ variant: 'error', description: 'Error al dar de baja el activo' });
+      this.is_disposing = false;
+    }
   }
 
   onClose(): void {

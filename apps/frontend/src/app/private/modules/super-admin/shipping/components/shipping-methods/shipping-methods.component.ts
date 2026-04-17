@@ -1,6 +1,6 @@
 import {Component, OnInit, inject, signal, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { take } from 'rxjs/operators';
+import { firstValueFrom } from 'rxjs';
 
 import { ShippingService } from '../../services/shipping.service';
 import { ShippingMethod } from '../../interfaces/shipping.interface';
@@ -188,10 +188,12 @@ export class ShippingMethodsComponent implements OnInit {
     this.loadData();
   }
 
-  loadData() {
-    this.shippingService.getMethods().pipe(take(1)).subscribe((data) => {
-      this.methods = data;
-    });
+  async loadData() {
+    try {
+      this.methods = await firstValueFrom(this.shippingService.getMethods());
+    } catch (e) {
+      console.error('Error loading shipping methods', e);
+    }
   }
 
   openCreateModal() {
@@ -213,11 +215,14 @@ export class ShippingMethodsComponent implements OnInit {
         cancelText: 'Cancelar',
         confirmVariant: 'danger',
       })
-      .then((confirmed) => {
+      .then(async (confirmed) => {
         if (confirmed) {
-          this.shippingService.deleteMethod(method.id).pipe(take(1)).subscribe(() => {
+          try {
+            await firstValueFrom(this.shippingService.deleteMethod(method.id));
             this.loadData();
-          });
+          } catch (e) {
+            console.error('Error deleting shipping method', e);
+          }
         }
       });
   }

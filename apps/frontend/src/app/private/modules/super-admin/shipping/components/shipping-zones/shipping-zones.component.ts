@@ -1,6 +1,6 @@
 import {Component, OnInit, inject, signal, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { take } from 'rxjs/operators';
+import { firstValueFrom } from 'rxjs';
 
 import { Router } from '@angular/router';
 import { ShippingService } from '../../services/shipping.service';
@@ -226,14 +226,17 @@ export class ShippingZonesComponent implements OnInit {
     this.loadData();
   }
 
-  loadData() {
-    this.shippingService.getZones().pipe(take(1)).subscribe((data) => {
-      this.zones = data;
-    });
-    // Load methods for rates modal
-    this.shippingService.getMethods().pipe(take(1)).subscribe((data) => {
-      this.methods = data;
-    });
+  async loadData() {
+    try {
+      const [zones, methods] = await Promise.all([
+        firstValueFrom(this.shippingService.getZones()),
+        firstValueFrom(this.shippingService.getMethods()),
+      ]);
+      this.zones = zones;
+      this.methods = methods;
+    } catch (e) {
+      console.error('Error loading shipping zones/methods', e);
+    }
   }
 
   openCreateModal() {

@@ -1,6 +1,6 @@
 import {Component, OnInit, inject, signal, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { take } from 'rxjs/operators';
+import { firstValueFrom } from 'rxjs';
 
 import { ShippingMethodsComponent } from './components/shipping-methods/shipping-methods.component';
 import { ShippingZonesComponent } from './components/shipping-zones/shipping-zones.component';
@@ -88,9 +88,17 @@ export class ShippingLayoutComponent implements OnInit {
     this.loadStats();
   }
 
-  loadStats(): void {
-    this.shippingService.getMethodStats().pipe(take(1)).subscribe((stats) => this.methodStats.set(stats));
-    this.shippingService.getZoneStats().pipe(take(1)).subscribe((stats) => this.zoneStats.set(stats));
+  async loadStats(): Promise<void> {
+    try {
+      const [methodStats, zoneStats] = await Promise.all([
+        firstValueFrom(this.shippingService.getMethodStats()),
+        firstValueFrom(this.shippingService.getZoneStats()),
+      ]);
+      this.methodStats.set(methodStats);
+      this.zoneStats.set(zoneStats);
+    } catch (e) {
+      console.error('Error loading shipping stats', e);
+    }
   }
 
   setActiveTab(tab: string): void {

@@ -2,7 +2,7 @@ import {Component, inject, signal, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NgClass } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
-import { take } from 'rxjs/operators';
+import { firstValueFrom } from 'rxjs';
 import { environment } from '../../../../../../../environments/environment';
 import {
   CardComponent,
@@ -62,42 +62,43 @@ export class AccountingFlowsComponent {
     this.loadData();
   }
 
-  loadData(): void {
+  async loadData(): Promise<void> {
     this.loading.set(true);
 
-    this.http.get<any>(`${environment.apiUrl}/store/settings`).pipe(take(1)).subscribe({
-      next: (res) => {
-        const settings = res?.data?.settings || res?.data || res;
-        const flows = settings?.module_flows?.accounting || settings?.accounting_flows || {};
-        const built = FLOW_DEFINITIONS.map((def) => ({
-          ...def,
-          enabled: flows[def.key] !== false,
-        }));
-        this.flows.set(built);
-        this.total_active_flows.set(built.filter((f) => f.enabled).length);
-        this.total_disabled_flows.set(built.filter((f) => !f.enabled).length);
-        this.loading.set(false);
-      },
-      error: () => {
-        const built = FLOW_DEFINITIONS.map((def) => ({ ...def, enabled: true }));
-        this.flows.set(built);
-        this.total_active_flows.set(built.length);
-        this.loading.set(false);
-      },
-    });
+    try {
+      const res = await firstValueFrom(this.http.get<any>(`${environment.apiUrl}/store/settings`));
+      const settings = res?.data?.settings || res?.data || res;
+      const flows = settings?.module_flows?.accounting || settings?.accounting_flows || {};
+      const built = FLOW_DEFINITIONS.map((def) => ({
+        ...def,
+        enabled: flows[def.key] !== false,
+      }));
+      this.flows.set(built);
+      this.total_active_flows.set(built.filter((f) => f.enabled).length);
+      this.total_disabled_flows.set(built.filter((f) => !f.enabled).length);
+      this.loading.set(false);
+    } catch {
+      const built = FLOW_DEFINITIONS.map((def) => ({ ...def, enabled: true }));
+      this.flows.set(built);
+      this.total_active_flows.set(built.length);
+      this.loading.set(false);
+    }
 
-    this.http.get<any>(`${environment.apiUrl}/store/accounting/journal-entries`, {
-      params: { limit: '10', page: '1' },
-    }).pipe(take(1)).subscribe({
-      next: (res) => {
-        const entries = res?.data || [];
-        this.recent_entries.set(entries.filter((e: any) => e.entry_type?.startsWith('auto_')).slice(0, 8));
-        const today = toLocalDateString();
-        this.total_entries_today.set(entries.filter(
-          (e: any) => e.entry_type?.startsWith('auto_') && e.created_at?.startsWith(today),
-        ).length);
-      },
-    });
+    try {
+      const res = await firstValueFrom(
+        this.http.get<any>(`${environment.apiUrl}/store/accounting/journal-entries`, {
+          params: { limit: '10', page: '1' },
+        }),
+      );
+      const entries = res?.data || [];
+      this.recent_entries.set(entries.filter((e: any) => e.entry_type?.startsWith('auto_')).slice(0, 8));
+      const today = toLocalDateString();
+      this.total_entries_today.set(entries.filter(
+        (e: any) => e.entry_type?.startsWith('auto_') && e.created_at?.startsWith(today),
+      ).length);
+    } catch {
+      // swallow - no handler previamente definido para este request
+    }
   }
 
   getEntryTypeLabel(entry_type: string): string {

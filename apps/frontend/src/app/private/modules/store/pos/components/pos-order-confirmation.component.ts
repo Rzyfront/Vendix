@@ -6,7 +6,7 @@ import {
   effect,
   DestroyRef } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { take, filter } from 'rxjs';
+import { firstValueFrom } from 'rxjs';
 
 
 import {
@@ -442,26 +442,28 @@ effect(() => {
     this.viewDetail.emit(this.orderId);
   }
 
-  createInvoice(): void {
+  async createInvoice(): Promise<void> {
     if (!this.orderId) return;
     this.creatingInvoice = true;
 
     // Listen for the result before dispatching
-    this.actions$.pipe(
-      ofType(InvoicingActions.createFromOrderSuccess, InvoicingActions.createFromOrderFailure),
-      take(1),
-      takeUntilDestroyed(this.destroyRef),
-    ).subscribe((action) => {
-      this.creatingInvoice = false;
-      if (action.type === InvoicingActions.createFromOrderSuccess.type) {
-        this.toastService.success('Factura creada exitosamente');
-      } else {
-        const errorAction = action as ReturnType<typeof InvoicingActions.createFromOrderFailure>;
-        this.toastService.error(errorAction.error || 'Error al crear la factura');
-      }
-    });
+    const actionPromise = firstValueFrom(
+      this.actions$.pipe(
+        ofType(InvoicingActions.createFromOrderSuccess, InvoicingActions.createFromOrderFailure),
+        takeUntilDestroyed(this.destroyRef),
+      ),
+    );
 
     this.store.dispatch(InvoicingActions.createFromOrder({ orderId: Number(this.orderId) }));
+
+    const action = await actionPromise;
+    this.creatingInvoice = false;
+    if (action.type === InvoicingActions.createFromOrderSuccess.type) {
+      this.toastService.success('Factura creada exitosamente');
+    } else {
+      const errorAction = action as ReturnType<typeof InvoicingActions.createFromOrderFailure>;
+      this.toastService.error(errorAction.error || 'Error al crear la factura');
+    }
   }
 
   hasDiscount(): boolean {

@@ -11,8 +11,8 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DatePipe } from '@angular/common';
 import { Store } from '@ngrx/store';
 import { Actions, ofType } from '@ngrx/effects';
-import { Subject } from 'rxjs';
-import { take, timeout, takeUntil } from 'rxjs/operators';
+import { Subject, firstValueFrom } from 'rxjs';
+import { timeout, takeUntil } from 'rxjs/operators';
 import {
   calculatePayrollRun,
   calculatePayrollRunSuccess,
@@ -453,7 +453,7 @@ private fastTrackCancel$ = new Subject<void>();
 
   // ── Step actions ──────────────────────────────────────
 
-  onNextStep(): void {
+  async onNextStep(): Promise<void> {
     const run = this.payrollRun();
     if (!run) return;
     this.loading.set(true);
@@ -473,15 +473,21 @@ private fastTrackCancel$ = new Subject<void>();
       // Listen for success/failure to reset loading
       const successFailureMap = this.getSuccessFailureActions(status);
       if (successFailureMap) {
-        this.actions$.pipe(
-          ofType(successFailureMap.success, successFailureMap.failure),
-          take(1),
-          takeUntilDestroyed(this.destroyRef),
-        ).subscribe(() => {
+        const actionPromise = firstValueFrom(
+          this.actions$.pipe(
+            ofType(successFailureMap.success, successFailureMap.failure),
+            takeUntilDestroyed(this.destroyRef),
+          ),
+        );
+        dispatchFn();
+        try {
+          await actionPromise;
+        } finally {
           this.loading.set(false);
-        });
+        }
+      } else {
+        dispatchFn();
       }
-      dispatchFn();
     } else {
       this.loading.set(false);
     }
@@ -506,7 +512,7 @@ private fastTrackCancel$ = new Subject<void>();
     this.dispatchNextStep(run.status, run.id);
   }
 
-  private dispatchNextStep(currentStatus: string, id: number): void {
+  private async dispatchNextStep(currentStatus: string, id: number): Promise<void> {
     const config = this.STEP_CONFIG[currentStatus];
     if (!config) {
       this.stopFastTrack();
@@ -542,35 +548,36 @@ private fastTrackCancel$ = new Subject<void>();
     };
 
     // Listen for success or failure WITH timeout
-    this.actions$.pipe(
-      ofType(successFailure.success, successFailure.failure),
-      take(1),
-      timeout(this.FAST_TRACK_TIMEOUT),
-      takeUntil(this.fastTrackCancel$),
-      takeUntilDestroyed(this.destroyRef),
-    ).subscribe({
-      next: (action: any) => {
-        if (action.type === successFailure.failure.type) {
-          this.stopFastTrack();
-          return;
-        }
-
-        const nextStatus = nextStatusMap[currentStatus];
-        if (nextStatus === 'paid') {
-          // All done
-          setTimeout(() => this.stopFastTrack(), 500);
-        } else {
-          this.dispatchNextStep(nextStatus, id);
-        }
-      },
-      error: () => {
-        // Timeout or other error
-        console.warn('[PayrollRunDetail] Fast-track timeout on step:', currentStatus);
-        this.stopFastTrack();
-      },
-    });
+    const actionPromise = firstValueFrom(
+      this.actions$.pipe(
+        ofType(successFailure.success, successFailure.failure),
+        timeout(this.FAST_TRACK_TIMEOUT),
+        takeUntil(this.fastTrackCancel$),
+        takeUntilDestroyed(this.destroyRef),
+      ),
+    );
 
     this.store.dispatch(dispatchAction);
+
+    try {
+      const action: any = await actionPromise;
+      if (action.type === successFailure.failure.type) {
+        this.stopFastTrack();
+        return;
+      }
+
+      const nextStatus = nextStatusMap[currentStatus];
+      if (nextStatus === 'paid') {
+        // All done
+        setTimeout(() => this.stopFastTrack(), 500);
+      } else {
+        this.dispatchNextStep(nextStatus, id);
+      }
+    } catch {
+      // Timeout or other error
+      console.warn('[PayrollRunDetail] Fast-track timeout on step:', currentStatus);
+      this.stopFastTrack();
+    }
   }
 
   private stopFastTrack(): void {

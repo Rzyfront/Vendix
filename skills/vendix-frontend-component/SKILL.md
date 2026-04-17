@@ -8,6 +8,8 @@ metadata:
 
 # Vendix Frontend Component Pattern
 
+> **⚠️ PREREQUISITO CRÍTICO**: Vendix es **Zoneless + Signals** (Angular 20). Antes de crear o editar cualquier componente, invocar **`vendix-zoneless-signals`** — define signals obligatorios para estado UI, patrones CVA con signals, antipatrones (NgZone, markForCheck, @Input/@Output legacy, take(1).subscribe síncrono, signal sin invocar).
+
 ## REGLA CRITICA — Reutilizacion Obligatoria
 
 > **OBLIGATORIO — Antes de crear un componente nuevo, SIEMPRE verificar si ya existe uno existente.**

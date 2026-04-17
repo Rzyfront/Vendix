@@ -2,7 +2,7 @@ import {Component, input, output, model, OnChanges, SimpleChanges, inject, signa
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
-import { take } from 'rxjs/operators';
+import { firstValueFrom } from 'rxjs';
 
 import { CarteraService } from '../../services/cartera.service';
 import { AccountReceivable } from '../../interfaces/cartera.interface';
@@ -156,33 +156,30 @@ export class ReceivablePaymentModalComponent implements OnChanges {
     }
   }
 
-  onSubmit(): void {
+  async onSubmit(): Promise<void> {
     const currentRec = this.receivable();
     if (this.form.invalid || !currentRec) return;
 
     const val = this.form.value;
     this.is_submitting.set(true);
 
-    this.carteraService
-      .registerArPayment(currentRec.id, {
-        amount: Number(val.amount),
-        payment_method: val.payment_method || undefined,
-        reference: val.reference || undefined,
-        notes: val.notes || undefined,
-      })
-      .pipe(take(1))
-      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-        next: () => {
-          this.is_submitting.set(false);
-          this.toastService.success('Cobro registrado exitosamente');
-          this.saved.emit();
-          this.onClose();
-        },
-        error: () => {
-          this.is_submitting.set(false);
-          this.toastService.error('Error al registrar el cobro');
-        },
-      });
+    try {
+      await firstValueFrom(
+        this.carteraService.registerArPayment(currentRec.id, {
+          amount: Number(val.amount),
+          payment_method: val.payment_method || undefined,
+          reference: val.reference || undefined,
+          notes: val.notes || undefined,
+        }),
+      );
+      this.is_submitting.set(false);
+      this.toastService.success('Cobro registrado exitosamente');
+      this.saved.emit();
+      this.onClose();
+    } catch {
+      this.is_submitting.set(false);
+      this.toastService.error('Error al registrar el cobro');
+    }
   }
 
   onClose(): void {

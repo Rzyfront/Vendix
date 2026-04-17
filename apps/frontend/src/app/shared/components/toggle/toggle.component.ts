@@ -41,7 +41,7 @@ import { FormStyleVariant } from '../../types/form.types';
       [class.bg-[var(--color-muted)]]="!isOn()"
     >
       <span
-        class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-[var(--color-surface)] shadow ring-0 transition duration-200 ease-in-out"
+        class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-[var(--color-surface)] shadow ring-0 transition-transform duration-75 ease-out"
         [class.translate-x-5]="isOn()"
         [class.translate-x-0]="!isOn()"
       ></span>
@@ -109,8 +109,8 @@ export class ToggleComponent implements ControlValueAccessor {
       'border-2',
       'border-transparent',
       'transition-colors',
-      'duration-200',
-      'ease-in-out',
+      'duration-75',
+      'ease-out',
       'focus:outline-none',
     ];
 

@@ -82,7 +82,7 @@ export class UsersComponent implements OnInit {
   readonly userToDelete = signal<User | null>(null);
   readonly showDeleteModal = signal(false);
   readonly viewMode = signal<'table' | 'cards'>('table');
-  searchSubject = new Subject<string>();
+  private readonly searchSubject$ = new Subject<string>();
 // Form for filters
   filterForm: FormGroup;
 
@@ -187,11 +187,11 @@ export class UsersComponent implements OnInit {
   ];
 
   // Pagination
-  pagination = {
+  readonly pagination = signal({
     page: 1,
     limit: 10,
     total: 0,
-    totalPages: 0};
+    totalPages: 0});
 
   // Filter states
   userStates = [
@@ -211,14 +211,14 @@ export class UsersComponent implements OnInit {
       state: ['']});
 
     // Setup search debounce
-    this.searchSubject
+    this.searchSubject$
       .pipe(debounceTime(300), distinctUntilChanged(), takeUntilDestroyed(this.destroyRef))
       .subscribe((searchTerm: string) => {
         this.filterForm.patchValue(
           { search: searchTerm },
           { emitEvent: false },
         );
-        this.pagination.page = 1;
+        this.pagination.update((p) => ({ ...p, page: 1 }));
         this.loadUsers();
       });
   }
@@ -231,16 +231,17 @@ export class UsersComponent implements OnInit {
     this.filterForm.valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(() => {
-        this.pagination.page = 1;
+        this.pagination.update((p) => ({ ...p, page: 1 }));
         this.loadUsers();
       });
   }
 loadUsers(): void {
     this.isLoading.set(true);
     const filters = this.filterForm.value;
+    const pag = this.pagination();
     const query: UserQueryDto = {
-      page: this.pagination.page,
-      limit: this.pagination.limit,
+      page: pag.page,
+      limit: pag.limit,
       search: filters.search || undefined,
       state: filters.state || undefined};
 
@@ -252,29 +253,29 @@ loadUsers(): void {
 
           // Validar que response.pagination exista y tenga las propiedades esperadas
           if (response.pagination) {
-            this.pagination = {
+            this.pagination.set({
               page: response.pagination.page || 1,
               limit: response.pagination.limit || 10,
               total: response.pagination.total || 0,
-              totalPages: response.pagination.total_pages || 0};
+              totalPages: response.pagination.total_pages || 0});
           } else {
             // Si no hay paginación, mantener valores por defecto
-            this.pagination = {
+            this.pagination.set({
               page: 1,
               limit: 10,
               total: this.users().length,
-              totalPages: 1};
+              totalPages: 1});
           }
         },
         error: (error) => {
           console.error('Error loading organization users:', error);
           this.users.set([]); // Limpiar usuarios en caso de error
           // Resetear paginación a valores seguros
-          this.pagination = {
+          this.pagination.set({
             page: 1,
             limit: 10,
             total: 0,
-            totalPages: 0};
+            totalPages: 0});
           // Handle error - show toast or notification
         }})
       .add(() => {
@@ -382,11 +383,11 @@ loadUsers(): void {
   }
 
   onSearchChange(searchTerm: string): void {
-    this.searchSubject.next(searchTerm);
+    this.searchSubject$.next(searchTerm);
   }
 
   onPageChange(page: number): void {
-    this.pagination.page = page;
+    this.pagination.update((p) => ({ ...p, page }));
     this.loadUsers();
   }
 

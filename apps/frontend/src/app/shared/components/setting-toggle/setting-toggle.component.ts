@@ -2,7 +2,8 @@ import {
   Component,
   forwardRef,
   input,
-  output
+  output,
+  signal,
 } from '@angular/core';
 
 import {
@@ -26,13 +27,19 @@ import { ToggleComponent } from '../toggle/toggle.component';
     ],
     template: `
     <div
-      class="flex items-center justify-between p-2 mt-3 bg-gray-50 border border-gray-100 rounded-xl transition-all hover:bg-gray-100/50 cursor-pointer select-none"
-      [class.opacity-50]="disabled"
-      [class.cursor-not-allowed]="disabled"
+      class="setting-toggle-row flex items-center justify-between p-2 mt-3 bg-gray-50 border border-gray-100 rounded-xl hover:bg-gray-100/50 select-none"
+      [class.opacity-50]="disabled()"
+      [class.is-disabled]="disabled()"
       [class.new-highlight]="isNew()"
-      (click)="onToggle(!value)"
+      role="button"
+      [attr.tabindex]="disabled() ? -1 : 0"
+      [attr.aria-pressed]="value()"
+      [attr.aria-disabled]="disabled()"
+      (click)="onToggle(!value())"
+      (keydown.enter)="onToggle(!value()); $event.preventDefault()"
+      (keydown.space)="onToggle(!value()); $event.preventDefault()"
       >
-      <div class="flex-1 mr-4">
+      <div class="flex-1 mr-4 pointer-events-none">
         <label class="text-xs font-semibold text-gray-700 block">
           {{ label() }}
           @if (isNew()) {
@@ -47,8 +54,8 @@ import { ToggleComponent } from '../toggle/toggle.component';
       </div>
       <app-toggle
         class="shrink-0"
-        [checked]="value"
-        [disabled]="disabled"
+        [checked]="value()"
+        [disabled]="disabled()"
         (changed)="onToggle($event)"
         (click)="$event.stopPropagation()"
       ></app-toggle>
@@ -56,7 +63,37 @@ import { ToggleComponent } from '../toggle/toggle.component';
     `,
     styles: [`
       :host {
+        display: block;
         cursor: pointer;
+      }
+
+      .setting-toggle-row {
+        cursor: pointer;
+      }
+      .setting-toggle-row, .setting-toggle-row * {
+        cursor: inherit;
+      }
+      .setting-toggle-row.is-disabled,
+      .setting-toggle-row.is-disabled * {
+        cursor: not-allowed;
+      }
+
+      .setting-toggle-row:active:not(.is-disabled) {
+        background: rgba(0, 0, 0, 0.04);
+        transform: scale(0.997);
+      }
+
+      .setting-toggle-row:focus-visible {
+        outline: 2px solid var(--color-ring, #7ed7a5);
+        outline-offset: 2px;
+      }
+
+      /* Asegura cursor pointer en el button interno del app-toggle */
+      :host ::ng-deep app-toggle button {
+        cursor: pointer;
+      }
+      :host ::ng-deep app-toggle button:disabled {
+        cursor: not-allowed;
       }
 
       .new-highlight {
@@ -79,18 +116,18 @@ import { ToggleComponent } from '../toggle/toggle.component';
 export class SettingToggleComponent implements ControlValueAccessor {
     readonly label = input<string>('');
     readonly description = input<string | undefined>(undefined);
-    disabled = false;
     readonly isNew = input(false);
 
     readonly changed = output<boolean>();
 
-    value = false;
+    readonly value = signal(false);
+    readonly disabled = signal(false);
 
     private onChange: (value: boolean) => void = () => { };
     private onTouched: () => void = () => { };
 
     writeValue(value: boolean): void {
-        this.value = !!value;
+        this.value.set(!!value);
     }
 
     registerOnChange(fn: (value: boolean) => void): void {
@@ -102,14 +139,14 @@ export class SettingToggleComponent implements ControlValueAccessor {
     }
 
     setDisabledState(disabled: boolean): void {
-        this.disabled = disabled;
+        this.disabled.set(disabled);
     }
 
     onToggle(value: boolean): void {
-        if (this.disabled) return;
-        this.value = value;
-        this.onChange(this.value);
-        this.changed.emit(this.value);
+        if (this.disabled()) return;
+        this.value.set(value);
+        this.onChange(value);
+        this.changed.emit(value);
         this.onTouched();
     }
 }

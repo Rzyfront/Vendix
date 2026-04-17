@@ -203,7 +203,6 @@ import { APP_MODULES } from '../../constants/app-modules.constant';
                               [formControlName]="child.key"
                               [label]="child.label"
                               [isNew]="isNewModule(child.key)"
-                              [disabled]="!isParentModuleEnabled(module.key)"
                             ></app-setting-toggle>
                           </div>
                         }
@@ -445,17 +444,26 @@ export class SettingsModalComponent {
       return;
     }
 
-    // Synchronize each child with the parent's state
+    // Synchronize each child with the parent's state.
+    // `onlySelf: true` evita que cada control burbujee un recompute al FormGroup raíz
+    // (evitaba N² status/validity passes con muchos hijos → perceptible como lag).
     parentModule.children.forEach((child: any) => {
       const controlPath = `panel_ui.${this.currentAppType}.${child.key}`;
       const childControl = this.settingsForm.get(controlPath);
 
       if (childControl) {
-        // Update child value without emitting additional events
-        // This prevents performance issues from multiple validation cycles
-        childControl.setValue(isEnabled, { emitEvent: false });
+        childControl.setValue(isEnabled, { emitEvent: false, onlySelf: true });
+        if (isEnabled) {
+          childControl.enable({ emitEvent: false, onlySelf: true });
+        } else {
+          childControl.disable({ emitEvent: false, onlySelf: true });
+        }
       }
     });
+    // Un solo recompute del grupo al final en vez de uno por hijo.
+    this.settingsForm
+      .get(`panel_ui.${this.currentAppType}`)
+      ?.updateValueAndValidity({ emitEvent: false });
   }
 
   /**
@@ -684,6 +692,24 @@ export class SettingsModalComponent {
 
     // Apply all patches at once
     this.settingsForm.patchValue(patchObj);
+
+    // Sync disabled state of child controls based on each parent's value
+    APP_MODULES.STORE_ADMIN.forEach((module: any) => {
+      if (!module.isParent || !module.children) return;
+      const parentEnabled =
+        patchObj.panel_ui.STORE_ADMIN[module.key] === true;
+      module.children.forEach((child: any) => {
+        const childControl = this.settingsForm.get(
+          `panel_ui.STORE_ADMIN.${child.key}`,
+        );
+        if (!childControl) return;
+        if (parentEnabled) {
+          childControl.enable({ emitEvent: false });
+        } else {
+          childControl.disable({ emitEvent: false });
+        }
+      });
+    });
   }
 
   getModulesForAppType(appType: string): any[] {

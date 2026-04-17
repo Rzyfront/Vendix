@@ -1080,7 +1080,7 @@ export class PosProductSelectionComponent {
   }
 
   get scaleConnectionStatus() {
-    return this.scaleService.status$.value;
+    return this.scaleService.status();
   }
 
   get showScaleButton(): boolean {

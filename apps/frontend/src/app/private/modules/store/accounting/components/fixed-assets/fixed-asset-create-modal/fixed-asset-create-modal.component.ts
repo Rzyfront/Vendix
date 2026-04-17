@@ -1,6 +1,6 @@
 import {Component, input, output, inject, effect, signal, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { take } from 'rxjs/operators';
+import { firstValueFrom } from 'rxjs';
 
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 
@@ -232,7 +232,7 @@ export class FixedAssetCreateModalComponent {
     }
   }
 
-  onSubmit(): void {
+  async onSubmit(): Promise<void> {
     if (this.form.invalid) return;
 
     this.is_submitting.set(true);
@@ -255,24 +255,22 @@ export class FixedAssetCreateModalComponent {
       ? this.accounting_service.updateFixedAsset(this.editAsset()!.id, dto)
       : this.accounting_service.createFixedAsset(dto);
 
-    request$.pipe(take(1)).subscribe({
-      next: () => {
-        this.toast_service.show({
-          variant: 'success',
-          description: this.editAsset() ? 'Activo actualizado correctamente' : 'Activo creado correctamente',
-        });
-        this.is_submitting.set(false);
-        this.saved.emit();
-        this.onClose();
-      },
-      error: () => {
-        this.toast_service.show({
-          variant: 'error',
-          description: 'Error al guardar el activo',
-        });
-        this.is_submitting.set(false);
-      },
-    });
+    try {
+      await firstValueFrom(request$);
+      this.toast_service.show({
+        variant: 'success',
+        description: this.editAsset() ? 'Activo actualizado correctamente' : 'Activo creado correctamente',
+      });
+      this.is_submitting.set(false);
+      this.saved.emit();
+      this.onClose();
+    } catch {
+      this.toast_service.show({
+        variant: 'error',
+        description: 'Error al guardar el activo',
+      });
+      this.is_submitting.set(false);
+    }
   }
 
   onClose(): void {

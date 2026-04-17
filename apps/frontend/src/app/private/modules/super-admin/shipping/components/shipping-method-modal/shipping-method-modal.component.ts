@@ -1,6 +1,6 @@
 import {Component, OnInit, inject, input, output, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { take } from 'rxjs/operators';
+import { firstValueFrom } from 'rxjs';
 
 import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ShippingService } from '../../services/shipping.service';
@@ -141,7 +141,7 @@ export class ShippingMethodModalComponent implements OnInit {
     return type === ShippingMethodType.CARRIER || type === ShippingMethodType.THIRD_PARTY_PROVIDER;
   }
 
-  onSubmit() {
+  async onSubmit() {
     if (this.form.invalid) return;
 
     this.isSubmitting = true;
@@ -152,26 +152,14 @@ export class ShippingMethodModalComponent implements OnInit {
       ? this.shippingService.updateMethod(method.id, value)
       : this.shippingService.createMethod(value);
 
-    request$.pipe(take(1)).subscribe({
-      next: () => {
-        this.isSubmitting = false;
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        this.saved.emit();
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        // TODO: The 'emit' function requires a mandatory void argument
-        this.close.emit();
-      },
-      error: () => {
-        this.isSubmitting = false;
-        alert('Error al guardar el método de envío.');
-      },
-    });
+    try {
+      await firstValueFrom(request$);
+      this.isSubmitting = false;
+      this.saved.emit();
+      this.close.emit();
+    } catch (e) {
+      this.isSubmitting = false;
+      alert('Error al guardar el método de envío.');
+    }
   }
 }

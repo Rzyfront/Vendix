@@ -8,6 +8,8 @@ metadata:
 
 # Vendix Frontend State Management
 
+> **⚠️ PREREQUISITO CRÍTICO**: Invocar **`vendix-zoneless-signals`** — reglas obligatorias de `toSignal()` con `initialValue`, antipatrones de variables planas de UI state, cuándo sí/no usar BehaviorSubject, reemplazo de `take(1).subscribe` síncrono.
+
 > **Tip**: Antes de usar ToastService o toast-container, consulta su README en `apps/frontend/src/app/shared/components/toast/README.md` para conocer sus metodos, variantes y patrones de uso.
 
 > **Services, Toast & Notifications** - Reactive state, HTTP services, and notification system.

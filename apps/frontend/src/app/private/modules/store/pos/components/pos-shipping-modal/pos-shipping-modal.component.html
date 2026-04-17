@@ -472,9 +472,9 @@
           <h2 class="section-title">Método de envío</h2>
         </div>
 
-        @if (shippingMethods.length > 0) {
+        @if (shippingMethods().length > 0) {
           <div class="payment-methods-grid">
-            @for (method of shippingMethods; track method) {
+            @for (method of shippingMethods(); track method.id) {
               <button
                 type="button"
                 (click)="selectShippingMethod(method)"
