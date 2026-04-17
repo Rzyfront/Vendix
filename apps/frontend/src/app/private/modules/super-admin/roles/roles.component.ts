@@ -208,15 +208,15 @@ searchSubject = new Subject<string>();
         this.loadRoles();
       });
 
-    this.rolesService.isCreatingRole
+    this.rolesService.isCreatingRole$
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe((isCreating) => {
+      .subscribe((isCreating: boolean) => {
         this.isCreatingRole.set(isCreating || false);
       });
 
-    this.rolesService.isUpdatingRole
+    this.rolesService.isUpdatingRole$
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe((isUpdating) => {
+      .subscribe((isUpdating: boolean) => {
         this.isUpdatingRole.set(isUpdating || false);
       });
   }
@@ -436,7 +436,7 @@ loadRoles(): void {
         requests.forEach((req) => {
           req.subscribe({
             next: () => checkDone(),
-            error: (e) => {
+            error: (e: any) => {
               console.error(e);
               errors++;
               checkDone();
