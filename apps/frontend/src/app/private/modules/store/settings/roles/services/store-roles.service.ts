@@ -1,4 +1,4 @@
-import { Injectable, inject } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import {
   Observable,
@@ -9,6 +9,7 @@ import {
   map,
 } from 'rxjs';
 import { tap, shareReplay } from 'rxjs/operators';
+import { toObservable } from '@angular/core/rxjs-interop';
 import { environment } from '../../../../../../../environments/environment';
 import {
   StoreRole,
@@ -35,32 +36,24 @@ export class StoreRolesService {
   private baseUrl = `${environment.apiUrl}/store/roles`;
   private readonly CACHE_TTL = 30000; // 30 segundos
 
-  // Estado de carga
-  private isLoading$ = new BehaviorSubject<boolean>(false);
-  private isCreating$ = new BehaviorSubject<boolean>(false);
-  private isUpdating$ = new BehaviorSubject<boolean>(false);
-
-  // Exponer estados como observables
-  get isLoading() {
-    return this.isLoading$.asObservable();
-  }
-  get isCreating() {
-    return this.isCreating$.asObservable();
-  }
-  get isUpdating() {
-    return this.isUpdating$.asObservable();
-  }
+  // Estado de carga — Signals (Angular 20 Zoneless)
+  readonly isLoading = signal(false);
+  readonly isLoading$ = toObservable(this.isLoading);
+  readonly isCreating = signal(false);
+  readonly isCreating$ = toObservable(this.isCreating);
+  readonly isUpdating = signal(false);
+  readonly isUpdating$ = toObservable(this.isUpdating);
 
   /**
    * Obtener lista de roles de la tienda
    */
   getRoles(): Observable<{ data: StoreRole[] }> {
-    this.isLoading$.next(true);
+    this.isLoading.set(true);
 
     return this.http
       .get<{ data: StoreRole[] }>(this.baseUrl)
       .pipe(
-        finalize(() => this.isLoading$.next(false)),
+        finalize(() => this.isLoading.set(false)),
         catchError((error) => {
           console.error('Error loading store roles:', error);
           return throwError(() => error);
@@ -139,12 +132,12 @@ export class StoreRolesService {
    * Crear nuevo rol
    */
   createRole(data: CreateStoreRoleDto): Observable<StoreRole> {
-    this.isCreating$.next(true);
+    this.isCreating.set(true);
 
     return this.http
       .post<StoreRole>(this.baseUrl, data)
       .pipe(
-        finalize(() => this.isCreating$.next(false)),
+        finalize(() => this.isCreating.set(false)),
         catchError((error) => {
           console.error('Error creating store role:', error);
           return throwError(() => error);
@@ -156,12 +149,12 @@ export class StoreRolesService {
    * Actualizar rol existente
    */
   updateRole(id: number, data: UpdateStoreRoleDto): Observable<StoreRole> {
-    this.isUpdating$.next(true);
+    this.isUpdating.set(true);
 
     return this.http
       .patch<StoreRole>(`${this.baseUrl}/${id}`, data)
       .pipe(
-        finalize(() => this.isUpdating$.next(false)),
+        finalize(() => this.isUpdating.set(false)),
         catchError((error) => {
           console.error('Error updating store role:', error);
           return throwError(() => error);

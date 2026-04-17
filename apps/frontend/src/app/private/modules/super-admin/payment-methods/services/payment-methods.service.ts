@@ -1,4 +1,4 @@
-import { Injectable, inject } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import {
   Observable,
@@ -9,6 +9,7 @@ import {
   finalize,
 } from 'rxjs';
 import { tap, shareReplay } from 'rxjs/operators';
+import { toObservable } from '@angular/core/rxjs-interop';
 import { environment } from '../../../../../../environments/environment';
 import {
   PaymentMethod,
@@ -34,20 +35,20 @@ export class SuperAdminPaymentMethodsService {
   private readonly apiBaseUrl = `${environment.apiUrl}/admin/payment-methods`;
   private readonly CACHE_TTL = 30000; // 30 segundos
 
-  private readonly isLoading$$ = new BehaviorSubject<boolean>(false);
-  private readonly isCreatingPaymentMethod$$ = new BehaviorSubject<boolean>(false);
-  private readonly isUpdatingPaymentMethod$$ = new BehaviorSubject<boolean>(false);
-  private readonly isDeletingPaymentMethod$$ = new BehaviorSubject<boolean>(false);
-
-  public readonly isLoading$ = this.isLoading$$.asObservable();
-  public readonly isCreatingPaymentMethod$ = this.isCreatingPaymentMethod$$.asObservable();
-  public readonly isUpdatingPaymentMethod$ = this.isUpdatingPaymentMethod$$.asObservable();
-  public readonly isDeletingPaymentMethod$ = this.isDeletingPaymentMethod$$.asObservable();
+  // Signals para estado de carga — Angular 20 Zoneless
+  readonly isLoading = signal(false);
+  readonly isLoading$ = toObservable(this.isLoading);
+  readonly isCreatingPaymentMethod = signal(false);
+  readonly isCreatingPaymentMethod$ = toObservable(this.isCreatingPaymentMethod);
+  readonly isUpdatingPaymentMethod = signal(false);
+  readonly isUpdatingPaymentMethod$ = toObservable(this.isUpdatingPaymentMethod);
+  readonly isDeletingPaymentMethod = signal(false);
+  readonly isDeletingPaymentMethod$ = toObservable(this.isDeletingPaymentMethod);
 
   getPaymentMethods(
     query?: PaymentMethodQueryDto,
   ): Observable<PaymentMethod[]> {
-    this.isLoading$$.next(true);
+    this.isLoading.set(true);
     let params = new HttpParams();
     if (query) {
       Object.entries(query).forEach(([key, value]) => {
@@ -68,7 +69,7 @@ export class SuperAdminPaymentMethodsService {
         return response || [];
       }),
       catchError(this.handleError),
-      finalize(() => this.isLoading$$.next(false)),
+      finalize(() => this.isLoading.set(false)),
     );
   }
 
@@ -80,11 +81,11 @@ export class SuperAdminPaymentMethodsService {
   }
 
   createPaymentMethod(data: CreatePaymentMethodDto): Observable<PaymentMethod> {
-    this.isCreatingPaymentMethod$$.next(true);
+    this.isCreatingPaymentMethod.set(true);
     return this.http.post<any>(this.apiBaseUrl, data).pipe(
       map((response) => response.data || response),
       catchError(this.handleError),
-      finalize(() => this.isCreatingPaymentMethod$$.next(false)),
+      finalize(() => this.isCreatingPaymentMethod.set(false)),
     );
   }
 
@@ -92,29 +93,29 @@ export class SuperAdminPaymentMethodsService {
     id: number,
     data: UpdatePaymentMethodDto,
   ): Observable<PaymentMethod> {
-    this.isUpdatingPaymentMethod$$.next(true);
+    this.isUpdatingPaymentMethod.set(true);
     return this.http.patch<any>(`${this.apiBaseUrl}/${id}`, data).pipe(
       map((response) => response.data || response),
       catchError(this.handleError),
-      finalize(() => this.isUpdatingPaymentMethod$$.next(false)),
+      finalize(() => this.isUpdatingPaymentMethod.set(false)),
     );
   }
 
   togglePaymentMethod(id: number): Observable<PaymentMethod> {
-    this.isUpdatingPaymentMethod$$.next(true);
+    this.isUpdatingPaymentMethod.set(true);
     return this.http.patch<any>(`${this.apiBaseUrl}/${id}/toggle`, {}).pipe(
       map((response) => response.data || response),
       catchError(this.handleError),
-      finalize(() => this.isUpdatingPaymentMethod$$.next(false)),
+      finalize(() => this.isUpdatingPaymentMethod.set(false)),
     );
   }
 
   deletePaymentMethod(id: number): Observable<void> {
-    this.isDeletingPaymentMethod$$.next(true);
+    this.isDeletingPaymentMethod.set(true);
     return this.http.delete<any>(`${this.apiBaseUrl}/${id}`).pipe(
       map((response) => response.data || response),
       catchError(this.handleError),
-      finalize(() => this.isDeletingPaymentMethod$$.next(false)),
+      finalize(() => this.isDeletingPaymentMethod.set(false)),
     );
   }
 
