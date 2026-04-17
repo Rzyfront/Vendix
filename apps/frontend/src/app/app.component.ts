@@ -78,16 +78,7 @@ export class AppComponent implements OnInit {
   private setupRouteErrorHandling(): void {
     this.routeManager.routesConfigured$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (configured) => {
-        if (configured) {
-          this.is_loading.set(false);
-        } else {
-          this.is_loading.set(false);
-          this.toastService.error(
-            'Error cargando las rutas de la aplicación. Por favor recarga la página.',
-            'Error de Configuración',
-            10000,
-          );
-        }
+        this.is_loading.set(!configured);
       },
       error: (error) => {
         console.error('[AppComponent] Route manager error:', error);
