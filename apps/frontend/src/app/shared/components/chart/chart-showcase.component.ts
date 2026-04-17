@@ -1,4 +1,4 @@
-import { Component } from '@angular/core';
+import { Component, signal } from '@angular/core';
 
 import {
   ChartComponent,
@@ -31,10 +31,10 @@ import { EChartsOption } from 'echarts';
           <button
             class="px-4 py-2 rounded-lg font-medium transition-all"
           [style.background-color]="
-            selectedTheme === theme ? 'var(--primary)' : 'var(--muted)'
+            selectedTheme() === theme ? 'var(--primary)' : 'var(--muted)'
           "
           [style.color]="
-            selectedTheme === theme ? 'white' : 'var(--muted-foreground)'
+            selectedTheme() === theme ? 'white' : 'var(--muted-foreground)'
           "
             (click)="changeTheme(theme)"
             >
@@ -58,7 +58,7 @@ import { EChartsOption } from 'echarts';
           </p>
           <app-chart
             [options]="barChartData"
-            [theme]="currentTheme"
+            [theme]="currentTheme()"
             size="medium"
             >
           </app-chart>
@@ -77,7 +77,7 @@ import { EChartsOption } from 'echarts';
           </p>
           <app-chart
             [options]="lineChartData"
-            [theme]="currentTheme"
+            [theme]="currentTheme()"
             size="medium"
             >
           </app-chart>
@@ -96,7 +96,7 @@ import { EChartsOption } from 'echarts';
           </p>
           <app-chart
             [options]="areaChartData"
-            [theme]="currentTheme"
+            [theme]="currentTheme()"
             size="medium"
             >
           </app-chart>
@@ -115,7 +115,7 @@ import { EChartsOption } from 'echarts';
           </p>
           <app-chart
             [options]="doughnutChartData"
-            [theme]="currentTheme"
+            [theme]="currentTheme()"
             size="medium"
             >
           </app-chart>
@@ -134,7 +134,7 @@ import { EChartsOption } from 'echarts';
           </p>
           <app-chart
             [options]="pieChartData"
-            [theme]="currentTheme"
+            [theme]="currentTheme()"
             size="medium"
             >
           </app-chart>
@@ -153,7 +153,7 @@ import { EChartsOption } from 'echarts';
           </p>
           <app-chart
             [options]="radarChartData"
-            [theme]="currentTheme"
+            [theme]="currentTheme()"
             size="medium"
             >
           </app-chart>
@@ -172,7 +172,7 @@ import { EChartsOption } from 'echarts';
           </p>
           <app-chart
             [options]="polarAreaChartData"
-            [theme]="currentTheme"
+            [theme]="currentTheme()"
             size="medium"
             >
           </app-chart>
@@ -191,7 +191,7 @@ import { EChartsOption } from 'echarts';
           </p>
           <app-chart
             [options]="nightingaleChartData"
-            [theme]="currentTheme"
+            [theme]="currentTheme()"
             size="medium"
             >
           </app-chart>
@@ -210,7 +210,7 @@ import { EChartsOption } from 'echarts';
           </p>
           <app-chart
             [options]="gaugeChartData"
-            [theme]="currentTheme"
+            [theme]="currentTheme()"
             size="medium"
             >
           </app-chart>
@@ -229,7 +229,7 @@ import { EChartsOption } from 'echarts';
           </p>
           <app-chart
             [options]="scatterChartData"
-            [theme]="currentTheme"
+            [theme]="currentTheme()"
             size="medium"
             >
           </app-chart>
@@ -248,7 +248,7 @@ import { EChartsOption } from 'echarts';
           </p>
           <app-chart
             [options]="bubbleChartData"
-            [theme]="currentTheme"
+            [theme]="currentTheme()"
             size="medium"
             >
           </app-chart>
@@ -273,17 +273,17 @@ import { EChartsOption } from 'echarts';
               <button
                 class="px-4 py-2 rounded-lg font-medium transition-all"
                 [style.background-color]="
-                  loading ? 'var(--error)' : 'var(--primary)'
+                  loading() ? 'var(--error)' : 'var(--primary)'
                 "
                 [style.color]="'white'"
                 (click)="toggleLoading()"
                 >
-                {{ loading ? 'Stop Loading' : 'Show Loading' }}
+                {{ loading() ? 'Stop Loading' : 'Show Loading' }}
               </button>
               <app-chart
                 [options]="barChartData"
-                [theme]="currentTheme"
-                [loading]="loading"
+                [theme]="currentTheme()"
+                [loading]="loading()"
                 size="small"
                 >
               </app-chart>
@@ -304,12 +304,12 @@ import { EChartsOption } from 'echarts';
                   Last Event:
                 </p>
                 <p class="text-sm" style="color: var(--muted-foreground);">
-                  {{ lastEvent || 'No events yet' }}
+                  {{ lastEvent() || 'No events yet' }}
                 </p>
               </div>
               <app-chart
                 [options]="lineChartData"
-                [theme]="currentTheme"
+                [theme]="currentTheme()"
                 size="small"
                 (chartClick)="onChartClick($event)"
                 (chartHover)="onChartHover($event)"
@@ -333,10 +333,10 @@ import { EChartsOption } from 'echarts';
 export class ChartShowcaseComponent {
   CHART_THEMES = CHART_THEMES;
   themeKeys = Object.keys(CHART_THEMES);
-  selectedTheme = 'corporate';
-  currentTheme = CHART_THEMES['corporate'];
-  loading = false;
-  lastEvent = '';
+  readonly selectedTheme = signal('corporate');
+  readonly currentTheme = signal(CHART_THEMES['corporate']);
+  readonly loading = signal(false);
+  readonly lastEvent = signal('');
 
   // Bar Chart Data
   barChartData: EChartsOption = {
@@ -552,19 +552,19 @@ export class ChartShowcaseComponent {
   };
 
   changeTheme(themeName: string): void {
-    this.selectedTheme = themeName;
-    this.currentTheme = CHART_THEMES[themeName];
+    this.selectedTheme.set(themeName);
+    this.currentTheme.set(CHART_THEMES[themeName] || CHART_THEMES['corporate']);
   }
 
   toggleLoading(): void {
-    this.loading = !this.loading;
+    this.loading.update((v) => !v);
   }
 
   onChartClick(event: any): void {
-    this.lastEvent = `Click: ${event.name || event.seriesName || 'Unknown'} - Value: ${event.value ?? 'N/A'}`;
+    this.lastEvent.set(`Click: ${event.name || event.seriesName || 'Unknown'} - Value: ${event.value ?? 'N/A'}`);
   }
 
   onChartHover(event: any): void {
-    this.lastEvent = `Hover: ${event.name || event.seriesName || 'Unknown'}`;
+    this.lastEvent.set(`Hover: ${event.name || event.seriesName || 'Unknown'}`);
   }
 }

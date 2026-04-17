@@ -3,7 +3,7 @@
   @for (slide of slides; track slide; let i = $index) {
     <div
       class="hero-slide"
-      [class.active]="i === currentSlideIndex"
+      [class.active]="i === currentSlideIndex()"
       >
       <div class="slide-image-container">
         <img [src]="slide.image" [alt]="slide.message" class="slide-image" />
@@ -76,7 +76,7 @@
     @for (slide of slides; track slide; let i = $index) {
       <button
         class="pagination-bullet"
-        [class.active]="i === currentSlideIndex"
+        [class.active]="i === currentSlideIndex()"
         (click)="goToSlide(i)"
         [attr.aria-label]="'Go to slide ' + (i + 1)"
       ></button>

@@ -2,7 +2,6 @@ import { Component, inject, computed, signal } from '@angular/core';
 import { NgTemplateOutlet } from '@angular/common';
 import { toSignal } from '@angular/core/rxjs-interop';
 import { Store } from '@ngrx/store';
-import { Observable, map, combineLatest, BehaviorSubject } from 'rxjs';
 
 import { ChartAccount } from '../../interfaces/accounting.interface';
 import {
@@ -373,13 +372,13 @@ export class ChartOfAccountsComponent {
     initialValue: false,
   });
 
-  private search$ = new BehaviorSubject<string>('');
-  searchTerm = '';
+  // Search term as signal
+  readonly searchTerm = signal('');
 
   // Filtered accounts (tree-aware search) - using computed
   readonly filteredAccounts = computed(() => {
     const accounts = this.accounts();
-    const search = this.search$.value;
+    const search = this.searchTerm();
     if (!search.trim()) return accounts;
     return this.filterTree(accounts, search.toLowerCase());
   });
@@ -408,8 +407,7 @@ export class ChartOfAccountsComponent {
   // Accounts already loaded by parent AccountingComponent
 
   onSearch(term: string): void {
-    this.searchTerm = term;
-    this.search$.next(term);
+    this.searchTerm.set(term);
   }
 
   openCreateModal(): void {

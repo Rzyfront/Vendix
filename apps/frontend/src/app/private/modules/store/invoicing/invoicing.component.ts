@@ -129,12 +129,12 @@ export class InvoicingComponent {
   readonly loading = toSignal(this.loading$, { initialValue: false });
 
   // Modal states
-  isCreateModalOpen = false;
-  isDetailModalOpen = false;
-  isCreditNoteModalOpen = false;
-  isResolutionsModalOpen = false;
-  selectedInvoice: Invoice | null = null;
-  creditNoteSourceInvoice: Invoice | null = null;
+  readonly isCreateModalOpen = signal(false);
+  readonly isDetailModalOpen = signal(false);
+  readonly isCreditNoteModalOpen = signal(false);
+  readonly isResolutionsModalOpen = signal(false);
+  readonly selectedInvoice = signal<Invoice | null>(null);
+  readonly creditNoteSourceInvoice = signal<Invoice | null>(null);
 
   constructor() {
     this.currencyService.loadCurrency();
@@ -145,22 +145,21 @@ export class InvoicingComponent {
 
   // Modal handlers
   openCreateModal(): void {
-    this.isCreateModalOpen = true;
+    this.isCreateModalOpen.set(true);
   }
 
   openResolutionsModal(): void {
-    this.isResolutionsModalOpen = true;
+    this.isResolutionsModalOpen.set(true);
   }
 
   viewInvoice(invoice: Invoice): void {
-    this.selectedInvoice = invoice;
-    this.isDetailModalOpen = true;
+    this.selectedInvoice.set(invoice);
+    this.isDetailModalOpen.set(true);
   }
 
   openCreditNoteModal(invoice: Invoice): void {
-    this.creditNoteSourceInvoice = invoice;
-    this.isDetailModalOpen = false;
-    this.isCreditNoteModalOpen = true;
+    this.creditNoteSourceInvoice.set(invoice);
+    this.isCreditNoteModalOpen.set(true);
   }
 
   refreshInvoices(): void {
