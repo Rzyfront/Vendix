@@ -344,10 +344,17 @@ export class ProductCreatePageComponent {
   private http = inject(HttpClient);
 
   // Data Collection Templates (for consultation configuration)
-  dataCollectionTemplates: { id: number; name: string; productIds: number[] }[] = [];
+  dataCollectionTemplates: {
+    id: number;
+    name: string;
+    productIds: number[];
+  }[] = [];
 
   get templateSelectorOptions(): SelectorOption[] {
-    return this.dataCollectionTemplates.map(t => ({ value: t.id, label: t.name }));
+    return this.dataCollectionTemplates.map((t) => ({
+      value: t.id,
+      label: t.name,
+    }));
   }
 
   // Provider assignment (for services with requires_booking)
@@ -537,7 +544,7 @@ export class ProductCreatePageComponent {
       track_inventory: draft.track_inventory ?? true,
       sku: draft.sku || '',
       category_ids: draft.category_ids || [],
-      brand_id: draft.brand_id || null,
+      brand_ids: draft.brand_id ? [draft.brand_id] : [],
       tax_category_ids: draft.tax_category_ids || [],
       state: draft.state || ProductState.ACTIVE,
     });
@@ -576,18 +583,21 @@ export class ProductCreatePageComponent {
   }
 
   private loadDataCollectionTemplates(): void {
-    this.http.get<any>(`${environment.apiUrl}/store/data-collection/templates`).pipe(
-      map((r: any) => r.data || [])
-    ).subscribe({
-      next: (templates: any[]) => {
-        this.dataCollectionTemplates = templates.map((t: any) => ({
-          id: t.id,
-          name: t.name,
-          productIds: (t.products || []).map((p: any) => p.product_id || p.product?.id),
-        }));
-      },
-      error: () => {}, // Silently fail — not critical
-    });
+    this.http
+      .get<any>(`${environment.apiUrl}/store/data-collection/templates`)
+      .pipe(map((r: any) => r.data || []))
+      .subscribe({
+        next: (templates: any[]) => {
+          this.dataCollectionTemplates = templates.map((t: any) => ({
+            id: t.id,
+            name: t.name,
+            productIds: (t.products || []).map(
+              (p: any) => p.product_id || p.product?.id,
+            ),
+          }));
+        },
+        error: () => {}, // Silently fail — not critical
+      });
   }
 
   private createForm(): FormGroup {
@@ -612,7 +622,7 @@ export class ProductCreatePageComponent {
       stock_quantity: [0, [Validators.min(0)]],
       track_inventory: [true],
       category_ids: [[] as number[]],
-      brand_id: [null],
+      brand_ids: [[]],
       tax_category_ids: [[] as number[]],
       weight: [0, [Validators.min(0)]],
       dimensions: this.fb.group({
@@ -760,7 +770,11 @@ export class ProductCreatePageComponent {
       stock_quantity: product.stock_quantity,
       track_inventory: product.track_inventory !== false,
       category_ids: categoryIds,
-      brand_id: product.brand?.id ?? product.brand_id,
+      brand_ids: product.brand?.id
+        ? [product.brand.id]
+        : product.brand_id
+          ? [product.brand_id]
+          : [],
       tax_category_ids: taxCategoryIds,
       state: product.state,
       pricing_type:
@@ -776,7 +790,8 @@ export class ProductCreatePageComponent {
       is_consultation: product.is_consultation || false,
       send_preconsultation: product.send_preconsultation || false,
       consultation_template_id: product.consultation_template_id || null,
-      preconsultation_template_id: (product as any).preconsultation_template_id || null,
+      preconsultation_template_id:
+        (product as any).preconsultation_template_id || null,
       weight: product.weight || 0,
       dimensions: {
         length: product.dimensions?.length || 0,
@@ -843,7 +858,7 @@ export class ProductCreatePageComponent {
   }
 
   private loadCategories(): void {
-    this.categoriesService.getCategories().subscribe({
+    this.categoriesService.getAllCategories().subscribe({
       next: (categories: ProductCategory[]) => {
         this.categoryOptions = categories.map((cat: ProductCategory) => ({
           value: cat.id,
@@ -888,7 +903,7 @@ export class ProductCreatePageComponent {
   }
 
   private loadBrands(): void {
-    this.brandsService.getBrands().subscribe({
+    this.brandsService.getAllBrands().subscribe({
       next: (brands: Brand[]) => {
         this.brandOptions = brands.map((brand: Brand) => ({
           value: brand.id,
@@ -897,7 +912,7 @@ export class ProductCreatePageComponent {
         }));
 
         // Re-set the brand value to force selector sync after options load
-        const brandControl = this.productForm.get('brand_id');
+        const brandControl = this.productForm.get('brand_ids');
         if (brandControl?.value) {
           const currentValue = brandControl.value;
           brandControl.setValue(currentValue);
@@ -1367,7 +1382,7 @@ export class ProductCreatePageComponent {
   onBrandCreated(brand: Brand): void {
     this.loadBrands();
     if (brand && brand.id) {
-      this.productForm.patchValue({ brand_id: brand.id });
+      this.productForm.patchValue({ brand_ids: [brand.id] });
     }
     this.isBrandCreateOpen = false;
   }
@@ -1698,7 +1713,9 @@ export class ProductCreatePageComponent {
           : undefined,
       category_ids: formValue.category_ids || [],
       tax_category_ids: formValue.tax_category_ids || [],
-      brand_id: formValue.brand_id ? Number(formValue.brand_id) : null,
+      brand_id: formValue.brand_ids?.[0]
+        ? Number(formValue.brand_ids[0])
+        : null,
       state: formValue.state || ProductState.ACTIVE,
       pricing_type:
         typeof formValue.pricing_type === 'object'
@@ -1719,7 +1736,8 @@ export class ProductCreatePageComponent {
         is_consultation: !!formValue.is_consultation,
         send_preconsultation: !!formValue.send_preconsultation,
         consultation_template_id: formValue.consultation_template_id || null,
-        preconsultation_template_id: formValue.preconsultation_template_id || null,
+        preconsultation_template_id:
+          formValue.preconsultation_template_id || null,
       }),
       images: images.length > 0 ? images : undefined,
       weight: isServiceType
@@ -1822,7 +1840,7 @@ export class ProductCreatePageComponent {
 
     this.isGeneratingDescription.set(true);
 
-    const brandId = this.productForm.get('brand_id')?.value;
+    const brandId = this.productForm.get('brand_ids')?.value?.[0];
     const brand = brandId
       ? this.brandOptions.find((b) => b.value === brandId)?.label
       : undefined;

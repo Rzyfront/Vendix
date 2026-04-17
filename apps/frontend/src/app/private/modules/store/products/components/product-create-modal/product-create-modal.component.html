@@ -5,39 +5,57 @@
   [size]="'md'"
   [title]="isEditMode ? 'Editar Producto' : 'Nuevo Producto'"
   subtitle="Configura los productos esenciales"
-  >
-
+>
   <div class="p-2 md:p-4">
     <form [formGroup]="productForm" class="space-y-2 md:space-y-2 md:space-y-4">
-
       <!-- Name -->
       <div>
-        <app-input label="Nombre del Producto" formControlName="name" placeholder="Ej. Camiseta Algodón Premium"
-        [error]="getErrorMessage('name')" [required]="true"></app-input>
+        <app-input
+          label="Nombre del Producto"
+          formControlName="name"
+          placeholder="Ej. Camiseta Algodón Premium"
+          [error]="getErrorMessage('name')"
+          [required]="true"
+        ></app-input>
       </div>
 
       <!-- Price & SKU Row -->
       <div class="grid grid-cols-2 gap-2 md:gap-4">
-        <app-input label="Precio Base" [currency]="true" formControlName="base_price" [error]="getErrorMessage('base_price')"
-        prefix="$" [required]="true" placeholder="0.00"></app-input>
+        <app-input
+          label="Precio Base"
+          [currency]="true"
+          formControlName="base_price"
+          [error]="getErrorMessage('base_price')"
+          prefix="$"
+          [required]="true"
+          placeholder="0.00"
+        ></app-input>
 
         <div>
-          <app-input label="SKU" formControlName="sku" placeholder="Ej. CAM-001"
-          [error]="getErrorMessage('sku')"></app-input>
+          <app-input
+            label="SKU"
+            formControlName="sku"
+            placeholder="Ej. CAM-001"
+            [error]="getErrorMessage('sku')"
+          ></app-input>
           <small class="text-xs text-gray-400 mt-0.5 block">Opcional</small>
         </div>
       </div>
 
       <!-- Track Inventory Toggle -->
-      <app-setting-toggle formControlName="track_inventory"
+      <app-setting-toggle
+        formControlName="track_inventory"
         label="Controlar inventario"
-        [description]="productForm.get('track_inventory')?.value
-          ? 'Se controla el stock de este producto'
-          : 'Producto bajo pedido — siempre disponible para venta'">
+        [description]="
+          productForm.get('track_inventory')?.value
+            ? 'Se controla el stock de este producto'
+            : 'Producto bajo pedido — siempre disponible para venta'
+        "
+      >
       </app-setting-toggle>
 
       <!-- Stock Field: Only shown when track_inventory is enabled -->
-      @if (productForm.get('track_inventory')?.value) {
+      @if (productForm.get("track_inventory")?.value) {
         <div class="grid grid-cols-1 gap-2 md:gap-4">
           <!-- Stock Field: Different behavior for create vs edit mode -->
           @if (!isEditMode) {
@@ -70,11 +88,19 @@
       <div class="grid grid-cols-2 gap-2 md:gap-4">
         <div>
           <div class="flex gap-2 items-end">
-            <app-selector class="flex-1" label="Categoría" [options]="categoryOptions" formControlName="category_id"
-            placeholder="Seleccionar"></app-selector>
-            <button type="button" (click)="isCategoryCreateOpen.set(true)"
+            <app-multi-selector
+              class="flex-1"
+              label="Categoría"
+              [options]="categoryOptions"
+              formControlName="category_ids"
+              placeholder="Seleccionar categorías..."
+            ></app-multi-selector>
+            <button
+              type="button"
+              (click)="isCategoryCreateOpen.set(true)"
               class="p-2 text-gray-500 hover:bg-gray-100 border border-gray-300 bg-white mb-0.5"
-              style="border-radius: var(--radius-sm);">
+              style="border-radius: var(--radius-sm)"
+            >
               <app-icon name="plus" size="20"></app-icon>
             </button>
           </div>
@@ -83,11 +109,19 @@
 
         <div>
           <div class="flex gap-2 items-end">
-            <app-selector class="flex-1" label="Marca" [options]="brandOptions"
-            formControlName="brand_id" placeholder="Seleccionar"></app-selector>
-            <button type="button" (click)="isBrandCreateOpen.set(true)"
+            <app-multi-selector
+              class="flex-1"
+              label="Marca"
+              [options]="brandOptions"
+              formControlName="brand_ids"
+              placeholder="Seleccionar marca..."
+            ></app-multi-selector>
+            <button
+              type="button"
+              (click)="isBrandCreateOpen.set(true)"
               class="p-2 text-gray-500 hover:bg-gray-100 border border-gray-300 bg-white mb-0.5"
-              style="border-radius: var(--radius-sm);">
+              style="border-radius: var(--radius-sm)"
+            >
               <app-icon name="plus" size="20"></app-icon>
             </button>
           </div>
@@ -98,19 +132,32 @@
       <!-- IVA / Impuestos -->
       <div>
         <div class="flex gap-2 items-end">
-          <app-multi-selector class="flex-1" label="Impuestos (IVA)"
-            [options]="taxCategoryOptions" formControlName="tax_category_ids"
-            placeholder="Seleccionar impuestos...">
+          <app-multi-selector
+            class="flex-1"
+            label="Impuestos (IVA)"
+            [options]="taxCategoryOptions"
+            formControlName="tax_category_ids"
+            placeholder="Seleccionar impuestos..."
+          >
           </app-multi-selector>
-          <button type="button" (click)="isTaxCategoryCreateOpen.set(true)"
+          <button
+            type="button"
+            (click)="isTaxCategoryCreateOpen.set(true)"
             class="p-2 text-gray-500 hover:bg-gray-100 border border-gray-300 bg-white mb-0.5"
-            style="border-radius: var(--radius-sm);">
+            style="border-radius: var(--radius-sm)"
+          >
             <app-icon name="plus" size="20"></app-icon>
           </button>
         </div>
-        @if ((productForm.get('tax_category_ids')?.value || []).length > 0 && productForm.get('base_price')?.value > 0) {
+        @if (
+          (productForm.get("tax_category_ids")?.value || []).length > 0 &&
+          productForm.get("base_price")?.value > 0
+        ) {
           <small class="text-xs text-gray-500 mt-1 block">
-            Precio con impuestos: <span class="font-semibold text-gray-700">{{ priceWithTax | number:'1.0-0' }}</span>
+            Precio con impuestos:
+            <span class="font-semibold text-gray-700">{{
+              priceWithTax | number: "1.0-0"
+            }}</span>
           </small>
         }
         <small class="text-xs text-gray-400 mt-0.5 block">Opcional</small>
@@ -118,26 +165,39 @@
 
       <!-- Advanced Link -->
       <div class="pt-2">
-        <button type="button" (click)="goToAdvancedCreation()"
-          class="text-sm text-primary-600 hover:text-primary-700 font-medium flex items-center gap-1 transition-colors">
+        <button
+          type="button"
+          (click)="goToAdvancedCreation()"
+          class="text-sm text-primary-600 hover:text-primary-700 font-medium flex items-center gap-1 transition-colors"
+        >
           <app-icon name="settings" size="14"></app-icon>
           Configuración avanzada (variantes, imágenes, descripción)
         </button>
       </div>
-
     </form>
   </div>
 
   <!-- Footer -->
   <div slot="footer" class="max-w-full">
-    <div class="flex items-center justify-end gap-2 md:gap-3 p-2 md:px-4 md:py-3 bg-gray-50 rounded-b-xl">
-      <app-button variant="outline" (clicked)="onCancel()" [disabled]="isSubmitting()"
-        customClasses="!rounded-xl flex-1 sm:flex-none font-bold">
+    <div
+      class="flex items-center justify-end gap-2 md:gap-3 p-2 md:px-4 md:py-3 bg-gray-50 rounded-b-xl"
+    >
+      <app-button
+        variant="outline"
+        (clicked)="onCancel()"
+        [disabled]="isSubmitting()"
+        customClasses="!rounded-xl flex-1 sm:flex-none font-bold"
+      >
         Cancelar
       </app-button>
 
-      <app-button variant="primary" (clicked)="onSubmit()" [loading]="isSubmitting()" [disabled]="isSubmitting()"
-        customClasses="!rounded-xl flex-1 sm:flex-none font-bold shadow-md shadow-primary-200 active:scale-95 transition-all">
+      <app-button
+        variant="primary"
+        (clicked)="onSubmit()"
+        [loading]="isSubmitting()"
+        [disabled]="isSubmitting()"
+        customClasses="!rounded-xl flex-1 sm:flex-none font-bold shadow-md shadow-primary-200 active:scale-95 transition-all"
+      >
         {{ isEditMode ? 'Guardar Cambios' : 'Crear Producto' }}
       </app-button>
     </div>
@@ -145,8 +205,12 @@
 </app-modal>
 
 <!-- Quick Create Modals -->
-<app-category-quick-create [isOpen]="isCategoryCreateOpen()" (isOpenChange)="isCategoryCreateOpen.set($event)"
-(created)="onCategoryCreated($event)" (cancel)="isCategoryCreateOpen.set(false)"></app-category-quick-create>
+<app-category-quick-create
+  [isOpen]="isCategoryCreateOpen()"
+  (isOpenChange)="isCategoryCreateOpen.set($event)"
+  (created)="onCategoryCreated($event)"
+  (cancel)="isCategoryCreateOpen.set(false)"
+></app-category-quick-create>
 
 <app-brand-quick-create
   [isOpen]="isBrandCreateOpen()"
@@ -159,5 +223,6 @@
   [isOpen]="isTaxCategoryCreateOpen()"
   (isOpenChange)="isTaxCategoryCreateOpen.set($event)"
   (created)="onTaxCategoryCreated($event)"
-  (cancel)="isTaxCategoryCreateOpen.set(false)">
+  (cancel)="isTaxCategoryCreateOpen.set(false)"
+>
 </app-tax-quick-create>

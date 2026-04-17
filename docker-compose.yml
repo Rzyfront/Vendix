@@ -61,7 +61,7 @@ services:
       - /app/node_modules
     networks:
       - vendix_net
-    command: sh -c "npx prisma generate && npx prisma migrate deploy && npm run start:dev"
+    command: sh -c "npx prisma generate && npm run start:dev"
     logging:
       driver: json-file
       options:

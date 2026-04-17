@@ -589,13 +589,13 @@
             <!-- Brand -->
             <div>
               <div class="flex gap-2 items-end">
-                <app-selector
+                <app-multi-selector
                   class="flex-1"
                   label="Marca"
                   [options]="brandOptions"
-                  formControlName="brand_id"
-                  placeholder="Seleccionar marca"
-                ></app-selector>
+                  formControlName="brand_ids"
+                  placeholder="Seleccionar marca..."
+                ></app-multi-selector>
 
                 <app-button
                   variant="outline"
@@ -1677,6 +1677,76 @@
         </div>
         <!-- Variants UI -->
         <div class="space-y-4 md:space-y-5">
+          <!-- Variant count preview -->
+          @if (
+            variantAttributes.length > 0 &&
+            previewVariantCount > 0 &&
+            generatedVariants.length > 0
+          ) {
+            <div
+              class="flex items-center gap-2 p-3 bg-primary/5 border border-primary/15 rounded-xl"
+            >
+              <app-icon
+                name="layers"
+                size="16"
+                class="text-primary-600"
+              ></app-icon>
+              <span class="text-sm font-medium text-primary-700">
+                <strong>{{ generatedVariants.length }}</strong> variante{{
+                  generatedVariants.length !== 1 ? "s" : ""
+                }}
+                generada{{ generatedVariants.length !== 1 ? "s" : "" }}
+                automáticamente
+              </span>
+            </div>
+          }
+
+          <!-- Duplicate SKU Warning -->
+          @if (hasDuplicateSkus && generatedVariants.length > 0) {
+            <div
+              class="flex items-center gap-2 p-3 bg-red-50 border border-red-200 rounded-xl"
+            >
+              <app-icon
+                name="alert-triangle"
+                size="16"
+                class="text-red-600"
+              ></app-icon>
+              <span class="text-sm font-medium text-red-700">
+                Hay SKUs duplicados entre las variantes. Cada variante debe tener
+                un SKU único para guardar.
+              </span>
+            </div>
+          }
+
+          <!-- Bulk Actions Bar -->
+          @if (generatedVariants.length > 0) {
+            <div
+              class="flex flex-wrap gap-2 p-3 bg-gray-50 border border-gray-200 rounded-xl"
+            >
+              <span
+                class="text-xs font-bold text-text-muted uppercase tracking-wider self-center mr-2"
+              >
+                {{ generatedVariants.length }} variantes
+              </span>
+              <app-button
+                variant="outline"
+                size="sm"
+                (clicked)="applyBasePriceToAll()"
+              >
+                <app-icon slot="icon" name="dollar-sign" [size]="14"></app-icon>
+                Aplicar precio base a todas
+              </app-button>
+              <app-button
+                variant="outline"
+                size="sm"
+                (clicked)="applyBaseCostToAll()"
+              >
+                <app-icon slot="icon" name="calculator" [size]="14"></app-icon>
+                Aplicar costo base a todas
+              </app-button>
+            </div>
+          }
+
           <!-- Quick Attribute Buttons -->
           <div class="flex flex-wrap gap-2">
             <button

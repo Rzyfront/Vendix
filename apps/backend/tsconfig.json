@@ -25,7 +25,7 @@
   "watchOptions": {
     "watchFile": "dynamicPriorityPolling",
     "watchDirectory": "dynamicPriorityPolling",
-    "fallbackPolling": "dynamicPriorityPolling",
+    "fallbackPolling": "fixedinterval",
     "synchronousWatchDirectory": false
   }
 }

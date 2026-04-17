@@ -17,7 +17,7 @@ import { Brand } from '../interfaces';
 export class BrandsService {
   private readonly apiUrl = environment.apiUrl;
 
-  constructor(private http: HttpClient) { }
+  constructor(private http: HttpClient) {}
 
   getBrands(storeId?: number): Observable<Brand[]> {
     const params = storeId
@@ -31,12 +31,22 @@ export class BrandsService {
       );
   }
 
+  getAllBrands(storeId?: number): Observable<Brand[]> {
+    const params = new HttpParams().set('limit', '200').set('page', '1');
+    return this.http
+      .get<ApiResponse<Brand[]>>(`${this.apiUrl}/store/brands`, { params })
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError),
+      );
+  }
+
   getBrandById(id: number): Observable<Brand> {
     return this.http
       .get<ApiResponse<Brand>>(`${this.apiUrl}/store/brands/${id}`)
       .pipe(
         map((response) => response.data),
-        catchError(this.handleError)
+        catchError(this.handleError),
       );
   }
 
@@ -45,7 +55,7 @@ export class BrandsService {
       .post<ApiResponse<Brand>>(`${this.apiUrl}/store/brands`, brand)
       .pipe(
         map((response) => response.data),
-        catchError(this.handleError)
+        catchError(this.handleError),
       );
   }
 
@@ -54,7 +64,7 @@ export class BrandsService {
       .patch<ApiResponse<Brand>>(`${this.apiUrl}/store/brands/${id}`, brand)
       .pipe(
         map((response) => response.data),
-        catchError(this.handleError)
+        catchError(this.handleError),
       );
   }
 

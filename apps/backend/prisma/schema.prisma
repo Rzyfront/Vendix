@@ -479,6 +479,7 @@ model stores {
   onboarding                  Boolean                       @default(false)
   addresses                   addresses[]
   audit_logs                  audit_logs[]
+  brands                      brands[]
   categories                  categories[]
   domain_settings             domain_settings[]
   inventory_locations         inventory_locations[]
@@ -653,13 +654,20 @@ model addresses {
 
 model brands {
   id          Int              @id @default(autoincrement())
-  name        String           @unique @db.VarChar(100)
+  store_id    Int
+  name        String           @db.VarChar(100)
+  slug        String           @db.VarChar(120)
   description String?
   logo_url    String?
   created_at  DateTime?        @default(now()) @db.Timestamp(6)
   updated_at  DateTime?        @default(now()) @db.Timestamp(6)
   state       brand_state_enum @default(active)
+  stores      stores           @relation(fields: [store_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   products    products[]
+
+  @@unique([store_id, name])
+  @@unique([store_id, slug])
+  @@index([store_id])
 }
 
 model categories {

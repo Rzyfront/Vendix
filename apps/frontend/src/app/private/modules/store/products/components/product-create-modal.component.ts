@@ -132,8 +132,8 @@ export class ProductCreateModalComponent {
       stock_quantity: [0, [Validators.required, Validators.min(0)]],
       track_inventory: [true],
       sku: [''],
-      category_id: [null],
-      brand_id: [null],
+      category_ids: [[]],
+      brand_ids: [[]],
       tax_category_ids: [[] as number[]],
       state: [ProductState.ACTIVE],
     });
@@ -158,8 +158,8 @@ export class ProductCreateModalComponent {
       stock_quantity: val.stock_quantity || 0,
       track_inventory: val.track_inventory ?? true,
       sku: val.sku || '',
-      category_ids: val.category_id ? [Number(val.category_id)] : [],
-      brand_id: val.brand_id || null,
+      category_ids: val.category_ids || [],
+      brand_ids: val.brand_ids || [],
       tax_category_ids: val.tax_category_ids || [],
       state: val.state || 'active',
     };
@@ -204,21 +204,22 @@ export class ProductCreateModalComponent {
       stock_quantity: prod.stock_quantity || 0,
       track_inventory: prod.track_inventory !== false,
       // Try to get category from new structure or legacy if exists
-      category_id:
-        (prod as any).category_ids?.[0] ||
-        prod.categories?.[0]?.id ||
-        null,
-      brand_id: prod.brand_id || null,
-      tax_category_ids:
-        (prod.product_tax_assignments || []).map(
-          (ta: any) => ta.tax_category_id,
-        ),
+      category_ids:
+        (prod as any).category_ids?.length > 0
+          ? (prod as any).category_ids
+          : prod.categories?.[0]?.id
+            ? [prod.categories[0].id]
+            : [],
+      brand_ids: prod.brand_id ? [prod.brand_id] : [],
+      tax_category_ids: (prod.product_tax_assignments || []).map(
+        (ta: any) => ta.tax_category_id,
+      ),
       state: prod.state || ProductState.ACTIVE,
     });
   }
 
   private loadCategories(): void {
-    this.categoriesService.getCategories().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+    this.categoriesService.getAllCategories().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (categories: ProductCategory[]) => {
         this.categoryOptions = categories.map((cat: ProductCategory) => ({
           value: cat.id,
@@ -261,7 +262,7 @@ export class ProductCreateModalComponent {
   }
 
   private loadBrands(): void {
-    this.brandsService.getBrands().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+    this.brandsService.getAllBrands().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (brands: Brand[]) => {
         this.brandOptions = brands.map((brand: Brand) => ({
           value: brand.id,
@@ -287,7 +288,7 @@ export class ProductCreateModalComponent {
         description: category.description,
       },
     ];
-    this.productForm.patchValue({ category_id: category.id });
+    this.productForm.patchValue({ category_ids: [category.id] });
     this.isCategoryCreateOpen.set(false);
   }
 
@@ -297,7 +298,7 @@ export class ProductCreateModalComponent {
       ...this.brandOptions,
       { value: brand.id, label: brand.name, description: brand.description },
     ];
-    this.productForm.patchValue({ brand_id: brand.id });
+    this.productForm.patchValue({ brand_ids: [brand.id] });
     this.isBrandCreateOpen.set(false);
   }
 
@@ -343,9 +344,9 @@ export class ProductCreateModalComponent {
       track_inventory: !!val.track_inventory,
       stock_quantity: val.track_inventory ? val.stock_quantity : null,
       sku: val.sku || undefined,
-      // Map single category to array for backend compat
-      category_ids: val.category_id ? [Number(val.category_id)] : [],
-      brand_id: val.brand_id,
+      // Map categories to array for backend
+      category_ids: val.category_ids || [],
+      brand_id: val.brand_ids?.[0] ? Number(val.brand_ids[0]) : null,
       tax_category_ids: val.tax_category_ids || [],
       state: val.state,
     };
