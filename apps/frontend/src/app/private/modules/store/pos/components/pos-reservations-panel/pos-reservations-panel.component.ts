@@ -1,10 +1,5 @@
-import {
-  Component,
-  inject,
-  output,
-  signal,
-  DestroyRef,
-} from '@angular/core';
+import { Component, inject, output, signal, DestroyRef } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { HttpClient } from '@angular/common/http';
 import { environment } from '../../../../../../../environments/environment';
@@ -25,6 +20,7 @@ export class PosReservationsPanelComponent {
   walkIn = output<void>();
 
   private http = inject(HttpClient);
+  private destroyRef = inject(DestroyRef);
 
   todayBookings = signal<any[]>([]);
   loading = signal(false);
@@ -62,20 +58,24 @@ export class PosReservationsPanelComponent {
 
   loadTodayBookings() {
     this.loading.set(true);
-    this.http.get<any>(`${this.apiUrl}/today`).subscribe({
-      next: (response) => {
-        this.todayBookings.set(response.data || []);
-        this.loading.set(false);
-      },
-      error: () => {
-        this.loading.set(false);
-      },
-    });
+    this.http
+      .get<any>(`${this.apiUrl}/today`)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          this.todayBookings.set(response.data || []);
+          this.loading.set(false);
+        },
+        error: () => {
+          this.loading.set(false);
+        },
+      });
   }
 
   confirm(booking: any) {
     this.http
       .post(`${this.apiUrl}/${booking.id}/confirm`, {})
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => this.loadTodayBookings(),
       });
@@ -84,6 +84,7 @@ export class PosReservationsPanelComponent {
   complete(booking: any) {
     this.http
       .post(`${this.apiUrl}/${booking.id}/complete`, {})
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => this.loadTodayBookings(),
       });
@@ -92,6 +93,7 @@ export class PosReservationsPanelComponent {
   noShow(booking: any) {
     this.http
       .post(`${this.apiUrl}/${booking.id}/no-show`, {})
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => this.loadTodayBookings(),
       });
@@ -114,8 +116,13 @@ export class PosReservationsPanelComponent {
     return labels[status] || status;
   }
 
-  getStatusVariant(status: string): 'success' | 'neutral' | 'error' | 'primary' | 'warning' {
-    const variants: Record<string, 'success' | 'neutral' | 'error' | 'primary' | 'warning'> = {
+  getStatusVariant(
+    status: string,
+  ): 'success' | 'neutral' | 'error' | 'primary' | 'warning' {
+    const variants: Record<
+      string,
+      'success' | 'neutral' | 'error' | 'primary' | 'warning'
+    > = {
       pending: 'warning',
       confirmed: 'primary',
       completed: 'success',

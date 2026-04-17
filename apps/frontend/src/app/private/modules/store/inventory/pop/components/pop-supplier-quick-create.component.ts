@@ -1,4 +1,5 @@
-import { Component, input, output, inject, signal } from '@angular/core';
+import {Component, input, output, inject, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   FormsModule,
@@ -130,6 +131,7 @@ import { SuppliersService } from '../../services/suppliers.service';
   styleUrls: ['./pop-supplier-quick-create.component.scss'],
 })
 export class PopSupplierQuickCreateComponent {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = input(false);
   readonly isOpenChange = output<boolean>();
   readonly close = output<void>();
@@ -183,7 +185,7 @@ export class PopSupplierQuickCreateComponent {
       }
     });
 
-    this.suppliersService.createSupplier(createDto).subscribe({
+    this.suppliersService.createSupplier(createDto).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response: any) => {
         if (response.success && response.data) {
           this.toastService.success('Proveedor creado correctamente');

@@ -1,4 +1,5 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import {Component, OnInit, inject, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { take } from 'rxjs/operators';
 
 import { ShippingMethodsComponent } from './components/shipping-methods/shipping-methods.component';
@@ -71,6 +72,7 @@ import { ShippingMethodStats, ShippingZoneStats } from './interfaces/shipping.in
   `,
 })
 export class ShippingLayoutComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private shippingService = inject(ShippingService);
 
   activeTab = signal<'methods' | 'zones'>('methods');

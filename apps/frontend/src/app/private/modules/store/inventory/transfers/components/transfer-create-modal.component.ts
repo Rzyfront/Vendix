@@ -1,11 +1,5 @@
-import {
-  Component,
-  inject,
-  input,
-  output,
-  effect,
-  viewChild,
-} from '@angular/core';
+import {Component, inject, input, output, effect, viewChild, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
 
@@ -405,6 +399,7 @@ interface TransferItem {
   `,
 })
 export class TransferCreateModalComponent {
+  private destroyRef = inject(DestroyRef);
   private transfersService = inject(TransfersService);
 
   readonly isOpen = input(false);
@@ -480,7 +475,7 @@ export class TransferCreateModalComponent {
       term,
       this.selectedFromLocation,
       this.selectedToLocation,
-    ).subscribe({
+    ).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (products) => {
         this.productSearchResults = products.filter(
           (p) => !this.transferItems.some(ti => ti.product_id === p.id),

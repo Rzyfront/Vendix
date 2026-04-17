@@ -1,8 +1,8 @@
-import { Component, ViewChild, inject, signal, input, output } from '@angular/core';
+import {Component, ViewChild, inject, signal, input, output, DestroyRef} from '@angular/core';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule, FormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
 import { map } from 'rxjs';
-import { toSignal } from '@angular/core/rxjs-interop';
+import {toSignal, takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import { loadExpenses, loadExpensesSummary, loadExpenseCategories } from '../../state/actions/expenses.actions';
 import { selectActiveExpenseCategories } from '../../state/selectors/expenses.selectors';
 import { ExpenseCategory } from '../../interfaces/expense.interface';
@@ -312,6 +312,7 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
   `
 })
 export class ExpenseCreateComponent {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = input<boolean>(false);
   readonly isOpenChange = output<boolean>();
 
@@ -420,7 +421,7 @@ export class ExpenseCreateComponent {
         expense_date: expenseDate,
         notes: formValue.notes,
         receipt_url: receiptUrl,
-      }).subscribe({
+      }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (response) => {
           const expenseId = response.data?.id;
           if (!expenseId || targetState === 'pending') {
@@ -429,10 +430,10 @@ export class ExpenseCreateComponent {
           }
 
           // Approve first (required for both 'approved' and 'paid')
-          this.expensesService.approveExpense(expenseId).subscribe({
+          this.expensesService.approveExpense(expenseId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
             next: () => {
               if (targetState === 'paid') {
-                this.expensesService.payExpense(expenseId).subscribe({
+                this.expensesService.payExpense(expenseId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
                   next: () => this.finishSubmit(),
                   error: () => this.finishSubmit(),
                 });
@@ -452,7 +453,7 @@ export class ExpenseCreateComponent {
     // Upload receipt first if present
     const currentFile = this.receiptFile();
     if (currentFile) {
-      this.expensesService.uploadReceipt(currentFile).subscribe({
+      this.expensesService.uploadReceipt(currentFile).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (result: { key: string; url: string }) => createAndFinish(result.key),
         error: () => createAndFinish(),
       });

@@ -1,8 +1,8 @@
-import { Injectable } from '@angular/core';
+import {Injectable, DestroyRef, inject} from '@angular/core';
 import { Observable, of, fromEvent } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { signal } from '@angular/core';
-import { toObservable } from '@angular/core/rxjs-interop';
+import {toObservable, takeUntilDestroyed} from '@angular/core/rxjs-interop';
 
 export interface OfflineData {
   products: any[];
@@ -34,6 +34,7 @@ export interface OfflineStatus {
   providedIn: 'root',
 })
 export class PosOfflineService {
+  private destroyRef = inject(DestroyRef);
   private readonly STORAGE_KEY = 'pos_offline_data';
   private readonly SYNC_QUEUE_KEY = 'pos_sync_queue';
   private readonly SETTINGS_KEY = 'pos_offline_settings';
@@ -56,12 +57,12 @@ export class PosOfflineService {
   }
 
   private setupNetworkListeners(): void {
-    fromEvent(window, 'online').subscribe(() => {
+    fromEvent(window, 'online').pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
       this.isOnline.set(true);
       this.attemptSync();
     });
 
-    fromEvent(window, 'offline').subscribe(() => {
+    fromEvent(window, 'offline').pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
       this.isOnline.set(false);
     });
   }

@@ -1,13 +1,5 @@
-import {
-  Component,
-  ChangeDetectionStrategy,
-  OnInit,
-  inject,
-  input,
-  output,
-  signal,
-  computed,
-} from '@angular/core';
+import {Component, ChangeDetectionStrategy, OnInit, inject, input, output, signal, computed, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   FormBuilder,
@@ -52,6 +44,7 @@ import { StepsLineItem } from '../../../../../../../shared/components/steps-line
   changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class AddRateWizardModalComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private shippingService = inject(ShippingMethodsService);
   private fb = inject(FormBuilder);
   private toastService = inject(ToastService);
@@ -236,7 +229,7 @@ export class AddRateWizardModalComponent implements OnInit {
     this.show_zone_creation.set(false);
     this.is_loading_zones.set(true);
 
-    this.shippingService.getStoreZones().subscribe({
+    this.shippingService.getStoreZones().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (zones) => {
         this.zones_list.set(zones);
         // Auto-select the newest zone (highest ID)
@@ -276,7 +269,7 @@ export class AddRateWizardModalComponent implements OnInit {
       ? this.shippingService.updateRate(this.edit_rate()!.id, dto as UpdateRateDto)
       : this.shippingService.createRate(dto);
 
-    obs.subscribe({
+    obs.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.toastService.show({
           variant: 'success',

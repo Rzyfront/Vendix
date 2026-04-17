@@ -1,4 +1,5 @@
-import { Component, inject, input, output, effect } from '@angular/core';
+import {Component, inject, input, output, effect, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NgClass } from '@angular/common';
 import { ProductsService } from '../../services/products.service';
 import {
@@ -491,6 +492,7 @@ import {
   ],
 })
 export class BulkImageUploadModalComponent {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = input(false);
   readonly isOpenChange = output<boolean>();
   readonly uploadComplete = output<void>();
@@ -641,7 +643,7 @@ export class BulkImageUploadModalComponent {
 
   // Step 0: File operations
   downloadTemplate(type: 'example' | 'store-skus') {
-    this.productsService.getBulkImageUploadTemplate(type).subscribe({
+    this.productsService.getBulkImageUploadTemplate(type).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (blob: Blob) => {
         const url = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
@@ -713,7 +715,7 @@ export class BulkImageUploadModalComponent {
     this.uploadError = null;
     this.currentStep = 1;
 
-    this.productsService.analyzeBulkImages(this.selectedFile).subscribe({
+    this.productsService.analyzeBulkImages(this.selectedFile).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (result) => {
         this.isAnalyzing = false;
         this.analysisResult = result;
@@ -739,7 +741,7 @@ export class BulkImageUploadModalComponent {
     this.isUploading = true;
     this.currentStep = 2;
 
-    this.productsService.uploadBulkImagesFromSession(this.sessionId).subscribe({
+    this.productsService.uploadBulkImagesFromSession(this.sessionId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (result) => {
         this.isUploading = false;
         this.uploadResults = result;

@@ -1,4 +1,5 @@
-import { Component, OnInit, inject, signal, computed } from '@angular/core';
+import {Component, OnInit, inject, signal, computed, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { Router, ActivatedRoute } from '@angular/router';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
@@ -222,6 +223,7 @@ import { ModalComponent } from '../../../../../../shared/components/modal/modal.
     `,
 })
 export class ArticleFormComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private fb = inject(FormBuilder);
   private service = inject(HelpCenterAdminService);
   toast = inject(ToastService);
@@ -309,7 +311,7 @@ export class ArticleFormComponent implements OnInit {
       this.loadArticle(this.articleId);
     }
 
-    this.form.statusChanges.subscribe(() => {
+    this.form.statusChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
       this.formValid.set(this.form.valid);
     });
   }
@@ -320,7 +322,7 @@ export class ArticleFormComponent implements OnInit {
   }
 
   loadCategories() {
-    this.service.getCategories().subscribe({
+    this.service.getCategories().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (categories) => {
         this.categoryOptions.set(
           categories.map((c) => ({ label: c.name, value: c.id })),
@@ -332,7 +334,7 @@ export class ArticleFormComponent implements OnInit {
 
   loadArticle(id: number) {
     this.loadingArticle.set(true);
-    this.service.getArticle(id).subscribe({
+    this.service.getArticle(id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (article) => {
         this.form.patchValue({
           title: article.title,
@@ -367,7 +369,7 @@ export class ArticleFormComponent implements OnInit {
   onCoverImageSelected(file: File) {
     this.coverFile.set(file);
     // Upload immediately
-    this.service.uploadImage(file).subscribe({
+    this.service.uploadImage(file).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (result) => {
         this.existingCoverUrl.set(result.url);
       },
@@ -412,7 +414,7 @@ export class ArticleFormComponent implements OnInit {
       ? this.service.updateArticle(this.articleId!, dto)
       : this.service.createArticle(dto);
 
-    request$.subscribe({
+    request$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.toast.success(
           this.isEditMode() ? 'Artículo actualizado' : 'Artículo creado',
@@ -438,7 +440,7 @@ export class ArticleFormComponent implements OnInit {
     if (this.categoryForm.invalid) return;
 
     this.categorySubmitting.set(true);
-    this.service.createCategory(this.categoryForm.value).subscribe({
+    this.service.createCategory(this.categoryForm.value).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.toast.success('Categoría creada');
         this.isCategoryCreateOpen = false;

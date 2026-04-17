@@ -1,4 +1,5 @@
-import { Component, inject, OnInit, input, output, model } from '@angular/core';
+import {Component, inject, OnInit, input, output, model, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   FormsModule,
@@ -606,6 +607,7 @@ import {
   ],
 })
 export class OrderCreateModalComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private currencyFormatService = inject(CurrencyFormatService);
   private currencyService = inject(CurrencyService);
   readonly isOpen = model<boolean>(false);
@@ -705,7 +707,7 @@ export class OrderCreateModalComponent implements OnInit {
     this.initializeForm();
 
     // Listen for order type changes to update validators
-    this.orderForm.get('order_type')?.valueChanges.subscribe((orderType) => {
+    this.orderForm.get('order_type')?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((orderType) => {
       this.updateValidators(orderType);
     });
   }
@@ -1027,7 +1029,7 @@ export class OrderCreateModalComponent implements OnInit {
         apiUrl = `${environment.apiUrl}/return-orders`;
       }
 
-      this.http.post(apiUrl, orderData).subscribe({
+      this.http.post(apiUrl, orderData).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (response: any) => {
           this.orderCreated.emit(response.data || response);
           this.isSubmitting = false;

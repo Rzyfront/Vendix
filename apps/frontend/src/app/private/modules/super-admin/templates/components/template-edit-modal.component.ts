@@ -1,4 +1,5 @@
-import { Component, SimpleChanges, input, output } from '@angular/core';
+import {Component, SimpleChanges, input, output, DestroyRef, inject} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
@@ -167,6 +168,7 @@ import {
   `,
 })
 export class TemplateEditModalComponent {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = input(false);
   readonly isSubmitting = input(false);
   readonly template = input<TemplateListItem | undefined>(undefined);
@@ -191,7 +193,7 @@ export class TemplateEditModalComponent {
       is_active: [true],
     });
 
-    this.templateForm.get('template_data')?.valueChanges.subscribe((value) => {
+    this.templateForm.get('template_data')?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((value) => {
       this.isJsonInvalid = !this.isValidJson(value);
     });
   }

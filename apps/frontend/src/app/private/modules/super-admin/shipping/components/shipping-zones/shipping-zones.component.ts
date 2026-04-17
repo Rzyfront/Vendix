@@ -1,4 +1,5 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import {Component, OnInit, inject, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { take } from 'rxjs/operators';
 
 import { Router } from '@angular/router';
@@ -212,6 +213,7 @@ import { ButtonComponent } from '../../../../../../shared/components/button/butt
   `,
 })
 export class ShippingZonesComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private shippingService = inject(ShippingService);
 
   zones: ShippingZone[] = [];

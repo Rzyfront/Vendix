@@ -1,4 +1,4 @@
-import { Component, input, output, inject } from '@angular/core';
+import {Component, input, output, inject, DestroyRef} from '@angular/core';
 import { DecimalPipe } from '@angular/common';
 import {
   FormBuilder,
@@ -7,7 +7,7 @@ import {
   Validators,
 } from '@angular/forms';
 import { Observable } from 'rxjs';
-import { toSignal } from '@angular/core/rxjs-interop';
+import {toSignal, takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import { PosPaymentService } from '../services/pos-payment.service';
 import {
   PaymentMethod,
@@ -434,6 +434,7 @@ import {
   ],
 })
 export class PosPaymentComponent {
+  private destroyRef = inject(DestroyRef);
   readonly totalAmount = input<number>(0);
   readonly orderId = input<string>('');
   readonly paymentComplete = output<PaymentResponse>();
@@ -458,7 +459,7 @@ export class PosPaymentComponent {
       reference: [''],
     });
 
-    this.paymentForm.get('reference')?.valueChanges.subscribe(() => {
+    this.paymentForm.get('reference')?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
       this.updateReferenceValidation();
     });
   }
@@ -521,7 +522,7 @@ export class PosPaymentComponent {
       reference: this.paymentForm.get('reference')?.value,
     };
 
-    this.paymentService.processPayment(paymentRequest).subscribe({
+    this.paymentService.processPayment(paymentRequest).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (result) => {
         if (result.nextAction?.type === 'redirect' && result.nextAction.url) {
           window.open(result.nextAction.url, '_blank');

@@ -1,10 +1,5 @@
-import {
-  Component,
-  input,
-  output,
-  signal,
-  computed,
-} from '@angular/core';
+import {Component, input, output, signal, computed, DestroyRef, inject} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { switchMap, catchError } from 'rxjs';
 import { of } from 'rxjs';
@@ -440,6 +435,7 @@ import {
   ],
 })
 export class InvoiceScannerModalComponent {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = input(false);
   readonly isOpenChange = output<boolean>();
   readonly confirmed = output<{
@@ -615,7 +611,7 @@ export class InvoiceScannerModalComponent {
           return of(null);
         }),
       )
-      .subscribe((matchResponse) => {
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe((matchResponse) => {
         this.isScanning.set(false);
         if (!matchResponse) return;
 

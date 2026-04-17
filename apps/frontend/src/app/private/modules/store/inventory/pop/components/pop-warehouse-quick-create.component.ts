@@ -1,4 +1,5 @@
-import { Component, input, output, signal } from '@angular/core';
+import {Component, input, output, signal, DestroyRef, inject} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormBuilder, FormGroup, ReactiveFormsModule } from '@angular/forms';
 
@@ -97,6 +98,7 @@ import { LocationType, CreateLocationDto } from '../../interfaces';
   ],
 })
 export class PopWarehouseQuickCreateComponent {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = input(false);
   readonly isOpenChange = output<boolean>();
   readonly close = output<void>();
@@ -143,7 +145,7 @@ export class PopWarehouseQuickCreateComponent {
       is_active: true,
     };
 
-    this.inventoryService.createLocation(createDto).subscribe({
+    this.inventoryService.createLocation(createDto).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         if (response.success && response.data) {
           this.warehouseCreated.emit(response.data.id);

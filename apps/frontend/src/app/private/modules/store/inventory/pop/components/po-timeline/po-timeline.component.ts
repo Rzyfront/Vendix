@@ -1,10 +1,5 @@
-import {
-  Component,
-  inject,
-  input,
-  signal,
-  effect,
-} from '@angular/core';
+import {Component, inject, input, signal, effect, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DatePipe } from '@angular/common';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { PurchaseOrdersService } from '../../../services';
@@ -70,6 +65,7 @@ interface TimelineDisplayItem {
   styles: [`:host { display: block; }`],
 })
 export class PoTimelineComponent {
+  private destroyRef = inject(DestroyRef);
   private purchaseOrdersService = inject(PurchaseOrdersService);
   private currencyService = inject(CurrencyFormatService);
 
@@ -89,7 +85,7 @@ export class PoTimelineComponent {
 
   loadTimeline(orderId: number): void {
     this.loading.set(true);
-    this.purchaseOrdersService.getPurchaseOrderTimeline(orderId).subscribe({
+    this.purchaseOrdersService.getPurchaseOrderTimeline(orderId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         const entries = response.data || [];
         this.displayItems.set(

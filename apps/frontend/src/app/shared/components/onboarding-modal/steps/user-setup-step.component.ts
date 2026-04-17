@@ -1,11 +1,5 @@
-import {
-  Component,
-  input,
-  output,
-  ChangeDetectionStrategy,
-  OnInit,
-  inject,
-} from '@angular/core';
+import {Component, input, output, ChangeDetectionStrategy, OnInit, inject, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { IconComponent, InputComponent, SelectorComponent } from '../../index';
@@ -559,6 +553,7 @@ import {
   `,
 })
 export class UserSetupStepComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   readonly formGroup = input<any>(null);
   readonly nextStep = output<void>();
   readonly skipStep = output<void>();
@@ -581,7 +576,7 @@ export class UserSetupStepComponent implements OnInit {
     const cityControl = fg.get('city');
 
     // Cargar departamentos al cambiar país
-    countryControl.valueChanges.subscribe((code: string) => {
+    countryControl.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((code: string) => {
       if (code === 'CO') {
         this.loadDepartments();
       } else {
@@ -593,7 +588,7 @@ export class UserSetupStepComponent implements OnInit {
     });
 
     // Cargar ciudades al cambiar departamento
-    depControl.valueChanges.subscribe((depId: number) => {
+    depControl.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((depId: number) => {
       if (depId) {
         this.loadCities(depId);
       } else {

@@ -1,12 +1,5 @@
-import {
-  Component,
-  input,
-  output,
-  inject,
-  effect,
-  signal,
-  ViewChild,
-} from '@angular/core';
+import {Component, input, output, inject, effect, signal, ViewChild, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
 
@@ -510,6 +503,7 @@ import {
   `,
 })
 export class AdjustmentCreateModalComponent {
+  private destroyRef = inject(DestroyRef);
   private inventoryService = inject(InventoryService);
 
   readonly isOpen = input(false);
@@ -584,7 +578,7 @@ export class AdjustmentCreateModalComponent {
       return;
     }
 
-    this.inventoryService.searchAdjustableProducts(term, this.selectedLocation).subscribe({
+    this.inventoryService.searchAdjustableProducts(term, this.selectedLocation).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         const products = response.data || [];
         this.productSearchResults.set(
@@ -712,7 +706,7 @@ export class AdjustmentCreateModalComponent {
     const product = this.preselectedProduct()!;
     this.isLoadingPreselectedStock.set(true);
 
-    this.inventoryService.searchAdjustableProducts(product.name, this.selectedLocation!).subscribe({
+    this.inventoryService.searchAdjustableProducts(product.name, this.selectedLocation!).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         const products = response.data || [];
         const match = products.find((p) => p.id === product.id);

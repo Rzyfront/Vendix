@@ -1,12 +1,5 @@
-import {
-  Component,
-  input,
-  output,
-  effect,
-  untracked,
-  inject,
-  signal,
-} from '@angular/core';
+import {Component, input, output, effect, untracked, inject, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   FormBuilder,
@@ -154,6 +147,7 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
   `,
 })
 export class PosSessionOpenModalComponent {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = input<boolean>(false);
   readonly isOpenChange = output<boolean>();
   readonly sessionOpened = output<any>();
@@ -183,7 +177,7 @@ export class PosSessionOpenModalComponent {
 
   loadRegisters() {
     this.loading.set(true);
-    this.cashRegisterService.getCashRegisters().subscribe({
+    this.cashRegisterService.getCashRegisters().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (registers) => {
         const active = registers.filter((r) => r.is_active);
         this.registers.set(active);
@@ -231,7 +225,7 @@ export class PosSessionOpenModalComponent {
 
     this.cashRegisterService
       .openSession(+cash_register_id, opening_amount)
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (session) => {
           this.submitting.set(false);
           this.toastService.success('Caja abierta correctamente');

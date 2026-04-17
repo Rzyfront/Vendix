@@ -1,4 +1,5 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import {Component, OnInit, inject, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { take } from 'rxjs/operators';
 
 import { ShippingService } from '../../services/shipping.service';
@@ -108,6 +109,7 @@ import {
   `,
 })
 export class ShippingMethodsComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private shippingService = inject(ShippingService);
   private dialogService = inject(DialogService);
 

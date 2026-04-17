@@ -1,4 +1,5 @@
-import { Component, input, output, inject, effect, signal } from '@angular/core';
+import {Component, input, output, inject, effect, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { take } from 'rxjs/operators';
 
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
@@ -151,6 +152,7 @@ import {
   `,
 })
 export class FixedAssetCreateModalComponent {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = input(false);
   readonly isOpenChange = output<boolean>();
   readonly editAsset = input<FixedAsset | null>(null);

@@ -1,10 +1,5 @@
-import {
-  Component,
-  OnInit,
-  inject,
-  input,
-  output
-} from '@angular/core';
+import {Component, OnInit, inject, input, output, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { take } from 'rxjs/operators';
 
 import {
@@ -221,6 +216,7 @@ import {
     `,
 })
 export class ShippingZoneModalComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   readonly zone = input<ShippingZone>();
   readonly close = output<void>();
   readonly saved = output<void>();

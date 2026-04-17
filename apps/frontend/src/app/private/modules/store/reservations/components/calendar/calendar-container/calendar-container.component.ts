@@ -1,4 +1,5 @@
-import { Component, signal, effect, inject, input, output, untracked } from '@angular/core';
+import {Component, signal, effect, inject, input, output, untracked, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { ReservationsService } from '../../../services/reservations.service';
 import { Booking, CalendarViewMode } from '../../../interfaces/reservation.interface';
@@ -23,6 +24,7 @@ import { finalize } from 'rxjs';
   styleUrls: ['./calendar-container.component.scss'],
 })
 export class CalendarContainerComponent {
+  private destroyRef = inject(DestroyRef);
   private reservationsService = inject(ReservationsService);
   private toastService = inject(ToastService);
 
@@ -58,7 +60,7 @@ export class CalendarContainerComponent {
     this.reservationsService
       .getCalendar(dateFrom, dateTo, this.selectedServiceId() ?? undefined)
       .pipe(finalize(() => this.loading.set(false)))
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (data) => this.bookingsByDate.set(data),
         error: () => this.toastService.error('Error al cargar calendario'),
       });

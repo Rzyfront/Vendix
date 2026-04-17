@@ -1,4 +1,5 @@
-import { Component, input, output, inject, effect } from '@angular/core';
+import {Component, input, output, inject, effect, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DatePipe, CurrencyPipe } from '@angular/common';
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { take } from 'rxjs/operators';
@@ -270,6 +271,7 @@ import {
   `,
 })
 export class FixedAssetDetailModalComponent {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = input(false);
   readonly isOpenChange = output<boolean>();
   readonly asset = input<FixedAsset | null>(null);
@@ -359,7 +361,7 @@ export class FixedAssetDetailModalComponent {
         disposal_amount: Number(values.disposal_amount),
       })
       .pipe(take(1))
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: () => {
           this.toast_service.show({ variant: 'success', description: 'Activo dado de baja correctamente' });
           this.is_disposing = false;

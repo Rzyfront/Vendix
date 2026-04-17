@@ -1,12 +1,5 @@
-import {
-  Component,
-  input,
-  output,
-  effect,
-  untracked,
-  inject,
-  signal,
-} from '@angular/core';
+import {Component, input, output, effect, untracked, inject, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DatePipe } from '@angular/common';
 import {
   FormBuilder,
@@ -274,6 +267,7 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
   `,
 })
 export class PosSessionCloseModalComponent {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = input<boolean>(false);
   readonly session = input<CashRegisterSession | null>(null);
   readonly isOpenChange = output<boolean>();
@@ -337,7 +331,7 @@ export class PosSessionCloseModalComponent {
       paypal: 'PayPal',
     };
 
-    this.cashRegisterService.getMovements(this.session()!.id).subscribe({
+    this.cashRegisterService.getMovements(this.session()!.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (movements) => {
         const opening = movements
           .filter((m) => m.type === 'opening_balance')
@@ -425,7 +419,7 @@ export class PosSessionCloseModalComponent {
 
     this.cashRegisterService
       .closeSession(this.session()!.id, actual_closing_amount, closing_notes)
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (closedSession) => {
           this.submitting.set(false);
           this.difference.set(Number(closedSession.difference || 0));

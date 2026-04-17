@@ -1,4 +1,5 @@
-import { Component, input, output, inject, signal, computed, ViewChild } from '@angular/core';
+import {Component, input, output, inject, signal, computed, ViewChild, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
 import {
@@ -262,6 +263,7 @@ import { BankAccount, ColumnMappingConfig } from '../../interfaces/accounting.in
   `,
 })
 export class StatementImportModalComponent {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = input(false);
   readonly bankAccounts = input<BankAccount[]>([]);
   readonly isOpenChange = output<boolean>();
@@ -455,7 +457,7 @@ export class StatementImportModalComponent {
     if (!file || !this.selectedAccountId) return;
 
     this.importing.set(true);
-    this.reconciliationService.importStatement(this.selectedAccountId, file).subscribe({
+    this.reconciliationService.importStatement(this.selectedAccountId, file).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (res) => {
         this.importing.set(false);
         this.importResult.set(res.data);

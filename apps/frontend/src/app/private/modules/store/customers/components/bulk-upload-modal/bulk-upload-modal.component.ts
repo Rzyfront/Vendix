@@ -1,4 +1,5 @@
-import { Component, inject, input, output, signal } from '@angular/core';
+import {Component, inject, input, output, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import * as XLSX from 'xlsx';
 import { CustomersService } from '../../services/customers.service';
 import {
@@ -302,6 +303,7 @@ import {
   `],
 })
 export class CustomerBulkUploadModalComponent {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = input(false);
   readonly isOpenChange = output<boolean>();
   readonly uploadComplete = output<void>();
@@ -374,7 +376,7 @@ export class CustomerBulkUploadModalComponent {
   }
 
   downloadTemplate() {
-    this.customersService.getBulkUploadTemplate().subscribe({
+    this.customersService.getBulkUploadTemplate().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (blob: Blob) => {
         const url = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
@@ -531,7 +533,7 @@ export class CustomerBulkUploadModalComponent {
     this.isUploading.set(true);
     this.uploadError.set(null);
 
-    this.customersService.uploadBulkCustomersJson(this.parsedData()!).subscribe({
+    this.customersService.uploadBulkCustomersJson(this.parsedData()!).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response: any) => {
         this.isUploading.set(false);
         const data = response.data || response;

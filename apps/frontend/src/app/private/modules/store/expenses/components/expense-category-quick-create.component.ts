@@ -1,4 +1,5 @@
-import { Component, inject, signal, input, output } from '@angular/core';
+import {Component, inject, signal, input, output, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   FormBuilder,
   FormGroup,
@@ -75,6 +76,7 @@ import { ExpenseCategory } from '../interfaces/expense.interface';
   `,
 })
 export class ExpenseCategoryQuickCreateComponent {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = input<boolean>(false);
   readonly isOpenChange = output<boolean>();
   readonly created = output<ExpenseCategory>();
@@ -108,7 +110,7 @@ export class ExpenseCategoryQuickCreateComponent {
     this.isSubmitting.set(true);
     const categoryData = this.categoryForm.value;
 
-    this.expensesService.createExpenseCategory(categoryData).subscribe({
+    this.expensesService.createExpenseCategory(categoryData).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         this.toastService.success('Categoría de gasto creada exitosamente');
         this.created.emit(response.data);

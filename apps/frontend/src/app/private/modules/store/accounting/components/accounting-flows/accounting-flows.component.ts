@@ -1,4 +1,5 @@
-import { Component, inject, signal } from '@angular/core';
+import {Component, inject, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NgClass } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { take } from 'rxjs/operators';
@@ -47,6 +48,7 @@ const FLOW_DEFINITIONS: Array<{ key: string; label: string; icon: string }> = [
   templateUrl: './accounting-flows.component.html',
 })
 export class AccountingFlowsComponent {
+  private destroyRef = inject(DestroyRef);
   private http = inject(HttpClient);
 
   readonly flows = signal<FlowStatus[]>([]);

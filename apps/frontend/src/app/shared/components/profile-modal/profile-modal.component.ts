@@ -1,4 +1,5 @@
-import { Component, inject, output, input, model, signal } from '@angular/core';
+import {Component, inject, output, input, model, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DatePipe, UpperCasePipe } from '@angular/common';
 import {
   FormBuilder,
@@ -534,6 +535,7 @@ import { environment } from '../../../../environments/environment';
   styles: [],
 })
 export class ProfileModalComponent {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = model(false);
   readonly isOpenChange = output<boolean>();
 
@@ -605,7 +607,7 @@ export class ProfileModalComponent {
       { validators: this.passwordMatchValidator },
     );
 
-    this.authFacade.user$.subscribe((user) => {
+    this.authFacade.user$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((user) => {
       if (user) {
         this.updateLocalUserInfo(user);
       }
@@ -618,7 +620,7 @@ export class ProfileModalComponent {
     const cityControl = this.profileForm.get('address.city');
 
     if (countryControl && depControl && cityControl) {
-      countryControl.valueChanges.subscribe((code: string) => {
+      countryControl.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((code: string) => {
         if (code === 'CO') {
           this.loadDepartments();
           depControl.enable();
@@ -635,7 +637,7 @@ export class ProfileModalComponent {
         }
       });
 
-      depControl.valueChanges.subscribe((depId: number) => {
+      depControl.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((depId: number) => {
         if (depId) {
           this.loadCities(depId);
           cityControl.enable();
@@ -775,7 +777,7 @@ export class ProfileModalComponent {
           this.isInitialLoad.set(false); // Mark initial load as complete
         }),
       )
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (response) => {
           const userData = response.data || response.user || response;
           this.updateLocalUserInfo(userData);
@@ -901,7 +903,7 @@ export class ProfileModalComponent {
     this.authService
       .updateProfile(payload)
       .pipe(finalize(() => this.saving.set(false)))
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (response) => {
           this.isEditing.set(false);
           this.loadProfile();
@@ -945,7 +947,7 @@ export class ProfileModalComponent {
     this.authService
       .changePassword(current_password, new_password)
       .pipe(finalize(() => this.savingPassword.set(false)))
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: () => {
           this.showPasswordSection.set(false);
           this.passwordForm.reset();
@@ -1077,7 +1079,7 @@ export class ProfileModalComponent {
     formData.append('file', file);
     formData.append('entityType', 'avatars');
 
-    this.http.post<any>(`${environment.apiUrl}/upload`, formData).subscribe({
+    this.http.post<any>(`${environment.apiUrl}/upload`, formData).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         // Store the key for saving later
         this.pendingAvatarKey = response.key;

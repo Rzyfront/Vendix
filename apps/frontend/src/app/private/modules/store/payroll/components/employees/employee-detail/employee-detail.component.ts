@@ -1,13 +1,6 @@
-import {
-  Component,
-  input,
-  output,
-  inject,
-  effect,
-  DestroyRef,
-} from '@angular/core';
+import {Component, input, output, inject, effect, DestroyRef} from '@angular/core';
 import { DatePipe } from '@angular/common';
-import { toSignal } from '@angular/core/rxjs-interop';
+import {toSignal, takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import {
   FormBuilder,
   FormGroup,
@@ -330,6 +323,7 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
   `,
 })
 export class EmployeeDetailComponent {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = input<boolean>(false);
   readonly employee = input<Employee | null>(null);
   readonly isOpenChange = output<boolean>();
@@ -404,7 +398,7 @@ export class EmployeeDetailComponent {
 
     this.loadAvailableUsers();
 
-    this.employeeForm.get('user_id')!.valueChanges.subscribe((value) => {
+    this.employeeForm.get('user_id')!.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((value) => {
       this.onUserSelected(value);
     });
 
@@ -492,7 +486,7 @@ export class EmployeeDetailComponent {
   }
 
   loadAvailableUsers(): void {
-    this.payrollService.getAvailableUsers().subscribe((res) => {
+    this.payrollService.getAvailableUsers().pipe(takeUntilDestroyed(this.destroyRef)).subscribe((res) => {
       this.availableUsersData = res.data;
       this.availableUsers = [
         { value: '', label: 'Sin vincular (datos manuales)' },

@@ -1,4 +1,5 @@
-import { Component, OnInit, ChangeDetectionStrategy, signal, computed, inject } from '@angular/core';
+import {Component, OnInit, ChangeDetectionStrategy, signal, computed, inject, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule, DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { DataCollectionSubmissionsService } from '../services/data-collection-submissions.service';
@@ -124,6 +125,7 @@ import type { ScrollableTab } from '../../../../../shared/components/scrollable-
   `,
 })
 export class SubmissionsComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private submissionsService = inject(DataCollectionSubmissionsService);
   private toastService = inject(ToastService);
 
@@ -158,7 +160,7 @@ export class SubmissionsComponent implements OnInit {
   loadSubmissions() {
     this.loading.set(true);
     const status = this.selectedStatus() || undefined;
-    this.submissionsService.getAll(status).subscribe({
+    this.submissionsService.getAll(status).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (subs) => {
         this.submissions.set(subs);
         this.loading.set(false);

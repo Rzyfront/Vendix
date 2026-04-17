@@ -1,4 +1,5 @@
-import { Injectable, inject, DestroyRef } from '@angular/core';
+import {Injectable, inject, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Subscription, timer, EMPTY } from 'rxjs';
 import { tap, catchError } from 'rxjs/operators';
 import { AuthService } from './auth.service';
@@ -55,7 +56,7 @@ export class TokenRefreshTimerService {
       return;
     }
 
-    this.timerSubscription = timer(finalRefreshTime).subscribe(() => {
+    this.timerSubscription = timer(finalRefreshTime).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
       this.proactiveRefresh();
     });
   }
@@ -107,7 +108,7 @@ export class TokenRefreshTimerService {
           return EMPTY;
         }),
       )
-      .subscribe();
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
   }
 
   /**

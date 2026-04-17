@@ -1,4 +1,5 @@
-import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
+import {Component, OnInit, OnDestroy, inject, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { RouterModule, Router, ActivatedRoute } from '@angular/router';
 import {
@@ -200,6 +201,7 @@ export function passwordStrengthValidator(
   styleUrls: [],
 })
 export class ResetOwnerPasswordComponent implements OnInit, OnDestroy {
+  private destroyRef = inject(DestroyRef);
   resetPasswordForm: FormGroup;
   readonly isLoading = signal(false);
   token: string | null = null;
@@ -243,10 +245,10 @@ export class ResetOwnerPasswordComponent implements OnInit, OnDestroy {
           }
         }),
       )
-      .subscribe();
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
 
     // Subscribe to error changes to display them on screen
-    this.authFacade.error$.subscribe((error) => {
+    this.authFacade.error$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((error) => {
       if (error) {
         const errorMessage =
           typeof error === 'string' ? error : extractApiErrorMessage(error);
@@ -267,14 +269,14 @@ export class ResetOwnerPasswordComponent implements OnInit, OnDestroy {
       this.authFacade.resetOwnerPassword(this.token, new_password);
 
       // Subscribe to loading state
-      const loadingSubscription = this.authFacade.loading$.subscribe(
+      const loadingSubscription = this.authFacade.loading$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(
         (isLoading) => {
           this.isLoading.set(isLoading);
         },
       );
 
       // Subscribe to error state - only handle errors with on-screen display (toast is handled by effects)
-      const errorSubscription = this.authFacade.error$.subscribe((error) => {
+      const errorSubscription = this.authFacade.error$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((error) => {
         if (error) {
           // Error is already handled in ngOnInit for on-screen display
           // Normalize error to handle both string and NormalizedApiPayload types

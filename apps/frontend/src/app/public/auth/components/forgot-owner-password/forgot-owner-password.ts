@@ -1,4 +1,5 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import {Component, OnInit, inject, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { RouterModule, Router } from '@angular/router';
 import {
@@ -132,6 +133,7 @@ import { IconComponent } from '../../../../shared/components';
   styleUrls: [],
 })
 export class ForgotOwnerPasswordComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   forgotPasswordForm: FormGroup;
   readonly isLoading = signal(false);
   error: string | null = null;
@@ -151,7 +153,7 @@ export class ForgotOwnerPasswordComponent implements OnInit {
 
   ngOnInit(): void {
     // Subscribe to error changes to display them on screen
-    this.authFacade.error$.subscribe((error) => {
+    this.authFacade.error$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((error) => {
       if (error) {
         const errorMessage =
           typeof error === 'string' ? error : extractApiErrorMessage(error);
@@ -168,13 +170,13 @@ export class ForgotOwnerPasswordComponent implements OnInit {
       const { vlink, email } = this.forgotPasswordForm.value;
       this.authFacade.forgotOwnerPassword(vlink, email);
 
-      const loadingSubscription = this.authFacade.loading$.subscribe(
+      const loadingSubscription = this.authFacade.loading$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(
         (isLoading) => {
           this.isLoading.set(isLoading);
         },
       );
 
-      const errorSubscription = this.authFacade.error$.subscribe((error) => {
+      const errorSubscription = this.authFacade.error$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((error) => {
         if (error) {
           // Error is already handled in ngOnInit
           // Normalize error to handle both string and NormalizedApiPayload types

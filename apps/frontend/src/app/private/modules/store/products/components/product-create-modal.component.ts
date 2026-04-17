@@ -1,12 +1,5 @@
-import {
-  Component,
-  input,
-  output,
-  model,
-  signal,
-  effect,
-  inject,
-} from '@angular/core';
+import {Component, input, output, model, signal, effect, inject, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DecimalPipe } from '@angular/common';
 import { Router } from '@angular/router';
 import {
@@ -66,6 +59,7 @@ import { TaxQuickCreateComponent } from './tax-quick-create.component';
   styleUrls: ['./product-create-modal/product-create-modal.component.scss'],
 })
 export class ProductCreateModalComponent {
+  private destroyRef = inject(DestroyRef);
   private fb = inject(FormBuilder);
   private productsService = inject(ProductsService);
   private categoriesService = inject(CategoriesService);
@@ -224,7 +218,7 @@ export class ProductCreateModalComponent {
   }
 
   private loadCategories(): void {
-    this.categoriesService.getCategories().subscribe({
+    this.categoriesService.getCategories().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (categories: ProductCategory[]) => {
         this.categoryOptions = categories.map((cat: ProductCategory) => ({
           value: cat.id,
@@ -241,7 +235,7 @@ export class ProductCreateModalComponent {
   }
 
   private loadTaxCategories(): void {
-    this.taxesService.getTaxCategories().subscribe({
+    this.taxesService.getTaxCategories().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (taxCategories: TaxCategory[]) => {
         this.allTaxCategories = taxCategories;
         this.taxCategoryOptions = taxCategories.map((cat: TaxCategory) => {
@@ -267,7 +261,7 @@ export class ProductCreateModalComponent {
   }
 
   private loadBrands(): void {
-    this.brandsService.getBrands().subscribe({
+    this.brandsService.getBrands().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (brands: Brand[]) => {
         this.brandOptions = brands.map((brand: Brand) => ({
           value: brand.id,

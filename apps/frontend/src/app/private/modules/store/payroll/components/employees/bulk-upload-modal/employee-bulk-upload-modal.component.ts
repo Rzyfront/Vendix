@@ -1,13 +1,5 @@
-import {
-  Component,
-  input,
-  output,
-  inject,
-  effect,
-  DestroyRef,
-  signal,
-  computed,
-} from '@angular/core';
+import {Component, input, output, inject, effect, DestroyRef, signal, computed} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CurrencyPipe, NgClass } from '@angular/common';
 import { PayrollService } from '../../../services/payroll.service';
 import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
@@ -1074,7 +1066,7 @@ export class EmployeeBulkUploadModalComponent {
   // Cancel/Close
   onCancel() {
     if (this.sessionId() && !this.uploadResults()) {
-      this.payrollService.cancelBulkEmployeeSession(this.sessionId()!).subscribe();
+      this.payrollService.cancelBulkEmployeeSession(this.sessionId()!).pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
     }
     if ((this.uploadResults()?.successful ?? 0) > 0) {
       this.uploadComplete.emit();
@@ -1101,7 +1093,7 @@ export class EmployeeBulkUploadModalComponent {
 
   // Step 0: File operations
   downloadTemplate() {
-    this.payrollService.getBulkEmployeeTemplate().subscribe({
+    this.payrollService.getBulkEmployeeTemplate().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (blob) => {
         const url = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
@@ -1178,7 +1170,7 @@ export class EmployeeBulkUploadModalComponent {
     this.uploadError.set(null);
     this.currentStep.set(1);
 
-    this.payrollService.analyzeBulkEmployees(this.selectedFile()!).subscribe({
+    this.payrollService.analyzeBulkEmployees(this.selectedFile()!).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (result) => {
         this.isAnalyzing.set(false);
         this.analysisResult.set(result);
@@ -1210,7 +1202,7 @@ export class EmployeeBulkUploadModalComponent {
 
     this.payrollService
       .uploadBulkEmployeesFromSession(this.sessionId()!)
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (result) => {
           this.isUploading.set(false);
           this.uploadResults.set(result);

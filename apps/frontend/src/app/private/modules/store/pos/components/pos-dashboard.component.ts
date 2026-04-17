@@ -1,4 +1,5 @@
-import { Component, output, inject, signal } from '@angular/core';
+import {Component, output, inject, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 
@@ -545,6 +546,7 @@ import { DashboardData, DashboardFilters } from '../models/dashboard.model';
   ],
 })
 export class PosDashboardComponent {
+  private destroyRef = inject(DestroyRef);
   readonly dataExported = output<{ format: string; data: Blob }>();
 
   readonly dashboardData = signal<DashboardData | null>(null);
@@ -575,7 +577,7 @@ export class PosDashboardComponent {
   private loadDashboardData(): void {
     this.loading.set(true);
 
-    this.dashboardService.getDashboardData(this.filters()).subscribe({
+    this.dashboardService.getDashboardData(this.filters()).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (data) => {
         this.dashboardData.set(data);
         this.loading.set(false);
@@ -592,7 +594,7 @@ export class PosDashboardComponent {
 
     this.dashboardService
       .exportDashboardData(this.filters(), format)
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (blob) => {
           this.dataExported.emit({ format, data: blob });
           this.downloadFile(

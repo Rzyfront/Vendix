@@ -1,4 +1,5 @@
-import { Component, inject, signal, computed } from '@angular/core';
+import {Component, inject, signal, computed, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NgClass } from '@angular/common';
 import { CarteraService } from '../../services/cartera.service';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
@@ -20,6 +21,7 @@ type AgingTab = 'ar' | 'ap';
   templateUrl: './aging-report.component.html',
 })
 export class AgingReportComponent {
+  private destroyRef = inject(DestroyRef);
   private cartera = inject(CarteraService);
   private currency = inject(CurrencyFormatService);
 
@@ -43,11 +45,11 @@ export class AgingReportComponent {
   loadData(): void {
     this.loading.set(true);
 
-    this.cartera.getArAging().subscribe({
+    this.cartera.getArAging().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (res) => { this.ar_aging.set(res.data); },
     });
 
-    this.cartera.getApAging().subscribe({
+    this.cartera.getApAging().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (res) => { this.ap_aging.set(res.data); this.loading.set(false); },
       error: () => { this.loading.set(false); },
     });

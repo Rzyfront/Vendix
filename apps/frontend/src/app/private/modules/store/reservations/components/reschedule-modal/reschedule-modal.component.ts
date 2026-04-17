@@ -1,4 +1,5 @@
-import { Component, input, output, signal, inject } from '@angular/core';
+import {Component, input, output, signal, inject, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   ModalComponent,
@@ -19,6 +20,7 @@ import { finalize } from 'rxjs';
   styleUrls: ['./reschedule-modal.component.scss'],
 })
 export class RescheduleModalComponent {
+  private destroyRef = inject(DestroyRef);
   private reservationsService = inject(ReservationsService);
   private toastService = inject(ToastService);
 
@@ -72,7 +74,7 @@ export class RescheduleModalComponent {
     this.loadingSlots.set(true);
     this.reservationsService.getAvailability(b.product_id, date, date, b.provider_id)
       .pipe(finalize(() => this.loadingSlots.set(false)))
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (slots) => this.slots.set(slots.filter(s => s.total_available > 0)),
         error: () => this.slots.set([]),
       });
@@ -93,7 +95,7 @@ export class RescheduleModalComponent {
       start_time: slot.start_time,
       end_time: slot.end_time,
     }).pipe(finalize(() => this.submitting.set(false)))
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: () => {
           this.toastService.success('Reserva reprogramada exitosamente');
           this.rescheduled.emit();

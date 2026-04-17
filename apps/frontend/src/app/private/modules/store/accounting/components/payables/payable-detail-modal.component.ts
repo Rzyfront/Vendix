@@ -1,11 +1,5 @@
-import {
-  Component,
-  input,
-  output,
-  inject,
-  effect,
-  signal,
-} from '@angular/core';
+import {Component, input, output, inject, effect, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 
 import { CarteraService } from '../../services/cartera.service';
@@ -288,6 +282,7 @@ import {
   `,
 })
 export class PayableDetailModalComponent {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = input(false);
   readonly isOpenChange = output<boolean>();
   readonly payable = input<AccountPayable | null>(null);
@@ -315,7 +310,7 @@ export class PayableDetailModalComponent {
     const pay = this.payable();
     if (!pay) return;
     this.is_loading.set(true);
-    this.carteraService.getPayable(pay.id).subscribe({
+    this.carteraService.getPayable(pay.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         this.detail.set(response.data);
         this.is_loading.set(false);

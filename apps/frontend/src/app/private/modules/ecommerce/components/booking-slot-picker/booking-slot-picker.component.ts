@@ -1,4 +1,5 @@
-import { Component, ChangeDetectionStrategy, inject, input, output, signal } from '@angular/core';
+import {Component, ChangeDetectionStrategy, inject, input, output, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
 import { HttpClient, HttpHeaders } from '@angular/common/http';
@@ -21,6 +22,7 @@ export interface AvailabilitySlot {
   styleUrls: ['./booking-slot-picker.component.scss'],
 })
 export class BookingSlotPickerComponent {
+  private destroyRef = inject(DestroyRef);
   readonly productId = input.required<number>();
   readonly productName = input<string>('');
   readonly serviceDuration = input<number>(60);
@@ -112,7 +114,7 @@ export class BookingSlotPickerComponent {
           headers: this.getHeaders(),
         },
       )
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (response) => {
           const slots = response.data || response || [];
           this.availableSlots.set(slots);

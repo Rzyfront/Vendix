@@ -1,12 +1,5 @@
-import {
-  Component,
-  inject,
-  input,
-  output,
-  OnChanges,
-  OnInit,
-  SimpleChanges,
-} from '@angular/core';
+import {Component, inject, input, output, OnChanges, OnInit, SimpleChanges, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   FormArray,
@@ -43,6 +36,7 @@ import {
   templateUrl: './footer-settings-form.component.html',
 })
 export class FooterSettingsFormComponent implements OnInit, OnChanges {
+  private destroyRef = inject(DestroyRef);
   private fb = inject(FormBuilder);
 
   readonly initialData = input<FooterSettings | undefined>(undefined);
@@ -79,7 +73,7 @@ export class FooterSettingsFormComponent implements OnInit, OnChanges {
         filter(() => !this.isPatching),
         debounceTime(300),
       )
-      .subscribe(() => {
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
         if (this.footerForm.valid) {
           this.valueChange.emit(this.getFormValue());
         }

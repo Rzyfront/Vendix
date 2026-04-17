@@ -1,4 +1,5 @@
-import { Component, input, output } from '@angular/core';
+import {Component, input, output, DestroyRef, inject} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
@@ -140,6 +141,7 @@ const CONFIGURATION_TYPES: Array<{ value: TemplateConfigType; label: string }> =
     `,
 })
 export class TemplateCreateModalComponent {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = input(false);
   readonly isSubmitting = input(false);
 
@@ -165,7 +167,7 @@ export class TemplateCreateModalComponent {
     });
 
     // Watch for JSON changes
-    this.templateForm.get('template_data')?.valueChanges.subscribe((value) => {
+    this.templateForm.get('template_data')?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((value) => {
       this.isJsonInvalid = !this.isValidJson(value);
     });
   }

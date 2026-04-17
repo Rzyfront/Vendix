@@ -1,15 +1,5 @@
-import {
-  Component,
-  inject,
-  OnInit,
-  OnDestroy,
-  OnChanges,
-  SimpleChanges,
-  input,
-  output,
-  model,
-  signal,
-} from '@angular/core';
+import {Component, inject, OnInit, OnDestroy, OnChanges, SimpleChanges, input, output, model, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule } from '@angular/forms';
 import { Subject, takeUntil } from 'rxjs';
@@ -389,6 +379,7 @@ import { OrganizationStoreSettingsService } from '../../services/organization-st
 export class StoreConfigurationModalComponent
   implements OnInit, OnDestroy, OnChanges
 {
+  private destroyRef = inject(DestroyRef);
   private currencyFormatService = inject(CurrencyFormatService);
   readonly isOpen = input<boolean>(false);
   readonly storeId = input<number | null>(null);
@@ -509,7 +500,7 @@ export class StoreConfigurationModalComponent
     this.settings_service
       .getStoreSettings(storeId)
       .pipe(takeUntil(this.destroy$$))
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (response: ApiResponse<StoreSettings>) => {
           if (response.data) {
             this.settings.set({ ...this.defaultSettings, ...response.data });
@@ -549,7 +540,7 @@ export class StoreConfigurationModalComponent
     this.settings_service
       .saveSettingsNow(storeId, this.settings())
       .pipe(takeUntil(this.destroy$$))
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (response: ApiResponse<StoreSettings>) => {
           if (response.data) {
             this.settings.set(this.mergeSettings(this.settings(), response.data));
@@ -632,7 +623,7 @@ export class StoreConfigurationModalComponent
       this.settings_service
         .resetToDefault(storeId)
         .pipe(takeUntil(this.destroy$$))
-        .subscribe({
+        .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
           next: (response: ApiResponse<StoreSettings>) => {
             if (response.data) {
               this.settings.set(response.data);

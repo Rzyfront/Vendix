@@ -1,11 +1,5 @@
-import {
-  Component,
-  input,
-  output,
-  inject,
-  effect,
-  signal,
-} from '@angular/core';
+import {Component, input, output, inject, effect, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { take } from 'rxjs/operators';
 
@@ -326,6 +320,7 @@ import {
   `,
 })
 export class ReceivableDetailModalComponent {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = input(false);
   readonly isOpenChange = output<boolean>();
   readonly receivable = input<AccountReceivable | null>(null);

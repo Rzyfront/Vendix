@@ -1,4 +1,5 @@
-import { Component, inject, OnInit, signal, computed } from '@angular/core';
+import {Component, inject, OnInit, signal, computed, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   ReactiveFormsModule,
@@ -228,6 +229,7 @@ interface RegistrationError {
   ],
 })
 export class RegisterOwnerComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private fb = inject(FormBuilder);
   private authService = inject(AuthService);
   private authFacade = inject(AuthFacade);
@@ -288,7 +290,7 @@ export class RegisterOwnerComponent implements OnInit {
       this.isLoading.set(true);
       this.clearError();
 
-      this.authService.registerOwner(this.registerForm.value).subscribe({
+      this.authService.registerOwner(this.registerForm.value).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: async (result) => {
           if (result.success && result.data) {
             // Restaurar el estado de la aplicación con el nuevo usuario

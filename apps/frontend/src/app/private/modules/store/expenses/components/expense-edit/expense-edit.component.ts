@@ -1,11 +1,4 @@
-import {
-  Component,
-  inject,
-  signal,
-  effect,
-  input,
-  output,
-} from '@angular/core';
+import {Component, inject, signal, effect, input, output, DestroyRef} from '@angular/core';
 import { DatePipe } from '@angular/common';
 import {
   FormBuilder,
@@ -16,7 +9,7 @@ import {
 } from '@angular/forms';
 import { Store } from '@ngrx/store';
 import { map } from 'rxjs';
-import { toSignal } from '@angular/core/rxjs-interop';
+import {toSignal, takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import {
   updateExpense,
   approveExpense,
@@ -365,6 +358,7 @@ import { FileUploadDropzoneComponent } from '../../../../../../shared/components
     `,
 })
 export class ExpenseEditComponent {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = input<boolean>(false);
   readonly expense = input<Expense | null>(null);
   readonly isOpenChange = output<boolean>();
@@ -476,7 +470,7 @@ export class ExpenseEditComponent {
 
     const currentFile = this.receiptFile();
     if (currentFile) {
-      this.expensesService.uploadReceipt(currentFile).subscribe({
+      this.expensesService.uploadReceipt(currentFile).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (result: { key: string; url: string }) =>
           dispatchUpdate(result.key),
         error: () => {

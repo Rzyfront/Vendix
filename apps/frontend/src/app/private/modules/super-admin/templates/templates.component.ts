@@ -1,4 +1,5 @@
-import { Component, OnInit, OnDestroy, signal } from '@angular/core';
+import {Component, OnInit, OnDestroy, signal, DestroyRef, inject} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { RouterModule } from '@angular/router';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
@@ -186,6 +187,7 @@ import './templates.component.css';
   `,
 })
 export class TemplatesComponent implements OnInit, OnDestroy {
+  private destroyRef = inject(DestroyRef);
   readonly templates = signal<TemplateListItem[]>([]);
   readonly isLoading = signal(false);
   searchTerm = '';
@@ -339,7 +341,7 @@ export class TemplatesComponent implements OnInit, OnDestroy {
       }),
     };
 
-    const sub = this.templatesService.getTemplates(query).subscribe({
+    const sub = this.templatesService.getTemplates(query).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         if (response.success) {
           this.templates.set(response.data);
@@ -359,7 +361,7 @@ export class TemplatesComponent implements OnInit, OnDestroy {
   }
 
   loadStats(): void {
-    const sub = this.templatesService.getTemplateStats().subscribe({
+    const sub = this.templatesService.getTemplateStats().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         if (response.success) {
           this.stats.set({
@@ -411,7 +413,7 @@ export class TemplatesComponent implements OnInit, OnDestroy {
   createTemplate(templateData: CreateTemplateDto): void {
     this.isCreatingTemplate.set(true);
 
-    const sub = this.templatesService.createTemplate(templateData).subscribe({
+    const sub = this.templatesService.createTemplate(templateData).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         if (response.success) {
           this.isCreateModalOpen.set(false);
@@ -448,7 +450,7 @@ export class TemplatesComponent implements OnInit, OnDestroy {
 
     const sub = this.templatesService
       .updateTemplate(this.selectedTemplate.id, templateData)
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (response) => {
           if (response.success) {
             this.isEditModalOpen.set(false);
@@ -481,7 +483,7 @@ export class TemplatesComponent implements OnInit, OnDestroy {
         if (confirmed) {
           const sub = this.templatesService
             .deleteTemplate(template.id)
-            .subscribe({
+            .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
               next: (response) => {
                 if (response.success) {
                   this.loadTemplates();

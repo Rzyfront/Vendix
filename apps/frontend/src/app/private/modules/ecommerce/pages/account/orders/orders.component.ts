@@ -1,4 +1,5 @@
-import { Component, ChangeDetectionStrategy, OnInit, signal } from '@angular/core';
+import {Component, ChangeDetectionStrategy, OnInit, signal, DestroyRef, inject} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { RouterModule } from '@angular/router';
 import { AccountService, Order } from '../../../services/account.service';
@@ -13,6 +14,7 @@ import { ButtonComponent } from '../../../../../../shared/components/button/butt
   styleUrls: ['./orders.component.scss'],
 })
 export class OrdersComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   readonly orders = signal<Order[]>([]);
   readonly is_loading = signal(true);
 
@@ -27,7 +29,7 @@ export class OrdersComponent implements OnInit {
 
   loadOrders(): void {
     this.is_loading.set(true);
-    this.account_service.getOrders(this.current_page()).subscribe({
+    this.account_service.getOrders(this.current_page()).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         if (response.success) {
           this.orders.set(response.data);

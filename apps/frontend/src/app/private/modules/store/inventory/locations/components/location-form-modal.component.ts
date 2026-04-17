@@ -1,4 +1,5 @@
-import { Component, input, output, effect, signal } from '@angular/core';
+import {Component, input, output, effect, signal, DestroyRef, inject} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   FormBuilder,
@@ -264,6 +265,7 @@ import {
   `,
 })
 export class LocationFormModalComponent {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = input(false);
   readonly location = input<InventoryLocation | null>(null);
   readonly isSubmitting = input(false);
@@ -355,7 +357,7 @@ export class LocationFormModalComponent {
     const countryControl = addressGroup?.get('country');
     const stateControl = addressGroup?.get('state');
 
-    countryControl?.valueChanges.subscribe((code) => {
+    countryControl?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((code) => {
       if (code === 'CO') {
         this.loadDepartments();
       } else {
@@ -366,7 +368,7 @@ export class LocationFormModalComponent {
       }
     });
 
-    stateControl?.valueChanges.subscribe((stateVal) => {
+    stateControl?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((stateVal) => {
       if (stateVal && this.form.get('address.country')?.value === 'CO') {
         const dept = this.departments().find(
           (d) => d.name === stateVal || d.id === Number(stateVal),

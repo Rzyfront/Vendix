@@ -1,9 +1,5 @@
-import {
-  Component,
-  inject,
-  output,
-  signal,
-} from '@angular/core';
+import {Component, inject, output, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { CurrencyPipe } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
@@ -22,6 +18,7 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
   styleUrls: ['./pos-quick-book.component.scss'],
 })
 export class PosQuickBookComponent {
+  private destroyRef = inject(DestroyRef);
   close = output<void>();
   created = output<any>();
 
@@ -64,7 +61,7 @@ export class PosQuickBookComponent {
           limit: '100',
         },
       })
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (r) => {
           this.services.set(r.data || []);
           this.loading.set(false);
@@ -110,7 +107,7 @@ export class PosQuickBookComponent {
           date_to: date,
         },
       })
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (r) => {
           this.slotsForDate.set(r.data?.slots || r.data || []);
           this.slotsLoading.set(false);
@@ -142,7 +139,7 @@ export class PosQuickBookComponent {
       .get<any>('/api/store/customers', {
         params: { search: query, limit: '10' },
       })
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (r) => {
           this.customers.set(r.data || []);
         },
@@ -184,7 +181,7 @@ export class PosQuickBookComponent {
         notes: this.notes(),
         skip_order_creation: true,
       })
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (response) => {
           this.submitting.set(false);
           const booking = response.data || response;

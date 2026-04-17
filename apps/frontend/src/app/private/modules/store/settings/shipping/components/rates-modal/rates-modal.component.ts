@@ -1,13 +1,5 @@
-import {
-  Component,
-  input,
-  output,
-  OnInit,
-  OnChanges,
-  SimpleChanges,
-  inject,
-  signal,
-} from '@angular/core';
+import {Component, input, output, OnInit, OnChanges, SimpleChanges, inject, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import {
   FormBuilder,
@@ -609,6 +601,7 @@ import {
   `,
 })
 export class RatesModalComponent implements OnInit, OnChanges {
+  private destroyRef = inject(DestroyRef);
   readonly zone = input.required<ShippingZone>();
   readonly is_read_only = input<boolean>(false);
   readonly close = output<void>();
@@ -826,7 +819,7 @@ export class RatesModalComponent implements OnInit, OnChanges {
   // ─── Data loading ───
 
   private loadShippingMethods(): void {
-    this.shippingService.getAvailableMethodsForRates().subscribe({
+    this.shippingService.getAvailableMethodsForRates().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (methods) => {
         this.shipping_methods.set(methods);
         // Auto-prepare create form after methods load (only for editable mode)
@@ -849,7 +842,7 @@ export class RatesModalComponent implements OnInit, OnChanges {
       ? this.shippingService.getSystemZoneRates(currentZone.id)
       : this.shippingService.getStoreZoneRates(currentZone.id);
 
-    fetch$.subscribe({
+    fetch$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (rates) => {
         this.rates.set(rates);
         this.is_loading_rates.set(false);
@@ -942,7 +935,7 @@ export class RatesModalComponent implements OnInit, OnChanges {
         is_active: values.is_active,
       };
 
-      this.shippingService.createRate(dto).subscribe({
+      this.shippingService.createRate(dto).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: () => {
           this.toast.success('Tarifa creada correctamente');
           this.loadRates();
@@ -974,7 +967,7 @@ export class RatesModalComponent implements OnInit, OnChanges {
         is_active: values.is_active,
       };
 
-      this.shippingService.updateRate(this.selectedRate()!.id, dto).subscribe({
+      this.shippingService.updateRate(this.selectedRate()!.id, dto).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: () => {
           this.toast.success('Tarifa actualizada correctamente');
           this.loadRates();
@@ -1011,7 +1004,7 @@ export class RatesModalComponent implements OnInit, OnChanges {
       })
       .then((confirmed) => {
         if (confirmed) {
-          this.shippingService.deleteRate(rate.id).subscribe({
+          this.shippingService.deleteRate(rate.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
             next: () => {
               this.toast.success('Tarifa eliminada');
               this.loadRates();

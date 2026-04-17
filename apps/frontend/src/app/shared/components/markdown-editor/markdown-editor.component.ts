@@ -1,13 +1,5 @@
-import {
-  Component,
-  ElementRef,
-  signal,
-  computed,
-  input,
-  model,
-  output,
-  viewChild
-} from '@angular/core';
+import {Component, ElementRef, signal, computed, input, model, output, viewChild, DestroyRef, inject} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
@@ -172,6 +164,7 @@ interface UploadResult {
   `],
 })
 export class MarkdownEditorComponent {
+  private destroyRef = inject(DestroyRef);
   readonly content = model<string>('');
   readonly uploadFn = input<(file: File) => Observable<UploadResult>>();
 
@@ -298,7 +291,7 @@ export class MarkdownEditorComponent {
     this.uploading.set(true);
     this.uploadingFileName.set(file.name);
 
-    uploadFn(file).subscribe({
+    uploadFn(file).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (result) => {
         this.insertImageAtCursor(result.url);
         this.uploading.set(false);

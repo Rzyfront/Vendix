@@ -7,6 +7,7 @@ import {
   DestroyRef,
   signal,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NgClass, CurrencyPipe } from '@angular/common';
 import * as XLSX from 'xlsx';
 import { ProductsService } from '../../../products/services/products.service';
@@ -840,6 +841,7 @@ interface AnalysisResult {
   ],
 })
 export class PopBulkDataModalComponent {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = input(false);
   readonly isOpenChange = output<boolean>();
   readonly close = output<void>();
@@ -988,19 +990,22 @@ export class PopBulkDataModalComponent {
 
   // Step 0: File operations
   downloadTemplate(type: 'quick' | 'complete') {
-    this.productsService.getBulkUploadTemplate(type).subscribe({
-      next: (blob: Blob) => {
-        const url = window.URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `plantilla-pedido-${type}.xlsx`;
-        link.click();
-        window.URL.revokeObjectURL(url);
-      },
-      error: () => {
-        this.toastService.error('Error al descargar la plantilla');
-      },
-    });
+    this.productsService
+      .getBulkUploadTemplate(type)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (blob: Blob) => {
+          const url = window.URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.href = url;
+          link.download = `plantilla-pedido-${type}.xlsx`;
+          link.click();
+          window.URL.revokeObjectURL(url);
+        },
+        error: () => {
+          this.toastService.error('Error al descargar la plantilla');
+        },
+      });
   }
 
   onDragOver(event: DragEvent) {

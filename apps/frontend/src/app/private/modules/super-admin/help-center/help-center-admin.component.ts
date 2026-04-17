@@ -1,4 +1,5 @@
-import { Component, OnInit, inject, signal, computed } from '@angular/core';
+import {Component, OnInit, inject, signal, computed, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { Router, RouterModule } from '@angular/router';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
@@ -220,6 +221,7 @@ import { CardComponent } from '../../../../shared/components';
     `,
 })
 export class HelpCenterAdminComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private service = inject(HelpCenterAdminService);
   private toast = inject(ToastService);
   private router = inject(Router);
@@ -380,8 +382,8 @@ export class HelpCenterAdminComponent implements OnInit {
     this.loadStats();
 
     // Subscribe to filter changes
-    this.statusFilterControl.valueChanges.subscribe(() => this.loadArticles());
-    this.typeFilterControl.valueChanges.subscribe(() => this.loadArticles());
+    this.statusFilterControl.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => this.loadArticles());
+    this.typeFilterControl.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => this.loadArticles());
   }
 
   loadArticles() {
@@ -393,7 +395,7 @@ export class HelpCenterAdminComponent implements OnInit {
     if (this.typeFilterControl.value)
       params.type = this.typeFilterControl.value;
 
-    this.service.getArticles(params).subscribe({
+    this.service.getArticles(params).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         this.articles.set(response.data);
         this.loading.set(false);
@@ -407,7 +409,7 @@ export class HelpCenterAdminComponent implements OnInit {
   }
 
   loadStats() {
-    this.service.getArticleStats().subscribe({
+    this.service.getArticleStats().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (data) => this.stats.set(data),
       error: (err) => console.error('Error loading stats', err),
     });
@@ -429,7 +431,7 @@ export class HelpCenterAdminComponent implements OnInit {
   }
 
   toggleStatus(article: HelpArticle, newStatus: string) {
-    this.service.updateArticle(article.id, { status: newStatus }).subscribe({
+    this.service.updateArticle(article.id, { status: newStatus }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.toast.success(
           newStatus === 'PUBLISHED'
@@ -453,7 +455,7 @@ export class HelpCenterAdminComponent implements OnInit {
 
   onConfirmDelete() {
     if (!this.articleToDelete) return;
-    this.service.deleteArticle(this.articleToDelete.id).subscribe({
+    this.service.deleteArticle(this.articleToDelete.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.toast.success('Artículo eliminado');
         this.isDeleteConfirmOpen = false;

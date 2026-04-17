@@ -1,12 +1,5 @@
-import {
-  Component,
-  input,
-  output,
-  signal,
-  computed,
-  effect,
-  inject,
-} from '@angular/core';
+import {Component, input, output, signal, computed, effect, inject, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
 import { forkJoin, of } from 'rxjs';
@@ -512,6 +505,7 @@ export interface PopProductConfigResult {
   ],
 })
 export class PopProductConfigModalComponent {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = input(false);
   readonly product = input<PopProduct | null>(null);
   readonly initialVariant = input<PopProductVariant | null>(null);
@@ -690,7 +684,7 @@ export class PopProductConfigModalComponent {
           .pipe(catchError(() => of(null))),
       );
 
-      forkJoin(createRequests).subscribe({
+      forkJoin(createRequests).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (results) => {
           const createdVariants = results
             .filter((r): r is any => r !== null)

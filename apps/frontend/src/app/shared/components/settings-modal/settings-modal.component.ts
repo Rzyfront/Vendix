@@ -1,14 +1,5 @@
-import {
-  Component,
-  inject,
-  input,
-  output,
-  model,
-  signal,
-  viewChild,
-  effect,
-  ChangeDetectionStrategy,
-} from '@angular/core';
+import {Component, inject, input, output, model, signal, viewChild, effect, ChangeDetectionStrategy, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   FormBuilder,
@@ -317,6 +308,7 @@ import { APP_MODULES } from '../../constants/app-modules.constant';
   styleUrls: ['./settings-modal.component.scss'],
 })
 export class SettingsModalComponent {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = model(false);
   readonly isOpenChange = output<boolean>();
 
@@ -599,7 +591,7 @@ export class SettingsModalComponent {
     this.authService
       .getSettings()
       .pipe(finalize(() => this.loading.set(false)))
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (response) => {
           const settings = response.data || response;
           this.currentSettings = settings;
@@ -740,7 +732,7 @@ export class SettingsModalComponent {
     const formValue = this.settingsForm.getRawValue();
 
     // 🔥 CRÍTICO: Preservar datos existentes con deep merge
-    this.authService.getSettings().subscribe({
+    this.authService.getSettings().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         const currentConfig = response.data?.config || response.config || {};
 

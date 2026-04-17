@@ -1,4 +1,5 @@
-import { Component, OnInit, inject, input, output } from '@angular/core';
+import {Component, OnInit, inject, input, output, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { take } from 'rxjs/operators';
 
 import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
@@ -97,6 +98,7 @@ import { SelectorComponent, SelectorOption } from '../../../../../../shared/comp
     `
 })
 export class ShippingMethodModalComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   readonly method = input<ShippingMethod>();
   readonly close = output<void>();
   readonly saved = output<void>();

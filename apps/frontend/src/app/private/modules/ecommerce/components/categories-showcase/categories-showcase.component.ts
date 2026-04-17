@@ -1,4 +1,5 @@
-import { Component, ChangeDetectionStrategy, inject, input, signal } from '@angular/core';
+import {Component, ChangeDetectionStrategy, inject, input, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { RouterModule, Router } from '@angular/router';
 import { Category } from '../../services/catalog.service';
@@ -12,6 +13,7 @@ import { CatalogService } from '../../services/catalog.service';
   styleUrls: ['./categories-showcase.component.scss'],
 })
 export class CategoriesShowcaseComponent {
+  private destroyRef = inject(DestroyRef);
   readonly limit = input<number>(6);
   readonly show_all_link = input<boolean>(true);
   readonly class = input<string>('');
@@ -27,7 +29,7 @@ export class CategoriesShowcaseComponent {
   }
 
   loadCategories(): void {
-    this.catalog_service.getCategories().subscribe({
+    this.catalog_service.getCategories().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: response => {
         if (response.success) {
           this.categories.set(response.data.slice(0, this.limit()));

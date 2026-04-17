@@ -1,4 +1,5 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
+import {Component, OnInit, inject, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { HelpCenterAdminService } from '../../services/help-center-admin.service';
@@ -184,6 +185,7 @@ import { ConfirmationModalComponent } from '../../../../../../shared/components/
     `,
 })
 export class CategoriesTabComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private fb = inject(FormBuilder);
   private service = inject(HelpCenterAdminService);
   private toast = inject(ToastService);
@@ -212,7 +214,7 @@ export class CategoriesTabComponent implements OnInit {
 
   loadCategories() {
     this.loading.set(true);
-    this.service.getCategories().subscribe({
+    this.service.getCategories().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (cats) => {
         this.categories.set(cats);
         this.loading.set(false);
@@ -259,7 +261,7 @@ export class CategoriesTabComponent implements OnInit {
       ? this.service.updateCategory(this.editingCategory.id, dto)
       : this.service.createCategory(dto);
 
-    request$.subscribe({
+    request$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.toast.success(
           this.editingCategory ? 'Categoría actualizada' : 'Categoría creada',
@@ -282,7 +284,7 @@ export class CategoriesTabComponent implements OnInit {
 
   onConfirmDelete() {
     if (!this.categoryToDelete) return;
-    this.service.deleteCategory(this.categoryToDelete.id).subscribe({
+    this.service.deleteCategory(this.categoryToDelete.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.toast.success('Categoría eliminada');
         this.isDeleteConfirmOpen = false;

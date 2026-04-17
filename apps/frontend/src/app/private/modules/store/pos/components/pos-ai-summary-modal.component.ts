@@ -1,17 +1,5 @@
-import {
-  Component,
-  input,
-  output,
-  signal,
-  computed,
-  effect,
-  untracked,
-  DestroyRef,
-  inject,
-  ViewChild,
-  ElementRef,
-  AfterViewChecked,
-} from '@angular/core';
+import {Component, input, output, signal, computed, effect, untracked, DestroyRef, inject, ViewChild, ElementRef, AfterViewChecked} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { Subscription } from 'rxjs';
 import {
@@ -315,7 +303,7 @@ export class PosAISummaryModalComponent implements AfterViewChecked {
 
     this.subscription = this.cashRegisterService
       .streamClosingSummary(sessionId)
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (event: AIStreamEvent) => {
           if (event.type === 'text' && event.content) {
             if (this.status() === 'loading') {

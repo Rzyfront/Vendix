@@ -1,4 +1,5 @@
-import { Component, OnInit, OnDestroy, signal } from '@angular/core';
+import {Component, OnInit, OnDestroy, signal, DestroyRef, inject} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { RouterModule } from '@angular/router';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
@@ -206,6 +207,7 @@ import './organizations.component.css';
   `,
 })
 export class OrganizationsComponent implements OnInit, OnDestroy {
+  private destroyRef = inject(DestroyRef);
   readonly organizations = signal<OrganizationListItem[]>([]);
   readonly isLoading = signal(false);
   searchTerm = '';
@@ -363,7 +365,7 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
     this.loadStats();
 
     // Subscribe to mode filter changes
-    const modeSub = this.modeControl.valueChanges.subscribe((value) => {
+    const modeSub = this.modeControl.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((value) => {
       this.onModeChange(value || '');
     });
     this.subscriptions.push(modeSub);
@@ -442,7 +444,7 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
 
     const sub = this.organizationsService
       .createOrganization(organizationData as CreateOrganizationDto)
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (response) => {
           if (response.success) {
             this.isCreateModalOpen = false;
@@ -479,7 +481,7 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
         : {}),
     };
 
-    const sub = this.organizationsService.getOrganizations(query).subscribe({
+    const sub = this.organizationsService.getOrganizations(query).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         if (response.success) {
           this.organizations.set(response.data.map((org: any) => ({
@@ -516,7 +518,7 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
   }
 
   loadStats(): void {
-    const sub = this.organizationsService.getOrganizationStatsList().subscribe({
+    const sub = this.organizationsService.getOrganizationStatsList().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         if (response.success) {
           this.stats.set({
@@ -620,7 +622,7 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
         if (confirmed) {
           const sub = this.organizationsService
             .deleteOrganization(org.id)
-            .subscribe({
+            .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
               next: (response) => {
                 if (response.success) {
                   this.loadOrganizations(); // Reload the list
@@ -683,7 +685,7 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
 
     const sub = this.organizationsService
       .updateOrganization(this.selectedOrganization.id, updateData)
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (response) => {
           if (response.success) {
             this.isEditModalOpen = false;

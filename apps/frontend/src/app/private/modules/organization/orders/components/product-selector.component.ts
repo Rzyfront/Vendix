@@ -1,9 +1,5 @@
-import {
-  Component,
-  forwardRef,
-  input,
-  output
-} from '@angular/core';
+import {Component, forwardRef, input, output, DestroyRef, inject} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import {
   FormsModule,
@@ -141,6 +137,7 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
   ],
 })
 export class ProductSelectorComponent implements ControlValueAccessor {
+  private destroyRef = inject(DestroyRef);
   readonly label = input<string>('Producto');
   readonly placeholder = input<string>('Buscar producto...');
   readonly required = input<boolean>(false);
@@ -200,7 +197,7 @@ export class ProductSelectorComponent implements ControlValueAccessor {
         sort_by: 'name',
         sort_order: 'asc',
       })
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (response) => {
           this.searchResults = response.data || [];
           this.showDropdown = true;
@@ -231,7 +228,7 @@ export class ProductSelectorComponent implements ControlValueAccessor {
   private checkInventory(product: Product): void {
     this.productsService
       .checkInventory(product.id, undefined, this.storeId() || undefined)
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (inventory) => {
           this.inventoryChecked.emit({
             available: inventory.available,

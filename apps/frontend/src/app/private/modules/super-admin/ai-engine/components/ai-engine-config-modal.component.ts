@@ -1,11 +1,5 @@
-import {
-  Component,
-  input,
-  output,
-  OnChanges,
-  inject,
-  signal,
-} from '@angular/core';
+import {Component, input, output, OnChanges, inject, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   ReactiveFormsModule,
@@ -221,6 +215,7 @@ import {
   ],
 })
 export class AIEngineConfigModalComponent implements OnChanges {
+  private destroyRef = inject(DestroyRef);
   isOpen = input<boolean>(false);
   isSubmitting = input<boolean>(false);
   config = input<AIEngineConfig | null>(null);
@@ -259,7 +254,7 @@ export class AIEngineConfigModalComponent implements OnChanges {
 
   constructor() {
     // Watch provider changes to auto-fill sdk_type and models
-    this.form.get('provider')?.valueChanges.subscribe((providerName: string) => {
+    this.form.get('provider')?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((providerName: string) => {
       const preset = KNOWN_PROVIDERS.find((p) => p.name === providerName);
       if (preset) {
         this.selectedProvider.set(preset);

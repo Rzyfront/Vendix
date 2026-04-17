@@ -1,6 +1,6 @@
-import { Injectable, signal } from '@angular/core';
+import {Injectable, signal, DestroyRef, inject} from '@angular/core';
 import { Observable, of, throwError } from 'rxjs';
-import { toObservable } from '@angular/core/rxjs-interop';
+import {toObservable, takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import { map, tap, catchError } from 'rxjs/operators';
 import {
   LotInfo,
@@ -56,6 +56,7 @@ const INITIAL_STATE: PopCartState = {
   providedIn: 'root',
 })
 export class PopCartService {
+  private destroyRef = inject(DestroyRef);
   private _cartState = signal<PopCartState>(INITIAL_STATE);
   private _loading = signal<boolean>(false);
   public cartState$ = toObservable(this._cartState);
@@ -237,7 +238,7 @@ export class PopCartService {
       product,
       quantity,
       unit_cost: product.cost || 0,
-    }).subscribe();
+    }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
   }
 
   /**
@@ -249,7 +250,7 @@ export class PopCartService {
       this.updateCartItem({
         itemId: currentItems[index].id,
         quantity,
-      }).subscribe();
+      }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
     }
   }
 
@@ -262,7 +263,7 @@ export class PopCartService {
       this.updateCartItem({
         itemId: currentItems[index].id,
         unit_cost: cost,
-      }).subscribe();
+      }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
     }
   }
 
@@ -284,7 +285,7 @@ export class PopCartService {
       this.updateCartItem({
         itemId: currentItems[index].id,
         lot_info: lotInfo,
-      }).subscribe();
+      }).pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
     }
   }
 

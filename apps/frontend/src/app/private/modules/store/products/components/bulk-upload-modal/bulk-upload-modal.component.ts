@@ -1,4 +1,5 @@
-import { Component, inject, input, output, effect } from '@angular/core';
+import {Component, inject, input, output, effect, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { NgClass, CurrencyPipe } from '@angular/common';
 import { ProductsService } from '../../services/products.service';
 import {
@@ -536,6 +537,7 @@ import {
   ],
 })
 export class BulkUploadModalComponent {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = input(false);
   readonly isOpenChange = output<boolean>();
   readonly uploadComplete = output<void>();
@@ -657,7 +659,7 @@ export class BulkUploadModalComponent {
   // Cancel/Close
   onCancel() {
     if (this.sessionId && !this.uploadResults) {
-      this.productsService.cancelBulkProductSession(this.sessionId).subscribe();
+      this.productsService.cancelBulkProductSession(this.sessionId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
     }
     if ((this.uploadResults?.successful ?? 0) > 0) {
       this.uploadComplete.emit();
@@ -684,7 +686,7 @@ export class BulkUploadModalComponent {
 
   // Step 0: File operations
   downloadTemplate(type: 'quick' | 'complete') {
-    this.productsService.getBulkUploadTemplate(type).subscribe({
+    this.productsService.getBulkUploadTemplate(type).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (blob) => {
         const url = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
@@ -754,7 +756,7 @@ export class BulkUploadModalComponent {
     this.uploadError = null;
     this.currentStep = 1;
 
-    this.productsService.analyzeBulkProducts(this.selectedFile).subscribe({
+    this.productsService.analyzeBulkProducts(this.selectedFile).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (result) => {
         this.isAnalyzing = false;
         this.analysisResult = result;
@@ -780,7 +782,7 @@ export class BulkUploadModalComponent {
     this.isUploading = true;
     this.currentStep = 2;
 
-    this.productsService.uploadBulkProductsFromSession(this.sessionId).subscribe({
+    this.productsService.uploadBulkProductsFromSession(this.sessionId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (result) => {
         this.isUploading = false;
         this.uploadResults = result;

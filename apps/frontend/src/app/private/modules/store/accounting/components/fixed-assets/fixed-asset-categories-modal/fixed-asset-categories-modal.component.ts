@@ -1,4 +1,5 @@
-import { Component, input, output, inject, signal } from '@angular/core';
+import {Component, input, output, inject, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 
@@ -144,6 +145,7 @@ import {
   `,
 })
 export class FixedAssetCategoriesModalComponent {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = input(false);
   readonly isOpenChange = output<boolean>();
   readonly categories = input<FixedAssetCategory[]>([]);
@@ -212,7 +214,7 @@ export class FixedAssetCategoriesModalComponent {
       ? this.accounting_service.updateFixedAssetCategory(this.editing_category.id, dto)
       : this.accounting_service.createFixedAssetCategory(dto);
 
-    request$.subscribe({
+    request$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.toast_service.show({
           variant: 'success',
@@ -233,7 +235,7 @@ export class FixedAssetCategoriesModalComponent {
   deleteCategory(cat: FixedAssetCategory): void {
     if (!confirm(`¿Eliminar la categoria "${cat.name}"? Los activos asociados no seran eliminados.`)) return;
 
-    this.accounting_service.deleteFixedAssetCategory(cat.id).subscribe({
+    this.accounting_service.deleteFixedAssetCategory(cat.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.toast_service.show({ variant: 'success', description: 'Categoria eliminada' });
         this.categoriesChanged.emit();

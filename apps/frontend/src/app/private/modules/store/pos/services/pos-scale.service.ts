@@ -4,6 +4,8 @@ import {
   EnvironmentInjector,
   ApplicationRef,
   createComponent,
+  DestroyRef,
+  inject,
 } from '@angular/core';
 import { BehaviorSubject } from 'rxjs';
 import {
@@ -32,6 +34,7 @@ const STABILITY_READINGS = 3;
 
 @Injectable({ providedIn: 'root' })
 export class PosScaleService implements OnDestroy {
+  private destroyRef = inject(DestroyRef);
   readonly weight$ = new BehaviorSubject<number>(0);
   readonly status$ = new BehaviorSubject<ScaleConnectionStatus>('disconnected');
   readonly stable$ = new BehaviorSubject<boolean>(false);
@@ -74,7 +77,11 @@ export class PosScaleService implements OnDestroy {
       this.startReadLoop();
       return true;
     } catch (err) {
-      this.status$.next(err instanceof DOMException && err.name === 'NotFoundError' ? 'disconnected' : 'error');
+      this.status$.next(
+        err instanceof DOMException && err.name === 'NotFoundError'
+          ? 'disconnected'
+          : 'error',
+      );
       this.port = null;
       return false;
     }
@@ -153,20 +160,30 @@ export class PosScaleService implements OnDestroy {
         componentRef.destroy();
       };
 
-      const sub = componentRef.instance.confirm.subscribe((weight: number) => {
-        resolve(weight);
-        sub.unsubscribe();
+      let sub: any;
+      let subCancel: any;
+
+      const cleanup = () => {
+        sub?.unsubscribe();
+        subCancel?.unsubscribe();
         destroy();
+      };
+
+      this.destroyRef.onDestroy(() => cleanup());
+
+      sub = componentRef.instance.confirm.subscribe((weight: number) => {
+        resolve(weight);
+        cleanup();
       });
 
-      const subCancel = componentRef.instance.cancel.subscribe(() => {
+      subCancel = componentRef.instance.cancel.subscribe(() => {
         resolve(undefined);
-        subCancel.unsubscribe();
-        destroy();
+        cleanup();
       });
 
       this.appRef.attachView(componentRef.hostView);
-      const domElem = (componentRef.hostView as any).rootNodes[0] as HTMLElement;
+      const domElem = (componentRef.hostView as any)
+        .rootNodes[0] as HTMLElement;
       document.body.appendChild(domElem);
     });
   }
@@ -182,11 +199,13 @@ export class PosScaleService implements OnDestroy {
 
     this.readLoopAbortController = new AbortController();
     const textDecoder = new TextDecoderStream();
-    const readableStreamClosed = this.port.readable.pipeTo(textDecoder.writable, {
-      signal: this.readLoopAbortController.signal,
-    }).catch(() => {
-      // Stream aborted or port disconnected
-    });
+    const readableStreamClosed = this.port.readable
+      .pipeTo(textDecoder.writable, {
+        signal: this.readLoopAbortController.signal,
+      })
+      .catch(() => {
+        // Stream aborted or port disconnected
+      });
 
     this.reader = textDecoder.readable.getReader();
     this.readLoop(readableStreamClosed);
@@ -243,7 +262,10 @@ export class PosScaleService implements OnDestroy {
     }
   }
 
-  private parseGeneric(line: string): { weight: number | null; isStable: boolean } {
+  private parseGeneric(line: string): {
+    weight: number | null;
+    isStable: boolean;
+  } {
     const match = line.match(/([+-]?\d+\.?\d*)\s*(kg|g|lb)?/i);
     if (!match) return { weight: null, isStable: false };
 
@@ -255,7 +277,7 @@ export class PosScaleService implements OnDestroy {
 
   private parseCas(line: string): { weight: number | null; isStable: boolean } {
     // Format: ST,GS,  0.500,kg  or  US,GS,  0.500,kg
-    const parts = line.split(',').map(p => p.trim());
+    const parts = line.split(',').map((p) => p.trim());
     if (parts.length < 3) return { weight: null, isStable: false };
 
     return {
@@ -264,12 +286,15 @@ export class PosScaleService implements OnDestroy {
     };
   }
 
-  private parseOhaus(line: string): { weight: number | null; isStable: boolean } {
+  private parseOhaus(line: string): {
+    weight: number | null;
+    isStable: boolean;
+  } {
     // Format similar to CAS: indicator, mode, weight, unit
-    const parts = line.split(',').map(p => p.trim());
+    const parts = line.split(',').map((p) => p.trim());
     if (parts.length < 3) return { weight: null, isStable: false };
 
-    const weightStr = parts.find(p => /^[+-]?\d+\.?\d*$/.test(p));
+    const weightStr = parts.find((p) => /^[+-]?\d+\.?\d*$/.test(p));
     return {
       weight: weightStr ? parseFloat(weightStr) : null,
       isStable: /\bST\b/i.test(parts[0]) || /\bstable\b/i.test(parts[0]),

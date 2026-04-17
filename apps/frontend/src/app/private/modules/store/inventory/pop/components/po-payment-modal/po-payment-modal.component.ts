@@ -1,12 +1,5 @@
-import {
-  Component,
-  inject,
-  input,
-  output,
-  signal,
-  computed,
-  effect,
-} from '@angular/core';
+import {Component, inject, input, output, signal, computed, effect, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
@@ -129,6 +122,7 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
   `],
 })
 export class PoPaymentModalComponent {
+  private destroyRef = inject(DestroyRef);
   private purchaseOrdersService = inject(PurchaseOrdersService);
   private toastService = inject(ToastService);
   private currencyService = inject(CurrencyFormatService);
@@ -200,7 +194,7 @@ export class PoPaymentModalComponent {
     if (this.reference.trim()) payload['reference'] = this.reference.trim();
     if (this.notes.trim()) payload['notes'] = this.notes.trim();
 
-    this.purchaseOrdersService.registerPurchaseOrderPayment(id, payload).subscribe({
+    this.purchaseOrdersService.registerPurchaseOrderPayment(id, payload).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.saving.set(false);
         this.toastService.success('Pago registrado correctamente');

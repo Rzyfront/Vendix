@@ -1,4 +1,5 @@
-import { Injectable, inject } from '@angular/core';
+import {Injectable, inject, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { HttpClient } from '@angular/common/http';
 import { Observable, map, mergeMap } from 'rxjs';
 import { AuthFacade } from '../store/auth/auth.facade';
@@ -70,6 +71,7 @@ export interface RegisterOwnerDto {
   providedIn: 'root',
 })
 export class AuthService {
+  private destroyRef = inject(DestroyRef);
   private readonly API_URL = `${environment.apiUrl}/auth`;
 
   private http = inject(HttpClient);
@@ -303,7 +305,7 @@ export class AuthService {
           },
           { headers },
         )
-        .subscribe({
+        .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
           error: () => {
             // Silently fail - backend logout signaling is not critical
           },

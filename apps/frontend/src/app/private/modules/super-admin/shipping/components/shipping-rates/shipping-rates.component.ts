@@ -1,15 +1,6 @@
 // Superadmin Shipping Rates Component
-import {
-  Component,
-  Input,
-  OnInit,
-  inject,
-  SimpleChanges,
-  OnChanges,
-  input,
-  output,
-  signal,
-} from '@angular/core';
+import {Component, Input, OnInit, inject, SimpleChanges, OnChanges, input, output, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { take } from 'rxjs/operators';
 import {
@@ -480,6 +471,7 @@ import {
   `,
 })
 export class ShippingRatesComponent implements OnInit, OnChanges {
+  private destroyRef = inject(DestroyRef);
   readonly zone = input<ShippingZone | undefined>(undefined);
   readonly methods = input<ShippingMethod[]>([]);
   readonly close = output<void>();

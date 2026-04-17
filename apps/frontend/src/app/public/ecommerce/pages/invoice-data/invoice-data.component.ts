@@ -1,4 +1,5 @@
-import { Component, OnInit, signal } from '@angular/core';
+import {Component, OnInit, signal, DestroyRef, inject} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute } from '@angular/router';
@@ -185,6 +186,7 @@ import { environment } from '../../../../../environments/environment';
   `,
 })
 export class InvoiceDataComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private readonly apiUrl = `${environment.apiUrl}/ecommerce/invoice-data`;
 
   token = '';
@@ -223,7 +225,7 @@ export class InvoiceDataComponent implements OnInit {
 
   private loadRequestInfo(): void {
     this.loading.set(true);
-    this.http.get<any>(`${this.apiUrl}/${this.token}`).subscribe({
+    this.http.get<any>(`${this.apiUrl}/${this.token}`).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         const data = response.data || response;
         this.storeName.set(data.store?.name || '');
@@ -253,7 +255,7 @@ export class InvoiceDataComponent implements OnInit {
     if (!this.isFormValid() || this.submitting()) return;
 
     this.submitting.set(true);
-    this.http.post<any>(`${this.apiUrl}/${this.token}/submit`, this.form).subscribe({
+    this.http.post<any>(`${this.apiUrl}/${this.token}/submit`, this.form).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.submitted.set(true);
         this.submitting.set(false);

@@ -1,12 +1,5 @@
-import {
-  Component,
-  input,
-  output,
-  effect,
-  untracked,
-  inject,
-  signal,
-} from '@angular/core';
+import {Component, input, output, effect, untracked, inject, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DatePipe } from '@angular/common';
 import {
   ButtonComponent,
@@ -264,6 +257,7 @@ import {
   `],
 })
 export class PosSessionDetailModalComponent {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = input<boolean>(false);
   readonly session = input<CashRegisterSession | null>(null);
   readonly isOpenChange = output<boolean>();
@@ -292,7 +286,7 @@ export class PosSessionDetailModalComponent {
     if (!this.session()) return;
     this.loading.set(true);
 
-    this.cashRegisterService.getMovements(this.session()!.id).subscribe({
+    this.cashRegisterService.getMovements(this.session()!.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (movements) => {
         this.movements.set(movements);
         this.calculateTotals();

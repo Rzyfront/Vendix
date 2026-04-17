@@ -1,9 +1,9 @@
-import { Injectable } from '@angular/core';
+import {Injectable, DestroyRef, inject} from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, of } from 'rxjs';
 import { map, tap, catchError } from 'rxjs/operators';
 import { signal } from '@angular/core';
-import { toObservable } from '@angular/core/rxjs-interop';
+import {toObservable, takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import { environment } from '../../../../../../environments/environment';
 
 export interface QueueEntry {
@@ -26,6 +26,7 @@ export interface QueueEntry {
   providedIn: 'root',
 })
 export class PosQueueService {
+  private destroyRef = inject(DestroyRef);
   private readonly apiUrl = `${environment.apiUrl}/store/customer-queue`;
   readonly queue = signal<QueueEntry[]>([]);
   readonly queueCount = signal<number>(0);
@@ -61,28 +62,28 @@ export class PosQueueService {
   selectEntry(id: number): Observable<QueueEntry> {
     return this.http.post<any>(`${this.apiUrl}/${id}/select`, {}).pipe(
       map((res) => res.data),
-      tap(() => this.loadQueue().subscribe()),
+      tap(() => this.loadQueue().pipe(takeUntilDestroyed(this.destroyRef)).subscribe()),
     );
   }
 
   releaseEntry(id: number): Observable<void> {
     return this.http.post<any>(`${this.apiUrl}/${id}/release`, {}).pipe(
       map(() => void 0),
-      tap(() => this.loadQueue().subscribe()),
+      tap(() => this.loadQueue().pipe(takeUntilDestroyed(this.destroyRef)).subscribe()),
     );
   }
 
   consumeEntry(id: number, orderId: number): Observable<any> {
     return this.http.post<any>(`${this.apiUrl}/${id}/consume`, { order_id: orderId }).pipe(
       map((res) => res.data),
-      tap(() => this.loadQueue().subscribe()),
+      tap(() => this.loadQueue().pipe(takeUntilDestroyed(this.destroyRef)).subscribe()),
     );
   }
 
   cancelEntry(id: number): Observable<void> {
     return this.http.delete<any>(`${this.apiUrl}/${id}`).pipe(
       map(() => void 0),
-      tap(() => this.loadQueue().subscribe()),
+      tap(() => this.loadQueue().pipe(takeUntilDestroyed(this.destroyRef)).subscribe()),
     );
   }
 
@@ -94,6 +95,6 @@ export class PosQueueService {
 
   /** Call this when an SSE notification of type customer_queue_* arrives */
   handleQueueNotification(): void {
-    this.loadQueue().subscribe();
+    this.loadQueue().pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
   }
 }

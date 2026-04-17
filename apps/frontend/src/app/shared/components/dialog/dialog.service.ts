@@ -3,6 +3,8 @@ import {
   createComponent,
   EnvironmentInjector,
   ApplicationRef,
+  DestroyRef,
+  inject,
 } from '@angular/core';
 import { ConfirmationModalComponent } from '../confirmation-modal/confirmation-modal.component';
 import { PromptModalComponent } from '../prompt-modal/prompt-modal.component';
@@ -38,6 +40,8 @@ export interface PromptData {
 
 @Injectable({ providedIn: 'root' })
 export class DialogService {
+  private destroyRef = inject(DestroyRef);
+
   constructor(
     private injector: EnvironmentInjector,
     private appRef: ApplicationRef,
@@ -94,17 +98,25 @@ export class DialogService {
           'customClasses',
           config.customClasses,
         );
-      const sub = componentRef.instance.confirm.subscribe(() => {
+      let sub: any;
+      let subCancel: any;
+
+      const cleanup = () => {
+        sub?.unsubscribe();
+        subCancel?.unsubscribe();
+        this.appRef.detachView(componentRef.hostView);
+        componentRef.destroy();
+      };
+
+      this.destroyRef.onDestroy(() => cleanup());
+
+      sub = componentRef.instance.confirm.subscribe(() => {
         resolve(true);
-        sub.unsubscribe();
-        this.appRef.detachView(componentRef.hostView);
-        componentRef.destroy();
+        cleanup();
       });
-      const subCancel = componentRef.instance.cancel.subscribe(() => {
+      subCancel = componentRef.instance.cancel.subscribe(() => {
         resolve(false);
-        subCancel.unsubscribe();
-        this.appRef.detachView(componentRef.hostView);
-        componentRef.destroy();
+        cleanup();
       });
       this.appRef.attachView(componentRef.hostView);
       const domElem = (componentRef.hostView as any)
@@ -161,17 +173,25 @@ export class DialogService {
           'customClasses',
           config.customClasses,
         );
-      const sub = componentRef.instance.confirm.subscribe((value: string) => {
+      let sub: any;
+      let subCancel: any;
+
+      const cleanup = () => {
+        sub?.unsubscribe();
+        subCancel?.unsubscribe();
+        this.appRef.detachView(componentRef.hostView);
+        componentRef.destroy();
+      };
+
+      this.destroyRef.onDestroy(() => cleanup());
+
+      sub = componentRef.instance.confirm.subscribe((value: string) => {
         resolve(value);
-        sub.unsubscribe();
-        this.appRef.detachView(componentRef.hostView);
-        componentRef.destroy();
+        cleanup();
       });
-      const subCancel = componentRef.instance.cancel.subscribe(() => {
+      subCancel = componentRef.instance.cancel.subscribe(() => {
         resolve(undefined);
-        subCancel.unsubscribe();
-        this.appRef.detachView(componentRef.hostView);
-        componentRef.destroy();
+        cleanup();
       });
       this.appRef.attachView(componentRef.hostView);
       const domElem = (componentRef.hostView as any)

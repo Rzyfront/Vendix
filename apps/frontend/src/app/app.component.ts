@@ -1,5 +1,5 @@
-import { Component, effect, inject, OnInit, signal } from '@angular/core';
-import { toSignal } from '@angular/core/rxjs-interop';
+import {Component, effect, inject, OnInit, signal, DestroyRef} from '@angular/core';
+import {toSignal, takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import { RouterOutlet } from '@angular/router';
 import { ConfigFacade } from './core/store/config';
 import { RouteManagerService } from './core/services/route-manager.service';
@@ -45,6 +45,7 @@ import { AppLoadingComponent } from './shared/components/app-loading/app-loading
   `,
 })
 export class AppComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private routeManager = inject(RouteManagerService);
   private configFacade = inject(ConfigFacade);
   private toastService = inject(ToastService);
@@ -75,7 +76,7 @@ export class AppComponent implements OnInit {
   }
 
   private setupRouteErrorHandling(): void {
-    this.routeManager.routesConfigured$.subscribe({
+    this.routeManager.routesConfigured$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (configured) => {
         if (configured) {
           this.is_loading.set(false);

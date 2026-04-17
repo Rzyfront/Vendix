@@ -1,11 +1,5 @@
-import {
-  Injectable,
-  OnDestroy,
-  PLATFORM_ID,
-  Inject,
-  signal,
-} from '@angular/core';
-import { toObservable } from '@angular/core/rxjs-interop';
+import {Injectable, OnDestroy, PLATFORM_ID, Inject, signal, DestroyRef, inject} from '@angular/core';
+import {toObservable, takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import { isPlatformBrowser } from '@angular/common';
 import { fromEvent, Observable } from 'rxjs';
 import { map, startWith } from 'rxjs/operators';
@@ -14,6 +8,7 @@ import { map, startWith } from 'rxjs/operators';
   providedIn: 'root',
 })
 export class FullscreenService implements OnDestroy {
+  private destroyRef = inject(DestroyRef);
   // Signal-first: canonical state holder
   readonly isFullscreenSignal = signal<boolean>(false);
   // Observable parallel for legacy consumers (takeUntil pipelines, etc.)
@@ -145,7 +140,7 @@ export class FullscreenService implements OnDestroy {
     ];
 
     events.forEach((eventName) => {
-      const cleanup = fromEvent(document, eventName).subscribe(() => {
+      const cleanup = fromEvent(document, eventName).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
         this.updateFullscreenState();
       });
 
@@ -153,7 +148,7 @@ export class FullscreenService implements OnDestroy {
     });
 
     // Detectar cambios con Visibility API para mayor robustez
-    const visibilityCleanup = fromEvent(document, 'visibilitychange').subscribe(() => {
+    const visibilityCleanup = fromEvent(document, 'visibilitychange').pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
       if (document.visibilityState === 'visible') {
         this.updateFullscreenState();
       }

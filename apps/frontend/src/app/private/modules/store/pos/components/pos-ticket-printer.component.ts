@@ -1,7 +1,7 @@
-import { Component, input, output, inject } from '@angular/core';
+import {Component, input, output, inject, DestroyRef} from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Observable } from 'rxjs';
-import { toSignal } from '@angular/core/rxjs-interop';
+import {toSignal, takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import { PosTicketService } from '../services/pos-ticket.service';
 import {
   TicketData,
@@ -408,6 +408,7 @@ import {
   ],
 })
 export class PosTicketPrinterComponent {
+  private destroyRef = inject(DestroyRef);
   readonly ticketData = input.required<TicketData>();
   readonly printComplete = output<boolean>();
   readonly printerClosed = output<void>();
@@ -460,7 +461,7 @@ export class PosTicketPrinterComponent {
   private loadPreview(): void {
     const data = this.ticketData();
     if (data) {
-      this.ticketService.previewTicket(data).subscribe((preview) => {
+      this.ticketService.previewTicket(data).pipe(takeUntilDestroyed(this.destroyRef)).subscribe((preview) => {
         this.ticketPreview = preview;
       });
     }
@@ -470,7 +471,7 @@ export class PosTicketPrinterComponent {
     if (this.selectedPrinter) {
       this.ticketService
         .testPrinter(this.selectedPrinter)
-        .subscribe((success) => {
+        .pipe(takeUntilDestroyed(this.destroyRef)).subscribe((success) => {
           if (!success) {
             console.error('Error en la prueba de impresión');
           }
@@ -489,7 +490,7 @@ export class PosTicketPrinterComponent {
       printer: this.selectedPrinter,
     };
 
-    this.ticketService.printTicket(data, options).subscribe({
+    this.ticketService.printTicket(data, options).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (success) => {
         this.printing = false;
         this.printComplete.emit(success);

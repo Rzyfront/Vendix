@@ -1,4 +1,5 @@
-import { Component, OnInit, OnDestroy, signal } from '@angular/core';
+import {Component, OnInit, OnDestroy, signal, DestroyRef, inject} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { Subscription } from 'rxjs';
 
@@ -90,6 +91,7 @@ import { InventoryMovement, MovementType } from '../interfaces';
   `,
 })
 export class MovementsComponent implements OnInit, OnDestroy {
+  private destroyRef = inject(DestroyRef);
   // Data
   readonly movements = signal<InventoryMovement[]>([]);
   readonly filtered_movements = signal<InventoryMovement[]>([]);
@@ -137,7 +139,7 @@ export class MovementsComponent implements OnInit, OnDestroy {
         ? { movement_type: this.current_type }
         : {};
 
-    const sub = this.inventoryService.getMovements(query).subscribe({
+    const sub = this.inventoryService.getMovements(query).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         if (response.data) {
           this.movements.set(Array.isArray(response.data) ? response.data : []);

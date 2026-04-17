@@ -1,4 +1,5 @@
-import { Injectable, ElementRef, OnDestroy } from '@angular/core';
+import {Injectable, ElementRef, OnDestroy, DestroyRef, inject} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Subject, fromEvent } from 'rxjs';
 import { filter, map, takeUntil, tap } from 'rxjs/operators';
 
@@ -21,6 +22,7 @@ export interface ShortcutGroup {
   providedIn: 'root',
 })
 export class PosKeyboardService implements OnDestroy {
+  private destroyRef = inject(DestroyRef);
   private shortcuts: Map<string, KeyboardShortcut> = new Map();
   private shortcutGroups: ShortcutGroup[] = [];
   private destroy$ = new Subject<void>();
@@ -72,7 +74,7 @@ export class PosKeyboardService implements OnDestroy {
         }),
         takeUntil(this.destroy$),
       )
-      .subscribe(({ shortcut }) => {
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe(({ shortcut }) => {
         if (shortcut) {
           shortcut.action();
         }

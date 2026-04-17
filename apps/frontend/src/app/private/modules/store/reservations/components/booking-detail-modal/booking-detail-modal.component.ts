@@ -1,4 +1,5 @@
-import { Component, input, output, signal, computed, inject, effect } from '@angular/core';
+import {Component, input, output, signal, computed, inject, effect, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CurrencyPipe, DatePipe, NgClass } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router } from '@angular/router';
@@ -21,6 +22,7 @@ import { finalize } from 'rxjs';
   styleUrls: ['./booking-detail-modal.component.scss'],
 })
 export class BookingDetailModalComponent {
+  private destroyRef = inject(DestroyRef);
   private reservationsService = inject(ReservationsService);
   private submissionsService = inject(DataCollectionSubmissionsService);
   private toastService = inject(ToastService);
@@ -194,7 +196,7 @@ export class BookingDetailModalComponent {
       internal_notes: this.internalNotesValue(),
     })
       .pipe(finalize(() => this.savingNotes.set(false)))
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: () => {
           this.editing.set(false);
           this.notesUpdated.emit();
@@ -250,7 +252,7 @@ export class BookingDetailModalComponent {
     this.loadingSlots.set(true);
     this.reservationsService.getAvailability(b.product_id, date, date, b.provider_id)
       .pipe(finalize(() => this.loadingSlots.set(false)))
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (slots) => this.slots.set(slots.filter(s => s.total_available > 0)),
         error: () => this.slots.set([]),
       });
@@ -272,7 +274,7 @@ export class BookingDetailModalComponent {
       end_time: slot.end_time,
     })
       .pipe(finalize(() => this.submittingReschedule.set(false)))
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: () => {
           this.toastService.success('Reserva reagendada exitosamente');
           this.rescheduling.set(false);
@@ -296,7 +298,7 @@ export class BookingDetailModalComponent {
   // --- Data Collection ---
 
   private loadSubmission(bookingId: number) {
-    this.submissionsService.getByBooking(bookingId).subscribe({
+    this.submissionsService.getByBooking(bookingId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (data) => {
         this.submission.set(data);
         if (data?.ai_prediagnosis) {

@@ -1,13 +1,5 @@
-import {
-  Component,
-  input,
-  output,
-  model,
-  OnChanges,
-  SimpleChanges,
-  inject,
-  signal,
-} from '@angular/core';
+import {Component, input, output, model, OnChanges, SimpleChanges, inject, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { take } from 'rxjs/operators';
@@ -125,6 +117,7 @@ import {
   `,
 })
 export class ReceivablePaymentModalComponent implements OnChanges {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = model<boolean>(false);
   readonly isOpenChange = output<boolean>();
   readonly receivable = model<AccountReceivable | null>(null);
@@ -178,7 +171,7 @@ export class ReceivablePaymentModalComponent implements OnChanges {
         notes: val.notes || undefined,
       })
       .pipe(take(1))
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: () => {
           this.is_submitting.set(false);
           this.toastService.success('Cobro registrado exitosamente');

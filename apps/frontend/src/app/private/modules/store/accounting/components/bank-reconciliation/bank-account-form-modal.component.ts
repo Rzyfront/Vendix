@@ -1,4 +1,5 @@
-import { Component, inject, signal, effect, input, output } from '@angular/core';
+import {Component, inject, signal, effect, input, output, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
 import {
@@ -100,6 +101,7 @@ import { BankAccount, ChartAccount } from '../../interfaces/accounting.interface
   `,
 })
 export class BankAccountFormModalComponent {
+  private destroyRef = inject(DestroyRef);
   readonly isOpen = input(false);
   readonly editAccount = input<BankAccount | null>(null);
   readonly isOpenChange = output<boolean>();
@@ -156,7 +158,7 @@ export class BankAccountFormModalComponent {
   }
 
   private loadChartAccounts(): void {
-    this.accountingService.getChartOfAccounts().subscribe({
+    this.accountingService.getChartOfAccounts().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (res) => {
         const flat = this.flattenAccounts(res.data || []);
         this.chartAccounts.set(flat);
@@ -198,7 +200,7 @@ export class BankAccountFormModalComponent {
       ? this.reconciliationService.updateBankAccount(this.editAccount()!.id, dto)
       : this.reconciliationService.createBankAccount(dto);
 
-    request$.subscribe({
+    request$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.toastService.success(
           this.editAccount() ? 'Cuenta actualizada' : 'Cuenta creada exitosamente',

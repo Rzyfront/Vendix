@@ -1,11 +1,5 @@
-import {
-  Component,
-  OnInit,
-  OnChanges,
-  inject,
-  input,
-  output,
-} from '@angular/core';
+import {Component, OnInit, OnChanges, inject, input, output, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   ReactiveFormsModule,
@@ -43,6 +37,7 @@ export interface NotificationsSettings {
   styleUrls: ['./notifications-settings-form.component.scss'],
 })
 export class NotificationsSettingsForm implements OnInit, OnChanges {
+  private destroyRef = inject(DestroyRef);
   readonly settings = input.required<NotificationsSettings>();
   readonly settingsChange = output<NotificationsSettings>();
 
@@ -168,7 +163,7 @@ export class NotificationsSettingsForm implements OnInit, OnChanges {
   }
 
   loadSubscriptions() {
-    this.notificationsApi.getSubscriptions().subscribe({
+    this.notificationsApi.getSubscriptions().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response: any) => {
         const subs = response?.data || [];
         for (const sub of subs) {
@@ -196,7 +191,7 @@ export class NotificationsSettingsForm implements OnInit, OnChanges {
     this.subscriptions[type] = !this.subscriptions[type];
     this.notificationsApi
       .updateSubscription({ type, in_app: this.subscriptions[type] })
-      .subscribe();
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
   }
 
   async onDevicePushToggle() {

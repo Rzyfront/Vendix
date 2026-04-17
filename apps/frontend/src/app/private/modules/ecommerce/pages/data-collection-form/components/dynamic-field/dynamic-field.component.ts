@@ -1,4 +1,5 @@
-import { Component, ChangeDetectionStrategy, input, output, computed, signal, inject } from '@angular/core';
+import {Component, ChangeDetectionStrategy, input, output, computed, signal, inject, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
@@ -157,6 +158,7 @@ import {
   `,
 })
 export class DynamicFieldComponent {
+  private destroyRef = inject(DestroyRef);
   private http = inject(HttpClient);
 
   field = input.required<any>();
@@ -206,7 +208,7 @@ export class DynamicFieldComponent {
     this.http.post<any>(
       `${environment.apiUrl}/ecommerce/data-collection/${token}/upload`,
       formData,
-    ).subscribe({
+    ).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (res) => {
         const data = res.data || res;
         this.valueChange.emit(data.key);

@@ -1,11 +1,5 @@
-import {
-  Component,
-  OnInit,
-  OnDestroy,
-  ViewChild,
-  signal,
-  HostListener,
-} from '@angular/core';
+import {Component, OnInit, OnDestroy, ViewChild, signal, HostListener, DestroyRef, inject} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
@@ -223,6 +217,7 @@ import { CostPreviewResponse } from '../interfaces';
   ],
 })
 export class PopComponent implements OnInit, OnDestroy {
+  private destroyRef = inject(DestroyRef);
   showInvoiceScanner = signal(false);
 
   supplierModalOpen = signal(false);
@@ -306,14 +301,14 @@ export class PopComponent implements OnInit, OnDestroy {
     this.checkMobile();
 
     this.subscriptions.push(
-      this.popCartService.cartState$.subscribe((state) => {
+      this.popCartService.cartState$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((state) => {
         this.cartState.set(state);
         this.cartSummary.set(state.summary);
         this.cartItemCount.set(state.items.length);
       }),
     );
 
-    this.route.paramMap.subscribe((params) => {
+    this.route.paramMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
       const id = params.get('id');
       if (id) {
         this.orderId = Number(id);
@@ -339,7 +334,7 @@ export class PopComponent implements OnInit, OnDestroy {
   }
 
   private autoAddProductById(productId: number): void {
-    this.productsService.getProductById(productId).subscribe({
+    this.productsService.getProductById(productId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (product: any) => {
         if (product) {
           const popProduct: PopProduct = {
@@ -371,7 +366,7 @@ export class PopComponent implements OnInit, OnDestroy {
           pricing_type: result.pricing_type || product.pricing_type,
         };
 
-        this.popCartService.removeFromCart(originalItemId).subscribe({
+        this.popCartService.removeFromCart(originalItemId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
           next: () => {
             result.variants!.forEach((variant) => {
               this.popCartService
@@ -384,7 +379,7 @@ export class PopComponent implements OnInit, OnDestroy {
                     : result.unit_cost,
                   lot_info: result.lot_info,
                 })
-                .subscribe();
+                .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
             });
             if (this.productSelection) {
               this.productSelection.updateProductVariants(
@@ -406,7 +401,7 @@ export class PopComponent implements OnInit, OnDestroy {
             variant: result.variant,
             pricing_type: result.pricing_type,
           })
-          .subscribe({
+          .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
             next: () => {
               this.toastService.success('Configuración actualizada');
             },
@@ -419,7 +414,7 @@ export class PopComponent implements OnInit, OnDestroy {
             lot_info: result.lot_info,
             pricing_type: result.pricing_type,
           })
-          .subscribe({
+          .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
             next: () => {
               this.toastService.success('Configuración actualizada');
             },
@@ -442,7 +437,7 @@ export class PopComponent implements OnInit, OnDestroy {
               : result.unit_cost,
             lot_info: result.lot_info,
           })
-          .subscribe();
+          .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
       });
 
       if (this.productSelection) {
@@ -471,7 +466,7 @@ export class PopComponent implements OnInit, OnDestroy {
           unit_cost: result.unit_cost,
           lot_info: result.lot_info,
         })
-        .subscribe({
+        .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
           next: () => {
             this.toastService.success(`${product?.name} agregado al carrito`);
           },
@@ -497,7 +492,7 @@ export class PopComponent implements OnInit, OnDestroy {
     this.editingCartItemId.set(item.id);
 
     if (item.product.id > 0) {
-      this.productsService.getProductById(item.product.id).subscribe({
+      this.productsService.getProductById(item.product.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (product: any) => {
           if (product) {
             this.configModalProduct.set({
@@ -574,7 +569,7 @@ export class PopComponent implements OnInit, OnDestroy {
             quantity: item.quantity,
             unit_cost: item.unit_price,
           })
-          .subscribe();
+          .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
       } else {
         this.popCartService
           .addToCart({
@@ -596,7 +591,7 @@ export class PopComponent implements OnInit, OnDestroy {
               description: item.description,
             },
           })
-          .subscribe();
+          .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
       }
       addedCount++;
     }
@@ -755,7 +750,7 @@ export class PopComponent implements OnInit, OnDestroy {
             sale_price: salePrice,
           },
         })
-        .subscribe();
+        .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
 
       addedCount++;
     });
@@ -796,7 +791,7 @@ export class PopComponent implements OnInit, OnDestroy {
         is_prebulk: true,
         prebulk_data: event.prebulkData,
       })
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: () => {
           this.toastService.success('Producto manual agregado');
         },
@@ -825,7 +820,7 @@ export class PopComponent implements OnInit, OnDestroy {
     if (this.currentLotItemId) {
       this.popCartService
         .updateItemLotInfo(this.currentLotItemId, lotInfo)
-        .subscribe();
+        .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
     }
     this.currentLotInfo = undefined;
     this.currentLotItemId = undefined;
@@ -868,7 +863,7 @@ export class PopComponent implements OnInit, OnDestroy {
         itemId: event.itemId,
         quantity: event.quantity,
       })
-      .subscribe();
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
   }
 
   onItemCostChanged(event: { itemId: string; cost: number }): void {
@@ -877,11 +872,11 @@ export class PopComponent implements OnInit, OnDestroy {
         itemId: event.itemId,
         unit_cost: event.cost,
       })
-      .subscribe();
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
   }
 
   onItemRemoved(itemId: string): void {
-    this.popCartService.removeFromCart(itemId).subscribe({
+    this.popCartService.removeFromCart(itemId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.toastService.success('Producto eliminado de la orden');
       },
@@ -898,7 +893,7 @@ export class PopComponent implements OnInit, OnDestroy {
     });
 
     if (confirm) {
-      this.popCartService.clearCart().subscribe({
+      this.popCartService.clearCart().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: () => {
           this.toastService.info('Orden vaciada');
         },
@@ -965,10 +960,10 @@ export class PopComponent implements OnInit, OnDestroy {
 
     const request = cartToPurchaseOrderRequest(draftState, userId, undefined);
 
-    this.purchaseOrdersService.createPurchaseOrder(request).subscribe({
+    this.purchaseOrdersService.createPurchaseOrder(request).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         this.toastService.success('Orden guardada como borrador');
-        this.popCartService.clearCart().subscribe();
+        this.popCartService.clearCart().pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
         this.router.navigate(['/admin/products']);
       },
       error: (error) => {
@@ -1065,7 +1060,7 @@ export class PopComponent implements OnInit, OnDestroy {
       return;
     }
 
-    this.purchaseOrdersService.getCostPreview(request).subscribe({
+    this.purchaseOrdersService.getCostPreview(request).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         this.costPreview.set(response.success ? response.data : null);
         this.loadingCostPreview.set(false);
@@ -1083,11 +1078,11 @@ export class PopComponent implements OnInit, OnDestroy {
     const request = cartToPurchaseOrderRequest(state, userId, undefined);
     request.status = 'approved';
 
-    this.purchaseOrdersService.createPurchaseOrder(request).subscribe({
+    this.purchaseOrdersService.createPurchaseOrder(request).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         if (response.success && response.data) {
           this.toastService.success('Orden creada exitosamente');
-          this.popCartService.clearCart().subscribe();
+          this.popCartService.clearCart().pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
           this.router.navigate(['/admin/products']);
         }
       },
@@ -1108,7 +1103,7 @@ export class PopComponent implements OnInit, OnDestroy {
 
     this.toastService.info('Creando orden e ingresando inventario...');
 
-    this.purchaseOrdersService.createPurchaseOrder(request).subscribe({
+    this.purchaseOrdersService.createPurchaseOrder(request).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         if (response.success && response.data) {
           const orderId = response.data.id;
@@ -1121,10 +1116,10 @@ export class PopComponent implements OnInit, OnDestroy {
 
           this.purchaseOrdersService
             .receivePurchaseOrder(orderId, receiveItems)
-            .subscribe({
+            .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
               next: () => {
                 this.toastService.success('Stock ingresado correctamente');
-                this.popCartService.clearCart().subscribe();
+                this.popCartService.clearCart().pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
                 this.router.navigate(['/admin/products']);
               },
               error: (err: any) => {
@@ -1132,7 +1127,7 @@ export class PopComponent implements OnInit, OnDestroy {
                 this.toastService.error(
                   'Orden creada pero hubo error al recibir stock',
                 );
-                this.popCartService.clearCart().subscribe();
+                this.popCartService.clearCart().pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
                 this.router.navigate(['/admin/products']);
               },
             });
@@ -1152,7 +1147,7 @@ export class PopComponent implements OnInit, OnDestroy {
   // ============================================================
 
   private loadOrder(orderId: number): void {
-    this.purchaseOrdersService.getPurchaseOrderById(orderId).subscribe({
+    this.purchaseOrdersService.getPurchaseOrderById(orderId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         if (response.success && response.data) {
           this.popCartService.loadOrder(response.data);

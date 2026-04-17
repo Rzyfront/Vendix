@@ -1,11 +1,5 @@
-import {
-  Component,
-  input,
-  output,
-  inject,
-  OnInit,
-  signal,
-} from '@angular/core';
+import {Component, input, output, inject, OnInit, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   ReactiveFormsModule,
@@ -227,6 +221,7 @@ import {
   ],
 })
 export class CurrencyCreateModalComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   isOpen = input<boolean>(false);
   isSubmitting = input<boolean>(false);
   isOpenChange = output<boolean>();
@@ -280,7 +275,7 @@ export class CurrencyCreateModalComponent implements OnInit {
     this.loadCurrencyCodes();
 
     // Escuchar cambios en el selector de código
-    this.selectedCodeControl.valueChanges.subscribe((code: string | null) => {
+    this.selectedCodeControl.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((code: string | null) => {
       this.onCodeSelect(code);
     });
   }

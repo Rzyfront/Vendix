@@ -1,4 +1,5 @@
-import { Component, OnInit, OnDestroy, signal } from '@angular/core';
+import {Component, OnInit, OnDestroy, signal, DestroyRef, inject} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { RouterModule } from '@angular/router';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
@@ -200,6 +201,7 @@ import './domains.component.css';
   `,
 })
 export class DomainsComponent implements OnInit, OnDestroy {
+  private destroyRef = inject(DestroyRef);
   readonly domains = signal<DomainListItem[]>([]);
   readonly isLoading = signal(false);
   searchTerm = '';
@@ -403,7 +405,7 @@ export class DomainsComponent implements OnInit, OnDestroy {
   createDomain(domainData: CreateDomainDto): void {
     this.isCreatingDomain = true;
 
-    const sub = this.domainsService.createDomain(domainData).subscribe({
+    const sub = this.domainsService.createDomain(domainData).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         if (response.success) {
           this.isCreateModalOpen = false;
@@ -447,7 +449,7 @@ export class DomainsComponent implements OnInit, OnDestroy {
 
     const sub = this.domainsService
       .updateDomain(event.id, event.data)
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (response) => {
           if (response.success) {
             this.isEditModalOpen = false;
@@ -478,7 +480,7 @@ export class DomainsComponent implements OnInit, OnDestroy {
       ...(this.searchTerm && { search: this.searchTerm }),
     };
 
-    const sub = this.domainsService.getDomains(query).subscribe({
+    const sub = this.domainsService.getDomains(query).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         if (response.success) {
           this.domains.set(response.data.map((domain: any) => ({
@@ -511,7 +513,7 @@ export class DomainsComponent implements OnInit, OnDestroy {
   }
 
   loadStats(): void {
-    const sub = this.domainsService.getDomainStatsList().subscribe({
+    const sub = this.domainsService.getDomainStatsList().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         if (response.success) {
           this.stats.set(response.data);
@@ -607,7 +609,7 @@ export class DomainsComponent implements OnInit, OnDestroy {
       })
       .then((confirmed) => {
         if (confirmed) {
-          const sub = this.domainsService.deleteDomain(domain.id).subscribe({
+          const sub = this.domainsService.deleteDomain(domain.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
             next: (response) => {
               if (response.success) {
                 this.loadDomains();
@@ -632,7 +634,7 @@ export class DomainsComponent implements OnInit, OnDestroy {
   }
 
   verifyDomain(domain: DomainListItem): void {
-    const sub = this.domainsService.verifyDomain(domain.id).subscribe({
+    const sub = this.domainsService.verifyDomain(domain.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         if (response.success) {
           this.loadDomains();

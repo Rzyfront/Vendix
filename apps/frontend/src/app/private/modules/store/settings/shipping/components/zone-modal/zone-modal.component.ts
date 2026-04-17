@@ -1,10 +1,5 @@
-import {
-  Component,
-  input,
-  output,
-  OnInit,
-  inject,
-} from '@angular/core';
+import {Component, input, output, OnInit, inject, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   FormBuilder,
@@ -202,6 +197,7 @@ import {
   `,
 })
 export class ZoneModalComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   readonly zone = input<ShippingZone>();
   readonly mode = input<'create' | 'edit'>('create');
   readonly close = output<void>();
@@ -342,7 +338,7 @@ export class ZoneModalComponent implements OnInit {
         ? this.shippingService.updateZone(currentZone.id, dto)
         : this.shippingService.createZone(dto);
 
-    request$.subscribe({
+    request$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.isSubmitting = false;
         this.toast.show({

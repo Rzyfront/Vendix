@@ -1,15 +1,6 @@
 /** REBUILD TRIGGER 2 **/
-import {
-  Component,
-  output,
-  OnInit,
-  ChangeDetectionStrategy,
-  inject,
-  signal,
-  computed,
-  viewChild,
-  ElementRef,
-} from '@angular/core';
+import {Component, output, OnInit, ChangeDetectionStrategy, inject, signal, computed, viewChild, ElementRef, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
@@ -610,6 +601,7 @@ interface DocumentStatus extends LegalDocument {
     `,
 })
 export class TermsStepComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   readonly completed = output<void>();
   readonly back = output<void>();
 
@@ -658,7 +650,7 @@ export class TermsStepComponent implements OnInit {
           this.loading.set(false);
         }),
       )
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (docs) => {
           this.documents = docs.map((doc) => ({
             ...doc,
