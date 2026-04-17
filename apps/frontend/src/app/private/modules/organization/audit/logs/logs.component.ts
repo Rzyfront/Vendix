@@ -3,7 +3,7 @@ import {Component,
   OnDestroy,
   signal,
   model,
-  inject,,
+  inject,
   DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';

@@ -111,7 +111,7 @@ import { ResolutionCreateComponent } from './resolution-create/resolution-create
               </div>
             }
             <!-- Empty State -->
-            @if (resolutions()?.length === 0) {
+            @if (resolutions().length === 0) {
               <div class="py-8 text-center">
                 <app-icon
                   name="file-text"

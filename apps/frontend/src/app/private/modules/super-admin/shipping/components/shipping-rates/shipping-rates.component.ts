@@ -11,6 +11,7 @@ import {
   signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { take } from 'rxjs/operators';
 import {
   FormBuilder,
   FormGroup,
@@ -676,7 +677,7 @@ export class ShippingRatesComponent implements OnInit, OnChanges {
     const z = this.zone();
     if (!z) return;
     this.loading.set(true);
-    this.shippingService.getRates(z.id).subscribe({
+    this.shippingService.getRates(z.id).pipe(take(1)).subscribe({
       next: (data) => {
         this.rates.set(data);
         this.loading.set(false);
@@ -728,7 +729,7 @@ export class ShippingRatesComponent implements OnInit, OnChanges {
       ? this.shippingService.updateRate(rate.id, payload)
       : this.shippingService.createRate(payload);
 
-    request$.subscribe({
+    request$.pipe(take(1)).subscribe({
       next: () => {
         this.isSubmitting.set(false);
         this.loadRates();
@@ -753,7 +754,7 @@ export class ShippingRatesComponent implements OnInit, OnChanges {
       })
       .then((confirmed) => {
         if (confirmed) {
-          this.shippingService.deleteRate(id).subscribe(() => {
+          this.shippingService.deleteRate(id).pipe(take(1)).subscribe(() => {
             this.loadRates();
             if (this.selectedRate()?.id === id) {
               this.selectedRate.set(undefined);

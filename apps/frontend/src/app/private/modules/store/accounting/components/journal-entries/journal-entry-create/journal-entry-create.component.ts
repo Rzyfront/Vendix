@@ -1,4 +1,5 @@
-import { Component, input, output, inject } from '@angular/core';
+import { Component, input, output, inject, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DecimalPipe } from '@angular/common';
 import { ReactiveFormsModule, FormBuilder, FormArray, Validators } from '@angular/forms';
 import { Store } from '@ngrx/store';
@@ -203,8 +204,8 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
           <app-button
             variant="primary"
             (clicked)="onSubmit()"
-            [disabled]="form.invalid || !is_balanced || is_submitting"
-            [loading]="is_submitting"
+            [disabled]="form.invalid || !is_balanced || is_submitting()"
+            [loading]="is_submitting()"
           >
             Crear Asiento
           </app-button>
@@ -223,7 +224,7 @@ export class JournalEntryCreateComponent {
   leaf_accounts$: Observable<ChartAccount[]> = this.store.select(selectLeafAccounts);
   open_periods$: Observable<FiscalPeriod[]> = this.store.select(selectOpenFiscalPeriods);
 
-  is_submitting = false;
+  is_submitting = signal(false);
   account_options: { value: any; label: string }[] = [];
   fiscal_period_options: { value: any; label: string }[] = [];
 
@@ -270,14 +271,14 @@ export class JournalEntryCreateComponent {
   }
 
   constructor() {
-    this.leaf_accounts$.subscribe((accounts) => {
+    this.leaf_accounts$.pipe(takeUntilDestroyed()).subscribe((accounts) => {
       this.account_options = accounts.map((a) => ({
         value: a.id,
         label: `${a.code} - ${a.name}`,
       }));
     });
 
-    this.open_periods$.subscribe((periods) => {
+    this.open_periods$.pipe(takeUntilDestroyed()).subscribe((periods) => {
       this.fiscal_period_options = periods.map((p) => ({
         value: p.id,
         label: p.name,
@@ -326,7 +327,7 @@ export class JournalEntryCreateComponent {
   onSubmit(): void {
     if (this.form.invalid || !this.is_balanced) return;
 
-    this.is_submitting = true;
+    this.is_submitting.set(true);
     const values = this.form.getRawValue();
 
     const dto: CreateJournalEntryDto = {
@@ -343,7 +344,7 @@ export class JournalEntryCreateComponent {
     };
 
     this.store.dispatch(createEntry({ entry: dto }));
-    this.is_submitting = false;
+    this.is_submitting.set(false);
     this.onClose();
   }
 

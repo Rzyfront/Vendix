@@ -32,6 +32,14 @@ grep -rl "BehaviorSubject\|new Subject<" apps/frontend/src/app --include="*.comp
 
 # take(1).subscribe sincrono — debe = 0 en toda la app (ya cubierto por migracion a signals)
 grep -rln "take(1)" apps/frontend/src/app --include="*.ts" | wc -l
+
+# Signal usado sin invocar — heuristica, revisar manualmente (bug tipo "!this.disabled")
+# Falsos positivos: metodos reales, propiedades no-signal. Foco: props que sabes que son signals.
+grep -rnE "(!|if\s*\(|while\s*\()this\.(disabled|loading|readonly|isOpen|saving|submitted|required)\s*(\)|&&|\|\||\s*$)" \
+  apps/frontend/src/app --include="*.ts" | grep -vE "this\.\w+\(" | wc -l
+
+# toSignal sin initialValue en facades — umbral esperado: 0 (o justificado caso a caso)
+grep -rnE "toSignal\(\s*this\.\w+\$\s*\)\s*;" apps/frontend/src/app --include="*.facade.ts" | wc -l
 ```
 
 ---
@@ -225,6 +233,8 @@ increment() { this.count.update(v => v + 1); } // CD automático
 | `BehaviorSubject` para booleano UI | ❌ Antipatrón | `signal()` |
 | `Subject<void>` para `destroy$` | ✅ Legítimo | conservar |
 | `Subject` con `debounceTime`/`switchMap` | ✅ Legítimo | conservar |
+| Signal usado sin invocar (`!this.disabled`, `if (this.loading)`) | ❌ Antipatrón silencioso | invocar: `!this.disabled()`, `if (this.loading())` |
+| Leer `toSignal()` sin `initialValue` en `ngOnInit` | ❌ Antipatrón | añadir `initialValue` o suscribirse al `$` / usar `effect()` |
 
 ---
 
@@ -370,7 +380,141 @@ onSearch(term: string) { this.search$.next(term); }
 
 ---
 
-## 11. Aclaración: `zone.js` en `angular.json`
+## 11. Antipatrón: signal usado sin invocar como función
+
+Los `input()`, `signal()`, `computed()`, `toSignal()` retornan una **función getter**, no el valor.
+Usarlos sin los paréntesis compila, pero evalúa la **referencia a la función** — que siempre es
+truthy. Bug silencioso: TypeScript no lo marca porque `!<function>` es válido.
+
+```typescript
+// ❌ BUG SILENCIOSO — `disabled` es InputSignal<boolean>, no boolean
+readonly disabled = input<boolean>(false);
+
+togglePasswordVisibility(): void {
+  if (!this.disabled) {                 // ← `!<function>` = false SIEMPRE
+    this.showPassword.set(!this.showPassword()); // nunca entra
+  }
+}
+
+// ❌ Mismo patrón con signal()
+readonly loading = signal(false);
+onSubmit() {
+  if (this.loading) return;             // ← siempre truthy → siempre sale
+}
+
+// ❌ En template (menos común, pero posible con expresiones)
+@if (loading) {  <!-- objeto truthy --> }
+```
+
+```typescript
+// ✅ CORRECTO — invocar siempre con ()
+if (!this.disabled()) { ... }
+if (this.loading()) return;
+
+// ✅ En template
+@if (loading()) { ... }
+{{ user()?.name }}
+```
+
+**Síntomas típicos**
+
+- Un toggle/botón "no hace nada" tras migración a signals.
+- Un `if (flag)` nunca entra a la rama `else`.
+- Un `disabled` nunca se respeta.
+
+**Heurística de auditoría** (falsos positivos posibles — revisar manualmente):
+
+```bash
+# Buscar `!this.<name>` sin paréntesis dentro de if/while/&&/||
+grep -rnE "(!|if\s*\(|while\s*\(|&&\s*|\|\|\s*)this\.\w+\s*(\)|&&|\|\||\s*$)" \
+  apps/frontend/src/app --include="*.ts" \
+  | grep -vE "this\.\w+\(" | head -50
+```
+
+---
+
+## 12. Antipatrón: leer `toSignal()` sin `initialValue` en `ngOnInit`
+
+`toSignal(obs$)` devuelve `undefined` hasta que el observable emita por primera vez.
+Si una facade expone `readonly data = toSignal(data$)` y el componente lee `facade.data()`
+sincrónicamente en `ngOnInit`, verá `undefined` si el observable aún no ha emitido (HTTP
+pendiente, NgRx effect en vuelo, etc.). Race condition silenciosa.
+
+```typescript
+// ❌ Facade sin initialValue
+@Injectable({ providedIn: 'root' })
+export class ConfigFacade {
+  readonly appConfig$ = this.store.select(selectAppConfig);
+  readonly appConfig = toSignal(this.appConfig$);  // ← empieza undefined
+
+  getCurrentConfig(): AppConfig | null {
+    return this.appConfig() ?? null;  // null si HTTP aún no resuelve
+  }
+}
+
+// ❌ Componente — lectura única en ngOnInit
+ngOnInit() {
+  const cfg = this.configFacade.getCurrentConfig(); // puede ser null
+  if (!cfg) return;                                  // early-return silencioso
+  this.contextType = cfg.domainConfig.environment;   // queda con default → bug UI
+}
+```
+
+**Soluciones** (elegir la que aplique):
+
+```typescript
+// ✅ Opción A — facade con initialValue explícito
+readonly appConfig = toSignal(this.appConfig$, { initialValue: null as AppConfig | null });
+readonly isLoading = toSignal(this.isLoading$, { initialValue: true });
+```
+
+```typescript
+// ✅ Opción B — suscripción reactiva con takeUntilDestroyed
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
+private destroyRef = inject(DestroyRef);
+
+ngOnInit() {
+  this.configFacade.appConfig$
+    .pipe(takeUntilDestroyed(this.destroyRef))
+    .subscribe(cfg => {
+      if (!cfg) return;
+      this.contextType = cfg.domainConfig.environment;
+    });
+}
+```
+
+```typescript
+// ✅ Opción C — effect() para reaccionar a cambios del signal
+import { effect } from '@angular/core';
+
+constructor() {
+  effect(() => {
+    const cfg = this.configFacade.appConfig();
+    if (!cfg) return;
+    this.contextType = cfg.domainConfig.environment;
+  });
+}
+```
+
+**Regla de facades Vendix:** todo `toSignal(...)` en una facade debe declarar `initialValue`
+(preferiblemente `null` para objetos, `false` para booleanos, `[]` para listas) **o** documentar
+por qué se permite `undefined`.
+
+**Heurística de auditoría:**
+
+```bash
+# toSignal sin initialValue — revisar cada hit
+grep -rnE "toSignal\(\s*this\.\w+\$\s*\)" apps/frontend/src/app --include="*.ts" | head -30
+
+# Componentes que llaman get<Algo>Config() en ngOnInit sin subscribe previo
+grep -rnB2 "getCurrentConfig\(\)\|this\.\w+Facade\.get\w+\(\)" \
+  apps/frontend/src/app --include="*.component.ts" | head -40
+```
+
+---
+
+## 13. Aclaración: `zone.js` en `angular.json`
 
 La auditoría estructural dice que "Vendix NO incluye `zone.js` en polyfills". Esto aplica a los
 targets de **producción** (`build`, `serve`, `server`). La presencia de `zone.js` bajo el target

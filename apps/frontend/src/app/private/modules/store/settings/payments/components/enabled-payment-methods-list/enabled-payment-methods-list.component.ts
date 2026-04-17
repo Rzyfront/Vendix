@@ -1,4 +1,4 @@
-import { Component, input, output, computed } from '@angular/core';
+import { Component, input, output, computed, signal } from '@angular/core';
 
 import { FormsModule } from '@angular/forms';
 import { StorePaymentMethod } from '../../interfaces/payment-methods.interface';
@@ -35,13 +35,13 @@ export class EnabledPaymentMethodsListComponent {
   readonly refresh = output<void>();
 
   // Search state
-  search_term = '';
+  search_term = signal('');
 
   // Computed filtered items
   readonly filtered_methods = computed(() => {
     const methods = this.payment_methods();
-    if (!this.search_term) return methods;
-    const term = this.search_term.toLowerCase();
+    if (!this.search_term()) return methods;
+    const term = this.search_term().toLowerCase();
     return methods.filter(
       (m) =>
         m.display_name?.toLowerCase().includes(term) ||
@@ -147,7 +147,7 @@ export class EnabledPaymentMethodsListComponent {
 
   // Event handlers
   onSearchChange(term: string): void {
-    this.search_term = term;
+    this.search_term.set(term);
   }
 
   onActionClick(action: string): void {

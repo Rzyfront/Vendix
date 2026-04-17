@@ -1,4 +1,4 @@
-import { Component, model, inject, signal } from '@angular/core';
+import { Component, model, inject, signal, DestroyRef } from '@angular/core';
 
 import {
   FormBuilder,
@@ -8,6 +8,7 @@ import {
 } from '@angular/forms';
 import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { createEmployee } from '../../../state/actions/payroll.actions';
 import { selectEmployeesLoading } from '../../../state/selectors/payroll.selectors';
 import { AvailableUser } from '../../../interfaces/payroll.interface';
@@ -264,6 +265,7 @@ export class EmployeeCreateComponent {
   readonly isOpen = model<boolean>(false);
 
   private payrollService = inject(PayrollService);
+  private destroyRef = inject(DestroyRef);
 
   employeeForm: FormGroup;
   loading$: Observable<boolean>;
@@ -342,22 +344,28 @@ export class EmployeeCreateComponent {
 
     this.loadAvailableUsers();
 
-    this.employeeForm.get('user_id')!.valueChanges.subscribe((value) => {
-      this.onUserSelected(value);
-    });
+    this.employeeForm
+      .get('user_id')!
+      .valueChanges.pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((value) => {
+        this.onUserSelected(value);
+      });
   }
 
   loadAvailableUsers(): void {
-    this.payrollService.getAvailableUsers().subscribe((res) => {
-      this.availableUsersData = res.data;
-      this.availableUsers.set([
-        { value: '', label: 'Sin vincular (datos manuales)' },
-        ...res.data.map((user) => ({
-          value: user.id,
-          label: `${user.first_name} ${user.last_name} (${user.email})`,
-        })),
-      ]);
-    });
+    this.payrollService
+      .getAvailableUsers()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((res) => {
+        this.availableUsersData = res.data;
+        this.availableUsers.set([
+          { value: '', label: 'Sin vincular (datos manuales)' },
+          ...res.data.map((user) => ({
+            value: user.id,
+            label: `${user.first_name} ${user.last_name} (${user.email})`,
+          })),
+        ]);
+      });
   }
 
   onUserSelected(value: any): void {

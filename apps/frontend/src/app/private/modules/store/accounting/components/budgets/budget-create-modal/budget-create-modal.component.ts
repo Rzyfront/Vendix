@@ -1,4 +1,4 @@
-import {Component, inject, input, output,
+import {Component, inject, input, output, signal,
   DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
@@ -30,7 +30,7 @@ import {
 ],
   templateUrl: './budget-create-modal.component.html',
   styleUrls: ['./budget-create-modal.component.scss']})
-export class BudgetCreateModalComponent implements {
+export class BudgetCreateModalComponent {
   private destroyRef = inject(DestroyRef);
 private fb = inject(FormBuilder);
   private accounting_service = inject(AccountingService);
@@ -42,7 +42,7 @@ private fb = inject(FormBuilder);
   readonly created = output<void>();
 
   fiscal_periods: SelectorOption[] = [];
-  is_submitting = false;
+  is_submitting = signal(false);
 
   form = this.fb.group({
     name: ['', [Validators.required, Validators.minLength(3)]],
@@ -69,7 +69,7 @@ private loadFiscalPeriods(): void {
   onSubmit(): void {
     if (this.form.invalid) return;
 
-    this.is_submitting = true;
+    this.is_submitting.set(true);
     const dto = this.form.value;
 
     this.accounting_service
@@ -78,7 +78,7 @@ private loadFiscalPeriods(): void {
       .subscribe({
         next: (res) => {
           this.toast_service.show({ variant: 'success', description: 'Presupuesto creado' });
-          this.is_submitting = false;
+          this.is_submitting.set(false);
           this.form.reset({ variance_threshold: 10 });
           this.isOpenChange.emit(false);
           this.created.emit();
@@ -89,7 +89,7 @@ private loadFiscalPeriods(): void {
         },
         error: () => {
           this.toast_service.show({ variant: 'error', description: 'Error al crear presupuesto' });
-          this.is_submitting = false;
+          this.is_submitting.set(false);
         }});
   }
 

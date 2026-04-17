@@ -1,7 +1,8 @@
 import { Injectable } from '@angular/core';
 import { Observable, of, fromEvent } from 'rxjs';
 import { map } from 'rxjs/operators';
-import { signal, toObservable } from '@angular/core';
+import { signal } from '@angular/core';
+import { toObservable } from '@angular/core/rxjs-interop';
 
 export interface OfflineData {
   products: any[];

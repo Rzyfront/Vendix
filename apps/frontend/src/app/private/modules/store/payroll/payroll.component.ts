@@ -67,7 +67,7 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
         <div
           class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
         >
-          <vendix-payroll-stats [view]="activeTab()"></vendix-payroll-stats>
+          <vendix-payroll-stats [view]="$any(activeTab())"></vendix-payroll-stats>
         </div>
       }
 

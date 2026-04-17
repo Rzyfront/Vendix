@@ -1,6 +1,7 @@
 import { Component, input, output, inject, effect } from '@angular/core';
 import { DatePipe, CurrencyPipe } from '@angular/common';
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
+import { take } from 'rxjs/operators';
 
 import { AccountingService } from '../../../services/accounting.service';
 import {
@@ -306,7 +307,7 @@ export class FixedAssetDetailModalComponent {
   private loadSchedule(): void {
     if (!this.asset()) return;
     this.is_loading_schedule = true;
-    this.accounting_service.getDepreciationSchedule(this.asset()!.id).subscribe({
+    this.accounting_service.getDepreciationSchedule(this.asset()!.id).pipe(take(1)).subscribe({
       next: (res) => {
         this.schedule = res.data;
         this.is_loading_schedule = false;
@@ -320,7 +321,7 @@ export class FixedAssetDetailModalComponent {
   private loadHistory(): void {
     if (!this.asset()) return;
     this.is_loading_history = true;
-    this.accounting_service.getDepreciationHistory(this.asset()!.id).subscribe({
+    this.accounting_service.getDepreciationHistory(this.asset()!.id).pipe(take(1)).subscribe({
       next: (res) => {
         this.history = res.data;
         this.is_loading_history = false;
@@ -335,7 +336,7 @@ export class FixedAssetDetailModalComponent {
     if (!this.asset()) return;
     if (!confirm('¿Estas seguro de retirar este activo? Esta accion no se puede deshacer.')) return;
 
-    this.accounting_service.retireAsset(this.asset()!.id).subscribe({
+    this.accounting_service.retireAsset(this.asset()!.id).pipe(take(1)).subscribe({
       next: () => {
         this.toast_service.show({ variant: 'success', description: 'Activo retirado correctamente' });
         this.assetUpdated.emit();
@@ -357,6 +358,7 @@ export class FixedAssetDetailModalComponent {
         disposal_date: values.disposal_date!,
         disposal_amount: Number(values.disposal_amount),
       })
+      .pipe(take(1))
       .subscribe({
         next: () => {
           this.toast_service.show({ variant: 'success', description: 'Activo dado de baja correctamente' });

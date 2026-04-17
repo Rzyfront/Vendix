@@ -6,56 +6,33 @@ import {
   effect,
   DestroyRef,
   signal,
+  computed,
 } from '@angular/core';
-import { NgClass, CurrencyPipe } from '@angular/common';
-import * as XLSX from 'xlsx';
-import { ProductsService } from '../../../products/services/products.service';
+import { CurrencyPipe, NgClass } from '@angular/common';
+import { PayrollService } from '../../../services/payroll.service';
+import { parseApiError } from '../../../../../../../core/utils/parse-api-error';
 import {
   ModalComponent,
   ButtonComponent,
   IconComponent,
   ToastService,
-} from '../../../../../../shared/components';
-import { SpinnerComponent } from '../../../../../../shared/components/spinner/spinner.component';
+} from '../../../../../../../shared/components';
+import { SpinnerComponent } from '../../../../../../../shared/components/spinner/spinner.component';
 import {
   StepsLineComponent,
   StepsLineItem,
-} from '../../../../../../shared/components/steps-line/steps-line.component';
-
-interface AnalyzedItem {
-  name: string;
-  sku: string;
-  unit_cost: number;
-  quantity: number;
-  cost_price: number;
-  stock_quantity: number;
-  base_price: number;
-  profit_margin: number;
-  description?: string;
-  brand_id?: string;
-  category_ids?: string;
-  state?: string;
-  available_for_ecommerce?: string;
-  weight: number;
-  status: 'ready' | 'warning' | 'error';
-  warnings: string[];
-  errors: string[];
-}
-
-interface AnalysisResult {
-  total: number;
-  valid: number;
-  warnings: number;
-  errors: number;
-  items: AnalyzedItem[];
-}
+} from '../../../../../../../shared/components/steps-line/steps-line.component';
+import {
+  BulkEmployeeAnalysisResult,
+  BulkEmployeeUploadResult,
+} from '../../../interfaces/bulk-employee-analysis.interface';
 
 @Component({
-  selector: 'app-pop-bulk-data-modal',
+  selector: 'app-employee-bulk-upload-modal',
   standalone: true,
   imports: [
-    NgClass,
     CurrencyPipe,
+    NgClass,
     ModalComponent,
     ButtonComponent,
     IconComponent,
@@ -68,31 +45,33 @@ interface AnalysisResult {
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
-      title="Carga Masiva al Pedido"
+      title="Carga Masiva de Empleados"
       (closed)="onCancel()"
-      subtitle="Importa productos desde un archivo Excel al pedido de compra"
+      subtitle="Importa múltiples empleados desde un archivo Excel o CSV"
     >
       <!-- INTRO SCREEN -->
-      @if (showingIntro()) {
+      @if (showingIntro) {
         <div class="space-y-3">
+          <!-- Header -->
           <div class="text-center">
             <div
               class="inline-flex items-center justify-center w-12 h-12 bg-primary/10 rounded-full mb-2"
             >
               <app-icon
-                name="shopping-cart"
+                name="users"
                 [size]="24"
                 class="text-primary"
               ></app-icon>
             </div>
             <h3 class="text-base font-semibold text-gray-900">
-              Carga masiva al pedido
+              Carga masiva de empleados
             </h3>
             <p class="text-xs text-gray-500 mt-0.5">
-              Importa productos desde un archivo Excel al pedido de compra
+              Importa empleados de una sola vez
             </p>
           </div>
 
+          <!-- Step-by-step guide -->
           <div class="space-y-2">
             <div
               class="flex items-start gap-2.5 px-3 py-2 bg-blue-50 rounded-lg border border-blue-100"
@@ -107,7 +86,7 @@ interface AnalysisResult {
                   Descarga la plantilla
                 </p>
                 <p class="text-[11px] text-blue-700">
-                  Excel con columnas pre-configuradas para tus productos.
+                  Excel con columnas pre-configuradas para tus empleados.
                 </p>
               </div>
             </div>
@@ -124,7 +103,7 @@ interface AnalysisResult {
                   Completa los datos
                 </p>
                 <p class="text-[11px] text-indigo-700">
-                  Nombre, SKU, Precio Compra, Cantidad y más.
+                  Nombre, Documento, Salario, Cargo, Tipo de Contrato y más.
                 </p>
               </div>
             </div>
@@ -141,7 +120,7 @@ interface AnalysisResult {
                   Sube el archivo
                 </p>
                 <p class="text-[11px] text-violet-700">
-                  Excel (.xlsx, .xls) o CSV. Máx. 1000 productos por archivo.
+                  Excel (.xlsx, .xls) o CSV. Máx. 1000 empleados por archivo.
                 </p>
               </div>
             </div>
@@ -158,13 +137,13 @@ interface AnalysisResult {
                   Revisa y confirma
                 </p>
                 <p class="text-[11px] text-green-700">
-                  Vista previa producto por producto antes de importar al
-                  pedido.
+                  Análisis empleado por empleado antes de confirmar la carga.
                 </p>
               </div>
             </div>
           </div>
 
+          <!-- Excel structure visual -->
           <div class="bg-gray-50 border rounded-lg px-3 py-2">
             <p class="text-[11px] font-medium text-gray-700 mb-1">
               Ejemplo de Excel:
@@ -174,41 +153,39 @@ interface AnalysisResult {
                 <thead>
                   <tr class="border-b border-gray-200">
                     <th class="px-2 py-0.5 text-left text-gray-600">Nombre</th>
-                    <th class="px-2 py-0.5 text-left text-gray-600">SKU</th>
-                    <th class="px-2 py-0.5 text-left text-gray-600">Tipo</th>
-                    <th class="px-2 py-0.5 text-right text-gray-600">
-                      Precio Venta
+                    <th class="px-2 py-0.5 text-left text-gray-600">
+                      Documento
                     </th>
                     <th class="px-2 py-0.5 text-right text-gray-600">
-                      Precio Compra
+                      Salario
                     </th>
-                    <th class="px-2 py-0.5 text-right text-gray-600">
-                      Cantidad Inicial
+                    <th class="px-2 py-0.5 text-left text-gray-600">Cargo</th>
+                    <th class="px-2 py-0.5 text-left text-gray-600">
+                      Tipo Contrato
                     </th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr>
-                    <td class="px-2 py-0.5">Camiseta Básica Blanca</td>
-                    <td class="px-2 py-0.5">CAM-BAS-BLA-001</td>
-                    <td class="px-2 py-0.5">Producto</td>
-                    <td class="px-2 py-0.5 text-right">15000</td>
-                    <td class="px-2 py-0.5 text-right">8000</td>
-                    <td class="px-2 py-0.5 text-right">50</td>
+                    <td class="px-2 py-0.5">Juan Pérez</td>
+                    <td class="px-2 py-0.5">CC 12345678</td>
+                    <td class="px-2 py-0.5 text-right">2500000</td>
+                    <td class="px-2 py-0.5">Vendedor</td>
+                    <td class="px-2 py-0.5">Término Indefinido</td>
                   </tr>
                   <tr>
-                    <td class="px-2 py-0.5">Pantalón Jean Clásico</td>
-                    <td class="px-2 py-0.5">PAN-JEA-CLA-032</td>
-                    <td class="px-2 py-0.5">Producto</td>
-                    <td class="px-2 py-0.5 text-right">45000</td>
-                    <td class="px-2 py-0.5 text-right">22000</td>
-                    <td class="px-2 py-0.5 text-right">30</td>
+                    <td class="px-2 py-0.5">María Gómez</td>
+                    <td class="px-2 py-0.5">CC 87654321</td>
+                    <td class="px-2 py-0.5 text-right">3200000</td>
+                    <td class="px-2 py-0.5">Gerente</td>
+                    <td class="px-2 py-0.5">Término Indefinido</td>
                   </tr>
                 </tbody>
               </table>
             </div>
           </div>
 
+          <!-- Auto-advance + don't show again -->
           <div
             class="flex items-center justify-between pt-1.5 border-t border-gray-100"
           >
@@ -225,11 +202,11 @@ interface AnalysisResult {
               <div class="w-16 h-1 bg-gray-200 rounded-full overflow-hidden">
                 <div
                   class="h-full bg-primary rounded-full transition-all duration-100"
-                  [style.width.%]="introProgress()"
+                  [style.width.%]="introProgress"
                 ></div>
               </div>
               <span class="text-[10px] text-gray-400"
-                >{{ introCountdown() }}s</span
+                >{{ introCountdown }}s</span
               >
             </div>
           </div>
@@ -237,18 +214,20 @@ interface AnalysisResult {
       }
 
       <!-- WIZARD -->
-      @if (!showingIntro()) {
+      @if (!showingIntro) {
+        <!-- Steps Line -->
         <div class="mb-4">
           <app-steps-line
             [steps]="steps"
-            [currentStep]="currentStep()"
+            [currentStep]="currentStep"
             size="sm"
           ></app-steps-line>
         </div>
 
         <!-- STEP 0: Preparar -->
-        @if (currentStep() === 0) {
+        @if (currentStep === 0) {
           <div class="space-y-3">
+            <!-- Compact hint -->
             <div
               class="bg-blue-50 px-3 py-2 rounded-lg border border-blue-100 flex items-start gap-2"
             >
@@ -259,92 +238,48 @@ interface AnalysisResult {
               ></app-icon>
               <p class="text-[11px] text-blue-800 leading-relaxed">
                 <span class="font-medium">Descarga la plantilla</span>, completa
-                los datos de tus productos y sube el archivo. Formatos: .xlsx,
-                .xls, .csv · Máx. 1000 productos.
+                los datos de tus empleados y sube el archivo. Formatos: .xlsx,
+                .xls, .csv · Máx. 1000 empleados.
               </p>
             </div>
 
+            <!-- Template Download (single card) -->
             <div>
               <p class="text-xs font-medium text-gray-700 mb-2">
-                1. Descarga una plantilla
+                1. Descarga la plantilla
               </p>
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <div
+                class="border border-indigo-200 hover:border-indigo-500 bg-indigo-50 rounded-lg px-3 py-2.5 cursor-pointer transition-all group flex items-center gap-3"
+                (click)="downloadTemplate()"
+              >
                 <div
-                  class="border border-indigo-200 hover:border-indigo-500 bg-indigo-50 rounded-lg px-3 py-2.5 cursor-pointer transition-all group flex items-center gap-3"
-                  (click)="downloadTemplate('quick')"
+                  class="p-1.5 bg-indigo-100 rounded-full text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-colors shrink-0"
                 >
-                  <div
-                    class="p-1.5 bg-indigo-100 rounded-full text-indigo-600 group-hover:bg-indigo-600 group-hover:text-white transition-colors shrink-0"
-                  >
-                    <app-icon name="check-circle" [size]="16"></app-icon>
-                  </div>
-                  <div class="min-w-0">
-                    <p class="font-semibold text-indigo-900 text-xs">
-                      Plantilla Rápida
-                    </p>
-                    <p class="text-[10px] text-indigo-600 truncate">
-                      Solo campos indispensables: Nombre, SKU, Tipo, Precio
-                      Venta, Precio Compra y Cantidad Inicial
-                    </p>
-                    <div
-                      class="flex items-center text-[10px] font-bold text-indigo-600 group-hover:text-indigo-800 mt-1"
-                    >
-                      <app-icon
-                        name="download"
-                        [size]="12"
-                        class="mr-1"
-                      ></app-icon>
-                      DESCARGAR EXCEL
-                    </div>
-                  </div>
+                  <app-icon name="users" [size]="16"></app-icon>
                 </div>
-                <div
-                  class="border border-green-200 hover:border-green-500 bg-green-50 rounded-lg px-3 py-2.5 cursor-pointer transition-all group flex items-center gap-3"
-                  (click)="downloadTemplate('complete')"
-                >
+                <div class="min-w-0">
+                  <p class="font-semibold text-indigo-900 text-xs">
+                    Plantilla de Empleados
+                  </p>
+                  <p class="text-[10px] text-indigo-600 truncate">
+                    Nombre, Documento, Salario, Cargo, Tipo de Contrato, Banco,
+                    EPS y más
+                  </p>
                   <div
-                    class="p-1.5 bg-green-100 rounded-full text-green-600 group-hover:bg-green-600 group-hover:text-white transition-colors shrink-0"
+                    class="flex items-center text-[10px] font-bold text-indigo-600 group-hover:text-indigo-800 mt-1"
                   >
-                    <app-icon name="file-text" [size]="16"></app-icon>
-                  </div>
-                  <div class="min-w-0">
-                    <p class="font-semibold text-green-900 text-xs">
-                      Plantilla Completa
-                    </p>
-                    <p class="text-[10px] text-green-600 truncate">
-                      Todos los datos: Bodega, Marca, Categorías, Peso, Ofertas,
-                      etc.
-                    </p>
-                    <div
-                      class="flex items-center text-[10px] font-bold text-green-600 group-hover:text-green-800 mt-1"
-                    >
-                      <app-icon
-                        name="download"
-                        [size]="12"
-                        class="mr-1"
-                      ></app-icon>
-                      DESCARGAR EXCEL
-                    </div>
+                    <app-icon
+                      name="download"
+                      [size]="12"
+                      class="mr-1"
+                    ></app-icon>
+                    DESCARGAR EXCEL
                   </div>
                 </div>
               </div>
             </div>
 
-            <div
-              class="bg-amber-50 px-3 py-2 rounded-lg border border-amber-100 flex items-start gap-2"
-            >
-              <app-icon
-                name="alert-triangle"
-                [size]="14"
-                class="text-amber-600 shrink-0 mt-0.5"
-              ></app-icon>
-              <p class="text-[11px] text-amber-800 leading-relaxed">
-                <span class="font-medium">Importante:</span> Los productos se
-                cargarán temporalmente en la orden. Si contienen nuevas marcas o
-                categorías, estas se crearán automáticamente al confirmar.
-              </p>
-            </div>
-
+            <!-- File Upload -->
             <div>
               <p class="text-xs font-medium text-gray-700 mb-2">
                 2. Sube tu archivo
@@ -396,8 +331,21 @@ interface AnalysisResult {
                   </p>
                 }
               </div>
+
+              @if (selectedFile) {
+                <div class="flex justify-end mt-2">
+                  <button
+                    class="text-xs text-red-500 hover:text-red-700 font-medium flex items-center gap-1"
+                    (click)="removeFile()"
+                  >
+                    <app-icon name="x" [size]="12"></app-icon>
+                    Quitar archivo
+                  </button>
+                </div>
+              }
             </div>
 
+            <!-- Upload Error -->
             @if (uploadError) {
               <div
                 class="bg-red-50 px-3 py-2 rounded-lg border border-red-100 text-red-700 text-xs flex items-start gap-2"
@@ -414,9 +362,10 @@ interface AnalysisResult {
         }
 
         <!-- STEP 1: Revisar -->
-        @if (currentStep() === 1) {
+        @if (currentStep === 1) {
           <div class="space-y-3">
-            @if (isProcessing()) {
+            <!-- Loading state -->
+            @if (isAnalyzing) {
               <div class="py-8 flex flex-col items-center justify-center">
                 <app-spinner
                   size="lg"
@@ -424,24 +373,28 @@ interface AnalysisResult {
                   class="mb-3"
                 ></app-spinner>
                 <p class="text-sm text-gray-900 font-medium">
-                  Procesando archivo...
+                  Analizando archivo...
                 </p>
                 <p class="text-xs text-gray-500 mt-1">
-                  Verificando productos y datos
+                  Verificando empleados, documentos y datos
                 </p>
               </div>
             }
 
-            @if (analysisResult && !isProcessing()) {
+            <!-- Analysis results -->
+            @if (analysisResult && !isAnalyzing) {
+              <!-- Summary stats cards -->
               <div
                 class="flex overflow-x-auto gap-2 pb-1 md:grid md:grid-cols-4 md:gap-3 md:overflow-visible"
               >
                 <div
                   class="min-w-[100px] bg-blue-50 px-3 py-2 rounded-lg border border-blue-100 shrink-0"
                 >
-                  <div class="text-[10px] text-blue-600 font-medium">Total</div>
+                  <div class="text-[10px] text-blue-600 font-medium">
+                    Total Empleados
+                  </div>
                   <div class="text-xl font-bold text-blue-700">
-                    {{ analysisResult.total }}
+                    {{ analysisResult!.total_employees }}
                   </div>
                 </div>
                 <div
@@ -451,7 +404,7 @@ interface AnalysisResult {
                     Listos
                   </div>
                   <div class="text-xl font-bold text-green-700">
-                    {{ analysisResult.valid }}
+                    {{ analysisResult!.ready }}
                   </div>
                 </div>
                 <div
@@ -461,7 +414,7 @@ interface AnalysisResult {
                     Advertencias
                   </div>
                   <div class="text-xl font-bold text-amber-700">
-                    {{ analysisResult.warnings }}
+                    {{ analysisResult!.with_warnings }}
                   </div>
                 </div>
                 <div
@@ -471,7 +424,7 @@ interface AnalysisResult {
                     Errores
                   </div>
                   <div class="text-xl font-bold text-red-700">
-                    {{ analysisResult.errors }}
+                    {{ analysisResult!.with_errors }}
                   </div>
                 </div>
               </div>
@@ -487,27 +440,27 @@ interface AnalysisResult {
                         <th
                           class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase"
                         >
-                          Producto
+                          Nombre
                         </th>
                         <th
                           class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase"
                         >
-                          SKU
+                          Documento
                         </th>
                         <th
                           class="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase"
                         >
-                          Cantidad
+                          Salario
                         </th>
                         <th
-                          class="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase"
+                          class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase"
                         >
-                          P. Compra
+                          Tipo Contrato
                         </th>
                         <th
-                          class="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase"
+                          class="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase"
                         >
-                          P. Venta
+                          Acción
                         </th>
                         <th
                           class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase"
@@ -517,38 +470,52 @@ interface AnalysisResult {
                       </tr>
                     </thead>
                     <tbody class="bg-white divide-y divide-gray-200">
-                      @for (item of analysisResult.items; track $index) {
+                      @for (
+                        item of analysisResult!.employees;
+                        track item.row_number
+                      ) {
                         <tr>
                           <td
                             class="px-3 py-2 text-sm text-gray-900 max-w-[180px] truncate"
                           >
-                            {{ item.name || '—' }}
+                            {{ item.name }} {{ item.last_name }}
                           </td>
                           <td
                             class="px-3 py-2 text-sm font-mono text-xs text-gray-600"
                           >
-                            {{ item.sku || '—' }}
-                          </td>
-                          <td
-                            class="px-3 py-2 text-sm text-right text-gray-700"
-                          >
-                            {{ item.quantity }}
+                            {{ item.document_type }} {{ item.document_number }}
                           </td>
                           <td
                             class="px-3 py-2 text-sm text-right text-gray-700"
                           >
                             {{
-                              item.cost_price
+                              item.base_salary
                                 | currency: 'COP' : 'symbol-narrow' : '1.0-0'
                             }}
                           </td>
-                          <td
-                            class="px-3 py-2 text-sm text-right text-gray-700"
-                          >
-                            {{
-                              item.base_price
-                                | currency: 'COP' : 'symbol-narrow' : '1.0-0'
-                            }}
+                          <td class="px-3 py-2 text-sm text-gray-600">
+                            {{ item.contract_type || '—' }}
+                          </td>
+                          <td class="px-3 py-2 text-sm text-center">
+                            <span
+                              class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+                              [ngClass]="{
+                                'bg-emerald-100 text-emerald-800':
+                                  item.action === 'create',
+                                'bg-sky-100 text-sky-800':
+                                  item.action === 'update',
+                                'bg-blue-100 text-blue-800':
+                                  item.action === 'associate',
+                              }"
+                            >
+                              {{
+                                item.action === 'create'
+                                  ? 'Crear'
+                                  : item.action === 'update'
+                                    ? 'Actualizar'
+                                    : 'Vincular'
+                              }}
+                            </span>
                           </td>
                           <td class="px-3 py-2 text-sm">
                             <span
@@ -572,6 +539,7 @@ interface AnalysisResult {
                             </span>
                           </td>
                         </tr>
+                        <!-- Warnings/Errors expandable row -->
                         @if (
                           item.warnings.length > 0 || item.errors.length > 0
                         ) {
@@ -614,12 +582,15 @@ interface AnalysisResult {
               <div
                 class="block md:hidden space-y-2 mt-3 max-h-52 overflow-y-auto"
               >
-                @for (item of analysisResult.items; track $index) {
+                @for (
+                  item of analysisResult!.employees;
+                  track item.row_number
+                ) {
                   <div class="border rounded-lg p-3 bg-white">
                     <div class="flex items-center justify-between mb-2">
                       <span
                         class="text-sm font-medium text-gray-900 truncate mr-2"
-                        >{{ item.name || '—' }}</span
+                        >{{ item.name }} {{ item.last_name }}</span
                       >
                       <span
                         class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium shrink-0"
@@ -641,24 +612,31 @@ interface AnalysisResult {
                       </span>
                     </div>
                     <p class="text-xs text-gray-500 font-mono mb-2">
-                      {{ item.sku || '—' }}
+                      {{ item.document_type }} {{ item.document_number }}
                     </p>
-                    <div class="flex gap-3 text-xs text-gray-600">
-                      <span>Cant: {{ item.quantity }}</span>
+                    <div class="flex gap-3 text-xs text-gray-600 mb-1">
+                      <span>{{
+                        item.base_salary
+                          | currency: 'COP' : 'symbol-narrow' : '1.0-0'
+                      }}</span>
                       <span
-                        >Compra:
-                        {{
-                          item.cost_price
-                            | currency: 'COP' : 'symbol-narrow' : '1.0-0'
-                        }}</span
+                        class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium"
+                        [ngClass]="{
+                          'bg-emerald-100 text-emerald-700':
+                            item.action === 'create',
+                          'bg-sky-100 text-sky-700': item.action === 'update',
+                          'bg-blue-100 text-blue-700':
+                            item.action === 'associate',
+                        }"
                       >
-                      <span
-                        >Venta:
                         {{
-                          item.base_price
-                            | currency: 'COP' : 'symbol-narrow' : '1.0-0'
-                        }}</span
-                      >
+                          item.action === 'create'
+                            ? 'Crear'
+                            : item.action === 'update'
+                              ? 'Actualizar'
+                              : 'Vincular'
+                        }}
+                      </span>
                     </div>
                     @if (item.warnings.length > 0 || item.errors.length > 0) {
                       <div class="mt-2 pt-2 border-t border-gray-100 space-y-1">
@@ -666,14 +644,14 @@ interface AnalysisResult {
                           <p
                             class="text-[11px] text-amber-700 flex items-start gap-1"
                           >
-                            <span class="shrink-0">⚠</span> {{ warning }}
+                            <span class="shrink-0">&#9888;</span> {{ warning }}
                           </p>
                         }
                         @for (error of item.errors; track error) {
                           <p
                             class="text-[11px] text-red-700 flex items-start gap-1"
                           >
-                            <span class="shrink-0">✗</span> {{ error }}
+                            <span class="shrink-0">&#10007;</span> {{ error }}
                           </p>
                         }
                       </div>
@@ -685,113 +663,211 @@ interface AnalysisResult {
           </div>
         }
 
-        <!-- STEP 2: Confirmar -->
-        @if (currentStep() === 2) {
+        <!-- STEP 2: Resultados -->
+        @if (currentStep === 2) {
           <div class="space-y-3">
-            <div class="bg-white border rounded-lg overflow-hidden">
-              <div
-                class="bg-gray-50 px-3 py-2 border-b flex justify-between items-center"
-              >
-                <h4 class="text-sm font-medium text-gray-900">
-                  Resumen de Importación
-                </h4>
-                <span class="text-xs text-gray-500"
-                  >{{ importedItems.length }} productos</span
-                >
+            <!-- Loading state -->
+            @if (isUploading) {
+              <div class="py-8 flex flex-col items-center justify-center">
+                <app-spinner
+                  size="lg"
+                  [center]="true"
+                  class="mb-3"
+                ></app-spinner>
+                <p class="text-sm text-gray-900 font-medium">
+                  Cargando empleados...
+                </p>
+                <p class="text-xs text-gray-500 mt-1">
+                  Esto puede tomar unos momentos
+                </p>
               </div>
-              <div class="p-3">
+            }
+
+            <!-- Upload Error -->
+            @if (uploadError && !isUploading) {
+              <div
+                class="bg-red-50 px-3 py-2 rounded-lg border border-red-100 text-red-700 text-xs flex items-start gap-2"
+              >
+                <app-icon
+                  name="alert-circle"
+                  [size]="14"
+                  class="shrink-0 mt-0.5"
+                ></app-icon>
+                <p>{{ uploadError }}</p>
+              </div>
+            }
+
+            <!-- Results -->
+            @if (uploadResults && !isUploading) {
+              <!-- Summary -->
+              <div class="bg-white border rounded-lg overflow-hidden">
                 <div
-                  class="bg-green-50 px-4 py-3 rounded-lg border border-green-100 flex items-center gap-3"
+                  class="bg-gray-50 px-3 py-2 border-b flex justify-between items-center"
                 >
-                  <app-icon
-                    name="check-circle"
-                    [size]="24"
-                    class="text-green-500"
-                  ></app-icon>
-                  <div>
-                    <h4 class="text-sm font-medium text-green-900">
-                      Productos importados al pedido
-                    </h4>
-                    <p class="text-xs text-green-700">
-                      Se agregaron {{ importedItems.length }} productos al
-                      pedido de compra.
-                    </p>
+                  <h4 class="text-sm font-medium text-gray-900">
+                    Resumen de Carga
+                  </h4>
+                  <span class="text-xs text-gray-500"
+                    >{{ uploadResults.total_processed || 0 }} empleados</span
+                  >
+                </div>
+                <div class="p-3 grid grid-cols-2 md:grid-cols-4 gap-2">
+                  <div
+                    class="bg-green-50 px-3 py-2 rounded border border-green-100"
+                  >
+                    <div class="text-[10px] text-green-600 font-medium">
+                      Exitosos
+                    </div>
+                    <div class="text-xl font-bold text-green-700">
+                      {{ uploadResults.successful || 0 }}
+                    </div>
                   </div>
+                  <div
+                    class="bg-red-50 px-3 py-2 rounded border border-red-100"
+                  >
+                    <div class="text-[10px] text-red-600 font-medium">
+                      Fallidos
+                    </div>
+                    <div class="text-xl font-bold text-red-700">
+                      {{ uploadResults.failed || 0 }}
+                    </div>
+                  </div>
+                  <div
+                    class="bg-blue-50 px-3 py-2 rounded border border-blue-100"
+                  >
+                    <div class="text-[10px] text-blue-600 font-medium">
+                      Usuarios Creados
+                    </div>
+                    <div class="text-xl font-bold text-blue-700">
+                      {{ uploadResults.users_created || 0 }}
+                    </div>
+                  </div>
+                  <div
+                    class="bg-purple-50 px-3 py-2 rounded border border-purple-100"
+                  >
+                    <div class="text-[10px] text-purple-600 font-medium">
+                      Usuarios Vinculados
+                    </div>
+                    <div class="text-xl font-bold text-purple-700">
+                      {{ uploadResults.users_linked || 0 }}
+                    </div>
+                  </div>
+                  @if (uploadResults.updated) {
+                    <div
+                      class="bg-sky-50 px-3 py-2 rounded border border-sky-100"
+                    >
+                      <div class="text-[10px] text-sky-600 font-medium">
+                        Actualizados
+                      </div>
+                      <div class="text-xl font-bold text-sky-700">
+                        {{ uploadResults.updated }}
+                      </div>
+                    </div>
+                  }
+                  @if (uploadResults.associated) {
+                    <div
+                      class="bg-indigo-50 px-3 py-2 rounded border border-indigo-100"
+                    >
+                      <div class="text-[10px] text-indigo-600 font-medium">
+                        Vinculados
+                      </div>
+                      <div class="text-xl font-bold text-indigo-700">
+                        {{ uploadResults.associated }}
+                      </div>
+                    </div>
+                  }
                 </div>
               </div>
-            </div>
 
-            <div class="border rounded-lg overflow-hidden">
-              <div
-                class="bg-gray-50 px-3 py-2 border-b text-gray-800 font-medium text-xs flex items-center"
-              >
-                <app-icon name="list" [size]="14" class="mr-1.5"></app-icon>
-                Productos Importados
-              </div>
-              <div class="max-h-48 overflow-y-auto bg-white">
-                <table class="min-w-full divide-y divide-gray-200">
-                  <thead class="bg-gray-50">
-                    <tr>
-                      <th
-                        class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase"
-                      >
-                        Producto
-                      </th>
-                      <th
-                        class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase"
-                      >
-                        SKU
-                      </th>
-                      <th
-                        class="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase"
-                      >
-                        Cantidad
-                      </th>
-                      <th
-                        class="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase"
-                      >
-                        P. Compra
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody class="bg-white divide-y divide-gray-200">
-                    @for (item of importedItems; track $index) {
+              <!-- Detail Table -->
+              <div class="border rounded-lg overflow-hidden">
+                <div
+                  class="bg-gray-50 px-3 py-2 border-b text-gray-800 font-medium text-xs flex items-center"
+                >
+                  <app-icon name="list" [size]="14" class="mr-1.5"></app-icon>
+                  Detalle por Empleado
+                </div>
+                <div class="max-h-48 overflow-y-auto bg-white">
+                  <table class="min-w-full divide-y divide-gray-200">
+                    <thead class="bg-gray-50">
                       <tr>
-                        <td
-                          class="px-3 py-2 text-sm text-gray-900 max-w-[150px] truncate"
+                        <th
+                          class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase"
                         >
-                          {{ item.name || '—' }}
-                        </td>
-                        <td
-                          class="px-3 py-2 whitespace-nowrap text-sm font-mono text-xs text-gray-600"
+                          Empleado
+                        </th>
+                        <th
+                          class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase"
                         >
-                          {{ item.sku || '—' }}
-                        </td>
-                        <td class="px-3 py-2 text-sm text-right text-gray-700">
-                          {{ item.quantity }}
-                        </td>
-                        <td class="px-3 py-2 text-sm text-right text-gray-700">
-                          {{
-                            item.cost_price
-                              | currency: 'COP' : 'symbol-narrow' : '1.0-0'
-                          }}
-                        </td>
+                          Documento
+                        </th>
+                        <th
+                          class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase"
+                        >
+                          Estado
+                        </th>
+                        <th
+                          class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase"
+                        >
+                          Detalle
+                        </th>
                       </tr>
-                    }
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody class="bg-white divide-y divide-gray-200">
+                      @for (result of uploadResults.results; track $index) {
+                        <tr>
+                          <td
+                            class="px-3 py-2 text-sm text-gray-900 max-w-[150px] truncate"
+                          >
+                            {{
+                              result.employee_name ||
+                                result.employee?.name ||
+                                '—'
+                            }}
+                          </td>
+                          <td
+                            class="px-3 py-2 whitespace-nowrap text-sm font-mono text-xs text-gray-600"
+                          >
+                            {{ result.document_number || '—' }}
+                          </td>
+                          <td class="px-3 py-2 whitespace-nowrap text-sm">
+                            <span
+                              class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+                              [ngClass]="{
+                                'bg-green-100 text-green-800':
+                                  result.status === 'success',
+                                'bg-red-100 text-red-800':
+                                  result.status === 'error',
+                              }"
+                            >
+                              {{
+                                result.status === 'success'
+                                  ? 'Exitoso'
+                                  : 'Error'
+                              }}
+                            </span>
+                          </td>
+                          <td class="px-3 py-2 text-sm text-gray-600">
+                            {{ result.message }}
+                          </td>
+                        </tr>
+                      }
+                    </tbody>
+                  </table>
+                </div>
               </div>
-            </div>
+            }
           </div>
         }
       }
+      <!-- end @if (!showingIntro) -->
 
       <!-- Footer -->
       <div
         slot="footer"
         class="flex justify-end gap-2 pt-4 border-t border-gray-200 mt-4"
       >
-        @if (showingIntro()) {
+        @if (showingIntro) {
           <app-button variant="outline" (clicked)="onCancel()"
             >Cancelar</app-button
           >
@@ -800,30 +876,39 @@ interface AnalysisResult {
             <app-icon name="arrow-right" [size]="16" slot="icon"></app-icon>
           </app-button>
         }
-        @if (!showingIntro() && currentStep() === 0) {
+        <!-- Step 0 -->
+        @if (!showingIntro && currentStep === 0) {
           <app-button variant="outline" (clicked)="onCancel()"
             >Cancelar</app-button
           >
           @if (selectedFile) {
-            <app-button variant="primary" (clicked)="analyzeFile()">
+            <app-button
+              variant="primary"
+              (clicked)="analyzeFile()"
+              [disabled]="isAnalyzing"
+            >
               <app-icon name="search" [size]="16" slot="icon"></app-icon>
               Analizar Archivo
             </app-button>
           }
         }
-        @if (!showingIntro() && currentStep() === 1 && !isProcessing()) {
-          <app-button variant="outline" (clicked)="goBack()">Atrás</app-button>
+        <!-- Step 1 -->
+        @if (!showingIntro && currentStep === 1 && !isAnalyzing) {
+          <app-button variant="outline" (clicked)="prevStep()"
+            >Atrás</app-button
+          >
           <app-button variant="outline" (clicked)="onCancel()"
             >Cancelar</app-button
           >
-          @if (analysisResult && totalValidItems > 0) {
-            <app-button variant="primary" (clicked)="confirmImport()">
-              <app-icon name="plus" [size]="16" slot="icon"></app-icon>
-              Importar {{ totalValidItems }} Productos al Pedido
+          @if (analysisResult && canProceed) {
+            <app-button variant="primary" (clicked)="proceedWithUpload()">
+              <app-icon name="upload" [size]="16" slot="icon"></app-icon>
+              Cargar {{ loadableCount }} Empleados
             </app-button>
           }
         }
-        @if (!showingIntro() && currentStep() === 2) {
+        <!-- Step 2 -->
+        @if (!showingIntro && currentStep === 2 && !isUploading) {
           <app-button variant="outline" (clicked)="onCancel()"
             >Cerrar</app-button
           >
@@ -839,56 +924,67 @@ interface AnalysisResult {
     `,
   ],
 })
-export class PopBulkDataModalComponent {
-  readonly isOpen = input(false);
+export class EmployeeBulkUploadModalComponent {
+  readonly isOpen = input<boolean>(false);
   readonly isOpenChange = output<boolean>();
-  readonly close = output<void>();
-  readonly dataLoaded = output<any[]>();
+  readonly uploadComplete = output<void>();
 
-  private static readonly INTRO_CACHE_KEY = 'vendix_bulk_pop_intro_dismissed';
+  private static readonly INTRO_CACHE_KEY =
+    'vendix_bulk_employee_intro_dismissed';
   private static readonly INTRO_DURATION = 20000;
   private static readonly INTRO_TICK = 100;
 
   // Intro state
-  showingIntro = signal(false);
-  dontShowIntroAgain = false;
-  introProgress = signal(0);
-  introCountdown = signal(20);
+  readonly showingIntro = signal(false);
+  readonly dontShowIntroAgain = signal(false);
+  readonly introProgress = signal(0);
+  readonly introCountdown = signal(20);
   private introTimerId: ReturnType<typeof setInterval> | null = null;
   private introElapsed = 0;
 
   // Wizard state
-  steps: StepsLineItem[] = [
+  readonly steps: StepsLineItem[] = [
     { label: 'Preparar' },
     { label: 'Revisar' },
-    { label: 'Confirmar' },
+    { label: 'Resultados' },
   ];
-  currentStep = signal(0);
+  readonly currentStep = signal(0);
 
   // File state
-  selectedFile: File | null = null;
-  isDragging = false;
+  readonly selectedFile = signal<File | null>(null);
+  readonly isDragging = signal(false);
 
-  // Analysis state (client-side)
-  isProcessing = signal(false);
-  analysisResult: AnalysisResult | null = null;
+  // Analysis state
+  readonly isAnalyzing = signal(false);
+  readonly analysisResult = signal<BulkEmployeeAnalysisResult | null>(null);
+  readonly sessionId = signal<string | null>(null);
 
-  // Import state
-  importedItems: any[] = [];
+  // Upload state
+  readonly isUploading = signal(false);
+  readonly uploadResults = signal<BulkEmployeeUploadResult | null>(null);
 
   // Error state
-  uploadError: string | null = null;
+  readonly uploadError = signal<string | null>(null);
 
-  private productsService = inject(ProductsService);
+  private payrollService = inject(PayrollService);
   private toastService = inject(ToastService);
+  private destroyRef = inject(DestroyRef);
 
-  get totalValidItems(): number {
-    if (!this.analysisResult) return 0;
-    return this.analysisResult.items.filter((i) => i.status !== 'error').length;
-  }
+  // Computed properties
+  readonly canProceed = computed(() => {
+    const r = this.analysisResult();
+    if (!r) return false;
+    return r.ready > 0 || r.with_warnings > 0;
+  });
 
+  readonly loadableCount = computed(() => {
+    const r = this.analysisResult();
+    if (!r) return 0;
+    return r.employees.filter((e) => e.status !== 'error').length;
+  });
+
+  // Lifecycle
   constructor() {
-    inject(DestroyRef).onDestroy(() => this.clearIntroTimer());
     effect(() => {
       if (this.isOpen()) {
         this.onModalOpen();
@@ -896,12 +992,16 @@ export class PopBulkDataModalComponent {
         this.clearIntroTimer();
       }
     });
+
+    this.destroyRef.onDestroy(() => {
+      this.clearIntroTimer();
+    });
   }
 
   // Intro logic
   private onModalOpen() {
     const dismissed = localStorage.getItem(
-      PopBulkDataModalComponent.INTRO_CACHE_KEY,
+      EmployeeBulkUploadModalComponent.INTRO_CACHE_KEY,
     );
     if (dismissed === 'true') {
       this.showingIntro.set(false);
@@ -910,36 +1010,36 @@ export class PopBulkDataModalComponent {
     this.showingIntro.set(true);
     this.introElapsed = 0;
     this.introProgress.set(0);
-    this.introCountdown.set(
-      Math.ceil(PopBulkDataModalComponent.INTRO_DURATION / 1000),
-    );
+    this.introCountdown.set(Math.ceil(
+      EmployeeBulkUploadModalComponent.INTRO_DURATION / 1000
+    ));
     this.startIntroTimer();
   }
 
   private startIntroTimer() {
     this.clearIntroTimer();
     this.introTimerId = setInterval(() => {
-      this.introElapsed += PopBulkDataModalComponent.INTRO_TICK;
-      this.introProgress.set(
-        Math.min(
+      this.introElapsed += EmployeeBulkUploadModalComponent.INTRO_TICK;
+      this.introProgress.set(Math.min(
+        100,
+        (this.introElapsed / EmployeeBulkUploadModalComponent.INTRO_DURATION) *
           100,
-          (this.introElapsed / PopBulkDataModalComponent.INTRO_DURATION) * 100,
+      ));
+      this.introCountdown.set(Math.max(
+        0,
+        Math.ceil(
+          (EmployeeBulkUploadModalComponent.INTRO_DURATION -
+            this.introElapsed) /
+            1000,
         ),
-      );
-      this.introCountdown.set(
-        Math.max(
-          0,
-          Math.ceil(
-            (PopBulkDataModalComponent.INTRO_DURATION - this.introElapsed) /
-              1000,
-          ),
-        ),
-      );
+      ));
 
-      if (this.introElapsed >= PopBulkDataModalComponent.INTRO_DURATION) {
+      if (
+        this.introElapsed >= EmployeeBulkUploadModalComponent.INTRO_DURATION
+      ) {
         this.skipIntro();
       }
-    }, PopBulkDataModalComponent.INTRO_TICK);
+    }, EmployeeBulkUploadModalComponent.INTRO_TICK);
   }
 
   private clearIntroTimer() {
@@ -951,23 +1051,34 @@ export class PopBulkDataModalComponent {
 
   skipIntro() {
     this.clearIntroTimer();
-    if (this.dontShowIntroAgain) {
-      localStorage.setItem(PopBulkDataModalComponent.INTRO_CACHE_KEY, 'true');
+    if (this.dontShowIntroAgain()) {
+      localStorage.setItem(
+        EmployeeBulkUploadModalComponent.INTRO_CACHE_KEY,
+        'true',
+      );
     }
     this.showingIntro.set(false);
   }
 
   toggleDontShowAgain() {
-    this.dontShowIntroAgain = !this.dontShowIntroAgain;
+    this.dontShowIntroAgain.set(!this.dontShowIntroAgain());
   }
 
   // Navigation
-  goBack() {
-    this.currentStep.update((s) => Math.max(0, s - 1));
+  prevStep() {
+    if (this.currentStep() > 0) {
+      this.currentStep.update(v => v - 1);
+    }
   }
 
+  // Cancel/Close
   onCancel() {
-    this.close.emit();
+    if (this.sessionId() && !this.uploadResults()) {
+      this.payrollService.cancelBulkEmployeeSession(this.sessionId()!).subscribe();
+    }
+    if ((this.uploadResults()?.successful ?? 0) > 0) {
+      this.uploadComplete.emit();
+    }
     this.isOpenChange.emit(false);
     this.resetState();
   }
@@ -978,22 +1089,24 @@ export class PopBulkDataModalComponent {
     this.introProgress.set(0);
     this.introElapsed = 0;
     this.currentStep.set(0);
-    this.selectedFile = null;
-    this.isDragging = false;
-    this.isProcessing.set(false);
-    this.analysisResult = null;
-    this.importedItems = [];
-    this.uploadError = null;
+    this.selectedFile.set(null);
+    this.isDragging.set(false);
+    this.isAnalyzing.set(false);
+    this.analysisResult.set(null);
+    this.sessionId.set(null);
+    this.isUploading.set(false);
+    this.uploadResults.set(null);
+    this.uploadError.set(null);
   }
 
   // Step 0: File operations
-  downloadTemplate(type: 'quick' | 'complete') {
-    this.productsService.getBulkUploadTemplate(type).subscribe({
-      next: (blob: Blob) => {
+  downloadTemplate() {
+    this.payrollService.getBulkEmployeeTemplate().subscribe({
+      next: (blob) => {
         const url = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
         link.href = url;
-        link.download = `plantilla-pedido-${type}.xlsx`;
+        link.download = `plantilla-empleados.xlsx`;
         link.click();
         window.URL.revokeObjectURL(url);
       },
@@ -1006,19 +1119,20 @@ export class PopBulkDataModalComponent {
   onDragOver(event: DragEvent) {
     event.preventDefault();
     event.stopPropagation();
-    this.isDragging = true;
+    this.isDragging.set(true);
   }
 
   onDragLeave(event: DragEvent) {
     event.preventDefault();
     event.stopPropagation();
-    this.isDragging = false;
+    this.isDragging.set(false);
   }
 
   onDrop(event: DragEvent) {
     event.preventDefault();
     event.stopPropagation();
-    this.isDragging = false;
+    this.isDragging.set(false);
+
     const files = event.dataTransfer?.files;
     if (files && files.length > 0) {
       this.validateAndSetFile(files[0]);
@@ -1032,6 +1146,11 @@ export class PopBulkDataModalComponent {
     }
   }
 
+  removeFile() {
+    this.selectedFile.set(null);
+    this.uploadError.set(null);
+  }
+
   private validateAndSetFile(file: File) {
     const allowedExtensions = ['.csv', '.xlsx', '.xls'];
     const ext = '.' + file.name.split('.').pop()?.toLowerCase();
@@ -1041,182 +1160,86 @@ export class PopBulkDataModalComponent {
       );
       return;
     }
+
     if (file.size > 5 * 1024 * 1024) {
       this.toastService.error('El archivo excede el límite de 5 MB');
       return;
     }
-    this.selectedFile = file;
-    this.uploadError = null;
+
+    this.selectedFile.set(file);
+    this.uploadError.set(null);
+  }
+
+  // Step 0 -> 1: Analyze
+  analyzeFile() {
+    if (!this.selectedFile()) return;
+
+    this.isAnalyzing.set(true);
+    this.uploadError.set(null);
+    this.currentStep.set(1);
+
+    this.payrollService.analyzeBulkEmployees(this.selectedFile()!).subscribe({
+      next: (result) => {
+        this.isAnalyzing.set(false);
+        this.analysisResult.set(result);
+        this.sessionId.set(result.session_id);
+
+        if (result.with_errors > 0) {
+          this.toastService.warning(
+            `${result.with_errors} empleado(s) con errores detectados`,
+          );
+        }
+      },
+      error: (error) => {
+        this.isAnalyzing.set(false);
+        this.currentStep.set(0);
+        this.uploadError.set(
+          typeof error === 'string' ? error : parseApiError(error).userMessage,
+        );
+        this.toastService.error('Error al analizar el archivo');
+      },
+    });
+  }
+
+  // Step 1 -> 2: Upload
+  proceedWithUpload() {
+    if (!this.sessionId()) return;
+
+    this.isUploading.set(true);
+    this.currentStep.set(2);
+
+    this.payrollService
+      .uploadBulkEmployeesFromSession(this.sessionId()!)
+      .subscribe({
+        next: (result) => {
+          this.isUploading.set(false);
+          this.uploadResults.set(result);
+
+          if (result.failed > 0) {
+            this.toastService.warning(
+              'La carga se completó con algunos errores.',
+            );
+          } else {
+            this.toastService.success(
+              `${result.successful} empleado(s) cargados exitosamente`,
+            );
+          }
+        },
+        error: (error) => {
+          this.isUploading.set(false);
+          this.uploadError.set(
+            typeof error === 'string'
+              ? error
+              : parseApiError(error).userMessage,
+          );
+          this.toastService.error('Error en la carga masiva de empleados');
+        },
+      });
   }
 
   formatFileSize(bytes: number): string {
-    if (bytes === 0) return '0 Bytes';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-  }
-
-  // Step 0 -> 1: Analyze file client-side
-  analyzeFile() {
-    if (!this.selectedFile) return;
-
-    this.isProcessing.set(true);
-    this.uploadError = null;
-    this.currentStep.set(1);
-
-    const reader = new FileReader();
-    reader.onload = (e: any) => {
-      try {
-        const bstr: string = e.target.result;
-        const wb: XLSX.WorkBook = XLSX.read(bstr, { type: 'binary' });
-        const wsname: string = wb.SheetNames[0];
-        const ws: XLSX.WorkSheet = wb.Sheets[wsname];
-        const data = XLSX.utils.sheet_to_json(ws);
-
-        if (!data || data.length === 0) {
-          this.toastService.error(
-            'El archivo está vacío o tiene un formato incorrecto',
-          );
-          this.isProcessing.set(false);
-          this.currentStep.set(0);
-          return;
-        }
-
-        if (data.length > 1000) {
-          this.toastService.error(
-            `El archivo excede el límite de 1000 items (tiene ${data.length})`,
-          );
-          this.isProcessing.set(false);
-          this.currentStep.set(0);
-          return;
-        }
-
-        const items: AnalyzedItem[] = data.map((row: any) => {
-          const name = row['Nombre'] || row['name'] || '';
-          const sku = row['SKU'] || row['sku'] || '';
-          const cost = parseFloat(
-            row['Precio Compra'] ||
-              row['Costo'] ||
-              row['cost_price'] ||
-              row['unit_cost'] ||
-              0,
-          );
-          const qty = parseFloat(
-            row['Cantidad'] ||
-              row['Cantidad Inicial'] ||
-              row['stock_quantity'] ||
-              row['quantity'] ||
-              row['qty'] ||
-              0,
-          );
-          const base_price = parseFloat(
-            row['Precio Venta'] || row['base_price'] || 0,
-          );
-          let profit_margin = parseFloat(
-            row['Margen'] || row['profit_margin'] || 0,
-          );
-          if (profit_margin > 0 && profit_margin < 1) {
-            profit_margin = profit_margin * 100;
-          }
-          const description = row['Descripción'] || row['description'];
-          const brand_id = row['Marca'] || row['brand_id'];
-          const category_ids = row['Categorías'] || row['category_ids'];
-          const state = row['Estado'] || row['state'];
-          const available_for_ecommerce =
-            row['Disponible Ecommerce'] || row['available_for_ecommerce'];
-          const weight = parseFloat(row['Peso'] || row['weight'] || 0);
-
-          const warnings: string[] = [];
-          const errors: string[] = [];
-
-          if (!name && !sku) {
-            errors.push('Falta nombre y SKU');
-          }
-          if (!name && sku) {
-            warnings.push('Falta el nombre del producto');
-          }
-          if (name && !sku) {
-            warnings.push('Falta el SKU');
-          }
-          if (isNaN(qty) || qty <= 0) {
-            warnings.push('Cantidad no especificada o inválida');
-          }
-          if (isNaN(cost) || cost <= 0) {
-            warnings.push('Precio de compra no especificado');
-          }
-
-          let status: 'ready' | 'warning' | 'error' = 'ready';
-          if (errors.length > 0) {
-            status = 'error';
-          } else if (warnings.length > 0) {
-            status = 'warning';
-          }
-
-          return {
-            name,
-            sku,
-            unit_cost: isNaN(cost) ? 0 : cost,
-            quantity: isNaN(qty) ? 0 : qty,
-            cost_price: isNaN(cost) ? 0 : cost,
-            stock_quantity: isNaN(qty) ? 0 : qty,
-            base_price: isNaN(base_price) ? 0 : base_price,
-            profit_margin: isNaN(profit_margin) ? 0 : profit_margin,
-            description,
-            brand_id,
-            category_ids,
-            state,
-            available_for_ecommerce,
-            weight: isNaN(weight) ? 0 : weight,
-            status,
-            warnings,
-            errors,
-          };
-        });
-
-        const valid = items.filter((i) => i.status === 'ready').length;
-        const withWarnings = items.filter((i) => i.status === 'warning').length;
-        const withErrors = items.filter((i) => i.status === 'error').length;
-
-        this.analysisResult = {
-          total: items.length,
-          valid,
-          warnings: withWarnings,
-          errors: withErrors,
-          items,
-        };
-
-        this.isProcessing.set(false);
-
-        if (withErrors > 0) {
-          this.toastService.warning(
-            `${withErrors} producto(s) con errores detectados`,
-          );
-        }
-      } catch (err) {
-        console.error('Error parsing file:', err);
-        this.uploadError = 'Error al procesar el archivo. Verifica el formato.';
-        this.toastService.error('Error al procesar el archivo');
-        this.isProcessing.set(false);
-        this.currentStep.set(0);
-      }
-    };
-
-    reader.readAsBinaryString(this.selectedFile);
-  }
-
-  confirmImport() {
-    if (!this.analysisResult) return;
-
-    const validItems = this.analysisResult.items
-      .filter((i) => i.status !== 'error')
-      .map(({ status, warnings, errors, ...item }) => item);
-
-    this.importedItems = validItems;
-    this.currentStep.set(2);
-    this.dataLoaded.emit(validItems);
-    this.toastService.success(
-      `${validItems.length} producto(s) importados al pedido`,
-    );
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
   }
 }

@@ -1,4 +1,4 @@
-import { Component, input, output, effect, inject } from '@angular/core';
+import { Component, input, output, effect, inject, signal } from '@angular/core';
 
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 import { Store } from '@ngrx/store';
@@ -97,8 +97,8 @@ import {
           <app-button
             variant="primary"
             (clicked)="onSubmit()"
-            [disabled]="form.invalid || is_submitting"
-            [loading]="is_submitting"
+            [disabled]="form.invalid || is_submitting()"
+            [loading]="is_submitting()"
           >
             {{ editAccount() ? 'Actualizar' : 'Crear' }}
           </app-button>
@@ -116,7 +116,7 @@ export class AccountCreateComponent {
   private fb = inject(FormBuilder);
   private store = inject(Store);
 
-  is_submitting = false;
+  is_submitting = signal(false);
 
   account_type_options = [
     { value: 'asset', label: 'Activo' },
@@ -177,7 +177,7 @@ export class AccountCreateComponent {
   onSubmit(): void {
     if (this.form.invalid) return;
 
-    this.is_submitting = true;
+    this.is_submitting.set(true);
     const values = this.form.getRawValue();
 
     if (this.editAccount()) {
@@ -203,7 +203,7 @@ export class AccountCreateComponent {
       this.store.dispatch(createAccount({ account: dto }));
     }
 
-    this.is_submitting = false;
+    this.is_submitting.set(false);
     this.onClose();
   }
 

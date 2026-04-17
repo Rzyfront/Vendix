@@ -1590,9 +1590,9 @@ export class PosPaymentInterfaceComponent {
 
   private syncAnonymousSaleState(): void {
     if (!this.allowAnonymousSales()) {
-      this.paymentState().update((s) => ({ ...s, isAnonymousSale: false }));
+      this.paymentState.update((s) => ({ ...s, isAnonymousSale: false }));
     } else {
-      this.paymentState().update((s) => ({
+      this.paymentState.update((s) => ({
         ...s,
         isAnonymousSale: this.anonymousSalesAsDefault(),
       }));
@@ -1625,7 +1625,7 @@ export class PosPaymentInterfaceComponent {
       .pipe(takeUntilDestroyed(this.destroyRef), debounceTime(100))
       .subscribe((value: string | number | null) => {
         if (value !== null && value !== undefined && value !== '') {
-          this.paymentState().update((s) => ({
+          this.paymentState.update((s) => ({
             ...s,
             cashReceived: parseFloat(value.toString()) || 0,
           }));
@@ -1636,7 +1636,7 @@ export class PosPaymentInterfaceComponent {
     this.referenceControl.valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((value: string | null) => {
-        this.paymentState().update((s) => ({ ...s, reference: value || '' }));
+        this.paymentState.update((s) => ({ ...s, reference: value || '' }));
       });
   }
 
@@ -1862,28 +1862,29 @@ export class PosPaymentInterfaceComponent {
     if (this.paymentState().paymentForm === 'credito') {
       const baseValid =
         !!this.cartState()?.customer && this.creditRemainingBalance() > 0;
-      if (this.creditType.set(== 'installments') {
-        return baseValid && this.creditNumInstallments() > 0);
+      if (this.creditType() === 'installments') {
+        return baseValid && this.creditNumInstallments() > 0;
       }
       return baseValid;
     }
 
     // Modo contado: lógica actual
-    if (!this.paymentState().selectedMethod) return false;
+    const selectedMethod = this.paymentState().selectedMethod;
+    if (!selectedMethod) return false;
 
     // Wallet validation
-    if (this.paymentState().selectedMethod.type === 'wallet') {
+    if (selectedMethod.type === 'wallet') {
       if (!this.cartState()?.customer) return false;
       if (!this.walletInfo()) return false;
       const total = this.cartState()?.summary?.total || 0;
-      return this.walletInfo.available >= total;
+      return (this.walletInfo()?.available ?? 0) >= total;
     }
 
     if (!this.paymentState().isAnonymousSale && !this.cartState()?.customer) {
       return false;
     }
 
-    if (this.paymentState().selectedMethod.type === 'cash') {
+    if (selectedMethod.type === 'cash') {
       const total = this.cartState()?.summary?.total || 0;
       return this.paymentState().cashReceived >= total;
     }
@@ -1893,7 +1894,7 @@ export class PosPaymentInterfaceComponent {
       return this.isWompiFormValid();
     }
 
-    if (this.paymentState().selectedMethod.requiresReference) {
+    if (selectedMethod.requiresReference) {
       const reference = this.referenceControl.value;
       return reference && reference.trim().length >= 4;
     }
@@ -1969,7 +1970,7 @@ export class PosPaymentInterfaceComponent {
       this.paymentState().selectedMethod?.type === 'wallet' &&
       this.walletInfo()
     ) {
-      payment_request.metadata = { walletId: this.walletInfo.wallet_id };
+      payment_request.metadata = { walletId: this.walletInfo()?.wallet_id };
     }
 
     // Pass Wompi payment method data
@@ -2034,7 +2035,7 @@ export class PosPaymentInterfaceComponent {
   }
 
   private processCreditSaleWithTerms(): void {
-    if (!this.cartState || !this.cartState()!.customer) {
+    if (!this.cartState() || !this.cartState()!.customer) {
       this.toastService.info('Seleccione un cliente para continuar');
       return;
     }
@@ -2081,7 +2082,7 @@ export class PosPaymentInterfaceComponent {
       interest_type: this.creditInterestType(),
       initial_payment: this.creditInitialPayment(),
       initial_payment_method_id: this.creditInitialPaymentMethod()
-        ? parseInt(this.creditInitialPaymentMethod().id)
+        ? parseInt(this.creditInitialPaymentMethod()?.id ?? '')
         : undefined,
     };
 
@@ -2350,8 +2351,8 @@ export class PosPaymentInterfaceComponent {
   }
 
   getTotalInstallments(): number {
-    return this.creditInstallmentsPreview.reduce(
-      (sum, inst) => sum + inst.amount,
+    return this.creditInstallmentsPreview().reduce(
+      (sum: number, inst: { amount: number; due_date: string }) => sum + inst.amount,
       0,
     );
   }
@@ -2383,7 +2384,7 @@ export class PosPaymentInterfaceComponent {
   }
 
   getInterestAmount(): number {
-    if (this.creditInstallmentsPreview.length === 0) return 0;
+    if (this.creditInstallmentsPreview().length === 0) return 0;
     return (
       Math.round(
         (this.getTotalInstallments() - this.creditRemainingBalance()) * 100,
@@ -2437,7 +2438,7 @@ export class PosPaymentInterfaceComponent {
       // No interest: simple division
       const baseAmount = Math.round((amountToFinance / n) * 100) / 100;
       this.creditInstallmentsPreview.set(Array.from({ length: n }, (_, i) => {
-        const due = new Date(startDate));
+        const due = new Date(startDate);
         due.setDate(due.getDate() + freqDays[this.creditFrequency()] * i);
         return {
           amount:
@@ -2446,7 +2447,7 @@ export class PosPaymentInterfaceComponent {
               : baseAmount,
           due_date: toLocalDateString(due),
         };
-      });
+      }));
     } else if (interestType === 'compound') {
       // Compound interest (capitalization): FV = P × (1+r)^n
       // Interest capitalizes each period, then total divided into equal installments
@@ -2455,7 +2456,7 @@ export class PosPaymentInterfaceComponent {
         Math.round(amountToFinance * Math.pow(1 + r, n) * 100) / 100;
       const baseAmount = Math.round((totalWithInterest / n) * 100) / 100;
       this.creditInstallmentsPreview.set(Array.from({ length: n }, (_, i) => {
-        const due = new Date(startDate));
+        const due = new Date(startDate);
         due.setDate(due.getDate() + freqDays[this.creditFrequency()] * i);
         return {
           amount:
@@ -2465,7 +2466,7 @@ export class PosPaymentInterfaceComponent {
               : baseAmount,
           due_date: toLocalDateString(due),
         };
-      });
+      }));
     } else {
       // Simple interest: I = P × r × n, distributed equally
       const r = annualRate / (periodsPerYear[this.creditFrequency()] || 12);
@@ -2473,7 +2474,7 @@ export class PosPaymentInterfaceComponent {
       const totalWithInterest = amountToFinance + totalInterest;
       const baseAmount = Math.round((totalWithInterest / n) * 100) / 100;
       this.creditInstallmentsPreview.set(Array.from({ length: n }, (_, i) => {
-        const due = new Date(startDate));
+        const due = new Date(startDate);
         due.setDate(due.getDate() + freqDays[this.creditFrequency()] * i);
         return {
           amount:
@@ -2483,7 +2484,7 @@ export class PosPaymentInterfaceComponent {
               : baseAmount,
           due_date: toLocalDateString(due),
         };
-      });
+      }));
     }
   }
 
@@ -2616,7 +2617,7 @@ export class PosPaymentInterfaceComponent {
   // ─── Wompi Methods ───────────────────────────────────────────────────
 
   isWompiSelected(): boolean {
-    return this.wompiService.isWompiMethod(this.paymentState?.selectedMethod);
+    return this.wompiService.isWompiMethod(this.paymentState()?.selectedMethod);
   }
 
   selectWompiSubMethod(sub: WompiSubMethod): void {
@@ -2719,7 +2720,7 @@ export class PosPaymentInterfaceComponent {
         this.wompiAwaitingPayment.set(true);
         this.wompiAwaitingMessage.set(this.selectedWompiSubMethod() === WompiSubMethod.NEQUI
             ? 'Esperando confirmación en la app de Nequi...'
-            : 'Esperando confirmación del pago...'));
+            : 'Esperando confirmación del pago...');
         this.startWompiPolling();
         break;
       case '3ds':

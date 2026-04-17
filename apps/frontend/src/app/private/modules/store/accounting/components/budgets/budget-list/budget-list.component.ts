@@ -47,7 +47,7 @@ interface BudgetStats {
 ],
   templateUrl: './budget-list.component.html',
   styleUrls: ['./budget-list.component.scss']})
-export class BudgetListComponent implements {
+export class BudgetListComponent {
   private destroyRef = inject(DestroyRef);
 private accounting_service = inject(AccountingService);
   private router = inject(Router);

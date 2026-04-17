@@ -53,8 +53,8 @@
       <app-button
         variant="primary"
         (clicked)="onSubmit()"
-        [disabled]="form.invalid || is_submitting"
-        [loading]="is_submitting">
+        [disabled]="form.invalid || is_submitting()"
+        [loading]="is_submitting()">
         Crear y Editar
       </app-button>
     </div>

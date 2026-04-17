@@ -81,7 +81,7 @@ import {
                 [disabled]="!hasCustomerEmail()"
               />
               Enviar por email
-              @if (ticketData()?.customer?.email) {
+              @if (ticketData().customer?.email) {
                 <span class="customer-info">
                   ({{ ticketData()!.customer!.email }})
                 </span>
@@ -98,7 +98,7 @@ import {
                 [disabled]="!hasCustomerPhone()"
               />
               Enviar por SMS
-              @if (ticketData()?.customer?.phone) {
+              @if (ticketData().customer?.phone) {
                 <span class="customer-info">
                   ({{ ticketData()!.customer!.phone }})
                 </span>

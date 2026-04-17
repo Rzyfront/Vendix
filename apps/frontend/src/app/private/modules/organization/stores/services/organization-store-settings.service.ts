@@ -1,7 +1,8 @@
-import { Injectable, inject } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { Observable, BehaviorSubject, throwError } from 'rxjs';
+import { Observable, throwError } from 'rxjs';
 import { catchError, map, tap } from 'rxjs/operators';
+import { toObservable } from '@angular/core/rxjs-interop';
 import { environment } from '../../../../../../environments/environment';
 import {
   ApiResponse,
@@ -19,10 +20,8 @@ export class OrganizationStoreSettingsService {
   private http = inject(HttpClient);
   private readonly api_base_url = `${environment.apiUrl}/organization/stores`;
 
-  private settings$$ = new BehaviorSubject<Map<number, StoreSettings>>(
-    new Map(),
-  );
-  settings$ = this.settings$$.asObservable();
+  readonly settings = signal<Map<number, StoreSettings>>(new Map());
+  readonly settings$ = toObservable(this.settings);
 
   getStoreSettings(storeId: number): Observable<ApiResponse<StoreSettings>> {
     return this.http
@@ -32,9 +31,9 @@ export class OrganizationStoreSettingsService {
       .pipe(
         tap((response: ApiResponse<StoreSettings>) => {
           // Cache the settings
-          const currentSettings = this.settings$$.value;
+          const currentSettings = this.settings();
           currentSettings.set(storeId, response.data);
-          this.settings$$.next(new Map(currentSettings));
+          this.settings.set(new Map(currentSettings));
         }),
         map((response) => response || { success: true, data: null }),
         catchError(this.handleError),
@@ -55,9 +54,9 @@ export class OrganizationStoreSettingsService {
       .pipe(
         tap((response: ApiResponse<StoreSettings>) => {
           // Update cache
-          const currentSettings = this.settings$$.value;
+          const currentSettings = this.settings();
           currentSettings.set(storeId, response.data);
-          this.settings$$.next(new Map(currentSettings));
+          this.settings.set(new Map(currentSettings));
         }),
         catchError(this.handleError),
       );
@@ -74,9 +73,9 @@ export class OrganizationStoreSettingsService {
       .pipe(
         tap((response: ApiResponse<StoreSettings>) => {
           // Update cache
-          const currentSettings = this.settings$$.value;
+          const currentSettings = this.settings();
           currentSettings.set(storeId, response.data);
-          this.settings$$.next(new Map(currentSettings));
+          this.settings.set(new Map(currentSettings));
         }),
         catchError(this.handleError),
       );

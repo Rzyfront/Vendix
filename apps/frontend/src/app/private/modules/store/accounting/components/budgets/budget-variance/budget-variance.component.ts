@@ -30,7 +30,7 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
 ],
   templateUrl: './budget-variance.component.html',
   styleUrls: ['./budget-variance.component.scss']})
-export class BudgetVarianceComponent implements {
+export class BudgetVarianceComponent {
   private destroyRef = inject(DestroyRef);
 private route = inject(ActivatedRoute);
   private router = inject(Router);

@@ -2,7 +2,7 @@ import { Component, input, output, inject, DestroyRef } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Observable } from 'rxjs';
 import { map, distinctUntilChanged, skip } from 'rxjs/operators';
-import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
+import { toSignal, toObservable, takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import {
   PosCartService,
   CartState,
@@ -36,7 +36,7 @@ import { PosApiService } from '../services/pos-api.service';
               [size]="18"
               class="text-primary"
             ></app-icon>
-            Carrito ({{ cartState()?.items?.length || 0 }})
+            Carrito ({{ cartState().items.length }})
           </h2>
         </div>
 
@@ -176,7 +176,7 @@ import { PosApiService } from '../services/pos-api.service';
                 type="button"
                 class="cart-btn checkout-btn"
                 (click)="quote.emit()"
-                [disabled]="isEmpty() ?? false"
+                [disabled]="isEmpty()"
               >
                 <app-icon name="file-text" [size]="18"></app-icon>
                 <span>Crear Cotización</span>
@@ -187,7 +187,7 @@ import { PosApiService } from '../services/pos-api.service';
                 type="button"
                 class="cart-btn checkout-btn"
                 (click)="layaway.emit()"
-                [disabled]="isEmpty() ?? false"
+                [disabled]="isEmpty()"
               >
                 <app-icon name="calendar" [size]="18"></app-icon>
                 <span>Crear Plan Separé</span>
@@ -199,7 +199,7 @@ import { PosApiService } from '../services/pos-api.service';
                   type="button"
                   class="cart-btn save-btn"
                   (click)="saveCart()"
-                  [disabled]="isEmpty() ?? false"
+                  [disabled]="isEmpty()"
                 >
                   <app-icon name="save" [size]="16"></app-icon>
                   <span>Guardar</span>
@@ -208,7 +208,7 @@ import { PosApiService } from '../services/pos-api.service';
                   type="button"
                   class="cart-btn shipping-btn"
                   (click)="shipping.emit()"
-                  [disabled]="isEmpty() ?? false"
+                  [disabled]="isEmpty()"
                 >
                   <app-icon name="truck" [size]="16"></app-icon>
                   <span>Envío</span>
@@ -218,7 +218,7 @@ import { PosApiService } from '../services/pos-api.service';
                 type="button"
                 class="cart-btn checkout-btn"
                 (click)="proceedToPayment()"
-                [disabled]="isEmpty() ?? false"
+                [disabled]="isEmpty()"
               >
                 <app-icon
                   [name]="isEditMode() ? 'check' : 'credit-card'"
@@ -231,7 +231,7 @@ import { PosApiService } from '../services/pos-api.service';
         </div>
 
         <!-- Customer Information (Compact) -->
-        @if (cartState()?.customer) {
+        @if (cartState().customer) {
           <div
             class="px-5 py-2.5 bg-primary/5 border-t border-primary/10 flex items-center gap-3"
           >
@@ -247,7 +247,7 @@ import { PosApiService } from '../services/pos-api.service';
                 Cliente
               </p>
               <p class="text-xs font-bold text-text-primary truncate">
-                {{ cartState()?.customer?.name }}
+                {{ cartState().customer?.name }}
               </p>
             </div>
           </div>
@@ -283,7 +283,7 @@ import { PosApiService } from '../services/pos-api.service';
         @if (!isEmpty()) {
           <div class="space-y-2">
             @for (
-              item of cartState()?.items;
+              item of cartState().items;
               track trackByItemId($index, item)
             ) {
               <div
@@ -495,9 +495,8 @@ private cartService = inject(PosCartService);
   private scaleService = inject(PosScaleService);
   private posApiService = inject(PosApiService);
 
-  readonly cartState = toSignal(this.cartService.cartState);
-  readonly isEmpty = toSignal(this.cartService.isEmpty, {
-    initialValue: false });
+  readonly cartState = this.cartService.cartState;
+  readonly isEmpty = toSignal(this.cartService.isEmpty, { initialValue: false });
   readonly summary = toSignal(this.cartService.summary);
 
   activePromotions: any[] = [];
@@ -528,7 +527,7 @@ private cartService = inject(PosCartService);
         } });
 
     // Re-apply promotions when cart items change (use item count to avoid infinite loops)
-    this.cartService.cartState
+    toObservable(this.cartService.cartState)
       .pipe(
         map((state) =>
           JSON.stringify(

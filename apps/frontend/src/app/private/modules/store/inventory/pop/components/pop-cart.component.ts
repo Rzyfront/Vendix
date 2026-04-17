@@ -56,7 +56,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                 variant="outline"
                 size="sm"
                 (clicked)="clearCart()"
-                [loading]="loading() ?? false"
+                [loading]="loading()"
                 class="text-destructive hover:text-destructive hover:bg-destructive/10 !px-2 !h-8"
               >
                 <app-icon name="trash-2" [size]="14" slot="icon"></app-icon>
@@ -96,8 +96,8 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
           <!-- Checkout Actions -->
           @if (
             {
-              loading: loading() ?? false,
-              isEmpty: isEmpty() ?? false,
+              loading: loading(),
+              isEmpty: isEmpty(),
             };
             as actionState
           ) {
@@ -360,7 +360,7 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                       [value]="item.quantity"
                       [min]="1"
                       [editable]="true"
-                      [disabled]="loading() ?? false"
+                      [disabled]="loading()"
                       [size]="'sm'"
                       (valueChange)="updateQuantity(item.id, $event)"
                     ></app-quantity-control>

@@ -421,13 +421,14 @@ export class PosCartService {
    * Get the applied coupon data (for sending to backend)
    */
   getAppliedCoupon(): { coupon_id: number; coupon_code: string } | null {
-    return this.cartState$.value.appliedCoupon
-      ? { coupon_id: this.cartState$.value.appliedCoupon.id, coupon_code: this.cartState$.value.appliedCoupon.code }
+    const state = this.cartState();
+    return state.appliedCoupon
+      ? { coupon_id: state.appliedCoupon.id, coupon_code: state.appliedCoupon.code }
       : null;
   }
 
   addPendingBooking(booking: PendingBooking): Observable<CartState> {
-    const current = this.cartState$.getValue();
+    const current = this.cartState();
     const exists = current.pendingBookings.some(b => b.id === booking.id);
     if (exists) return of(current);
 
@@ -436,30 +437,30 @@ export class PosCartService {
       pendingBookings: [...current.pendingBookings, booking],
       updatedAt: new Date(),
     };
-    this.cartState$.next(newState);
+    this.cartState.set(newState);
     return of(newState);
   }
 
   removePendingBooking(bookingId: number): Observable<CartState> {
-    const current = this.cartState$.getValue();
+    const current = this.cartState();
     const newState: CartState = {
       ...current,
       pendingBookings: current.pendingBookings.filter(b => b.id !== bookingId),
       updatedAt: new Date(),
     };
-    this.cartState$.next(newState);
+    this.cartState.set(newState);
     return of(newState);
   }
 
   getPendingBookingIds(): number[] {
-    return this.cartState$.getValue().pendingBookings.map(b => b.id);
+    return this.cartState().pendingBookings.map(b => b.id);
   }
 
   /**
    * Get current cart state value
    */
   getCurrentState(): CartState {
-    return this.cartState$.value;
+    return this.cartState();
   }
 
   /**
@@ -467,7 +468,7 @@ export class PosCartService {
    */
   getItemById(itemId: string): CartItem | null {
     return (
-      this.cartState$.value.items.find((item) => item.id === itemId) || null
+      this.cartState().items.find((item) => item.id === itemId) || null
     );
   }
 
@@ -475,7 +476,7 @@ export class PosCartService {
    * Check if product is in cart
    */
   isProductInCart(productId: string): boolean {
-    return this.cartState$.value.items.some(
+    return this.cartState().items.some(
       (item) => item.product.id === productId,
     );
   }
@@ -484,7 +485,7 @@ export class PosCartService {
    * Get item quantity for product
    */
   getProductQuantity(productId: string): number {
-    const item = this.cartState$.value.items.find(
+    const item = this.cartState().items.find(
       (item) => item.product.id === productId,
     );
     return item ? item.quantity : 0;
@@ -494,7 +495,7 @@ export class PosCartService {
    * Process add to cart
    */
   private processAddToCart(request: AddToCartRequest): CartState {
-    const currentState = this.cartState$.value;
+    const currentState = this.cartState();
 
     // Check if this is a weight product
     const isWeightProduct = !!request.weight && request.weight > 0;
@@ -584,7 +585,7 @@ export class PosCartService {
    * Process update cart item
    */
   private processUpdateCartItem(request: UpdateCartItemRequest): CartState {
-    const currentState = this.cartState$.value;
+    const currentState = this.cartState();
     const itemIndex = currentState.items.findIndex(
       (item) => item.id === request.itemId,
     );
@@ -633,7 +634,7 @@ export class PosCartService {
    * Process remove from cart
    */
   private processRemoveFromCart(itemId: string): CartState {
-    const currentState = this.cartState$.value;
+    const currentState = this.cartState();
     const updatedItems = currentState.items.filter(
       (item) => item.id !== itemId,
     );
@@ -653,7 +654,7 @@ export class PosCartService {
    * Process apply discount
    */
   private processApplyDiscount(request: ApplyDiscountRequest): CartState {
-    const currentState = this.cartState$.value;
+    const currentState = this.cartState();
     // Para descuentos, usamos el subtotal BRUTO (con IVA) tal como está en el carrito
     const subtotal = this.calculateSubtotal(currentState.items);
 
@@ -687,7 +688,7 @@ export class PosCartService {
    * Process remove discount
    */
   private processRemoveDiscount(discountId: string): CartState {
-    const currentState = this.cartState$.value;
+    const currentState = this.cartState();
     const updatedDiscounts = currentState.appliedDiscounts.filter(
       (discount) => discount.id !== discountId,
     );
@@ -820,7 +821,7 @@ export class PosCartService {
       const availableStock = request.variant ? request.variant.stock : request.product.stock;
 
       // Check current cart quantity for this product+variant combo
-      const currentState = this.cartState$.value;
+      const currentState = this.cartState();
       const existingItem = currentState.items.find(
         (item) =>
           item.product.id === request.product.id &&
@@ -849,7 +850,7 @@ export class PosCartService {
     request: ApplyDiscountRequest,
   ): CartValidationError[] {
     const errors: CartValidationError[] = [];
-    const currentState = this.cartState$.value;
+    const currentState = this.cartState();
     const subtotal = this.calculateSubtotal(currentState.items);
 
     if (subtotal <= 0) {

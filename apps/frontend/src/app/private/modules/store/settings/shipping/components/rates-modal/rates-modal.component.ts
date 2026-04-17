@@ -6,6 +6,7 @@ import {
   OnChanges,
   SimpleChanges,
   inject,
+  signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import {
@@ -100,7 +101,7 @@ import {
 
           <div class="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
             <!-- Loading -->
-            @if (is_loading_rates) {
+            @if (is_loading_rates()) {
               <div
                 class="flex flex-col items-center justify-center py-20 text-gray-400 gap-3"
               >
@@ -112,7 +113,7 @@ import {
             }
 
             <!-- Empty -->
-            @if (!is_loading_rates && rates.length === 0) {
+            @if (!is_loading_rates() && rates().length === 0) {
               <div
                 class="py-20 text-center px-8 border-2 border-dashed border-gray-100 rounded-2xl mx-2"
               >
@@ -143,21 +144,21 @@ import {
             }
 
             <!-- Rich Rate Cards -->
-            @for (rate of rates; track rate) {
+            @for (rate of rates(); track rate) {
               <div
                 (click)="selectRate(rate)"
                 [class.border-[var(--color-primary)]]="
-                  selectedRate?.id === rate.id
+                  selectedRate()?.id === rate.id
                 "
                 [class.bg-[var(--color-primary)]/5]="
-                  selectedRate?.id === rate.id
+                  selectedRate()?.id === rate.id
                 "
-                [class.shadow-md]="selectedRate?.id === rate.id"
-                [class.translate-x-1]="selectedRate?.id === rate.id"
+                [class.shadow-md]="selectedRate()?.id === rate.id"
+                [class.translate-x-1]="selectedRate()?.id === rate.id"
                 class="p-4 rounded-2xl border border-[var(--color-border)] hover:bg-gray-50 transition-all duration-300 cursor-pointer group relative overflow-hidden"
               >
                 <!-- Left accent bar -->
-                @if (selectedRate?.id === rate.id) {
+                @if (selectedRate()?.id === rate.id) {
                   <div
                     class="absolute left-0 top-0 bottom-0 w-1 bg-[var(--color-primary)]"
                   ></div>
@@ -231,7 +232,7 @@ import {
         >
           <!-- Read-only view -->
           @if (is_read_only()) {
-            @if (selectedRate) {
+            @if (selectedRate()) {
               <div class="p-6 overflow-y-auto">
                 <h4
                   class="text-lg font-black text-gray-900 mb-6 flex items-center"
@@ -240,7 +241,7 @@ import {
                   <span
                     class="ml-3 text-[10px] font-bold bg-purple-50 px-2 py-1 rounded-lg border border-purple-200 text-purple-600 tracking-widest"
                   >
-                    REF: {{ selectedRate.id }}
+                    REF: {{ selectedRate()?.id }}
                   </span>
                 </h4>
                 <div
@@ -253,7 +254,7 @@ import {
                         >Método</label
                       >
                       <p class="font-bold text-[var(--color-text-primary)]">
-                        {{ selectedRate.shipping_method?.name || '-' }}
+                        {{ selectedRate()?.shipping_method?.name || '-' }}
                       </p>
                     </div>
                     <div>
@@ -262,7 +263,7 @@ import {
                         >Estrategia</label
                       >
                       <p class="font-bold text-[var(--color-text-primary)]">
-                        {{ getRateTypeLabel(selectedRate.type || '') }}
+                        {{ getRateTypeLabel(selectedRate()?.type || '') }}
                       </p>
                     </div>
                     <div>
@@ -271,23 +272,23 @@ import {
                         >Costo Base</label
                       >
                       <p class="font-black text-emerald-600 text-lg">
-                        \${{ selectedRate.base_cost | number }}
+                        \${{ selectedRate()?.base_cost | number }}
                       </p>
                     </div>
-                    @if (selectedRate.per_unit_cost) {
+                    @if (selectedRate()?.per_unit_cost) {
                       <div>
                         <label
                           class="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1"
                           >Costo Variable</label
                         >
                         <p class="font-bold text-[var(--color-text-primary)]">
-                          \${{ selectedRate.per_unit_cost | number }}
+                          \${{ selectedRate()?.per_unit_cost | number }}
                         </p>
                       </div>
                     }
                     @if (
-                      selectedRate.min_val !== null &&
-                      selectedRate.min_val !== undefined
+                      selectedRate()?.min_val !== null &&
+                      selectedRate()?.min_val !== undefined
                     ) {
                       <div>
                         <label
@@ -295,13 +296,13 @@ import {
                           >Mínimo</label
                         >
                         <p class="font-bold text-[var(--color-text-primary)]">
-                          {{ selectedRate.min_val }}
+                          {{ selectedRate()?.min_val }}
                         </p>
                       </div>
                     }
                     @if (
-                      selectedRate.max_val !== null &&
-                      selectedRate.max_val !== undefined
+                      selectedRate()?.max_val !== null &&
+                      selectedRate()?.max_val !== undefined
                     ) {
                       <div>
                         <label
@@ -309,18 +310,18 @@ import {
                           >Máximo</label
                         >
                         <p class="font-bold text-[var(--color-text-primary)]">
-                          {{ selectedRate.max_val }}
+                          {{ selectedRate()?.max_val }}
                         </p>
                       </div>
                     }
-                    @if (selectedRate.free_shipping_threshold) {
+                    @if (selectedRate()?.free_shipping_threshold) {
                       <div>
                         <label
                           class="text-[10px] font-bold text-gray-400 uppercase tracking-widest block mb-1"
                           >Envío Gratis Desde</label
                         >
                         <p class="font-bold text-emerald-600">
-                          \${{ selectedRate.free_shipping_threshold | number }}
+                          \${{ selectedRate()?.free_shipping_threshold | number }}
                         </p>
                       </div>
                     }
@@ -328,7 +329,7 @@ import {
                 </div>
               </div>
             }
-            @if (!selectedRate) {
+            @if (!selectedRate()) {
               <div
                 class="flex flex-col items-center justify-center h-full text-center p-6"
               >
@@ -354,20 +355,20 @@ import {
             <div class="p-6 overflow-y-auto flex-1">
               <div class="flex items-center justify-between mb-8">
                 <h4 class="text-lg font-black text-gray-900 flex items-center">
-                  {{ selectedRate ? 'Editar Tarifa' : 'Nueva Tarifa' }}
-                  @if (selectedRate) {
+                  {{ selectedRate() ? 'Editar Tarifa' : 'Nueva Tarifa' }}
+                  @if (selectedRate()) {
                     <span
                       class="ml-3 text-[10px] font-bold bg-purple-50 px-2 py-1 rounded-lg border border-purple-200 text-purple-600 tracking-widest"
-                      >REF: {{ selectedRate.id }}</span
+                      >REF: {{ selectedRate()?.id }}</span
                     >
                   }
                 </h4>
-                @if (selectedRate) {
+                @if (selectedRate()) {
                   <div class="animate-in fade-in duration-300">
                     <app-button
                       variant="ghost"
                       size="sm"
-                      (clicked)="onDeleteRate(selectedRate)"
+                      (clicked)="onDeleteRate(selectedRate()!)"
                       customClasses="!text-red-500 hover:!bg-red-50 !h-8 !px-3 !text-xs"
                     >
                       <app-icon
@@ -515,7 +516,7 @@ import {
               <app-button
                 variant="primary"
                 [fullWidth]="true"
-                [loading]="is_saving"
+                [loading]="is_saving()"
                 [disabled]="form.invalid"
                 (clicked)="onSubmitRate()"
               >
@@ -525,7 +526,7 @@ import {
                   slot="icon"
                   class="mr-2"
                 ></app-icon>
-                {{ selectedRate ? 'Actualizar Tarifa' : 'Crear Tarifa' }}
+                {{ selectedRate() ? 'Actualizar Tarifa' : 'Crear Tarifa' }}
               </app-button>
             </div>
           }
@@ -618,11 +619,11 @@ export class RatesModalComponent implements OnInit, OnChanges {
   private toast = inject(ToastService);
   private dialogService = inject(DialogService);
 
-  rates: ShippingRate[] = [];
-  selectedRate?: ShippingRate;
-  is_loading_rates = false;
-  is_saving = false;
-  shipping_methods: ShippingRateMethod[] = [];
+  rates = signal<ShippingRate[]>([]);
+  selectedRate = signal<ShippingRate | undefined>(undefined);
+  is_loading_rates = signal(false);
+  is_saving = signal(false);
+  shipping_methods = signal<ShippingRateMethod[]>([]);
 
   form: FormGroup;
 
@@ -643,7 +644,7 @@ export class RatesModalComponent implements OnInit, OnChanges {
   }
 
   get shipping_method_options(): { value: any; label: string }[] {
-    return this.shipping_methods.map((m) => ({
+    return this.shipping_methods().map((m) => ({
       value: m.id,
       label: m.name,
     }));
@@ -827,9 +828,9 @@ export class RatesModalComponent implements OnInit, OnChanges {
   private loadShippingMethods(): void {
     this.shippingService.getAvailableMethodsForRates().subscribe({
       next: (methods) => {
-        this.shipping_methods = methods;
+        this.shipping_methods.set(methods);
         // Auto-prepare create form after methods load (only for editable mode)
-        if (!this.is_read_only() && !this.selectedRate) {
+        if (!this.is_read_only() && !this.selectedRate()) {
           this.prepareCreate();
         }
       },
@@ -841,8 +842,8 @@ export class RatesModalComponent implements OnInit, OnChanges {
     const currentZone = this.zone();
     if (!currentZone) return;
 
-    this.is_loading_rates = true;
-    this.selectedRate = undefined;
+    this.is_loading_rates.set(true);
+    this.selectedRate.set(undefined);
 
     const fetch$ = this.is_read_only()
       ? this.shippingService.getSystemZoneRates(currentZone.id)
@@ -850,12 +851,12 @@ export class RatesModalComponent implements OnInit, OnChanges {
 
     fetch$.subscribe({
       next: (rates) => {
-        this.rates = rates;
-        this.is_loading_rates = false;
+        this.rates.set(rates);
+        this.is_loading_rates.set(false);
       },
       error: () => {
         this.toast.error('Error al cargar tarifas');
-        this.is_loading_rates = false;
+        this.is_loading_rates.set(false);
       },
     });
   }
@@ -863,7 +864,7 @@ export class RatesModalComponent implements OnInit, OnChanges {
   // ─── Rate selection & form ───
 
   selectRate(rate: ShippingRate): void {
-    this.selectedRate = rate;
+    this.selectedRate.set(rate);
     if (!this.is_read_only()) {
       this.populateForm(rate);
     }
@@ -884,10 +885,10 @@ export class RatesModalComponent implements OnInit, OnChanges {
   }
 
   prepareCreate(): void {
-    this.selectedRate = undefined;
+    this.selectedRate.set(undefined);
     this.form.reset({
       shipping_method_id:
-        this.shipping_methods.length > 0 ? this.shipping_methods[0].id : null,
+        this.shipping_methods().length > 0 ? this.shipping_methods()[0].id : null,
       name: '',
       type: 'flat',
       base_cost: 0,
@@ -922,11 +923,11 @@ export class RatesModalComponent implements OnInit, OnChanges {
 
     if (!this.zone) return;
 
-    this.is_saving = true;
+    this.is_saving.set(true);
     const values = this.form.value;
     const currentZone = this.zone();
 
-    if (!this.selectedRate) {
+    if (!this.selectedRate()) {
       // Create
       const dto: CreateRateDto = {
         shipping_zone_id: currentZone.id,
@@ -952,11 +953,11 @@ export class RatesModalComponent implements OnInit, OnChanges {
           // TODO: The 'emit' function requires a mandatory void argument
           // TODO: The 'emit' function requires a mandatory void argument
           this.rates_changed.emit();
-          this.is_saving = false;
+          this.is_saving.set(false);
         },
         error: (err) => {
           this.toast.error('Error al crear tarifa: ' + err.message);
-          this.is_saving = false;
+          this.is_saving.set(false);
         },
       });
     } else {
@@ -973,7 +974,7 @@ export class RatesModalComponent implements OnInit, OnChanges {
         is_active: values.is_active,
       };
 
-      this.shippingService.updateRate(this.selectedRate.id, dto).subscribe({
+      this.shippingService.updateRate(this.selectedRate()!.id, dto).subscribe({
         next: () => {
           this.toast.success('Tarifa actualizada correctamente');
           this.loadRates();
@@ -984,11 +985,11 @@ export class RatesModalComponent implements OnInit, OnChanges {
           // TODO: The 'emit' function requires a mandatory void argument
           // TODO: The 'emit' function requires a mandatory void argument
           this.rates_changed.emit();
-          this.is_saving = false;
+          this.is_saving.set(false);
         },
         error: (err) => {
           this.toast.error('Error al actualizar tarifa: ' + err.message);
-          this.is_saving = false;
+          this.is_saving.set(false);
         },
       });
     }
@@ -1014,7 +1015,7 @@ export class RatesModalComponent implements OnInit, OnChanges {
             next: () => {
               this.toast.success('Tarifa eliminada');
               this.loadRates();
-              if (this.selectedRate?.id === rate.id) {
+              if (this.selectedRate()?.id === rate.id) {
                 this.prepareCreate();
               }
               // TODO: The 'emit' function requires a mandatory void argument

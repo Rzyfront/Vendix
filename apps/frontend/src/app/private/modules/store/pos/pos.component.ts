@@ -6,7 +6,7 @@ import {
   inject,
   DestroyRef,
 } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toObservable } from '@angular/core/rxjs-interop';
 
 import { Router, ActivatedRoute } from '@angular/router';
 import { Store } from '@ngrx/store';
@@ -253,17 +253,6 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
                   ></app-pos-session-status-bar>
                 }
 
-                <!-- Cash Register Session Status Bar -->
-                @if (cashRegisterEnabled) {
-                  <app-pos-session-status-bar
-                    [session]="activeSession"
-                    [showOpenButton]="true"
-                    (openClicked)="showSessionOpenModal = true"
-                    (closeClicked)="showSessionCloseModal = true"
-                    (movementClicked)="showCashMovementModal = true"
-                    (detailClicked)="showSessionDetailModal = true"
-                  ></app-pos-session-status-bar>
-                }
               </div>
             </div>
           </div>
@@ -409,6 +398,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
           (quote)="onQuote()"
           (layaway)="onLayaway()"
         ></app-pos-mobile-footer>
+      }
 
       <!-- Mobile Cart Modal -->
       <app-pos-cart-modal
@@ -551,7 +541,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
           [isSaving]="loading()"
           (save)="onLayawayConfigSave($event)"
           (close)="showLayawayConfigModal.set(false)"
-        />
+        ></app-layaway-config-modal>
       }
     </div>
   `,
@@ -887,7 +877,7 @@ export class PosComponent {
   }
 
   private setupSubscriptions(): void {
-    this.cartService.cartState
+    toObservable(this.cartService.cartState)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((cartState: CartState) => {
         this.cartState.set(cartState);
@@ -899,7 +889,7 @@ export class PosComponent {
         this.selectedCustomer.set(customer);
       });
 
-    this.cartService.loading
+    toObservable(this.cartService.loading)
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((loading: boolean) => {
         this.loading.set(Boolean(loading));

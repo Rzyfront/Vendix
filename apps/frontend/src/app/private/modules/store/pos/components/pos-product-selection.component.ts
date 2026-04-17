@@ -80,7 +80,8 @@ import {
             size="sm"
             placeholder="Buscar productos..."
             [debounceTime]="300"
-            [(ngModel)]="searchQuery()"
+            [ngModel]="searchQuery()"
+            (ngModelChange)="searchQuery.set($event)"
             (searchChange)="onSearch($event)"
           />
 

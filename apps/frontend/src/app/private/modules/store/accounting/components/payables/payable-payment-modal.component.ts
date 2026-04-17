@@ -3,6 +3,7 @@ import {
   input,
   output,
   model,
+  signal,
   OnChanges,
   SimpleChanges,
   inject,
@@ -120,8 +121,8 @@ import {
             <app-button
               variant="primary"
               (clicked)="onSubmit()"
-              [loading]="is_submitting"
-              [disabled]="form.invalid || is_submitting"
+              [loading]="is_submitting()"
+              [disabled]="form.invalid || is_submitting()"
             >
               Registrar Pago
             </app-button>
@@ -142,7 +143,7 @@ export class PayablePaymentModalComponent implements OnChanges {
   private currencyService = inject(CurrencyFormatService);
   private toastService = inject(ToastService);
 
-  is_submitting = false;
+  is_submitting = signal(false);
 
   payment_method_options = [
     { value: 'cash', label: 'Efectivo' },
@@ -176,7 +177,7 @@ export class PayablePaymentModalComponent implements OnChanges {
     if (this.form.invalid || !currentPayable) return;
 
     const val = this.form.value;
-    this.is_submitting = true;
+    this.is_submitting.set(true);
 
     this.carteraService
       .registerApPayment(currentPayable.id, {
@@ -188,7 +189,7 @@ export class PayablePaymentModalComponent implements OnChanges {
       })
       .subscribe({
         next: () => {
-          this.is_submitting = false;
+          this.is_submitting.set(false);
           this.toastService.success('Pago registrado exitosamente');
           // TODO: The 'emit' function requires a mandatory void argument
           // TODO: The 'emit' function requires a mandatory void argument
@@ -199,7 +200,7 @@ export class PayablePaymentModalComponent implements OnChanges {
           this.onClose();
         },
         error: () => {
-          this.is_submitting = false;
+          this.is_submitting.set(false);
           this.toastService.error('Error al registrar el pago');
         },
       });

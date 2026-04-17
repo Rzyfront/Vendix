@@ -1,6 +1,6 @@
-import { Component, OnInit, OnDestroy, signal, computed } from '@angular/core';
+import { Component, OnInit, signal, computed, DestroyRef, inject } from '@angular/core';
 
-import { Subscription } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 // Shared Components
 import {
@@ -96,7 +96,7 @@ import { SupplierListComponent } from './components/supplier-list/supplier-list.
     </div>
   `,
 })
-export class SuppliersComponent implements OnInit, OnDestroy {
+export class SuppliersComponent implements OnInit {
   suppliers = signal<Supplier[]>([]);
   selected_supplier = signal<Supplier | null>(null);
 
@@ -111,7 +111,7 @@ export class SuppliersComponent implements OnInit, OnDestroy {
   });
 
   status_filter: 'all' | 'active' | 'inactive' = 'all';
-  search_term = '';
+  search_term = signal('');
 
   is_loading = signal(false);
   is_modal_open = signal(false);
@@ -121,7 +121,7 @@ export class SuppliersComponent implements OnInit, OnDestroy {
     return Math.ceil(this.totalItems() / this.filters().limit) || 1;
   });
 
-  private subscriptions: Subscription[] = [];
+  private destroyRef = inject(DestroyRef);
 
   constructor(
     private suppliersService: SuppliersService,
@@ -133,10 +133,6 @@ export class SuppliersComponent implements OnInit, OnDestroy {
     this.loadSuppliers();
   }
 
-  ngOnDestroy(): void {
-    this.subscriptions.forEach((sub) => sub.unsubscribe());
-  }
-
   loadSuppliers(): void {
     this.is_loading.set(true);
 
@@ -145,8 +141,8 @@ export class SuppliersComponent implements OnInit, OnDestroy {
       limit: this.filters().limit,
     };
 
-    if (this.search_term) {
-      query.search = this.search_term;
+    if (this.search_term()) {
+      query.search = this.search_term();
     }
 
     if (this.status_filter === 'active') {
@@ -155,23 +151,25 @@ export class SuppliersComponent implements OnInit, OnDestroy {
       query.is_active = false;
     }
 
-    const sub = this.suppliersService.getSuppliers(query).subscribe({
-      next: (response: any) => {
-        if (response.data) {
-          this.suppliers.set(response.data);
-          this.totalItems.set(
-            response.meta?.pagination?.total ?? response.data.length,
-          );
-          this.calculateStats();
-        }
-        this.is_loading.set(false);
-      },
-      error: (error) => {
-        this.toastService.error(error || 'Error al cargar proveedores');
-        this.is_loading.set(false);
-      },
-    });
-    this.subscriptions.push(sub);
+    this.suppliersService
+      .getSuppliers(query)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response: any) => {
+          if (response.data) {
+            this.suppliers.set(response.data);
+            this.totalItems.set(
+              response.meta?.pagination?.total ?? response.data.length,
+            );
+            this.calculateStats();
+          }
+          this.is_loading.set(false);
+        },
+        error: (error) => {
+          this.toastService.error(error || 'Error al cargar proveedores');
+          this.is_loading.set(false);
+        },
+      });
   }
 
   calculateStats(): void {
@@ -185,7 +183,7 @@ export class SuppliersComponent implements OnInit, OnDestroy {
   }
 
   onSearch(term: string): void {
-    this.search_term = term;
+    this.search_term.set(term);
     this.filters.update((f) => ({ ...f, page: 1 }));
     this.loadSuppliers();
   }
@@ -245,8 +243,9 @@ export class SuppliersComponent implements OnInit, OnDestroy {
 
     const supplier = this.selected_supplier();
     if (supplier) {
-      const sub = this.suppliersService
+      this.suppliersService
         .updateSupplier(supplier.id, data)
+        .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: () => {
             this.toastService.success('Proveedor actualizado correctamente');
@@ -259,10 +258,10 @@ export class SuppliersComponent implements OnInit, OnDestroy {
             this.is_submitting.set(false);
           },
         });
-      this.subscriptions.push(sub);
     } else {
-      const sub = this.suppliersService
+      this.suppliersService
         .createSupplier(data as CreateSupplierDto)
+        .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: () => {
             this.toastService.success('Proveedor creado correctamente');
@@ -275,7 +274,6 @@ export class SuppliersComponent implements OnInit, OnDestroy {
             this.is_submitting.set(false);
           },
         });
-      this.subscriptions.push(sub);
     }
   }
 
@@ -296,15 +294,17 @@ export class SuppliersComponent implements OnInit, OnDestroy {
   }
 
   deleteSupplier(supplier: Supplier): void {
-    const sub = this.suppliersService.deleteSupplier(supplier.id).subscribe({
-      next: () => {
-        this.toastService.success('Proveedor eliminado correctamente');
-        this.loadSuppliers();
-      },
-      error: (error) => {
-        this.toastService.error(error || 'Error al eliminar proveedor');
-      },
-    });
-    this.subscriptions.push(sub);
+    this.suppliersService
+      .deleteSupplier(supplier.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.success('Proveedor eliminado correctamente');
+          this.loadSuppliers();
+        },
+        error: (error) => {
+          this.toastService.error(error || 'Error al eliminar proveedor');
+        },
+      });
   }
 }

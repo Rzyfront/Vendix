@@ -1,4 +1,5 @@
-import { Component, input, output, inject, effect } from '@angular/core';
+import { Component, input, output, inject, effect, signal } from '@angular/core';
+import { take } from 'rxjs/operators';
 
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 
@@ -139,8 +140,8 @@ import {
           <app-button
             variant="primary"
             (clicked)="onSubmit()"
-            [disabled]="form.invalid || is_submitting"
-            [loading]="is_submitting"
+            [disabled]="form.invalid || is_submitting()"
+            [loading]="is_submitting()"
           >
             {{ editAsset() ? 'Actualizar' : 'Crear' }}
           </app-button>
@@ -160,7 +161,7 @@ export class FixedAssetCreateModalComponent {
   private accounting_service = inject(AccountingService);
   private toast_service = inject(ToastService);
 
-  is_submitting = false;
+  is_submitting = signal(false);
 
   depreciation_method_options = [
     { value: 'straight_line', label: 'Linea Recta' },
@@ -232,7 +233,7 @@ export class FixedAssetCreateModalComponent {
   onSubmit(): void {
     if (this.form.invalid) return;
 
-    this.is_submitting = true;
+    this.is_submitting.set(true);
     const values = this.form.getRawValue();
 
     const dto: any = {
@@ -252,13 +253,13 @@ export class FixedAssetCreateModalComponent {
       ? this.accounting_service.updateFixedAsset(this.editAsset()!.id, dto)
       : this.accounting_service.createFixedAsset(dto);
 
-    request$.subscribe({
+    request$.pipe(take(1)).subscribe({
       next: () => {
         this.toast_service.show({
           variant: 'success',
           description: this.editAsset() ? 'Activo actualizado correctamente' : 'Activo creado correctamente',
         });
-        this.is_submitting = false;
+        this.is_submitting.set(false);
         this.saved.emit();
         this.onClose();
       },
@@ -267,7 +268,7 @@ export class FixedAssetCreateModalComponent {
           variant: 'error',
           description: 'Error al guardar el activo',
         });
-        this.is_submitting = false;
+        this.is_submitting.set(false);
       },
     });
   }

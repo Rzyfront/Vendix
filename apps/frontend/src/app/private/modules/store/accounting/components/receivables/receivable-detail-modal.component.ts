@@ -7,6 +7,7 @@ import {
   signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
+import { take } from 'rxjs/operators';
 
 import { CarteraService } from '../../services/cartera.service';
 import {
@@ -352,7 +353,7 @@ export class ReceivableDetailModalComponent {
     const rec = this.receivable();
     if (!rec) return;
     this.is_loading.set(true);
-    this.carteraService.getReceivable(rec.id).subscribe({
+    this.carteraService.getReceivable(rec.id).pipe(take(1)).subscribe({
       next: (response) => {
         this.detail.set(response.data);
         this.is_loading.set(false);

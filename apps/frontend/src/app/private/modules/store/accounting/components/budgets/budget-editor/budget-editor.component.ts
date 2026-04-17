@@ -50,7 +50,7 @@ interface EditorLine {
 ],
   templateUrl: './budget-editor.component.html',
   styleUrls: ['./budget-editor.component.scss']})
-export class BudgetEditorComponent implements {
+export class BudgetEditorComponent {
   private destroyRef = inject(DestroyRef);
 private route = inject(ActivatedRoute);
   private router = inject(Router);

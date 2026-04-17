@@ -1,6 +1,6 @@
 import { Component, input, output, signal } from '@angular/core';
 
-import { FormsModule } from '@angular/forms';
+import { FormBuilder, FormGroup, ReactiveFormsModule } from '@angular/forms';
 
 import {
   ModalComponent,
@@ -20,7 +20,7 @@ import { LocationType, CreateLocationDto } from '../../interfaces';
   selector: 'app-pop-warehouse-quick-create',
   standalone: true,
   imports: [
-    FormsModule,
+    ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
     InputComponent,
@@ -36,14 +36,13 @@ import { LocationType, CreateLocationDto } from '../../interfaces';
     >
       <form
         (ngSubmit)="onSubmit()"
-        #warehouseForm="ngForm"
         class="h-full flex flex-col"
       >
         <div class="space-y-4 flex-1">
           <!-- Name -->
           <app-input
             label="Nombre *"
-            [(ngModel)]="form.name"
+            [formControl]="$any(form.get('name'))"
             name="name"
             [required]="true"
             placeholder="Ej: Bodega Principal"
@@ -52,7 +51,7 @@ import { LocationType, CreateLocationDto } from '../../interfaces';
           <!-- Code -->
           <app-input
             label="Código *"
-            [(ngModel)]="form.code"
+            [formControl]="$any(form.get('code'))"
             name="code"
             [required]="true"
             placeholder="Ej: BOD-001"
@@ -61,7 +60,7 @@ import { LocationType, CreateLocationDto } from '../../interfaces';
           <!-- Type -->
           <app-selector
             label="Tipo de Ubicación"
-            [(ngModel)]="form.type"
+            [formControl]="$any(form.get('type'))"
             name="type"
             [options]="typeOptions"
             placeholder="Seleccionar tipo"
@@ -76,12 +75,12 @@ import { LocationType, CreateLocationDto } from '../../interfaces';
           <app-button
             variant="primary"
             type="submit"
-            [disabled]="!isFormValid() || isLoading"
+            [disabled]="!isFormValid() || isLoading()"
           >
-            @if (!isLoading) {
+            @if (!isLoading()) {
               <span>Crear Bodega</span>
             }
-            @if (isLoading) {
+            @if (isLoading()) {
               <span>Creando...</span>
             }
           </app-button>
@@ -112,13 +111,18 @@ export class PopWarehouseQuickCreateComponent {
     { value: 'transit', label: 'En Tránsito' },
   ];
 
-  form = signal({
-    name: '',
-    code: '',
-    type: 'warehouse',
-  });
+  form: FormGroup;
 
-  constructor(private inventoryService: InventoryService) {}
+  constructor(
+    private inventoryService: InventoryService,
+    private fb: FormBuilder
+  ) {
+    this.form = this.fb.group({
+      name: ['', []],
+      code: ['', []],
+      type: ['warehouse', []],
+    });
+  }
 
   // ============================================================
   // Form Actions
@@ -131,11 +135,11 @@ export class PopWarehouseQuickCreateComponent {
 
     this.isLoading.set(true);
 
-    const f = this.form();
+    const formValue = this.form.value;
     const createDto: CreateLocationDto = {
-      name: f.name,
-      code: f.code,
-      type: f.type as LocationType,
+      name: formValue.name,
+      code: formValue.code,
+      type: formValue.type as LocationType,
       is_active: true,
     };
 
@@ -163,12 +167,12 @@ export class PopWarehouseQuickCreateComponent {
   }
 
   public isFormValid(): boolean {
-    const f = this.form();
-    return !!(f.name && f.code && f.type);
+    const formValue = this.form.value;
+    return !!(formValue.name && formValue.code && formValue.type);
   }
 
   private resetForm(): void {
-    this.form.set({
+    this.form.reset({
       name: '',
       code: '',
       type: 'warehouse',

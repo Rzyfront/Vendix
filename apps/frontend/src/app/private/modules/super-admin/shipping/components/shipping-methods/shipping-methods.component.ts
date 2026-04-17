@@ -1,4 +1,5 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, inject, signal } from '@angular/core';
+import { take } from 'rxjs/operators';
 
 import { ShippingService } from '../../services/shipping.service';
 import { ShippingMethod } from '../../interfaces/shipping.interface';
@@ -94,7 +95,7 @@ import {
           }
         </div>
 
-        @defer (when showModal) {
+        @defer (when showModal()) {
           <app-superadmin-shipping-method-modal
             [method]="selectedMethod"
             (close)="closeModal()"
@@ -111,7 +112,7 @@ export class ShippingMethodsComponent implements OnInit {
   private dialogService = inject(DialogService);
 
   methods: ShippingMethod[] = [];
-  showModal = false;
+  showModal = signal(false);
   selectedMethod?: ShippingMethod;
 
   columns: TableColumn[] = [
@@ -186,19 +187,19 @@ export class ShippingMethodsComponent implements OnInit {
   }
 
   loadData() {
-    this.shippingService.getMethods().subscribe((data) => {
+    this.shippingService.getMethods().pipe(take(1)).subscribe((data) => {
       this.methods = data;
     });
   }
 
   openCreateModal() {
     this.selectedMethod = undefined;
-    this.showModal = true;
+    this.showModal.set(true);
   }
 
   openEditModal(method: ShippingMethod) {
     this.selectedMethod = method;
-    this.showModal = true;
+    this.showModal.set(true);
   }
 
   deleteMethod(method: ShippingMethod) {
@@ -212,7 +213,7 @@ export class ShippingMethodsComponent implements OnInit {
       })
       .then((confirmed) => {
         if (confirmed) {
-          this.shippingService.deleteMethod(method.id).subscribe(() => {
+          this.shippingService.deleteMethod(method.id).pipe(take(1)).subscribe(() => {
             this.loadData();
           });
         }
@@ -220,7 +221,7 @@ export class ShippingMethodsComponent implements OnInit {
   }
 
   closeModal() {
-    this.showModal = false;
+    this.showModal.set(false);
     this.selectedMethod = undefined;
   }
 }

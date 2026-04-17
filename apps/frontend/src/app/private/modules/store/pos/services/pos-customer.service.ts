@@ -1,7 +1,8 @@
-import { Injectable } from '@angular/core';
-import { BehaviorSubject, Observable, of, throwError } from 'rxjs';
+import { Injectable, signal } from '@angular/core';
+import { Observable, of, throwError } from 'rxjs';
 import { catchError, delay, map, tap } from 'rxjs/operators';
 import { HttpClient, HttpParams } from '@angular/common/http';
+import { toObservable } from '@angular/core/rxjs-interop';
 import { environment } from '../../../../../../environments/environment';
 import {
   PosCustomer,
@@ -24,11 +25,10 @@ export type {
   providedIn: 'root',
 })
 export class PosCustomerService {
-  private readonly customers$ = new BehaviorSubject<PosCustomer[]>([]);
-  private readonly loading$ = new BehaviorSubject<boolean>(false);
-  private readonly selectedCustomer$ = new BehaviorSubject<PosCustomer | null>(
-    null,
-  );
+  readonly customers = signal<PosCustomer[]>([]);
+  readonly loading = signal<boolean>(false);
+  readonly selectedCustomer = signal<PosCustomer | null>(null);
+
   private readonly apiUrl = `${environment.apiUrl}/store/customers`;
   private readonly registerUrl = `${environment.apiUrl}/store/customers`;
 
@@ -38,16 +38,16 @@ export class PosCustomerService {
   }
 
   // Observable getters
-  get customers(): Observable<PosCustomer[]> {
-    return this.customers$.asObservable();
+  get customers$(): Observable<PosCustomer[]> {
+    return toObservable(this.customers);
   }
 
-  get loading(): Observable<boolean> {
-    return this.loading$.asObservable();
+  get loading$(): Observable<boolean> {
+    return toObservable(this.loading);
   }
 
-  get selectedCustomer(): Observable<PosCustomer | null> {
-    return this.selectedCustomer$.asObservable();
+  get selectedCustomer$(): Observable<PosCustomer | null> {
+    return toObservable(this.selectedCustomer);
   }
 
   /**
@@ -56,12 +56,12 @@ export class PosCustomerService {
   createQuickCustomer(
     request: CreatePosCustomerRequest,
   ): Observable<PosCustomer> {
-    this.loading$.next(true);
+    this.loading.set(true);
 
     // Validate required fields
     const validationErrors = this.validateCustomerRequest(request);
     if (validationErrors.length > 0) {
-      this.loading$.next(false);
+      this.loading.set(false);
       return throwError(
         () => new Error(validationErrors.map((e) => e.message).join(', ')),
       );
@@ -71,13 +71,13 @@ export class PosCustomerService {
     return this.http.post<PosCustomer>(this.registerUrl, request).pipe(
       map((response: any) => this.mapApiCustomerToPosCustomer(response)),
       tap((customer) => {
-        const currentCustomers = this.customers$.value;
-        this.customers$.next([customer, ...currentCustomers]);
+        const currentCustomers = this.customers();
+        this.customers.set([customer, ...currentCustomers]);
         this.selectCustomer(customer);
-        this.loading$.next(false);
+        this.loading.set(false);
       }),
       catchError((error) => {
-        this.loading$.next(false);
+        this.loading.set(false);
         return throwError(() => error);
       }),
     );
@@ -89,7 +89,7 @@ export class PosCustomerService {
   searchCustomers(
     request: SearchCustomersRequest = {},
   ): Observable<PaginatedCustomersResponse> {
-    this.loading$.next(true);
+    this.loading.set(true);
 
     const { query = '', limit = 20, page = 1 } = request;
     let params = new HttpParams()
@@ -115,9 +115,9 @@ export class PosCustomerService {
           totalPages: meta.totalPages || response.totalPages || 0,
         };
       }),
-      tap(() => this.loading$.next(false)),
+      tap(() => this.loading.set(false)),
       catchError((error) => {
-        this.loading$.next(false);
+        this.loading.set(false);
         return throwError(() => error);
       }),
     );
@@ -127,25 +127,25 @@ export class PosCustomerService {
    * Select a customer for the current POS transaction
    */
   selectCustomer(customer: PosCustomer | null): void {
-    this.selectedCustomer$.next(customer);
+    this.selectedCustomer.set(customer);
   }
 
   /**
    * Create a new customer
    */
   createCustomer(request: CreatePosCustomerRequest): Observable<PosCustomer> {
-    this.loading$.next(true);
+    this.loading.set(true);
 
     return this.http.post<PosCustomer>(this.registerUrl, request).pipe(
       map((response: any) => this.mapApiCustomerToPosCustomer(response)),
       tap((customer) => {
         // Add to local customers list
-        const currentCustomers = this.customers$.value;
-        this.customers$.next([...currentCustomers, customer]);
-        this.loading$.next(false);
+        const currentCustomers = this.customers();
+        this.customers.set([...currentCustomers, customer]);
+        this.loading.set(false);
       }),
       catchError((error) => {
-        this.loading$.next(false);
+        this.loading.set(false);
         return throwError(() => error);
       }),
     );
@@ -155,7 +155,7 @@ export class PosCustomerService {
    * Get customer by ID
    */
   getCustomerById(id: number): Observable<PosCustomer | null> {
-    const customer = this.customers$.value.find((c) => c.id === id);
+    const customer = this.customers().find((c) => c.id === id);
     return of(customer || null);
   }
 
@@ -166,12 +166,12 @@ export class PosCustomerService {
     id: number,
     updates: Partial<CreatePosCustomerRequest>,
   ): Observable<PosCustomer> {
-    this.loading$.next(true);
+    this.loading.set(true);
 
     return of(updates).pipe(
       delay(250),
       map((updates) => {
-        const currentCustomers = this.customers$.value;
+        const currentCustomers = this.customers();
         const customerIndex = currentCustomers.findIndex((c) => c.id === id);
 
         if (customerIndex === -1) {
@@ -189,19 +189,19 @@ export class PosCustomerService {
         };
 
         currentCustomers[customerIndex] = updatedCustomer;
-        this.customers$.next([...currentCustomers]);
+        this.customers.set([...currentCustomers]);
 
         // Update selected customer if it's the same
-        const selectedCustomer = this.selectedCustomer$.value;
+        const selectedCustomer = this.selectedCustomer();
         if (selectedCustomer?.id === id) {
-          this.selectedCustomer$.next(updatedCustomer);
+          this.selectedCustomer.set(updatedCustomer);
         }
 
         return updatedCustomer;
       }),
-      tap(() => this.loading$.next(false)),
+      tap(() => this.loading.set(false)),
       catchError((error) => {
-        this.loading$.next(false);
+        this.loading.set(false);
         return throwError(() => error);
       }),
     );
@@ -211,14 +211,14 @@ export class PosCustomerService {
    * Clear selected customer
    */
   clearSelectedCustomer(): void {
-    this.selectedCustomer$.next(null);
+    this.selectedCustomer.set(null);
   }
 
   /**
    * Get current selected customer value
    */
   getSelectedCustomerValue(): PosCustomer | null {
-    return this.selectedCustomer$.value;
+    return this.selectedCustomer();
   }
 
   /**
@@ -254,7 +254,7 @@ export class PosCustomerService {
     }
 
     // Check for duplicate email
-    const existingCustomer = this.customers$.value.find(
+    const existingCustomer = this.customers().find(
       (c) => c.email.toLowerCase() === request.email.toLowerCase(),
     );
     if (existingCustomer) {
@@ -366,6 +366,6 @@ export class PosCustomerService {
   //   const mockCustomers: PosCustomer[] = [
   //     // ... mock data
   //   ];
-  //   this.customers$.next(mockCustomers);
+  //   this.customers.set(mockCustomers);
   // }
 }

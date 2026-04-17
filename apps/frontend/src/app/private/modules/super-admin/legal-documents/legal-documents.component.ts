@@ -1,4 +1,6 @@
-import { Component, OnInit, inject, signal, computed } from '@angular/core';
+import { Component, OnInit, DestroyRef, inject, signal, computed } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { take } from 'rxjs/operators';
 
 import { RouterModule } from '@angular/router';
 import { FormControl, ReactiveFormsModule } from '@angular/forms';
@@ -200,6 +202,7 @@ import { formatDateOnlyUTC } from '../../../../shared/utils/date.util';
 export class LegalDocumentsComponent implements OnInit {
   private service = inject(LegalDocumentsService);
   private toast = inject(ToastService);
+  private destroyRef = inject(DestroyRef);
 
   // Signals
   documents = signal<LegalDocument[]>([]);
@@ -350,11 +353,13 @@ export class LegalDocumentsComponent implements OnInit {
     this.loadDocuments();
 
     // Subscribe to filter changes
-    this.typeFilterControl.valueChanges.subscribe(() => {
-      // computed 'filteredDocuments' will update automatically,
-      // but if we were fetching from server with pagination/filter, we would call loadDocuments here.
-      // Since we filter client-side for now (as per original code), no need to re-fetch.
-    });
+    this.typeFilterControl.valueChanges
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(() => {
+        // computed 'filteredDocuments' will update automatically,
+        // but if we were fetching from server with pagination/filter, we would call loadDocuments here.
+        // Since we filter client-side for now (as per original code), no need to re-fetch.
+      });
   }
 
   initFilters() {
@@ -369,7 +374,7 @@ export class LegalDocumentsComponent implements OnInit {
   loadDocuments() {
     this.loading.set(true);
     // Fetch all for client-side filtering as per original pattern
-    this.service.getSystemDocuments({}).subscribe({
+    this.service.getSystemDocuments({}).pipe(take(1)).subscribe({
       next: (docs) => {
         this.documents.set(docs);
         this.loading.set(false);
@@ -393,7 +398,7 @@ export class LegalDocumentsComponent implements OnInit {
 
   openEditModal(doc: LegalDocument) {
     this.loading.set(true);
-    this.service.getSystemDocument(doc.id).subscribe({
+    this.service.getSystemDocument(doc.id).pipe(take(1)).subscribe({
       next: (fullDoc) => {
         this.selectedDocument = fullDoc;
         this.isModalOpen = true;
@@ -423,6 +428,7 @@ export class LegalDocumentsComponent implements OnInit {
           this.selectedDocument.id,
           dto as UpdateSystemDocumentDto,
         )
+        .pipe(take(1))
         .subscribe({
           next: () => {
             this.toast.success('Documento actualizado correctamente');
@@ -441,6 +447,7 @@ export class LegalDocumentsComponent implements OnInit {
       // Create
       this.service
         .createSystemDocument(dto as CreateSystemDocumentDto)
+        .pipe(take(1))
         .subscribe({
           next: () => {
             this.toast.success('Documento creado correctamente');
@@ -468,7 +475,7 @@ export class LegalDocumentsComponent implements OnInit {
     if (!this.confirmDocument || !this.confirmAction) return;
 
     if (this.confirmAction === 'deactivate') {
-      this.service.deactivateDocument(this.confirmDocument.id).subscribe({
+      this.service.deactivateDocument(this.confirmDocument.id).pipe(take(1)).subscribe({
         next: () => {
           this.toast.success('Documento desactivado');
           this.loadDocuments();
@@ -479,7 +486,7 @@ export class LegalDocumentsComponent implements OnInit {
           ),
       });
     } else {
-      this.service.activateDocument(this.confirmDocument.id).subscribe({
+      this.service.activateDocument(this.confirmDocument.id).pipe(take(1)).subscribe({
         next: () => {
           this.toast.success('Documento activado');
           this.loadDocuments();

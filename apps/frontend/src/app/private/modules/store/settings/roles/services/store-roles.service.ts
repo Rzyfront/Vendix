@@ -2,7 +2,6 @@ import { Injectable, inject, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import {
   Observable,
-  BehaviorSubject,
   finalize,
   catchError,
   throwError,

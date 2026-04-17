@@ -50,7 +50,7 @@ import {
       subtitle="Importa múltiples empleados desde un archivo Excel o CSV"
     >
       <!-- INTRO SCREEN -->
-      @if (showingIntro) {
+      @if (showingIntro()) {
         <div class="space-y-3">
           <!-- Header -->
           <div class="text-center">
@@ -192,7 +192,7 @@ import {
             <label class="flex items-center gap-2 cursor-pointer select-none">
               <input
                 type="checkbox"
-                [checked]="dontShowIntroAgain"
+                [checked]="dontShowIntroAgain()"
                 (change)="toggleDontShowAgain()"
                 class="w-3.5 h-3.5 rounded border-gray-300 text-primary focus:ring-primary"
               />
@@ -202,11 +202,11 @@ import {
               <div class="w-16 h-1 bg-gray-200 rounded-full overflow-hidden">
                 <div
                   class="h-full bg-primary rounded-full transition-all duration-100"
-                  [style.width.%]="introProgress"
+                  [style.width.%]="introProgress()"
                 ></div>
               </div>
               <span class="text-[10px] text-gray-400"
-                >{{ introCountdown }}s</span
+                >{{ introCountdown() }}s</span
               >
             </div>
           </div>
@@ -214,18 +214,18 @@ import {
       }
 
       <!-- WIZARD -->
-      @if (!showingIntro) {
+      @if (!showingIntro()) {
         <!-- Steps Line -->
         <div class="mb-4">
           <app-steps-line
             [steps]="steps"
-            [currentStep]="currentStep"
+            [currentStep]="currentStep()"
             size="sm"
           ></app-steps-line>
         </div>
 
         <!-- STEP 0: Preparar -->
-        @if (currentStep === 0) {
+        @if (currentStep() === 0) {
           <div class="space-y-3">
             <!-- Compact hint -->
             <div
@@ -290,8 +290,8 @@ import {
                 (dragleave)="onDragLeave($event)"
                 (drop)="onDrop($event)"
                 (click)="fileInput.click()"
-                [class.border-blue-500]="isDragging"
-                [class.bg-blue-50]="isDragging"
+                [class.border-blue-500]="isDragging()"
+                [class.bg-blue-50]="isDragging()"
               >
                 <input
                   #fileInput
@@ -301,12 +301,12 @@ import {
                   (change)="onFileSelected($event)"
                 />
 
-                @if (!selectedFile) {
+                @if (!selectedFile()) {
                   <app-icon
                     name="upload-cloud"
                     [size]="36"
                     class="mx-auto text-gray-400 mb-2"
-                    [class.text-blue-500]="isDragging"
+                    [class.text-blue-500]="isDragging()"
                   ></app-icon>
                   <p class="text-sm text-gray-900 font-medium">
                     Arrastra tu archivo Excel aquí
@@ -317,22 +317,22 @@ import {
                   </p>
                 }
 
-                @if (selectedFile) {
+                @if (selectedFile()) {
                   <app-icon
                     name="file-spreadsheet"
                     [size]="36"
                     class="mx-auto text-green-500 mb-2"
                   ></app-icon>
                   <p class="text-sm text-gray-900 font-medium">
-                    {{ selectedFile.name }}
+                    {{ selectedFile()!.name }}
                   </p>
                   <p class="text-xs text-gray-500 mt-0.5">
-                    {{ formatFileSize(selectedFile.size) }}
+                    {{ formatFileSize(selectedFile()!.size) }}
                   </p>
                 }
               </div>
 
-              @if (selectedFile) {
+              @if (selectedFile()) {
                 <div class="flex justify-end mt-2">
                   <button
                     class="text-xs text-red-500 hover:text-red-700 font-medium flex items-center gap-1"
@@ -346,7 +346,7 @@ import {
             </div>
 
             <!-- Upload Error -->
-            @if (uploadError) {
+            @if (uploadError()) {
               <div
                 class="bg-red-50 px-3 py-2 rounded-lg border border-red-100 text-red-700 text-xs flex items-start gap-2"
               >
@@ -355,17 +355,17 @@ import {
                   [size]="14"
                   class="shrink-0 mt-0.5"
                 ></app-icon>
-                <p>{{ uploadError }}</p>
+                <p>{{ uploadError() }}</p>
               </div>
             }
           </div>
         }
 
         <!-- STEP 1: Revisar -->
-        @if (currentStep === 1) {
+        @if (currentStep() === 1) {
           <div class="space-y-3">
             <!-- Loading state -->
-            @if (isAnalyzing) {
+            @if (isAnalyzing()) {
               <div class="py-8 flex flex-col items-center justify-center">
                 <app-spinner
                   size="lg"
@@ -382,7 +382,7 @@ import {
             }
 
             <!-- Analysis results -->
-            @if (analysisResult && !isAnalyzing) {
+            @if (analysisResult()  && !isAnalyzing()) {
               <!-- Summary stats cards -->
               <div
                 class="flex overflow-x-auto gap-2 pb-1 md:grid md:grid-cols-4 md:gap-3 md:overflow-visible"
@@ -394,7 +394,7 @@ import {
                     Total Empleados
                   </div>
                   <div class="text-xl font-bold text-blue-700">
-                    {{ analysisResult!.total_employees }}
+                    {{ analysisResult()!.total_employees }}
                   </div>
                 </div>
                 <div
@@ -404,7 +404,7 @@ import {
                     Listos
                   </div>
                   <div class="text-xl font-bold text-green-700">
-                    {{ analysisResult!.ready }}
+                    {{ analysisResult()!.ready }}
                   </div>
                 </div>
                 <div
@@ -414,7 +414,7 @@ import {
                     Advertencias
                   </div>
                   <div class="text-xl font-bold text-amber-700">
-                    {{ analysisResult!.with_warnings }}
+                    {{ analysisResult()!.with_warnings }}
                   </div>
                 </div>
                 <div
@@ -424,7 +424,7 @@ import {
                     Errores
                   </div>
                   <div class="text-xl font-bold text-red-700">
-                    {{ analysisResult!.with_errors }}
+                    {{ analysisResult()!.with_errors }}
                   </div>
                 </div>
               </div>
@@ -471,7 +471,7 @@ import {
                     </thead>
                     <tbody class="bg-white divide-y divide-gray-200">
                       @for (
-                        item of analysisResult!.employees;
+                        item of analysisResult()!.employees;
                         track item.row_number
                       ) {
                         <tr>
@@ -583,7 +583,7 @@ import {
                 class="block md:hidden space-y-2 mt-3 max-h-52 overflow-y-auto"
               >
                 @for (
-                  item of analysisResult!.employees;
+                  item of analysisResult()!.employees;
                   track item.row_number
                 ) {
                   <div class="border rounded-lg p-3 bg-white">
@@ -664,10 +664,10 @@ import {
         }
 
         <!-- STEP 2: Resultados -->
-        @if (currentStep === 2) {
+        @if (currentStep() === 2) {
           <div class="space-y-3">
             <!-- Loading state -->
-            @if (isUploading) {
+            @if (isUploading()) {
               <div class="py-8 flex flex-col items-center justify-center">
                 <app-spinner
                   size="lg"
@@ -684,7 +684,7 @@ import {
             }
 
             <!-- Upload Error -->
-            @if (uploadError && !isUploading) {
+            @if (uploadError() && !isUploading()) {
               <div
                 class="bg-red-50 px-3 py-2 rounded-lg border border-red-100 text-red-700 text-xs flex items-start gap-2"
               >
@@ -693,12 +693,12 @@ import {
                   [size]="14"
                   class="shrink-0 mt-0.5"
                 ></app-icon>
-                <p>{{ uploadError }}</p>
+                <p>{{ uploadError() }}</p>
               </div>
             }
 
             <!-- Results -->
-            @if (uploadResults && !isUploading) {
+            @if (uploadResults() && !isUploading()) {
               <!-- Summary -->
               <div class="bg-white border rounded-lg overflow-hidden">
                 <div
@@ -708,7 +708,7 @@ import {
                     Resumen de Carga
                   </h4>
                   <span class="text-xs text-gray-500"
-                    >{{ uploadResults.total_processed || 0 }} empleados</span
+                    >{{ uploadResults()!.total_processed || 0 }} empleados</span
                   >
                 </div>
                 <div class="p-3 grid grid-cols-2 md:grid-cols-4 gap-2">
@@ -719,7 +719,7 @@ import {
                       Exitosos
                     </div>
                     <div class="text-xl font-bold text-green-700">
-                      {{ uploadResults.successful || 0 }}
+                      {{ uploadResults()!.successful || 0 }}
                     </div>
                   </div>
                   <div
@@ -729,7 +729,7 @@ import {
                       Fallidos
                     </div>
                     <div class="text-xl font-bold text-red-700">
-                      {{ uploadResults.failed || 0 }}
+                      {{ uploadResults()!.failed || 0 }}
                     </div>
                   </div>
                   <div
@@ -739,7 +739,7 @@ import {
                       Usuarios Creados
                     </div>
                     <div class="text-xl font-bold text-blue-700">
-                      {{ uploadResults.users_created || 0 }}
+                      {{ uploadResults()!.users_created || 0 }}
                     </div>
                   </div>
                   <div
@@ -749,10 +749,10 @@ import {
                       Usuarios Vinculados
                     </div>
                     <div class="text-xl font-bold text-purple-700">
-                      {{ uploadResults.users_linked || 0 }}
+                      {{ uploadResults()!.users_linked || 0 }}
                     </div>
                   </div>
-                  @if (uploadResults.updated) {
+                  @if (uploadResults()!.updated) {
                     <div
                       class="bg-sky-50 px-3 py-2 rounded border border-sky-100"
                     >
@@ -760,11 +760,11 @@ import {
                         Actualizados
                       </div>
                       <div class="text-xl font-bold text-sky-700">
-                        {{ uploadResults.updated }}
+                        {{ uploadResults()!.updated }}
                       </div>
                     </div>
                   }
-                  @if (uploadResults.associated) {
+                  @if (uploadResults()!.associated) {
                     <div
                       class="bg-indigo-50 px-3 py-2 rounded border border-indigo-100"
                     >
@@ -772,7 +772,7 @@ import {
                         Vinculados
                       </div>
                       <div class="text-xl font-bold text-indigo-700">
-                        {{ uploadResults.associated }}
+                        {{ uploadResults()!.associated }}
                       </div>
                     </div>
                   }
@@ -814,7 +814,7 @@ import {
                       </tr>
                     </thead>
                     <tbody class="bg-white divide-y divide-gray-200">
-                      @for (result of uploadResults.results; track $index) {
+                      @for (result of uploadResults()!.results; track $index) {
                         <tr>
                           <td
                             class="px-3 py-2 text-sm text-gray-900 max-w-[150px] truncate"
@@ -867,7 +867,7 @@ import {
         slot="footer"
         class="flex justify-end gap-2 pt-4 border-t border-gray-200 mt-4"
       >
-        @if (showingIntro) {
+        @if (showingIntro()) {
           <app-button variant="outline" (clicked)="onCancel()"
             >Cancelar</app-button
           >
@@ -877,15 +877,15 @@ import {
           </app-button>
         }
         <!-- Step 0 -->
-        @if (!showingIntro && currentStep === 0) {
+        @if (!showingIntro() && currentStep() === 0) {
           <app-button variant="outline" (clicked)="onCancel()"
             >Cancelar</app-button
           >
-          @if (selectedFile) {
+          @if (selectedFile()) {
             <app-button
               variant="primary"
               (clicked)="analyzeFile()"
-              [disabled]="isAnalyzing"
+              [disabled]="isAnalyzing()"
             >
               <app-icon name="search" [size]="16" slot="icon"></app-icon>
               Analizar Archivo
@@ -893,22 +893,22 @@ import {
           }
         }
         <!-- Step 1 -->
-        @if (!showingIntro && currentStep === 1 && !isAnalyzing) {
+        @if (!showingIntro() && currentStep() === 1  && !isAnalyzing()) {
           <app-button variant="outline" (clicked)="prevStep()"
             >Atrás</app-button
           >
           <app-button variant="outline" (clicked)="onCancel()"
             >Cancelar</app-button
           >
-          @if (analysisResult && canProceed) {
+          @if (analysisResult()  && canProceed()) {
             <app-button variant="primary" (clicked)="proceedWithUpload()">
               <app-icon name="upload" [size]="16" slot="icon"></app-icon>
-              Cargar {{ loadableCount }} Empleados
+              Cargar {{ loadableCount() }} Empleados
             </app-button>
           }
         }
         <!-- Step 2 -->
-        @if (!showingIntro && currentStep === 2 && !isUploading) {
+        @if (!showingIntro() && currentStep() === 2 && !isUploading()) {
           <app-button variant="outline" (clicked)="onCancel()"
             >Cerrar</app-button
           >
@@ -1011,8 +1011,8 @@ export class EmployeeBulkUploadModalComponent {
     this.introElapsed = 0;
     this.introProgress.set(0);
     this.introCountdown.set(Math.ceil(
-      EmployeeBulkUploadModalComponent.INTRO_DURATION / 1000,
-    );
+      EmployeeBulkUploadModalComponent.INTRO_DURATION / 1000
+    ));
     this.startIntroTimer();
   }
 
@@ -1020,19 +1020,19 @@ export class EmployeeBulkUploadModalComponent {
     this.clearIntroTimer();
     this.introTimerId = setInterval(() => {
       this.introElapsed += EmployeeBulkUploadModalComponent.INTRO_TICK;
-      this.introProgress = Math.min(
+      this.introProgress.set(Math.min(
         100,
         (this.introElapsed / EmployeeBulkUploadModalComponent.INTRO_DURATION) *
           100,
-      );
-      this.introCountdown = Math.max(
+      ));
+      this.introCountdown.set(Math.max(
         0,
         Math.ceil(
           (EmployeeBulkUploadModalComponent.INTRO_DURATION -
             this.introElapsed) /
             1000,
         ),
-      );
+      ));
 
       if (
         this.introElapsed >= EmployeeBulkUploadModalComponent.INTRO_DURATION
@@ -1051,7 +1051,7 @@ export class EmployeeBulkUploadModalComponent {
 
   skipIntro() {
     this.clearIntroTimer();
-    if (this.dontShowIntroAgain) {
+    if (this.dontShowIntroAgain()) {
       localStorage.setItem(
         EmployeeBulkUploadModalComponent.INTRO_CACHE_KEY,
         'true',
@@ -1066,7 +1066,7 @@ export class EmployeeBulkUploadModalComponent {
 
   // Navigation
   prevStep() {
-    if (this.currentStep > 0) {
+    if (this.currentStep() > 0) {
       this.currentStep.update(v => v - 1);
     }
   }
@@ -1086,14 +1086,14 @@ export class EmployeeBulkUploadModalComponent {
   resetState() {
     this.clearIntroTimer();
     this.showingIntro.set(false);
-    this.introProgress = 0;
+    this.introProgress.set(0);
     this.introElapsed = 0;
     this.currentStep.set(0);
     this.selectedFile.set(null);
     this.isDragging.set(false);
     this.isAnalyzing.set(false);
-    this.analysisResult = null;
-    this.sessionId = null;
+    this.analysisResult.set(null);
+    this.sessionId.set(null);
     this.isUploading.set(false);
     this.uploadResults.set(null);
     this.uploadError.set(null);
@@ -1166,19 +1166,19 @@ export class EmployeeBulkUploadModalComponent {
       return;
     }
 
-    this.selectedFile = file;
+    this.selectedFile.set(file);
     this.uploadError.set(null);
   }
 
   // Step 0 -> 1: Analyze
   analyzeFile() {
-    if (!this.selectedFile) return;
+    if (!this.selectedFile()) return;
 
     this.isAnalyzing.set(true);
     this.uploadError.set(null);
     this.currentStep.set(1);
 
-    this.payrollService.analyzeBulkEmployees(this.selectedFile).subscribe({
+    this.payrollService.analyzeBulkEmployees(this.selectedFile()!).subscribe({
       next: (result) => {
         this.isAnalyzing.set(false);
         this.analysisResult.set(result);
@@ -1193,8 +1193,9 @@ export class EmployeeBulkUploadModalComponent {
       error: (error) => {
         this.isAnalyzing.set(false);
         this.currentStep.set(0);
-        this.uploadError =
-          typeof error === 'string' ? error : parseApiError(error).userMessage;
+        this.uploadError.set(
+          typeof error === 'string' ? error : parseApiError(error).userMessage,
+        );
         this.toastService.error('Error al analizar el archivo');
       },
     });
@@ -1202,13 +1203,13 @@ export class EmployeeBulkUploadModalComponent {
 
   // Step 1 -> 2: Upload
   proceedWithUpload() {
-    if (!this.sessionId) return;
+    if (!this.sessionId()) return;
 
     this.isUploading.set(true);
     this.currentStep.set(2);
 
     this.payrollService
-      .uploadBulkEmployeesFromSession(this.sessionId)
+      .uploadBulkEmployeesFromSession(this.sessionId()!)
       .subscribe({
         next: (result) => {
           this.isUploading.set(false);
@@ -1226,10 +1227,11 @@ export class EmployeeBulkUploadModalComponent {
         },
         error: (error) => {
           this.isUploading.set(false);
-          this.uploadError =
+          this.uploadError.set(
             typeof error === 'string'
               ? error
-              : parseApiError(error).userMessage;
+              : parseApiError(error).userMessage,
+          );
           this.toastService.error('Error en la carga masiva de empleados');
         },
       });

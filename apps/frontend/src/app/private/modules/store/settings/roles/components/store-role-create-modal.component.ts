@@ -85,7 +85,7 @@ import { CreateStoreRoleDto } from '../interfaces/store-role.interface';
       }
     `,
   ]})
-export class StoreRoleCreateModalComponent implements {
+export class StoreRoleCreateModalComponent {
   private destroyRef = inject(DestroyRef);
   readonly isOpen = model<boolean>(false);
   readonly isOpenChange = output<boolean>();

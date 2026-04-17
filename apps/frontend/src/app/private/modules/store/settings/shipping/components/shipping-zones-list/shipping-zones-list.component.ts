@@ -1,4 +1,4 @@
-import { Component, input, output, computed } from '@angular/core';
+import { Component, input, output, computed, signal } from '@angular/core';
 
 import { FormsModule } from '@angular/forms';
 import { ShippingZone } from '../../interfaces/shipping-zones.interface';
@@ -44,7 +44,7 @@ import {
                 size="sm"
                 placeholder="Buscar zona..."
                 [debounceTime]="300"
-                [ngModel]="search_term"
+                [ngModel]="search_term()"
                 (ngModelChange)="onSearchChange($event)"
               ></app-inputsearch>
 
@@ -127,13 +127,13 @@ export class ShippingZonesListComponent {
   readonly sync = output<ShippingZone>();
 
   // State
-  search_term = '';
+  search_term = signal('');
 
   // Computed
   readonly filtered_zones = computed(() => {
     const zones = this.zones();
-    if (!this.search_term) return zones;
-    const term = this.search_term.toLowerCase();
+    if (!this.search_term()) return zones;
+    const term = this.search_term().toLowerCase();
     return zones.filter(
       (z) =>
         z.name.toLowerCase().includes(term) ||
@@ -264,7 +264,7 @@ export class ShippingZonesListComponent {
 
   // Event handlers
   onSearchChange(term: string): void {
-    this.search_term = term;
+    this.search_term.set(term);
   }
 
   // Helpers

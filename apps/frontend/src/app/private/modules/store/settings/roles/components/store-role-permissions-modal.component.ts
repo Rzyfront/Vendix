@@ -288,7 +288,7 @@ const ACTION_LABELS: Record<string, string> = {
     `,
   ]})
 export class StoreRolePermissionsModalComponent
-  implements, OnChanges
+  implements OnChanges
 {
   private destroyRef = inject(DestroyRef);
   readonly isOpen = model<boolean>(false);

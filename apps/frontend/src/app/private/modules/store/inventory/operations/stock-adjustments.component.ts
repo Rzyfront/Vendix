@@ -144,7 +144,7 @@ export class StockAdjustmentsComponent implements OnInit {
 
   // Filters
   current_type: AdjustmentType | 'all' = 'all';
-  search_term = '';
+  search_term = signal('');
 
   // UI State
   readonly is_loading = signal(false);
@@ -225,8 +225,8 @@ ngOnInit(): void {
       );
     }
 
-    if (this.search_term) {
-      const term = this.search_term.toLowerCase();
+    if (this.search_term()) {
+      const term = this.search_term().toLowerCase();
       filtered = filtered.filter(
         (a) =>
           a.products?.name?.toLowerCase().includes(term) ||
@@ -252,7 +252,7 @@ ngOnInit(): void {
   // ============================================================
 
   onSearch(term: string): void {
-    this.search_term = term;
+    this.search_term.set(term);
     this.applyFilters();
   }
 
@@ -265,7 +265,7 @@ ngOnInit(): void {
 
   onClearFilters(): void {
     this.current_type = 'all';
-    this.search_term = '';
+    this.search_term.set('');
     this.pagination.update(p => ({ ...p, page: 1 }));
     this.loadAdjustments();
   }

@@ -78,7 +78,7 @@ export class DispatchNoteListComponent {
   filters = { page: 1, limit: 10 };
 
   // Filter state
-  search_term = '';
+  search_term = signal('');
   selected_status = '';
 
   // Filter configuration
@@ -252,8 +252,8 @@ export class DispatchNoteListComponent {
     if (this.selected_status) {
       query.status = this.selected_status;
     }
-    if (this.search_term) {
-      query.search = this.search_term;
+    if (this.search_term()) {
+      query.search = this.search_term();
     }
 
     this.dispatchNotesService
@@ -293,7 +293,7 @@ export class DispatchNoteListComponent {
   }
 
   onSearchChange(term: string): void {
-    this.search_term = term;
+    this.search_term.set(term);
     this.filters.page = 1;
     this.loadDispatchNotes();
   }
@@ -306,7 +306,7 @@ export class DispatchNoteListComponent {
   }
 
   clearFilters(): void {
-    this.search_term = '';
+    this.search_term.set('');
     this.selected_status = '';
     this.filter_values = {};
     this.filters.page = 1;
@@ -322,7 +322,7 @@ export class DispatchNoteListComponent {
   }
 
   get hasFilters(): boolean {
-    return !!(this.search_term || this.selected_status);
+    return !!(this.search_term() || this.selected_status);
   }
 
   getEmptyStateTitle(): string {

@@ -187,7 +187,7 @@ interface AssetStats {
               <p class="mt-4 text-base">No se encontraron activos fijos</p>
               <p class="text-sm">
                 {{
-                  search_term
+                  search_term()
                     ? 'Intenta con otro termino de busqueda.'
                     : 'Crea tu primer activo fijo para comenzar.'
                 }}
@@ -402,7 +402,7 @@ interface AssetStats {
       ></vendix-fixed-asset-categories-modal>
     </div>
   `})
-export class FixedAssetsComponent implements {
+export class FixedAssetsComponent {
   private destroyRef = inject(DestroyRef);
 private accounting_service = inject(AccountingService);
   private currencyService = inject(CurrencyFormatService);
@@ -425,7 +425,7 @@ private accounting_service = inject(AccountingService);
   );
 
   // Filters
-  search_term = '';
+  search_term = signal('');
   filter_status = '';
   filter_category = '';
 
@@ -514,8 +514,8 @@ loadAssets(): void {
   private applyFilters(): void {
     let result = [...this.assets()];
 
-    if (this.search_term) {
-      const term = this.search_term.toLowerCase();
+    if (this.search_term()) {
+      const term = this.search_term().toLowerCase();
       result = result.filter(
         (a) =>
           a.name.toLowerCase().includes(term) ||
@@ -532,7 +532,7 @@ loadAssets(): void {
   }
 
   onSearch(term: string): void {
-    this.search_term = term;
+    this.search_term.set(term);
     this.applyFilters();
   }
 

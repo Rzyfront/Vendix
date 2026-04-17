@@ -1,6 +1,10 @@
-import {Component, input, output,
+import {
+  Component,
+  input,
+  output,
   DestroyRef,
-  inject} from '@angular/core';
+  inject
+} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
@@ -127,7 +131,7 @@ import { Domain } from '../../interfaces/domain.interface';
       }
     `,
   ]})
-export class DomainDeleteConfirmationComponent implements {
+export class DomainDeleteConfirmationComponent {
   private destroyRef = inject(DestroyRef);
   readonly isOpen = input(false);
   readonly domain = input<Domain | null>(null);
@@ -138,17 +142,20 @@ export class DomainDeleteConfirmationComponent implements {
 
   hostnameInput = new FormControl('', {
     validators: [Validators.required],
-    nonNullable: true});
+    nonNullable: true
+  });
 
   showError = false;
-constructor() {
+
+  constructor() {
     this.hostnameInput.valueChanges.subscribe(() => {
       if (this.showError && this.isHostnameValid) {
         this.showError = false;
       }
     });
   }
-get placeholderText(): string {
+
+  get placeholderText(): string {
     const domain = this.domain();
     return domain ? `Escribe '${domain.hostname}' para confirmar` : '';
   }

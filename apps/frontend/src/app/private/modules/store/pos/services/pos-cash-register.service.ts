@@ -2,7 +2,8 @@ import { Injectable } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, of } from 'rxjs';
 import { map, tap, catchError } from 'rxjs/operators';
-import { signal, toObservable } from '@angular/core';
+import { signal } from '@angular/core';
+import { toObservable } from '@angular/core/rxjs-interop';
 import { environment } from '../../../../../../environments/environment';
 
 export interface AIStreamEvent {

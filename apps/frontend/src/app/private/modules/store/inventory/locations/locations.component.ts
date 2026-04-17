@@ -1,7 +1,7 @@
-import { Component, OnInit, OnDestroy, signal, computed } from '@angular/core';
+import { Component, OnInit, signal, computed, DestroyRef, inject } from '@angular/core';
 
 import { FormsModule } from '@angular/forms';
-import { Subscription } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 // Shared Components
 import {
@@ -216,7 +216,7 @@ import { LocationFormModalComponent } from './components/location-form-modal.com
     </div>
   `,
 })
-export class LocationsComponent implements OnInit, OnDestroy {
+export class LocationsComponent implements OnInit {
   locations = signal<InventoryLocation[]>([]);
   filtered_locations = computed(() => this.locations());
   selected_location = signal<InventoryLocation | null>(null);
@@ -232,7 +232,7 @@ export class LocationsComponent implements OnInit, OnDestroy {
 
   status_filter: 'all' | 'active' | 'inactive' = 'all';
   type_filter = '';
-  search_term = '';
+  search_term = signal('');
 
   filterConfigs: FilterConfig[] = [
     {
@@ -363,7 +363,7 @@ export class LocationsComponent implements OnInit, OnDestroy {
   is_modal_open = signal(false);
   is_submitting = signal(false);
 
-  private subscriptions: Subscription[] = [];
+  private destroyRef = inject(DestroyRef);
 
   constructor(
     private locationsService: LocationsService,
@@ -375,48 +375,46 @@ export class LocationsComponent implements OnInit, OnDestroy {
     this.loadLocations();
   }
 
-  ngOnDestroy(): void {
-    this.subscriptions.forEach((sub) => sub.unsubscribe());
-  }
-
   loadLocations(): void {
     this.is_loading.set(true);
     const p = this.pagination();
     const query: any = {
       page: p.page,
       limit: p.limit,
-      ...(this.search_term ? { search: this.search_term } : {}),
+      ...(this.search_term() ? { search: this.search_term() } : {}),
       ...(this.status_filter === 'active' ? { is_active: true } : {}),
       ...(this.status_filter === 'inactive' ? { is_active: false } : {}),
       ...(this.type_filter ? { type: this.type_filter } : {}),
     };
 
-    const sub = this.locationsService.getLocations(query).subscribe({
-      next: (response: any) => {
-        if (response.data) {
-          this.locations.set(response.data);
-          if (response.meta) {
-            this.pagination.update((pg) => ({
-              ...pg,
-              total: response.meta.total,
-              totalPages: response.meta.totalPages,
-            }));
+    this.locationsService
+      .getLocations(query)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response: any) => {
+          if (response.data) {
+            this.locations.set(response.data);
+            if (response.meta) {
+              this.pagination.update((pg) => ({
+                ...pg,
+                total: response.meta.total,
+                totalPages: response.meta.totalPages,
+              }));
+            }
+            this.calculateStats();
           }
-          this.calculateStats();
-        }
-        if (this.locations().length === 0 && this.pagination().page > 1) {
-          this.pagination.update((pg) => ({ ...pg, page: pg.page - 1 }));
-          this.loadLocations();
-          return;
-        }
-        this.is_loading.set(false);
-      },
-      error: (error) => {
-        this.toastService.error(error || 'Error al cargar ubicaciones');
-        this.is_loading.set(false);
-      },
-    });
-    this.subscriptions.push(sub);
+          if (this.locations().length === 0 && this.pagination().page > 1) {
+            this.pagination.update((pg) => ({ ...pg, page: pg.page - 1 }));
+            this.loadLocations();
+            return;
+          }
+          this.is_loading.set(false);
+        },
+        error: (error) => {
+          this.toastService.error(error || 'Error al cargar ubicaciones');
+          this.is_loading.set(false);
+        },
+      });
   }
 
   calculateStats(): void {
@@ -431,7 +429,7 @@ export class LocationsComponent implements OnInit, OnDestroy {
   }
 
   onSearch(term: string): void {
-    this.search_term = term;
+    this.search_term.set(term);
     this.pagination.update((p) => ({ ...p, page: 1 }));
     this.loadLocations();
   }
@@ -456,7 +454,7 @@ export class LocationsComponent implements OnInit, OnDestroy {
   clearFilters(): void {
     this.status_filter = 'all';
     this.type_filter = '';
-    this.search_term = '';
+    this.search_term.set('');
     this.filterValues = {};
     this.pagination.update((p) => ({ ...p, page: 1 }));
     this.loadLocations();
@@ -517,22 +515,25 @@ export class LocationsComponent implements OnInit, OnDestroy {
 
     const loc = this.selected_location();
     if (loc) {
-      const sub = this.locationsService.updateLocation(loc.id, data).subscribe({
-        next: () => {
-          this.toastService.success('Ubicación actualizada correctamente');
-          this.is_submitting.set(false);
-          this.closeModal();
-          this.loadLocations();
-        },
-        error: (error) => {
-          this.toastService.error(error || 'Error al actualizar ubicación');
-          this.is_submitting.set(false);
-        },
-      });
-      this.subscriptions.push(sub);
+      this.locationsService
+        .updateLocation(loc.id, data)
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: () => {
+            this.toastService.success('Ubicación actualizada correctamente');
+            this.is_submitting.set(false);
+            this.closeModal();
+            this.loadLocations();
+          },
+          error: (error) => {
+            this.toastService.error(error || 'Error al actualizar ubicación');
+            this.is_submitting.set(false);
+          },
+        });
     } else {
-      const sub = this.locationsService
+      this.locationsService
         .createLocation(data as CreateLocationDto)
+        .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: () => {
             this.toastService.success('Ubicación creada correctamente');
@@ -545,7 +546,6 @@ export class LocationsComponent implements OnInit, OnDestroy {
             this.is_submitting.set(false);
           },
         });
-      this.subscriptions.push(sub);
     }
   }
 
@@ -566,15 +566,17 @@ export class LocationsComponent implements OnInit, OnDestroy {
   }
 
   deleteLocation(location: InventoryLocation): void {
-    const sub = this.locationsService.deleteLocation(location.id).subscribe({
-      next: () => {
-        this.toastService.success('Ubicación eliminada correctamente');
-        this.loadLocations();
-      },
-      error: (error) => {
-        this.toastService.error(error || 'Error al eliminar ubicación');
-      },
-    });
-    this.subscriptions.push(sub);
+    this.locationsService
+      .deleteLocation(location.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.success('Ubicación eliminada correctamente');
+          this.loadLocations();
+        },
+        error: (error) => {
+          this.toastService.error(error || 'Error al eliminar ubicación');
+        },
+      });
   }
 }

@@ -117,8 +117,8 @@ import { SuppliersService } from '../../services/suppliers.service';
           </app-button>
           <app-button
             variant="primary"
-            [disabled]="supplierForm.invalid || isLoading"
-            [loading]="isLoading"
+            [disabled]="supplierForm.invalid || isLoading()"
+            [loading]="isLoading()"
             (clicked)="onSubmit()"
           >
             Crear Proveedor

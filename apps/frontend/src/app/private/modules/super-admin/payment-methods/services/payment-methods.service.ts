@@ -5,7 +5,6 @@ import {
   catchError,
   map,
   throwError,
-  BehaviorSubject,
   finalize,
 } from 'rxjs';
 import { tap, shareReplay } from 'rxjs/operators';

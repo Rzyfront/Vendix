@@ -1,4 +1,4 @@
-import { Component, input, output, inject } from '@angular/core';
+import { Component, input, output, inject, signal } from '@angular/core';
 
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 
@@ -117,8 +117,8 @@ import {
               <div class="flex justify-end gap-2 mt-3">
                 <app-button variant="outline" size="sm" (clicked)="cancelForm()">Cancelar</app-button>
                 <app-button variant="primary" size="sm" (clicked)="saveCategory()"
-                            [disabled]="form.invalid || is_submitting"
-                            [loading]="is_submitting">
+                            [disabled]="form.invalid || is_submitting()"
+                            [loading]="is_submitting()">
                   {{ editing_category ? 'Actualizar' : 'Crear' }}
                 </app-button>
               </div>
@@ -155,7 +155,7 @@ export class FixedAssetCategoriesModalComponent {
 
   show_form = false;
   editing_category: FixedAssetCategory | null = null;
-  is_submitting = false;
+  is_submitting = signal(false);
 
   method_options = [
     { value: 'straight_line', label: 'Linea Recta' },
@@ -198,7 +198,7 @@ export class FixedAssetCategoriesModalComponent {
 
   saveCategory(): void {
     if (this.form.invalid) return;
-    this.is_submitting = true;
+    this.is_submitting.set(true);
 
     const values = this.form.getRawValue();
     const dto: any = {
@@ -218,14 +218,14 @@ export class FixedAssetCategoriesModalComponent {
           variant: 'success',
           description: this.editing_category ? 'Categoria actualizada' : 'Categoria creada',
         });
-        this.is_submitting = false;
+        this.is_submitting.set(false);
         this.show_form = false;
         this.editing_category = null;
         this.categoriesChanged.emit();
       },
       error: () => {
         this.toast_service.show({ variant: 'error', description: 'Error al guardar la categoria' });
-        this.is_submitting = false;
+        this.is_submitting.set(false);
       },
     });
   }

@@ -1,6 +1,7 @@
 import { Component, inject, signal } from '@angular/core';
 import { NgClass } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
+import { take } from 'rxjs/operators';
 import { environment } from '../../../../../../../environments/environment';
 import {
   CardComponent,
@@ -62,7 +63,7 @@ export class AccountingFlowsComponent {
   loadData(): void {
     this.loading.set(true);
 
-    this.http.get<any>(`${environment.apiUrl}/store/settings`).subscribe({
+    this.http.get<any>(`${environment.apiUrl}/store/settings`).pipe(take(1)).subscribe({
       next: (res) => {
         const settings = res?.data?.settings || res?.data || res;
         const flows = settings?.module_flows?.accounting || settings?.accounting_flows || {};
@@ -85,7 +86,7 @@ export class AccountingFlowsComponent {
 
     this.http.get<any>(`${environment.apiUrl}/store/accounting/journal-entries`, {
       params: { limit: '10', page: '1' },
-    }).subscribe({
+    }).pipe(take(1)).subscribe({
       next: (res) => {
         const entries = res?.data || [];
         this.recent_entries.set(entries.filter((e: any) => e.entry_type?.startsWith('auto_')).slice(0, 8));

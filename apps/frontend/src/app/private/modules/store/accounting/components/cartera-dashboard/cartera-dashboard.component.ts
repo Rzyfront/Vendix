@@ -27,7 +27,7 @@ import {
     StatsComponent,
   ],
   templateUrl: './cartera-dashboard.component.html'})
-export class CarteraDashboardComponent implements {
+export class CarteraDashboardComponent {
   private destroyRef = inject(DestroyRef);
 private carteraService = inject(CarteraService);
   private currencyService = inject(CurrencyFormatService);

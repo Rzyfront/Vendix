@@ -1,7 +1,8 @@
-import { Injectable } from '@angular/core';
-import { BehaviorSubject, Observable, of, throwError } from 'rxjs';
+import { Injectable, signal } from '@angular/core';
+import { Observable, of, throwError } from 'rxjs';
 import { catchError, delay, map, tap } from 'rxjs/operators';
 import { HttpClient } from '@angular/common/http';
+import { toObservable } from '@angular/core/rxjs-interop';
 import { environment } from '../../../../../../environments/environment';
 import { StoreContextService } from '../../../../../core/services/store-context.service';
 import {
@@ -28,9 +29,9 @@ import { PosCustomer } from '../models/customer.model';
 })
 export class PosOrderService {
   private readonly apiUrl = environment.apiUrl;
-  private readonly orders$ = new BehaviorSubject<PosOrder[]>([]);
-  private readonly loading$ = new BehaviorSubject<boolean>(false);
-  private readonly currentOrder$ = new BehaviorSubject<PosOrder | null>(null);
+  readonly orders = signal<PosOrder[]>([]);
+  readonly loading = signal<boolean>(false);
+  readonly currentOrder = signal<PosOrder | null>(null);
 
   constructor(
     private http: HttpClient,
@@ -40,16 +41,16 @@ export class PosOrderService {
   }
 
   // Observable getters
-  get orders(): Observable<PosOrder[]> {
-    return this.orders$.asObservable();
+  get orders$(): Observable<PosOrder[]> {
+    return toObservable(this.orders);
   }
 
-  get loading(): Observable<boolean> {
-    return this.loading$.asObservable();
+  get loading$(): Observable<boolean> {
+    return toObservable(this.loading);
   }
 
-  get currentOrder(): Observable<PosOrder | null> {
-    return this.currentOrder$.asObservable();
+  get currentOrder$(): Observable<PosOrder | null> {
+    return toObservable(this.currentOrder);
   }
 
   /**
@@ -59,12 +60,12 @@ export class PosOrderService {
     cartState: CartState,
     createdBy: string,
   ): Observable<PosOrder> {
-    this.loading$.next(true);
+    this.loading.set(true);
 
     // Validate cart state
     const validationErrors = this.validateCartForOrder(cartState);
     if (validationErrors.length > 0) {
-      this.loading$.next(false);
+      this.loading.set(false);
       return throwError(
         () => new Error(validationErrors.map((e) => e.message).join(', ')),
       );
@@ -129,13 +130,13 @@ export class PosOrderService {
           }
         }),
         tap((order) => {
-          const currentOrders = this.orders$.value;
-          this.orders$.next([order, ...currentOrders]);
-          this.currentOrder$.next(order);
-          this.loading$.next(false);
+          const currentOrders = this.orders();
+          this.orders.set([order, ...currentOrders]);
+          this.currentOrder.set(order);
+          this.loading.set(false);
         }),
         catchError((error) => {
-          this.loading$.next(false);
+          this.loading.set(false);
           return throwError(() => error);
         }),
       );
@@ -148,7 +149,7 @@ export class PosOrderService {
     cartState: CartState,
     createdBy: string,
   ): Observable<PosOrder> {
-    this.loading$.next(true);
+    this.loading.set(true);
 
     const request: CreatePosOrderRequest = {
       customer: cartState.customer,
@@ -163,13 +164,13 @@ export class PosOrderService {
       delay(300),
       map((req) => this.createOrderFromRequest(req, 'draft')),
       tap((order) => {
-        const currentOrders = this.orders$.value;
-        this.orders$.next([order, ...currentOrders]);
-        this.currentOrder$.next(order);
-        this.loading$.next(false);
+        const currentOrders = this.orders();
+        this.orders.set([order, ...currentOrders]);
+        this.currentOrder.set(order);
+        this.loading.set(false);
       }),
       catchError((error) => {
-        this.loading$.next(false);
+        this.loading.set(false);
         return throwError(() => error);
       }),
     );
@@ -182,25 +183,25 @@ export class PosOrderService {
     orderId: string,
     request: UpdatePosOrderRequest,
   ): Observable<PosOrder> {
-    this.loading$.next(true);
+    this.loading.set(true);
 
     return of({ orderId, request }).pipe(
       delay(400),
       map(({ orderId, request }) => this.updateOrderInternal(orderId, request)),
       tap((order) => {
-        const currentOrders = this.orders$.value;
+        const currentOrders = this.orders();
         const orderIndex = currentOrders.findIndex((o) => o.id === orderId);
         if (orderIndex >= 0) {
           currentOrders[orderIndex] = order;
-          this.orders$.next([...currentOrders]);
+          this.orders.set([...currentOrders]);
         }
-        if (this.currentOrder$.value?.id === orderId) {
-          this.currentOrder$.next(order);
+        if (this.currentOrder()?.id === orderId) {
+          this.currentOrder.set(order);
         }
-        this.loading$.next(false);
+        this.loading.set(false);
       }),
       catchError((error) => {
-        this.loading$.next(false);
+        this.loading.set(false);
         return throwError(() => error);
       }),
     );
@@ -212,7 +213,7 @@ export class PosOrderService {
   processPayment(
     request: ProcessPaymentRequest,
   ): Observable<ProcessPaymentResponse> {
-    this.loading$.next(true);
+    this.loading.set(true);
 
     // Build POS payment request for cash sale
     const posPaymentRequest = {
@@ -302,14 +303,14 @@ export class PosOrderService {
         }),
         tap((response) => {
           if (response.success && response.order) {
-            const currentOrders = this.orders$.value;
-            this.orders$.next([response.order, ...currentOrders]);
-            this.currentOrder$.next(response.order);
+            const currentOrders = this.orders();
+            this.orders.set([response.order, ...currentOrders]);
+            this.currentOrder.set(response.order);
           }
-          this.loading$.next(false);
+          this.loading.set(false);
         }),
         catchError((error) => {
-          this.loading$.next(false);
+          this.loading.set(false);
           return throwError(() => error);
         }),
       );
@@ -372,7 +373,7 @@ export class PosOrderService {
    * Get order by ID
    */
   getOrderById(orderId: string): Observable<PosOrder | null> {
-    const order = this.orders$.value.find((o) => o.id === orderId);
+    const order = this.orders().find((o) => o.id === orderId);
     return of(order || null).pipe(delay(100));
   }
 
@@ -380,7 +381,7 @@ export class PosOrderService {
    * Get order by order number
    */
   getOrderByOrderNumber(orderNumber: string): Observable<PosOrder | null> {
-    const order = this.orders$.value.find((o) => o.orderNumber === orderNumber);
+    const order = this.orders().find((o) => o.orderNumber === orderNumber);
     return of(order || null).pipe(delay(100));
   }
 
@@ -390,7 +391,7 @@ export class PosOrderService {
   searchOrders(
     request: OrderSearchRequest = {},
   ): Observable<PaginatedOrdersResponse> {
-    this.loading$.next(true);
+    this.loading.set(true);
 
     const {
       query = '',
@@ -403,7 +404,7 @@ export class PosOrderService {
       offset = 0,
     } = request;
 
-    return of(this.orders$.value).pipe(
+    return of(this.orders()).pipe(
       delay(300),
       map((orders) => {
         let filteredOrders = [...orders];
@@ -496,9 +497,9 @@ export class PosOrderService {
           hasMore,
         };
       }),
-      tap(() => this.loading$.next(false)),
+      tap(() => this.loading.set(false)),
       catchError((error) => {
-        this.loading$.next(false);
+        this.loading.set(false);
         return throwError(() => error);
       }),
     );
@@ -508,7 +509,7 @@ export class PosOrderService {
    * Get order statistics
    */
   getOrderStats(dateFrom?: Date, dateTo?: Date): Observable<OrderStats> {
-    return of(this.orders$.value).pipe(
+    return of(this.orders()).pipe(
       delay(200),
       map((orders) => {
         let filteredOrders = [...orders];
@@ -627,21 +628,21 @@ export class PosOrderService {
    * Set current order
    */
   setCurrentOrder(order: PosOrder | null): void {
-    this.currentOrder$.next(order);
+    this.currentOrder.set(order);
   }
 
   /**
    * Clear current order
    */
   clearCurrentOrder(): void {
-    this.currentOrder$.next(null);
+    this.currentOrder.set(null);
   }
 
   /**
    * Get current order value
    */
   getCurrentOrderValue(): PosOrder | null {
-    return this.currentOrder$.value;
+    return this.currentOrder();
   }
 
   /**
@@ -730,7 +731,7 @@ export class PosOrderService {
   private processPaymentRequest(
     request: ProcessPaymentRequest,
   ): ProcessPaymentResponse {
-    const order = this.orders$.value.find((o) => o.id === request.orderId);
+    const order = this.orders().find((o) => o.id === request.orderId);
     if (!order) {
       return {
         success: false,
@@ -771,7 +772,7 @@ export class PosOrderService {
    * Update order payment status
    */
   private updateOrderPaymentStatus(orderId: string, payment: any): void {
-    const currentOrders = this.orders$.value;
+    const currentOrders = this.orders();
     const orderIndex = currentOrders.findIndex((o) => o.id === orderId);
 
     if (orderIndex >= 0) {
@@ -796,10 +797,10 @@ export class PosOrderService {
       };
 
       currentOrders[orderIndex] = updatedOrder;
-      this.orders$.next([...currentOrders]);
+      this.orders.set([...currentOrders]);
 
-      if (this.currentOrder$.value?.id === orderId) {
-        this.currentOrder$.next(updatedOrder);
+      if (this.currentOrder()?.id === orderId) {
+        this.currentOrder.set(updatedOrder);
       }
     }
   }
@@ -874,7 +875,7 @@ export class PosOrderService {
       },
     ];
 
-    this.orders$.next(mockOrders);
+    this.orders.set(mockOrders);
   }
 
   /**
@@ -884,7 +885,7 @@ export class PosOrderService {
     orderId: string,
     request: UpdatePosOrderRequest,
   ): PosOrder {
-    const currentOrders = this.orders$.value;
+    const currentOrders = this.orders();
     const orderIndex = currentOrders.findIndex((o) => o.id === orderId);
 
     if (orderIndex === -1) {

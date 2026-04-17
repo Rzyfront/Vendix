@@ -1,4 +1,5 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
+import { take } from 'rxjs/operators';
 
 import { ShippingMethodsComponent } from './components/shipping-methods/shipping-methods.component';
 import { ShippingZonesComponent } from './components/shipping-zones/shipping-zones.component';
@@ -86,8 +87,8 @@ export class ShippingLayoutComponent implements OnInit {
   }
 
   loadStats(): void {
-    this.shippingService.getMethodStats().subscribe((stats) => this.methodStats.set(stats));
-    this.shippingService.getZoneStats().subscribe((stats) => this.zoneStats.set(stats));
+    this.shippingService.getMethodStats().pipe(take(1)).subscribe((stats) => this.methodStats.set(stats));
+    this.shippingService.getZoneStats().pipe(take(1)).subscribe((stats) => this.zoneStats.set(stats));
   }
 
   setActiveTab(tab: string): void {

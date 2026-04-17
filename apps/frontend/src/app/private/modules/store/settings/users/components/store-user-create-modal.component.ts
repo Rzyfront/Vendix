@@ -2,6 +2,7 @@ import {Component,
   input,
   output,
   model,
+  signal,
   inject,
   DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -46,7 +47,7 @@ import { CreateStoreUserDto } from '../interfaces/store-user.interface';
             placeholder="Juan"
             [required]="true"
             [control]="userForm.get('first_name')"
-            [disabled]="isCreating"
+            [disabled]="isCreating()"
           ></app-input>
 
           <app-input
@@ -55,7 +56,7 @@ import { CreateStoreUserDto } from '../interfaces/store-user.interface';
             placeholder="Perez"
             [required]="true"
             [control]="userForm.get('last_name')"
-            [disabled]="isCreating"
+            [disabled]="isCreating()"
           ></app-input>
 
           <app-input
@@ -63,7 +64,7 @@ import { CreateStoreUserDto } from '../interfaces/store-user.interface';
             label="Nombre de Usuario"
             placeholder="juanperez"
             [control]="userForm.get('username')"
-            [disabled]="isCreating"
+            [disabled]="isCreating()"
             helpText="Opcional. Solo letras, numeros y guiones bajos"
           ></app-input>
 
@@ -74,7 +75,7 @@ import { CreateStoreUserDto } from '../interfaces/store-user.interface';
             placeholder="juan@ejemplo.com"
             [required]="true"
             [control]="userForm.get('email')"
-            [disabled]="isCreating"
+            [disabled]="isCreating()"
           ></app-input>
 
           <app-input
@@ -84,7 +85,7 @@ import { CreateStoreUserDto } from '../interfaces/store-user.interface';
             placeholder="••••••••••"
             [required]="true"
             [control]="userForm.get('password')"
-            [disabled]="isCreating"
+            [disabled]="isCreating()"
             helpText="Minimo 8 caracteres, debe incluir mayuscula, minuscula, numero y caracter especial"
           ></app-input>
         </div>
@@ -94,15 +95,15 @@ import { CreateStoreUserDto } from '../interfaces/store-user.interface';
         <app-button
           variant="outline"
           (clicked)="onCancel()"
-          [disabled]="isCreating"
+          [disabled]="isCreating()"
         >
           Cancelar
         </app-button>
         <app-button
           variant="primary"
           (clicked)="onSubmit()"
-          [disabled]="userForm.invalid || isCreating"
-          [loading]="isCreating"
+          [disabled]="userForm.invalid || isCreating()"
+          [loading]="isCreating()"
         >
           Crear Usuario
         </app-button>
@@ -116,15 +117,15 @@ import { CreateStoreUserDto } from '../interfaces/store-user.interface';
       }
     `,
   ]})
-export class StoreUserCreateModalComponent implements {
+export class StoreUserCreateModalComponent {
   private destroyRef = inject(DestroyRef);
   readonly isOpen = model<boolean>(false);
   readonly isOpenChange = output<boolean>();
   readonly onUserCreated = output<void>();
 
   userForm: FormGroup;
-  isCreating: boolean = false;
-private storeUsersService = inject(StoreUsersManagementService);
+  isCreating = signal(false);
+  private storeUsersService = inject(StoreUsersManagementService);
   private toastService = inject(ToastService);
 
   constructor(private fb: FormBuilder) {
@@ -155,14 +156,14 @@ private storeUsersService = inject(StoreUsersManagementService);
       ]});
   }
 onSubmit(): void {
-    if (this.userForm.invalid || this.isCreating) {
+    if (this.userForm.invalid || this.isCreating()) {
       Object.keys(this.userForm.controls).forEach((key) => {
         this.userForm.get(key)?.markAsTouched();
       });
       return;
     }
 
-    this.isCreating = true;
+    this.isCreating.set(true);
     const userData: CreateStoreUserDto = this.userForm.value;
 
     // Remove username if empty
@@ -175,7 +176,7 @@ onSubmit(): void {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
-          this.isCreating = false;
+          this.isCreating.set(false);
           this.toastService.success('Usuario creado exitosamente');
           // TODO: The 'emit' function requires a mandatory void argument
           // TODO: The 'emit' function requires a mandatory void argument
@@ -187,7 +188,7 @@ onSubmit(): void {
           this.resetForm();
         },
         error: (error: any) => {
-          this.isCreating = false;
+          this.isCreating.set(false);
           console.error('Error creating store user:', error);
           const message = error?.error?.message || 'Error al crear el usuario';
           this.toastService.error(message);

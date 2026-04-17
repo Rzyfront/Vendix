@@ -225,9 +225,6 @@ export class StoreEcommerceLayoutComponent {
     clearTimeout(this.animation_timeout);
     clearTimeout(this.tooltip_timeout);
 
-    // Trigger animation
-    // Zoneless: setTimeout se usa aqui por duracion real (CSS animation timing).
-    // No se requiere NgZone: los signals disparan CD automaticamente al mutar.
     requestAnimationFrame(() => {
       this.is_animating.set(true);
       this.show_added_tooltip.set(true);
@@ -251,9 +248,6 @@ export class StoreEcommerceLayoutComponent {
     clearTimeout(this.wishlist_animation_timeout);
     clearTimeout(this.wishlist_tooltip_timeout);
 
-    // Trigger animation
-    // Zoneless: setTimeout se usa aqui por duracion real (CSS animation timing).
-    // No se requiere NgZone: los signals disparan CD automaticamente al mutar.
     requestAnimationFrame(() => {
       this.is_wishlist_animating.set(true);
       this.show_wishlist_added_tooltip.set(true);

@@ -3,7 +3,8 @@ import {
   input,
   output,
   inject,
-  DestroyRef } from '@angular/core';
+  DestroyRef,
+  signal } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
@@ -41,35 +42,36 @@ import { ScaleConnectionStatus } from '../../../../../core/models/store-settings
         }
     
         <!-- Scale reading display -->
-        @if (connectionStatus === 'connected') {
+        @if (connectionStatus() === 'connected') {
           <div class="scale-reading-container">
             <div class="scale-reading-display">
-              <span class="scale-reading-value">{{ currentWeight | number:'1.3-3' }}</span>
+              <span class="scale-reading-value">{{ currentWeight() | number:'1.3-3' }}</span>
               <span class="scale-reading-unit">{{ weightUnit() }}</span>
             </div>
-            <div class="scale-status-indicator" [class.stable]="isStable" [class.unstable]="!isStable">
-              <app-icon [name]="isStable ? 'check-circle' : 'loader'" [size]="16"></app-icon>
-              <span>{{ isStable ? 'Lectura estable' : 'Estabilizando...' }}</span>
+            <div class="scale-status-indicator" [class.stable]="isStable()" [class.unstable]="!isStable()">
+              <app-icon [name]="isStable() ? 'check-circle' : 'loader'" [size]="16"></app-icon>
+              <span>{{ isStable() ? 'Lectura estable' : 'Estabilizando...' }}</span>
             </div>
           </div>
         }
     
         <!-- Disconnected / error states -->
-        @if (connectionStatus !== 'connected') {
+        @if (connectionStatus() !== 'connected') {
           <div class="scale-disconnected">
             <div class="disconnected-notice">
               <app-icon name="alert-triangle" [size]="20" class="text-warning"></app-icon>
               <span class="text-sm text-text-secondary">
-                {{ connectionStatus === 'connecting' ? 'Conectando báscula...' : 'Báscula desconectada' }}
+                {{ connectionStatus() === 'connecting' ? 'Conectando báscula...' : 'Báscula desconectada' }}
               </span>
             </div>
             <!-- Manual fallback input -->
-            @if (allowManualFallback() && connectionStatus !== 'connecting') {
+            @if (allowManualFallback() && connectionStatus() !== 'connecting') {
               <div class="manual-fallback">
                 <label class="text-xs text-text-secondary mb-1 block">Peso manual:</label>
                 <app-input
                   [placeholder]="'Peso en ' + weightUnit()"
-                  [(ngModel)]="manualWeight"
+                  [ngModel]="manualWeight()"
+                  (ngModelChange)="manualWeight.set($event)"
                   (keyup.enter)="onConfirm()"
                   type="number"
                   step="0.001"
@@ -184,33 +186,33 @@ export class PosScaleWeightModalComponent {
   readonly confirm = output<number>();
   readonly cancel = output<void>();
 
-  isOpen = true;
-  currentWeight = 0;
-  isStable = false;
-  connectionStatus: ScaleConnectionStatus = 'disconnected';
-  manualWeight = '';
+  isOpen = signal(true);
+  currentWeight = signal(0);
+  isStable = signal(false);
+  connectionStatus = signal<ScaleConnectionStatus>('disconnected');
+  manualWeight = signal('');
 private scaleService = inject(PosScaleService);
 
   constructor() {
-this.scaleService.weight$
+    this.scaleService.weight$
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(w => this.currentWeight = w);
+      .subscribe(w => this.currentWeight.set(w));
 
     this.scaleService.stable$
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(s => this.isStable = s);
+      .subscribe(s => this.isStable.set(s));
 
     this.scaleService.status$
       .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe(st => this.connectionStatus = st);
+      .subscribe(st => this.connectionStatus.set(st));
   }
 
   get canConfirm(): boolean {
-    if (this.connectionStatus === 'connected') {
-      return this.isStable && this.currentWeight > 0;
+    if (this.connectionStatus() === 'connected') {
+      return this.isStable() && this.currentWeight() > 0;
     }
-    if (this.allowManualFallback() && this.manualWeight) {
-      const val = parseFloat(this.manualWeight.replace(',', '.'));
+    if (this.allowManualFallback() && this.manualWeight()) {
+      const val = parseFloat(this.manualWeight().replace(',', '.'));
       return !isNaN(val) && val > 0;
     }
     return false;
@@ -220,23 +222,23 @@ this.scaleService.weight$
     if (!this.canConfirm) return;
 
     let weight: number;
-    if (this.connectionStatus === 'connected') {
-      weight = this.currentWeight;
+    if (this.connectionStatus() === 'connected') {
+      weight = this.currentWeight();
     } else {
-      weight = parseFloat(this.manualWeight.replace(',', '.'));
+      weight = parseFloat(this.manualWeight().replace(',', '.'));
     }
 
     this.confirm.emit(weight);
-    this.isOpen = false;
+    this.isOpen.set(false);
   }
 
   onCancel(): void {
     this.cancel.emit();
-    this.isOpen = false;
+    this.isOpen.set(false);
   }
 
   onModalClose(): void {
-    if (!this.isOpen) {
+    if (!this.isOpen()) {
       this.cancel.emit();
     }
   }

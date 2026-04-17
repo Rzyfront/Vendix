@@ -122,7 +122,7 @@ import {
       }
     `,
   ]})
-export class StoreRoleEditModalComponent implements {
+export class StoreRoleEditModalComponent {
   private destroyRef = inject(DestroyRef);
   readonly role = model<StoreRole | null>(null);
   readonly isOpen = model<boolean>(false);

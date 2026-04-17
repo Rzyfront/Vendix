@@ -1,6 +1,8 @@
 import { Injectable } from '@angular/core';
-import { Observable, of, BehaviorSubject, throwError } from 'rxjs';
+import { Observable, of, throwError } from 'rxjs';
 import { delay, map, catchError } from 'rxjs/operators';
+import { signal } from '@angular/core';
+import { toObservable } from '@angular/core/rxjs-interop';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { environment } from '../../../../../../environments/environment';
 import { StoreContextService } from '../../../../../core/services/store-context.service';
@@ -116,7 +118,8 @@ export class PosProductService {
   private readonly apiUrl = `${environment.apiUrl}/store/products`;
   private categories: Category[] = [];
   private brands: Brand[] = [];
-  private searchHistory$ = new BehaviorSubject<string[]>([]);
+  readonly searchHistory = signal<string[]>([]);
+  readonly searchHistory$ = toObservable(this.searchHistory);
 
   constructor(
     private http: HttpClient,
@@ -521,22 +524,22 @@ export class PosProductService {
   }
 
   getSearchHistory(): Observable<string[]> {
-    return this.searchHistory$.asObservable();
+    return this.searchHistory$;
   }
 
   addToSearchHistory(query: string): void {
     if (!query || query.trim().length < 2) return;
 
-    const current = this.searchHistory$.value;
+    const current = this.searchHistory();
     const filtered = current.filter(
       (q) => q.toLowerCase() !== query.toLowerCase(),
     );
     const updated = [query, ...filtered].slice(0, 10);
-    this.searchHistory$.next(updated);
+    this.searchHistory.set(updated);
   }
 
   clearSearchHistory(): void {
-    this.searchHistory$.next([]);
+    this.searchHistory.set([]);
   }
 
   getPopularProducts(limit: number = 10): Observable<Product[]> {

@@ -95,7 +95,7 @@ interface PeriodStats {
               class="text-[13px] font-bold text-gray-600 tracking-wide
                        md:text-lg md:font-semibold md:text-text-primary"
             >
-              Periodos Fiscales ({{ periods()?.length || 0 }})
+              Periodos Fiscales ({{ periods().length }})
             </h2>
             <div class="flex items-center gap-2 w-full md:w-auto">
               <app-options-dropdown

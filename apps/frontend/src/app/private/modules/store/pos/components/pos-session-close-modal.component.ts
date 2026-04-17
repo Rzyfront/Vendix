@@ -109,18 +109,18 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
               <div class="flex justify-between">
                 <span class="text-text-secondary">Apertura</span>
                 <span class="font-medium text-text-primary">{{
-                  movementsSummary().opening | currency: 0
+                  movementsSummary()?.opening | currency: 0
                 }}</span>
               </div>
 
-              @if (movementsSummary().salesByMethod.length > 0) {
+              @if ((movementsSummary()?.salesByMethod?.length ?? 0) > 0) {
                 <p
                   class="text-[10px] font-semibold text-text-secondary uppercase tracking-wider pt-1"
                 >
                   Ventas por metodo
                 </p>
                 @for (
-                  entry of movementsSummary().salesByMethod;
+                  entry of movementsSummary()?.salesByMethod ?? [];
                   track entry.method
                 ) {
                   <div class="flex justify-between">
@@ -147,27 +147,27 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
                 }
               }
 
-              @if (movementsSummary().cashIn > 0) {
+              @if ((movementsSummary()?.cashIn ?? 0) > 0) {
                 <div class="flex justify-between">
                   <span class="text-blue-600">+ Entradas de efectivo</span>
                   <span class="font-medium text-blue-600">{{
-                    movementsSummary().cashIn | currency: 0
+                    movementsSummary()?.cashIn | currency: 0
                   }}</span>
                 </div>
               }
-              @if (movementsSummary().cashRefunds > 0) {
+              @if ((movementsSummary()?.cashRefunds ?? 0) > 0) {
                 <div class="flex justify-between">
                   <span class="text-red-600">- Reembolsos (efectivo)</span>
                   <span class="font-medium text-red-600">{{
-                    movementsSummary().cashRefunds | currency: 0
+                    movementsSummary()?.cashRefunds | currency: 0
                   }}</span>
                 </div>
               }
-              @if (movementsSummary().cashOut > 0) {
+              @if ((movementsSummary()?.cashOut ?? 0) > 0) {
                 <div class="flex justify-between">
                   <span class="text-amber-600">- Salidas de efectivo</span>
                   <span class="font-medium text-amber-600">{{
-                    movementsSummary().cashOut | currency: 0
+                    movementsSummary()?.cashOut | currency: 0
                   }}</span>
                 </div>
               }
@@ -176,16 +176,16 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
                   >Efectivo Esperado en Caja</span
                 >
                 <span class="font-bold text-text-primary">{{
-                  movementsSummary().expectedCashTotal | currency: 0
+                  movementsSummary()?.expectedCashTotal | currency: 0
                 }}</span>
               </div>
-              @if (movementsSummary().nonCashTotal > 0) {
+              @if ((movementsSummary()?.nonCashTotal ?? 0) > 0) {
                 <div class="flex justify-between text-xs pt-1">
                   <span class="text-text-secondary"
                     >Ventas por otros medios</span
                   >
                   <span class="text-text-secondary">{{
-                    movementsSummary().nonCashTotal | currency: 0
+                    movementsSummary()?.nonCashTotal | currency: 0
                   }}</span>
                 </div>
               }
@@ -222,27 +222,27 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
           <div
             class="p-4 rounded-xl flex items-center gap-3 border"
             [class]="
-              difference() >= 0
+              (difference() ?? 0) >= 0
                 ? 'bg-green-50 text-green-700 border-green-200'
                 : 'bg-red-50 text-red-700 border-red-200'
             "
           >
             <div
               class="w-9 h-9 rounded-full flex items-center justify-center"
-              [class]="difference() >= 0 ? 'bg-green-100' : 'bg-red-100'"
+              [class]="(difference() ?? 0) >= 0 ? 'bg-green-100' : 'bg-red-100'"
             >
               <app-icon
-                [name]="difference() >= 0 ? 'trending-up' : 'trending-down'"
+                [name]="(difference() ?? 0) >= 0 ? 'trending-up' : 'trending-down'"
                 [size]="18"
               ></app-icon>
             </div>
             <div>
               <p class="text-xs font-medium opacity-70">
-                {{ difference() >= 0 ? 'Sobrante' : 'Faltante' }}
+                {{ (difference() ?? 0) >= 0 ? 'Sobrante' : 'Faltante' }}
               </p>
               <p class="text-lg font-bold">
                 {{
-                  (difference() >= 0 ? difference() : -difference())
+                  ((difference() ?? 0) >= 0 ? (difference() ?? 0) : -(difference() ?? 0))
                     | currency: 0
                 }}
               </p>

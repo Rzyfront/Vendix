@@ -124,6 +124,7 @@ export interface OrganizationCandidate {
         </div>
 
         <!-- Login Form -->
+        @if (contextType !== null) {
         <app-card
           shadow="md"
           class="!mt-6 sm:!mt-8"
@@ -238,6 +239,7 @@ export interface OrganizationCandidate {
             </div>
           </form>
         </app-card>
+        }
 
         <!-- Back to Landing -->
         <div class="text-center mt-3 sm:mt-4">
@@ -466,7 +468,7 @@ export class ContextualLoginComponent implements OnInit {
   loginState: LoginState = 'idle';
   loginError: LoginError | null = null;
   apiErrorMessage: string | null = null;
-  contextType: 'vendix' | 'organization' | 'store' = 'vendix';
+  contextType: 'vendix' | 'organization' | 'store' | null = null;
   displayName: string = '';
   logoUrl: string = '';
   showVlinkTooltip = true;
@@ -490,7 +492,6 @@ private toast = inject(ToastService);
 
   ngOnInit(): void {
     this.loadAuthContext();
-    this.verifyAllowedContext();
 
     // Auto-hide V-link tooltip after 3 seconds
     setTimeout(() => {
@@ -529,48 +530,44 @@ private toast = inject(ToastService);
       });
   }
 private loadAuthContext(): void {
-    const appConfig = this.appConfigFacade.getCurrentConfig();
-    if (!appConfig) {
-      return;
-    }
-
-    const domainConfig = appConfig.domainConfig;
-    // Use environment (AppType) as source of truth
-    const env = domainConfig.environment;
-    if (env === 'VENDIX_LANDING' || env === 'VENDIX_ADMIN') {
-      this.contextType = 'vendix';
-      this.displayName = 'Vendix Platform';
-      this.loginForm.get('vlink')?.setValidators([Validators.required]);
-    } else if (env === 'ORG_ADMIN' || env === 'ORG_LANDING') {
-      this.contextType = 'organization';
-      this.displayName = domainConfig.organization_slug || '';
-      this.loginForm.get('vlink')?.clearValidators();
-    } else if (
-      ['STORE_ADMIN', 'STORE_LANDING', 'STORE_ECOMMERCE'].includes(env)
-    ) {
-      this.contextType = 'store';
-      this.displayName = domainConfig.store_slug || '';
-      this.loginForm.get('vlink')?.clearValidators();
-    }
-    this.loginForm.get('vlink')?.updateValueAndValidity();
-    this.logoUrl = appConfig.branding?.logo?.url || '';
-    if (!this.logoUrl && domainConfig.isMainVendixDomain) {
-      this.logoUrl = 'vlogo.png';
-    }
-  }
-
-  /**
-   * Defensive check: Verify that the current app type is allowed to access auth routes.
-   * This serves as a fallback in case the LandingOnlyGuard fails or is bypassed.
-   */
-  private verifyAllowedContext(): void {
     const allowedEnvs = ['VENDIX_LANDING', 'ORG_LANDING', 'STORE_LANDING'];
-    const env =
-      this.appConfigFacade.getCurrentConfig()?.domainConfig?.environment;
 
-    if (env && !allowedEnvs.includes(env)) {
-      this.router.navigate(['/']);
-    }
+    this.appConfigFacade.appConfig$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((appConfig) => {
+        if (!appConfig) {
+          return;
+        }
+
+        const domainConfig = appConfig.domainConfig;
+        const env = domainConfig.environment;
+
+        if (env && !allowedEnvs.includes(env)) {
+          this.router.navigate(['/']);
+          return;
+        }
+
+        if (env === 'VENDIX_LANDING' || env === 'VENDIX_ADMIN') {
+          this.contextType = 'vendix';
+          this.displayName = 'Vendix Platform';
+          this.loginForm.get('vlink')?.setValidators([Validators.required]);
+        } else if (env === 'ORG_ADMIN' || env === 'ORG_LANDING') {
+          this.contextType = 'organization';
+          this.displayName = domainConfig.organization_slug || '';
+          this.loginForm.get('vlink')?.clearValidators();
+        } else if (
+          ['STORE_ADMIN', 'STORE_LANDING', 'STORE_ECOMMERCE'].includes(env)
+        ) {
+          this.contextType = 'store';
+          this.displayName = domainConfig.store_slug || '';
+          this.loginForm.get('vlink')?.clearValidators();
+        }
+        this.loginForm.get('vlink')?.updateValueAndValidity();
+        this.logoUrl = appConfig.branding?.logo?.url || '';
+        if (!this.logoUrl && domainConfig.isMainVendixDomain) {
+          this.logoUrl = 'vlogo.png';
+        }
+      });
   }
 
   /**

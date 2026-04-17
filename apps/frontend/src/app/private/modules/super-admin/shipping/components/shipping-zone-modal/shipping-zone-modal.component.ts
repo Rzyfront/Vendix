@@ -5,6 +5,7 @@ import {
   input,
   output
 } from '@angular/core';
+import { take } from 'rxjs/operators';
 
 import {
   FormBuilder,
@@ -341,7 +342,7 @@ export class ShippingZoneModalComponent implements OnInit {
       ? this.shippingService.updateZone(zone.id, payload)
       : this.shippingService.createZone(payload);
 
-    request$.subscribe({
+    request$.pipe(take(1)).subscribe({
       next: () => {
         this.isSubmitting = false;
         // TODO: The 'emit' function requires a mandatory void argument

@@ -1,4 +1,5 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, inject, signal } from '@angular/core';
+import { take } from 'rxjs/operators';
 
 import { Router } from '@angular/router';
 import { ShippingService } from '../../services/shipping.service';
@@ -190,7 +191,7 @@ import { ButtonComponent } from '../../../../../../shared/components/button/butt
         </div>
       }
 
-      @defer (when showModal) {
+      @defer (when showModal()) {
         <app-superadmin-shipping-zone-modal
           [zone]="selectedZone"
           (close)="closeModal()"
@@ -215,7 +216,7 @@ export class ShippingZonesComponent implements OnInit {
 
   zones: ShippingZone[] = [];
   methods: ShippingMethod[] = [];
-  showModal = false;
+  showModal = signal(false);
   showRatesModal = false;
   selectedZone?: ShippingZone;
 
@@ -224,27 +225,27 @@ export class ShippingZonesComponent implements OnInit {
   }
 
   loadData() {
-    this.shippingService.getZones().subscribe((data) => {
+    this.shippingService.getZones().pipe(take(1)).subscribe((data) => {
       this.zones = data;
     });
     // Load methods for rates modal
-    this.shippingService.getMethods().subscribe((data) => {
+    this.shippingService.getMethods().pipe(take(1)).subscribe((data) => {
       this.methods = data;
     });
   }
 
   openCreateModal() {
     this.selectedZone = undefined;
-    this.showModal = true;
+    this.showModal.set(true);
   }
 
   openEditModal(zone: ShippingZone) {
     this.selectedZone = zone;
-    this.showModal = true;
+    this.showModal.set(true);
   }
 
   closeModal() {
-    this.showModal = false;
+    this.showModal.set(false);
     this.selectedZone = undefined;
   }
 

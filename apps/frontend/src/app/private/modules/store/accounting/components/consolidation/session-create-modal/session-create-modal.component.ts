@@ -82,7 +82,7 @@ import {
       </div>
     </app-modal>
   `})
-export class SessionCreateModalComponent implements {
+export class SessionCreateModalComponent {
   private destroyRef = inject(DestroyRef);
 private fb = inject(FormBuilder);
   private accounting_service = inject(AccountingService);

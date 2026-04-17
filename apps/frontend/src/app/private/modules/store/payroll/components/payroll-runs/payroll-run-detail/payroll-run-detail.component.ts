@@ -8,11 +8,11 @@ import {
   signal,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { DatePipe, AsyncPipe } from '@angular/common';
+import { DatePipe } from '@angular/common';
 import { Store } from '@ngrx/store';
 import { Actions, ofType } from '@ngrx/effects';
 import { Subject } from 'rxjs';
-import { take, timeout } from 'rxjs/operators';
+import { take, timeout, takeUntil } from 'rxjs/operators';
 import {
   calculatePayrollRun,
   calculatePayrollRunSuccess,
@@ -51,7 +51,6 @@ import { PayrollItemDetailComponent } from '../payroll-item-detail/payroll-item-
   standalone: true,
   imports: [
     DatePipe,
-    AsyncPipe,
     ModalComponent,
     ButtonComponent,
     IconComponent,
@@ -550,7 +549,7 @@ private fastTrackCancel$ = new Subject<void>();
       takeUntil(this.fastTrackCancel$),
       takeUntilDestroyed(this.destroyRef),
     ).subscribe({
-      next: (action) => {
+      next: (action: any) => {
         if (action.type === successFailure.failure.type) {
           this.stopFastTrack();
           return;

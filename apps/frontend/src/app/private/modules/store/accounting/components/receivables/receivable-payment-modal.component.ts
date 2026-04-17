@@ -10,6 +10,7 @@ import {
 } from '@angular/core';
 
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
+import { take } from 'rxjs/operators';
 
 import { CarteraService } from '../../services/cartera.service';
 import { AccountReceivable } from '../../interfaces/cartera.interface';
@@ -176,6 +177,7 @@ export class ReceivablePaymentModalComponent implements OnChanges {
         reference: val.reference || undefined,
         notes: val.notes || undefined,
       })
+      .pipe(take(1))
       .subscribe({
         next: () => {
           this.is_submitting.set(false);

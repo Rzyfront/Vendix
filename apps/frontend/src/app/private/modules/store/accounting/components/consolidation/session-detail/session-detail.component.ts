@@ -60,7 +60,7 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
   ],
   templateUrl: './session-detail.component.html',
   styleUrls: ['./session-detail.component.scss']})
-export class SessionDetailComponent implements {
+export class SessionDetailComponent {
   private destroyRef = inject(DestroyRef);
 private route = inject(ActivatedRoute);
   private router = inject(Router);

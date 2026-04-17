@@ -133,7 +133,7 @@ import { SessionCreateModalComponent } from '../session-create-modal/session-cre
       ></vendix-session-create-modal>
     </div>
   `})
-export class ConsolidationSessionsComponent implements {
+export class ConsolidationSessionsComponent {
   private destroyRef = inject(DestroyRef);
 private accounting_service = inject(AccountingService);
   private toast_service = inject(ToastService);

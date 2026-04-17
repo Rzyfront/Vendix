@@ -1,5 +1,6 @@
 import { Injectable, signal } from '@angular/core';
-import { Observable, of, throwError, toObservable } from 'rxjs';
+import { Observable, of, throwError } from 'rxjs';
+import { toObservable } from '@angular/core/rxjs-interop';
 import { map, tap, catchError } from 'rxjs/operators';
 import {
   LotInfo,
@@ -317,7 +318,7 @@ export class PopCartService {
           updatedAt: new Date(),
         };
       }),
-      tap((newState) => this._cartState.next(newState)),
+      tap((newState) => this._cartState.set(newState)),
     );
   }
 
@@ -549,7 +550,7 @@ export class PopCartService {
       newState.summary = this.calculateSummary(newState.items);
     }
 
-    this._cartState.next(newState);
+    this._cartState.set(newState);
   }
 
 

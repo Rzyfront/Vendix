@@ -1,4 +1,5 @@
 import { Component, OnInit, inject, input, output } from '@angular/core';
+import { take } from 'rxjs/operators';
 
 import { FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { ShippingService } from '../../services/shipping.service';
@@ -149,7 +150,7 @@ export class ShippingMethodModalComponent implements OnInit {
       ? this.shippingService.updateMethod(method.id, value)
       : this.shippingService.createMethod(value);
 
-    request$.subscribe({
+    request$.pipe(take(1)).subscribe({
       next: () => {
         this.isSubmitting = false;
         // TODO: The 'emit' function requires a mandatory void argument

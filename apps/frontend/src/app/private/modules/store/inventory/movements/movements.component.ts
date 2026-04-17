@@ -104,7 +104,7 @@ export class MovementsComponent implements OnInit, OnDestroy {
 
   // Filters
   current_type: MovementType | 'all' = 'all';
-  search_term = '';
+  search_term = signal('');
 
   // UI State
   readonly is_loading = signal(false);
@@ -163,8 +163,8 @@ export class MovementsComponent implements OnInit, OnDestroy {
       );
     }
 
-    if (this.search_term) {
-      const term = this.search_term.toLowerCase();
+    if (this.search_term()) {
+      const term = this.search_term().toLowerCase();
       filtered = filtered.filter(
         (m) =>
           m.products?.name?.toLowerCase().includes(term) ||
@@ -193,7 +193,7 @@ export class MovementsComponent implements OnInit, OnDestroy {
   // ============================================================
 
   onSearch(term: string): void {
-    this.search_term = term;
+    this.search_term.set(term);
     this.applyFilters();
   }
 
@@ -205,7 +205,7 @@ export class MovementsComponent implements OnInit, OnDestroy {
 
   onClearFilters(): void {
     this.current_type = 'all';
-    this.search_term = '';
+    this.search_term.set('');
     this.applyFilters();
   }
 

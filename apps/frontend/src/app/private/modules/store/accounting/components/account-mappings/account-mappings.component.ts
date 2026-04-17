@@ -302,7 +302,7 @@ const GROUP_FLOW_MAP: Record<string, string> = {
   ],
   templateUrl: './account-mappings.component.html',
   styleUrls: ['./account-mappings.component.scss']})
-export class AccountMappingsComponent implements {
+export class AccountMappingsComponent {
   private destroyRef = inject(DestroyRef);
   private store = inject(Store);
   private http = inject(HttpClient);

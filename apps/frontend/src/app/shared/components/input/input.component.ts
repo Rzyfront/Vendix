@@ -89,7 +89,7 @@ export type InputSize = 'sm' | 'md' | 'lg';
         <!-- Input field -->
         <input
           #inputRef
-          [id]="inputId"
+          [id]="inputId()"
           [type]="actualInputType"
           [attr.inputmode]="currency() ? 'decimal' : null"
           [placeholder]="placeholder()"
@@ -115,7 +115,7 @@ export type InputSize = 'sm' | 'md' | 'lg';
             class="absolute inset-y-0 right-0 pr-3 flex items-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors duration-200 focus:outline-none"
             (click)="togglePasswordVisibility()"
             [attr.aria-label]="
-              showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'
+              showPassword() ? 'Ocultar contraseña' : 'Mostrar contraseña'
             "
             tabindex="-1"
           >
@@ -576,7 +576,7 @@ export class InputComponent implements ControlValueAccessor {
   }
 
   onSuffixClick(): void {
-    if (this.suffixClickable() && !this.disabled) {
+    if (this.suffixClickable() && !this.isDisabled()) {
       // TODO: The 'emit' function requires a mandatory void argument
       this.suffixClick.emit();
     }
@@ -595,7 +595,7 @@ export class InputComponent implements ControlValueAccessor {
   }
 
   togglePasswordVisibility(): void {
-    if (!this.disabled) {
+    if (!this.isDisabled()) {
       this.showPassword.set(!this.showPassword());
     }
   }

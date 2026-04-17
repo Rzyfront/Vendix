@@ -1,6 +1,11 @@
-import {Component, input, output, model,
+import {
+  Component,
+  input,
+  output,
+  model,
   DestroyRef,
-  inject} from '@angular/core';
+  inject
+} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
@@ -28,7 +33,7 @@ import { StoreListItem } from '../../interfaces/store.interface';
   ],
   templateUrl: './store-delete-confirmation.component.html',
   styleUrl: './store-delete-confirmation.component.scss'})
-export class StoreDeleteConfirmationComponent implements {
+export class StoreDeleteConfirmationComponent {
   private destroyRef = inject(DestroyRef);
   readonly isOpen = model<boolean>(false);
   readonly store = input<StoreListItem | null>(null);
@@ -39,15 +44,20 @@ export class StoreDeleteConfirmationComponent implements {
 
   slugInput = new FormControl('', {
     validators: [Validators.required],
-    nonNullable: true});
-constructor() {
+    nonNullable: true
+  });
+
+  showError = false;
+
+  constructor() {
     this.slugInput.valueChanges.subscribe(() => {
       if (this.showError && this.isSlugValid) {
         this.showError = false;
       }
     });
   }
-get placeholderText(): string {
+
+  get placeholderText(): string {
     const store = this.store();
     return store ? `Escribe '${store.slug}' para confirmar` : '';
   }
@@ -59,8 +69,6 @@ get placeholderText(): string {
     }
     return this.slugInput.value.trim() === store.slug;
   }
-
-  showError = false;
 
   onConfirm(): void {
     if (!this.isSlugValid) {
