@@ -49,14 +49,12 @@ import {
               placeholder="Ej: Cajero, Supervisor..."
               [required]="true"
               [control]="roleForm.get('name')"
-              [disabled]="isUpdating"
             ></app-input>
             <app-input
               formControlName="description"
               label="Descripcion"
               placeholder="Descripcion opcional del rol"
               [control]="roleForm.get('description')"
-              [disabled]="isUpdating"
             ></app-input>
           </div>
           <!-- Role Info -->
@@ -165,6 +163,7 @@ ngOnChanges(): void {
     }
 
     this.isUpdating = true;
+    this.roleForm.disable({ emitEvent: false });
     const roleData: UpdateStoreRoleDto = this.roleForm.value;
 
     this.storeRolesService
@@ -173,17 +172,14 @@ ngOnChanges(): void {
       .subscribe({
         next: () => {
           this.isUpdating = false;
+          this.roleForm.enable({ emitEvent: false });
           this.toastService.success('Rol actualizado exitosamente');
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
           this.onRoleUpdated.emit();
           this.isOpenChange.emit(false);
         },
         error: (error: any) => {
           this.isUpdating = false;
+          this.roleForm.enable({ emitEvent: false });
           console.error('Error updating store role:', error);
           const message = error?.error?.message || 'Error al actualizar el rol';
           this.toastService.error(message);

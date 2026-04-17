@@ -5,10 +5,13 @@ import { HttpClient } from '@angular/common/http';
 import { Store } from '@ngrx/store';
 
 import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
+import { filter, switchMap, take, of, catchError } from 'rxjs';
 
 
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { environment } from '../../../../../../../environments/environment';
+import { TenantFacade } from '../../../../../../core/store/tenant/tenant.facade';
+import { AppType } from '../../../../../../core/models/environment.enum';
 
 import {
   AccountMapping,
@@ -307,6 +310,7 @@ export class AccountMappingsComponent {
   private store = inject(Store);
   private http = inject(HttpClient);
   private toast = inject(ToastService);
+  private tenantFacade = inject(TenantFacade);
 // State signals
   readonly loading = toSignal(
     this.store.select(selectAccountMappingsLoading),
@@ -341,22 +345,44 @@ export class AccountMappingsComponent {
         this.has_changes.set(false);
       });
 
-    this.http
-      .get<any>(`${environment.apiUrl}/store/settings`)
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (res) => {
+    this.tenantFacade.currentEnvironment$
+      .pipe(
+        filter((env): env is AppType => !!env),
+        take(1),
+        switchMap((env) => {
+          const endpoint = this.getSettingsEndpoint(env);
+          if (!endpoint) {
+            this.flows_loaded.set(true);
+            return of(null);
+          }
+          return this.http
+            .get<any>(`${environment.apiUrl}${endpoint}`)
+            .pipe(catchError(() => of(null)));
+        }),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((res) => {
+        if (res) {
           const settings = res?.data?.settings || res?.data || res;
           this.flow_toggles.set(
             settings?.module_flows?.accounting ||
               settings?.accounting_flows ||
-              {}
+              {},
           );
-          this.flows_loaded.set(true);
-        },
-        error: () => {
-          this.flows_loaded.set(true);
-        }});
+        }
+        this.flows_loaded.set(true);
+      });
+  }
+
+  private getSettingsEndpoint(env: AppType): string | null {
+    switch (env) {
+      case AppType.STORE_ADMIN:
+        return '/store/settings';
+      case AppType.ORG_ADMIN:
+        return '/organization/settings';
+      default:
+        return null;
+    }
   }
 getLabel(mapping_key: string): string {
     return MAPPING_LABELS[mapping_key] || mapping_key;
@@ -419,11 +445,17 @@ getLabel(mapping_key: string): string {
   toggleFlow(group_key: string): void {
     const flow_key = GROUP_FLOW_MAP[group_key];
     if (!flow_key) return;
+    const env = this.tenantFacade.currentEnvironment();
+    const endpoint = env ? this.getSettingsEndpoint(env) : null;
+    if (!endpoint) {
+      this.toast.error('No se puede actualizar la configuración en este contexto');
+      return;
+    }
     const new_value = !this.isFlowEnabled(group_key);
     const updatedToggles = { ...this.flow_toggles(), [flow_key]: new_value };
     this.flow_toggles.set(updatedToggles);
     this.http
-      .patch(`${environment.apiUrl}/store/settings`, {
+      .patch(`${environment.apiUrl}${endpoint}`, {
         module_flows: { accounting: { [flow_key]: new_value } }})
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({

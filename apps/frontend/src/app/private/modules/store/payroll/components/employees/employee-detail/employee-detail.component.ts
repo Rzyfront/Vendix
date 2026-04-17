@@ -1,4 +1,4 @@
-import {Component, input, output, inject, effect, DestroyRef} from '@angular/core';
+import {Component, input, output, inject, effect, signal, DestroyRef} from '@angular/core';
 import { DatePipe } from '@angular/common';
 import {toSignal, takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import {
@@ -95,7 +95,7 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
             <app-selector
               label="Usuario del sistema (opcional)"
               formControlName="user_id"
-              [options]="availableUsers"
+              [options]="availableUsers()"
               placeholder="Seleccionar usuario..."
             ></app-selector>
             <p class="text-xs text-text-secondary mt-1">
@@ -336,7 +336,7 @@ export class EmployeeDetailComponent {
   readonly loading = toSignal(this.store.select(selectEmployeesLoading), {
     initialValue: false,
   });
-  availableUsers: SelectorOption[] = [];
+  readonly availableUsers = signal<SelectorOption[]>([]);
   private availableUsersData: AvailableUser[] = [];
 
   documentTypeOptions: SelectorOption[] = [
@@ -488,13 +488,13 @@ export class EmployeeDetailComponent {
   loadAvailableUsers(): void {
     this.payrollService.getAvailableUsers().pipe(takeUntilDestroyed(this.destroyRef)).subscribe((res) => {
       this.availableUsersData = res.data;
-      this.availableUsers = [
+      this.availableUsers.set([
         { value: '', label: 'Sin vincular (datos manuales)' },
         ...res.data.map((user) => ({
           value: user.id,
           label: `${user.first_name} ${user.last_name} (${user.email})`,
         })),
-      ];
+      ]);
     });
   }
 

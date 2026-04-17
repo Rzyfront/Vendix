@@ -23,7 +23,7 @@
             variant="outline"
             size="sm"
             (clicked)="resetMappings()"
-            [disabled]="!has_custom_mappings"
+            [disabled]="!has_custom_mappings()"
           >
             <app-icon name="refresh-cw" [size]="14" slot="icon"></app-icon>
             <span class="hidden sm:inline">Restablecer Defaults</span>
@@ -33,7 +33,7 @@
             variant="primary"
             size="sm"
             (clicked)="saveMappings()"
-            [disabled]="!has_changes"
+            [disabled]="!has_changes()"
           >
             <app-icon name="save" [size]="14" slot="icon"></app-icon>
             <span class="hidden sm:inline">Guardar Cambios</span>
@@ -55,7 +55,7 @@
         </div>
       }
 
-      @if (mapping_groups.length === 0 && !loading()) {
+      @if (mapping_groups().length === 0 && !loading()) {
         <app-empty-state
           icon="link"
           title="No hay mapeos configurados"

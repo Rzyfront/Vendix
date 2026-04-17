@@ -67,12 +67,9 @@ export class ToggleComponent implements ControlValueAccessor {
   private onTouched: () => void = () => {};
 
   constructor() {
-    effect(
-      () => {
-        this.isOn.set(this.checked());
-      },
-      { allowSignalWrites: true },
-    );
+    effect(() => {
+      this.isOn.set(this.checked());
+    });
   }
 
   writeValue(value: boolean): void {

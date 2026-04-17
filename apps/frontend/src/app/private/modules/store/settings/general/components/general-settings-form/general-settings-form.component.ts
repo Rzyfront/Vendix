@@ -5,6 +5,7 @@ import {
   inject,
   input,
   output,
+  signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
@@ -70,7 +71,7 @@ export class GeneralSettingsForm implements OnInit, OnChanges {
   ];
 
   // Cargado dinámicamente desde CurrencyService
-  currencies: SelectorOption[] = [];
+  readonly currencies = signal<SelectorOption[]>([]);
 
   languages: SelectorOption[] = [
     { value: 'es', label: 'Español' },
@@ -128,28 +129,30 @@ export class GeneralSettingsForm implements OnInit, OnChanges {
   async loadCurrencies() {
     try {
       const activeCurrencies = await this.currencyService.getActiveCurrencies();
-      this.currencies = activeCurrencies.map((c) => ({
+      const mapped = activeCurrencies.map((c) => ({
         value: c.code,
         label: `${c.name} (${c.code})`,
       }));
+      this.currencies.set(mapped);
 
       // Si no hay moneda seleccionada y hay monedas disponibles, seleccionar la primera
       const currentCurrency = this.currencyControl.value;
-      if (!currentCurrency && this.currencies.length > 0) {
-        this.currencyControl.setValue(this.currencies[0].value as string);
+      if (!currentCurrency && mapped.length > 0) {
+        this.currencyControl.setValue(mapped[0].value as string);
       }
     } catch (error) {
       console.error('Error loading currencies:', error);
       // Fallback a monedas comunes si falla el servicio
-      this.currencies = [
+      const fallback: SelectorOption[] = [
         { value: 'COP', label: 'Peso Colombiano (COP)' },
         { value: 'USD', label: 'Dólar Americano (USD)' },
         { value: 'EUR', label: 'Euro (EUR)' },
       ];
+      this.currencies.set(fallback);
 
       // Seleccionar la primera por defecto si no hay ninguna
       if (!this.currencyControl.value) {
-        this.currencyControl.setValue(this.currencies[0].value as string);
+        this.currencyControl.setValue(fallback[0].value as string);
       }
     }
   }

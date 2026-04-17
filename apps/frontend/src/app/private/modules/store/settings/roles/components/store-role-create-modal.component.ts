@@ -46,7 +46,6 @@ import { CreateStoreRoleDto } from '../interfaces/store-role.interface';
             placeholder="Ej: Cajero, Supervisor..."
             [required]="true"
             [control]="roleForm.get('name')"
-            [disabled]="isCreating"
           ></app-input>
 
           <app-input
@@ -54,7 +53,6 @@ import { CreateStoreRoleDto } from '../interfaces/store-role.interface';
             label="Descripcion"
             placeholder="Descripcion opcional del rol"
             [control]="roleForm.get('description')"
-            [disabled]="isCreating"
           ></app-input>
         </div>
       </form>
@@ -117,6 +115,7 @@ onSubmit(): void {
     }
 
     this.isCreating = true;
+    this.roleForm.disable({ emitEvent: false });
     const roleData: CreateStoreRoleDto = this.roleForm.value;
 
     // Remove description if empty
@@ -130,18 +129,15 @@ onSubmit(): void {
       .subscribe({
         next: () => {
           this.isCreating = false;
+          this.roleForm.enable({ emitEvent: false });
           this.toastService.success('Rol creado exitosamente');
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
-          // TODO: The 'emit' function requires a mandatory void argument
           this.onRoleCreated.emit();
           this.isOpenChange.emit(false);
           this.resetForm();
         },
         error: (error: any) => {
           this.isCreating = false;
+          this.roleForm.enable({ emitEvent: false });
           console.error('Error creating store role:', error);
           const message = error?.error?.message || 'Error al crear el rol';
           this.toastService.error(message);

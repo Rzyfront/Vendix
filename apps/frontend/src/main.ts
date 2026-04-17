@@ -3,6 +3,15 @@ import { appConfig } from './app/app.config';
 import { AppComponent } from './app/app.component';
 
 if (typeof window !== 'undefined') {
+  const originalConsoleError = console.error.bind(console);
+  console.error = (...args: unknown[]) => {
+    const first = args[0];
+    if (typeof first === 'string' && first.includes('NG0505')) return;
+    originalConsoleError(...args);
+  };
+}
+
+if (typeof window !== 'undefined') {
   const CHUNK_RELOAD_ATTEMPT_KEY = 'vendix:chunk-reload-attempted';
 
   function isDynamicImportFailure(error: unknown): boolean {

@@ -15,7 +15,7 @@
     <div>
       <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Preferencias y Localización</h4>
       <div class="space-y-4">
-        <app-selector [formControl]="currencyControl" label="Moneda" [options]="currencies"
+        <app-selector [formControl]="currencyControl" label="Moneda" [options]="currencies()"
         (valueChange)="onFieldChange()" size="sm"></app-selector>
         <app-selector [formControl]="timezoneControl" label="Zona Horaria" [options]="commonTimezones"
         (valueChange)="onFieldChange()" size="sm"></app-selector>

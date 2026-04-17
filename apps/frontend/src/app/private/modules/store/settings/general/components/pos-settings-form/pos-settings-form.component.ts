@@ -1,4 +1,5 @@
-import { Component, OnInit, OnChanges, input, output } from '@angular/core';
+import { Component, OnInit, OnChanges, DestroyRef, inject, input, output } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
@@ -22,6 +23,8 @@ import { ToastService } from '../../../../../../../shared/components/toast/toast
 export class PosSettingsForm implements OnInit, OnChanges {
   readonly settings = input.required<PosSettings>();
   readonly settingsChange = output<PosSettings>();
+
+  private destroyRef = inject(DestroyRef);
 
   constructor(
     private scaleService: PosScaleService,
@@ -225,10 +228,42 @@ export class PosSettingsForm implements OnInit, OnChanges {
 
   ngOnInit() {
     this.patchForm();
+    this.wireDependentControls();
   }
 
   ngOnChanges() {
     this.patchForm();
+  }
+
+  private wireDependentControls() {
+    const links: Array<[FormControl<boolean>, FormControl[]]> = [
+      [this.allowAnonymousSalesControl, [this.anonymousSalesAsDefaultControl]],
+      [this.scaleEnabledControl, [this.allowManualWeightEntryControl]],
+      [
+        this.cashRegisterEnabledControl,
+        [
+          this.requireSessionForSalesControl,
+          this.requireClosingCountControl,
+          this.trackNonCashPaymentsControl,
+          this.allowMultipleSessionsControl,
+          this.autoCreateDefaultRegisterControl,
+        ],
+      ],
+      [this.customerQueueEnabledControl, [this.requireEmailControl]],
+    ];
+
+    for (const [master, dependents] of links) {
+      const apply = (enabled: boolean | null) => {
+        for (const dep of dependents) {
+          if (enabled) dep.enable({ emitEvent: false });
+          else dep.disable({ emitEvent: false });
+        }
+      };
+      apply(master.value);
+      master.valueChanges
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe(apply);
+    }
   }
 
   getDefaultBusinessHours(): Record<string, BusinessHours> {

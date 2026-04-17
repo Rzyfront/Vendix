@@ -38,7 +38,6 @@ import {
               formControlName="code"
               [control]="form.get('code')"
               [required]="true"
-              [disabled]="!!editAccount()"
               placeholder="Ej: 1101"
             ></app-input>
 
@@ -133,7 +132,7 @@ export class AccountCreateComponent {
 
   get parent_account_options() {
     const options = [{ value: null as any, label: 'Ninguno (Cuenta Raíz)' }];
-    this.flattenForSelect(this.accounts(), options, 0);
+    this.flattenForSelect(this.accounts(), options, 0, new Set<number>());
     return options;
   }
 
@@ -150,6 +149,7 @@ export class AccountCreateComponent {
   constructor() {
     effect(() => {
       const ea = this.editAccount();
+      const codeCtrl = this.form.get('code');
       if (ea) {
         this.form.patchValue({
           code: ea.code,
@@ -160,6 +160,7 @@ export class AccountCreateComponent {
           is_active: ea.is_active,
           accepts_entries: ea.accepts_entries,
         });
+        codeCtrl?.disable({ emitEvent: false });
       } else if (ea === null) {
         this.form.reset({
           code: '',
@@ -170,6 +171,7 @@ export class AccountCreateComponent {
           is_active: true,
           accepts_entries: true,
         });
+        codeCtrl?.enable({ emitEvent: false });
       }
     });
   }
@@ -224,12 +226,15 @@ export class AccountCreateComponent {
     accounts: ChartAccount[],
     options: { value: any; label: string }[],
     depth: number,
+    seen: Set<number>,
   ): void {
     for (const account of accounts) {
+      if (seen.has(account.id)) continue;
+      seen.add(account.id);
       const prefix = '\u00A0\u00A0'.repeat(depth);
       options.push({ value: account.id, label: `${prefix}${account.code} - ${account.name}` });
       if (account.children?.length) {
-        this.flattenForSelect(account.children, options, depth + 1);
+        this.flattenForSelect(account.children, options, depth + 1, seen);
       }
     }
   }
