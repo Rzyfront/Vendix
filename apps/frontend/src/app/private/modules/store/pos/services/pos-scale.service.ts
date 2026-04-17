@@ -4,8 +4,10 @@ import {
   EnvironmentInjector,
   ApplicationRef,
   createComponent,
+  DestroyRef,
+  inject,
+  signal,
 } from '@angular/core';
-import { BehaviorSubject } from 'rxjs';
 import {
   ScaleDeviceConfig,
   ScaleConnectionStatus,
@@ -32,9 +34,14 @@ const STABILITY_READINGS = 3;
 
 @Injectable({ providedIn: 'root' })
 export class PosScaleService implements OnDestroy {
-  readonly weight$ = new BehaviorSubject<number>(0);
-  readonly status$ = new BehaviorSubject<ScaleConnectionStatus>('disconnected');
-  readonly stable$ = new BehaviorSubject<boolean>(false);
+  private destroyRef = inject(DestroyRef);
+  private readonly _weight = signal<number>(0);
+  private readonly _status = signal<ScaleConnectionStatus>('disconnected');
+  private readonly _stable = signal<boolean>(false);
+
+  readonly weight = this._weight.asReadonly();
+  readonly status = this._status.asReadonly();
+  readonly stable = this._stable.asReadonly();
 
   private config: ScaleDeviceConfig = { ...DEFAULT_CONFIG };
   private port: SerialPort | null = null;
@@ -59,7 +66,7 @@ export class PosScaleService implements OnDestroy {
     if (!this.isWebSerialSupported()) return false;
     if (this.port) await this.disconnect();
 
-    this.status$.next('connecting');
+    this._status.set('connecting');
 
     try {
       this.port = await navigator.serial.requestPort();
@@ -70,11 +77,15 @@ export class PosScaleService implements OnDestroy {
         parity: this.config.parity,
       });
 
-      this.status$.next('connected');
+      this._status.set('connected');
       this.startReadLoop();
       return true;
     } catch (err) {
-      this.status$.next(err instanceof DOMException && err.name === 'NotFoundError' ? 'disconnected' : 'error');
+      this._status.set(
+        err instanceof DOMException && err.name === 'NotFoundError'
+          ? 'disconnected'
+          : 'error',
+      );
       this.port = null;
       return false;
     }
@@ -98,18 +109,18 @@ export class PosScaleService implements OnDestroy {
     }
     this.port = null;
 
-    this.weight$.next(0);
-    this.stable$.next(false);
+    this._weight.set(0);
+    this._stable.set(false);
     this.recentReadings = [];
-    this.status$.next('disconnected');
+    this._status.set('disconnected');
   }
 
   isConnected(): boolean {
-    return this.status$.value === 'connected';
+    return this._status() === 'connected';
   }
 
   getCurrentWeight(): number {
-    return this.weight$.value;
+    return this._weight();
   }
 
   async tryAutoReconnect(): Promise<void> {
@@ -119,7 +130,7 @@ export class PosScaleService implements OnDestroy {
       const ports = await navigator.serial.getPorts();
       if (ports.length > 0) {
         this.port = ports[0];
-        this.status$.next('connecting');
+        this._status.set('connecting');
 
         await this.port.open({
           baudRate: this.config.baud_rate,
@@ -128,12 +139,12 @@ export class PosScaleService implements OnDestroy {
           parity: this.config.parity,
         });
 
-        this.status$.next('connected');
+        this._status.set('connected');
         this.startReadLoop();
       }
     } catch {
       this.port = null;
-      this.status$.next('disconnected');
+      this._status.set('disconnected');
     }
   }
 
@@ -143,30 +154,40 @@ export class PosScaleService implements OnDestroy {
         environmentInjector: this.injector,
       });
 
-      componentRef.instance.title = data.title;
-      componentRef.instance.message = data.message;
-      componentRef.instance.weightUnit = data.weightUnit;
-      componentRef.instance.allowManualFallback = data.allowManualFallback;
+      componentRef.setInput('title', data.title);
+      componentRef.setInput('message', data.message);
+      componentRef.setInput('weightUnit', data.weightUnit);
+      componentRef.setInput('allowManualFallback', data.allowManualFallback);
 
       const destroy = () => {
         this.appRef.detachView(componentRef.hostView);
         componentRef.destroy();
       };
 
-      const sub = componentRef.instance.confirm.subscribe((weight: number) => {
-        resolve(weight);
-        sub.unsubscribe();
+      let sub: any;
+      let subCancel: any;
+
+      const cleanup = () => {
+        sub?.unsubscribe();
+        subCancel?.unsubscribe();
         destroy();
+      };
+
+      this.destroyRef.onDestroy(() => cleanup());
+
+      sub = componentRef.instance.confirm.subscribe((weight: number) => {
+        resolve(weight);
+        cleanup();
       });
 
-      const subCancel = componentRef.instance.cancel.subscribe(() => {
+      subCancel = componentRef.instance.cancel.subscribe(() => {
         resolve(undefined);
-        subCancel.unsubscribe();
-        destroy();
+        cleanup();
       });
 
       this.appRef.attachView(componentRef.hostView);
-      const domElem = (componentRef.hostView as any).rootNodes[0] as HTMLElement;
+      const domElem = (componentRef.hostView as any)
+        .rootNodes[0] as HTMLElement;
       document.body.appendChild(domElem);
     });
   }
@@ -182,11 +203,13 @@ export class PosScaleService implements OnDestroy {
 
     this.readLoopAbortController = new AbortController();
     const textDecoder = new TextDecoderStream();
-    const readableStreamClosed = this.port.readable.pipeTo(textDecoder.writable, {
-      signal: this.readLoopAbortController.signal,
-    }).catch(() => {
-      // Stream aborted or port disconnected
-    });
+    const readableStreamClosed = this.port.readable
+      .pipeTo(textDecoder.writable, {
+        signal: this.readLoopAbortController.signal,
+      })
+      .catch(() => {
+        // Stream aborted or port disconnected
+      });
 
     this.reader = textDecoder.readable.getReader();
     this.readLoop(readableStreamClosed);
@@ -216,8 +239,8 @@ export class PosScaleService implements OnDestroy {
     this.reader = null;
     await streamClosed;
 
-    if (this.status$.value === 'connected') {
-      this.status$.next('error');
+    if (this._status() === 'connected') {
+      this._status.set('error');
     }
   }
 
@@ -238,12 +261,15 @@ export class PosScaleService implements OnDestroy {
     }
 
     if (weight !== null && !isNaN(weight)) {
-      this.weight$.next(weight);
+      this._weight.set(weight);
       this.updateStability(weight, isStable);
     }
   }
 
-  private parseGeneric(line: string): { weight: number | null; isStable: boolean } {
+  private parseGeneric(line: string): {
+    weight: number | null;
+    isStable: boolean;
+  } {
     const match = line.match(/([+-]?\d+\.?\d*)\s*(kg|g|lb)?/i);
     if (!match) return { weight: null, isStable: false };
 
@@ -255,7 +281,7 @@ export class PosScaleService implements OnDestroy {
 
   private parseCas(line: string): { weight: number | null; isStable: boolean } {
     // Format: ST,GS,  0.500,kg  or  US,GS,  0.500,kg
-    const parts = line.split(',').map(p => p.trim());
+    const parts = line.split(',').map((p) => p.trim());
     if (parts.length < 3) return { weight: null, isStable: false };
 
     return {
@@ -264,12 +290,15 @@ export class PosScaleService implements OnDestroy {
     };
   }
 
-  private parseOhaus(line: string): { weight: number | null; isStable: boolean } {
+  private parseOhaus(line: string): {
+    weight: number | null;
+    isStable: boolean;
+  } {
     // Format similar to CAS: indicator, mode, weight, unit
-    const parts = line.split(',').map(p => p.trim());
+    const parts = line.split(',').map((p) => p.trim());
     if (parts.length < 3) return { weight: null, isStable: false };
 
-    const weightStr = parts.find(p => /^[+-]?\d+\.?\d*$/.test(p));
+    const weightStr = parts.find((p) => /^[+-]?\d+\.?\d*$/.test(p));
     return {
       weight: weightStr ? parseFloat(weightStr) : null,
       isStable: /\bST\b/i.test(parts[0]) || /\bstable\b/i.test(parts[0]),
@@ -283,7 +312,7 @@ export class PosScaleService implements OnDestroy {
     }
 
     if (protocolStable) {
-      this.stable$.next(true);
+      this._stable.set(true);
       return;
     }
 
@@ -291,9 +320,9 @@ export class PosScaleService implements OnDestroy {
     if (this.recentReadings.length >= STABILITY_READINGS) {
       const max = Math.max(...this.recentReadings);
       const min = Math.min(...this.recentReadings);
-      this.stable$.next(max - min <= STABILITY_TOLERANCE);
+      this._stable.set(max - min <= STABILITY_TOLERANCE);
     } else {
-      this.stable$.next(false);
+      this._stable.set(false);
     }
   }
 }

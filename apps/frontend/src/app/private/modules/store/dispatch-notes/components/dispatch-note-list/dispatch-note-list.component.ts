@@ -1,14 +1,12 @@
 import {
   Component,
-  Output,
-  EventEmitter,
-  OnInit,
-  OnDestroy,
+  DestroyRef,
   inject,
+  output,
+  signal,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Subject, takeUntil } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   TableColumn,
@@ -46,7 +44,6 @@ import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
   selector: 'app-dispatch-note-list',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ResponsiveDataViewComponent,
     InputsearchComponent,
@@ -60,29 +57,28 @@ import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
   templateUrl: './dispatch-note-list.component.html',
   styleUrls: ['./dispatch-note-list.component.scss'],
 })
-export class DispatchNoteListComponent implements OnInit, OnDestroy {
+export class DispatchNoteListComponent {
   private currencyService = inject(CurrencyFormatService);
   private dispatchNotesService = inject(DispatchNotesService);
   private printService = inject(DispatchNotePrintService);
   private dialogService = inject(DialogService);
   private toastService = inject(ToastService);
+  private destroyRef = inject(DestroyRef);
 
-  @Output() viewDetail = new EventEmitter<DispatchNote>();
-  @Output() create = new EventEmitter<void>();
-  @Output() refresh = new EventEmitter<void>();
-
-  private destroy$ = new Subject<void>();
+  readonly viewDetail = output<DispatchNote>();
+  readonly create = output<void>();
+  readonly refresh = output<void>();
 
   // Data
-  dispatch_notes: DispatchNote[] = [];
-  loading = false;
-  total_items = 0;
+  dispatch_notes = signal<DispatchNote[]>([]);
+  loading = signal(false);
+  total_items = signal(0);
 
   // Pagination
   filters = { page: 1, limit: 10 };
 
   // Filter state
-  search_term = '';
+  search_term = signal('');
   selected_status = '';
 
   // Filter configuration
@@ -242,17 +238,12 @@ export class DispatchNoteListComponent implements OnInit, OnDestroy {
     ],
   };
 
-  ngOnInit(): void {
+  constructor() {
     this.loadDispatchNotes();
   }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
   loadDispatchNotes(): void {
-    this.loading = true;
+    this.loading.set(true);
 
     const query: any = {
       page: this.filters.page,
@@ -261,37 +252,39 @@ export class DispatchNoteListComponent implements OnInit, OnDestroy {
     if (this.selected_status) {
       query.status = this.selected_status;
     }
-    if (this.search_term) {
-      query.search = this.search_term;
+    if (this.search_term()) {
+      query.search = this.search_term();
     }
 
     this.dispatchNotesService
       .getDispatchNotes(query)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: any) => {
           const notes = response.data || response;
-          this.dispatch_notes = Array.isArray(notes) ? notes : [];
-          this.total_items =
+          const arr = Array.isArray(notes) ? notes : [];
+          this.dispatch_notes.set(arr);
+          this.total_items.set(
             response.meta?.pagination?.total ??
             response.meta?.total ??
             response.pagination?.total ??
-            this.dispatch_notes.length;
-          this.loading = false;
+            arr.length
+          );
+          this.loading.set(false);
         },
         error: (error: any) => {
           console.error('Error loading dispatch notes:', error);
           this.toastService.error(
             'Error al cargar las remisiones. Por favor intenta nuevamente.',
           );
-          this.loading = false;
+          this.loading.set(false);
         },
       });
   }
 
   // Pagination
   get totalPages(): number {
-    return Math.ceil(this.total_items / (this.filters.limit || 10));
+    return Math.ceil(this.total_items() / (this.filters.limit || 10));
   }
 
   onPageChange(page: number): void {
@@ -300,7 +293,7 @@ export class DispatchNoteListComponent implements OnInit, OnDestroy {
   }
 
   onSearchChange(term: string): void {
-    this.search_term = term;
+    this.search_term.set(term);
     this.filters.page = 1;
     this.loadDispatchNotes();
   }
@@ -313,7 +306,7 @@ export class DispatchNoteListComponent implements OnInit, OnDestroy {
   }
 
   clearFilters(): void {
-    this.search_term = '';
+    this.search_term.set('');
     this.selected_status = '';
     this.filter_values = {};
     this.filters.page = 1;
@@ -323,13 +316,13 @@ export class DispatchNoteListComponent implements OnInit, OnDestroy {
   onActionClick(action: string): void {
     switch (action) {
       case 'create':
-        this.create.emit();
+        this.create.emit(undefined);
         break;
     }
   }
 
   get hasFilters(): boolean {
-    return !!(this.search_term || this.selected_status);
+    return !!(this.search_term() || this.selected_status);
   }
 
   getEmptyStateTitle(): string {
@@ -358,7 +351,7 @@ export class DispatchNoteListComponent implements OnInit, OnDestroy {
 
     this.dispatchNotesService
       .confirm(dn.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.success('Remision confirmada');
@@ -379,7 +372,7 @@ export class DispatchNoteListComponent implements OnInit, OnDestroy {
 
     this.dispatchNotesService
       .deliver(dn.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.success('Remision marcada como entregada');
@@ -400,7 +393,7 @@ export class DispatchNoteListComponent implements OnInit, OnDestroy {
 
     this.dispatchNotesService
       .invoice(dn.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.success('Factura generada exitosamente');
@@ -422,7 +415,7 @@ export class DispatchNoteListComponent implements OnInit, OnDestroy {
 
     this.dispatchNotesService
       .void(dn.id, { void_reason: 'Anulada por usuario' })
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.success('Remision anulada');
@@ -444,7 +437,7 @@ export class DispatchNoteListComponent implements OnInit, OnDestroy {
 
     this.dispatchNotesService
       .remove(dn.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.success('Remision eliminada');

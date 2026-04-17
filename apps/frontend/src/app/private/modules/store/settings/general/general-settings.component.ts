@@ -1,5 +1,5 @@
 import { Component, inject, OnInit, computed, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { StoreSettingsService } from './services/store-settings.service';
 import { StoreSettings } from '../../../../../core/models/store-settings.interface';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
@@ -15,15 +15,14 @@ import { ScrollableTabsComponent } from '../../../../../shared/components/scroll
 import { StickyHeaderComponent, StickyHeaderBadgeColor, StickyHeaderActionButton } from '../../../../../shared/components/sticky-header/sticky-header.component';
 import { ConfigFacade } from '../../../../../core/store/config';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
-import { combineLatest, firstValueFrom } from 'rxjs';
-import { take } from 'rxjs/operators';
+import { firstValueFrom } from 'rxjs';
 
 
 @Component({
   selector: 'app-general-settings',
   standalone: true,
   imports: [
-    CommonModule, LucideAngularModule,
+    LucideAngularModule,
     IconComponent,
     GeneralSettingsForm,
     InventorySettingsForm,
@@ -33,7 +32,7 @@ import { take } from 'rxjs/operators';
     AppSettingsForm,
     ScrollableTabsComponent,
     StickyHeaderComponent
-  ],
+],
   templateUrl: './general-settings.component.html',
   styleUrls: ['./general-settings.component.scss'],
 })
@@ -102,16 +101,13 @@ export class GeneralSettingsComponent implements OnInit {
   }
 
   private resolveStoreAppUrl(): void {
-    combineLatest([
-      this.authFacade.userDomainHostname$,
-      this.authFacade.userOrganizationSlug$,
-    ]).pipe(take(1)).subscribe(([hostname, slug]) => {
-      if (hostname) {
-        this.storeAppUrl = `${window.location.protocol}//${hostname}`;
-      } else if (slug) {
-        this.storeAppUrl = '/' + slug;
-      }
-    });
+    const hostname = this.authFacade.userDomainHostname();
+    const slug = this.authFacade.userOrganizationSlug();
+    if (hostname) {
+      this.storeAppUrl = `${window.location.protocol}//${hostname}`;
+    } else if (slug) {
+      this.storeAppUrl = '/' + slug;
+    }
   }
 
   loadSettings() {

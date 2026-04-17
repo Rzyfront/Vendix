@@ -1,13 +1,13 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
   OnInit,
   OnDestroy,
   inject,
+  input,
+  output,
+  signal,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { FormBuilder, FormGroup } from '@angular/forms';
 import { Subscription } from 'rxjs';
@@ -37,7 +37,6 @@ import {
   selector: 'app-order-details',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     ModalComponent,
@@ -51,15 +50,15 @@ import {
 })
 export class OrderDetailsComponent implements OnInit, OnDestroy {
   private currencyService = inject(CurrencyFormatService);
-  @Input() isOpen = false;
-  @Input() order?: OrderListItem;
-  @Output() isOpenChange = new EventEmitter<boolean>();
+  readonly isOpen = input<boolean>(false);
+  readonly order = input<OrderListItem>();
+  readonly isOpenChange = output<boolean>();
 
-  orderDetails?: OrderDetails;
-  isLoading = false;
-  isUpdating = false;
-  isDispatching = false;
-  showDispatchModal = false;
+  readonly orderDetails = signal<OrderDetails | undefined>(undefined);
+  readonly isLoading = signal(false);
+  readonly isUpdating = signal(false);
+  readonly isDispatching = signal(false);
+  readonly showDispatchModal = signal(false);
 
   // Dispatch form
   dispatchForm!: FormGroup;
@@ -94,7 +93,7 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
   }
 
   ngOnInit(): void {
-    if (this.order) {
+    if (this.order()) {
       this.loadOrderDetails();
     }
   }
@@ -122,28 +121,29 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
   }
 
   ngOnChanges(): void {
-    if (this.order && this.isOpen) {
+    if (this.order() && this.isOpen()) {
       this.loadOrderDetails();
     }
   }
 
   loadOrderDetails(): void {
-    if (!this.order) return;
+    if (!this.order()) return;
 
-    this.isLoading = true;
+    this.isLoading.set(true);
 
     // TODO: Replace with actual API call
     // For now, generate mock data
     setTimeout(() => {
-      this.orderDetails = this.generateMockOrderDetails(this.order!);
+      const details = this.generateMockOrderDetails(this.order()!);
+      this.orderDetails.set(details);
       this.updateForm.patchValue({
-        status: this.orderDetails.status,
-        payment_status: this.orderDetails.payment_status,
-        tracking_number: this.orderDetails.tracking_number || '',
-        estimated_delivery: this.orderDetails.estimated_delivery || '',
-        notes: this.orderDetails.notes || '',
+        status: details.status,
+        payment_status: details.payment_status,
+        tracking_number: details.tracking_number || '',
+        estimated_delivery: details.estimated_delivery || '',
+        notes: details.notes || '',
       });
-      this.isLoading = false;
+      this.isLoading.set(false);
     }, 1000);
   }
 
@@ -192,19 +192,19 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
   }
 
   onUpdateOrder(): void {
-    if (!this.orderDetails || this.updateForm.invalid) return;
+    if (!this.orderDetails() || this.updateForm.invalid) return;
 
-    this.isUpdating = true;
+    this.isUpdating.set(true);
 
     // TODO: Replace with actual API call
     setTimeout(() => {
       this.loadOrderDetails(); // Reload details
-      this.isUpdating = false;
+      this.isUpdating.set(false);
     }, 1000);
   }
 
   onCancelOrder(): void {
-    if (!this.orderDetails) return;
+    if (!this.orderDetails()) return;
 
     const reason = prompt('Please enter the reason for cancellation:');
     if (!reason) return;
@@ -216,7 +216,7 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
   }
 
   onRefundOrder(): void {
-    if (!this.orderDetails) return;
+    if (!this.orderDetails()) return;
 
     const amount = prompt('Enter refund amount (leave empty for full refund):');
     const refundAmount = amount ? parseFloat(amount) : undefined;
@@ -230,13 +230,13 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
   }
 
   onPrintInvoice(): void {
-    if (!this.orderDetails) return;
+    if (!this.orderDetails()) return;
 
     // TODO: Replace with actual API call
   }
 
   onPrintPackingSlip(): void {
-    if (!this.orderDetails) return;
+    if (!this.orderDetails()) return;
 
     // TODO: Replace with actual API call
   }
@@ -281,66 +281,70 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
   }
 
   getCustomerName(): string {
-    if (!this.orderDetails?.customer) return 'Unknown Customer';
-    return `${this.orderDetails.customer.first_name} ${this.orderDetails.customer.last_name}`;
+    const d = this.orderDetails();
+    if (!d?.customer) return 'Unknown Customer';
+    return `${d.customer.first_name} ${d.customer.last_name}`;
   }
 
   getStoreName(): string {
-    if (!this.orderDetails?.store) return 'Unknown Store';
-    return this.orderDetails.store.name;
+    const d = this.orderDetails();
+    if (!d?.store) return 'Unknown Store';
+    return d.store.name;
   }
 
   canCancelOrder(): boolean {
-    if (!this.orderDetails) return false;
+    const d = this.orderDetails();
+    if (!d) return false;
     return [
       OrderStatus.PENDING,
       OrderStatus.CONFIRMED,
       OrderStatus.PROCESSING,
-    ].includes(this.orderDetails.status);
+    ].includes(d.status);
   }
 
   canRefundOrder(): boolean {
-    if (!this.orderDetails) return false;
+    const d = this.orderDetails();
+    if (!d) return false;
     return (
-      this.orderDetails.payment_status === PaymentStatus.PAID &&
-      [OrderStatus.DELIVERED, OrderStatus.SHIPPED].includes(
-        this.orderDetails.status,
-      )
+      d.payment_status === PaymentStatus.PAID &&
+      [OrderStatus.DELIVERED, OrderStatus.SHIPPED].includes(d.status)
     );
   }
 
   canUpdateTracking(): boolean {
-    if (!this.orderDetails) return false;
+    const d = this.orderDetails();
+    if (!d) return false;
     return [
       OrderStatus.CONFIRMED,
       OrderStatus.PROCESSING,
       OrderStatus.SHIPPED,
-    ].includes(this.orderDetails.status);
+    ].includes(d.status);
   }
 
   canDispatchOrder(): boolean {
-    if (!this.orderDetails) return false;
+    const d = this.orderDetails();
+    if (!d) return false;
     return (
-      this.orderDetails.status === OrderStatus.PROCESSING &&
-      this.orderDetails.payment_status === PaymentStatus.PAID &&
-      this.orderDetails.delivery_type === 'home_delivery' &&
-      !!this.orderDetails.shipping_method_id
+      d.status === OrderStatus.PROCESSING &&
+      d.payment_status === PaymentStatus.PAID &&
+      d.delivery_type === 'home_delivery' &&
+      !!d.shipping_method_id
     );
   }
 
   openDispatchModal(): void {
     this.dispatchForm.reset();
-    this.showDispatchModal = true;
+    this.showDispatchModal.set(true);
   }
 
   closeDispatchModal(): void {
-    this.showDispatchModal = false;
+    this.showDispatchModal.set(false);
   }
 
   onDispatchOrder(): void {
-    if (!this.orderDetails) return;
+    if (!this.orderDetails()) return;
 
-    this.isDispatching = true;
+    this.isDispatching.set(true);
 
     const dispatchData = {
       tracking_number:
@@ -353,7 +357,7 @@ export class OrderDetailsComponent implements OnInit, OnDestroy {
     setTimeout(() => {
       this.closeDispatchModal();
       this.loadOrderDetails();
-      this.isDispatching = false;
+      this.isDispatching.set(false);
     }, 1000);
   }
 }

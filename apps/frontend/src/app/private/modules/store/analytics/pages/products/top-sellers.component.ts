@@ -1,7 +1,9 @@
-import { Component, OnInit, OnDestroy, inject } from '@angular/core';
+import {Component, OnInit, inject,
+  DestroyRef} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Store } from '@ngrx/store';
-import { Observable, Subject, takeUntil } from 'rxjs';
+import { Observable } from 'rxjs';
+import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
 
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
@@ -37,14 +39,12 @@ import { EChartsOption } from 'echarts';
         width: 100%;
       }
     `,
-  ],
-})
-export class TopSellersComponent implements OnInit, OnDestroy {
+  ]})
+export class TopSellersComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
-  private destroy$ = new Subject<void>();
-
-  topSellers$: Observable<TopSellingProduct[]> = this.store.select(
+topSellers$: Observable<TopSellingProduct[]> = this.store.select(
     ProductsSelectors.selectTopSellers,
   );
   loadingTopSellers$: Observable<boolean> = this.store.select(
@@ -53,6 +53,10 @@ export class TopSellersComponent implements OnInit, OnDestroy {
   dateRange$: Observable<DateRangeFilter> = this.store.select(
     ProductsSelectors.selectDateRange,
   );
+
+  readonly topSellers = toSignal(this.topSellers$, { initialValue: [] as TopSellingProduct[] });
+  readonly loadingTopSellers = toSignal(this.loadingTopSellers$, { initialValue: false });
+  readonly dateRange = toSignal(this.dateRange$);
 
   topSellersChartOptions: EChartsOption = {};
 
@@ -64,20 +68,17 @@ export class TopSellersComponent implements OnInit, OnDestroy {
       key: 'revenue',
       label: 'Ingresos',
       align: 'right',
-      transform: (v) => this.currencyService.format(v),
-    },
+      transform: (v) => this.currencyService.format(v)},
     {
       key: 'average_price',
       label: 'Precio Promedio',
       align: 'right',
-      transform: (v) => this.currencyService.format(v),
-    },
+      transform: (v) => this.currencyService.format(v)},
     {
       key: 'profit_margin',
       label: 'Margen',
       align: 'right',
-      transform: (v) => (v !== null ? `${v.toFixed(1)}%` : '-'),
-    },
+      transform: (v) => (v !== null ? `${v.toFixed(1)}%` : '-')},
   ];
 
   cardConfig: ItemListCardConfig = {
@@ -89,35 +90,26 @@ export class TopSellersComponent implements OnInit, OnDestroy {
       {
         key: 'average_price',
         label: 'Precio Prom.',
-        transform: (v) => this.currencyService.format(v),
-      },
+        transform: (v) => this.currencyService.format(v)},
       {
         key: 'profit_margin',
         label: 'Margen',
-        transform: (v) => (v !== null ? `${v.toFixed(1)}%` : '-'),
-      },
+        transform: (v) => (v !== null ? `${v.toFixed(1)}%` : '-')},
     ],
     footerKey: 'revenue',
     footerLabel: 'Ingresos',
-    footerTransform: (v) => this.currencyService.format(v),
-  };
+    footerTransform: (v) => this.currencyService.format(v)};
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
 
     this.store.dispatch(ProductsActions.loadTopSellers());
 
-    this.topSellers$.pipe(takeUntil(this.destroy$)).subscribe((topSellers) => {
+    this.topSellers$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((topSellers) => {
       this.updateChart(topSellers);
     });
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  onDateRangeChange(range: DateRangeFilter): void {
+onDateRangeChange(range: DateRangeFilter): void {
     this.store.dispatch(ProductsActions.setDateRange({ dateRange: range }));
   }
 
@@ -148,30 +140,25 @@ export class TopSellersComponent implements OnInit, OnDestroy {
           const data = params[0];
           const product = reversed[data.dataIndex];
           return `<strong>${product.product_name}</strong><br/>Ingresos: ${this.currencyService.format(data.value)}<br/>Unidades: ${product.units_sold}`;
-        },
-      },
+        }},
       grid: {
         left: '3%',
         right: '6%',
         bottom: '3%',
         top: '3%',
-        containLabel: true,
-      },
+        containLabel: true},
       xAxis: {
         type: 'value',
         axisLine: { show: false },
         axisLabel: {
           color: textSecondary,
-          formatter: (value: number) => this.currencyService.format(value, 0),
-        },
-        splitLine: { lineStyle: { color: borderColor } },
-      },
+          formatter: (value: number) => this.currencyService.format(value, 0)},
+        splitLine: { lineStyle: { color: borderColor } }},
       yAxis: {
         type: 'category',
         data: names,
         axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary, fontSize: 11 },
-      },
+        axisLabel: { color: textSecondary, fontSize: 11 }},
       series: [
         {
           name: 'Ingresos',
@@ -179,11 +166,8 @@ export class TopSellersComponent implements OnInit, OnDestroy {
           data: revenues,
           itemStyle: {
             color: primaryColor,
-            borderRadius: [0, 4, 4, 0],
-          },
-          barMaxWidth: 30,
-        },
-      ],
-    };
+            borderRadius: [0, 4, 4, 0]},
+          barMaxWidth: 30},
+      ]};
   }
 }

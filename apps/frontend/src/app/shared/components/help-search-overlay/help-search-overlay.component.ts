@@ -1,15 +1,17 @@
 import {
   Component,
+  DestroyRef,
   ElementRef,
   HostListener,
   inject,
-  OnDestroy,
-  ViewChild,
+  signal,
+  viewChild
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import { Router } from '@angular/router';
-import { FormsModule } from '@angular/forms';
-import { Subject, takeUntil, debounceTime, distinctUntilChanged } from 'rxjs';
+import { FormControl, FormsModule, ReactiveFormsModule } from '@angular/forms';
+import { Subject, debounceTime, distinctUntilChanged } from 'rxjs';
 
 import { IconComponent } from '../icon/icon.component';
 import { SpinnerComponent } from '../spinner/spinner.component';
@@ -19,24 +21,24 @@ import { HelpArticle } from '../../../private/modules/store/help/models/help-art
 @Component({
   selector: 'app-help-search-overlay',
   standalone: true,
-  imports: [CommonModule, FormsModule, IconComponent, SpinnerComponent],
+  imports: [FormsModule, ReactiveFormsModule, IconComponent, SpinnerComponent],
   template: `
     <!-- Trigger Button -->
     <button
       class="search-trigger"
       (click)="open($event)"
       aria-label="Buscar en Centro de Ayuda"
-    >
+      >
       <app-icon name="search" [size]="18"></app-icon>
     </button>
-
+    
     <!-- Overlay -->
     <dialog
       #dialogRef
       class="overlay"
       (click)="onBackdropClick($event)"
       (cancel)="close()"
-    >
+      >
       <div class="spotlight" (click)="$event.stopPropagation()">
         <!-- Search Input -->
         <div class="spotlight-input-wrap">
@@ -46,58 +48,68 @@ import { HelpArticle } from '../../../private/modules/store/help/models/help-art
             type="text"
             class="spotlight-input"
             placeholder="Buscar artículos de ayuda..."
-            [(ngModel)]="query"
-            (ngModelChange)="onQueryChange($event)"
+            [formControl]="searchControl"
+            (input)="onQueryChange(searchControl.value)"
             autocomplete="off"
-          />
-          <kbd class="spotlight-kbd" *ngIf="!query">ESC</kbd>
-          <button
-            *ngIf="query"
-            class="spotlight-clear"
-            (click)="clearQuery()"
-          >
-            <app-icon name="x" [size]="16"></app-icon>
-          </button>
+            />
+          @if (!searchControl.value) {
+            <kbd class="spotlight-kbd">ESC</kbd>
+          }
+          @if (searchControl.value) {
+            <button
+              class="spotlight-clear"
+              (click)="clearQuery()"
+              >
+              <app-icon name="x" [size]="16"></app-icon>
+            </button>
+          }
         </div>
 
         <!-- Results -->
-        <div class="spotlight-results" *ngIf="query.length >= 2">
-          <!-- Loading -->
-          <div class="spotlight-loading" *ngIf="isSearching">
-            <app-spinner size="sm"></app-spinner>
-            <span>Buscando...</span>
+        @if (searchControl.value.length >= 2) {
+          <div class="spotlight-results">
+            <!-- Loading -->
+            @if (isSearching()) {
+              <div class="spotlight-loading">
+                <app-spinner size="sm"></app-spinner>
+                <span>Buscando...</span>
+              </div>
+            }
+            <!-- Results List -->
+            @for (article of results(); track article; let i = $index) {
+              <div
+                class="spotlight-result"
+                [class.active]="i === activeIndex()"
+                (click)="selectResult(article)"
+                (mouseenter)="activeIndex.set(i)"
+                >
+                <div class="result-content">
+                  <span class="result-title">{{ article.title }}</span>
+                  <span class="result-summary">{{ article.summary }}</span>
+                </div>
+                <span class="result-category">{{ article.category.name }}</span>
+              </div>
+            }
+            <!-- Empty -->
+            @if (!isSearching() && results().length === 0 && hasSearched()) {
+              <div class="spotlight-empty">
+                <app-icon name="search" [size]="24" class="empty-icon"></app-icon>
+                <span>No se encontraron artículos</span>
+              </div>
+            }
           </div>
-
-          <!-- Results List -->
-          <div
-            *ngFor="let article of results; let i = index"
-            class="spotlight-result"
-            [class.active]="i === activeIndex"
-            (click)="selectResult(article)"
-            (mouseenter)="activeIndex = i"
-          >
-            <div class="result-content">
-              <span class="result-title">{{ article.title }}</span>
-              <span class="result-summary">{{ article.summary }}</span>
-            </div>
-            <span class="result-category">{{ article.category.name }}</span>
-          </div>
-
-          <!-- Empty -->
-          <div class="spotlight-empty" *ngIf="!isSearching && results.length === 0 && hasSearched">
-            <app-icon name="search" [size]="24" class="empty-icon"></app-icon>
-            <span>No se encontraron artículos</span>
-          </div>
-        </div>
+        }
 
         <!-- Hint -->
-        <div class="spotlight-hint" *ngIf="query.length < 2">
-          <app-icon name="help-circle" [size]="16"></app-icon>
-          <span>Escribe al menos 2 caracteres para buscar</span>
-        </div>
+        @if (searchControl.value.length < 2) {
+          <div class="spotlight-hint">
+            <app-icon name="help-circle" [size]="16"></app-icon>
+            <span>Escribe al menos 2 caracteres para buscar</span>
+          </div>
+        }
       </div>
     </dialog>
-  `,
+    `,
   styles: [`
     .search-trigger {
       display: flex;
@@ -290,88 +302,90 @@ import { HelpArticle } from '../../../private/modules/store/help/models/help-art
       color: var(--color-text-tertiary, #9ca3af);
       font-size: 0.8125rem;
     }
-  `],
-})
-export class HelpSearchOverlayComponent implements OnDestroy {
+  `] })
+export class HelpSearchOverlayComponent {
   private helpCenterService = inject(HelpCenterService);
   private router = inject(Router);
-  private destroy$ = new Subject<void>();
-  private searchSubject$ = new Subject<string>();
+  private destroyRef = inject(DestroyRef);
+private searchSubject$ = new Subject<string>();
 
-  @ViewChild('dialogRef') dialogRef!: ElementRef<HTMLDialogElement>;
+  readonly dialogRef = viewChild.required<ElementRef<HTMLDialogElement>>('dialogRef');
 
-  isOpen = false;
-  query = '';
-  results: HelpArticle[] = [];
-  isSearching = false;
-  hasSearched = false;
-  activeIndex = 0;
+  readonly isOpen = signal(false);
+  readonly searchControl = new FormControl<string>('', { nonNullable: true });
+  readonly results = signal<HelpArticle[]>([]);
+  readonly isSearching = signal(false);
+  readonly hasSearched = signal(false);
+  readonly activeIndex = signal(0);
 
   constructor() {
     this.searchSubject$
       .pipe(
         debounceTime(300),
         distinctUntilChanged(),
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
       )
       .subscribe(q => {
         if (q.trim().length >= 2) {
           this.search(q);
         } else {
-          this.results = [];
-          this.hasSearched = false;
+          this.results.set([]);
+          this.hasSearched.set(false);
         }
       });
+
   }
 
   @HostListener('document:keydown', ['$event'])
   onKeydown(event: KeyboardEvent): void {
-    if (event.key === 'Escape' && this.isOpen) {
+    if (event.key === 'Escape' && this.isOpen()) {
       this.close();
       event.preventDefault();
     }
 
-    if (!this.isOpen) return;
+    if (!this.isOpen()) return;
 
     if (event.key === 'ArrowDown') {
       event.preventDefault();
-      this.activeIndex = Math.min(this.activeIndex + 1, this.results.length - 1);
+      this.activeIndex.set(Math.min(this.activeIndex() + 1, this.results().length - 1));
     }
 
     if (event.key === 'ArrowUp') {
       event.preventDefault();
-      this.activeIndex = Math.max(this.activeIndex - 1, 0);
+      this.activeIndex.set(Math.max(this.activeIndex() - 1, 0));
     }
 
-    if (event.key === 'Enter' && this.results[this.activeIndex]) {
+    const current = this.results()[this.activeIndex()];
+    if (event.key === 'Enter' && current) {
       event.preventDefault();
-      this.selectResult(this.results[this.activeIndex]);
+      this.selectResult(current);
     }
   }
 
   open(event: Event): void {
     event.stopPropagation();
-    this.dialogRef.nativeElement.showModal();
-    this.isOpen = true;
+    this.dialogRef().nativeElement.showModal();
+    this.isOpen.set(true);
     setTimeout(() => {
-      const input = this.dialogRef.nativeElement.querySelector('.spotlight-input') as HTMLInputElement;
+      const input = this.dialogRef().nativeElement.querySelector('.spotlight-input') as HTMLInputElement;
       input?.focus();
     }, 50);
   }
 
   close(): void {
-    if (this.dialogRef.nativeElement.open) {
-      this.dialogRef.nativeElement.close();
+    const dialogRef = this.dialogRef();
+    if (dialogRef.nativeElement.open) {
+      dialogRef.nativeElement.close();
     }
-    this.isOpen = false;
-    this.query = '';
-    this.results = [];
-    this.hasSearched = false;
-    this.activeIndex = 0;
+    this.isOpen.set(false);
+    this.searchControl.setValue('');
+    this.results.set([]);
+    this.hasSearched.set(false);
+    this.activeIndex.set(0);
   }
 
   onBackdropClick(event: Event): void {
-    if (event.target === this.dialogRef.nativeElement) {
+    if (event.target === this.dialogRef().nativeElement) {
       this.close();
     }
   }
@@ -381,9 +395,9 @@ export class HelpSearchOverlayComponent implements OnDestroy {
   }
 
   clearQuery(): void {
-    this.query = '';
-    this.results = [];
-    this.hasSearched = false;
+    this.searchControl.setValue('');
+    this.results.set([]);
+    this.hasSearched.set(false);
   }
 
   selectResult(article: HelpArticle): void {
@@ -392,25 +406,20 @@ export class HelpSearchOverlayComponent implements OnDestroy {
   }
 
   private search(q: string): void {
-    this.isSearching = true;
+    this.isSearching.set(true);
     this.helpCenterService.searchArticles(q, 8)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (results) => {
-          this.results = results;
-          this.isSearching = false;
-          this.hasSearched = true;
-          this.activeIndex = 0;
+          this.results.set(results);
+          this.isSearching.set(false);
+          this.hasSearched.set(true);
+          this.activeIndex.set(0);
         },
         error: () => {
-          this.isSearching = false;
-          this.hasSearched = true;
-        },
-      });
+          this.isSearching.set(false);
+          this.hasSearched.set(true);
+        } });
   }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
 }

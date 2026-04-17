@@ -1,7 +1,7 @@
-import { Component, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject, effect, signal, computed } from '@angular/core';
+import { DecimalPipe } from '@angular/common';
 import { Store } from '@ngrx/store';
-import { Observable } from 'rxjs';
+import { toSignal } from '@angular/core/rxjs-interop';
 
 import {
   FiscalPeriod,
@@ -24,7 +24,8 @@ import {
   selector: 'vendix-balance-sheet',
   standalone: true,
   imports: [
-    CommonModule,
+    DecimalPipe,
+
     ButtonComponent,
     CardComponent,
     IconComponent,
@@ -33,7 +34,11 @@ import {
   template: `
     <div class="w-full">
       <!-- Unified Container -->
-      <app-card [responsive]="true" [padding]="false" customClasses="md:min-h-[400px]">
+      <app-card
+        [responsive]="true"
+        [padding]="false"
+        customClasses="md:min-h-[400px]"
+      >
         <!-- Header -->
         <div
           class="sticky top-0 z-10 bg-background px-2 py-1.5 -mt-[5px]
@@ -50,7 +55,7 @@ import {
             </h2>
             <div class="flex items-center gap-2 w-full md:w-auto">
               <app-selector
-                [options]="period_options"
+                [options]="periodOptions()"
                 placeholder="Seleccionar periodo..."
                 (selectionChange)="onPeriodChange($event)"
                 class="flex-1 md:w-48"
@@ -64,7 +69,7 @@ import {
 
         <!-- Data Content -->
         <div class="relative p-2 md:p-4">
-          @if (loading$ | async) {
+          @if (loading()) {
             <div
               class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
             >
@@ -74,7 +79,7 @@ import {
             </div>
           }
 
-          @if (report$ | async; as report) {
+          @if (report(); as report) {
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <!-- Assets -->
               <div
@@ -260,36 +265,45 @@ import {
     </div>
   `,
 })
-export class BalanceSheetComponent implements OnInit {
+export class BalanceSheetComponent {
   private store = inject(Store);
 
-  report$: Observable<BalanceSheetReport | null> =
-    this.store.select(selectBalanceSheet);
-  loading$: Observable<boolean> = this.store.select(selectReportLoading);
-  periods$: Observable<FiscalPeriod[]> = this.store.select(selectFiscalPeriods);
+  // Signal-based state
+  readonly report = toSignal(this.store.select(selectBalanceSheet), {
+    initialValue: null as BalanceSheetReport | null,
+  });
+  readonly loading = toSignal(this.store.select(selectReportLoading), {
+    initialValue: false,
+  });
+  readonly periods = toSignal(this.store.select(selectFiscalPeriods), {
+    initialValue: [] as FiscalPeriod[],
+  });
 
-  period_options: { value: any; label: string }[] = [];
-  selected_period_id: number | null = null;
+  // ✅ Migrated to signals (Section 9 — antipatrón variables planas)
+  readonly selectedPeriodId = signal<number | null>(null);
+  readonly periodOptions = computed(() =>
+    this.periods().map((p) => ({
+      value: p.id,
+      label: p.name,
+    }))
+  );
 
-  ngOnInit(): void {
-    this.periods$.subscribe((periods) => {
-      this.period_options = periods.map((p) => ({
-        value: p.id,
-        label: p.name,
-      }));
-    });
+  constructor() {
+    // Auto-update period options when periods change (via computed)
+    // Effect no longer needed — computed handles it
   }
 
   onPeriodChange(value: any): void {
-    this.selected_period_id = value;
+    this.selectedPeriodId.set(value);
     this.loadReport();
   }
 
   loadReport(): void {
-    if (this.selected_period_id) {
+    const periodId = this.selectedPeriodId();
+    if (periodId) {
       this.store.dispatch(
         loadBalanceSheet({
-          query: { fiscal_period_id: this.selected_period_id },
+          query: { fiscal_period_id: periodId },
         }),
       );
     }

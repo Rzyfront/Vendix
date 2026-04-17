@@ -1,25 +1,23 @@
-import {
-  Injectable,
-  NgZone,
-  OnDestroy,
-  PLATFORM_ID,
-  Inject,
-} from '@angular/core';
+import {Injectable, OnDestroy, PLATFORM_ID, Inject, signal, DestroyRef, inject} from '@angular/core';
+import {toObservable, takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import { isPlatformBrowser } from '@angular/common';
-import { BehaviorSubject, fromEvent, Observable } from 'rxjs';
+import { fromEvent, Observable } from 'rxjs';
 import { map, startWith } from 'rxjs/operators';
 
 @Injectable({
   providedIn: 'root',
 })
 export class FullscreenService implements OnDestroy {
-  private isFullscreen$ = new BehaviorSubject<boolean>(false);
+  private destroyRef = inject(DestroyRef);
+  // Signal-first: canonical state holder
+  readonly isFullscreenSignal = signal<boolean>(false);
+  // Observable parallel for legacy consumers (takeUntil pipelines, etc.)
+  private readonly isFullscreen$ = toObservable(this.isFullscreenSignal);
   private fullscreenElement: Element | null = null;
   private eventListeners: (() => void)[] = [];
   private isBrowser: boolean;
 
   constructor(
-    private ngZone: NgZone,
     @Inject(PLATFORM_ID) platformId: object,
   ) {
     this.isBrowser = isPlatformBrowser(platformId);
@@ -32,14 +30,14 @@ export class FullscreenService implements OnDestroy {
    * Obtiene el estado actual de fullscreen como Observable
    */
   get isFullscreen(): Observable<boolean> {
-    return this.isFullscreen$.asObservable();
+    return this.isFullscreen$;
   }
 
   /**
    * Obtiene el estado actual de fullscreen como valor booleano
    */
   get isFullscreenActive(): boolean {
-    return this.isFullscreen$.value;
+    return this.isFullscreenSignal();
   }
 
   /**
@@ -58,12 +56,10 @@ export class FullscreenService implements OnDestroy {
       const requestFullscreen = this.getRequestFullscreenMethod(targetElement);
 
       if (requestFullscreen) {
-        await this.ngZone.runOutsideAngular(() => {
-          return (requestFullscreen as any).call(targetElement);
-        });
+        await (requestFullscreen as any).call(targetElement);
 
         this.fullscreenElement = targetElement;
-        this.isFullscreen$.next(true);
+        this.isFullscreenSignal.set(true);
       }
     } catch (error) {
       throw error;
@@ -82,12 +78,10 @@ export class FullscreenService implements OnDestroy {
       const exitFullscreen = this.getExitFullscreenMethod();
 
       if (exitFullscreen) {
-        await this.ngZone.runOutsideAngular(() => {
-          return (exitFullscreen as any).call(document);
-        });
+        await (exitFullscreen as any).call(document);
 
         this.fullscreenElement = null;
-        this.isFullscreen$.next(false);
+        this.isFullscreenSignal.set(false);
       }
     } catch (error) {
       throw error;
@@ -146,26 +140,18 @@ export class FullscreenService implements OnDestroy {
     ];
 
     events.forEach((eventName) => {
-      const cleanup = this.ngZone.runOutsideAngular(() => {
-        return fromEvent(document, eventName).subscribe(() => {
-          this.ngZone.run(() => {
-            this.updateFullscreenState();
-          });
-        });
+      const cleanup = fromEvent(document, eventName).pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
+        this.updateFullscreenState();
       });
 
       this.eventListeners.push(() => cleanup.unsubscribe());
     });
 
     // Detectar cambios con Visibility API para mayor robustez
-    const visibilityCleanup = this.ngZone.runOutsideAngular(() => {
-      return fromEvent(document, 'visibilitychange').subscribe(() => {
-        this.ngZone.run(() => {
-          if (document.visibilityState === 'visible') {
-            this.updateFullscreenState();
-          }
-        });
-      });
+    const visibilityCleanup = fromEvent(document, 'visibilitychange').pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
+      if (document.visibilityState === 'visible') {
+        this.updateFullscreenState();
+      }
     });
 
     this.eventListeners.push(() => visibilityCleanup.unsubscribe());
@@ -176,8 +162,8 @@ export class FullscreenService implements OnDestroy {
    */
   private updateFullscreenState(): void {
     const isCurrentlyFullscreen = !!this.getFullscreenElement();
-    if (isCurrentlyFullscreen !== this.isFullscreen$.value) {
-      this.isFullscreen$.next(isCurrentlyFullscreen);
+    if (isCurrentlyFullscreen !== this.isFullscreenSignal()) {
+      this.isFullscreenSignal.set(isCurrentlyFullscreen);
       document.documentElement.classList.toggle('fullscreen-active', isCurrentlyFullscreen);
     }
   }

@@ -1,14 +1,14 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
   forwardRef,
   inject,
-  ViewChild,
   ElementRef,
+  input,
+  output,
+  signal,
+  viewChild,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   ControlValueAccessor,
   NG_VALUE_ACCESSOR,
@@ -34,7 +34,7 @@ export type InputSize = 'sm' | 'md' | 'lg';
 @Component({
   selector: 'app-input',
   standalone: true,
-  imports: [CommonModule],
+  imports: [],
   providers: [
     {
       provide: NG_VALUE_ACCESSOR,
@@ -43,64 +43,64 @@ export type InputSize = 'sm' | 'md' | 'lg';
     },
   ],
   template: `
-    <div [class]="'w-full ' + customWrapperClass">
+    <div [class]="'w-full ' + customWrapperClass()">
       <!-- Label -->
-      <label
-        *ngIf="label"
-        [for]="inputId"
-        [class]="labelClasses"
-        class="label-with-tooltip"
-      >
-        <span>{{ label }}</span>
-        <span
-          *ngIf="tooltipText"
-          class="help-icon"
-          [attr.data-tooltip]="tooltipText"
+      @if (label()) {
+        <label
+          [for]="inputId()"
+          [class]="labelClasses"
+          class="label-with-tooltip"
         >
-          <svg
-            class="h-4 w-4"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            stroke-width="2"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-            />
-          </svg>
-        </span>
-        <span *ngIf="required" class="text-[var(--color-destructive)] ml-1"
-          >*</span
-        >
-      </label>
+          <span>{{ label() }}</span>
+          @if (tooltipText()) {
+            <span class="help-icon" [attr.data-tooltip]="tooltipText()">
+              <svg
+                class="h-4 w-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
+              </svg>
+            </span>
+          }
+          @if (required()) {
+            <span class="text-[var(--color-destructive)] ml-1">*</span>
+          }
+        </label>
+      }
 
       <!-- Input wrapper -->
       <div class="relative">
         <!-- Prefix icon -->
-        <div
-          *ngIf="prefixIcon"
-          class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"
-        >
-          <ng-content select="[slot=prefix-icon]"></ng-content>
-        </div>
+        @if (prefixIcon()) {
+          <div
+            class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"
+          >
+            <ng-content select="[slot=prefix-icon]"></ng-content>
+          </div>
+        }
 
         <!-- Input field -->
         <input
           #inputRef
-          [id]="inputId"
+          [id]="inputId()"
           [type]="actualInputType"
-          [attr.inputmode]="currency ? 'decimal' : null"
-          [placeholder]="placeholder"
-          [disabled]="disabled"
-          [readonly]="readonly"
-          [value]="value"
-          [step]="step"
-          [min]="min"
-          [max]="max"
+          [attr.inputmode]="currency() ? 'decimal' : null"
+          [placeholder]="placeholder()"
+          [disabled]="isDisabled()"
+          [readonly]="readonly()"
+          [value]="value()"
+          [step]="step()"
+          [min]="min()"
+          [max]="max()"
           [class]="inputClasses"
-          [style]="customInputStyle"
+          [style]="customInputStyle()"
           (input)="onInput($event)"
           (blur)="onBlur()"
           (focus)="onFocus()"
@@ -109,79 +109,81 @@ export type InputSize = 'sm' | 'md' | 'lg';
         />
 
         <!-- Password visibility toggle -->
-        <button
-          *ngIf="type === 'password'"
-          type="button"
-          class="absolute inset-y-0 right-0 pr-3 flex items-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors duration-200 focus:outline-none"
-          (click)="togglePasswordVisibility()"
-          [attr.aria-label]="
-            showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'
-          "
-          tabindex="-1"
-        >
-          <!-- Eye icon (show password) -->
-          <svg
-            *ngIf="!showPassword"
-            class="h-5 w-5"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            stroke-width="2"
+        @if (type() === 'password') {
+          <button
+            type="button"
+            class="absolute inset-y-0 right-0 pr-3 flex items-center text-[var(--color-text-muted)] hover:text-[var(--color-text-primary)] transition-colors duration-200 focus:outline-none"
+            (click)="togglePasswordVisibility()"
+            [attr.aria-label]="
+              showPassword() ? 'Ocultar contraseña' : 'Mostrar contraseña'
+            "
+            tabindex="-1"
           >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
-            />
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
-            />
-          </svg>
-          <!-- Eye-off icon (hide password) -->
-          <svg
-            *ngIf="showPassword"
-            class="h-5 w-5"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            stroke-width="2"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"
-            />
-          </svg>
-        </button>
+            <!-- Eye icon (show password) -->
+            @if (!showPassword()) {
+              <svg
+                class="h-5 w-5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"
+                />
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"
+                />
+              </svg>
+            }
+            <!-- Eye-off icon (hide password) -->
+            @if (showPassword()) {
+              <svg
+                class="h-5 w-5"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M13.875 18.825A10.05 10.05 0 0112 19c-4.478 0-8.268-2.943-9.543-7a9.97 9.97 0 011.563-3.029m5.858.908a3 3 0 114.243 4.243M9.878 9.878l4.242 4.242M9.88 9.88l-3.29-3.29m7.532 7.532l3.29 3.29M3 3l3.59 3.59m0 0A9.953 9.953 0 0112 5c4.478 0 8.268 2.943 9.543 7a10.025 10.025 0 01-4.132 5.411m0 0L21 21"
+                />
+              </svg>
+            }
+          </button>
+        }
 
         <!-- Suffix icon (only show if not password type) -->
-        <div
-          *ngIf="suffixIcon && type !== 'password'"
-          class="absolute inset-y-0 right-0 pr-3 flex items-center"
-          [class.pointer-events-none]="!suffixClickable"
-          (click)="onSuffixClick()"
-        >
-          <ng-content select="[slot=suffix-icon]"></ng-content>
-        </div>
+        @if (suffixIcon() && type() !== 'password') {
+          <div
+            class="absolute inset-y-0 right-0 pr-3 flex items-center"
+            [class.pointer-events-none]="!suffixClickable()"
+            (click)="onSuffixClick()"
+          >
+            <ng-content select="[slot=suffix-icon]"></ng-content>
+          </div>
+        }
       </div>
 
       <!-- Helper text -->
-      <p
-        *ngIf="helperText && !getValidationError()"
-        class="mt-2 text-sm text-[var(--color-text-secondary)]"
-      >
-        {{ helperText }}
-      </p>
+      @if (helperText() && !getValidationError()) {
+        <p class="mt-2 text-sm text-[var(--color-text-secondary)]">
+          {{ helperText() }}
+        </p>
+      }
 
       <!-- Error message -->
-      <p
-        *ngIf="getValidationError()"
-        class="mt-2 text-sm text-[var(--color-destructive)]"
-      >
-        {{ getValidationError() }}
-      </p>
+      @if (getValidationError()) {
+        <p class="mt-2 text-sm text-[var(--color-destructive)]">
+          {{ getValidationError() }}
+        </p>
+      }
     </div>
   `,
   styles: [
@@ -258,62 +260,64 @@ export type InputSize = 'sm' | 'md' | 'lg';
   ],
 })
 export class InputComponent implements ControlValueAccessor {
-  @Input() label?: string;
-  @Input() placeholder = '';
-  @Input() type: InputType = 'text';
-  @Input() size: InputSize = 'md';
-  @Input() styleVariant: FormStyleVariant = 'modern';
-  @Input() disabled = false;
-  @Input() readonly = false;
-  @Input() required = false;
-  @Input() error?: string;
-  @Input() helperText?: string;
-  @Input() prefixIcon = false;
-  @Input() suffixIcon = false;
-  @Input() suffixClickable = false;
-  @Input() control?: AbstractControl | null;
-  @Input() step?: string;
-  @Input() min?: string | number;
-  @Input() max?: string | number;
+  readonly label = input<string>('');
+  readonly placeholder = input('');
+  readonly type = input<InputType>('text');
+  readonly size = input<InputSize>('md');
+  readonly styleVariant = input<FormStyleVariant>('modern');
+  readonly disabled = input<boolean>(false);
+  private disabledState = false;
+  readonly readonly = input(false);
+  readonly required = input(false);
+  readonly error = input<string>();
+  readonly helperText = input<string>('');
+  readonly prefixIcon = input(false);
+  readonly suffixIcon = input(false);
+  readonly suffixClickable = input(false);
+  readonly control = input<AbstractControl | null>();
+  readonly step = input<string>();
+  readonly min = input<string | number>();
+  readonly max = input<string | number>();
 
-  // ✅ Nuevos inputs para personalización de estilos
-  @Input() customInputStyle = ''; // Estilos inline personalizados
-  @Input() customWrapperClass = ''; // Clases para el wrapper
-  @Input() customLabelClass = ''; // Clases para el label
-  @Input() customInputClass = ''; // Clases adicionales para el input
-  @Input() customClasses = ''; // Retrocompatibilidad
-  @Input() tooltipText?: string; // Texto para el tooltip de ayuda (muestra ícono automáticamente)
-  @Input() currency = false; // Enable currency formatting mode
-  @Input() currencyDecimals?: number; // Override decimal places
-  @Input() allowNegative = false; // Allow negative values in currency mode
+  // Nuevos inputs para personalización de estilos
+  readonly customInputStyle = input('');
+  readonly customWrapperClass = input('');
+  readonly customLabelClass = input('');
+  readonly customInputClass = input('');
+  readonly customClasses = input('');
+  readonly tooltipText = input<string>('');
+  readonly currency = input(false);
+  readonly currencyDecimals = input<number>();
+  readonly allowNegative = input(false);
 
-  @Output() inputChange = new EventEmitter<string>();
-  @Output() inputFocus = new EventEmitter<void>();
-  @Output() inputBlur = new EventEmitter<void>();
-  @Output() suffixClick = new EventEmitter<void>();
+  readonly inputChange = output<string>();
+  readonly inputFocus = output<void>();
+  readonly inputBlur = output<void>();
+  readonly suffixClick = output<void>();
 
-  @Input() value = '';
-  inputId = `input-${Math.random().toString(36).substr(2, 9)}`;
-  showPassword = false;
+  value = signal('');
+  inputId = signal(`input-${Math.random().toString(36).substr(2, 9)}`);
+  showPassword = signal(false);
 
-  @ViewChild('inputRef') inputRef!: ElementRef<HTMLInputElement>;
+  readonly inputRef =
+    viewChild.required<ElementRef<HTMLInputElement>>('inputRef');
 
   private currencyService = inject(CurrencyFormatService);
   private currencyRawValue: number | null = null;
   private isCurrencyFocused = false;
 
   // ControlValueAccessor implementation
-  private onChange = (value: any) => { };
-  private onTouched = () => { };
+  private onChange = (value: any) => {};
+  private onTouched = () => {};
 
   writeValue(value: any): void {
-    if (this.currency) {
+    if (this.currency()) {
       this.currencyRawValue = value != null ? Number(value) : null;
       if (!this.isCurrencyFocused) {
-        this.value = this.currencyFormatForDisplay(this.currencyRawValue);
+        this.value.set(this.currencyFormatForDisplay(this.currencyRawValue));
       }
     } else {
-      this.value = value || '';
+      this.value.set(value || '');
     }
   }
 
@@ -326,13 +330,17 @@ export class InputComponent implements ControlValueAccessor {
   }
 
   setDisabledState(isDisabled: boolean): void {
-    this.disabled = isDisabled;
+    this.disabledState = isDisabled;
+  }
+
+  isDisabled(): boolean {
+    return this.disabled() || this.disabledState;
   }
 
   get labelClasses(): string {
     const baseClasses = ['block', 'font-medium', 'mb-2'];
 
-    if (this.styleVariant === 'modern') {
+    if (this.styleVariant() === 'modern') {
       // Modern: iOS-inspired uppercase labels
       return [
         ...baseClasses,
@@ -340,7 +348,7 @@ export class InputComponent implements ControlValueAccessor {
         'uppercase',
         'tracking-[0.05em]',
         'text-[var(--color-text-muted)]',
-        this.customLabelClass,
+        this.customLabelClass(),
       ]
         .filter(Boolean)
         .join(' ');
@@ -351,7 +359,7 @@ export class InputComponent implements ControlValueAccessor {
       ...baseClasses,
       'text-sm',
       'text-[var(--color-text-primary)]',
-      this.customLabelClass,
+      this.customLabelClass(),
     ]
       .filter(Boolean)
       .join(' ');
@@ -371,17 +379,14 @@ export class InputComponent implements ControlValueAccessor {
 
     // Clases de validación por estado
     let stateClasses: string[];
-    if (this.control?.invalid && this.control?.touched) {
+    const control = this.control();
+    if (control?.invalid && control?.touched) {
       stateClasses = [
         'border-[var(--color-destructive)]',
         'focus:border-[var(--color-destructive)]',
         'bg-[rgba(239,68,68,0.1)]',
       ];
-    } else if (
-      this.control?.valid &&
-      this.control?.touched &&
-      this.control?.value
-    ) {
+    } else if (control?.valid && control?.touched && control?.value) {
       stateClasses = [
         'border-[var(--color-primary)]',
         'focus:border-[var(--color-primary)]',
@@ -401,8 +406,13 @@ export class InputComponent implements ControlValueAccessor {
       md: { pl: ['pl-3', 'sm:pl-4'], pr: ['pr-3', 'sm:pr-4'] },
       lg: { pl: ['pl-4'], pr: ['pr-4'] },
     };
-    const leftPadding = this.prefixIcon ? ['pl-10'] : basePadding[this.size].pl;
-    const rightPadding = (this.suffixIcon || this.type === 'password') ? ['pr-10'] : basePadding[this.size].pr;
+    const leftPadding = this.prefixIcon()
+      ? ['pl-10']
+      : basePadding[this.size()].pl;
+    const rightPadding =
+      this.suffixIcon() || this.type() === 'password'
+        ? ['pr-10']
+        : basePadding[this.size()].pr;
 
     let variantClasses: string[];
 
@@ -416,29 +426,29 @@ export class InputComponent implements ControlValueAccessor {
       lg: ['h-12', 'sm:h-[52px]', 'text-base', 'sm:text-lg'],
     };
 
-    if (this.styleVariant === 'modern') {
+    if (this.styleVariant() === 'modern') {
       // Modern: iOS-inspired with shadow focus
       variantClasses = [
-        ...sizeClasses[this.size],
+        ...sizeClasses[this.size()],
         'rounded-xl',
         'bg-[var(--color-background)]',
         'focus:bg-[var(--color-surface)]',
         'focus:shadow-[0_0_0_3px_var(--color-ring)]',
-        this.control?.invalid && this.control?.touched
+        control?.invalid && control?.touched
           ? 'focus:shadow-[0_0_0_3px_rgba(239,68,68,0.3)]'
-          : this.control?.valid && this.control?.touched && this.control?.value
+          : control?.valid && control?.touched && control?.value
             ? 'focus:shadow-[0_0_0_3px_rgba(126,215,165,0.3)]'
             : '',
       ];
     } else {
       // Classic: with ring focus
       variantClasses = [
-        ...sizeClasses[this.size],
+        ...sizeClasses[this.size()],
         'rounded-xl',
         'focus:ring-2',
-        this.control?.invalid && this.control?.touched
+        control?.invalid && control?.touched
           ? 'focus:ring-[var(--color-destructive)]/30'
-          : this.control?.valid && this.control?.touched && this.control?.value
+          : control?.valid && control?.touched && control?.value
             ? 'focus:ring-[var(--color-primary)]/30'
             : 'focus:ring-secondary/40',
       ];
@@ -454,26 +464,30 @@ export class InputComponent implements ControlValueAccessor {
     ];
 
     // Agregar clases personalizadas
-    if (this.customInputClass) {
-      classes.push(this.customInputClass);
+    const customInputClass = this.customInputClass();
+    if (customInputClass) {
+      classes.push(customInputClass);
     }
-    if (this.customClasses) {
-      classes.push(this.customClasses);
+    const customClasses = this.customClasses();
+    if (customClasses) {
+      classes.push(customClasses);
     }
 
     return classes.filter(Boolean).join(' ');
   }
 
   getValidationError(): string | null {
-    if (this.error) {
-      return this.error;
+    const error = this.error();
+    if (error) {
+      return error;
     }
 
-    if (!this.control || !this.control.errors || !this.control.touched) {
+    const control = this.control();
+    if (!control || !control.errors || !control.touched) {
       return null;
     }
 
-    const errors = this.control.errors;
+    const errors = control.errors;
     if (errors['required']) {
       return 'Este campo es requerido.';
     }
@@ -496,7 +510,7 @@ export class InputComponent implements ControlValueAccessor {
       return 'La contraseña debe contener al menos un carácter especial.';
     }
     if (errors['pattern']) {
-      if (this.type === 'tel') {
+      if (this.type() === 'tel') {
         return 'Solo se permiten números y los símbolos + # * ( ) -';
       }
       return 'El formato es inválido.';
@@ -509,14 +523,18 @@ export class InputComponent implements ControlValueAccessor {
   onInput(event: Event): void {
     const target = event.target as HTMLInputElement;
 
-    if (this.currency) {
+    if (this.currency()) {
       const cursorPos = target.selectionStart ?? 0;
       const oldValue = target.value;
       const sanitized = this.currencySanitize(oldValue);
       const formatted = this.currencyFormatLive(sanitized);
-      const newCursorPos = this.currencyAdjustCursor(oldValue, formatted, cursorPos);
+      const newCursorPos = this.currencyAdjustCursor(
+        oldValue,
+        formatted,
+        cursorPos,
+      );
 
-      this.value = formatted;
+      this.value.set(formatted);
       target.value = formatted;
       target.setSelectionRange(newCursorPos, newCursorPos);
 
@@ -526,54 +544,59 @@ export class InputComponent implements ControlValueAccessor {
       return;
     }
 
-    if (this.type === 'tel') {
+    if (this.type() === 'tel') {
       target.value = target.value.replace(/[^\d+#*\s()-]/g, '');
     }
-    this.value = target.value;
-    this.onChange(this.value);
-    this.inputChange.emit(this.value);
+    this.value.set(target.value);
+    this.onChange(this.value());
+    this.inputChange.emit(this.value());
   }
 
   onBlur(): void {
-    if (this.currency) {
+    if (this.currency()) {
       this.isCurrencyFocused = false;
       const formatted = this.currencyFormatForDisplay(this.currencyRawValue);
-      this.value = formatted;
-      if (this.inputRef?.nativeElement) {
-        this.inputRef.nativeElement.value = formatted;
+      this.value.set(formatted);
+      const inputRef = this.inputRef();
+      if (inputRef?.nativeElement) {
+        inputRef.nativeElement.value = formatted;
       }
     }
     this.onTouched();
+    // TODO: The 'emit' function requires a mandatory void argument
     this.inputBlur.emit();
   }
 
   onFocus(): void {
-    if (this.currency) {
+    if (this.currency()) {
       this.isCurrencyFocused = true;
     }
+    // TODO: The 'emit' function requires a mandatory void argument
     this.inputFocus.emit();
   }
 
   onSuffixClick(): void {
-    if (this.suffixClickable && !this.disabled) {
+    if (this.suffixClickable() && !this.isDisabled()) {
+      // TODO: The 'emit' function requires a mandatory void argument
       this.suffixClick.emit();
     }
   }
 
   // Password visibility toggle
   get actualInputType(): InputType {
-    if (this.currency) {
+    if (this.currency()) {
       return 'text';
     }
-    if (this.type === 'password' && this.showPassword) {
+    const type = this.type();
+    if (type === 'password' && this.showPassword()) {
       return 'text';
     }
-    return this.type;
+    return type;
   }
 
   togglePasswordVisibility(): void {
-    if (!this.disabled) {
-      this.showPassword = !this.showPassword;
+    if (!this.isDisabled()) {
+      this.showPassword.set(!this.showPassword());
     }
   }
 
@@ -582,15 +605,23 @@ export class InputComponent implements ControlValueAccessor {
   // =========================================================================
 
   onKeydown(event: KeyboardEvent): void {
-    if (!this.currency) return;
+    if (!this.currency()) return;
 
     const { decimal } = this.currencyGetSeparators();
 
     // Always allow: navigation, selection, clipboard
     const allowedKeys = [
-      'Backspace', 'Delete', 'Tab', 'Escape', 'Enter',
-      'ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown',
-      'Home', 'End',
+      'Backspace',
+      'Delete',
+      'Tab',
+      'Escape',
+      'Enter',
+      'ArrowLeft',
+      'ArrowRight',
+      'ArrowUp',
+      'ArrowDown',
+      'Home',
+      'End',
     ];
     if (allowedKeys.includes(event.key)) return;
     if (event.ctrlKey || event.metaKey) return;
@@ -599,9 +630,10 @@ export class InputComponent implements ControlValueAccessor {
     if (event.key >= '0' && event.key <= '9') return;
 
     // Allow minus at position 0 if allowed
-    if (event.key === '-' && this.allowNegative) {
+    if (event.key === '-' && this.allowNegative()) {
       const input = event.target as HTMLInputElement;
-      if ((input.selectionStart ?? 0) === 0 && !input.value.includes('-')) return;
+      if ((input.selectionStart ?? 0) === 0 && !input.value.includes('-'))
+        return;
     }
 
     const { thousands } = this.currencyGetSeparators();
@@ -621,7 +653,7 @@ export class InputComponent implements ControlValueAccessor {
   }
 
   onPaste(event: ClipboardEvent): void {
-    if (!this.currency) return;
+    if (!this.currency()) return;
     event.preventDefault();
     const pasted = event.clipboardData?.getData('text') || '';
     const input = event.target as HTMLInputElement;
@@ -634,7 +666,7 @@ export class InputComponent implements ControlValueAccessor {
     const sanitized = this.currencySanitize(merged);
     const formatted = this.currencyFormatLive(sanitized);
 
-    this.value = formatted;
+    this.value.set(formatted);
     input.value = formatted;
     this.currencyRawValue = this.currencyParse(sanitized);
     this.onChange(this.currencyRawValue);
@@ -644,15 +676,18 @@ export class InputComponent implements ControlValueAccessor {
   private currencyGetSeparators(): { thousands: string; decimal: string } {
     const style = this.currencyService.currencyFormatStyle();
     switch (style) {
-      case 'dot_comma':   return { thousands: '.', decimal: ',' };
-      case 'space_comma': return { thousands: '\u00A0', decimal: ',' };
+      case 'dot_comma':
+        return { thousands: '.', decimal: ',' };
+      case 'space_comma':
+        return { thousands: '\u00A0', decimal: ',' };
       case 'comma_dot':
-      default:            return { thousands: ',', decimal: '.' };
+      default:
+        return { thousands: ',', decimal: '.' };
     }
   }
 
   private currencyGetDecimals(): number {
-    return this.currencyDecimals ?? this.currencyService.currencyDecimals();
+    return this.currencyDecimals() ?? this.currencyService.currencyDecimals();
   }
 
   private currencyFormatForDisplay(value: number | null): string {
@@ -664,7 +699,8 @@ export class InputComponent implements ControlValueAccessor {
     const fixed = absValue.toFixed(decimals);
     const [intPart, decPart] = fixed.split('.');
     const withThousands = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, thousands);
-    let result = decimals > 0 ? `${withThousands}${decimal}${decPart}` : withThousands;
+    let result =
+      decimals > 0 ? `${withThousands}${decimal}${decPart}` : withThousands;
     if (isNegative) result = '-' + result;
     return result;
   }
@@ -699,7 +735,8 @@ export class InputComponent implements ControlValueAccessor {
   }
 
   private currencyParse(displayValue: string): number | null {
-    if (!displayValue || displayValue.trim() === '' || displayValue === '-') return null;
+    if (!displayValue || displayValue.trim() === '' || displayValue === '-')
+      return null;
     const { thousands, decimal } = this.currencyGetSeparators();
     let cleaned = displayValue;
     const thousandsRegex = new RegExp(this.escapeRegex(thousands), 'g');
@@ -720,7 +757,7 @@ export class InputComponent implements ControlValueAccessor {
       const ch = value[i];
       if (ch >= '0' && ch <= '9') {
         result += ch;
-      } else if (ch === '-' && i === 0 && this.allowNegative) {
+      } else if (ch === '-' && i === 0 && this.allowNegative()) {
         result += ch;
       } else if (ch === thousands || ch === '\u00A0') {
         // Thousands separator → skip (added automatically by formatLive)
@@ -734,7 +771,11 @@ export class InputComponent implements ControlValueAccessor {
     return result;
   }
 
-  private currencyAdjustCursor(oldValue: string, newValue: string, oldCursor: number): number {
+  private currencyAdjustCursor(
+    oldValue: string,
+    newValue: string,
+    oldCursor: number,
+  ): number {
     const { thousands } = this.currencyGetSeparators();
     let contentCharsBefore = 0;
     for (let i = 0; i < oldCursor; i++) {

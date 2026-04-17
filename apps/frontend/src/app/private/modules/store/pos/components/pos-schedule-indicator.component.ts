@@ -1,14 +1,14 @@
-import { CommonModule } from '@angular/common';
-import { Component, EventEmitter, Input, Output } from '@angular/core';
+
+import { Component, input, output } from '@angular/core';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 
 @Component({
   selector: 'app-pos-schedule-indicator',
   standalone: true,
-  imports: [CommonModule, IconComponent],
+  imports: [IconComponent],
   template: `
-    @if (enabled) {
-      @if (isWithinHours && !isDayClosed) {
+    @if (enabled()) {
+      @if (isWithinHours() && !isDayClosed()) {
         <div
           class="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3 py-2 bg-green-50 border border-green-200 rounded-xl text-green-700 min-h-[40px]"
         >
@@ -66,7 +66,7 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
 
           <!-- Status label -->
           <span class="font-semibold text-sm truncate">
-            @if (isDayClosed) {
+            @if (isDayClosed()) {
               Cerrado hoy
             } @else {
               Fuera de servicio
@@ -74,7 +74,7 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
           </span>
 
           <!-- Separator + hours -->
-          @if (!isDayClosed && todayHours) {
+          @if (!isDayClosed() && todayHours()) {
             <span class="text-red-300 hidden sm:inline" aria-hidden="true"
               >&middot;</span
             >
@@ -100,15 +100,16 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
   `,
 })
 export class PosScheduleIndicatorComponent {
-  @Input() isWithinHours: boolean = false;
-  @Input() todayHours: { open: string; close: string } | null = null;
-  @Input() isDayClosed: boolean = false;
-  @Input() enabled: boolean = false;
+  readonly isWithinHours = input<boolean>(false);
+  readonly todayHours = input<{ open: string; close: string } | null>(null);
+  readonly isDayClosed = input<boolean>(false);
+  readonly enabled = input<boolean>(false);
 
-  @Output() clicked = new EventEmitter<void>();
+  readonly clicked = output<void>();
 
   hoursText(): string {
-    if (!this.todayHours) return '';
-    return `${this.todayHours.open} – ${this.todayHours.close}`;
+    const hours = this.todayHours();
+    if (!hours) return '';
+    return `${hours.open} – ${hours.close}`;
   }
 }

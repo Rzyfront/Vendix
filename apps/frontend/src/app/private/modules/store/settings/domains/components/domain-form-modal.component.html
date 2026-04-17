@@ -1,5 +1,5 @@
 <app-modal
-  [isOpen]="isOpen"
+  [isOpen]="isOpen()"
   (isOpenChange)="isOpenChange.emit($event)"
   (cancel)="onCancel()"
   [size]="'md'"
@@ -69,7 +69,7 @@
       <app-button
         variant="outline"
         (clicked)="onCancel()"
-        [disabled]="isSaving"
+        [disabled]="isSaving()"
       >
         Cancelar
       </app-button>
@@ -77,7 +77,7 @@
       <app-button
         variant="primary"
         (clicked)="onSubmit()"
-        [loading]="isSaving"
+        [loading]="isSaving()"
         [disabled]="form.invalid"
       >
         {{ isEditing ? "Actualizar Dominio" : "Crear Dominio" }}

@@ -1,14 +1,14 @@
-import { Injectable, inject } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import {
   Observable,
-  BehaviorSubject,
   finalize,
   catchError,
   throwError,
   map,
 } from 'rxjs';
 import { tap, shareReplay } from 'rxjs/operators';
+import { toObservable } from '@angular/core/rxjs-interop';
 import { environment } from '../../../../../../environments/environment';
 import {
   User,
@@ -36,31 +36,21 @@ export class UsersService {
   private apiUrl = environment.apiUrl;
   private readonly CACHE_TTL = 30000; // 30 segundos
 
-  // Estado de carga
-  private isLoading$ = new BehaviorSubject<boolean>(false);
-  private isCreatingUser$ = new BehaviorSubject<boolean>(false);
-  private isUpdatingUser$ = new BehaviorSubject<boolean>(false);
-  private isDeletingUser$ = new BehaviorSubject<boolean>(false);
-
-  // Exponer estados como observables
-  get isLoading() {
-    return this.isLoading$.asObservable();
-  }
-  get isCreatingUser() {
-    return this.isCreatingUser$.asObservable();
-  }
-  get isUpdatingUser() {
-    return this.isUpdatingUser$.asObservable();
-  }
-  get isDeletingUser() {
-    return this.isDeletingUser$.asObservable();
-  }
+  // Estado de carga — Signals (Angular 20 Zoneless)
+  readonly isLoading = signal<boolean>(false);
+  readonly isLoading$ = toObservable(this.isLoading);
+  readonly isCreatingUser = signal<boolean>(false);
+  readonly isCreatingUser$ = toObservable(this.isCreatingUser);
+  readonly isUpdatingUser = signal<boolean>(false);
+  readonly isUpdatingUser$ = toObservable(this.isUpdatingUser);
+  readonly isDeletingUser = signal<boolean>(false);
+  readonly isDeletingUser$ = toObservable(this.isDeletingUser);
 
   /**
    * Obtener lista de usuarios de la organización con paginación y filtros
    */
   getUsers(query: UserQueryDto = {}): Observable<PaginatedUsersResponse> {
-    this.isLoading$.next(true);
+    this.isLoading.set(true);
 
     let params = new HttpParams();
     if (query.page) params = params.set('page', query.page.toString());
@@ -83,7 +73,7 @@ export class UsersService {
             },
           } as PaginatedUsersResponse;
         }),
-        finalize(() => this.isLoading$.next(false)),
+        finalize(() => this.isLoading.set(false)),
         catchError((error) => {
           console.error('Error loading organization users:', error);
           return throwError(() => error);
@@ -107,12 +97,12 @@ export class UsersService {
    * Crear nuevo usuario en la organización
    */
   createUser(userData: CreateUserDto): Observable<User> {
-    this.isCreatingUser$.next(true);
+    this.isCreatingUser.set(true);
 
     return this.http
       .post<User>(`${this.apiUrl}/organization/users`, userData)
       .pipe(
-        finalize(() => this.isCreatingUser$.next(false)),
+        finalize(() => this.isCreatingUser.set(false)),
         catchError((error) => {
           console.error('Error creating user:', error);
           return throwError(() => error);
@@ -124,12 +114,12 @@ export class UsersService {
    * Actualizar usuario existente
    */
   updateUser(id: number, userData: UpdateUserDto): Observable<User> {
-    this.isUpdatingUser$.next(true);
+    this.isUpdatingUser.set(true);
 
     return this.http
       .patch<User>(`${this.apiUrl}/organization/users/${id}`, userData)
       .pipe(
-        finalize(() => this.isUpdatingUser$.next(false)),
+        finalize(() => this.isUpdatingUser.set(false)),
         catchError((error) => {
           console.error('Error updating user:', error);
           return throwError(() => error);
@@ -141,12 +131,12 @@ export class UsersService {
    * Eliminar usuario (Soft delete)
    */
   deleteUser(id: number): Observable<void> {
-    this.isDeletingUser$.next(true);
+    this.isDeletingUser.set(true);
 
     return this.http
       .delete<void>(`${this.apiUrl}/organization/users/${id}`)
       .pipe(
-        finalize(() => this.isDeletingUser$.next(false)),
+        finalize(() => this.isDeletingUser.set(false)),
         catchError((error) => {
           console.error('Error deleting user:', error);
           return throwError(() => error);
@@ -158,12 +148,12 @@ export class UsersService {
    * Archivar usuario
    */
   archiveUser(id: number): Observable<User> {
-    this.isUpdatingUser$.next(true);
+    this.isUpdatingUser.set(true);
 
     return this.http
       .post<User>(`${this.apiUrl}/organization/users/${id}/archive`, {})
       .pipe(
-        finalize(() => this.isUpdatingUser$.next(false)),
+        finalize(() => this.isUpdatingUser.set(false)),
         catchError((error) => {
           console.error('Error archiving user:', error);
           return throwError(() => error);
@@ -175,12 +165,12 @@ export class UsersService {
    * Reactivar usuario
    */
   reactivateUser(id: number): Observable<User> {
-    this.isUpdatingUser$.next(true);
+    this.isUpdatingUser.set(true);
 
     return this.http
       .post<User>(`${this.apiUrl}/organization/users/${id}/reactivate`, {})
       .pipe(
-        finalize(() => this.isUpdatingUser$.next(false)),
+        finalize(() => this.isUpdatingUser.set(false)),
         catchError((error) => {
           console.error('Error reactivating user:', error);
           return throwError(() => error);
@@ -288,7 +278,7 @@ export class UsersService {
    * Update user configuration
    */
   updateUserConfiguration(id: number, configData: any): Observable<any> {
-    this.isUpdatingUser$.next(true);
+    this.isUpdatingUser.set(true);
 
     return this.http
       .patch<any>(
@@ -297,7 +287,7 @@ export class UsersService {
       )
       .pipe(
         map((response) => response.data),
-        finalize(() => this.isUpdatingUser$.next(false)),
+        finalize(() => this.isUpdatingUser.set(false)),
         catchError((error) => {
           console.error('Error updating user configuration:', error);
           return throwError(() => error);

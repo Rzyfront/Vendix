@@ -1,12 +1,5 @@
-import {
-  Component,
-  Input,
-  Output,
-  EventEmitter,
-  OnChanges,
-  SimpleChanges,
-  inject,
-} from '@angular/core';
+import {Component, input, output, inject, effect, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 
 import { CarteraService } from '../../services/cartera.service';
@@ -29,34 +22,34 @@ import {
   imports: [CommonModule, ModalComponent, ButtonComponent, IconComponent],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onClose()"
-      [title]="payable?.document_number || 'Detalle Cuenta por Pagar'"
+      [title]="payable()?.document_number || 'Detalle Cuenta por Pagar'"
       size="xl"
     >
-      @if (detail) {
+      @if (detail(); as d) {
         <div class="p-4 space-y-6 max-h-[70vh] overflow-y-auto">
           <!-- Supplier Info -->
           <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
               <p class="text-xs text-gray-500">Proveedor</p>
               <p class="text-sm font-semibold">
-                {{ detail.supplier?.name || '—' }}
+                {{ d.supplier?.name || '—' }}
               </p>
             </div>
             <div>
               <p class="text-xs text-gray-500">Email</p>
-              <p class="text-sm">{{ detail.supplier?.email || '—' }}</p>
+              <p class="text-sm">{{ d.supplier?.email || '—' }}</p>
             </div>
             <div>
               <p class="text-xs text-gray-500">Telefono</p>
-              <p class="text-sm">{{ detail.supplier?.phone || '—' }}</p>
+              <p class="text-sm">{{ d.supplier?.phone || '—' }}</p>
             </div>
             <div>
               <p class="text-xs text-gray-500">Origen</p>
               <p class="text-sm">
-                {{ detail.source_type }} #{{ detail.source_id }}
+                {{ d.source_type }} #{{ d.source_id }}
               </p>
             </div>
           </div>
@@ -65,19 +58,19 @@ import {
           <div class="flex items-center gap-3">
             <span
               class="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full"
-              [class]="getStatusClass(detail.status)"
+              [class]="getStatusClass(d.status)"
             >
-              {{ getStatusLabel(detail.status) }}
+              {{ getStatusLabel(d.status) }}
             </span>
             <span
               class="text-[10px] font-bold uppercase px-2 py-0.5 rounded-full"
-              [class]="getPriorityClass(detail.priority)"
+              [class]="getPriorityClass(d.priority)"
             >
-              {{ getPriorityLabel(detail.priority) }}
+              {{ getPriorityLabel(d.priority) }}
             </span>
-            @if (detail.days_overdue > 0) {
+            @if (d.days_overdue > 0) {
               <span class="text-xs text-red-500 font-medium">
-                {{ detail.days_overdue }} dias vencido
+                {{ d.days_overdue }} dias vencido
               </span>
             }
           </div>
@@ -89,25 +82,25 @@ import {
             <div>
               <p class="text-xs text-gray-500">Monto Original</p>
               <p class="text-sm font-semibold font-mono">
-                {{ formatCurrency(detail.original_amount) }}
+                {{ formatCurrency(d.original_amount) }}
               </p>
             </div>
             <div>
               <p class="text-xs text-gray-500">Pagado</p>
               <p class="text-sm font-semibold font-mono text-emerald-600">
-                {{ formatCurrency(detail.paid_amount) }}
+                {{ formatCurrency(d.paid_amount) }}
               </p>
             </div>
             <div>
               <p class="text-xs text-gray-500">Saldo</p>
               <p class="text-sm font-bold font-mono text-primary">
-                {{ formatCurrency(detail.balance) }}
+                {{ formatCurrency(d.balance) }}
               </p>
             </div>
             <div>
               <p class="text-xs text-gray-500">Vencimiento</p>
               <p class="text-sm font-medium">
-                {{ detail.due_date | date : 'dd/MM/yyyy' }}
+                {{ d.due_date | date: 'dd/MM/yyyy' }}
               </p>
             </div>
           </div>
@@ -117,36 +110,38 @@ import {
             <div>
               <p class="text-xs text-gray-500">Fecha Emision</p>
               <p class="text-sm">
-                {{ detail.issue_date | date : 'dd/MM/yyyy' }}
+                {{ d.issue_date | date: 'dd/MM/yyyy' }}
               </p>
             </div>
             <div>
               <p class="text-xs text-gray-500">Ultimo Pago</p>
               <p class="text-sm">
                 {{
-                  detail.last_payment_date
-                    ? (detail.last_payment_date | date : 'dd/MM/yyyy')
+                  d.last_payment_date
+                    ? (d.last_payment_date | date: 'dd/MM/yyyy')
                     : '—'
                 }}
               </p>
             </div>
-            @if (detail.notes) {
+            @if (d.notes) {
               <div class="col-span-2">
                 <p class="text-xs text-gray-500">Notas</p>
-                <p class="text-sm">{{ detail.notes }}</p>
+                <p class="text-sm">{{ d.notes }}</p>
               </div>
             }
           </div>
 
           <!-- Payment History -->
           <div>
-            <h4 class="text-sm font-semibold text-text-primary mb-3 flex items-center gap-2">
+            <h4
+              class="text-sm font-semibold text-text-primary mb-3 flex items-center gap-2"
+            >
               <app-icon name="history" [size]="16"></app-icon>
               Historial de Pagos
             </h4>
-            @if (detail.ap_payments && detail.ap_payments.length > 0) {
+            @if (d.ap_payments && d.ap_payments.length > 0) {
               <div class="space-y-2">
-                @for (payment of detail.ap_payments; track payment.id) {
+                @for (payment of d.ap_payments; track payment.id) {
                   <div
                     class="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
                   >
@@ -165,9 +160,10 @@ import {
                           {{ formatCurrency(payment.amount) }}
                         </p>
                         <p class="text-xs text-gray-500">
-                          {{ payment.payment_date | date : 'dd/MM/yyyy' }}
+                          {{ payment.payment_date | date: 'dd/MM/yyyy' }}
                           @if (payment.payment_method) {
-                            · {{ getPaymentMethodLabel(payment.payment_method) }}
+                            ·
+                            {{ getPaymentMethodLabel(payment.payment_method) }}
                           }
                           @if (payment.reference) {
                             · Ref: {{ payment.reference }}
@@ -192,17 +188,19 @@ import {
 
           <!-- Payment Schedules -->
           <div>
-            <h4 class="text-sm font-semibold text-text-primary mb-3 flex items-center gap-2">
+            <h4
+              class="text-sm font-semibold text-text-primary mb-3 flex items-center gap-2"
+            >
               <app-icon name="calendar-clock" [size]="16"></app-icon>
               Programacion de Pagos
             </h4>
             @if (
-              detail.ap_payment_schedules &&
-              detail.ap_payment_schedules.length > 0
+              d.ap_payment_schedules &&
+              d.ap_payment_schedules.length > 0
             ) {
               <div class="space-y-2">
                 @for (
-                  schedule of detail.ap_payment_schedules;
+                  schedule of d.ap_payment_schedules;
                   track schedule.id
                 ) {
                   <div
@@ -224,14 +222,10 @@ import {
                         </p>
                         <p class="text-xs text-gray-500">
                           Programado:
-                          {{
-                            schedule.scheduled_date | date : 'dd/MM/yyyy'
-                          }}
+                          {{ schedule.scheduled_date | date: 'dd/MM/yyyy' }}
                           @if (schedule.processed_at) {
                             · Procesado:
-                            {{
-                              schedule.processed_at | date : 'dd/MM/yyyy'
-                            }}
+                            {{ schedule.processed_at | date: 'dd/MM/yyyy' }}
                           }
                         </p>
                       </div>
@@ -254,33 +248,23 @@ import {
 
           <!-- Actions -->
           @if (
-            detail.status !== 'paid' && detail.status !== 'written_off'
+            d.status !== 'paid' && d.status !== 'written_off'
           ) {
-            <div
-              class="flex justify-end gap-3 pt-4 border-t border-border"
-            >
+            <div class="flex justify-end gap-3 pt-4 border-t border-border">
               <app-button
                 variant="outline"
                 size="sm"
-                (clicked)="writeOffRequested.emit(detail)"
+                (clicked)="writeOffRequested.emit(d)"
               >
-                <app-icon
-                  name="x-circle"
-                  [size]="14"
-                  slot="icon"
-                ></app-icon>
+                <app-icon name="x-circle" [size]="14" slot="icon"></app-icon>
                 Castigar
               </app-button>
               <app-button
                 variant="primary"
                 size="sm"
-                (clicked)="paymentRequested.emit(detail)"
+                (clicked)="paymentRequested.emit(d)"
               >
-                <app-icon
-                  name="banknote"
-                  [size]="14"
-                  slot="icon"
-                ></app-icon>
+                <app-icon name="banknote" [size]="14" slot="icon"></app-icon>
                 Registrar Pago
               </app-button>
             </div>
@@ -297,39 +281,43 @@ import {
     </app-modal>
   `,
 })
-export class PayableDetailModalComponent implements OnChanges {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Input() payable: AccountPayable | null = null;
-  @Output() paymentRequested = new EventEmitter<AccountPayable>();
-  @Output() writeOffRequested = new EventEmitter<AccountPayable>();
+export class PayableDetailModalComponent {
+  private destroyRef = inject(DestroyRef);
+  readonly isOpen = input(false);
+  readonly isOpenChange = output<boolean>();
+  readonly payable = input<AccountPayable | null>(null);
+  readonly paymentRequested = output<AccountPayable>();
+  readonly writeOffRequested = output<AccountPayable>();
 
   private carteraService = inject(CarteraService);
   private currencyService = inject(CurrencyFormatService);
 
-  detail: AccountPayable | null = null;
-  is_loading = false;
+  detail = signal<AccountPayable | null>(null);
+  is_loading = signal(false);
 
-  ngOnChanges(changes: SimpleChanges): void {
-    if (changes['isOpen'] && this.isOpen && this.payable) {
-      this.loadDetail();
-    }
-    if (changes['isOpen'] && !this.isOpen) {
-      this.detail = null;
-    }
+  constructor() {
+    effect(() => {
+      if (this.isOpen() && this.payable()) {
+        this.loadDetail();
+      }
+      if (this.isOpen() === false) {
+        this.detail.set(null);
+      }
+    });
   }
 
   private loadDetail(): void {
-    if (!this.payable) return;
-    this.is_loading = true;
-    this.carteraService.getPayable(this.payable.id).subscribe({
+    const pay = this.payable();
+    if (!pay) return;
+    this.is_loading.set(true);
+    this.carteraService.getPayable(pay.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
-        this.detail = response.data;
-        this.is_loading = false;
+        this.detail.set(response.data);
+        this.is_loading.set(false);
       },
       error: () => {
-        this.detail = this.payable;
-        this.is_loading = false;
+        this.detail.set(pay);
+        this.is_loading.set(false);
       },
     });
   }

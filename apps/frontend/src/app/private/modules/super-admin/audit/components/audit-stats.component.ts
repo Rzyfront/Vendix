@@ -1,5 +1,5 @@
 import { Component, input, computed } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { StatsComponent } from '../../../../../shared/components/index';
 import {
   AuditStats,
@@ -10,7 +10,7 @@ import {
 @Component({
   selector: 'app-audit-stats',
   standalone: true,
-  imports: [CommonModule, StatsComponent],
+  imports: [StatsComponent],
   template: `
     <div class="space-y-4">
       <div class="stats-container">

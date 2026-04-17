@@ -1,5 +1,5 @@
-import { Component, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject, computed, signal } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { Store } from '@ngrx/store';
 import { Observable, map } from 'rxjs';
 
@@ -41,7 +41,6 @@ interface EntryStats {
   selector: 'vendix-journal-entries',
   standalone: true,
   imports: [
-    CommonModule,
     CardComponent,
     InputsearchComponent,
     StatsComponent,
@@ -57,7 +56,7 @@ interface EntryStats {
       <div
         class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
       >
-        @if (stats$ | async; as stats) {
+        @if (stats(); as stats) {
           <app-stats
             title="Total Asientos"
             [value]="stats.total"
@@ -111,7 +110,7 @@ interface EntryStats {
               class="text-[13px] font-bold text-gray-600 tracking-wide
                        md:text-lg md:font-semibold md:text-text-primary"
             >
-              Asientos Contables ({{ (entries$ | async)?.length || 0 }})
+              Asientos Contables ({{ entries().length }})
             </h2>
             <div class="flex items-center gap-2 w-full md:w-auto">
               <app-inputsearch
@@ -134,22 +133,22 @@ interface EntryStats {
         <!-- Data Content -->
         <div class="relative p-2 md:p-4">
           <app-responsive-data-view
-            [data]="(entries$ | async) || []"
+            [data]="entries() || []"
             [columns]="columns"
             [cardConfig]="card_config"
             [actions]="table_actions"
-            [loading]="(loading$ | async) || false"
+            [loading]="loading()"
             emptyMessage="No se encontraron asientos contables"
             emptyIcon="file-text"
             (rowClick)="onRowClick($event)"
           ></app-responsive-data-view>
 
           <!-- Pagination -->
-          @if (meta$ | async; as meta) {
+          @if (meta(); as meta) {
             @if (meta && meta.totalPages > 1) {
               <div class="mt-4 border-t border-border pt-4">
                 <app-pagination
-                  [currentPage]="(page$ | async) || 1"
+                  [currentPage]="page()"
                   [totalPages]="meta.totalPages"
                   [total]="meta.total"
                   (pageChange)="onPageChange($event)"
@@ -168,34 +167,42 @@ interface EntryStats {
       <!-- Detail Modal -->
       <vendix-journal-entry-detail
         [(isOpen)]="is_detail_modal_open"
-        [entry]="selected_entry"
+        [entry]="selected_entry()"
       ></vendix-journal-entry-detail>
     </div>
   `,
 })
-export class JournalEntriesComponent implements OnInit {
+export class JournalEntriesComponent {
   private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
 
-  entries$: Observable<JournalEntry[]> = this.store.select(selectEntries);
-  loading$: Observable<boolean> = this.store.select(selectEntriesLoading);
-  meta$ = this.store.select(selectEntriesMeta);
-  page$ = this.store.select(selectPage);
+  // State via toSignal
+  readonly entries = toSignal(this.store.select(selectEntries), {
+    initialValue: [] as JournalEntry[],
+  });
+  readonly loading = toSignal(this.store.select(selectEntriesLoading), {
+    initialValue: false,
+  });
+  readonly meta = toSignal(this.store.select(selectEntriesMeta), {
+    initialValue: null,
+  });
+  readonly page = toSignal(this.store.select(selectPage), { initialValue: 1 });
 
   // Stats computed from entries
-  stats$: Observable<EntryStats> = this.entries$.pipe(
-    map((entries) => ({
+  readonly stats = computed(() => {
+    const entries = this.entries();
+    return {
       total: entries.length,
       draft: entries.filter((e) => e.status === 'draft').length,
       posted: entries.filter((e) => e.status === 'posted').length,
       voided: entries.filter((e) => e.status === 'voided').length,
-    })),
-  );
+    };
+  });
 
-  is_create_modal_open = false;
-  is_detail_modal_open = false;
-  selected_entry: JournalEntry | null = null;
-  filter_values: FilterValues = {};
+  readonly is_create_modal_open = signal(false);
+  readonly is_detail_modal_open = signal(false);
+  readonly selected_entry = signal<JournalEntry | null>(null);
+  readonly filter_values = signal<FilterValues>({});
 
   filter_configs: FilterConfig[] = [
     {
@@ -285,20 +292,20 @@ export class JournalEntriesComponent implements OnInit {
     footerKey: 'total_debit',
     footerLabel: 'Total',
     footerStyle: 'prominent',
-    footerTransform: (val: any) => this.currencyService.format(Number(val) || 0),
+    footerTransform: (val: any) =>
+      this.currencyService.format(Number(val) || 0),
     detailKeys: [
       {
         key: 'entry_date',
         label: 'Fecha',
         icon: 'calendar',
-        transform: (val: any) =>
-          val ? formatDateOnlyUTC(val) : '-',
+        transform: (val: any) => (val ? formatDateOnlyUTC(val) : '-'),
       },
       { key: 'entry_type', label: 'Tipo', icon: 'tag' },
     ],
   };
 
-  ngOnInit(): void {
+  constructor() {
     this.store.dispatch(AccountingActions.loadEntries());
   }
 
@@ -307,14 +314,15 @@ export class JournalEntriesComponent implements OnInit {
   }
 
   onFilterChange(values: FilterValues): void {
-    this.filter_values = { ...values };
+    const updatedValues = { ...values };
+    this.filter_values.set(updatedValues);
     const status_filter = (values['status'] as string) || '';
     this.store.dispatch(AccountingActions.setStatusFilter({ status_filter }));
   }
 
   onActionClick(action: string): void {
     if (action === 'create') {
-      this.is_create_modal_open = true;
+      this.is_create_modal_open.set(true);
     }
   }
 
@@ -323,8 +331,8 @@ export class JournalEntriesComponent implements OnInit {
   }
 
   viewEntry(entry: JournalEntry): void {
-    this.selected_entry = entry;
-    this.is_detail_modal_open = true;
+    this.selected_entry.set(entry);
+    this.is_detail_modal_open.set(true);
   }
 
   onPageChange(page: number): void {

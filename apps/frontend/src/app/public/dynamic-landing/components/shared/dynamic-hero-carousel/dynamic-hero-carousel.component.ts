@@ -1,16 +1,20 @@
-import { Component, OnInit, OnDestroy, Input } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, OnInit, OnDestroy, input, computed } from '@angular/core';
+
 import { RouterModule } from '@angular/router';
 
 @Component({
   selector: 'app-dynamic-hero-carousel',
   standalone: true,
-  imports: [CommonModule, RouterModule],
+  imports: [RouterModule],
   templateUrl: './dynamic-hero-carousel.component.html',
   styleUrls: ['./dynamic-hero-carousel.component.scss'],
 })
 export class DynamicHeroCarouselComponent implements OnInit, OnDestroy {
-  @Input() slides: any[] = [];
+  readonly slides = input<any[]>([]);
+  readonly effectiveSlides = computed(() => {
+    const s = this.slides();
+    return s && s.length > 0 ? s : this.defaultSlides;
+  });
 
   // Default slides configuration if none provided (optional fallback)
   defaultSlides = [

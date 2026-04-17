@@ -1,19 +1,18 @@
-import {
-  Component,
-  Input,
-  Output,
-  EventEmitter,
+import {Component,
   OnInit,
-  OnDestroy,
   forwardRef,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
+  input,
+  output,
+  signal,
+  DestroyRef,
+  inject} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import {
   ControlValueAccessor,
   NG_VALUE_ACCESSOR,
-  ReactiveFormsModule,
-} from '@angular/forms';
-import { Subject, debounceTime, distinctUntilChanged, takeUntil } from 'rxjs';
+  ReactiveFormsModule} from '@angular/forms';
+import { Subject, debounceTime, distinctUntilChanged } from 'rxjs';
 import { FormStyleVariant } from '../../types/form.types';
 
 export type InputSearchSize = 'sm' | 'md' | 'lg';
@@ -21,13 +20,12 @@ export type InputSearchSize = 'sm' | 'md' | 'lg';
 @Component({
   selector: 'app-inputsearch',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule],
+  imports: [ReactiveFormsModule],
   providers: [
     {
       provide: NG_VALUE_ACCESSOR,
       useExisting: forwardRef(() => InputsearchComponent),
-      multi: true,
-    },
+      multi: true},
   ],
   styleUrl: './inputsearch.component.scss',
   template: `
@@ -51,11 +49,11 @@ export type InputSearchSize = 'sm' | 'md' | 'lg';
 
         <!-- Input de búsqueda -->
         <input
-          [type]="type"
-          [placeholder]="placeholder"
-          [disabled]="disabled"
-          [readonly]="readonly"
-          [value]="value"
+          [type]="type()"
+          [placeholder]="placeholder()"
+          [disabled]="isDisabled()"
+          [readonly]="readonly()"
+          [value]="value()"
           [class]="inputClasses"
           (input)="onInputChange($event)"
           (focus)="onFocus()"
@@ -65,74 +63,72 @@ export type InputSearchSize = 'sm' | 'md' | 'lg';
         />
 
         <!-- Botón de limpiar (opcional) -->
-        <button
-          *ngIf="showClear && value"
-          type="button"
-          class="inputsearch-clear"
-          [class]="clearButtonClasses"
-          (click)="clearInput()"
-          [disabled]="disabled"
-        >
-          <svg
-            class="clear-icon"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            stroke-linejoin="round"
+        @if (showClear() && value()) {
+          <button
+            type="button"
+            class="inputsearch-clear"
+            [class]="clearButtonClasses"
+            (click)="clearInput()"
+            [disabled]="isDisabled()"
           >
-            <line x1="18" y1="6" x2="6" y2="18"></line>
-            <line x1="6" y1="6" x2="18" y2="18"></line>
-          </svg>
-        </button>
+            <svg
+              class="clear-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        }
       </div>
 
       <!-- Mensaje de ayuda o error -->
-      <div
-        *ngIf="helpText || errorMessage"
-        class="inputsearch-help"
-        [class]="helpClasses"
-      >
-        <span *ngIf="errorMessage" class="error-message">{{
-          errorMessage
-        }}</span>
-        <span *ngIf="!errorMessage && helpText" class="help-text">{{
-          helpText
-        }}</span>
-      </div>
+      @if (helpText() || errorMessage()) {
+        <div class="inputsearch-help" [class]="helpClasses">
+          @if (errorMessage()) {
+            <span class="error-message">{{ errorMessage() }}</span>
+          }
+          @if (!errorMessage() && helpText()) {
+            <span class="help-text">{{ helpText() }}</span>
+          }
+        </div>
+      }
     </div>
-  `,
-})
+  `})
 export class InputsearchComponent
-  implements OnInit, OnDestroy, ControlValueAccessor
+  implements OnInit, ControlValueAccessor
 {
-  @Input() type: 'text' | 'search' | 'email' | 'url' = 'text';
-  @Input() placeholder = 'Buscar...';
-  @Input() disabled = false;
-  @Input() readonly = false;
-  @Input() required = false;
-  @Input() showClear = true;
-  @Input() size: InputSearchSize = 'md';
-  @Input() styleVariant: FormStyleVariant = 'modern';
-  @Input() debounceTime = 300; // 300 ms por defecto
-  @Input() helpText = '';
-  @Input() errorMessage = '';
-  @Input() customClasses = '';
+  private destroyRef = inject(DestroyRef);
+  readonly type = input<'text' | 'search' | 'email' | 'url'>('text');
+  readonly placeholder = input('Buscar...');
+  readonly disabled = input<boolean>(false);
+  private disabledState = false;
+  readonly readonly = input(false);
+  readonly required = input(false);
+  readonly showClear = input(true);
+  readonly size = input<InputSearchSize>('md');
+  readonly styleVariant = input<FormStyleVariant>('modern');
+  readonly debounceTime = input(300);
+  readonly helpText = input('');
+  readonly errorMessage = input('');
+  readonly customClasses = input('');
 
-  @Output() searchChange = new EventEmitter<string>();
-  @Output() search = new EventEmitter<string>();
-  @Output() focus = new EventEmitter<void>();
-  @Output() blur = new EventEmitter<void>();
-  @Output() enter = new EventEmitter<void>();
-  @Output() escape = new EventEmitter<void>();
-  @Output() clear = new EventEmitter<void>();
+  readonly searchChange = output<string>();
+  readonly search = output<string>();
+  readonly focus = output<void>();
+  readonly blur = output<void>();
+  readonly enter = output<void>();
+  readonly escape = output<void>();
+  readonly clear = output<void>();
 
-  value = '';
-  isFocused = false;
-
-  private destroy$ = new Subject<void>();
-  private searchSubject$ = new Subject<string>();
+  readonly value = signal('');
+  readonly isFocused = signal(false);
+private searchSubject$ = new Subject<string>();
 
   // ControlValueAccessor methods
   private onChange: (value: string) => void = () => {};
@@ -142,24 +138,18 @@ export class InputsearchComponent
     // Configurar el debounce para la búsqueda
     this.searchSubject$
       .pipe(
-        debounceTime(this.debounceTime),
+        debounceTime(this.debounceTime()),
         distinctUntilChanged(),
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((searchValue) => {
         this.searchChange.emit(searchValue);
         this.search.emit(searchValue);
       });
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  // ControlValueAccessor implementation
+// ControlValueAccessor implementation
   writeValue(value: string): void {
-    this.value = value || '';
+    this.value.set(value || '');
   }
 
   registerOnChange(fn: (value: string) => void): void {
@@ -171,44 +161,54 @@ export class InputsearchComponent
   }
 
   setDisabledState(isDisabled: boolean): void {
-    this.disabled = isDisabled;
+    this.disabledState = isDisabled;
+  }
+
+  isDisabled(): boolean {
+    return this.disabled() || this.disabledState;
   }
 
   // Event handlers
   onInputChange(event: Event): void {
     const target = event.target as HTMLInputElement;
-    this.value = target.value;
+    const next = target.value;
+    this.value.set(next);
 
     // Emitir el cambio inmediato para ControlValueAccessor
-    this.onChange(this.value);
+    this.onChange(next);
 
     // Emitir al subject para el debounce
-    this.searchSubject$.next(this.value);
+    this.searchSubject$.next(next);
   }
 
   onFocus(): void {
-    this.isFocused = true;
+    this.isFocused.set(true);
+    // TODO: The 'emit' function requires a mandatory void argument
     this.focus.emit();
   }
 
   onBlur(): void {
-    this.isFocused = false;
+    this.isFocused.set(false);
     this.onTouched();
+    // TODO: The 'emit' function requires a mandatory void argument
     this.blur.emit();
   }
 
   onEnter(): void {
+    // TODO: The 'emit' function requires a mandatory void argument
     this.enter.emit();
   }
 
   onEscape(): void {
+    // TODO: The 'emit' function requires a mandatory void argument
     this.escape.emit();
   }
 
   clearInput(): void {
-    this.value = '';
-    this.onChange(this.value);
-    this.searchSubject$.next(this.value);
+    this.value.set('');
+    this.onChange('');
+    this.searchSubject$.next('');
+    // TODO: The 'emit' function requires a mandatory void argument
     this.clear.emit();
   }
 
@@ -216,22 +216,21 @@ export class InputsearchComponent
   get containerClasses(): string {
     const baseClasses = ['inputsearch-container'];
 
-    const variantClasses = this.styleVariant === 'modern'
-      ? ['inputsearch-modern']
-      : [];
+    const variantClasses =
+      this.styleVariant() === 'modern' ? ['inputsearch-modern'] : [];
 
-    const sizeClasses = this.styleVariant === 'classic'
-      ? {
-          sm: ['inputsearch-container-sm'],
-          md: ['inputsearch-container-md'],
-          lg: ['inputsearch-container-lg'],
-        }[this.size]
-      : [];
+    const sizeClasses =
+      this.styleVariant() === 'classic'
+        ? {
+            sm: ['inputsearch-container-sm'],
+            md: ['inputsearch-container-md'],
+            lg: ['inputsearch-container-lg']}[this.size()]
+        : [];
 
     const stateClasses = [
-      this.disabled ? 'inputsearch-disabled' : '',
-      this.errorMessage ? 'inputsearch-error' : '',
-      this.isFocused ? 'inputsearch-focused' : '',
+      this.isDisabled() ? 'inputsearch-disabled' : '',
+      this.errorMessage() ? 'inputsearch-error' : '',
+      this.isFocused() ? 'inputsearch-focused' : '',
     ].filter(Boolean);
 
     const classes = [
@@ -241,8 +240,9 @@ export class InputsearchComponent
       ...stateClasses,
     ];
 
-    if (this.customClasses) {
-      classes.push(this.customClasses);
+    const customClasses = this.customClasses();
+    if (customClasses) {
+      classes.push(customClasses);
     }
 
     return classes.join(' ');
@@ -251,65 +251,72 @@ export class InputsearchComponent
   get wrapperClasses(): string {
     const baseClasses = ['inputsearch-wrapper'];
 
-    const variantClasses = this.styleVariant === 'modern'
-      ? ['inputsearch-wrapper-modern']
-      : [];
+    const variantClasses =
+      this.styleVariant() === 'modern' ? ['inputsearch-wrapper-modern'] : [];
 
-    const sizeClasses = this.styleVariant === 'classic'
-      ? {
-          sm: ['inputsearch-wrapper-sm'],
-          md: ['inputsearch-wrapper-md'],
-          lg: ['inputsearch-wrapper-lg'],
-        }[this.size]
-      : [];
+    const sizeClasses =
+      this.styleVariant() === 'classic'
+        ? {
+            sm: ['inputsearch-wrapper-sm'],
+            md: ['inputsearch-wrapper-md'],
+            lg: ['inputsearch-wrapper-lg']}[this.size()]
+        : [];
 
     const stateClasses = [
-      this.disabled ? 'inputsearch-wrapper-disabled' : '',
-      this.errorMessage ? 'inputsearch-wrapper-error' : '',
-      this.isFocused ? 'inputsearch-wrapper-focused' : '',
+      this.isDisabled() ? 'inputsearch-wrapper-disabled' : '',
+      this.errorMessage() ? 'inputsearch-wrapper-error' : '',
+      this.isFocused() ? 'inputsearch-wrapper-focused' : '',
     ].filter(Boolean);
 
-    return [...baseClasses, ...variantClasses, ...sizeClasses, ...stateClasses].join(' ');
+    return [
+      ...baseClasses,
+      ...variantClasses,
+      ...sizeClasses,
+      ...stateClasses,
+    ].join(' ');
   }
 
   get inputClasses(): string {
     const baseClasses = ['inputsearch-input'];
 
-    const variantClasses = this.styleVariant === 'modern'
-      ? ['inputsearch-input-modern']
-      : [];
+    const variantClasses =
+      this.styleVariant() === 'modern' ? ['inputsearch-input-modern'] : [];
 
-    const sizeClasses = this.styleVariant === 'classic'
-      ? {
-          sm: ['inputsearch-input-sm'],
-          md: ['inputsearch-input-md'],
-          lg: ['inputsearch-input-lg'],
-        }[this.size]
-      : [];
+    const sizeClasses =
+      this.styleVariant() === 'classic'
+        ? {
+            sm: ['inputsearch-input-sm'],
+            md: ['inputsearch-input-md'],
+            lg: ['inputsearch-input-lg']}[this.size()]
+        : [];
 
     const stateClasses = [
-      this.disabled ? 'inputsearch-input-disabled' : '',
-      this.errorMessage ? 'inputsearch-input-error' : '',
-      this.isFocused ? 'inputsearch-input-focused' : '',
+      this.isDisabled() ? 'inputsearch-input-disabled' : '',
+      this.errorMessage() ? 'inputsearch-input-error' : '',
+      this.isFocused() ? 'inputsearch-input-focused' : '',
     ].filter(Boolean);
 
-    return [...baseClasses, ...variantClasses, ...sizeClasses, ...stateClasses].join(' ');
+    return [
+      ...baseClasses,
+      ...variantClasses,
+      ...sizeClasses,
+      ...stateClasses,
+    ].join(' ');
   }
 
   get iconClasses(): string {
     const baseClasses = ['inputsearch-icon'];
 
-    const variantClasses = this.styleVariant === 'modern'
-      ? ['inputsearch-icon-modern']
-      : [];
+    const variantClasses =
+      this.styleVariant() === 'modern' ? ['inputsearch-icon-modern'] : [];
 
-    const sizeClasses = this.styleVariant === 'classic'
-      ? {
-          sm: ['inputsearch-icon-sm'],
-          md: ['inputsearch-icon-md'],
-          lg: ['inputsearch-icon-lg'],
-        }[this.size]
-      : [];
+    const sizeClasses =
+      this.styleVariant() === 'classic'
+        ? {
+            sm: ['inputsearch-icon-sm'],
+            md: ['inputsearch-icon-md'],
+            lg: ['inputsearch-icon-lg']}[this.size()]
+        : [];
 
     return [...baseClasses, ...variantClasses, ...sizeClasses].join(' ');
   }
@@ -317,17 +324,16 @@ export class InputsearchComponent
   get clearButtonClasses(): string {
     const baseClasses = ['inputsearch-clear'];
 
-    const variantClasses = this.styleVariant === 'modern'
-      ? ['inputsearch-clear-modern']
-      : [];
+    const variantClasses =
+      this.styleVariant() === 'modern' ? ['inputsearch-clear-modern'] : [];
 
-    const sizeClasses = this.styleVariant === 'classic'
-      ? {
-          sm: ['inputsearch-clear-sm'],
-          md: ['inputsearch-clear-md'],
-          lg: ['inputsearch-clear-lg'],
-        }[this.size]
-      : [];
+    const sizeClasses =
+      this.styleVariant() === 'classic'
+        ? {
+            sm: ['inputsearch-clear-sm'],
+            md: ['inputsearch-clear-md'],
+            lg: ['inputsearch-clear-lg']}[this.size()]
+        : [];
 
     return [...baseClasses, ...variantClasses, ...sizeClasses].join(' ');
   }
@@ -336,7 +342,7 @@ export class InputsearchComponent
     const baseClasses = ['inputsearch-help'];
 
     const stateClasses = [
-      this.errorMessage ? 'inputsearch-help-error' : '',
+      this.errorMessage() ? 'inputsearch-help-error' : '',
     ].filter(Boolean);
 
     return [...baseClasses, ...stateClasses].join(' ');

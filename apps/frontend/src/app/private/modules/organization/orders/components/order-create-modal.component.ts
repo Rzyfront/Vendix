@@ -1,12 +1,6 @@
-import {
-  Component,
-  Input,
-  Output,
-  EventEmitter,
-  inject,
-  OnInit,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, inject, OnInit, input, output, model, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import {
   FormsModule,
   ReactiveFormsModule,
@@ -39,7 +33,6 @@ import {
   selector: 'app-order-create-modal',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     ModalComponent,
@@ -51,8 +44,8 @@ import {
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
-      (isOpenChange)="isOpenChange.emit($event)"
+      [isOpen]="isOpen()"
+      (isOpenChange)="onModalChange($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
       title="Create New Order"
@@ -117,7 +110,7 @@ import {
                 orderForm.get('order_type')?.value === 'SALE' ||
                 orderForm.get('order_type')?.value === 'RETURN'
               "
-              [options]="storeOptions"
+              [options]="storeOptions()"
               [hidden]="orderForm.get('order_type')?.value === 'PURCHASE'"
             ></app-selector>
 
@@ -248,196 +241,194 @@ import {
           </div>
 
           <div formArrayName="items" class="space-y-3">
-            <div
-              *ngFor="let itemGroup of itemsArray.controls; let i = index"
-              [formGroupName]="i"
-              class="border border-border rounded-lg p-4 bg-surface/50"
-            >
-              <div class="space-y-4">
-                <!-- Basic product info -->
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <app-product-selector
-                    [storeId]="selectedStoreId"
-                    [label]="'Product'"
-                    [required]="true"
-                    (productSelected)="onProductSelected($event, i)"
-                    (inventoryChecked)="onInventoryChecked($event, i)"
-                  ></app-product-selector>
-
-                  <app-input
-                    formControlName="product_name"
-                    label="Product Name"
-                    placeholder="Product name"
-                    [required]="true"
-                  ></app-input>
-
-                  <app-input
-                    formControlName="product_variant_id"
-                    label="Variant ID"
-                    type="number"
-                    placeholder="Enter variant ID (optional)"
-                  ></app-input>
-                </div>
-
-                <!-- Quantity and pricing -->
-                <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <app-input
-                    formControlName="quantity"
-                    label="Quantity"
-                    type="number"
-                    placeholder="1"
-                    [required]="true"
-                    (input)="calculateItemTotal(i)"
-                  ></app-input>
-
-                  <app-input
-                    formControlName="unit_price"
-                    label="Unit Price"
-                    type="number"
-                    step="0.01"
-                    placeholder="0.00"
-                    [required]="true"
-                    (input)="calculateItemTotal(i)"
-                  ></app-input>
-
-                  <app-input
-                    formControlName="total_price"
-                    label="Total Price"
-                    type="number"
-                    step="0.01"
-                    placeholder="0.00"
-                    [readonly]="true"
-                  ></app-input>
-
-                  <app-input
-                    formControlName="discount_percentage"
-                    label="Discount %"
-                    type="number"
-                    step="0.01"
-                    placeholder="0"
-                    min="0"
-                    max="100"
-                  ></app-input>
-                </div>
-
-                <!-- Tax and location -->
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <app-input
-                    formControlName="tax_rate"
-                    label="Tax Rate"
-                    type="number"
-                    step="0.01"
-                    placeholder="0.10"
-                    (input)="calculateItemTotal(i)"
-                  ></app-input>
-
-                  <app-input
-                    formControlName="tax_amount_item"
-                    label="Tax Amount"
-                    type="number"
-                    step="0.01"
-                    placeholder="0.00"
-                    [readonly]="true"
-                  ></app-input>
-
-                  <app-input
-                    formControlName="location_id"
-                    label="Location ID"
-                    type="number"
-                    placeholder="Enter location ID"
-                    [hidden]="
-                      orderForm.get('order_type')?.value !== 'PURCHASE' &&
-                      orderForm.get('order_type')?.value !== 'TRANSFER'
-                    "
-                  ></app-input>
-                </div>
-
-                <!-- Return order specific fields -->
-                <div
-                  class="grid grid-cols-1 md:grid-cols-4 gap-4"
-                  [hidden]="orderForm.get('order_type')?.value !== 'RETURN'"
-                >
-                  <app-input
-                    formControlName="order_item_id"
-                    label="Order Item ID"
-                    type="number"
-                    placeholder="Original order item ID"
-                  ></app-input>
-
-                  <app-input
-                    formControlName="quantity_returned"
-                    label="Quantity Returned"
-                    type="number"
-                    placeholder="1"
-                    [required]="orderForm.get('order_type')?.value === 'RETURN'"
-                  ></app-input>
-
-                  <app-selector
-                    formControlName="return_reason"
-                    label="Return Reason"
-                    placeholder="Select reason"
-                    [options]="getReturnReasonOptions()"
-                    [required]="orderForm.get('order_type')?.value === 'RETURN'"
-                  ></app-selector>
-
-                  <app-selector
-                    formControlName="condition_on_return"
-                    label="Condition on Return"
-                    placeholder="Select condition"
-                    [options]="getConditionOptions()"
-                    [required]="orderForm.get('order_type')?.value === 'RETURN'"
-                  ></app-selector>
-                </div>
-
-                <!-- Return specific fields continued -->
-                <div
-                  class="grid grid-cols-1 md:grid-cols-3 gap-4"
-                  [hidden]="orderForm.get('order_type')?.value !== 'RETURN'"
-                >
-                  <app-input
-                    formControlName="refund_amount"
-                    label="Refund Amount"
-                    type="number"
-                    step="0.01"
-                    placeholder="0.00"
-                  ></app-input>
-
-                  <div class="flex items-center space-x-2">
-                    <input
-                      type="checkbox"
-                      id="restock_{{ i }}"
-                      formControlName="restock"
-                      class="mr-2"
-                    />
-                    <label
-                      for="restock_{{ i }}"
-                      class="text-sm text-text-primary"
-                    >
-                      Restock Item
-                    </label>
+            @for (
+              itemGroup of itemsArray.controls;
+              track itemGroup;
+              let i = $index
+            ) {
+              <div
+                [formGroupName]="i"
+                class="border border-border rounded-lg p-4 bg-surface/50"
+              >
+                <div class="space-y-4">
+                  <!-- Basic product info -->
+                  <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <app-product-selector
+                      [storeId]="selectedStoreId()"
+                      [label]="'Product'"
+                      [required]="true"
+                      (productSelected)="onProductSelected($event, i)"
+                      (inventoryChecked)="onInventoryChecked($event, i)"
+                    ></app-product-selector>
+                    <app-input
+                      formControlName="product_name"
+                      label="Product Name"
+                      placeholder="Product name"
+                      [required]="true"
+                    ></app-input>
+                    <app-input
+                      formControlName="product_variant_id"
+                      label="Variant ID"
+                      type="number"
+                      placeholder="Enter variant ID (optional)"
+                    ></app-input>
                   </div>
-
-                  <app-input
-                    formControlName="notes"
-                    label="Item Notes"
-                    placeholder="Additional notes for this item"
-                  ></app-input>
-                </div>
-
-                <!-- Remove button -->
-                <div class="flex justify-end">
-                  <app-button
-                    variant="outline"
-                    size="sm"
-                    (clicked)="removeItem(i)"
-                    [disabled]="items.length <= 1"
+                  <!-- Quantity and pricing -->
+                  <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                    <app-input
+                      formControlName="quantity"
+                      label="Quantity"
+                      type="number"
+                      placeholder="1"
+                      [required]="true"
+                      (input)="calculateItemTotal(i)"
+                    ></app-input>
+                    <app-input
+                      formControlName="unit_price"
+                      label="Unit Price"
+                      type="number"
+                      step="0.01"
+                      placeholder="0.00"
+                      [required]="true"
+                      (input)="calculateItemTotal(i)"
+                    ></app-input>
+                    <app-input
+                      formControlName="total_price"
+                      label="Total Price"
+                      type="number"
+                      step="0.01"
+                      placeholder="0.00"
+                      [readonly]="true"
+                    ></app-input>
+                    <app-input
+                      formControlName="discount_percentage"
+                      label="Discount %"
+                      type="number"
+                      step="0.01"
+                      placeholder="0"
+                      min="0"
+                      max="100"
+                    ></app-input>
+                  </div>
+                  <!-- Tax and location -->
+                  <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <app-input
+                      formControlName="tax_rate"
+                      label="Tax Rate"
+                      type="number"
+                      step="0.01"
+                      placeholder="0.10"
+                      (input)="calculateItemTotal(i)"
+                    ></app-input>
+                    <app-input
+                      formControlName="tax_amount_item"
+                      label="Tax Amount"
+                      type="number"
+                      step="0.01"
+                      placeholder="0.00"
+                      [readonly]="true"
+                    ></app-input>
+                    <app-input
+                      formControlName="location_id"
+                      label="Location ID"
+                      type="number"
+                      placeholder="Enter location ID"
+                      [hidden]="
+                        orderForm.get('order_type')?.value !== 'PURCHASE' &&
+                        orderForm.get('order_type')?.value !== 'TRANSFER'
+                      "
+                    ></app-input>
+                  </div>
+                  <!-- Return order specific fields -->
+                  <div
+                    class="grid grid-cols-1 md:grid-cols-4 gap-4"
+                    [hidden]="orderForm.get('order_type')?.value !== 'RETURN'"
                   >
-                    <app-icon name="trash-2" [size]="16" slot="icon"></app-icon>
-                    Remove Item
-                  </app-button>
+                    <app-input
+                      formControlName="order_item_id"
+                      label="Order Item ID"
+                      type="number"
+                      placeholder="Original order item ID"
+                    ></app-input>
+                    <app-input
+                      formControlName="quantity_returned"
+                      label="Quantity Returned"
+                      type="number"
+                      placeholder="1"
+                      [required]="
+                        orderForm.get('order_type')?.value === 'RETURN'
+                      "
+                    ></app-input>
+                    <app-selector
+                      formControlName="return_reason"
+                      label="Return Reason"
+                      placeholder="Select reason"
+                      [options]="getReturnReasonOptions()"
+                      [required]="
+                        orderForm.get('order_type')?.value === 'RETURN'
+                      "
+                    ></app-selector>
+                    <app-selector
+                      formControlName="condition_on_return"
+                      label="Condition on Return"
+                      placeholder="Select condition"
+                      [options]="getConditionOptions()"
+                      [required]="
+                        orderForm.get('order_type')?.value === 'RETURN'
+                      "
+                    ></app-selector>
+                  </div>
+                  <!-- Return specific fields continued -->
+                  <div
+                    class="grid grid-cols-1 md:grid-cols-3 gap-4"
+                    [hidden]="orderForm.get('order_type')?.value !== 'RETURN'"
+                  >
+                    <app-input
+                      formControlName="refund_amount"
+                      label="Refund Amount"
+                      type="number"
+                      step="0.01"
+                      placeholder="0.00"
+                    ></app-input>
+                    <div class="flex items-center space-x-2">
+                      <input
+                        type="checkbox"
+                        id="restock_{{ i }}"
+                        formControlName="restock"
+                        class="mr-2"
+                      />
+                      <label
+                        for="restock_{{ i }}"
+                        class="text-sm text-text-primary"
+                      >
+                        Restock Item
+                      </label>
+                    </div>
+                    <app-input
+                      formControlName="notes"
+                      label="Item Notes"
+                      placeholder="Additional notes for this item"
+                    ></app-input>
+                  </div>
+                  <!-- Remove button -->
+                  <div class="flex justify-end">
+                    <app-button
+                      variant="outline"
+                      size="sm"
+                      (clicked)="removeItem(i)"
+                      [disabled]="items.length <= 1"
+                    >
+                      <app-icon
+                        name="trash-2"
+                        [size]="16"
+                        slot="icon"
+                      ></app-icon>
+                      Remove Item
+                    </app-button>
+                  </div>
                 </div>
               </div>
-            </div>
+            }
           </div>
         </div>
 
@@ -616,13 +607,19 @@ import {
   ],
 })
 export class OrderCreateModalComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private currencyFormatService = inject(CurrencyFormatService);
   private currencyService = inject(CurrencyService);
-  @Input() isOpen = false;
-  @Input() storeOptions: Array<{ label: string; value: string }> = [];
-  @Input() selectedStoreId: number | null = null;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() orderCreated = new EventEmitter<CreateOrderDto>();
+  readonly isOpen = model<boolean>(false);
+  readonly storeOptions = input<
+    Array<{
+      label: string;
+      value: string;
+    }>
+  >([]);
+  readonly selectedStoreId = input<number | null>(null);
+  readonly isOpenChange = output<boolean>();
+  readonly orderCreated = output<CreateOrderDto>();
 
   orderForm!: FormGroup;
   isSubmitting = false;
@@ -710,7 +707,7 @@ export class OrderCreateModalComponent implements OnInit {
     this.initializeForm();
 
     // Listen for order type changes to update validators
-    this.orderForm.get('order_type')?.valueChanges.subscribe((orderType) => {
+    this.orderForm.get('order_type')?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((orderType) => {
       this.updateValidators(orderType);
     });
   }
@@ -878,7 +875,7 @@ export class OrderCreateModalComponent implements OnInit {
   }
 
   onModalChange(isOpen: boolean): void {
-    this.isOpen = isOpen;
+    this.isOpen.set(isOpen);
     this.isOpenChange.emit(isOpen);
 
     if (!isOpen) {
@@ -1032,7 +1029,7 @@ export class OrderCreateModalComponent implements OnInit {
         apiUrl = `${environment.apiUrl}/return-orders`;
       }
 
-      this.http.post(apiUrl, orderData).subscribe({
+      this.http.post(apiUrl, orderData).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (response: any) => {
           this.orderCreated.emit(response.data || response);
           this.isSubmitting = false;

@@ -1,8 +1,7 @@
-import { Component, OnInit, OnDestroy, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, DestroyRef, inject } from '@angular/core';
 import { Store } from '@ngrx/store';
-import { Subject } from 'rxjs';
-import { takeUntil } from 'rxjs/operators';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
+import { signal } from '@angular/core';
 
 import {
   StatsComponent,
@@ -24,7 +23,6 @@ import {
   Promotion,
   CreatePromotionDto,
   UpdatePromotionDto,
-  PromotionsSummary,
 } from './interfaces/promotion.interface';
 import { PromotionListComponent } from './components/promotion-list/promotion-list.component';
 import { PromotionFormModalComponent } from './components/promotion-form-modal/promotion-form-modal.component';
@@ -34,7 +32,6 @@ import { PromotionsService } from './services/promotions.service';
   selector: 'app-promotions',
   standalone: true,
   imports: [
-    CommonModule,
     StatsComponent,
     PromotionListComponent,
     PromotionFormModalComponent,
@@ -47,50 +44,50 @@ import { PromotionsService } from './services/promotions.service';
       >
         <app-stats
           title="Activas"
-          [value]="summary?.total_active ?? 0"
+          [value]="summary()?.total_active ?? 0"
           smallText="Promociones activas"
           iconName="zap"
           iconBgColor="bg-emerald-100"
           iconColor="text-emerald-500"
-          [loading]="summaryLoading"
+          [loading]="summaryLoading()"
         ></app-stats>
 
         <app-stats
           title="Programadas"
-          [value]="summary?.total_scheduled ?? 0"
+          [value]="summary()?.total_scheduled ?? 0"
           smallText="Por activarse"
           iconName="clock"
           iconBgColor="bg-blue-100"
           iconColor="text-blue-500"
-          [loading]="summaryLoading"
+          [loading]="summaryLoading()"
         ></app-stats>
 
         <app-stats
           title="Total descuentos"
-          [value]="formatCurrency(summary?.total_discount_given ?? 0)"
+          [value]="formatCurrency(summary()?.total_discount_given ?? 0)"
           smallText="Descuento otorgado"
           iconName="dollar-sign"
           iconBgColor="bg-purple-100"
           iconColor="text-purple-500"
-          [loading]="summaryLoading"
+          [loading]="summaryLoading()"
         ></app-stats>
 
         <app-stats
           title="Usos totales"
-          [value]="summary?.total_usage ?? 0"
+          [value]="summary()?.total_usage ?? 0"
           smallText="Veces aplicadas"
           iconName="bar-chart-3"
           iconBgColor="bg-amber-100"
           iconColor="text-amber-500"
-          [loading]="summaryLoading"
+          [loading]="summaryLoading()"
         ></app-stats>
       </div>
 
       <!-- List -->
       <app-promotion-list
-        [promotions]="promotions"
-        [loading]="loading"
-        [meta]="meta"
+        [promotions]="promotions()"
+        [loading]="loading()"
+        [meta]="meta()"
         (create)="openCreateModal()"
         (edit)="openEditModal($event)"
         (activate)="onActivate($event)"
@@ -103,9 +100,9 @@ import { PromotionsService } from './services/promotions.service';
       ></app-promotion-list>
 
       <!-- Create/Edit Modal -->
-      @if (show_form_modal) {
+      @if (show_form_modal()) {
         <app-promotion-form-modal
-          [promotion]="selected_promotion"
+          [promotion]="selected_promotion()"
           (save)="onSave($event)"
           (close)="closeFormModal()"
         />
@@ -121,58 +118,32 @@ import { PromotionsService } from './services/promotions.service';
     `,
   ],
 })
-export class PromotionsComponent implements OnInit, OnDestroy {
+export class PromotionsComponent {
   private store = inject(Store);
   private promotions_service = inject(PromotionsService);
   private currency_service = inject(CurrencyFormatService);
   private dialog_service = inject(DialogService);
   private toast_service = inject(ToastService);
-  private destroy$ = new Subject<void>();
+  private destroyRef = inject(DestroyRef);
 
-  // State
-  promotions: Promotion[] = [];
-  loading = false;
-  meta: any = null;
-  summary: PromotionsSummary | null = null;
-  summaryLoading = false;
+  // State via toSignal
+  protected promotions = toSignal(this.store.select(selectPromotions), { initialValue: [] as Promotion[] });
+  protected loading = toSignal(this.store.select(selectPromotionsLoading), { initialValue: false });
+  protected meta = toSignal(this.store.select(selectPromotionsMeta), { initialValue: null });
+  protected summary = toSignal(this.store.select(selectSummary), { initialValue: null });
+  protected summaryLoading = toSignal(this.store.select(selectSummaryLoading), { initialValue: false });
 
   // Modal
-  show_form_modal = false;
-  selected_promotion: Promotion | null = null;
-  edit_loading = false;
+  protected show_form_modal = signal(false);
+  protected selected_promotion = signal<Promotion | null>(null);
 
-  ngOnInit(): void {
+  constructor() {
     this.store.dispatch(PromotionsActions.loadPromotions());
     this.store.dispatch(PromotionsActions.loadSummary());
 
     this.store
-      .select(selectPromotions)
-      .pipe(takeUntil(this.destroy$))
-      .subscribe((p) => (this.promotions = p));
-
-    this.store
-      .select(selectPromotionsLoading)
-      .pipe(takeUntil(this.destroy$))
-      .subscribe((l) => (this.loading = l));
-
-    this.store
-      .select(selectPromotionsMeta)
-      .pipe(takeUntil(this.destroy$))
-      .subscribe((m) => (this.meta = m));
-
-    this.store
-      .select(selectSummary)
-      .pipe(takeUntil(this.destroy$))
-      .subscribe((s) => (this.summary = s));
-
-    this.store
-      .select(selectSummaryLoading)
-      .pipe(takeUntil(this.destroy$))
-      .subscribe((l) => (this.summaryLoading = l));
-
-    this.store
       .select(selectError)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((error) => {
         if (error) {
           this.toast_service.error(error);
@@ -180,46 +151,37 @@ export class PromotionsComponent implements OnInit, OnDestroy {
       });
   }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  formatCurrency(value: number): string {
+  protected formatCurrency(value: number): string {
     return this.currency_service.format(value);
   }
 
   // ── Modal ──────────────────────────────────────────────────────────────
 
-  openCreateModal(): void {
-    this.selected_promotion = null;
-    this.show_form_modal = true;
+  protected openCreateModal(): void {
+    this.selected_promotion.set(null);
+    this.show_form_modal.set(true);
   }
 
-  openEditModal(promotion: Promotion): void {
-    this.edit_loading = true;
+  protected openEditModal(promotion: Promotion): void {
     this.promotions_service.getPromotion(promotion.id).subscribe({
       next: (res) => {
-        this.selected_promotion = res.data;
-        this.show_form_modal = true;
-        this.edit_loading = false;
-      },
-      error: () => {
-        this.edit_loading = false;
+        this.selected_promotion.set(res.data);
+        this.show_form_modal.set(true);
       },
     });
   }
 
-  closeFormModal(): void {
-    this.show_form_modal = false;
-    this.selected_promotion = null;
+  protected closeFormModal(): void {
+    this.show_form_modal.set(false);
+    this.selected_promotion.set(null);
   }
 
-  onSave(dto: CreatePromotionDto | UpdatePromotionDto): void {
-    if (this.selected_promotion) {
+  protected onSave(dto: CreatePromotionDto | UpdatePromotionDto): void {
+    const current = this.selected_promotion();
+    if (current) {
       this.store.dispatch(
         PromotionsActions.updatePromotion({
-          id: this.selected_promotion.id,
+          id: current.id,
           dto: dto as UpdatePromotionDto,
         }),
       );
@@ -233,15 +195,15 @@ export class PromotionsComponent implements OnInit, OnDestroy {
 
   // ── Actions ────────────────────────────────────────────────────────────
 
-  onActivate(id: number): void {
+  protected onActivate(id: number): void {
     this.store.dispatch(PromotionsActions.activatePromotion({ id }));
   }
 
-  onPause(id: number): void {
+  protected onPause(id: number): void {
     this.store.dispatch(PromotionsActions.pausePromotion({ id }));
   }
 
-  onCancel(id: number): void {
+  protected onCancel(id: number): void {
     this.dialog_service
       .confirm({
         title: 'Cancelar promocion',
@@ -256,7 +218,7 @@ export class PromotionsComponent implements OnInit, OnDestroy {
       });
   }
 
-  onDelete(id: number): void {
+  protected onDelete(id: number): void {
     this.dialog_service
       .confirm({
         title: 'Eliminar promocion',
@@ -273,15 +235,15 @@ export class PromotionsComponent implements OnInit, OnDestroy {
 
   // ── Filters ────────────────────────────────────────────────────────────
 
-  onPageChange(page: number): void {
+  protected onPageChange(page: number): void {
     this.store.dispatch(PromotionsActions.setPage({ page }));
   }
 
-  onSearchChange(search: string): void {
+  protected onSearchChange(search: string): void {
     this.store.dispatch(PromotionsActions.setSearch({ search }));
   }
 
-  onFilterChange(filters: Record<string, string>): void {
+  protected onFilterChange(filters: Record<string, string>): void {
     if (filters['state'] !== undefined) {
       this.store.dispatch(
         PromotionsActions.setStateFilter({ state: filters['state'] }),

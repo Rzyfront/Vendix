@@ -1,5 +1,5 @@
-import { Component, Input, Output, EventEmitter, HostBinding } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, HostBinding, input, output } from '@angular/core';
+
 
 export type ButtonVariant =
   | 'primary'
@@ -15,42 +15,45 @@ export type ButtonSize = 'xsm' | 'sm' | 'md' | 'lg';
 @Component({
   selector: 'app-button',
   standalone: true,
-  imports: [CommonModule],
+  imports: [],
   template: `
     <button
-      [type]="type"
-      [attr.form]="form"
-      [disabled]="disabled || loading"
+      [type]="type()"
+      [attr.form]="form()"
+      [disabled]="disabled() || loading()"
       [class]="buttonClasses"
       (click)="handleClick($event)"
-    >
+      >
       <div class="btn-content">
         <!-- Loading spinner -->
-        <svg
-          *ngIf="loading"
-          class="animate-spin h-4 w-4 flex-shrink-0"
-          fill="none"
-          viewBox="0 0 24 24"
-        >
-          <circle
-            class="opacity-25"
-            cx="12"
-            cy="12"
-            r="10"
-            stroke="currentColor"
-            stroke-width="4"
-          ></circle>
-          <path
-            class="opacity-75"
-            fill="currentColor"
-            d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-          ></path>
-        </svg>
+        @if (loading()) {
+          <svg
+            class="animate-spin h-4 w-4 flex-shrink-0"
+            fill="none"
+            viewBox="0 0 24 24"
+            >
+            <circle
+              class="opacity-25"
+              cx="12"
+              cy="12"
+              r="10"
+              stroke="currentColor"
+              stroke-width="4"
+            ></circle>
+            <path
+              class="opacity-75"
+              fill="currentColor"
+              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+            ></path>
+          </svg>
+        }
         <span class="btn-icon flex-shrink-0"><ng-content select="[slot=icon]"></ng-content></span>
-        <span *ngIf="!loading || showTextWhileLoading" class="btn-text"><ng-content></ng-content></span>
+        @if (!loading() || showTextWhileLoading()) {
+          <span class="btn-text"><ng-content></ng-content></span>
+        }
       </div>
     </button>
-  `,
+    `,
   styles: [
     `
       :host {
@@ -160,28 +163,28 @@ export type ButtonSize = 'xsm' | 'sm' | 'md' | 'lg';
   ],
 })
 export class ButtonComponent {
-  @Input() variant: ButtonVariant = 'primary';
-  @Input() size: ButtonSize = 'md';
-  @Input() type: 'button' | 'submit' | 'reset' = 'button';
-  @Input() form?: string; // Associates button with a form by id (for buttons outside the form)
-  @Input() disabled = false;
-  @Input() loading = false;
-  @Input() showTextWhileLoading = false;
-  @Input() fullWidth = false;
-  @Input() iconOnlyMobile = false;
-  @Input() customClasses = '';
+  readonly variant = input<ButtonVariant>('primary');
+  readonly size = input<ButtonSize>('md');
+  readonly type = input<'button' | 'submit' | 'reset'>('button');
+  readonly form = input<string>(); // Associates button with a form by id (for buttons outside the form)
+  readonly disabled = input(false);
+  readonly loading = input(false);
+  readonly showTextWhileLoading = input(false);
+  readonly fullWidth = input(false);
+  readonly iconOnlyMobile = input(false);
+  readonly customClasses = input('');
 
   @HostBinding('class.icon-only-mobile')
   get isIconOnlyMobile(): boolean {
-    return this.iconOnlyMobile;
+    return this.iconOnlyMobile();
   }
 
   @HostBinding('class.w-full')
   get isFullWidth(): boolean {
-    return this.fullWidth;
+    return this.fullWidth();
   }
 
-  @Output() clicked = new EventEmitter<Event>();
+  readonly clicked = output<Event>();
 
   get buttonClasses(): string {
     const baseClasses = [
@@ -266,24 +269,25 @@ export class ButtonComponent {
     };
 
     // Width classes
-    const widthClasses = this.fullWidth ? ['w-full'] : [];
+    const widthClasses = this.fullWidth() ? ['w-full'] : [];
 
     const classes = [
       ...baseClasses,
-      ...sizeClasses[this.size],
-      ...variantClasses[this.variant],
+      ...sizeClasses[this.size()],
+      ...variantClasses[this.variant()],
       ...widthClasses,
     ];
 
-    if (this.customClasses) {
-      classes.push(this.customClasses);
+    const customClasses = this.customClasses();
+    if (customClasses) {
+      classes.push(customClasses);
     }
 
     return classes.join(' ');
   }
 
   handleClick(event: Event): void {
-    if (!this.disabled && !this.loading) {
+    if (!this.disabled() && !this.loading()) {
       this.clicked.emit(event);
     }
   }

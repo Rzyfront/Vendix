@@ -1,8 +1,7 @@
-import { Injectable, inject } from '@angular/core';
+import { Injectable, inject, signal } from '@angular/core';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import {
   Observable,
-  BehaviorSubject,
   finalize,
   catchError,
   throwError,
@@ -10,6 +9,7 @@ import {
   tap,
   shareReplay,
 } from 'rxjs';
+import { toObservable } from '@angular/core/rxjs-interop';
 import { environment } from '../../../../../../environments/environment';
 import {
   Role,
@@ -47,37 +47,23 @@ export class RolesService {
   private apiUrl = environment.apiUrl;
   private readonly CACHE_TTL = 30000; // 30 segundos
 
-  // Estado de carga
-  private isLoading$ = new BehaviorSubject<boolean>(false);
-  private isCreatingRole$ = new BehaviorSubject<boolean>(false);
-  private isUpdatingRole$ = new BehaviorSubject<boolean>(false);
-  private isDeletingRole$ = new BehaviorSubject<boolean>(false);
-  private isCreatingPermission$ = new BehaviorSubject<boolean>(false);
-  private isUpdatingPermission$ = new BehaviorSubject<boolean>(false);
-  private isDeletingPermission$ = new BehaviorSubject<boolean>(false);
+  // Estados (Signals)
+  readonly isLoading = signal(false);
+  readonly isCreatingRole = signal(false);
+  readonly isUpdatingRole = signal(false);
+  readonly isDeletingRole = signal(false);
+  readonly isCreatingPermission = signal(false);
+  readonly isUpdatingPermission = signal(false);
+  readonly isDeletingPermission = signal(false);
 
-  // Exponer estados como observables
-  get isLoading() {
-    return this.isLoading$.asObservable();
-  }
-  get isCreatingRole() {
-    return this.isCreatingRole$.asObservable();
-  }
-  get isUpdatingRole() {
-    return this.isUpdatingRole$.asObservable();
-  }
-  get isDeletingRole() {
-    return this.isDeletingRole$.asObservable();
-  }
-  get isCreatingPermission() {
-    return this.isCreatingPermission$.asObservable();
-  }
-  get isUpdatingPermission() {
-    return this.isUpdatingPermission$.asObservable();
-  }
-  get isDeletingPermission() {
-    return this.isDeletingPermission$.asObservable();
-  }
+  // Observable compatibility layer
+  readonly isLoading$ = toObservable(this.isLoading);
+  readonly isCreatingRole$ = toObservable(this.isCreatingRole);
+  readonly isUpdatingRole$ = toObservable(this.isUpdatingRole);
+  readonly isDeletingRole$ = toObservable(this.isDeletingRole);
+  readonly isCreatingPermission$ = toObservable(this.isCreatingPermission);
+  readonly isUpdatingPermission$ = toObservable(this.isUpdatingPermission);
+  readonly isDeletingPermission$ = toObservable(this.isDeletingPermission);
 
   // ==================== ROLES ====================
 
@@ -85,7 +71,7 @@ export class RolesService {
    * Obtener lista de roles con paginación y filtros
    */
   getRoles(query: RoleQueryDto = {}): Observable<PaginatedRolesResponse> {
-    this.isLoading$.next(true);
+    this.isLoading.set(true);
 
     let params = new HttpParams();
     if (query.page) params = params.set('page', query.page.toString());
@@ -113,7 +99,7 @@ export class RolesService {
             },
           } as PaginatedRolesResponse;
         }),
-        finalize(() => this.isLoading$.next(false)),
+        finalize(() => this.isLoading.set(false)),
         catchError((error) => {
           console.error('Error loading roles:', error);
           return throwError(() => error);
@@ -137,12 +123,12 @@ export class RolesService {
    * Crear nuevo rol
    */
   createRole(roleData: CreateRoleDto): Observable<Role> {
-    this.isCreatingRole$.next(true);
+    this.isCreatingRole.set(true);
 
     return this.http
       .post<Role>(`${this.apiUrl}/superadmin/roles`, roleData)
       .pipe(
-        finalize(() => this.isCreatingRole$.next(false)),
+        finalize(() => this.isCreatingRole.set(false)),
         catchError((error) => {
           console.error('Error creating role:', error);
           return throwError(() => error);
@@ -154,12 +140,12 @@ export class RolesService {
    * Actualizar rol existente
    */
   updateRole(id: number, roleData: UpdateRoleDto): Observable<Role> {
-    this.isUpdatingRole$.next(true);
+    this.isUpdatingRole.set(true);
 
     return this.http
       .patch<Role>(`${this.apiUrl}/superadmin/roles/${id}`, roleData)
       .pipe(
-        finalize(() => this.isUpdatingRole$.next(false)),
+        finalize(() => this.isUpdatingRole.set(false)),
         catchError((error) => {
           console.error('Error updating role:', error);
           return throwError(() => error);
@@ -171,10 +157,10 @@ export class RolesService {
    * Eliminar rol
    */
   deleteRole(id: number): Observable<void> {
-    this.isDeletingRole$.next(true);
+    this.isDeletingRole.set(true);
 
     return this.http.delete<void>(`${this.apiUrl}/superadmin/roles/${id}`).pipe(
-      finalize(() => this.isDeletingRole$.next(false)),
+      finalize(() => this.isDeletingRole.set(false)),
       catchError((error) => {
         console.error('Error deleting role:', error);
         return throwError(() => error);
@@ -302,7 +288,7 @@ export class RolesService {
   getPermissions(
     query: PermissionQueryDto = {},
   ): Observable<PaginatedPermissionsResponse> {
-    this.isLoading$.next(true);
+    this.isLoading.set(true);
 
     let params = new HttpParams();
     if (query.page) params = params.set('page', query.page.toString());
@@ -325,7 +311,7 @@ export class RolesService {
             },
           } as PaginatedPermissionsResponse;
         }),
-        finalize(() => this.isLoading$.next(false)),
+        finalize(() => this.isLoading.set(false)),
         catchError((error) => {
           console.error('Error loading permissions:', error);
           return throwError(() => error);
@@ -353,7 +339,7 @@ export class RolesService {
   createPermission(
     permissionData: CreatePermissionDto,
   ): Observable<Permission> {
-    this.isCreatingPermission$.next(true);
+    this.isCreatingPermission.set(true);
 
     return this.http
       .post<Permission>(
@@ -361,7 +347,7 @@ export class RolesService {
         permissionData,
       )
       .pipe(
-        finalize(() => this.isCreatingPermission$.next(false)),
+        finalize(() => this.isCreatingPermission.set(false)),
         catchError((error) => {
           console.error('Error creating permission:', error);
           return throwError(() => error);
@@ -376,7 +362,7 @@ export class RolesService {
     id: number,
     permissionData: UpdatePermissionDto,
   ): Observable<Permission> {
-    this.isUpdatingPermission$.next(true);
+    this.isUpdatingPermission.set(true);
 
     return this.http
       .patch<Permission>(
@@ -384,7 +370,7 @@ export class RolesService {
         permissionData,
       )
       .pipe(
-        finalize(() => this.isUpdatingPermission$.next(false)),
+        finalize(() => this.isUpdatingPermission.set(false)),
         catchError((error) => {
           console.error('Error updating permission:', error);
           return throwError(() => error);
@@ -396,12 +382,12 @@ export class RolesService {
    * Eliminar permiso
    */
   deletePermission(id: number): Observable<void> {
-    this.isDeletingPermission$.next(true);
+    this.isDeletingPermission.set(true);
 
     return this.http
       .delete<void>(`${this.apiUrl}/superadmin/admin/permissions/${id}`)
       .pipe(
-        finalize(() => this.isDeletingPermission$.next(false)),
+        finalize(() => this.isDeletingPermission.set(false)),
         catchError((error) => {
           console.error('Error deleting permission:', error);
           return throwError(() => error);

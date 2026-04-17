@@ -4,7 +4,7 @@
   <div class="stats-container">
     <app-stats
       title="Total Tickets"
-      [value]="ticketStats.total"
+      [value]="ticketStats().total"
       smallText="Todos los tickets"
       iconName="ticket"
       iconBgColor="bg-blue-100"
@@ -12,7 +12,7 @@
     ></app-stats>
     <app-stats
       title="Abiertos"
-      [value]="ticketStats.open_tickets"
+      [value]="ticketStats().open_tickets"
       smallText="Tickets en proceso"
       iconName="folder"
       iconBgColor="bg-yellow-100"
@@ -20,7 +20,7 @@
     ></app-stats>
     <app-stats
       title="Resueltos"
-      [value]="ticketStats.resolved"
+      [value]="ticketStats().resolved"
       smallText="Tickets cerrados"
       iconName="check-circle"
       iconBgColor="bg-emerald-100"
@@ -28,7 +28,7 @@
     ></app-stats>
     <app-stats
       title="Vencidos"
-      [value]="ticketStats.overdue"
+      [value]="ticketStats().overdue"
       smallText="SLA vencido"
       iconName="alert-triangle"
       iconBgColor="bg-red-100"
@@ -94,56 +94,59 @@
     <!-- Table Container -->
     <div class="relative min-h-[400px] p-2 md:p-4">
       <!-- Loading Overlay -->
-      <div
-        *ngIf="isLoading"
-        class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
-      >
+      @if (isLoading()) {
         <div
-          class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-        ></div>
-      </div>
+          class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
+        >
+          <div
+            class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+          ></div>
+        </div>
+      }
 
       <!-- Table -->
-      <app-responsive-data-view
-        *ngIf="!isLoading"
-        [data]="tickets"
-        [columns]="columns"
-        [actions]="actions"
-        [cardConfig]="cardConfig"
-        [hoverable]="true"
-        [striped]="true"
-        [emptyMessage]="'No se encontraron tickets'"
-        [emptyIcon]="'ticket'"
-        tableSize="md"
-        (rowClick)="viewTicket($event)"
-      >
-      </app-responsive-data-view>
+      @if (!isLoading()) {
+        <app-responsive-data-view
+          [data]="tickets()"
+          [columns]="columns"
+          [actions]="actions"
+          [cardConfig]="cardConfig"
+          [hoverable]="true"
+          [striped]="true"
+          [emptyMessage]="'No se encontraron tickets'"
+          [emptyIcon]="'ticket'"
+          tableSize="md"
+          (rowClick)="viewTicket($event)"
+        >
+        </app-responsive-data-view>
+      }
     </div>
 
     <!-- Pagination -->
-    <div
-      class="px-6 py-4 border-t border-border bg-muted/30 flex justify-center"
-      *ngIf="tickets.length > 0"
-    >
-      <app-pagination
-        [currentPage]="pagination.page"
-        [totalPages]="pagination.totalPages"
-        [total]="pagination.total"
-        [limit]="pagination.limit"
-        infoStyle="range"
-        (pageChange)="onPageChange($event)"
-      />
-    </div>
+    @if (tickets().length > 0) {
+      <div
+        class="px-6 py-4 border-t border-border bg-muted/30 flex justify-center"
+      >
+        <app-pagination
+          [currentPage]="pagination.page"
+          [totalPages]="pagination.totalPages"
+          [total]="pagination.total"
+          [limit]="pagination.limit"
+          infoStyle="range"
+          (pageChange)="onPageChange($event)"
+        />
+      </div>
+    }
   </app-card>
 </div>
 
 <!-- Assign Modal -->
 <app-modal
-  [isOpen]="showAssignModal"
+  [isOpen]="showAssignModal()"
   [title]="'Asignar Ticket'"
   [subtitle]="'Selecciona un usuario para asignar este ticket'"
-  (cancel)="showAssignModal = false"
-  (isOpenChange)="showAssignModal = $event"
+  (cancel)="showAssignModal.set(false)"
+  (isOpenChange)="showAssignModal.set($event)"
 >
   <form [formGroup]="assignForm" class="space-y-4">
     <div>
@@ -158,60 +161,64 @@
       />
     </div>
 
-    <div *ngIf="loadingUsers" class="text-center py-4">
-      <div
-        class="animate-spin rounded-full h-6 w-6 border-b-2 border-primary mx-auto"
-      ></div>
-    </div>
-
-    <div
-      *ngIf="!loadingUsers && users.length > 0"
-      class="max-h-60 overflow-y-auto border border-gray-200 rounded-lg"
-    >
-      <div
-        *ngFor="let user of users"
-        class="flex items-center gap-3 p-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
-        (click)="selectUser(user.id)"
-        [class.bg-primary\/10]="
-          assignForm.get('assigned_to_user_id')?.value === user.id
-        "
-      >
+    @if (loadingUsers()) {
+      <div class="text-center py-4">
         <div
-          class="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center"
-        >
-          <span class="text-sm font-semibold text-primary">
-            {{ user.first_name?.[0] || "?" }}{{ user.last_name?.[0] || "" }}
-          </span>
-        </div>
-        <div class="flex-1">
-          <div class="text-sm font-medium text-text-primary">
-            {{ user.first_name }} {{ user.last_name }}
-          </div>
-          <div class="text-xs text-text-secondary">
-            {{ user.email }}
-          </div>
-        </div>
-        <div
-          *ngIf="assignForm.get('assigned_to_user_id')?.value === user.id"
-          class="text-primary"
-        >
-          <app-icon name="check" [size]="18"></app-icon>
-        </div>
+          class="animate-spin rounded-full h-6 w-6 border-b-2 border-primary mx-auto"
+        ></div>
       </div>
-    </div>
+    }
 
-    <div
-      *ngIf="!loadingUsers && users.length === 0"
-      class="text-center py-4 text-text-secondary text-sm"
-    >
-      No se encontraron usuarios
-    </div>
+    @if (!loadingUsers() && users().length > 0) {
+      <div class="max-h-60 overflow-y-auto border border-gray-200 rounded-lg">
+        @for (user of users(); track user) {
+          <div
+            class="flex items-center gap-3 p-3 hover:bg-gray-50 cursor-pointer border-b border-gray-100 last:border-b-0"
+            (click)="selectUser(user.id)"
+            [class.bg-primary\/10]="
+              assignForm.get('assigned_to_user_id')?.value === user.id
+            "
+          >
+            <div
+              class="w-10 h-10 rounded-full bg-primary/20 flex items-center justify-center"
+            >
+              <span class="text-sm font-semibold text-primary">
+                {{ user.first_name?.[0] || "?" }}{{ user.last_name?.[0] || "" }}
+              </span>
+            </div>
+            <div class="flex-1">
+              <div class="text-sm font-medium text-text-primary">
+                {{ user.first_name }} {{ user.last_name }}
+              </div>
+              <div class="text-xs text-text-secondary">
+                {{ user.email }}
+              </div>
+            </div>
+            @if (assignForm.get("assigned_to_user_id")?.value === user.id) {
+              <div class="text-primary">
+                <app-icon name="check" [size]="18"></app-icon>
+              </div>
+            }
+          </div>
+        }
+      </div>
+    }
+
+    @if (!loadingUsers() && users().length === 0) {
+      <div class="text-center py-4 text-text-secondary text-sm">
+        No se encontraron usuarios
+      </div>
+    }
 
     <input type="hidden" formControlName="assigned_to_user_id" />
   </form>
 
   <div slot="footer" class="flex justify-end gap-3">
-    <app-button variant="ghost" (clicked)="showAssignModal = false" size="sm">
+    <app-button
+      variant="ghost"
+      (clicked)="showAssignModal.set(false)"
+      size="sm"
+    >
       Cancelar
     </app-button>
     <app-button variant="primary" (clicked)="assignTicket()" size="sm">

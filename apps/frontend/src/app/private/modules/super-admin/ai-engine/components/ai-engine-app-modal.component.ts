@@ -6,7 +6,7 @@ import {
   inject,
   signal,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   ReactiveFormsModule,
   FormBuilder,
@@ -32,13 +32,12 @@ import {
   selector: 'app-ai-engine-app-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ModalComponent,
     InputComponent,
     ButtonComponent,
-    SelectorComponent,
-  ],
+    SelectorComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen()"

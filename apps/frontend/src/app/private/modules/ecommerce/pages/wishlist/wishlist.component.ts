@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, DestroyRef } from '@angular/core';
+import { Component, ChangeDetectionStrategy, OnInit, inject, DestroyRef, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -18,9 +18,9 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
   styleUrls: ['./wishlist.component.scss'],
 })
 export class WishlistComponent implements OnInit {
-  wishlist: Wishlist | null = null;
-  is_loading = true;
-  removing_id: number | null = null;
+  readonly wishlist = signal<Wishlist | null>(null);
+  readonly is_loading = signal(true);
+  readonly removing_id = signal<number | null>(null);
 
   private destroy_ref = inject(DestroyRef);
   private toast_service = inject(ToastService);
@@ -36,26 +36,26 @@ export class WishlistComponent implements OnInit {
   }
 
   loadWishlist(): void {
-    this.is_loading = true;
+    this.is_loading.set(true);
     this.wishlist_service.getWishlist().subscribe({
       next: () => {
-        this.is_loading = false;
+        this.is_loading.set(false);
       },
       error: () => {
-        this.is_loading = false;
+        this.is_loading.set(false);
       },
     });
 
     this.wishlist_service.wishlist$.pipe(takeUntilDestroyed(this.destroy_ref)).subscribe((wishlist) => {
-      this.wishlist = wishlist;
+      this.wishlist.set(wishlist);
     });
   }
 
   removeFromWishlist(product_id: number): void {
-    this.removing_id = product_id;
+    this.removing_id.set(product_id);
     this.wishlist_service.removeItem(product_id).pipe(
       finalize(() => {
-        this.removing_id = null;
+        this.removing_id.set(null);
       })
     ).subscribe({
       next: () => this.toast_service.info('Producto eliminado de favoritos'),

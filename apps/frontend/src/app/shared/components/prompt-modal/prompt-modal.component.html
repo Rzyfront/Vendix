@@ -1,27 +1,29 @@
 <app-modal
   [(isOpen)]="isOpen"
-  [title]="title"
-  [size]="size"
-  [showCloseButton]="showCloseButton"
-  [customClasses]="customClasses"
->
+  [title]="title()"
+  [size]="size()"
+  [showCloseButton]="showCloseButton()"
+  [customClasses]="customClasses()"
+  >
   <div class="modal-body">
-    <p *ngIf="message" class="mb-4 text-text-secondary">{{ message }}</p>
+    @if (message()) {
+      <p class="mb-4 text-text-secondary">{{ message() }}</p>
+    }
     <app-input
-      [placeholder]="placeholder"
+      [placeholder]="placeholder()"
       [(ngModel)]="inputValue"
       (keyup.enter)="onConfirm()"
-      [type]="inputType"
-      [step]="inputType === 'number' ? '0.01' : undefined"
-      [min]="inputType === 'number' ? '0' : undefined"
+      [type]="inputType()"
+      [step]="inputType() === 'number' ? '0.01' : undefined"
+      [min]="inputType() === 'number' ? '0' : undefined"
     ></app-input>
   </div>
   <div slot="footer" class="modal-footer flex justify-end gap-2 md:gap-4">
     <app-button variant="outline" (clicked)="onCancel()">{{
-      cancelText
+      cancelText()
     }}</app-button>
     <app-button variant="primary" (clicked)="onConfirm()">{{
-      confirmText
+      confirmText()
     }}</app-button>
   </div>
 </app-modal>

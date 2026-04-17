@@ -1,5 +1,6 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, OnInit, OnDestroy, signal, DestroyRef, inject} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import { RouterModule } from '@angular/router';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { Subscription } from 'rxjs';
@@ -44,7 +45,6 @@ import './templates.component.css';
   selector: 'app-templates',
   standalone: true,
   imports: [
-    CommonModule,
     RouterModule,
     FormsModule,
     ReactiveFormsModule,
@@ -62,7 +62,7 @@ import './templates.component.css';
   template: `
     <div class="space-y-6">
       <!-- Stats Cards -->
-      <app-template-stats [stats]="stats"></app-template-stats>
+      <app-template-stats [stats]="stats()"></app-template-stats>
 
       <!-- Templates List -->
       <div class="bg-surface rounded-card shadow-card border border-border">
@@ -92,7 +92,7 @@ import './templates.component.css';
                   variant="outline"
                   size="sm"
                   (clicked)="refreshTemplates()"
-                  [disabled]="isLoading"
+                  [disabled]="isLoading()"
                   title="Refresh"
                 >
                   <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
@@ -118,71 +118,78 @@ import './templates.component.css';
         </div>
 
         <!-- Loading State -->
-        <div *ngIf="isLoading" class="p-8 text-center">
-          <div
-            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-          ></div>
-          <p class="mt-2 text-text-secondary">Loading templates...</p>
-        </div>
+        @if (isLoading()) {
+          <div class="p-8 text-center">
+            <div
+              class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            ></div>
+            <p class="mt-2 text-text-secondary">Loading templates...</p>
+          </div>
+        }
 
         <!-- Empty State -->
-        <app-empty-state
-          *ngIf="!isLoading && templates.length === 0"
-          icon="file-text"
-          [title]="getEmptyStateTitle()"
-          [description]="getEmptyStateDescription()"
-          actionButtonText="Crear Template"
-          (actionClick)="openCreateTemplateModal()"
-        >
-        </app-empty-state>
+        @if (!isLoading() && templates().length === 0) {
+          <app-empty-state
+            icon="file-text"
+            [title]="getEmptyStateTitle()"
+            [description]="getEmptyStateDescription()"
+            actionButtonText="Crear Template"
+            (actionClick)="openCreateTemplateModal()"
+          >
+          </app-empty-state>
+        }
 
         <!-- Templates Table -->
-        <div *ngIf="!isLoading && templates.length > 0" class="p-6">
-          <app-responsive-data-view
-            [data]="templates"
-            [columns]="tableColumns"
-            [cardConfig]="cardConfig"
-            [actions]="tableActions"
-            [loading]="isLoading"
-            emptyMessage="No hay plantillas"
-            emptyIcon="file-text"
-          >
-          </app-responsive-data-view>
-
-          <!-- Pagination -->
-          <div class="mt-6 flex justify-center">
-            <app-pagination
-              [currentPage]="pagination.page"
-              [totalPages]="pagination.totalPages"
-              [total]="pagination.total"
-              [limit]="pagination.limit"
-              infoStyle="range"
-              (pageChange)="changePage($event)"
-            />
+        @if (!isLoading() && templates().length > 0) {
+          <div class="p-6">
+            <app-responsive-data-view
+              [data]="templates()"
+              [columns]="tableColumns"
+              [cardConfig]="cardConfig"
+              [actions]="tableActions"
+              [loading]="isLoading()"
+              emptyMessage="No hay plantillas"
+              emptyIcon="file-text"
+            >
+            </app-responsive-data-view>
+            <!-- Pagination -->
+            <div class="mt-6 flex justify-center">
+              <app-pagination
+                [currentPage]="pagination.page"
+                [totalPages]="pagination.totalPages"
+                [total]="pagination.total"
+                [limit]="pagination.limit"
+                infoStyle="range"
+                (pageChange)="changePage($event)"
+              />
+            </div>
           </div>
-        </div>
+        }
       </div>
 
-      <!-- Create Template Modal -->
-      <app-template-create-modal
-        [(isOpen)]="isCreateModalOpen"
-        [isSubmitting]="isCreatingTemplate"
-        (submit)="createTemplate($event)"
-      ></app-template-create-modal>
+      @defer (when isCreateModalOpen()) {
+        <app-template-create-modal
+          [(isOpen)]="isCreateModalOpen"
+          [isSubmitting]="isCreatingTemplate()"
+          (submit)="createTemplate($event)"
+        ></app-template-create-modal>
+      }
 
-      <!-- Edit Template Modal -->
-      <app-template-edit-modal
-        [(isOpen)]="isEditModalOpen"
-        [isSubmitting]="isUpdatingTemplate"
-        [template]="selectedTemplate"
-        (submit)="updateTemplate($event)"
-      ></app-template-edit-modal>
+      @defer (when isEditModalOpen()) {
+        <app-template-edit-modal
+          [(isOpen)]="isEditModalOpen"
+          [isSubmitting]="isUpdatingTemplate()"
+          [template]="selectedTemplate"
+          (submit)="updateTemplate($event)"
+        ></app-template-edit-modal>
+      }
     </div>
   `,
 })
 export class TemplatesComponent implements OnInit, OnDestroy {
-  templates: TemplateListItem[] = [];
-  isLoading = false;
+  private destroyRef = inject(DestroyRef);
+  readonly templates = signal<TemplateListItem[]>([]);
+  readonly isLoading = signal(false);
   searchTerm = '';
   selectedConfigurationType: TemplateConfigType | null = null;
 
@@ -284,12 +291,12 @@ export class TemplatesComponent implements OnInit, OnDestroy {
     ],
   };
 
-  stats = {
+  readonly stats = signal({
     totalTemplates: 0,
     activeTemplates: 0,
     systemTemplates: 0,
     customTemplates: 0,
-  };
+  });
 
   pagination = {
     page: 1,
@@ -298,11 +305,11 @@ export class TemplatesComponent implements OnInit, OnDestroy {
     totalPages: 0,
   };
 
-  isCreateModalOpen = false;
-  isCreatingTemplate = false;
+  readonly isCreateModalOpen = signal(false);
+  readonly isCreatingTemplate = signal(false);
 
-  isEditModalOpen = false;
-  isUpdatingTemplate = false;
+  readonly isEditModalOpen = signal(false);
+  readonly isUpdatingTemplate = signal(false);
   selectedTemplate?: TemplateListItem;
 
   private subscriptions: Subscription[] = [];
@@ -323,7 +330,7 @@ export class TemplatesComponent implements OnInit, OnDestroy {
   }
 
   loadTemplates(): void {
-    this.isLoading = true;
+    this.isLoading.set(true);
 
     const query = {
       page: this.pagination.page,
@@ -334,18 +341,18 @@ export class TemplatesComponent implements OnInit, OnDestroy {
       }),
     };
 
-    const sub = this.templatesService.getTemplates(query).subscribe({
+    const sub = this.templatesService.getTemplates(query).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         if (response.success) {
-          this.templates = response.data;
+          this.templates.set(response.data);
           this.pagination.total = response.meta.total;
           this.pagination.totalPages = response.meta.totalPages;
         }
-        this.isLoading = false;
+        this.isLoading.set(false);
       },
       error: (error) => {
         console.error('Error loading templates:', error);
-        this.isLoading = false;
+        this.isLoading.set(false);
         this.toastService.error('Error loading templates');
       },
     });
@@ -354,13 +361,15 @@ export class TemplatesComponent implements OnInit, OnDestroy {
   }
 
   loadStats(): void {
-    const sub = this.templatesService.getTemplateStats().subscribe({
+    const sub = this.templatesService.getTemplateStats().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         if (response.success) {
-          this.stats.totalTemplates = response.data.totalTemplates;
-          this.stats.activeTemplates = response.data.activeTemplates;
-          this.stats.systemTemplates = response.data.systemTemplates;
-          this.stats.customTemplates = response.data.customTemplates;
+          this.stats.set({
+            totalTemplates: response.data.totalTemplates,
+            activeTemplates: response.data.activeTemplates,
+            systemTemplates: response.data.systemTemplates,
+            customTemplates: response.data.customTemplates,
+          });
         }
       },
       error: (error) => {
@@ -394,30 +403,30 @@ export class TemplatesComponent implements OnInit, OnDestroy {
   }
 
   openCreateTemplateModal(): void {
-    this.isCreateModalOpen = true;
+    this.isCreateModalOpen.set(true);
   }
 
   onCreateModalCancel(): void {
-    this.isCreateModalOpen = false;
+    this.isCreateModalOpen.set(false);
   }
 
   createTemplate(templateData: CreateTemplateDto): void {
-    this.isCreatingTemplate = true;
+    this.isCreatingTemplate.set(true);
 
-    const sub = this.templatesService.createTemplate(templateData).subscribe({
+    const sub = this.templatesService.createTemplate(templateData).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         if (response.success) {
-          this.isCreateModalOpen = false;
+          this.isCreateModalOpen.set(false);
           this.loadTemplates();
           this.loadStats();
           this.toastService.success('Template created successfully');
         }
-        this.isCreatingTemplate = false;
+        this.isCreatingTemplate.set(false);
       },
       error: (error) => {
         console.error('Error creating template:', error);
         this.toastService.error('Error creating template');
-        this.isCreatingTemplate = false;
+        this.isCreatingTemplate.set(false);
       },
     });
 
@@ -426,35 +435,35 @@ export class TemplatesComponent implements OnInit, OnDestroy {
 
   editTemplate(template: TemplateListItem): void {
     this.selectedTemplate = template;
-    this.isEditModalOpen = true;
+    this.isEditModalOpen.set(true);
   }
 
   onEditModalCancel(): void {
-    this.isEditModalOpen = false;
+    this.isEditModalOpen.set(false);
     this.selectedTemplate = undefined;
   }
 
   updateTemplate(templateData: UpdateTemplateDto): void {
     if (!this.selectedTemplate) return;
 
-    this.isUpdatingTemplate = true;
+    this.isUpdatingTemplate.set(true);
 
     const sub = this.templatesService
       .updateTemplate(this.selectedTemplate.id, templateData)
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (response) => {
           if (response.success) {
-            this.isEditModalOpen = false;
+            this.isEditModalOpen.set(false);
             this.selectedTemplate = undefined;
             this.loadTemplates();
             this.toastService.success('Template updated successfully');
           }
-          this.isUpdatingTemplate = false;
+          this.isUpdatingTemplate.set(false);
         },
         error: (error) => {
           console.error('Error updating template:', error);
           this.toastService.error('Error updating template');
-          this.isUpdatingTemplate = false;
+          this.isUpdatingTemplate.set(false);
         },
       });
 
@@ -474,7 +483,7 @@ export class TemplatesComponent implements OnInit, OnDestroy {
         if (confirmed) {
           const sub = this.templatesService
             .deleteTemplate(template.id)
-            .subscribe({
+            .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
               next: (response) => {
                 if (response.success) {
                   this.loadTemplates();

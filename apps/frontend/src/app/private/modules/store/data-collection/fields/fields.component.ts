@@ -1,5 +1,6 @@
-import { Component, OnInit, ChangeDetectionStrategy, signal, computed, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, OnInit, ChangeDetectionStrategy, signal, computed, inject, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import { FormsModule } from '@angular/forms';
 import { MetadataFieldsService } from '../services/metadata-fields.service';
 import { MetadataField } from '../interfaces/metadata-field.interface';
@@ -25,7 +26,6 @@ import type { ScrollableTab } from '../../../../../shared/components/scrollable-
   selector: 'app-fields',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     FieldModalComponent,
     SpinnerComponent,
@@ -35,8 +35,8 @@ import type { ScrollableTab } from '../../../../../shared/components/scrollable-
     CardComponent,
     InputsearchComponent,
     ButtonComponent,
-    IconComponent,
-  ],
+    IconComponent
+],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="md:space-y-4">
@@ -127,6 +127,7 @@ import type { ScrollableTab } from '../../../../../shared/components/scrollable-
   `,
 })
 export class FieldsComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private fieldsService = inject(MetadataFieldsService);
   private toastService = inject(ToastService);
   private dialogService = inject(DialogService);
@@ -232,7 +233,7 @@ export class FieldsComponent implements OnInit {
 
   loadFields() {
     this.loading.set(true);
-    this.fieldsService.getFields(undefined, true).subscribe({
+    this.fieldsService.getFields(undefined, true).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (fields) => {
         this.fields.set(fields);
         this.loading.set(false);
@@ -273,7 +274,7 @@ export class FieldsComponent implements OnInit {
       ? this.fieldsService.updateField(selected.id, data)
       : this.fieldsService.createField(data);
 
-    obs.subscribe({
+    obs.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.toastService.success(selected ? 'Campo actualizado' : 'Campo creado');
         this.closeModal();
@@ -286,7 +287,7 @@ export class FieldsComponent implements OnInit {
   }
 
   toggleField(field: MetadataField) {
-    this.fieldsService.toggleField(field.id, !field.is_active).subscribe({
+    this.fieldsService.toggleField(field.id, !field.is_active).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.toastService.success(field.is_active ? 'Campo desactivado' : 'Campo activado');
         this.loadFields();
@@ -313,7 +314,7 @@ export class FieldsComponent implements OnInit {
       return;
     }
 
-    this.fieldsService.deleteField(field.id).subscribe({
+    this.fieldsService.deleteField(field.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.toastService.success('Campo eliminado');
         this.loadFields();

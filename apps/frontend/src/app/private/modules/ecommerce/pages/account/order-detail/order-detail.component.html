@@ -4,7 +4,7 @@
     Mis pedidos
   </a>
 
-  @if (verifyingWompiPayment && order) {
+  @if (verifyingWompiPayment() && order()) {
     <div class="wompi-verifying-banner">
       <div class="spinner-small"></div>
       <div class="verifying-text">
@@ -16,13 +16,13 @@
     </div>
   }
 
-  @if (is_loading) {
+  @if (is_loading()) {
     <div class="loading">
       <div class="spinner"></div>
     </div>
-  } @else if (order) {
+  } @else if (order(); as order) {
     <!-- Success Banner -->
-    @if (is_new_order) {
+    @if (is_new_order()) {
       <div class="success-banner">
         <div class="success-icon-wrap">
           <app-icon name="check" [size]="28"></app-icon>
@@ -30,7 +30,7 @@
         <div class="success-text">
           <h2>¡Pedido confirmado!</h2>
           <p class="success-order-number">Pedido #{{ order.order_number }}</p>
-          <p class="success-description">{{ postPurchaseMessage }}</p>
+          <p class="success-description">{{ postPurchaseMessage() }}</p>
         </div>
         <app-icon
           name="package"
@@ -41,7 +41,7 @@
     }
 
     <!-- Order Header Card (non-new orders) -->
-    @if (!is_new_order) {
+    @if (!is_new_order()) {
       <div class="order-header-card">
         <div class="order-header-top">
           <h1>Pedido #{{ order.order_number }}</h1>
@@ -57,7 +57,7 @@
           </span>
           <span class="meta-item">
             <app-icon name="package" [size]="14"></app-icon>
-            {{ totalItems }} {{ totalItems === 1 ? "producto" : "productos" }}
+            {{ totalItems() }} {{ totalItems() === 1 ? "producto" : "productos" }}
           </span>
           <span class="meta-item total-highlight">
             <app-icon name="receipt" [size]="14"></app-icon>
@@ -73,7 +73,7 @@
       <section class="card-section">
         <div class="section-header">
           <app-icon name="shopping-bag" [size]="18"></app-icon>
-          <h3>Productos ({{ totalItems }})</h3>
+          <h3>Productos ({{ totalItems() }})</h3>
         </div>
         <div class="section-divider"></div>
         <div class="items-list">

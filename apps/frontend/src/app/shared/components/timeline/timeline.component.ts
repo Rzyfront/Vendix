@@ -1,6 +1,5 @@
 import {
   Component,
-  ChangeDetectionStrategy,
   ContentChild,
   TemplateRef,
   computed,
@@ -17,7 +16,6 @@ import { TimelineStep, TimelineSize, TimelineStepStatus } from './timeline.inter
   imports: [CommonModule, IconComponent],
   templateUrl: './timeline.component.html',
   styleUrls: ['./timeline.component.css'],
-  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class TimelineComponent {
   // ── Inputs ──────────────────────────────────────────────────

@@ -1,5 +1,6 @@
-import { Component, OnInit, inject, signal, computed } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, OnInit, inject, signal, computed, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import { Router, ActivatedRoute } from '@angular/router';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { Observable } from 'rxjs';
@@ -23,7 +24,6 @@ import { ModalComponent } from '../../../../../../shared/components/modal/modal.
   selector: 'app-article-form',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     InputComponent,
     TextareaComponent,
@@ -34,8 +34,8 @@ import { ModalComponent } from '../../../../../../shared/components/modal/modal.
     IconComponent,
     StickyHeaderComponent,
     ButtonComponent,
-    ModalComponent,
-  ],
+    ModalComponent
+],
   template: `
     <div class="flex flex-col gap-4 md:gap-6">
       <!-- Sticky Header -->
@@ -49,150 +49,146 @@ import { ModalComponent } from '../../../../../../shared/components/modal/modal.
         [actions]="headerActions()"
         (actionClicked)="onHeaderAction($event)"
       ></app-sticky-header>
-
+    
       <!-- Loading -->
-      <div *ngIf="loadingArticle()" class="flex items-center justify-center py-20">
-        <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-      </div>
-
+      @if (loadingArticle()) {
+        <div class="flex items-center justify-center py-20">
+          <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        </div>
+      }
+    
       <!-- Form -->
-      <form *ngIf="!loadingArticle()" [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4 md:gap-6 p-3 md:p-4 max-w-5xl mx-auto w-full">
-        <!-- Section 1: Basic Info -->
-        <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm">
-          <div class="flex items-center gap-2 mb-4">
-            <app-icon name="info" size="18" class="text-primary-600"></app-icon>
-            <h2 class="text-base font-bold text-gray-900">Información básica</h2>
-          </div>
-          <div class="flex flex-col gap-4">
-            <app-input
-              label="Título"
-              placeholder="Título del artículo"
-              [formControl]="$any(form.get('title'))"
-              [required]="true"
-            ></app-input>
-
-            <app-textarea
-              label="Resumen"
-              placeholder="Breve descripción del artículo"
-              [formControl]="$any(form.get('summary'))"
-              [rows]="3"
-              [required]="true"
-            ></app-textarea>
-          </div>
-        </section>
-
-        <!-- Section 2: Classification -->
-        <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm">
-          <div class="flex items-center gap-2 mb-4">
-            <app-icon name="tag" size="18" class="text-primary-600"></app-icon>
-            <h2 class="text-base font-bold text-gray-900">Clasificación</h2>
-          </div>
-          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
-            <app-selector
-              label="Tipo"
-              placeholder="Selecciona un tipo"
-              [options]="typeOptions"
-              [formControl]="$any(form.get('type'))"
-            ></app-selector>
-
-            <div class="flex gap-2 items-end">
+      @if (!loadingArticle()) {
+        <form [formGroup]="form" (ngSubmit)="onSubmit()" class="flex flex-col gap-4 md:gap-6 p-3 md:p-4 max-w-5xl mx-auto w-full">
+          <!-- Section 1: Basic Info -->
+          <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm">
+            <div class="flex items-center gap-2 mb-4">
+              <app-icon name="info" size="18" class="text-primary-600"></app-icon>
+              <h2 class="text-base font-bold text-gray-900">Información básica</h2>
+            </div>
+            <div class="flex flex-col gap-4">
+              <app-input
+                label="Título"
+                placeholder="Título del artículo"
+                [formControl]="$any(form.get('title'))"
+                [required]="true"
+              ></app-input>
+              <app-textarea
+                label="Resumen"
+                placeholder="Breve descripción del artículo"
+                [formControl]="$any(form.get('summary'))"
+                [rows]="3"
+                [required]="true"
+              ></app-textarea>
+            </div>
+          </section>
+          <!-- Section 2: Classification -->
+          <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm">
+            <div class="flex items-center gap-2 mb-4">
+              <app-icon name="tag" size="18" class="text-primary-600"></app-icon>
+              <h2 class="text-base font-bold text-gray-900">Clasificación</h2>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 md:gap-4">
               <app-selector
-                class="flex-1"
-                label="Categoría"
-                placeholder="Selecciona una categoría"
-                [options]="categoryOptions()"
-                [formControl]="$any(form.get('category_id'))"
+                label="Tipo"
+                placeholder="Selecciona un tipo"
+                [options]="typeOptions"
+                [formControl]="$any(form.get('type'))"
               ></app-selector>
-              <app-button variant="outline" (clicked)="isCategoryCreateOpen = true"
-                customClasses="!w-[42px] !h-[42px] !p-0 flex items-center justify-center mb-0.5">
-                <app-icon name="plus" size="20"></app-icon>
-              </app-button>
+              <div class="flex gap-2 items-end">
+                <app-selector
+                  class="flex-1"
+                  label="Categoría"
+                  placeholder="Selecciona una categoría"
+                  [options]="categoryOptions()"
+                  [formControl]="$any(form.get('category_id'))"
+                ></app-selector>
+                <app-button variant="outline" (clicked)="isCategoryCreateOpen = true"
+                  customClasses="!w-[42px] !h-[42px] !p-0 flex items-center justify-center mb-0.5">
+                  <app-icon name="plus" size="20"></app-icon>
+                </app-button>
+              </div>
+              <app-selector
+                label="Estado"
+                placeholder="Estado"
+                [options]="statusOptions"
+                [formControl]="$any(form.get('status'))"
+              ></app-selector>
+              <app-input
+                label="Módulo (opcional)"
+                placeholder="Ej: POS, Inventario, etc."
+                [formControl]="$any(form.get('module'))"
+              ></app-input>
             </div>
-
-            <app-selector
-              label="Estado"
-              placeholder="Estado"
-              [options]="statusOptions"
-              [formControl]="$any(form.get('status'))"
-            ></app-selector>
-
-            <app-input
-              label="Módulo (opcional)"
-              placeholder="Ej: POS, Inventario, etc."
-              [formControl]="$any(form.get('module'))"
-            ></app-input>
-          </div>
-        </section>
-
-        <!-- Section 3: Cover Image -->
-        <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm">
-          <div class="flex items-center gap-2 mb-4">
-            <app-icon name="image" size="18" class="text-primary-600"></app-icon>
-            <h2 class="text-base font-bold text-gray-900">Imagen de portada</h2>
-          </div>
-          <app-file-upload-dropzone
-            label="Subir imagen de portada"
-            helperText="JPG, PNG o WebP"
-            accept="image/*"
-            icon="image"
-            (fileSelected)="onCoverImageSelected($event)"
-            (fileRemoved)="onCoverImageRemoved()"
-          ></app-file-upload-dropzone>
-          <div *ngIf="existingCoverUrl() && !coverFile()" class="mt-3">
-            <img [src]="existingCoverUrl()" alt="Cover" class="max-h-32 rounded-lg border border-border object-contain" />
-          </div>
-        </section>
-
-        <!-- Section 4: Content -->
-        <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm">
-          <div class="flex items-center gap-2 mb-4">
-            <app-icon name="file-text" size="18" class="text-primary-600"></app-icon>
-            <h2 class="text-base font-bold text-gray-900">Contenido</h2>
-          </div>
-          <app-markdown-editor
-            [content]="contentValue()"
-            [uploadFn]="imageUploadFn"
-            (contentChange)="onContentChange($event)"
-            (uploadError)="toast.error($event)"
-          ></app-markdown-editor>
-        </section>
-
-        <!-- Section 5: Extra -->
-        <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm">
-          <div class="flex items-center gap-2 mb-4">
-            <app-icon name="settings" size="18" class="text-primary-600"></app-icon>
-            <h2 class="text-base font-bold text-gray-900">Opciones adicionales</h2>
-          </div>
-          <div class="flex flex-col gap-4">
-            <app-input
-              label="Tags (separados por coma)"
-              placeholder="Ej: inventario, productos, tutorial"
-              [formControl]="$any(form.get('tags'))"
-            ></app-input>
-
-            <div class="flex items-center gap-6">
-              <app-toggle
-                label="Artículo destacado"
-                [formControl]="$any(form.get('is_featured'))"
-              ></app-toggle>
+          </section>
+          <!-- Section 3: Cover Image -->
+          <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm">
+            <div class="flex items-center gap-2 mb-4">
+              <app-icon name="image" size="18" class="text-primary-600"></app-icon>
+              <h2 class="text-base font-bold text-gray-900">Imagen de portada</h2>
             </div>
-
-            <app-input
-              label="Orden de aparición"
-              type="number"
-              placeholder="0"
-              [formControl]="$any(form.get('sort_order'))"
-            ></app-input>
-          </div>
-        </section>
-      </form>
-
+            <app-file-upload-dropzone
+              label="Subir imagen de portada"
+              helperText="JPG, PNG o WebP"
+              accept="image/*"
+              icon="image"
+              (fileSelected)="onCoverImageSelected($event)"
+              (fileRemoved)="onCoverImageRemoved()"
+            ></app-file-upload-dropzone>
+            @if (existingCoverUrl() && !coverFile()) {
+              <div class="mt-3">
+                <img [src]="existingCoverUrl()" alt="Cover" class="max-h-32 rounded-lg border border-border object-contain" />
+              </div>
+            }
+          </section>
+          <!-- Section 4: Content -->
+          <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm">
+            <div class="flex items-center gap-2 mb-4">
+              <app-icon name="file-text" size="18" class="text-primary-600"></app-icon>
+              <h2 class="text-base font-bold text-gray-900">Contenido</h2>
+            </div>
+            <app-markdown-editor
+              [content]="contentValue()"
+              [uploadFn]="imageUploadFn"
+              (contentChange)="onContentChange($event)"
+              (uploadError)="toast.error($event)"
+            ></app-markdown-editor>
+          </section>
+          <!-- Section 5: Extra -->
+          <section class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm">
+            <div class="flex items-center gap-2 mb-4">
+              <app-icon name="settings" size="18" class="text-primary-600"></app-icon>
+              <h2 class="text-base font-bold text-gray-900">Opciones adicionales</h2>
+            </div>
+            <div class="flex flex-col gap-4">
+              <app-input
+                label="Tags (separados por coma)"
+                placeholder="Ej: inventario, productos, tutorial"
+                [formControl]="$any(form.get('tags'))"
+              ></app-input>
+              <div class="flex items-center gap-6">
+                <app-toggle
+                  label="Artículo destacado"
+                  [formControl]="$any(form.get('is_featured'))"
+                ></app-toggle>
+              </div>
+              <app-input
+                label="Orden de aparición"
+                type="number"
+                placeholder="0"
+                [formControl]="$any(form.get('sort_order'))"
+              ></app-input>
+            </div>
+          </section>
+        </form>
+      }
+    
       <!-- Quick Create Category Modal -->
       <app-modal
         [(isOpen)]="isCategoryCreateOpen"
         title="Nueva Categoría"
         size="sm"
-      >
+        >
         <form [formGroup]="categoryForm" (ngSubmit)="onCategoryCreated()" class="flex flex-col gap-4">
           <app-input
             label="Nombre"
@@ -200,14 +196,14 @@ import { ModalComponent } from '../../../../../../shared/components/modal/modal.
             [formControl]="$any(categoryForm.get('name'))"
             [required]="true"
           ></app-input>
-
+    
           <app-textarea
             label="Descripción"
             placeholder="Breve descripción (opcional)"
             [formControl]="$any(categoryForm.get('description'))"
             [rows]="2"
           ></app-textarea>
-
+    
           <div class="flex justify-end gap-3 mt-2">
             <app-button variant="outline" size="sm" (clicked)="isCategoryCreateOpen = false">
               Cancelar
@@ -217,16 +213,17 @@ import { ModalComponent } from '../../../../../../shared/components/modal/modal.
               size="sm"
               type="submit"
               [disabled]="categorySubmitting() || categoryForm.invalid"
-            >
+              >
               {{ categorySubmitting() ? 'Guardando...' : 'Crear' }}
             </app-button>
           </div>
         </form>
       </app-modal>
     </div>
-  `,
+    `,
 })
 export class ArticleFormComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private fb = inject(FormBuilder);
   private service = inject(HelpCenterAdminService);
   toast = inject(ToastService);
@@ -314,7 +311,7 @@ export class ArticleFormComponent implements OnInit {
       this.loadArticle(this.articleId);
     }
 
-    this.form.statusChanges.subscribe(() => {
+    this.form.statusChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => {
       this.formValid.set(this.form.valid);
     });
   }
@@ -325,7 +322,7 @@ export class ArticleFormComponent implements OnInit {
   }
 
   loadCategories() {
-    this.service.getCategories().subscribe({
+    this.service.getCategories().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (categories) => {
         this.categoryOptions.set(
           categories.map((c) => ({ label: c.name, value: c.id })),
@@ -337,7 +334,7 @@ export class ArticleFormComponent implements OnInit {
 
   loadArticle(id: number) {
     this.loadingArticle.set(true);
-    this.service.getArticle(id).subscribe({
+    this.service.getArticle(id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (article) => {
         this.form.patchValue({
           title: article.title,
@@ -372,7 +369,7 @@ export class ArticleFormComponent implements OnInit {
   onCoverImageSelected(file: File) {
     this.coverFile.set(file);
     // Upload immediately
-    this.service.uploadImage(file).subscribe({
+    this.service.uploadImage(file).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (result) => {
         this.existingCoverUrl.set(result.url);
       },
@@ -417,7 +414,7 @@ export class ArticleFormComponent implements OnInit {
       ? this.service.updateArticle(this.articleId!, dto)
       : this.service.createArticle(dto);
 
-    request$.subscribe({
+    request$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.toast.success(
           this.isEditMode() ? 'Artículo actualizado' : 'Artículo creado',
@@ -443,7 +440,7 @@ export class ArticleFormComponent implements OnInit {
     if (this.categoryForm.invalid) return;
 
     this.categorySubmitting.set(true);
-    this.service.createCategory(this.categoryForm.value).subscribe({
+    this.service.createCategory(this.categoryForm.value).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.toast.success('Categoría creada');
         this.isCategoryCreateOpen = false;

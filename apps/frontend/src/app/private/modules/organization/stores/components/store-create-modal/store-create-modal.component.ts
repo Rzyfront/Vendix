@@ -1,22 +1,20 @@
-import {
-  Component,
-  Input,
-  Output,
-  EventEmitter,
+import {Component,
   OnInit,
-  OnDestroy,
   ChangeDetectionStrategy,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
+  input,
+  output,
+  DestroyRef,
+  inject} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import {
   FormsModule,
   ReactiveFormsModule,
   FormBuilder,
   FormGroup,
   Validators,
-  AbstractControl,
-} from '@angular/forms';
-import { Subject, takeUntil } from 'rxjs';
+  AbstractControl} from '@angular/forms';
+
 
 import { StoreType, OperatingHours } from '../../interfaces/store.interface';
 import { OrganizationStoresService } from '../../services/organization-stores.service';
@@ -31,8 +29,7 @@ import {
   ToggleComponent,
   SelectorOption,
   ModalSize,
-  ButtonVariant,
-} from '../../../../../../shared/components/index';
+  ButtonVariant} from '../../../../../../shared/components/index';
 
 export interface StoreCreateModalData {
   name: string;
@@ -58,7 +55,6 @@ export interface StoreCreateModalData {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     ModalComponent,
@@ -66,11 +62,11 @@ export interface StoreCreateModalData {
     ButtonComponent,
     IconComponent,
     SelectorComponent,
-    ToggleComponent,
-  ],
+    ToggleComponent
+],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="onModalChange($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
@@ -261,15 +257,15 @@ export interface StoreCreateModalData {
           <app-button
             variant="outline"
             (clicked)="onCancel()"
-            [disabled]="isSubmitting"
+            [disabled]="isSubmitting()"
           >
             Cancelar
           </app-button>
           <app-button
             variant="primary"
             (clicked)="onSubmit()"
-            [disabled]="storeForm.invalid || isSubmitting"
-            [loading]="isSubmitting"
+            [disabled]="storeForm.invalid || isSubmitting()"
+            [loading]="isSubmitting()"
           >
             <app-icon name="plus" [size]="16" slot="icon"></app-icon>
             Crear Tienda
@@ -300,24 +296,21 @@ export interface StoreCreateModalData {
         border-radius: 4px;
       }
     `,
-  ],
-})
-export class StoreCreateModalComponent implements OnInit, OnDestroy {
-  @Input() isOpen = false;
-  @Input() isSubmitting = false;
+  ]})
+export class StoreCreateModalComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
+  readonly isOpen = input(false);
+  readonly isSubmitting = input(false);
 
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() submit = new EventEmitter<StoreCreateModalData>();
-  @Output() cancel = new EventEmitter<void>();
+  readonly isOpenChange = output<boolean>();
+  readonly submit = output<StoreCreateModalData>();
+  readonly cancel = output<void>();
 
   storeForm!: FormGroup;
   storeTypeOptions: SelectorOption[] = [];
   timezoneOptions: SelectorOption[] = [];
   currencyOptions: SelectorOption[] = [];
-
-  private destroy$ = new Subject<void>();
-
-  constructor(
+constructor(
     private fb: FormBuilder,
     private storesService: OrganizationStoresService,
   ) {
@@ -328,13 +321,7 @@ export class StoreCreateModalComponent implements OnInit, OnDestroy {
     this.loadOptions();
     this.setupAutoSlugGeneration();
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  private initializeForm(): void {
+private initializeForm(): void {
     this.storeForm = this.fb.group({
       name: [
         '',
@@ -355,8 +342,7 @@ export class StoreCreateModalComponent implements OnInit, OnDestroy {
       color_secondary: ['#2f6f4e'],
       is_active: [true],
       operating_hours: [null],
-      manager_user_id: [null],
-    });
+      manager_user_id: [null]});
   }
 
   private async loadOptions(): Promise<void> {
@@ -368,7 +354,7 @@ export class StoreCreateModalComponent implements OnInit, OnDestroy {
   private setupAutoSlugGeneration(): void {
     this.storeForm
       .get('name')
-      ?.valueChanges.pipe(takeUntil(this.destroy$))
+      ?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((name) => {
         const slugControl = this.storeForm.get('slug');
         if (name && !slugControl?.value) {
@@ -396,6 +382,10 @@ export class StoreCreateModalComponent implements OnInit, OnDestroy {
 
   onCancel(): void {
     this.isOpenChange.emit(false);
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.cancel.emit();
   }
 
@@ -422,9 +412,7 @@ export class StoreCreateModalComponent implements OnInit, OnDestroy {
       settings: {
         currency_code: formValue.currency_code || undefined,
         color_primary: formValue.color_primary || undefined,
-        color_secondary: formValue.color_secondary || undefined,
-      },
-    };
+        color_secondary: formValue.color_secondary || undefined}};
 
     // Remove undefined values
     Object.keys(storeData).forEach((key) => {
@@ -453,8 +441,7 @@ export class StoreCreateModalComponent implements OnInit, OnDestroy {
       color_secondary: '#2f6f4e',
       is_active: true,
       operating_hours: null,
-      manager_user_id: null,
-    });
+      manager_user_id: null});
   }
 
   getErrorMessage(control: AbstractControl | null): string {

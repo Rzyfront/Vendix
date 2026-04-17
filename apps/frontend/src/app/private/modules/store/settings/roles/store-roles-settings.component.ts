@@ -1,6 +1,8 @@
-import { Component, OnInit, OnDestroy, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { Subject, takeUntil } from 'rxjs';
+import {Component, OnInit, inject, signal,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
+
 import { StoreRole, StoreRoleStats } from './interfaces/store-role.interface';
 import { StoreRolesService } from './services/store-roles.service';
 
@@ -8,20 +10,17 @@ import {
   StoreRoleCreateModalComponent,
   StoreRoleEditModalComponent,
   StoreRolePermissionsModalComponent,
-  StoreRolesListComponent,
-} from './components/index';
+  StoreRolesListComponent} from './components/index';
 
 import {
   DialogService,
   ToastService,
-  StatsComponent,
-} from '../../../../../shared/components/index';
+  StatsComponent} from '../../../../../shared/components/index';
 
 @Component({
   selector: 'app-store-roles-settings',
   standalone: true,
   imports: [
-    CommonModule,
     StoreRoleCreateModalComponent,
     StoreRoleEditModalComponent,
     StoreRolePermissionsModalComponent,
@@ -36,50 +35,50 @@ import {
       >
         <app-stats
           title="Total Roles"
-          [value]="roleStats?.total_roles ?? 0"
+          [value]="roleStats()?.total_roles ?? 0"
           smallText="en la tienda"
           iconName="shield"
           iconBgColor="bg-primary/10"
           iconColor="text-primary"
-          [loading]="statsLoading"
+          [loading]="statsLoading()"
         ></app-stats>
 
         <app-stats
           title="Sistema"
-          [value]="roleStats?.system_roles ?? 0"
+          [value]="roleStats()?.system_roles ?? 0"
           smallText="roles del sistema"
           iconName="lock"
           iconBgColor="bg-blue-100"
           iconColor="text-blue-600"
-          [loading]="statsLoading"
+          [loading]="statsLoading()"
         ></app-stats>
 
         <app-stats
           title="Personalizados"
-          [value]="roleStats?.custom_roles ?? 0"
+          [value]="roleStats()?.custom_roles ?? 0"
           smallText="roles personalizados"
           iconName="edit"
           iconBgColor="bg-green-100"
           iconColor="text-green-600"
-          [loading]="statsLoading"
+          [loading]="statsLoading()"
         ></app-stats>
 
         <app-stats
           title="Permisos Store"
-          [value]="roleStats?.total_store_permissions ?? 0"
+          [value]="roleStats()?.total_store_permissions ?? 0"
           smallText="permisos disponibles"
           iconName="key"
           iconBgColor="bg-yellow-100"
           iconColor="text-yellow-600"
-          [loading]="statsLoading"
+          [loading]="statsLoading()"
         ></app-stats>
       </div>
 
       <!-- List -->
       <app-store-roles-list
-        [roles]="filteredRoles"
-        [loading]="isLoading"
-        [totalCount]="roles.length"
+        [roles]="filteredRoles()"
+        [loading]="isLoading()"
+        [totalCount]="roles().length"
         (create)="openCreateModal()"
         (edit)="openEditModal($event)"
         (managePermissions)="openPermissionsModal($event)"
@@ -89,16 +88,14 @@ import {
         (sort)="onSortChange($event)"
       ></app-store-roles-list>
 
-      <!-- Create Role Modal -->
-      @if (showCreateModal) {
+      @defer (when showCreateModal) {
         <app-store-role-create-modal
           [(isOpen)]="showCreateModal"
           (onRoleCreated)="onRoleCreated()"
         />
       }
 
-      <!-- Edit Role Modal -->
-      @if (showEditModal && currentRole) {
+      @defer (when showEditModal && currentRole) {
         <app-store-role-edit-modal
           [role]="currentRole"
           [(isOpen)]="showEditModal"
@@ -106,8 +103,7 @@ import {
         />
       }
 
-      <!-- Permissions Modal -->
-      @if (showPermissionsModal && permissionsRole) {
+      @defer (when showPermissionsModal && permissionsRole) {
         <app-store-role-permissions-modal
           [role]="permissionsRole"
           [(isOpen)]="showPermissionsModal"
@@ -115,20 +111,18 @@ import {
         />
       }
     </div>
-  `,
-})
-export class StoreRolesSettingsComponent implements OnInit, OnDestroy {
+  `})
+export class StoreRolesSettingsComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private storeRolesService = inject(StoreRolesService);
   private dialogService = inject(DialogService);
   private toastService = inject(ToastService);
-  private destroy$ = new Subject<void>();
-
-  // State
-  roles: StoreRole[] = [];
-  filteredRoles: StoreRole[] = [];
-  roleStats: StoreRoleStats | null = null;
-  isLoading = false;
-  statsLoading = false;
+// State
+  readonly roles = signal<StoreRole[]>([]);
+  readonly filteredRoles = signal<StoreRole[]>([]);
+  readonly roleStats = signal<StoreRoleStats | null>(null);
+  readonly isLoading = signal(false);
+  readonly statsLoading = signal(false);
 
   // Filters
   searchTerm = '';
@@ -145,49 +139,41 @@ export class StoreRolesSettingsComponent implements OnInit, OnDestroy {
     this.loadRoles();
     this.loadStats();
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  loadRoles(): void {
-    this.isLoading = true;
+loadRoles(): void {
+    this.isLoading.set(true);
 
     this.storeRolesService
       .getRoles()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
-          this.roles = response.data || [];
+          this.roles.set(response.data || []);
           this.applyFilters();
         },
         error: (error) => {
           console.error('Error loading store roles:', error);
-          this.roles = [];
-          this.filteredRoles = [];
-        },
-      })
+          this.roles.set([]);
+          this.filteredRoles.set([]);
+        }})
       .add(() => {
-        this.isLoading = false;
+        this.isLoading.set(false);
       });
   }
 
   loadStats(): void {
-    this.statsLoading = true;
+    this.statsLoading.set(true);
     this.storeRolesService
       .getStats()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (stats) => {
-          this.roleStats = stats;
-          this.statsLoading = false;
+          this.roleStats.set(stats);
+          this.statsLoading.set(false);
         },
         error: (err) => {
           console.error('Error loading store role stats', err);
-          this.statsLoading = false;
-        },
-      });
+          this.statsLoading.set(false);
+        }});
   }
 
   // ── Filters ──────────────────────────────────────────────────────────
@@ -204,19 +190,22 @@ export class StoreRolesSettingsComponent implements OnInit, OnDestroy {
     this.applyFilters();
   }
 
-  onSortChange(event: { column: string; direction: 'asc' | 'desc' | null }): void {
+  onSortChange(event: {
+    column: string;
+    direction: 'asc' | 'desc' | null;
+  }): void {
     if (!event.direction) return;
-    this.filteredRoles = [...this.filteredRoles].sort((a: any, b: any) => {
+    this.filteredRoles.set([...this.filteredRoles()].sort((a: any, b: any) => {
       const valA = a[event.column];
       const valB = b[event.column];
       if (valA < valB) return event.direction === 'asc' ? -1 : 1;
       if (valA > valB) return event.direction === 'asc' ? 1 : -1;
       return 0;
-    });
+    }));
   }
 
   private applyFilters(): void {
-    let filtered = [...this.roles];
+    let filtered = [...this.roles()];
 
     if (this.typeFilter === 'system') {
       filtered = filtered.filter((r) => r.system_role);
@@ -233,7 +222,7 @@ export class StoreRolesSettingsComponent implements OnInit, OnDestroy {
       );
     }
 
-    this.filteredRoles = filtered;
+    this.filteredRoles.set(filtered);
   }
 
   // ── Modals ───────────────────────────────────────────────────────────
@@ -276,8 +265,7 @@ export class StoreRolesSettingsComponent implements OnInit, OnDestroy {
         message: `Estas seguro de que deseas eliminar el rol "${role.name}"? Esta accion no se puede deshacer.`,
         confirmText: 'Eliminar',
         cancelText: 'Cancelar',
-        confirmVariant: 'danger',
-      })
+        confirmVariant: 'danger'})
       .then((confirmed) => {
         if (confirmed) {
           this.storeRolesService.deleteRole(role.id).subscribe({
@@ -290,8 +278,7 @@ export class StoreRolesSettingsComponent implements OnInit, OnDestroy {
               const message =
                 error?.error?.message || 'Error al eliminar el rol';
               this.toastService.error(message);
-            },
-          });
+            }});
         }
       });
   }

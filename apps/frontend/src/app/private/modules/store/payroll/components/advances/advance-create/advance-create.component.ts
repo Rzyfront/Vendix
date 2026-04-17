@@ -1,23 +1,40 @@
-import { Component, Input, Output, EventEmitter, OnInit, OnDestroy, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
-import { Subject } from 'rxjs';
-import { takeUntil } from 'rxjs/operators';
+import {
+  Component,
+  input,
+  output,
+  model,
+  inject,
+  DestroyRef,
+  signal,
+} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
+import {
+  FormBuilder,
+  FormGroup,
+  Validators,
+  ReactiveFormsModule,
+} from '@angular/forms';
 
 import { PayrollService } from '../../../services/payroll.service';
-import { Employee, CreateAdvanceDto } from '../../../interfaces/payroll.interface';
+import {
+  Employee,
+  CreateAdvanceDto,
+} from '../../../interfaces/payroll.interface';
 import { ToastService } from '../../../../../../../shared/components/toast/toast.service';
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
-import { SelectorComponent, SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
+import {
+  SelectorComponent,
+  SelectorOption,
+} from '../../../../../../../shared/components/selector/selector.component';
 import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
 
 @Component({
   selector: 'app-advance-create',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
@@ -26,19 +43,18 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
-      (isOpenChange)="isOpenChange.emit($event)"
+      [isOpen]="isOpen()"
+      (isOpenChange)="isOpen.set($event)"
       (cancel)="onClose()"
       title="Nuevo Adelanto"
       size="md"
     >
       <div class="p-4">
         <form [formGroup]="form" (ngSubmit)="onSubmit()" class="space-y-4">
-
           <app-selector
             label="Empleado"
             formControlName="employee_id"
-            [options]="employeeOptions"
+            [options]="employeeOptions()"
             [required]="true"
             placeholder="Seleccionar empleado..."
           ></app-selector>
@@ -78,7 +94,9 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
           ></app-input>
 
           <div>
-            <label class="block text-sm font-medium text-text-primary mb-1">Motivo</label>
+            <label class="block text-sm font-medium text-text-primary mb-1"
+              >Motivo</label
+            >
             <textarea
               formControlName="reason"
               rows="3"
@@ -88,21 +106,22 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
               placeholder="Motivo del adelanto (opcional)..."
             ></textarea>
           </div>
-
         </form>
       </div>
 
       <!-- Footer -->
       <div slot="footer">
-        <div class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
+        <div
+          class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100"
+        >
           <app-button variant="outline" (clicked)="onClose()">
             Cancelar
           </app-button>
           <app-button
             variant="primary"
             (clicked)="onSubmit()"
-            [disabled]="form.invalid || submitting"
-            [loading]="submitting"
+            [disabled]="form.invalid || submitting()"
+            [loading]="submitting()"
           >
             Solicitar Adelanto
           </app-button>
@@ -111,20 +130,23 @@ import { toLocalDateString } from '../../../../../../../shared/utils/date.util';
     </app-modal>
   `,
 })
-export class AdvanceCreateComponent implements OnInit, OnDestroy {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() created = new EventEmitter<void>();
+export class AdvanceCreateComponent {
+  private destroyRef = inject(DestroyRef);
+  readonly isOpen = model<boolean>(false);
+  readonly created = output<void>();
 
   private fb = inject(FormBuilder);
   private payrollService = inject(PayrollService);
   private toastService = inject(ToastService);
-  private destroy$ = new Subject<void>();
 
-  submitting = false;
-  employeeOptions: SelectorOption[] = [];
+  constructor() {
+    const today = toLocalDateString();
+    this.form.patchValue({ advance_date: today });
+  }
+  readonly submitting = signal(false);
+  readonly employeeOptions = signal<SelectorOption[]>([]);
 
-  frequencyOptions: SelectorOption[] = [
+  readonly frequencyOptions: SelectorOption[] = [
     { label: 'Mensual', value: 'monthly' },
     { label: 'Quincenal', value: 'biweekly' },
     { label: 'Semanal', value: 'weekly' },
@@ -139,28 +161,18 @@ export class AdvanceCreateComponent implements OnInit, OnDestroy {
     reason: [''],
   });
 
-  ngOnInit(): void {
-    this.loadEmployees();
-
-    // Set default date to today
-    const today = toLocalDateString();
-    this.form.patchValue({ advance_date: today });
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
   private loadEmployees(): void {
-    this.payrollService.getEmployees({ status: 'active', limit: 500 })
-      .pipe(takeUntil(this.destroy$))
+    this.payrollService
+      .getEmployees({ status: 'active', limit: 500 })
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
-          this.employeeOptions = (res.data || []).map((emp: Employee) => ({
-            label: `${emp.first_name} ${emp.last_name} (${emp.document_number})`,
-            value: emp.id,
-          }));
+          this.employeeOptions.set(
+            (res.data || []).map((emp: Employee) => ({
+              label: `${emp.first_name} ${emp.last_name} (${emp.document_number})`,
+              value: emp.id,
+            })),
+          );
         },
       });
   }
@@ -171,7 +183,7 @@ export class AdvanceCreateComponent implements OnInit, OnDestroy {
       return;
     }
 
-    this.submitting = true;
+    this.submitting.set(true);
     const val = this.form.value;
 
     const dto: CreateAdvanceDto = {
@@ -183,24 +195,31 @@ export class AdvanceCreateComponent implements OnInit, OnDestroy {
       reason: val.reason || undefined,
     };
 
-    this.payrollService.createAdvance(dto)
-      .pipe(takeUntil(this.destroy$))
+    this.payrollService
+      .createAdvance(dto)
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
-          this.toastService.show({ variant: 'success', description: 'Adelanto creado exitosamente' });
-          this.submitting = false;
+          this.toastService.show({
+            variant: 'success',
+            description: 'Adelanto creado exitosamente',
+          });
+          this.submitting.set(false);
           this.form.reset({ installments: 1, frequency: 'monthly' });
           this.created.emit();
           this.onClose();
         },
         error: () => {
-          this.toastService.show({ variant: 'error', description: 'Error al crear el adelanto' });
-          this.submitting = false;
+          this.toastService.show({
+            variant: 'error',
+            description: 'Error al crear el adelanto',
+          });
+          this.submitting.set(false);
         },
       });
   }
 
   onClose(): void {
-    this.isOpenChange.emit(false);
+    this.isOpen.set(false);
   }
 }

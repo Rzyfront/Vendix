@@ -1,18 +1,15 @@
 import {
   Component,
-  ChangeDetectionStrategy,
+  DestroyRef,
   inject,
   signal,
-  OnInit,
-  OnDestroy,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import {
   ReactiveFormsModule,
   FormBuilder,
   FormGroup,
 } from '@angular/forms';
-import { Subject, takeUntil } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   InputComponent,
@@ -27,13 +24,11 @@ import { DispatchNoteWizardService } from '../../services/dispatch-note-wizard.s
   selector: 'app-dispatch-wizard-details-step',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     InputComponent,
     TextareaComponent,
     SelectorComponent,
   ],
-  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <form [formGroup]="form" class="space-y-3">
       <!-- Section: Fechas -->
@@ -89,12 +84,12 @@ import { DispatchNoteWizardService } from '../../services/dispatch-note-wizard.s
     </form>
   `,
 })
-export class DetailsStepComponent implements OnInit, OnDestroy {
+export class DetailsStepComponent {
   readonly wizardService = inject(DispatchNoteWizardService);
 
   private readonly fb = inject(FormBuilder);
   private readonly locationsService = inject(LocationsService);
-  private readonly destroy$ = new Subject<void>();
+  private readonly destroyRef = inject(DestroyRef);
 
   readonly locationOptions = signal<SelectorOption[]>([]);
 
@@ -106,20 +101,15 @@ export class DetailsStepComponent implements OnInit, OnDestroy {
     internal_notes: [this.wizardService.details().internal_notes || ''],
   });
 
-  ngOnInit(): void {
+  constructor() {
     this.loadLocations();
     this.syncFormToService();
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
   }
 
   private loadLocations(): void {
     this.locationsService
       .getLocations({ is_active: true })
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           const locations = response.data || [];
@@ -139,7 +129,7 @@ export class DetailsStepComponent implements OnInit, OnDestroy {
 
   private syncFormToService(): void {
     this.form.valueChanges
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((values) => {
         const selectedLocation = this.locationOptions().find(
           (o) => o.value === values.dispatch_location_id,

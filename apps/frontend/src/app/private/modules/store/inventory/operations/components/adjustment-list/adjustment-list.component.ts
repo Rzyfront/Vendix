@@ -1,5 +1,5 @@
 import { Component, input, output, computed } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 
 // Shared Components
@@ -27,7 +27,6 @@ import { InventoryAdjustment, AdjustmentType } from '../../../interfaces';
   selector: 'app-adjustment-list',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     InputsearchComponent,
     OptionsDropdownComponent,
@@ -36,8 +35,8 @@ import { InventoryAdjustment, AdjustmentType } from '../../../interfaces';
     ButtonComponent,
     PaginationComponent,
     EmptyStateComponent,
-    CardComponent,
-  ],
+    CardComponent
+],
   templateUrl: './adjustment-list.component.html',
 })
 export class AdjustmentListComponent {

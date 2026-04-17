@@ -1,13 +1,6 @@
-import {
-  Component,
-  Input,
-  Output,
-  EventEmitter,
-  ChangeDetectionStrategy,
-  OnInit,
-  ChangeDetectorRef,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, input, output, ChangeDetectionStrategy, OnInit, inject, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { IconComponent, InputComponent, SelectorComponent } from '../../index';
 import {
@@ -21,13 +14,12 @@ import {
   selector: 'app-user-setup-step',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     IconComponent,
     InputComponent,
-    SelectorComponent,
-  ],
+    SelectorComponent
+],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [
     `
@@ -429,7 +421,7 @@ import {
         </div>
 
         <!-- User Form -->
-        <form class="user-form" [formGroup]="formGroup">
+        <form class="user-form" [formGroup]="formGroup()">
           <!-- Personal Information Section -->
           <div class="form-section">
             <div class="section-header">
@@ -561,31 +553,30 @@ import {
   `,
 })
 export class UserSetupStepComponent implements OnInit {
-  @Input() formGroup: any;
-  @Output() nextStep = new EventEmitter<void>();
-  @Output() skipStep = new EventEmitter<void>();
-  @Output() previousStep = new EventEmitter<void>();
+  private destroyRef = inject(DestroyRef);
+  readonly formGroup = input<any>(null);
+  readonly nextStep = output<void>();
+  readonly skipStep = output<void>();
+  readonly previousStep = output<void>();
+
+  private readonly countryService = inject(CountryService);
 
   countries: Country[] = [];
   departments: Department[] = [];
   cities: City[] = [];
 
-  constructor(
-    private countryService: CountryService,
-    private cdr: ChangeDetectorRef,
-  ) { }
-
   ngOnInit(): void {
     this.countries = this.countryService.getCountries();
 
-    if (!this.formGroup) return;
+    const fg = this.formGroup();
+    if (!fg) return;
 
-    const countryControl = this.formGroup.get('country_code');
-    const depControl = this.formGroup.get('state_province');
-    const cityControl = this.formGroup.get('city');
+    const countryControl = fg.get('country_code');
+    const depControl = fg.get('state_province');
+    const cityControl = fg.get('city');
 
     // Cargar departamentos al cambiar país
-    countryControl.valueChanges.subscribe((code: string) => {
+    countryControl.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((code: string) => {
       if (code === 'CO') {
         this.loadDepartments();
       } else {
@@ -593,18 +584,16 @@ export class UserSetupStepComponent implements OnInit {
         this.cities = [];
         depControl.setValue('');
         cityControl.setValue('');
-        this.cdr.markForCheck();
       }
     });
 
     // Cargar ciudades al cambiar departamento
-    depControl.valueChanges.subscribe((depId: number) => {
+    depControl.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((depId: number) => {
       if (depId) {
         this.loadCities(depId);
       } else {
         this.cities = [];
         cityControl.setValue('');
-        this.cdr.markForCheck();
       }
     });
 
@@ -620,12 +609,10 @@ export class UserSetupStepComponent implements OnInit {
 
   async loadDepartments(): Promise<void> {
     this.departments = await this.countryService.getDepartments();
-    this.cdr.markForCheck();
   }
 
   async loadCities(departmentId: number): Promise<void> {
     this.cities = await this.countryService.getCitiesByDepartment(departmentId);
-    this.cdr.markForCheck();
   }
 
   get countryOptions() {

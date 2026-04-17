@@ -6,7 +6,7 @@
       <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
         <!-- Title - smaller on mobile, larger on desktop -->
         <h2 class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary">
-          Órdenes ({{ totalItems }})
+          Órdenes ({{ totalItems() }})
         </h2>
 
         <!-- Search row - horizontal on mobile -->
@@ -16,7 +16,7 @@
             size="sm"
             placeholder="Buscar órdenes..."
             [debounceTime]="1000"
-            [ngModel]="searchTerm"
+            [ngModel]="searchTerm()"
             (ngModelChange)="onSearchChange($event)"
           ></app-inputsearch>
 
@@ -33,9 +33,9 @@
           <app-options-dropdown
             class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
             [filters]="filterConfigs"
-            [filterValues]="filterValues"
+            [filterValues]="filterValues()"
             [actions]="dropdownActions"
-            [isLoading]="loading"
+            [isLoading]="loading()"
             (filterChange)="onFilterChange($event)"
             (clearAllFilters)="clearFilters()"
             (actionClick)="onActionClick($event)"
@@ -45,47 +45,52 @@
     </div>
 
     <!-- Estado de Carga -->
-    <div *ngIf="loading" class="p-4 md:p-6 text-center">
-      <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-      <p class="mt-2 text-text-secondary">Cargando órdenes...</p>
-    </div>
+    @if (loading()) {
+      <div class="p-4 md:p-6 text-center">
+        <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        <p class="mt-2 text-text-secondary">Cargando órdenes...</p>
+      </div>
+    }
 
     <!-- Estado Vacío -->
-    <app-empty-state
-      *ngIf="!loading && orders.length === 0"
-      icon="shopping-bag"
-      [title]="getEmptyStateTitle()"
-      [description]="getEmptyStateDescription()"
-      actionButtonText="Crear Primera Orden"
-      [showActionButton]="!hasFilters"
-      [showRefreshButton]="true"
-      [showClearFilters]="hasFilters"
-      (actionClick)="create.emit()"
-      (refreshClick)="refresh.emit()"
-      (clearFiltersClick)="clearFilters()"
-    ></app-empty-state>
+    @if (!loading() && orders().length === 0) {
+      <app-empty-state
+        icon="shopping-bag"
+        [title]="getEmptyStateTitle()"
+        [description]="getEmptyStateDescription()"
+        actionButtonText="Crear Primera Orden"
+        [showActionButton]="!hasFilters()"
+        [showRefreshButton]="true"
+        [showClearFilters]="hasFilters()"
+        (actionClick)="create.emit()"
+        (refreshClick)="refresh.emit()"
+        (clearFiltersClick)="clearFilters()"
+      ></app-empty-state>
+    }
 
     <!-- Orders List -->
-    <div *ngIf="!loading && orders.length > 0" class="px-2 pb-2 pt-3 md:p-4">
-      <app-responsive-data-view
-        [data]="orders"
-        [columns]="columns"
-        [actions]="actions"
-        [cardConfig]="cardConfig"
-        [loading]="loading"
-        [sortable]="true"
-        (sort)="onSort($event)"
-        (rowClick)="handleViewOrder($event.id)"
-      ></app-responsive-data-view>
+    @if (!loading() && orders().length > 0) {
+      <div class="px-2 pb-2 pt-3 md:p-4">
+        <app-responsive-data-view
+          [data]="orders()"
+          [columns]="columns"
+          [actions]="actions"
+          [cardConfig]="cardConfig"
+          [loading]="loading()"
+          [sortable]="true"
+          (sort)="onSort($event)"
+          (rowClick)="handleViewOrder($event.id)"
+        ></app-responsive-data-view>
 
-      <!-- Pagination -->
-      <app-pagination
-        [currentPage]="filters.page || 1"
-        [totalPages]="totalPages"
-        [total]="totalItems"
-        [limit]="filters.limit || 10"
-        (pageChange)="onPageChange($event)"
-      ></app-pagination>
-    </div>
+        <!-- Pagination -->
+        <app-pagination
+          [currentPage]="_filters.page || 1"
+          [totalPages]="totalPages()"
+          [total]="totalItems()"
+          [limit]="_filters.limit || 10"
+          (pageChange)="onPageChange($event)"
+        ></app-pagination>
+      </div>
+    }
   </app-card>
 </div>

@@ -1,5 +1,5 @@
-import { Component, Input } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input } from '@angular/core';
+
 
 // Import shared components
 import { StatsComponent } from '../../../../../shared/components';
@@ -7,12 +7,12 @@ import { StatsComponent } from '../../../../../shared/components';
 @Component({
   selector: 'app-organization-stats',
   standalone: true,
-  imports: [CommonModule, StatsComponent],
+  imports: [StatsComponent],
   template: `
     <div class="stats-container">
       <app-stats
         title="Total Organizations"
-        [value]="stats.total"
+        [value]="stats().total"
         iconName="building"
         iconBgColor="bg-primary/10"
         iconColor="text-primary"
@@ -20,7 +20,7 @@ import { StatsComponent } from '../../../../../shared/components';
 
       <app-stats
         title="Active"
-        [value]="stats.active"
+        [value]="stats().active"
         iconName="check"
         iconBgColor="bg-green-100"
         iconColor="text-green-600"
@@ -28,7 +28,7 @@ import { StatsComponent } from '../../../../../shared/components';
 
       <app-stats
         title="Inactive"
-        [value]="stats.inactive"
+        [value]="stats().inactive"
         iconName="warning"
         iconBgColor="bg-yellow-100"
         iconColor="text-yellow-600"
@@ -36,7 +36,7 @@ import { StatsComponent } from '../../../../../shared/components';
 
       <app-stats
         title="Suspended"
-        [value]="stats.suspended"
+        [value]="stats().suspended"
         iconName="close"
         iconBgColor="bg-red-100"
         iconColor="text-red-600"
@@ -44,7 +44,7 @@ import { StatsComponent } from '../../../../../shared/components';
 
       <app-stats
         title="Demo"
-        [value]="stats.demo"
+        [value]="stats().demo"
         iconName="eye"
         iconBgColor="bg-amber-100"
         iconColor="text-amber-600"
@@ -52,7 +52,7 @@ import { StatsComponent } from '../../../../../shared/components';
 
       <app-stats
         title="Test"
-        [value]="stats.test"
+        [value]="stats().test"
         iconName="flask-conical"
         iconBgColor="bg-purple-100"
         iconColor="text-purple-600"
@@ -68,12 +68,12 @@ import { StatsComponent } from '../../../../../shared/components';
   ],
 })
 export class OrganizationStatsComponent {
-  @Input() stats = {
+  readonly stats = input({
     total: 0,
     active: 0,
     inactive: 0,
     suspended: 0,
     demo: 0,
     test: 0,
-  };
+});
 }

@@ -1,12 +1,10 @@
 import {
   Component,
-  ChangeDetectionStrategy,
   inject,
   input,
   output,
   computed,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import {
   ModalComponent,
   ButtonComponent,
@@ -19,12 +17,10 @@ import { DispatchNote, DispatchNoteItem } from '../../interfaces/dispatch-note.i
   selector: 'app-invoice-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ModalComponent,
     ButtonComponent,
     IconComponent,
   ],
-  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <app-modal
       [isOpen]="isOpen()"
@@ -61,25 +57,25 @@ import { DispatchNote, DispatchNoteItem } from '../../interfaces/dispatch-note.i
                 </tr>
               </thead>
               <tbody>
-                <tr
-                  *ngFor="let item of items(); let last = last"
-                  class="transition-colors duration-150"
-                  [class.border-b]="!last"
-                  [class.border-[var(--color-border)]]="!last"
-                >
-                  <td class="px-4 py-3 text-[var(--fs-sm)] text-[var(--color-text-primary)]">
-                    {{ getProductName(item) }}
-                  </td>
-                  <td class="px-4 py-3 text-[var(--fs-sm)] text-[var(--color-text-primary)] text-right">
-                    {{ item.dispatched_quantity }}
-                  </td>
-                  <td class="px-4 py-3 text-[var(--fs-sm)] text-[var(--color-text-primary)] text-right">
-                    {{ formatCurrency(item.unit_price) }}
-                  </td>
-                  <td class="px-4 py-3 text-[var(--fs-sm)] font-[var(--fw-medium)] text-[var(--color-text-primary)] text-right">
-                    {{ formatCurrency(item.total_price) }}
-                  </td>
-                </tr>
+                @for (item of items(); track item.id; let last = $last) {
+                  <tr
+                    class="transition-colors duration-150"
+                    [class.border-b]="!last"
+                  >
+                    <td class="px-4 py-3 text-[var(--fs-sm)] text-[var(--color-text-primary)]">
+                      {{ getProductName(item) }}
+                    </td>
+                    <td class="px-4 py-3 text-[var(--fs-sm)] text-[var(--color-text-primary)] text-right">
+                      {{ item.dispatched_quantity }}
+                    </td>
+                    <td class="px-4 py-3 text-[var(--fs-sm)] text-[var(--color-text-primary)] text-right">
+                      {{ formatCurrency(item.unit_price) }}
+                    </td>
+                    <td class="px-4 py-3 text-[var(--fs-sm)] font-[var(--fw-medium)] text-[var(--color-text-primary)] text-right">
+                      {{ formatCurrency(item.total_price) }}
+                    </td>
+                  </tr>
+                }
               </tbody>
             </table>
           </div>
@@ -87,22 +83,21 @@ import { DispatchNote, DispatchNoteItem } from '../../interfaces/dispatch-note.i
 
         <!-- Items Summary — Mobile Cards -->
         <div class="md:hidden space-y-3">
-          <div
-            *ngFor="let item of items()"
-            class="rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 space-y-2"
-          >
-            <p class="text-[var(--fs-sm)] font-[var(--fw-medium)] text-[var(--color-text-primary)]">
-              {{ getProductName(item) }}
-            </p>
-            <div class="flex items-center justify-between">
-              <span class="text-[var(--fs-xs)] text-[var(--color-text-secondary)]">
-                {{ item.dispatched_quantity }} x {{ formatCurrency(item.unit_price) }}
-              </span>
-              <span class="text-[var(--fs-sm)] font-[var(--fw-medium)] text-[var(--color-text-primary)]">
-                {{ formatCurrency(item.total_price) }}
-              </span>
+          @for (item of items(); track item.id) {
+            <div class="rounded-lg border border-[var(--color-border)] bg-[var(--color-background)] p-3 space-y-2">
+              <p class="text-[var(--fs-sm)] font-[var(--fw-medium)] text-[var(--color-text-primary)]">
+                {{ getProductName(item) }}
+              </p>
+              <div class="flex items-center justify-between">
+                <span class="text-[var(--fs-xs)] text-[var(--color-text-secondary)]">
+                  {{ item.dispatched_quantity }} x {{ formatCurrency(item.unit_price) }}
+                </span>
+                <span class="text-[var(--fs-sm)] font-[var(--fw-medium)] text-[var(--color-text-primary)]">
+                  {{ formatCurrency(item.total_price) }}
+                </span>
+              </div>
             </div>
-          </div>
+          }
         </div>
 
         <!-- Totals -->
@@ -114,15 +109,14 @@ import { DispatchNote, DispatchNoteItem } from '../../interfaces/dispatch-note.i
             </span>
           </div>
 
-          <div
-            *ngIf="hasDiscount()"
-            class="flex items-center justify-between"
-          >
-            <span class="text-[var(--fs-sm)] text-[var(--color-text-secondary)]">Descuento</span>
-            <span class="text-[var(--fs-sm)] text-red-600">
-              -{{ formatCurrency(dispatchNote().discount_amount) }}
-            </span>
-          </div>
+          @if (hasDiscount()) {
+            <div class="flex items-center justify-between">
+              <span class="text-[var(--fs-sm)] text-[var(--color-text-secondary)]">Descuento</span>
+              <span class="text-[var(--fs-sm)] text-red-600">
+                -{{ formatCurrency(dispatchNote().discount_amount) }}
+              </span>
+            </div>
+          }
 
           <div class="flex items-center justify-between">
             <span class="text-[var(--fs-sm)] text-[var(--color-text-secondary)]">IVA</span>
@@ -147,27 +141,28 @@ import { DispatchNote, DispatchNoteItem } from '../../interfaces/dispatch-note.i
               {{ dispatchNote().customer_name }}
             </span>
           </div>
-          <div *ngIf="dispatchNote().customer_tax_id" class="flex items-center justify-between">
-            <span class="text-[var(--fs-sm)] text-[var(--color-text-secondary)]">NIT / CC</span>
-            <span class="text-[var(--fs-sm)] text-[var(--color-text-primary)]">
-              {{ dispatchNote().customer_tax_id }}
-            </span>
-          </div>
+          @if (dispatchNote().customer_tax_id) {
+            <div class="flex items-center justify-between">
+              <span class="text-[var(--fs-sm)] text-[var(--color-text-secondary)]">NIT / CC</span>
+              <span class="text-[var(--fs-sm)] text-[var(--color-text-primary)]">
+                {{ dispatchNote().customer_tax_id }}
+              </span>
+            </div>
+          }
         </div>
 
         <!-- Linked Sales Order -->
-        <div
-          *ngIf="dispatchNote().sales_order_id"
-          class="flex items-center gap-2 text-[var(--fs-sm)] text-[var(--color-text-secondary)]"
-        >
-          <app-icon name="link" [size]="14" class="text-[var(--color-text-muted)]"></app-icon>
-          <span>
-            Orden de venta:
-            <span class="font-[var(--fw-medium)] text-[var(--color-text-primary)]">
-              #{{ dispatchNote().sales_order?.order_number || dispatchNote().sales_order_id }}
+        @if (dispatchNote().sales_order_id) {
+          <div class="flex items-center gap-2 text-[var(--fs-sm)] text-[var(--color-text-secondary)]">
+            <app-icon name="link" [size]="14" class="text-[var(--color-text-muted)]"></app-icon>
+            <span>
+              Orden de venta:
+              <span class="font-[var(--fw-medium)] text-[var(--color-text-primary)]">
+                #{{ dispatchNote().sales_order?.order_number || dispatchNote().sales_order_id }}
+              </span>
             </span>
-          </span>
-        </div>
+          </div>
+        }
       </div>
 
       <!-- Footer -->

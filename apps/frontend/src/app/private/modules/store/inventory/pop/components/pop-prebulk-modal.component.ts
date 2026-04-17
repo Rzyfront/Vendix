@@ -1,5 +1,4 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input, output } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
@@ -18,7 +17,6 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.p
   selector: 'app-pop-prebulk-modal',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ModalComponent,
     ButtonComponent,
@@ -28,7 +26,7 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.p
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
@@ -151,11 +149,11 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.p
   styleUrls: ['./pop-prebulk-modal.component.scss'],
 })
 export class PopPreBulkModalComponent {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
+  readonly isOpen = input(false);
+  readonly isOpenChange = output<boolean>();
 
-  @Output() close = new EventEmitter<void>();
-  @Output() add = new EventEmitter<{
+  readonly close = output<void>();
+  readonly add = output<{
     prebulkData: PreBulkData;
     quantity: number;
     unit_cost: number;

@@ -1,5 +1,6 @@
-import { Component, Input, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, ChangeDetectionStrategy, inject, input, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import { RouterModule, Router } from '@angular/router';
 import { Category } from '../../services/catalog.service';
 import { CatalogService } from '../../services/catalog.service';
@@ -7,36 +8,37 @@ import { CatalogService } from '../../services/catalog.service';
 @Component({
   selector: 'app-categories-showcase',
   standalone: true,
-  imports: [CommonModule, RouterModule],
+  imports: [RouterModule],
   templateUrl: './categories-showcase.component.html',
   styleUrls: ['./categories-showcase.component.scss'],
 })
 export class CategoriesShowcaseComponent {
-  @Input() limit = 6;
-  @Input() show_all_link = true;
-  @Input() class = '';
+  private destroyRef = inject(DestroyRef);
+  readonly limit = input<number>(6);
+  readonly show_all_link = input<boolean>(true);
+  readonly class = input<string>('');
 
-  categories: Category[] = [];
-  is_loading = true;
+  readonly categories = signal<Category[]>([]);
+  readonly is_loading = signal(true);
 
   private catalog_service = inject(CatalogService);
   private router = inject(Router);
 
-  ngOnInit(): void {
+  constructor() {
     this.loadCategories();
   }
 
   loadCategories(): void {
-    this.catalog_service.getCategories().subscribe({
+    this.catalog_service.getCategories().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: response => {
         if (response.success) {
-          this.categories = response.data.slice(0, this.limit);
+          this.categories.set(response.data.slice(0, this.limit()));
         }
-        this.is_loading = false;
+        this.is_loading.set(false);
       },
       error: () => {
-        this.categories = [];
-        this.is_loading = false;
+        this.categories.set([]);
+        this.is_loading.set(false);
       },
     });
   }

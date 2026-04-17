@@ -1,18 +1,19 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
   forwardRef,
+  input,
+  output,
+  signal,
+  effect,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
 import { FormStyleVariant } from '../../types/form.types';
 
 @Component({
   selector: 'app-toggle',
   standalone: true,
-  imports: [CommonModule],
+  imports: [],
   providers: [
     {
       provide: NG_VALUE_ACCESSOR,
@@ -31,42 +32,48 @@ import { FormStyleVariant } from '../../types/form.types';
   template: `
     <button
       type="button"
-      [attr.aria-pressed]="checked"
-      [attr.aria-label]="ariaLabel || label || 'Toggle'"
-      [disabled]="disabled"
+      [attr.aria-pressed]="isOn()"
+      [attr.aria-label]="ariaLabel() || label() || 'Toggle'"
+      [disabled]="disabled()"
       (click)="onToggle()"
       [class]="buttonClasses"
-      [class.bg-[var(--color-primary)]]="checked"
-      [class.bg-[var(--color-muted)]]="!checked"
+      [class.bg-[var(--color-primary)]]="isOn()"
+      [class.bg-[var(--color-muted)]]="!isOn()"
     >
       <span
-        class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-[var(--color-surface)] shadow ring-0 transition duration-200 ease-in-out"
-        [class.translate-x-5]="checked"
-        [class.translate-x-0]="!checked"
+        class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-[var(--color-surface)] shadow ring-0 transition-transform duration-75 ease-out"
+        [class.translate-x-5]="isOn()"
+        [class.translate-x-0]="!isOn()"
       ></span>
     </button>
-    <span
-      *ngIf="label"
-      [class]="labelClasses"
-      >{{ label }}</span
-    >
+    @if (label()) {
+      <span [class]="labelClasses">{{ label() }}</span>
+    }
   `,
 })
 export class ToggleComponent implements ControlValueAccessor {
-  @Input() checked = false;
-  @Input() disabled = false;
-  @Input() label?: string;
-  @Input() ariaLabel?: string;
-  @Input() styleVariant: FormStyleVariant = 'modern';
+  readonly checked = input(false);
+  readonly disabled = input(false);
+  private isDisabledFromForm = false;
+  readonly label = input<string | undefined>(undefined);
+  readonly ariaLabel = input<string>();
+  readonly styleVariant = input<FormStyleVariant>('modern');
 
-  @Output() toggled = new EventEmitter<boolean>();
-  @Output() changed = new EventEmitter<boolean>();
+  readonly isOn = signal(false);
+  readonly toggled = output<boolean>();
+  readonly changed = output<boolean>();
 
   private onChange: (value: boolean) => void = () => {};
   private onTouched: () => void = () => {};
 
+  constructor() {
+    effect(() => {
+      this.isOn.set(this.checked());
+    });
+  }
+
   writeValue(value: boolean): void {
-    this.checked = !!value;
+    this.isOn.set(!!value);
   }
 
   registerOnChange(fn: (value: boolean) => void): void {
@@ -77,16 +84,16 @@ export class ToggleComponent implements ControlValueAccessor {
     this.onTouched = fn;
   }
 
-  setDisabledState(disabled: boolean): void {
-    this.disabled = disabled;
+  setDisabledState(isDisabled: boolean): void {
+    this.isDisabledFromForm = isDisabled;
   }
 
   onToggle(): void {
-    if (this.disabled) return;
-    this.checked = !this.checked;
-    this.onChange(this.checked);
-    this.toggled.emit(this.checked);
-    this.changed.emit(this.checked);
+    if (this.disabled() || this.isDisabledFromForm) return;
+    this.isOn.update((v) => !v);
+    this.onChange(this.isOn());
+    this.toggled.emit(this.isOn());
+    this.changed.emit(this.isOn());
     this.onTouched();
   }
 
@@ -102,12 +109,12 @@ export class ToggleComponent implements ControlValueAccessor {
       'border-2',
       'border-transparent',
       'transition-colors',
-      'duration-200',
-      'ease-in-out',
+      'duration-75',
+      'ease-out',
       'focus:outline-none',
     ];
 
-    if (this.styleVariant === 'modern') {
+    if (this.styleVariant() === 'modern') {
       // Modern: shadow-based focus
       return [
         ...baseClasses,
@@ -127,7 +134,7 @@ export class ToggleComponent implements ControlValueAccessor {
   get labelClasses(): string {
     const baseClasses = ['ml-2', 'align-middle'];
 
-    if (this.styleVariant === 'modern') {
+    if (this.styleVariant() === 'modern') {
       return [
         ...baseClasses,
         'text-[11px]',
@@ -137,10 +144,8 @@ export class ToggleComponent implements ControlValueAccessor {
       ].join(' ');
     }
 
-    return [
-      ...baseClasses,
-      'text-sm',
-      'text-[var(--color-text-primary)]',
-    ].join(' ');
+    return [...baseClasses, 'text-sm', 'text-[var(--color-text-primary)]'].join(
+      ' ',
+    );
   }
 }

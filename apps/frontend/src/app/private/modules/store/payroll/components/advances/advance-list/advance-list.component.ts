@@ -1,5 +1,5 @@
 import { Component, inject, input, output } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency';
 import { CardComponent } from '../../../../../../../shared/components/card/card.component';
@@ -25,14 +25,13 @@ import { EmployeeAdvance } from '../../../interfaces/payroll.interface';
   selector: 'app-advance-list',
   standalone: true,
   imports: [
-    CommonModule,
     CardComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
     ResponsiveDataViewComponent,
     ButtonComponent,
-    IconComponent,
-  ],
+    IconComponent
+],
   templateUrl: './advance-list.component.html',
 })
 export class AdvanceListComponent {

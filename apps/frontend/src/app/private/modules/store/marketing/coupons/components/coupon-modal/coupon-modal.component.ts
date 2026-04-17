@@ -1,5 +1,5 @@
 import { Component, inject, input, output } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   ReactiveFormsModule,
   FormBuilder,
@@ -21,15 +21,14 @@ import {
   selector: 'app-coupon-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
     InputComponent,
     SelectorComponent,
     TextareaComponent,
-    SettingToggleComponent,
-  ],
+    SettingToggleComponent
+],
   template: `
     @if (visible()) {
     <app-modal

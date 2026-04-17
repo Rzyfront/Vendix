@@ -1,11 +1,5 @@
-import {
-  Component,
-  ChangeDetectionStrategy,
-  signal,
-  computed,
-  inject,
-  OnInit,
-} from '@angular/core';
+import {Component, ChangeDetectionStrategy, signal, computed, inject, OnInit, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
@@ -749,6 +743,7 @@ interface Selection {
   `,
 })
 export class TemplateEditorComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private route = inject(ActivatedRoute);
   private router = inject(Router);
   private templatesService = inject(DataCollectionTemplatesService);
@@ -904,7 +899,7 @@ export class TemplateEditorComponent implements OnInit {
       return;
     }
 
-    this.templatesService.getOne(id).subscribe({
+    this.templatesService.getOne(id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (t) => {
         this.template.set(t);
         this.initFormData(t);
@@ -1056,10 +1051,10 @@ export class TemplateEditorComponent implements OnInit {
 
     const productIds = this.selectedProductIds();
 
-    this.templatesService.update(t.id, payload).subscribe({
+    this.templatesService.update(t.id, payload).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         if (productIds.length >= 0) {
-          this.templatesService.assignProducts(t.id, productIds).subscribe({
+          this.templatesService.assignProducts(t.id, productIds).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
             next: () => {
               this.saving.set(false);
               this.toastService.success('Plantilla actualizada');
@@ -1641,7 +1636,7 @@ export class TemplateEditorComponent implements OnInit {
   // --- Data Loading ---
 
   private loadAvailableFields() {
-    this.fieldsService.getFields().subscribe({
+    this.fieldsService.getFields().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (fields) => this.availableFields.set(fields),
       error: () => {},
     });
@@ -1651,7 +1646,7 @@ export class TemplateEditorComponent implements OnInit {
     this.http
       .get<any>(`${environment.apiUrl}/store/products?limit=200`)
       .pipe(map((r) => r.data))
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (products) => this.availableProducts.set(products),
         error: () => {},
       });

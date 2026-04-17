@@ -1,5 +1,6 @@
-import { Component, signal, effect, inject, input, output, ChangeDetectionStrategy, untracked } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, signal, effect, inject, input, output, untracked, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import { ReservationsService } from '../../../services/reservations.service';
 import { Booking, CalendarViewMode } from '../../../interfaces/reservation.interface';
 import { ToastService, SpinnerComponent } from '../../../../../../../shared/components';
@@ -13,18 +14,17 @@ import { finalize } from 'rxjs';
   selector: 'app-calendar-container',
   standalone: true,
   imports: [
-    CommonModule,
     CalendarToolbarComponent,
     CalendarMonthViewComponent,
     CalendarWeekViewComponent,
     CalendarDayViewComponent,
-    SpinnerComponent,
-  ],
+    SpinnerComponent
+],
   templateUrl: './calendar-container.component.html',
   styleUrls: ['./calendar-container.component.scss'],
-  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class CalendarContainerComponent {
+  private destroyRef = inject(DestroyRef);
   private reservationsService = inject(ReservationsService);
   private toastService = inject(ToastService);
 
@@ -60,7 +60,7 @@ export class CalendarContainerComponent {
     this.reservationsService
       .getCalendar(dateFrom, dateTo, this.selectedServiceId() ?? undefined)
       .pipe(finalize(() => this.loading.set(false)))
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (data) => this.bookingsByDate.set(data),
         error: () => this.toastService.error('Error al cargar calendario'),
       });

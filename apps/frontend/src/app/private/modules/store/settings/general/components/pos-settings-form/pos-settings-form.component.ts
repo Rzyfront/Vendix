@@ -1,12 +1,6 @@
-import {
-  Component,
-  Input,
-  Output,
-  EventEmitter,
-  OnInit,
-  OnChanges,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, OnInit, OnChanges, DestroyRef, inject, input, output } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
 import { SettingToggleComponent } from '../../../../../../../shared/components/setting-toggle/setting-toggle.component';
@@ -22,13 +16,15 @@ import { ToastService } from '../../../../../../../shared/components/toast/toast
 @Component({
   selector: 'app-pos-settings-form',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, SettingToggleComponent],
+  imports: [ReactiveFormsModule, SettingToggleComponent],
   templateUrl: './pos-settings-form.component.html',
   styleUrls: ['./pos-settings-form.component.scss'],
 })
 export class PosSettingsForm implements OnInit, OnChanges {
-  @Input() settings!: PosSettings;
-  @Output() settingsChange = new EventEmitter<PosSettings>();
+  readonly settings = input.required<PosSettings>();
+  readonly settingsChange = output<PosSettings>();
+
+  private destroyRef = inject(DestroyRef);
 
   constructor(
     private scaleService: PosScaleService,
@@ -232,10 +228,42 @@ export class PosSettingsForm implements OnInit, OnChanges {
 
   ngOnInit() {
     this.patchForm();
+    this.wireDependentControls();
   }
 
   ngOnChanges() {
     this.patchForm();
+  }
+
+  private wireDependentControls() {
+    const links: Array<[FormControl<boolean>, FormControl[]]> = [
+      [this.allowAnonymousSalesControl, [this.anonymousSalesAsDefaultControl]],
+      [this.scaleEnabledControl, [this.allowManualWeightEntryControl]],
+      [
+        this.cashRegisterEnabledControl,
+        [
+          this.requireSessionForSalesControl,
+          this.requireClosingCountControl,
+          this.trackNonCashPaymentsControl,
+          this.allowMultipleSessionsControl,
+          this.autoCreateDefaultRegisterControl,
+        ],
+      ],
+      [this.customerQueueEnabledControl, [this.requireEmailControl]],
+    ];
+
+    for (const [master, dependents] of links) {
+      const apply = (enabled: boolean | null) => {
+        for (const dep of dependents) {
+          if (enabled) dep.enable({ emitEvent: false });
+          else dep.disable({ emitEvent: false });
+        }
+      };
+      apply(master.value);
+      master.valueChanges
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe(apply);
+    }
   }
 
   getDefaultBusinessHours(): Record<string, BusinessHours> {
@@ -251,11 +279,12 @@ export class PosSettingsForm implements OnInit, OnChanges {
   }
 
   patchForm() {
-    if (this.settings) {
+    const currentSettings = this.settings();
+    if (currentSettings) {
       this.form.patchValue({
-        ...this.settings,
+        ...currentSettings,
         business_hours:
-          this.settings.business_hours || this.getDefaultBusinessHours(),
+          currentSettings.business_hours || this.getDefaultBusinessHours(),
       });
     }
   }

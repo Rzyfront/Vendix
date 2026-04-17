@@ -1,30 +1,30 @@
-import { Component, Input, Output, EventEmitter, ChangeDetectionStrategy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input, output } from '@angular/core';
+
 import { TimeRange } from '../../interfaces';
 
 @Component({
   selector: 'app-time-range-selector',
   standalone: true,
-  imports: [CommonModule],
-  changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [],
   template: `
     <div class="inline-flex rounded-lg overflow-hidden" style="border: 1px solid var(--color-border);">
-      <button
-        *ngFor="let option of options; trackBy: trackByValue"
-        (click)="select(option.value)"
-        class="px-3 py-1.5 text-xs font-medium transition-colors duration-150"
-        [style.background]="selected === option.value ? 'var(--color-primary)' : 'var(--color-surface)'"
-        [style.color]="selected === option.value ? 'white' : 'var(--color-text-secondary)'"
-        [style.border-right]="option.value !== '7d' ? '1px solid var(--color-border)' : 'none'"
-      >
-        {{ option.label }}
-      </button>
+      @for (option of options; track trackByValue($index, option)) {
+        <button
+          (click)="select(option.value)"
+          class="px-3 py-1.5 text-xs font-medium transition-colors duration-150"
+          [style.background]="selected() === option.value ? 'var(--color-primary)' : 'var(--color-surface)'"
+          [style.color]="selected() === option.value ? 'white' : 'var(--color-text-secondary)'"
+          [style.border-right]="option.value !== '7d' ? '1px solid var(--color-border)' : 'none'"
+          >
+          {{ option.label }}
+        </button>
+      }
     </div>
-  `,
+    `,
 })
 export class TimeRangeSelectorComponent {
-  @Input() selected: TimeRange = '1h';
-  @Output() rangeChange = new EventEmitter<TimeRange>();
+  readonly selected = input<TimeRange>('1h');
+  readonly rangeChange = output<TimeRange>();
 
   readonly options: { label: string; value: TimeRange }[] = [
     { label: '1h', value: '1h' },

@@ -1,5 +1,7 @@
-import { Component, Input, Output, EventEmitter, OnChanges, SimpleChanges, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, input, output, inject, effect, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { firstValueFrom } from 'rxjs';
+
 import { ReactiveFormsModule, FormBuilder, Validators } from '@angular/forms';
 
 import { AccountingService } from '../../../services/accounting.service';
@@ -17,20 +19,19 @@ import {
   selector: 'vendix-fixed-asset-create-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
     InputComponent,
     SelectorComponent,
-    TextareaComponent,
-  ],
+    TextareaComponent
+],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onClose()"
-      [title]="editAsset ? 'Editar Activo Fijo' : 'Nuevo Activo Fijo'"
+      [title]="editAsset() ? 'Editar Activo Fijo' : 'Nuevo Activo Fijo'"
       size="lg"
     >
       <div class="p-4 space-y-4">
@@ -140,28 +141,29 @@ import {
           <app-button
             variant="primary"
             (clicked)="onSubmit()"
-            [disabled]="form.invalid || is_submitting"
-            [loading]="is_submitting"
+            [disabled]="form.invalid || is_submitting()"
+            [loading]="is_submitting()"
           >
-            {{ editAsset ? 'Actualizar' : 'Crear' }}
+            {{ editAsset() ? 'Actualizar' : 'Crear' }}
           </app-button>
         </div>
       </div>
     </app-modal>
   `,
 })
-export class FixedAssetCreateModalComponent implements OnChanges {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Input() editAsset: FixedAsset | null = null;
-  @Input() categories: FixedAssetCategory[] = [];
-  @Output() saved = new EventEmitter<void>();
+export class FixedAssetCreateModalComponent {
+  private destroyRef = inject(DestroyRef);
+  readonly isOpen = input(false);
+  readonly isOpenChange = output<boolean>();
+  readonly editAsset = input<FixedAsset | null>(null);
+  readonly categories = input<FixedAssetCategory[]>([]);
+  readonly saved = output<void>();
 
   private fb = inject(FormBuilder);
   private accounting_service = inject(AccountingService);
   private toast_service = inject(ToastService);
 
-  is_submitting = false;
+  is_submitting = signal(false);
 
   depreciation_method_options = [
     { value: 'straight_line', label: 'Linea Recta' },
@@ -171,7 +173,7 @@ export class FixedAssetCreateModalComponent implements OnChanges {
   get category_options() {
     return [
       { value: null as any, label: 'Sin categoria' },
-      ...this.categories
+      ...this.categories()
         .filter((c) => c.is_active)
         .map((c) => ({ value: c.id, label: c.name })),
     ];
@@ -190,28 +192,31 @@ export class FixedAssetCreateModalComponent implements OnChanges {
     notes: [''],
   });
 
-  ngOnChanges(changes: SimpleChanges): void {
-    if (changes['editAsset'] && this.editAsset) {
-      this.form.patchValue({
-        name: this.editAsset.name,
-        description: this.editAsset.description || '',
-        category_id: this.editAsset.category_id || null,
-        acquisition_date: this.editAsset.acquisition_date?.split('T')[0] || '',
-        acquisition_cost: this.editAsset.acquisition_cost,
-        salvage_value: this.editAsset.salvage_value,
-        useful_life_months: this.editAsset.useful_life_months,
-        depreciation_method: this.editAsset.depreciation_method,
-        depreciation_start_date: this.editAsset.depreciation_start_date?.split('T')[0] || '',
-        notes: this.editAsset.notes || '',
-      });
-    } else if (changes['editAsset'] && !this.editAsset) {
-      this.resetForm();
-    }
+  constructor() {
+    effect(() => {
+      const ea = this.editAsset();
+      if (ea) {
+        this.form.patchValue({
+          name: ea.name,
+          description: ea.description || '',
+          category_id: ea.category_id || null,
+          acquisition_date: ea.acquisition_date?.split('T')[0] || '',
+          acquisition_cost: ea.acquisition_cost,
+          salvage_value: ea.salvage_value,
+          useful_life_months: ea.useful_life_months,
+          depreciation_method: ea.depreciation_method,
+          depreciation_start_date: ea.depreciation_start_date?.split('T')[0] || '',
+          notes: ea.notes || '',
+        });
+      } else if (ea === null) {
+        this.resetForm();
+      }
+    });
   }
 
   onCategoryChange(category_id: any): void {
     if (!category_id) return;
-    const category = this.categories.find((c) => c.id === category_id);
+    const category = this.categories().find((c) => c.id === category_id);
     if (category) {
       this.form.patchValue({
         useful_life_months: category.default_useful_life_months,
@@ -227,10 +232,10 @@ export class FixedAssetCreateModalComponent implements OnChanges {
     }
   }
 
-  onSubmit(): void {
+  async onSubmit(): Promise<void> {
     if (this.form.invalid) return;
 
-    this.is_submitting = true;
+    this.is_submitting.set(true);
     const values = this.form.getRawValue();
 
     const dto: any = {
@@ -246,33 +251,30 @@ export class FixedAssetCreateModalComponent implements OnChanges {
       notes: values.notes || undefined,
     };
 
-    const request$ = this.editAsset
-      ? this.accounting_service.updateFixedAsset(this.editAsset.id, dto)
+    const request$ = this.editAsset()
+      ? this.accounting_service.updateFixedAsset(this.editAsset()!.id, dto)
       : this.accounting_service.createFixedAsset(dto);
 
-    request$.subscribe({
-      next: () => {
-        this.toast_service.show({
-          variant: 'success',
-          description: this.editAsset ? 'Activo actualizado correctamente' : 'Activo creado correctamente',
-        });
-        this.is_submitting = false;
-        this.saved.emit();
-        this.onClose();
-      },
-      error: () => {
-        this.toast_service.show({
-          variant: 'error',
-          description: 'Error al guardar el activo',
-        });
-        this.is_submitting = false;
-      },
-    });
+    try {
+      await firstValueFrom(request$);
+      this.toast_service.show({
+        variant: 'success',
+        description: this.editAsset() ? 'Activo actualizado correctamente' : 'Activo creado correctamente',
+      });
+      this.is_submitting.set(false);
+      this.saved.emit();
+      this.onClose();
+    } catch {
+      this.toast_service.show({
+        variant: 'error',
+        description: 'Error al guardar el activo',
+      });
+      this.is_submitting.set(false);
+    }
   }
 
   onClose(): void {
     this.isOpenChange.emit(false);
-    this.editAsset = null;
     this.resetForm();
   }
 

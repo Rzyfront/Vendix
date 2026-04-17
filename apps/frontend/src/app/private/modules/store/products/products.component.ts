@@ -1,6 +1,5 @@
-import { Component, OnInit, OnDestroy, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { Subscription } from 'rxjs';
+import { Component, inject, DestroyRef, signal } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router, ActivatedRoute } from '@angular/router';
 
 // Services
@@ -35,7 +34,6 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
   selector: 'app-products',
   standalone: true,
   imports: [
-    CommonModule,
     ProductListComponent,
     ProductCreateModalComponent,
     BulkUploadModalComponent,
@@ -49,7 +47,7 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
       <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
         <app-stats
           title="Productos Totales"
-          [value]="stats.total_products"
+          [value]="stats().total_products"
           smallText="Catálogo completo"
           iconName="package"
           iconBgColor="bg-blue-100"
@@ -58,7 +56,7 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
 
         <app-stats
           title="Productos Activos"
-          [value]="stats.active_products"
+          [value]="stats().active_products"
           smallText="Disponibles para venta"
           iconName="check-circle"
           iconBgColor="bg-green-100"
@@ -67,8 +65,8 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
 
         <app-stats
           title="Stock Bajo"
-          [value]="stats.low_stock_products"
-          [smallText]="stats.out_of_stock_products + ' sin stock'"
+          [value]="stats().low_stock_products"
+          [smallText]="stats().out_of_stock_products + ' sin stock'"
           iconName="alert-triangle"
           iconBgColor="bg-amber-100"
           iconColor="text-amber-600"
@@ -76,7 +74,7 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
 
         <app-stats
           title="Valor Total"
-          [value]="formatCurrencyValue(stats.total_value)"
+          [value]="formatCurrencyValue(stats().total_value)"
           smallText="Valor del inventario"
           iconName="dollar-sign"
           iconBgColor="bg-purple-100"
@@ -86,11 +84,11 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
 
       <!-- Product List -->
       <app-product-list
-        [products]="products"
-        [isLoading]="isLoading"
-        [categories]="categories"
-        [brands]="brands"
-        [paginationData]="pagination"
+        [products]="products()"
+        [isLoading]="isLoading()"
+        [categories]="categories()"
+        [brands]="brands()"
+        [paginationData]="pagination()"
         (refresh)="loadProducts()"
         (search)="onSearch($event)"
         (filter)="onFilter($event)"
@@ -123,20 +121,29 @@ import { StatsComponent } from '../../../../shared/components/stats/stats.compon
     </div>
   `,
 })
-export class ProductsComponent implements OnInit, OnDestroy {
+export class ProductsComponent {
   private currencyService = inject(CurrencyFormatService);
+  private productsService = inject(ProductsService);
+  private categoriesService = inject(CategoriesService);
+  private brandsService = inject(BrandsService);
+  private toastService = inject(ToastService);
+  private dialogService = inject(DialogService);
+  private authFacade = inject(AuthFacade);
+  private router = inject(Router);
+  private route = inject(ActivatedRoute);
+  private destroyRef = inject(DestroyRef);
 
-  products: Product[] = [];
-  categories: ProductCategory[] = [];
-  brands: Brand[] = [];
-  isLoading = false;
+  readonly products = signal<Product[]>([]);
+  readonly categories = signal<ProductCategory[]>([]);
+  readonly brands = signal<Brand[]>([]);
+  readonly isLoading = signal(false);
   storeId: string | null = null;
 
   // Pagination
-  pagination = { page: 1, limit: 10, total: 0, totalPages: 0 };
+  readonly pagination = signal({ page: 1, limit: 10, total: 0, totalPages: 0 });
 
   // Stats
-  stats: ProductStats = {
+  readonly stats = signal<ProductStats>({
     total_products: 0,
     active_products: 0,
     inactive_products: 0,
@@ -146,7 +153,7 @@ export class ProductsComponent implements OnInit, OnDestroy {
     total_value: 0,
     categories_count: 0,
     brands_count: 0,
-  };
+  });
 
   // Queries
   searchTerm = '';
@@ -158,135 +165,125 @@ export class ProductsComponent implements OnInit, OnDestroy {
   isBulkImageUploadModalOpen = false;
   isCreatingProduct = false;
 
-  private subscriptions: Subscription[] = [];
-
-  constructor(
-    private productsService: ProductsService,
-    private categoriesService: CategoriesService,
-    private brandsService: BrandsService,
-    private toastService: ToastService,
-    private dialogService: DialogService,
-    private authFacade: AuthFacade,
-    private router: Router,
-    private route: ActivatedRoute,
-  ) { }
-
-  ngOnInit(): void {
+  constructor() {
     // Asegurar que la moneda esté cargada
     this.currencyService.loadCurrency();
 
     // Subscribe to queryParams for pagination persistence
-    const queryParamsSub = this.route.queryParams.subscribe((params) => {
-      const page = params['page'];
-      if (page) {
-        this.pagination.page = parseInt(page, 10) || 1;
-      }
-    });
-    this.subscriptions.push(queryParamsSub);
+    this.route.queryParams
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((params) => {
+        const page = params['page'];
+        if (page) {
+          this.pagination.update(p => ({ ...p, page: parseInt(page, 10) || 1 }));
+        }
+      });
 
     // Subscribe to userStore$ observable to get the store ID
-    const storeSub = this.authFacade.userStore$.subscribe((store: any) => {
-      const storeId = store?.id;
-      if (storeId && !this.storeId) {
-        this.storeId = String(storeId);
-        this.loadStats();
-      }
-    });
-    this.subscriptions.push(storeSub);
+    this.authFacade.userStore$
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((store: any) => {
+        const storeId = store?.id;
+        if (storeId && !this.storeId) {
+          this.storeId = String(storeId);
+          this.loadStats();
+        }
+      });
 
     this.loadProducts();
     this.loadCategories();
     this.loadBrands();
   }
 
-  ngOnDestroy(): void {
-    this.subscriptions.forEach((sub) => sub.unsubscribe());
-  }
-
   loadProducts(): void {
-    this.isLoading = true;
+    this.isLoading.set(true);
+    const pag = this.pagination();
     const query: ProductQueryDto = {
       ...(this.searchTerm && { search: this.searchTerm }),
       ...this.currentFilters,
-      page: this.pagination.page,
-      limit: this.pagination.limit,
+      page: pag.page,
+      limit: pag.limit,
     };
 
-    const sub = this.productsService.getProducts(query).subscribe({
-      next: (response: any) => {
-        if (response.data) {
-          this.products = response.data;
-        } else {
-          this.products = [];
-        }
+    this.productsService.getProducts(query)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response: any) => {
+          if (response.data) {
+            this.products.set(response.data);
+          } else {
+            this.products.set([]);
+          }
 
-        // Extract pagination metadata
-        if (response.pagination) {
-          this.pagination = { ...this.pagination, ...response.pagination };
-        }
+          // Extract pagination metadata
+          if (response.pagination) {
+            this.pagination.update(p => ({ ...p, ...response.pagination }));
+          }
 
-        // Edge case: if current page is empty but not the first page, go back
-        if (this.products.length === 0 && this.pagination.page > 1) {
-          this.pagination.page--;
-          this.loadProducts();
-          return;
-        }
+          // Edge case: if current page is empty but not the first page, go back
+          if (this.products().length === 0 && this.pagination().page > 1) {
+            this.pagination.update(p => ({ ...p, page: p.page - 1 }));
+            this.loadProducts();
+            return;
+          }
 
-        this.isLoading = false;
-      },
-      error: (error: any) => {
-        console.error('Error loading products:', error);
-        const message = extractApiErrorMessage(error);
-        this.toastService.error(message, 'Error al cargar productos');
-        this.isLoading = false;
-      },
-    });
-    this.subscriptions.push(sub);
+          this.isLoading.set(false);
+        },
+        error: (error: any) => {
+          console.error('Error loading products:', error);
+          const message = extractApiErrorMessage(error);
+          this.toastService.error(message, 'Error al cargar productos');
+          this.isLoading.set(false);
+        },
+      });
   }
 
   loadStats(): void {
     if (!this.storeId) return;
 
-    const sub = this.productsService.getProductStats(parseInt(this.storeId, 10)).subscribe({
-      next: (response: any) => {
-        if (response) this.stats = response;
-      },
-      error: (error: any) => {
-        console.error('Error loading stats:', error);
-        const message = extractApiErrorMessage(error);
-        this.toastService.error(message, 'Error al cargar estadísticas');
-      },
-    });
-    this.subscriptions.push(sub);
+    this.productsService.getProductStats(parseInt(this.storeId, 10))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response: any) => {
+          if (response) this.stats.set(response);
+        },
+        error: (error: any) => {
+          console.error('Error loading stats:', error);
+          const message = extractApiErrorMessage(error);
+          this.toastService.error(message, 'Error al cargar estadísticas');
+        },
+      });
   }
 
   loadCategories(): void {
     this.categoriesService
       .getCategories()
-      .subscribe((cats) => (this.categories = cats));
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((cats) => this.categories.set(cats));
   }
 
   loadBrands(): void {
     this.brandsService
       .getBrands()
-      .subscribe((brands) => (this.brands = brands));
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((brands) => this.brands.set(brands));
   }
 
   // Event Handlers
   onSearch(term: string): void {
     this.searchTerm = term;
-    this.pagination.page = 1;
+    this.pagination.update(p => ({ ...p, page: 1 }));
     this.loadProducts();
   }
 
   onFilter(filters: Partial<ProductQueryDto>): void {
     this.currentFilters = filters;
-    this.pagination.page = 1;
+    this.pagination.update(p => ({ ...p, page: 1 }));
     this.loadProducts();
   }
 
   changePage(page: number): void {
-    this.pagination.page = page;
+    this.pagination.update(p => ({ ...p, page }));
     this.loadProducts();
   }
 
@@ -296,7 +293,7 @@ export class ProductsComponent implements OnInit, OnDestroy {
 
   navigateToEditPage(product: Product): void {
     this.router.navigate(['/admin/products/edit', product.id], {
-      queryParams: { fromPage: this.pagination.page }
+      queryParams: { fromPage: this.pagination().page }
     });
   }
 
@@ -309,21 +306,22 @@ export class ProductsComponent implements OnInit, OnDestroy {
 
   createProduct(data: CreateProductDto): void {
     this.isCreatingProduct = true;
-    const sub = this.productsService.createProduct(data).subscribe({
-      next: () => {
-        this.toastService.success('Producto creado exitosamente');
-        this.isCreatingProduct = false;
-        this.onModalClose();
-        this.loadProducts();
-        this.loadStats();
-      },
-      error: (error: any) => {
-        const message = extractApiErrorMessage(error);
-        this.toastService.error(message, 'Error al crear producto');
-        this.isCreatingProduct = false;
-      },
-    });
-    this.subscriptions.push(sub);
+    this.productsService.createProduct(data)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.success('Producto creado exitosamente');
+          this.isCreatingProduct = false;
+          this.onModalClose();
+          this.loadProducts();
+          this.loadStats();
+        },
+        error: (error: any) => {
+          const message = extractApiErrorMessage(error);
+          this.toastService.error(message, 'Error al crear producto');
+          this.isCreatingProduct = false;
+        },
+      });
   }
 
   deleteProduct(product: Product): void {

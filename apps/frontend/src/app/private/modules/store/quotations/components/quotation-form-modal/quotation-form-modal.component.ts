@@ -1,5 +1,5 @@
-import { Component, OnInit, computed, inject, input, output, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, computed, inject, input, output, signal } from '@angular/core';
+import { DecimalPipe } from '@angular/common';
 import { FormArray, FormBuilder, FormGroup, ReactiveFormsModule, Validators } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { Subject, debounceTime, distinctUntilChanged, switchMap, of, catchError, map } from 'rxjs';
@@ -20,7 +20,7 @@ import {
   selector: 'app-quotation-form-modal',
   standalone: true,
   imports: [
-    CommonModule,
+    DecimalPipe,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
@@ -316,7 +316,7 @@ import {
     </app-modal>
   `,
 })
-export class QuotationFormModalComponent implements OnInit {
+export class QuotationFormModalComponent {
   /** Input: existing quotation for edit mode, null for create mode */
   readonly quotation = input<Quotation | null>(null);
 
@@ -409,9 +409,8 @@ export class QuotationFormModalComponent implements OnInit {
       .subscribe((products) => {
         this.productResults.set(products);
       });
-  }
 
-  ngOnInit(): void {
+    // Populate form when editing an existing quotation
     const q = this.quotation();
     if (q) {
       this.selectedCustomer.set(q.customer || null);

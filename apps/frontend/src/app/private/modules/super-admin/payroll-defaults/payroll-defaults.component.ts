@@ -1,11 +1,12 @@
-import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { Subject, takeUntil } from 'rxjs';
+import {Component, OnInit, inject, signal,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
+
 import {
   PayrollSystemDefault,
   CreatePayrollDefaultDto,
-  UpdatePayrollDefaultDto,
-} from './interfaces';
+  UpdatePayrollDefaultDto} from './interfaces';
 import { PayrollDefaultsApiService } from './services';
 import { PayrollDefaultsFormComponent } from './components';
 import {
@@ -17,20 +18,18 @@ import {
   ResponsiveDataViewComponent,
   ItemListCardConfig,
   EmptyStateComponent,
-  CardComponent,
-} from '../../../../shared/components/index';
+  CardComponent} from '../../../../shared/components/index';
 
 @Component({
   selector: 'app-payroll-defaults',
   standalone: true,
   imports: [
-    CommonModule,
     PayrollDefaultsFormComponent,
     ButtonComponent,
     ResponsiveDataViewComponent,
     EmptyStateComponent,
-    CardComponent,
-  ],
+    CardComponent
+],
   template: `
     <div class="flex flex-col gap-6">
       <!-- Main Content Card -->
@@ -100,9 +99,9 @@ import {
       (submitUpdate)="onUpdate($event)"
     ></app-payroll-defaults-form>
   `,
-  styles: [],
-})
-export class PayrollDefaultsComponent implements OnInit, OnDestroy {
+  styles: []})
+export class PayrollDefaultsComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private api = inject(PayrollDefaultsApiService);
   private dialogService = inject(DialogService);
   private toastService = inject(ToastService);
@@ -112,10 +111,7 @@ export class PayrollDefaultsComponent implements OnInit, OnDestroy {
   isSubmitting = signal(false);
   showFormModal = signal(false);
   selectedRecord = signal<PayrollSystemDefault | null>(null);
-
-  private destroy$ = new Subject<void>();
-
-  tableColumns: TableColumn[] = [
+tableColumns: TableColumn[] = [
     { key: 'year', label: 'Año', sortable: true, priority: 1 },
     { key: 'decree_ref', label: 'Decreto', sortable: false, priority: 2 },
     {
@@ -125,24 +121,21 @@ export class PayrollDefaultsComponent implements OnInit, OnDestroy {
       badge: true,
       priority: 1,
       badgeConfig: { type: 'status', size: 'sm' },
-      transform: (value: boolean) => (value ? 'Publicado' : 'Borrador'),
-    },
+      transform: (value: boolean) => (value ? 'Publicado' : 'Borrador')},
     {
       key: 'published_at',
       label: 'Publicado',
       sortable: true,
       priority: 3,
       transform: (value: string | null) =>
-        value ? new Date(value).toLocaleDateString('es-CO') : '—',
-    },
+        value ? new Date(value).toLocaleDateString('es-CO') : '—'},
     {
       key: 'updated_at',
       label: 'Actualizado',
       sortable: true,
       priority: 3,
       transform: (value: string) =>
-        new Date(value).toLocaleDateString('es-CO'),
-    },
+        new Date(value).toLocaleDateString('es-CO')},
   ];
 
   cardConfig: ItemListCardConfig = {
@@ -153,8 +146,7 @@ export class PayrollDefaultsComponent implements OnInit, OnDestroy {
     badgeTransform: (value: boolean) => (value ? 'Publicado' : 'Borrador'),
     detailKeys: [
       { key: 'published_at', label: 'Publicado' },
-    ],
-  };
+    ]};
 
   tableActions: TableAction[] = [
     {
@@ -162,45 +154,35 @@ export class PayrollDefaultsComponent implements OnInit, OnDestroy {
       icon: 'edit',
       action: (rec: PayrollSystemDefault) => this.openEditModal(rec),
       variant: 'info',
-      show: (rec: PayrollSystemDefault) => !rec.is_published,
-    },
+      show: (rec: PayrollSystemDefault) => !rec.is_published},
     {
       label: 'Ver',
       icon: 'eye',
       action: (rec: PayrollSystemDefault) => this.openViewModal(rec),
       variant: 'secondary',
-      show: (rec: PayrollSystemDefault) => rec.is_published,
-    },
+      show: (rec: PayrollSystemDefault) => rec.is_published},
     {
       label: 'Publicar',
       icon: 'send',
       action: (rec: PayrollSystemDefault) => this.confirmPublish(rec),
       variant: 'success',
-      show: (rec: PayrollSystemDefault) => !rec.is_published,
-    },
+      show: (rec: PayrollSystemDefault) => !rec.is_published},
     {
       label: 'Despublicar',
       icon: 'archive',
       action: (rec: PayrollSystemDefault) => this.confirmUnpublish(rec),
       variant: 'danger',
-      show: (rec: PayrollSystemDefault) => rec.is_published,
-    },
+      show: (rec: PayrollSystemDefault) => rec.is_published},
   ];
 
   ngOnInit(): void {
     this.loadRecords();
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  loadRecords(): void {
+loadRecords(): void {
     this.isLoading.set(true);
     this.api
       .getAll()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           this.records.set(response.data || []);
@@ -210,8 +192,7 @@ export class PayrollDefaultsComponent implements OnInit, OnDestroy {
           console.error('Error loading payroll defaults:', err);
           this.toastService.error('Error al cargar los parámetros de nómina');
           this.isLoading.set(false);
-        },
-      });
+        }});
   }
 
   openCreateModal(): void {
@@ -233,7 +214,7 @@ export class PayrollDefaultsComponent implements OnInit, OnDestroy {
     this.isSubmitting.set(true);
     this.api
       .create(dto)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.showFormModal.set(false);
@@ -247,8 +228,7 @@ export class PayrollDefaultsComponent implements OnInit, OnDestroy {
             err.error?.message || 'Error al crear el año fiscal',
           );
           this.isSubmitting.set(false);
-        },
-      });
+        }});
   }
 
   onUpdate(dto: UpdatePayrollDefaultDto): void {
@@ -258,7 +238,7 @@ export class PayrollDefaultsComponent implements OnInit, OnDestroy {
     this.isSubmitting.set(true);
     this.api
       .update(rec.year, dto)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.showFormModal.set(false);
@@ -273,8 +253,7 @@ export class PayrollDefaultsComponent implements OnInit, OnDestroy {
             err.error?.message || 'Error al actualizar los parámetros',
           );
           this.isSubmitting.set(false);
-        },
-      });
+        }});
   }
 
   confirmPublish(rec: PayrollSystemDefault): void {
@@ -284,8 +263,7 @@ export class PayrollDefaultsComponent implements OnInit, OnDestroy {
         message: `¿Publicar los parámetros de nómina para ${rec.year}? Esto notificará a todas las organizaciones y los parámetros estarán disponibles para calcular nóminas.`,
         confirmText: 'Publicar',
         cancelText: 'Cancelar',
-        confirmVariant: 'primary',
-      })
+        confirmVariant: 'primary'})
       .then((confirmed) => {
         if (confirmed) {
           this.publishRecord(rec);
@@ -300,8 +278,7 @@ export class PayrollDefaultsComponent implements OnInit, OnDestroy {
         message: `¿Despublicar los parámetros de nómina para ${rec.year}? Las organizaciones dejarán de usarlos como referencia activa.`,
         confirmText: 'Despublicar',
         cancelText: 'Cancelar',
-        confirmVariant: 'danger',
-      })
+        confirmVariant: 'danger'})
       .then((confirmed) => {
         if (confirmed) {
           this.unpublishRecord(rec);
@@ -312,7 +289,7 @@ export class PayrollDefaultsComponent implements OnInit, OnDestroy {
   private publishRecord(rec: PayrollSystemDefault): void {
     this.api
       .publish(rec.year)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.loadRecords();
@@ -323,14 +300,13 @@ export class PayrollDefaultsComponent implements OnInit, OnDestroy {
           this.toastService.error(
             err.error?.message || 'Error al publicar los parámetros',
           );
-        },
-      });
+        }});
   }
 
   private unpublishRecord(rec: PayrollSystemDefault): void {
     this.api
       .unpublish(rec.year)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.loadRecords();
@@ -341,7 +317,6 @@ export class PayrollDefaultsComponent implements OnInit, OnDestroy {
           this.toastService.error(
             err.error?.message || 'Error al despublicar los parámetros',
           );
-        },
-      });
+        }});
   }
 }

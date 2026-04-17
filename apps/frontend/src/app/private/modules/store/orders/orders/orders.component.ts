@@ -1,7 +1,6 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, DestroyRef, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
-import { Subject, takeUntil } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 // Import components
 import { OrdersListComponent } from '../components/orders-list';
@@ -14,13 +13,17 @@ import { StoreOrdersService } from '../services/store-orders.service';
 @Component({
   selector: 'app-orders',
   standalone: true,
-  imports: [CommonModule, OrdersListComponent, OrderStatsComponent],
+  imports: [OrdersListComponent, OrderStatsComponent],
   templateUrl: './orders.component.html',
   styleUrls: ['./orders.component.css'],
 })
-export class OrdersComponent implements OnInit, OnDestroy {
+export class OrdersComponent {
+  private router = inject(Router);
+  private ordersService = inject(StoreOrdersService);
+  private destroyRef = inject(DestroyRef);
+
   // Stats data
-  orderStats: ExtendedOrderStats = {
+  orderStats = signal<ExtendedOrderStats>({
     total_orders: 0,
     total_revenue: 0,
     pending_orders: 0,
@@ -30,38 +33,26 @@ export class OrdersComponent implements OnInit, OnDestroy {
     pendingGrowthRate: 0,
     completedGrowthRate: 0,
     revenueGrowthRate: 0,
-  };
+  });
 
-  private destroy$ = new Subject<void>();
-
-  constructor(
-    private router: Router,
-    private ordersService: StoreOrdersService,
-  ) {}
-
-  ngOnInit(): void {
+  constructor() {
     this.loadOrderStats();
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
   }
 
   loadOrderStats(): void {
     this.ordersService
       .getOrderStats()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: any) => {
           const stats = response.data || response;
-          this.orderStats = {
+          this.orderStats.set({
             ...stats,
             ordersGrowthRate: 5.2, // Mock data - should come from backend
             pendingGrowthRate: -2.1,
             completedGrowthRate: 8.7,
             revenueGrowthRate: 12.3,
-          };
+          });
         },
         error: (err: any) => {
           console.error('Error loading order stats:', err);

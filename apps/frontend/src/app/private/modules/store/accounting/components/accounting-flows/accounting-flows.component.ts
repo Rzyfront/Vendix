@@ -1,6 +1,8 @@
-import { Component, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, inject, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { NgClass } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
+import { firstValueFrom } from 'rxjs';
 import { environment } from '../../../../../../../environments/environment';
 import {
   CardComponent,
@@ -40,57 +42,63 @@ const FLOW_DEFINITIONS: Array<{ key: string; label: string; icon: string }> = [
 @Component({
   selector: 'vendix-accounting-flows',
   standalone: true,
-  imports: [CommonModule, CardComponent, IconComponent, ButtonComponent],
+  imports: [CardComponent, IconComponent, ButtonComponent,
+    NgClass,
+  ],
   templateUrl: './accounting-flows.component.html',
 })
-export class AccountingFlowsComponent implements OnInit {
+export class AccountingFlowsComponent {
+  private destroyRef = inject(DestroyRef);
   private http = inject(HttpClient);
 
-  flows: FlowStatus[] = [];
-  loading = true;
-  total_active_flows = 0;
-  total_disabled_flows = 0;
-  total_entries_today = 0;
-  recent_entries: any[] = [];
+  readonly flows = signal<FlowStatus[]>([]);
+  readonly loading = signal(true);
+  readonly total_active_flows = signal(0);
+  readonly total_disabled_flows = signal(0);
+  readonly total_entries_today = signal(0);
+  readonly recent_entries = signal<any[]>([]);
 
-  ngOnInit(): void {
+  constructor() {
     this.loadData();
   }
 
-  loadData(): void {
-    this.loading = true;
+  async loadData(): Promise<void> {
+    this.loading.set(true);
 
-    this.http.get<any>(`${environment.apiUrl}/store/settings`).subscribe({
-      next: (res) => {
-        const settings = res?.data?.settings || res?.data || res;
-        const flows = settings?.module_flows?.accounting || settings?.accounting_flows || {};
-        this.flows = FLOW_DEFINITIONS.map((def) => ({
-          ...def,
-          enabled: flows[def.key] !== false,
-        }));
-        this.total_active_flows = this.flows.filter((f) => f.enabled).length;
-        this.total_disabled_flows = this.flows.filter((f) => !f.enabled).length;
-        this.loading = false;
-      },
-      error: () => {
-        this.flows = FLOW_DEFINITIONS.map((def) => ({ ...def, enabled: true }));
-        this.total_active_flows = this.flows.length;
-        this.loading = false;
-      },
-    });
+    try {
+      const res = await firstValueFrom(this.http.get<any>(`${environment.apiUrl}/store/settings`));
+      const settings = res?.data?.settings || res?.data || res;
+      const flows = settings?.module_flows?.accounting || settings?.accounting_flows || {};
+      const built = FLOW_DEFINITIONS.map((def) => ({
+        ...def,
+        enabled: flows[def.key] !== false,
+      }));
+      this.flows.set(built);
+      this.total_active_flows.set(built.filter((f) => f.enabled).length);
+      this.total_disabled_flows.set(built.filter((f) => !f.enabled).length);
+      this.loading.set(false);
+    } catch {
+      const built = FLOW_DEFINITIONS.map((def) => ({ ...def, enabled: true }));
+      this.flows.set(built);
+      this.total_active_flows.set(built.length);
+      this.loading.set(false);
+    }
 
-    this.http.get<any>(`${environment.apiUrl}/store/accounting/journal-entries`, {
-      params: { limit: '10', page: '1' },
-    }).subscribe({
-      next: (res) => {
-        const entries = res?.data || [];
-        this.recent_entries = entries.filter((e: any) => e.entry_type?.startsWith('auto_')).slice(0, 8);
-        const today = toLocalDateString();
-        this.total_entries_today = entries.filter(
-          (e: any) => e.entry_type?.startsWith('auto_') && e.created_at?.startsWith(today),
-        ).length;
-      },
-    });
+    try {
+      const res = await firstValueFrom(
+        this.http.get<any>(`${environment.apiUrl}/store/accounting/journal-entries`, {
+          params: { limit: '10', page: '1' },
+        }),
+      );
+      const entries = res?.data || [];
+      this.recent_entries.set(entries.filter((e: any) => e.entry_type?.startsWith('auto_')).slice(0, 8));
+      const today = toLocalDateString();
+      this.total_entries_today.set(entries.filter(
+        (e: any) => e.entry_type?.startsWith('auto_') && e.created_at?.startsWith(today),
+      ).length);
+    } catch {
+      // swallow - no handler previamente definido para este request
+    }
   }
 
   getEntryTypeLabel(entry_type: string): string {

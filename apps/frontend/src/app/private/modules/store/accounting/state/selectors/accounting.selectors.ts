@@ -18,7 +18,17 @@ export const selectAccountsLoading = createSelector(
 
 export const selectLeafAccounts = createSelector(
   selectAccounts,
-  (accounts) => flattenAccounts(accounts).filter((a) => a.accepts_entries),
+  (accounts) => {
+    const flat = flattenAccounts(accounts);
+    const seen = new Set<number>();
+    const result: ChartAccount[] = [];
+    for (const a of flat) {
+      if (seen.has(a.id)) continue;
+      seen.add(a.id);
+      if (a.accepts_entries) result.push(a);
+    }
+    return result;
+  },
 );
 
 // ── Journal Entries ────────────────────────────────────────────────

@@ -1,5 +1,5 @@
-import { Component, Input, Output, EventEmitter, forwardRef } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, forwardRef, input, output } from '@angular/core';
+
 import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
 import { FormStyleVariant } from '../../types/form.types';
 
@@ -11,7 +11,7 @@ export interface InputButtonOption {
 @Component({
   selector: 'app-input-buttons',
   standalone: true,
-  imports: [CommonModule],
+  imports: [],
   providers: [
     {
       provide: NG_VALUE_ACCESSOR,
@@ -20,53 +20,54 @@ export interface InputButtonOption {
     },
   ],
   template: `
-    <div [class]="'w-full ' + customWrapperClass">
+    <div [class]="'w-full ' + customWrapperClass()">
       <!-- Label -->
-      <label
-        *ngIf="label"
-        [class]="labelClasses"
-        class="label-with-tooltip"
-      >
-        <span>{{ label }}</span>
-        <span
-          *ngIf="tooltipText"
-          class="help-icon"
-          [attr.data-tooltip]="tooltipText"
-        >
-          <svg
-            class="h-4 w-4"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            stroke-width="2"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-            />
-          </svg>
-        </span>
-        <span *ngIf="required" class="text-[var(--color-destructive)] ml-1">*</span>
-      </label>
+      @if (label()) {
+        <label [class]="labelClasses" class="label-with-tooltip">
+          <span>{{ label() }}</span>
+          @if (tooltipText()) {
+            <span class="help-icon" [attr.data-tooltip]="tooltipText()">
+              <svg
+                class="h-4 w-4"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <path
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                />
+              </svg>
+            </span>
+          }
+          @if (required()) {
+            <span class="text-[var(--color-destructive)] ml-1">*</span>
+          }
+        </label>
+      }
 
       <!-- Buttons container -->
-      <div [class]="containerClasses + ' ' + customContainerClass">
-        <button
-          *ngFor="let option of options"
-          type="button"
-          [disabled]="disabled"
-          (click)="selectOption(option.value)"
-          [class]="getButtonClasses(option.value)"
-        >
-          {{ option.label }}
-        </button>
+      <div [class]="containerClasses + ' ' + customContainerClass()">
+        @for (option of options(); track option) {
+          <button
+            type="button"
+            [disabled]="isDisabled()"
+            (click)="selectOption(option.value)"
+            [class]="getButtonClasses(option.value)"
+          >
+            {{ option.label }}
+          </button>
+        }
       </div>
 
       <!-- Helper text -->
-      <p *ngIf="helperText" class="mt-2 text-sm text-[var(--color-text-secondary)]">
-        {{ helperText }}
-      </p>
+      @if (helperText()) {
+        <p class="mt-2 text-sm text-[var(--color-text-secondary)]">
+          {{ helperText() }}
+        </p>
+      }
     </div>
   `,
   styles: [
@@ -131,17 +132,18 @@ export interface InputButtonOption {
   ],
 })
 export class InputButtonsComponent implements ControlValueAccessor {
-  @Input() label?: string;
-  @Input() options: InputButtonOption[] = [];
-  @Input() disabled = false;
-  @Input() required = false;
-  @Input() helperText?: string;
-  @Input() tooltipText?: string;
-  @Input() styleVariant: FormStyleVariant = 'modern';
-  @Input() customWrapperClass = '';
-  @Input() customContainerClass = '';
+  readonly label = input<string>('');
+  readonly options = input<InputButtonOption[]>([]);
+  readonly disabled = input<boolean>(false);
+  private disabledState = false;
+  readonly helperText = input<string>('');
+  readonly tooltipText = input<string>('');
+  readonly required = input(false);
+  readonly styleVariant = input<FormStyleVariant>('modern');
+  readonly customWrapperClass = input('');
+  readonly customContainerClass = input('');
 
-  @Output() valueChange = new EventEmitter<string>();
+  readonly valueChange = output<string>();
 
   value = '';
 
@@ -161,11 +163,15 @@ export class InputButtonsComponent implements ControlValueAccessor {
   }
 
   setDisabledState(isDisabled: boolean): void {
-    this.disabled = isDisabled;
+    this.disabledState = isDisabled;
+  }
+
+  isDisabled(): boolean {
+    return this.disabled() || this.disabledState;
   }
 
   selectOption(optionValue: string): void {
-    if (this.disabled) return;
+    if (this.isDisabled()) return;
     this.value = optionValue;
     this.onChange(optionValue);
     this.onTouched();
@@ -175,7 +181,7 @@ export class InputButtonsComponent implements ControlValueAccessor {
   get labelClasses(): string {
     const base = ['block', 'font-medium', 'mb-2'];
 
-    if (this.styleVariant === 'modern') {
+    if (this.styleVariant() === 'modern') {
       return [
         ...base,
         'text-[11px]',

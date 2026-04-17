@@ -1,15 +1,9 @@
-import {
-  Component,
-  OnInit,
-  OnDestroy,
-  ViewChild,
-  signal,
-  HostListener,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, OnInit, OnDestroy, ViewChild, signal, HostListener, DestroyRef, inject} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
-import { Subscription, take } from 'rxjs';
+import { Subscription, firstValueFrom } from 'rxjs';
 
 import {
   PopCartService,
@@ -65,7 +59,6 @@ import { CostPreviewResponse } from '../interfaces';
   selector: 'app-pop',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     PopProductSelectionComponent,
     PopCartComponent,
@@ -91,8 +84,8 @@ import { CostPreviewResponse } from '../interfaces';
         <!-- Header (Supplier, Location, Dates) -->
         <app-pop-header
           class="flex-none border-b border-border"
-          (openSupplierModal)="supplierModalOpen = true"
-          (openWarehouseModal)="warehouseModalOpen = true"
+          (openSupplierModal)="supplierModalOpen.set(true)"
+          (openWarehouseModal)="warehouseModalOpen.set(true)"
         ></app-pop-header>
 
         <!-- Main Content Grid -->
@@ -130,23 +123,24 @@ import { CostPreviewResponse } from '../interfaces';
     </div>
 
     <!-- Mobile Footer -->
-    <app-pop-mobile-footer
-      *ngIf="isMobile()"
-      [cartSummary]="cartSummary"
-      [itemCount]="cartItemCount"
-      (viewOrder)="onOpenCartModal()"
-      (saveDraft)="onSaveAsDraft()"
-      (createOrder)="onSubmitOrder()"
-      (createAndReceive)="onCreateAndReceive()"
-    ></app-pop-mobile-footer>
+    @if (isMobile()) {
+      <app-pop-mobile-footer
+        [cartSummary]="cartSummary()"
+        [itemCount]="cartItemCount()"
+        (viewOrder)="onOpenCartModal()"
+        (saveDraft)="onSaveAsDraft()"
+        (createOrder)="onSubmitOrder()"
+        (createAndReceive)="onCreateAndReceive()"
+      ></app-pop-mobile-footer>
+    }
 
     <!-- Mobile Cart Modal -->
     <app-pop-cart-modal
-      [isOpen]="showCartModal && isMobile()"
-      [cartState]="cartState"
-      [supplierName]="selectedSupplierName"
-      [locationName]="selectedLocationName"
-      [isProcessing]="isProcessingOrder"
+      [isOpen]="showCartModal() && isMobile()"
+      [cartState]="cartState()"
+      [supplierName]="selectedSupplierName()"
+      [locationName]="selectedLocationName()"
+      [isProcessing]="isProcessingOrder()"
       (closed)="onCloseCartModal()"
       (itemQuantityChanged)="onItemQuantityChanged($event)"
       (itemCostChanged)="onItemCostChanged($event)"
@@ -183,32 +177,28 @@ import { CostPreviewResponse } from '../interfaces';
     ></app-pop-lot-modal>
 
     <app-pop-order-confirmation-modal
-      [isOpen]="showOrderConfirmModal"
-      (isOpenChange)="showOrderConfirmModal = $event"
-      [cartState]="cartState"
+      [isOpen]="showOrderConfirmModal()"
+      (isOpenChange)="showOrderConfirmModal.set($event)"
+      [cartState]="cartState()"
       [supplierName]="currentSupplierName"
       [locationName]="currentLocationName"
       [actionType]="confirmOrderAction"
-      [costPreview]="costPreview"
-      [loadingPreview]="loadingCostPreview"
+      [costPreview]="costPreview()"
+      [loadingPreview]="loadingCostPreview()"
       (confirmed)="onOrderConfirmed()"
-      (cancelled)="showOrderConfirmModal = false"
+      (cancelled)="showOrderConfirmModal.set(false)"
       (navigateToSettings)="onNavigateToSettings()"
     ></app-pop-order-confirmation-modal>
 
     <app-pop-product-config-modal
-      [isOpen]="showConfigModal"
-      [product]="configModalProduct"
+      [isOpen]="showConfigModal()"
+      [product]="configModalProduct()"
       [initialVariant]="editingCartItemVariant"
       [initialLotInfo]="editingCartItemLotInfo"
       [initialPricingType]="editingCartItemPricingType"
-      [isEditing]="!!editingCartItemId"
+      [isEditing]="!!editingCartItemId()"
       (confirmed)="onConfigConfirmed($event)"
-      (closed)="
-        showConfigModal = false;
-        configModalProduct = null;
-        editingCartItemId = null
-      "
+      (closed)="onConfigClosed()"
     ></app-pop-product-config-modal>
 
     <app-invoice-scanner-modal
@@ -227,80 +217,72 @@ import { CostPreviewResponse } from '../interfaces';
   ],
 })
 export class PopComponent implements OnInit, OnDestroy {
-  // Invoice scanner
+  private destroyRef = inject(DestroyRef);
   showInvoiceScanner = signal(false);
 
-  // Modal states
-  supplierModalOpen = false;
-  warehouseModalOpen = false;
-  lotModalOpen = false;
-  prebulkModalOpen = false;
+  supplierModalOpen = signal(false);
+  warehouseModalOpen = signal(false);
+  lotModalOpen = signal(false);
+  prebulkModalOpen = signal(false);
 
-  // Lot modal
   currentLotInfo?: any;
   currentLotItemId?: string;
 
-  // Config modal (for products with variants or batch tracking)
-  showConfigModal = false;
-  configModalProduct: PopProduct | null = null;
-  editingCartItemId: string | null = null; // When editing an existing cart item
+  showConfigModal = signal(false);
+  configModalProduct = signal<PopProduct | null>(null);
+  editingCartItemId = signal<string | null>(null);
 
   get editingCartItemVariant(): any {
-    if (!this.editingCartItemId) return null;
-    return (
-      this.popCartService.getItemById(this.editingCartItemId)?.variant || null
-    );
+    const id = this.editingCartItemId();
+    if (!id) return null;
+    return this.popCartService.getItemById(id)?.variant || null;
   }
 
   get editingCartItemLotInfo(): any {
-    if (!this.editingCartItemId) return null;
-    return (
-      this.popCartService.getItemById(this.editingCartItemId)?.lot_info || null
-    );
+    const id = this.editingCartItemId();
+    if (!id) return null;
+    return this.popCartService.getItemById(id)?.lot_info || null;
   }
 
   get editingCartItemPricingType(): 'unit' | 'weight' {
-    if (!this.editingCartItemId) return 'unit';
-    return (
-      this.popCartService.getItemById(this.editingCartItemId)?.product
-        ?.pricing_type || 'unit'
-    );
+    const id = this.editingCartItemId();
+    if (!id) return 'unit';
+    return this.popCartService.getItemById(id)?.product?.pricing_type || 'unit';
   }
 
   get currentSupplierName(): string {
     const state = this.popCartService.currentState;
     if (!state.supplierId || !this.header) return '';
-    return this.header.suppliers.find(s => s.id === state.supplierId)?.name || '';
+    return (
+      this.header.suppliers().find((s) => s.id === state.supplierId)?.name || ''
+    );
   }
 
   get currentLocationName(): string {
     const state = this.popCartService.currentState;
     if (!state.locationId || !this.header) return '';
-    return this.header.locations.find(l => l.id === state.locationId)?.name || '';
+    return (
+      this.header.locations().find((l) => l.id === state.locationId)?.name || ''
+    );
   }
 
-  // Route params
   orderId?: number;
 
-  // Mobile responsive
   isMobile = signal(false);
-  showCartModal = false;
-  isProcessingOrder = false;
+  showCartModal = signal(false);
+  isProcessingOrder = signal(false);
 
-  // Order confirmation modal
-  showOrderConfirmModal = false;
+  showOrderConfirmModal = signal(false);
   confirmOrderAction: 'create' | 'create-receive' = 'create';
 
-  // Cost preview
-  costPreview: CostPreviewResponse | null = null;
-  loadingCostPreview = false;
+  costPreview = signal<CostPreviewResponse | null>(null);
+  loadingCostPreview = signal(false);
 
-  // Cart state for mobile components
-  cartState: PopCartState | null = null;
-  cartSummary: PopCartSummary | null = null;
-  cartItemCount = 0;
-  selectedSupplierName = '';
-  selectedLocationName = '';
+  cartState = signal<PopCartState | null>(null);
+  cartSummary = signal<PopCartSummary | null>(null);
+  cartItemCount = signal(0);
+  selectedSupplierName = signal('');
+  selectedLocationName = signal('');
 
   private subscriptions: Subscription[] = [];
 
@@ -315,21 +297,18 @@ export class PopComponent implements OnInit, OnDestroy {
     private authFacade: AuthFacade,
   ) {}
 
-  ngOnInit(): void {
-    // Initialize mobile detection
+  async ngOnInit(): Promise<void> {
     this.checkMobile();
 
-    // Subscribe to cart state for mobile components
     this.subscriptions.push(
-      this.popCartService.cartState$.subscribe((state) => {
-        this.cartState = state;
-        this.cartSummary = state.summary;
-        this.cartItemCount = state.items.length;
+      this.popCartService.cartState$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((state) => {
+        this.cartState.set(state);
+        this.cartSummary.set(state.summary);
+        this.cartItemCount.set(state.items.length);
       }),
     );
 
-    // Check for editing existing order
-    this.route.paramMap.subscribe((params) => {
+    this.route.paramMap.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((params) => {
       const id = params.get('id');
       if (id) {
         this.orderId = Number(id);
@@ -337,13 +316,11 @@ export class PopComponent implements OnInit, OnDestroy {
       }
     });
 
-    // Check for product_id in query params for auto-adding to cart
-    this.route.queryParams.pipe(take(1)).subscribe((params) => {
-      const productId = params['product_id'];
-      if (productId) {
-        this.autoAddProductById(Number(productId));
-      }
-    });
+    const params = await firstValueFrom(this.route.queryParams);
+    const productId = params['product_id'];
+    if (productId) {
+      this.autoAddProductById(Number(productId));
+    }
   }
 
   @HostListener('window:resize')
@@ -356,7 +333,7 @@ export class PopComponent implements OnInit, OnDestroy {
   }
 
   private autoAddProductById(productId: number): void {
-    this.productsService.getProductById(productId).subscribe({
+    this.productsService.getProductById(productId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (product: any) => {
         if (product) {
           const popProduct: PopProduct = {
@@ -364,9 +341,8 @@ export class PopComponent implements OnInit, OnDestroy {
             cost: Number(product.cost_price || product.price || 0),
           };
 
-          // Always open config modal in POP
-          this.configModalProduct = popProduct;
-          this.showConfigModal = true;
+          this.configModalProduct.set(popProduct);
+          this.showConfigModal.set(true);
         }
       },
       error: (err: any) => {
@@ -376,23 +352,25 @@ export class PopComponent implements OnInit, OnDestroy {
   }
 
   onConfigConfirmed(result: PopProductConfigResult): void {
-    if (!this.configModalProduct) return;
+    const product = this.configModalProduct();
+    if (!product) return;
 
-    if (this.editingCartItemId) {
+    const editingId = this.editingCartItemId();
+
+    if (editingId) {
       if (result.variants?.length) {
-        const originalItemId = this.editingCartItemId;
-        const product: PopProduct = {
-          ...this.configModalProduct,
-          pricing_type:
-            result.pricing_type || this.configModalProduct.pricing_type,
+        const originalItemId = editingId;
+        const p: PopProduct = {
+          ...product,
+          pricing_type: result.pricing_type || product.pricing_type,
         };
 
-        this.popCartService.removeFromCart(originalItemId).subscribe({
+        this.popCartService.removeFromCart(originalItemId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
           next: () => {
             result.variants!.forEach((variant) => {
               this.popCartService
                 .addToCart({
-                  product,
+                  product: p,
                   variant,
                   quantity: 1,
                   unit_cost: variant.cost_price
@@ -400,29 +378,29 @@ export class PopComponent implements OnInit, OnDestroy {
                     : result.unit_cost,
                   lot_info: result.lot_info,
                 })
-                .subscribe();
+                .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
             });
             if (this.productSelection) {
               this.productSelection.updateProductVariants(
-                this.configModalProduct!.id,
+                product!.id,
                 result.variants!,
               );
             }
             this.toastService.success(
-              `${result.variants!.length === 1 ? '1 variante' : `${result.variants!.length} variantes`} de ${this.configModalProduct?.name} agregadas`,
+              `${result.variants!.length === 1 ? '1 variante' : `${result.variants!.length} variantes`} de ${product?.name} agregadas`,
             );
           },
         });
       } else if (result.variant) {
         this.popCartService
           .updateCartItem({
-            itemId: this.editingCartItemId,
+            itemId: editingId,
             unit_cost: result.unit_cost,
             lot_info: result.lot_info,
             variant: result.variant,
             pricing_type: result.pricing_type,
           })
-          .subscribe({
+          .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
             next: () => {
               this.toastService.success('Configuración actualizada');
             },
@@ -430,29 +408,27 @@ export class PopComponent implements OnInit, OnDestroy {
       } else {
         this.popCartService
           .updateCartItem({
-            itemId: this.editingCartItemId,
+            itemId: editingId,
             unit_cost: result.unit_cost,
             lot_info: result.lot_info,
             pricing_type: result.pricing_type,
           })
-          .subscribe({
+          .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
             next: () => {
               this.toastService.success('Configuración actualizada');
             },
           });
       }
     } else if (result.variants?.length) {
-      // Adding multiple variants — one cart item per variant
-      const product: PopProduct = {
-        ...this.configModalProduct,
-        pricing_type:
-          result.pricing_type || this.configModalProduct.pricing_type,
+      const p: PopProduct = {
+        ...product,
+        pricing_type: result.pricing_type || product.pricing_type,
       };
 
       result.variants.forEach((variant) => {
         this.popCartService
           .addToCart({
-            product,
+            product: p,
             variant,
             quantity: 1,
             unit_cost: variant.cost_price
@@ -460,12 +436,12 @@ export class PopComponent implements OnInit, OnDestroy {
               : result.unit_cost,
             lot_info: result.lot_info,
           })
-          .subscribe();
+          .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
       });
 
       if (this.productSelection) {
         this.productSelection.updateProductVariants(
-          this.configModalProduct!.id,
+          product!.id,
           result.variants,
         );
       }
@@ -473,29 +449,25 @@ export class PopComponent implements OnInit, OnDestroy {
       const count = result.variants.length;
       this.toastService.success(
         count === 1
-          ? `${this.configModalProduct.name} agregado al carrito`
-          : `${count} variantes de ${this.configModalProduct.name} agregadas al carrito`,
+          ? `${product.name} agregado al carrito`
+          : `${count} variantes de ${product.name} agregadas al carrito`,
       );
     } else {
-      // Adding a single item without variants
-      const product: PopProduct = {
-        ...this.configModalProduct,
-        pricing_type:
-          result.pricing_type || this.configModalProduct.pricing_type,
+      const p: PopProduct = {
+        ...product,
+        pricing_type: result.pricing_type || product.pricing_type,
       };
 
       this.popCartService
         .addToCart({
-          product,
+          product: p,
           quantity: result.quantity,
           unit_cost: result.unit_cost,
           lot_info: result.lot_info,
         })
-        .subscribe({
+        .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
           next: () => {
-            this.toastService.success(
-              `${this.configModalProduct?.name} agregado al carrito`,
-            );
+            this.toastService.success(`${product?.name} agregado al carrito`);
           },
           error: (err) => {
             console.error('Error adding configured product:', err);
@@ -504,46 +476,45 @@ export class PopComponent implements OnInit, OnDestroy {
         });
     }
 
-    // Always clean up modal state
-    this.showConfigModal = false;
-    this.configModalProduct = null;
-    this.editingCartItemId = null;
+    this.showConfigModal.set(false);
+    this.configModalProduct.set(null);
+    this.editingCartItemId.set(null);
   }
 
-  /**
-   * Open config modal to edit an existing cart item's variant/lot/unit settings.
-   * Re-fetches the product from the backend to get full variant data.
-   */
-  openItemConfigModal(item: PopCartItem): void {
-    this.editingCartItemId = item.id;
+  onConfigClosed(): void {
+    this.showConfigModal.set(false);
+    this.configModalProduct.set(null);
+    this.editingCartItemId.set(null);
+  }
 
-    // If product has id > 0, fetch fresh data to get variants
+  openItemConfigModal(item: PopCartItem): void {
+    this.editingCartItemId.set(item.id);
+
     if (item.product.id > 0) {
-      this.productsService.getProductById(item.product.id).subscribe({
+      this.productsService.getProductById(item.product.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (product: any) => {
           if (product) {
-            this.configModalProduct = {
+            this.configModalProduct.set({
               ...product,
               cost: Number(product.cost_price || product.price || 0),
               cost_price: Number(product.cost_price || 0),
               pricing_type:
                 product.pricing_type || item.product.pricing_type || 'unit',
               product_variants: product.product_variants || [],
-            };
+            });
           } else {
-            this.configModalProduct = { ...item.product };
+            this.configModalProduct.set({ ...item.product });
           }
-          this.showConfigModal = true;
+          this.showConfigModal.set(true);
         },
         error: () => {
-          this.configModalProduct = { ...item.product };
-          this.showConfigModal = true;
+          this.configModalProduct.set({ ...item.product });
+          this.showConfigModal.set(true);
         },
       });
     } else {
-      // Prebulk product
-      this.configModalProduct = { ...item.product };
-      this.showConfigModal = true;
+      this.configModalProduct.set({ ...item.product });
+      this.showConfigModal.set(true);
     }
   }
 
@@ -555,12 +526,10 @@ export class PopComponent implements OnInit, OnDestroy {
   // Handlers
   // ============================================================
 
-  onProductAdded(event: any): void {
-    // Logic handled in child, but we could show a global toast here if needed
-  }
+  onProductAdded(event: any): void {}
 
   onManualAddRequested(): void {
-    this.prebulkModalOpen = true;
+    this.prebulkModalOpen.set(true);
   }
 
   onInvoiceScanConfirmed(data: {
@@ -572,12 +541,12 @@ export class PopComponent implements OnInit, OnDestroy {
   }): void {
     this.showInvoiceScanner.set(false);
 
-    // 1. Set supplier if matched
     if (data.matchResult.supplier_match.matched_id) {
-      this.popCartService.setSupplier(data.matchResult.supplier_match.matched_id);
+      this.popCartService.setSupplier(
+        data.matchResult.supplier_match.matched_id,
+      );
     }
 
-    // 2. Add each item to cart
     let addedCount = 0;
     for (const item of data.editedItems) {
       const candidate = item.selected_product_id
@@ -585,46 +554,47 @@ export class PopComponent implements OnInit, OnDestroy {
         : null;
 
       if (candidate) {
-        // Matched product → regular cart item
-        this.popCartService.addToCart({
-          product: {
-            id: candidate.id,
-            name: candidate.name,
-            code: candidate.sku || '',
-            cost: item.unit_price,
-            price: 0,
-            stock: 0,
-            is_active: true,
-          },
-          quantity: item.quantity,
-          unit_cost: item.unit_price,
-        }).subscribe();
+        this.popCartService
+          .addToCart({
+            product: {
+              id: candidate.id,
+              name: candidate.name,
+              code: candidate.sku || '',
+              cost: item.unit_price,
+              price: 0,
+              stock: 0,
+              is_active: true,
+            },
+            quantity: item.quantity,
+            unit_cost: item.unit_price,
+          })
+          .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
       } else {
-        // Unmatched → prebulk item
-        this.popCartService.addToCart({
-          product: {
-            id: 0,
-            name: item.description,
-            code: item.sku_if_visible || '',
-            cost: item.unit_price,
-            price: 0,
-            stock: 0,
-            is_active: true,
-          },
-          quantity: item.quantity,
-          unit_cost: item.unit_price,
-          is_prebulk: true,
-          prebulk_data: {
-            name: item.description,
-            code: item.sku_if_visible || '',
-            description: item.description,
-          },
-        }).subscribe();
+        this.popCartService
+          .addToCart({
+            product: {
+              id: 0,
+              name: item.description,
+              code: item.sku_if_visible || '',
+              cost: item.unit_price,
+              price: 0,
+              stock: 0,
+              is_active: true,
+            },
+            quantity: item.quantity,
+            unit_cost: item.unit_price,
+            is_prebulk: true,
+            prebulk_data: {
+              name: item.description,
+              code: item.sku_if_visible || '',
+              description: item.description,
+            },
+          })
+          .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
       }
       addedCount++;
     }
 
-    // 3. Invoice metadata as notes
     if (data.invoiceNumber) {
       const currentNotes = this.popCartService.currentState.notes || '';
       const invoiceNote = `Factura escaneada: ${data.invoiceNumber}`;
@@ -633,7 +603,6 @@ export class PopComponent implements OnInit, OnDestroy {
       );
     }
 
-    // 4. Toast — stay on page, don't navigate
     this.toastService.success(
       `${addedCount} producto(s) agregados al carrito desde factura`,
     );
@@ -644,23 +613,18 @@ export class PopComponent implements OnInit, OnDestroy {
 
     let addedCount = 0;
 
-    // Process each row
     items.forEach((row) => {
-      // Normalize keys to lowercase to be more forgiving
       const normalizedRow: any = {};
       Object.keys(row).forEach((key) => {
         normalizedRow[key.toLowerCase().trim()] = row[key];
       });
 
-      // Attempt to find mandatory fields
-      // Name: name, nombre, producto, product
       const name =
         normalizedRow['name'] ||
         normalizedRow['nombre'] ||
         normalizedRow['producto'] ||
         normalizedRow['product'];
 
-      // SKU: sku, code, codigo, id
       const sku =
         normalizedRow['sku'] ||
         normalizedRow['code'] ||
@@ -668,12 +632,9 @@ export class PopComponent implements OnInit, OnDestroy {
         normalizedRow['id'];
 
       if (!name || !sku) {
-        // Skip invalid rows
         return;
       }
 
-      // Optional fields
-      // Cost: cost, costo, price, precio, unit_cost, cost_price, precio compra
       const costRaw =
         normalizedRow['cost'] ||
         normalizedRow['costo'] ||
@@ -686,7 +647,6 @@ export class PopComponent implements OnInit, OnDestroy {
         0;
       const unit_cost = Number(costRaw) || 0;
 
-      // Quantity: quantity, qty, cantidad, cant, cantidad inicial
       const qtyRaw =
         normalizedRow['quantity'] ||
         normalizedRow['qty'] ||
@@ -697,7 +657,6 @@ export class PopComponent implements OnInit, OnDestroy {
         1;
       const quantity = Number(qtyRaw) || 1;
 
-      // New metadata fields
       const description = (
         normalizedRow['description'] ||
         normalizedRow['descripción'] ||
@@ -730,8 +689,6 @@ export class PopComponent implements OnInit, OnDestroy {
             normalizedRow['margin'],
         ) || 0;
 
-      // Final metadata mapping for new requirement
-      // Note: The modal already maps 'Marca' -> 'brand_id' and 'Categorías' -> 'category_ids'
       const brand = (
         normalizedRow['brand_id'] ||
         normalizedRow['marca'] ||
@@ -761,7 +718,6 @@ export class PopComponent implements OnInit, OnDestroy {
             normalizedRow['sale_price'],
         ) || 0;
 
-      // Construct dummy product
       const dummyProduct = {
         id: 0,
         name: String(name),
@@ -793,7 +749,7 @@ export class PopComponent implements OnInit, OnDestroy {
             sale_price: salePrice,
           },
         })
-        .subscribe();
+        .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
 
       addedCount++;
     });
@@ -815,7 +771,6 @@ export class PopComponent implements OnInit, OnDestroy {
     unit_cost: number;
     notes?: string;
   }): void {
-    // We need a dummy product object for the interface, even if it's prebulk
     const dummyProduct = {
       id: 0,
       name: event.prebulkData.name,
@@ -835,7 +790,7 @@ export class PopComponent implements OnInit, OnDestroy {
         is_prebulk: true,
         prebulk_data: event.prebulkData,
       })
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: () => {
           this.toastService.success('Producto manual agregado');
         },
@@ -851,9 +806,7 @@ export class PopComponent implements OnInit, OnDestroy {
   productSelection!: PopProductSelectionComponent;
 
   onSupplierCreated(supplierId: number): void {
-    // 1. Trigger refresh to get the new supplier in the list
     this.header.refreshSuppliers();
-    // 2. Set the ID in the service (Header will react to this state change)
     this.popCartService.setSupplier(supplierId);
   }
 
@@ -866,7 +819,7 @@ export class PopComponent implements OnInit, OnDestroy {
     if (this.currentLotItemId) {
       this.popCartService
         .updateItemLotInfo(this.currentLotItemId, lotInfo)
-        .subscribe();
+        .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
     }
     this.currentLotInfo = undefined;
     this.currentLotItemId = undefined;
@@ -877,11 +830,10 @@ export class PopComponent implements OnInit, OnDestroy {
     this.currentLotItemId = undefined;
   }
 
-  // Open lot modal from cart (method called by child components)
   openLotModal(item: any): void {
     this.currentLotItemId = item.id;
     this.currentLotInfo = item.lot_info;
-    this.lotModalOpen = true;
+    this.lotModalOpen.set(true);
   }
 
   // ============================================================
@@ -889,19 +841,17 @@ export class PopComponent implements OnInit, OnDestroy {
   // ============================================================
 
   onOpenCartModal(): void {
-    this.showCartModal = true;
+    this.showCartModal.set(true);
   }
 
   onCloseCartModal(): void {
-    this.showCartModal = false;
+    this.showCartModal.set(false);
   }
 
   onConfigureFromModal(): void {
-    // Close modal and expand header settings
-    this.showCartModal = false;
+    this.showCartModal.set(false);
     if (this.header) {
-      this.header.showMobileSettings = true;
-      // Delay flash so the DOM renders the expanded settings first
+      this.header.showMobileSettings.set(true);
       setTimeout(() => this.header.flashConfigWarning(), 50);
     }
   }
@@ -912,7 +862,7 @@ export class PopComponent implements OnInit, OnDestroy {
         itemId: event.itemId,
         quantity: event.quantity,
       })
-      .subscribe();
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
   }
 
   onItemCostChanged(event: { itemId: string; cost: number }): void {
@@ -921,11 +871,11 @@ export class PopComponent implements OnInit, OnDestroy {
         itemId: event.itemId,
         unit_cost: event.cost,
       })
-      .subscribe();
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
   }
 
   onItemRemoved(itemId: string): void {
-    this.popCartService.removeFromCart(itemId).subscribe({
+    this.popCartService.removeFromCart(itemId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.toastService.success('Producto eliminado de la orden');
       },
@@ -942,7 +892,7 @@ export class PopComponent implements OnInit, OnDestroy {
     });
 
     if (confirm) {
-      this.popCartService.clearCart().subscribe({
+      this.popCartService.clearCart().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: () => {
           this.toastService.info('Orden vaciada');
         },
@@ -951,23 +901,19 @@ export class PopComponent implements OnInit, OnDestroy {
   }
 
   onSaveDraftFromModal(): void {
-    this.showCartModal = false;
+    this.showCartModal.set(false);
     this.onSaveAsDraft();
   }
 
   onCreateOrderFromModal(): void {
-    this.showCartModal = false;
+    this.showCartModal.set(false);
     this.onSubmitOrder();
   }
 
   onCreateAndReceiveFromModal(): void {
-    // Don't close modal - let onCreateAndReceive handle it after success
     this.onCreateAndReceiveWithModal();
   }
 
-  /**
-   * Create and receive order from modal - shows confirmation modal first
-   */
   private onCreateAndReceiveWithModal(): void {
     const state = this.popCartService.currentState;
 
@@ -981,10 +927,10 @@ export class PopComponent implements OnInit, OnDestroy {
       return;
     }
 
-    this.showCartModal = false;
+    this.showCartModal.set(false);
     this.confirmOrderAction = 'create-receive';
     this.loadCostPreview();
-    this.showOrderConfirmModal = true;
+    this.showOrderConfirmModal.set(true);
   }
 
   // ============================================================
@@ -1013,10 +959,10 @@ export class PopComponent implements OnInit, OnDestroy {
 
     const request = cartToPurchaseOrderRequest(draftState, userId, undefined);
 
-    this.purchaseOrdersService.createPurchaseOrder(request).subscribe({
+    this.purchaseOrdersService.createPurchaseOrder(request).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         this.toastService.success('Orden guardada como borrador');
-        this.popCartService.clearCart().subscribe();
+        this.popCartService.clearCart().pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
         this.router.navigate(['/admin/products']);
       },
       error: (error) => {
@@ -1035,7 +981,7 @@ export class PopComponent implements OnInit, OnDestroy {
 
     if (!state.supplierId || !state.locationId || state.items.length === 0) {
       if (this.isMobile()) {
-        this.showCartModal = true;
+        this.showCartModal.set(true);
       }
       if ((!state.supplierId || !state.locationId) && this.header) {
         this.header.flashConfigWarning();
@@ -1047,7 +993,7 @@ export class PopComponent implements OnInit, OnDestroy {
     }
 
     this.confirmOrderAction = 'create';
-    this.showOrderConfirmModal = true;
+    this.showOrderConfirmModal.set(true);
   }
 
   onCreateAndReceive(): void {
@@ -1055,7 +1001,7 @@ export class PopComponent implements OnInit, OnDestroy {
 
     if (!state.supplierId || !state.locationId || state.items.length === 0) {
       if (this.isMobile()) {
-        this.showCartModal = true;
+        this.showCartModal.set(true);
       }
       if ((!state.supplierId || !state.locationId) && this.header) {
         this.header.flashConfigWarning();
@@ -1068,7 +1014,7 @@ export class PopComponent implements OnInit, OnDestroy {
 
     this.confirmOrderAction = 'create-receive';
     this.loadCostPreview();
-    this.showOrderConfirmModal = true;
+    this.showOrderConfirmModal.set(true);
   }
 
   // ============================================================
@@ -1076,7 +1022,7 @@ export class PopComponent implements OnInit, OnDestroy {
   // ============================================================
 
   onOrderConfirmed(): void {
-    this.showOrderConfirmModal = false;
+    this.showOrderConfirmModal.set(false);
     if (this.confirmOrderAction === 'create') {
       this._executeSubmitOrder();
     } else {
@@ -1085,7 +1031,7 @@ export class PopComponent implements OnInit, OnDestroy {
   }
 
   onNavigateToSettings(): void {
-    this.showOrderConfirmModal = false;
+    this.showOrderConfirmModal.set(false);
     this.router.navigate(['/store/settings/general']);
   }
 
@@ -1093,14 +1039,14 @@ export class PopComponent implements OnInit, OnDestroy {
     const state = this.popCartService.currentState;
     if (!state.locationId || state.items.length === 0) return;
 
-    this.costPreview = null;
-    this.loadingCostPreview = true;
+    this.costPreview.set(null);
+    this.loadingCostPreview.set(true);
 
     const request = {
       location_id: state.locationId,
       items: state.items
-        .filter(item => !item.is_prebulk && item.product?.id)
-        .map(item => ({
+        .filter((item) => !item.is_prebulk && item.product?.id)
+        .map((item) => ({
           product_id: item.product.id,
           product_variant_id: item.variant?.id,
           quantity: item.quantity,
@@ -1109,18 +1055,18 @@ export class PopComponent implements OnInit, OnDestroy {
     };
 
     if (request.items.length === 0) {
-      this.loadingCostPreview = false;
+      this.loadingCostPreview.set(false);
       return;
     }
 
-    this.purchaseOrdersService.getCostPreview(request).subscribe({
+    this.purchaseOrdersService.getCostPreview(request).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
-        this.costPreview = response.success ? response.data : null;
-        this.loadingCostPreview = false;
+        this.costPreview.set(response.success ? response.data : null);
+        this.loadingCostPreview.set(false);
       },
       error: () => {
-        this.costPreview = null;
-        this.loadingCostPreview = false;
+        this.costPreview.set(null);
+        this.loadingCostPreview.set(false);
       },
     });
   }
@@ -1131,11 +1077,11 @@ export class PopComponent implements OnInit, OnDestroy {
     const request = cartToPurchaseOrderRequest(state, userId, undefined);
     request.status = 'approved';
 
-    this.purchaseOrdersService.createPurchaseOrder(request).subscribe({
+    this.purchaseOrdersService.createPurchaseOrder(request).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         if (response.success && response.data) {
           this.toastService.success('Orden creada exitosamente');
-          this.popCartService.clearCart().subscribe();
+          this.popCartService.clearCart().pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
           this.router.navigate(['/admin/products']);
         }
       },
@@ -1156,7 +1102,7 @@ export class PopComponent implements OnInit, OnDestroy {
 
     this.toastService.info('Creando orden e ingresando inventario...');
 
-    this.purchaseOrdersService.createPurchaseOrder(request).subscribe({
+    this.purchaseOrdersService.createPurchaseOrder(request).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         if (response.success && response.data) {
           const orderId = response.data.id;
@@ -1169,10 +1115,10 @@ export class PopComponent implements OnInit, OnDestroy {
 
           this.purchaseOrdersService
             .receivePurchaseOrder(orderId, receiveItems)
-            .subscribe({
+            .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
               next: () => {
                 this.toastService.success('Stock ingresado correctamente');
-                this.popCartService.clearCart().subscribe();
+                this.popCartService.clearCart().pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
                 this.router.navigate(['/admin/products']);
               },
               error: (err: any) => {
@@ -1180,7 +1126,7 @@ export class PopComponent implements OnInit, OnDestroy {
                 this.toastService.error(
                   'Orden creada pero hubo error al recibir stock',
                 );
-                this.popCartService.clearCart().subscribe();
+                this.popCartService.clearCart().pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
                 this.router.navigate(['/admin/products']);
               },
             });
@@ -1200,7 +1146,7 @@ export class PopComponent implements OnInit, OnDestroy {
   // ============================================================
 
   private loadOrder(orderId: number): void {
-    this.purchaseOrdersService.getPurchaseOrderById(orderId).subscribe({
+    this.purchaseOrdersService.getPurchaseOrderById(orderId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         if (response.success && response.data) {
           this.popCartService.loadOrder(response.data);

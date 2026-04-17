@@ -1,5 +1,7 @@
-import { Component, OnInit, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, OnInit, inject, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { firstValueFrom } from 'rxjs';
+
 import { ShippingMethodsComponent } from './components/shipping-methods/shipping-methods.component';
 import { ShippingZonesComponent } from './components/shipping-zones/shipping-zones.component';
 import { StatsComponent } from '../../../../shared/components/stats/stats.component';
@@ -11,12 +13,11 @@ import { ShippingMethodStats, ShippingZoneStats } from './interfaces/shipping.in
   selector: 'app-superadmin-shipping-layout',
   standalone: true,
   imports: [
-    CommonModule,
     ShippingMethodsComponent,
     ShippingZonesComponent,
     StatsComponent,
-    DashboardTabsComponent,
-  ],
+    DashboardTabsComponent
+],
   template: `
     <div class="space-y-4 p-4 md:p-6">
       <!-- Stats consolidadas usando stats-container -->
@@ -71,6 +72,7 @@ import { ShippingMethodStats, ShippingZoneStats } from './interfaces/shipping.in
   `,
 })
 export class ShippingLayoutComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private shippingService = inject(ShippingService);
 
   activeTab = signal<'methods' | 'zones'>('methods');
@@ -86,9 +88,17 @@ export class ShippingLayoutComponent implements OnInit {
     this.loadStats();
   }
 
-  loadStats(): void {
-    this.shippingService.getMethodStats().subscribe((stats) => this.methodStats.set(stats));
-    this.shippingService.getZoneStats().subscribe((stats) => this.zoneStats.set(stats));
+  async loadStats(): Promise<void> {
+    try {
+      const [methodStats, zoneStats] = await Promise.all([
+        firstValueFrom(this.shippingService.getMethodStats()),
+        firstValueFrom(this.shippingService.getZoneStats()),
+      ]);
+      this.methodStats.set(methodStats);
+      this.zoneStats.set(zoneStats);
+    } catch (e) {
+      console.error('Error loading shipping stats', e);
+    }
   }
 
   setActiveTab(tab: string): void {

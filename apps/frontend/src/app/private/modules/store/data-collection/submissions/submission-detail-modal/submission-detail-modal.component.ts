@@ -1,13 +1,5 @@
-import {
-  Component,
-  ChangeDetectionStrategy,
-  input,
-  output,
-  inject,
-  OnInit,
-  signal,
-  computed,
-} from '@angular/core';
+import {Component, ChangeDetectionStrategy, input, output, inject, OnInit, signal, computed, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule, DatePipe } from '@angular/common';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
@@ -374,6 +366,7 @@ interface GroupedTab {
   `,
 })
 export class SubmissionDetailModalComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   submissionId = input.required<number>();
   close = output<void>();
 
@@ -403,7 +396,7 @@ export class SubmissionDetailModalComponent implements OnInit {
 
   loadSubmission() {
     this.loading.set(true);
-    this.submissionsService.getOne(this.submissionId()).subscribe({
+    this.submissionsService.getOne(this.submissionId()).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (sub) => {
         this.submission.set(sub);
         const { tabs, sections } = this.buildGroupedData(sub);
@@ -606,7 +599,7 @@ export class SubmissionDetailModalComponent implements OnInit {
       if (resp.field?.field_type === 'file' && resp.value_text) {
         const val = resp.value_text;
         if (val.startsWith('organizations/')) {
-          this.submissionsService.getPresignedUrl(val).subscribe({
+          this.submissionsService.getPresignedUrl(val).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
             next: (res) => {
               const map = new Map(this.fileUrlMap());
               map.set(resp.id, res.url);

@@ -1,4 +1,4 @@
-import { ChangeDetectionStrategy, Component, output } from '@angular/core';
+import { Component, output } from '@angular/core';
 
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { IconComponent, TooltipComponent } from '../../../../../../shared/components';
@@ -9,7 +9,6 @@ import { IconComponent, TooltipComponent } from '../../../../../../shared/compon
   imports: [CardComponent, IconComponent, TooltipComponent],
   templateUrl: './quick-actions-panel.component.html',
   styleUrls: ['./quick-actions-panel.component.scss'],
-  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class QuickActionsPanelComponent {
   walkIn = output<void>();

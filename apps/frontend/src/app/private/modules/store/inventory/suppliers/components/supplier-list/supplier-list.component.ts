@@ -1,5 +1,5 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input, output, signal } from '@angular/core';
+
 import { FormsModule } from '@angular/forms';
 
 // Shared Components
@@ -27,7 +27,6 @@ import { Supplier } from '../../../interfaces';
   selector: 'app-supplier-list',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ButtonComponent,
     InputsearchComponent,
@@ -41,27 +40,27 @@ import { Supplier } from '../../../interfaces';
   templateUrl: './supplier-list.component.html',
 })
 export class SupplierListComponent {
-  @Input() suppliers: Supplier[] = [];
-  @Input() isLoading = false;
-  @Input() totalItems = 0;
-  @Input() currentPage = 1;
-  @Input() totalPages = 1;
-  @Input() limit = 10;
+  readonly suppliers = input<Supplier[]>([]);
+  readonly isLoading = input(false);
+  readonly totalItems = input(0);
+  readonly currentPage = input(1);
+  readonly totalPages = input(1);
+  readonly limit = input(10);
 
-  @Output() refresh = new EventEmitter<void>();
-  @Output() search = new EventEmitter<string>();
-  @Output() filter = new EventEmitter<FilterValues>();
-  @Output() create = new EventEmitter<void>();
-  @Output() edit = new EventEmitter<Supplier>();
-  @Output() delete = new EventEmitter<Supplier>();
-  @Output() sort = new EventEmitter<{
+  readonly refresh = output<void>();
+  readonly search = output<string>();
+  readonly filter = output<FilterValues>();
+  readonly create = output<void>();
+  readonly edit = output<Supplier>();
+  readonly delete = output<Supplier>();
+  readonly sort = output<{
     column: string;
     direction: 'asc' | 'desc' | null;
   }>();
-  @Output() pageChange = new EventEmitter<number>();
+  readonly pageChange = output<number>();
 
-  searchTerm = '';
-  selectedStatus = '';
+  searchTerm = signal('');
+  selectedStatus = signal('');
 
   // Filter configuration for the options dropdown
   filterConfigs: FilterConfig[] = [
@@ -155,19 +154,19 @@ export class SupplierListComponent {
 
   // Event Handlers
   onSearchChange(term: string): void {
-    this.searchTerm = term;
+    this.searchTerm.set(term);
     this.search.emit(term);
   }
 
   onFilterChange(values: FilterValues): void {
     this.filterValues = values;
-    this.selectedStatus = (values['is_active'] as string) || '';
+    this.selectedStatus.set((values['is_active'] as string) || '');
     this.filter.emit(values);
   }
 
   clearFilters(): void {
-    this.searchTerm = '';
-    this.selectedStatus = '';
+    this.searchTerm.set('');
+    this.selectedStatus.set('');
     this.filterValues = {};
     this.search.emit('');
     this.filter.emit({});
@@ -198,6 +197,6 @@ export class SupplierListComponent {
   }
 
   get hasFilters(): boolean {
-    return !!(this.searchTerm || this.selectedStatus);
+    return !!(this.searchTerm() || this.selectedStatus());
   }
 }

@@ -1,14 +1,6 @@
-import {
-  Component,
-  inject,
-  input,
-  output,
-  signal,
-  computed,
-  effect,
-  ChangeDetectionStrategy,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, inject, input, output, signal, computed, effect, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { DatePipe } from '@angular/common';
 import { ModalComponent } from '../../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
@@ -32,7 +24,7 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
   selector: 'app-po-detail-modal',
   standalone: true,
   imports: [
-    CommonModule,
+    DatePipe,
     ModalComponent,
     ButtonComponent,
     IconComponent,
@@ -41,7 +33,6 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
     PoPaymentModalComponent,
     PoTimelineComponent,
   ],
-  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <app-modal
       [isOpen]="isOpen()"
@@ -576,6 +567,7 @@ import { CurrencyFormatService } from '../../../../../../../shared/pipes/currenc
   styles: [`:host { display: block; }`],
 })
 export class PoDetailModalComponent {
+  private destroyRef = inject(DestroyRef);
   private purchaseOrdersService = inject(PurchaseOrdersService);
   private toastService = inject(ToastService);
   private dialogService = inject(DialogService);
@@ -751,7 +743,7 @@ export class PoDetailModalComponent {
 
   private loadReceptions(orderId: number): void {
     this.loadingReceptions.set(true);
-    this.purchaseOrdersService.getPurchaseOrderReceptions(orderId).subscribe({
+    this.purchaseOrdersService.getPurchaseOrderReceptions(orderId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (res: any) => {
         this.receptions.set(res.data || res || []);
         this.loadingReceptions.set(false);
@@ -766,7 +758,7 @@ export class PoDetailModalComponent {
 
   private loadPayments(orderId: number): void {
     this.loadingPayments.set(true);
-    this.purchaseOrdersService.getPurchaseOrderPayments(orderId).subscribe({
+    this.purchaseOrdersService.getPurchaseOrderPayments(orderId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (res: any) => {
         this.payments.set(res.data || res || []);
         this.loadingPayments.set(false);
@@ -781,7 +773,7 @@ export class PoDetailModalComponent {
 
   private loadAttachments(orderId: number): void {
     this.loadingAttachments.set(true);
-    this.purchaseOrdersService.getPurchaseOrderAttachments(orderId).subscribe({
+    this.purchaseOrdersService.getPurchaseOrderAttachments(orderId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (res: any) => {
         this.attachments.set(res.data || res || []);
         this.loadingAttachments.set(false);
@@ -851,7 +843,7 @@ export class PoDetailModalComponent {
     if (!po) return;
 
     this.uploading.set(true);
-    this.purchaseOrdersService.uploadPurchaseOrderAttachment(po.id, file).subscribe({
+    this.purchaseOrdersService.uploadPurchaseOrderAttachment(po.id, file).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (res: any) => {
         this.uploading.set(false);
         this.toastService.success('Archivo subido');
@@ -878,7 +870,7 @@ export class PoDetailModalComponent {
     const po = this.order();
     if (!po) return;
 
-    this.purchaseOrdersService.removePurchaseOrderAttachment(po.id, attachmentId).subscribe({
+    this.purchaseOrdersService.removePurchaseOrderAttachment(po.id, attachmentId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.attachments.update(list => list.filter(a => a.id !== attachmentId));
         this.toastService.success('Adjunto eliminado');

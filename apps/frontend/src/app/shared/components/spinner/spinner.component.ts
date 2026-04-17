@@ -1,12 +1,12 @@
-import { Component, Input } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input } from '@angular/core';
+
 
 export type SpinnerSize = 'sm' | 'md' | 'lg' | 'xl';
 
 @Component({
   selector: 'app-spinner',
   standalone: true,
-  imports: [CommonModule],
+  imports: [],
   template: `
     <div [class]="containerClasses">
       <svg [class]="spinnerClasses" fill="none" viewBox="0 0 24 24">
@@ -24,38 +24,41 @@ export type SpinnerSize = 'sm' | 'md' | 'lg' | 'xl';
           d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
         ></path>
       </svg>
-
-      <span *ngIf="text" [class]="textClasses">
-        {{ text }}
-      </span>
+    
+      @if (text()) {
+        <span [class]="textClasses">
+          {{ text() }}
+        </span>
+      }
     </div>
-  `,
+    `,
 })
 export class SpinnerComponent {
-  @Input() size: SpinnerSize = 'md';
-  @Input() text?: string;
-  @Input() color = 'text-primary';
-  @Input() center = false;
-  @Input() customClasses = '';
+  readonly size = input<SpinnerSize>('md');
+  readonly text = input<string | undefined>(undefined);
+  readonly color = input('text-primary');
+  readonly center = input(false);
+  readonly customClasses = input('');
 
   get containerClasses(): string {
     const baseClasses = ['flex', 'items-center', 'gap-2'];
 
-    const centerClasses = this.center
+    const centerClasses = this.center()
       ? ['justify-center', 'w-full', 'h-full']
       : [];
 
     const classes = [...baseClasses, ...centerClasses];
 
-    if (this.customClasses) {
-      classes.push(this.customClasses);
+    const customClasses = this.customClasses();
+    if (customClasses) {
+      classes.push(customClasses);
     }
 
     return classes.join(' ');
   }
 
   get spinnerClasses(): string {
-    const baseClasses = ['animate-spin', this.color];
+    const baseClasses = ['animate-spin', this.color()];
 
     const sizeClasses = {
       sm: ['h-4', 'w-4'],
@@ -64,7 +67,7 @@ export class SpinnerComponent {
       xl: ['h-12', 'w-12'],
     };
 
-    return [...baseClasses, ...sizeClasses[this.size]].join(' ');
+    return [...baseClasses, ...sizeClasses[this.size()]].join(' ');
   }
 
   get textClasses(): string {
@@ -77,6 +80,6 @@ export class SpinnerComponent {
       xl: ['text-xl'],
     };
 
-    return [...baseClasses, ...sizeClasses[this.size]].join(' ');
+    return [...baseClasses, ...sizeClasses[this.size()]].join(' ');
   }
 }

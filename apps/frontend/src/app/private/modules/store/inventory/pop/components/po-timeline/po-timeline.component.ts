@@ -1,12 +1,6 @@
-import {
-  Component,
-  inject,
-  input,
-  signal,
-  effect,
-  ChangeDetectionStrategy,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, inject, input, signal, effect, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { DatePipe } from '@angular/common';
 import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { PurchaseOrdersService } from '../../../services';
 import { PurchaseOrderTimelineEntry } from '../../../interfaces';
@@ -26,8 +20,7 @@ interface TimelineDisplayItem {
 @Component({
   selector: 'app-po-timeline',
   standalone: true,
-  imports: [CommonModule, IconComponent],
-  changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [DatePipe, IconComponent],
   template: `
     @if (loading()) {
       <div class="flex items-center justify-center py-8">
@@ -72,6 +65,7 @@ interface TimelineDisplayItem {
   styles: [`:host { display: block; }`],
 })
 export class PoTimelineComponent {
+  private destroyRef = inject(DestroyRef);
   private purchaseOrdersService = inject(PurchaseOrdersService);
   private currencyService = inject(CurrencyFormatService);
 
@@ -91,7 +85,7 @@ export class PoTimelineComponent {
 
   loadTimeline(orderId: number): void {
     this.loading.set(true);
-    this.purchaseOrdersService.getPurchaseOrderTimeline(orderId).subscribe({
+    this.purchaseOrdersService.getPurchaseOrderTimeline(orderId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         const entries = response.data || [];
         this.displayItems.set(

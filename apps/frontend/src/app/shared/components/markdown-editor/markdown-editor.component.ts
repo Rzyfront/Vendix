@@ -1,14 +1,6 @@
-import {
-  Component,
-  Input,
-  Output,
-  EventEmitter,
-  ViewChild,
-  ElementRef,
-  signal,
-  computed,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, ElementRef, signal, computed, input, model, output, viewChild, DestroyRef, inject} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import { FormsModule } from '@angular/forms';
 import { DomSanitizer, SafeHtml } from '@angular/platform-browser';
 import { Observable } from 'rxjs';
@@ -23,7 +15,7 @@ interface UploadResult {
 @Component({
   selector: 'app-markdown-editor',
   standalone: true,
-  imports: [CommonModule, FormsModule, IconComponent],
+  imports: [FormsModule, IconComponent],
   template: `
     <!-- Toolbar -->
     <div class="flex items-center gap-1 p-2 border border-border rounded-t-lg bg-gray-100/80 flex-wrap">
@@ -57,7 +49,7 @@ interface UploadResult {
         title="Imagen"
         (click)="triggerImageUpload()"
         [disabled]="uploading()"
-      >
+        >
         <app-icon name="image" size="16"></app-icon>
       </button>
       <div class="w-px h-5 bg-border mx-1"></div>
@@ -67,10 +59,10 @@ interface UploadResult {
       <button type="button" class="toolbar-btn" title="Cita" (click)="insertMarkdown('quote')">
         <app-icon name="text-quote" size="16"></app-icon>
       </button>
-
+    
       <!-- Spacer -->
       <div class="flex-1"></div>
-
+    
       <!-- Preview toggle -->
       <button
         type="button"
@@ -78,12 +70,12 @@ interface UploadResult {
         [class.bg-primary-100]="showPreview()"
         [class.text-primary-700]="showPreview()"
         (click)="showPreview.set(!showPreview())"
-      >
+        >
         <app-icon name="eye" size="16"></app-icon>
         <span class="text-xs ml-1 hidden sm:inline">Vista previa</span>
       </button>
     </div>
-
+    
     <!-- Editor Body -->
     <div
       class="relative border border-t-0 border-border rounded-b-lg overflow-hidden transition-colors"
@@ -94,44 +86,48 @@ interface UploadResult {
       (dragover)="onDragOver($event)"
       (dragleave)="onDragLeave($event)"
       (drop)="onDrop($event)"
-    >
-      <!-- Drag overlay -->
-      <div
-        *ngIf="dragging()"
-        class="absolute inset-0 z-10 flex items-center justify-center bg-primary-50/80 backdrop-blur-sm rounded-b-lg pointer-events-none"
       >
-        <div class="flex flex-col items-center gap-2 text-primary-600">
-          <app-icon name="image-plus" size="32"></app-icon>
-          <span class="text-sm font-medium">Suelta la imagen aquí</span>
+      <!-- Drag overlay -->
+      @if (dragging()) {
+        <div
+          class="absolute inset-0 z-10 flex items-center justify-center bg-primary-50/80 backdrop-blur-sm rounded-b-lg pointer-events-none"
+          >
+          <div class="flex flex-col items-center gap-2 text-primary-600">
+            <app-icon name="image-plus" size="32"></app-icon>
+            <span class="text-sm font-medium">Suelta la imagen aquí</span>
+          </div>
         </div>
-      </div>
-
+      }
+    
       <!-- Textarea -->
       <div [class.border-r]="showPreview()" [class.border-border]="showPreview()">
         <textarea
           #editorTextarea
           class="w-full min-h-[300px] p-4 text-sm font-mono text-text-primary bg-surface resize-y focus:outline-none"
-          [ngModel]="content"
+          [ngModel]="content()"
           (ngModelChange)="onContentChange($event)"
           (paste)="onPaste($event)"
           placeholder="Escribe el contenido en Markdown..."
         ></textarea>
       </div>
-
+    
       <!-- Preview -->
-      <div
-        *ngIf="showPreview()"
-        class="p-4 min-h-[300px] bg-gray-50/30 overflow-auto prose prose-sm max-w-none markdown-preview"
-        [innerHTML]="previewHtml()"
-      ></div>
+      @if (showPreview()) {
+        <div
+          class="p-4 min-h-[300px] bg-gray-50/30 overflow-auto prose prose-sm max-w-none markdown-preview"
+          [innerHTML]="previewHtml()"
+        ></div>
+      }
     </div>
-
+    
     <!-- Uploading indicator -->
-    <div *ngIf="uploading()" class="flex items-center gap-2 mt-2 text-xs text-text-secondary">
-      <div class="animate-spin rounded-full h-3 w-3 border-b-2 border-primary"></div>
-      Subiendo: {{ uploadingFileName() }}...
-    </div>
-
+    @if (uploading()) {
+      <div class="flex items-center gap-2 mt-2 text-xs text-text-secondary">
+        <div class="animate-spin rounded-full h-3 w-3 border-b-2 border-primary"></div>
+        Subiendo: {{ uploadingFileName() }}...
+      </div>
+    }
+    
     <!-- Hidden file input -->
     <input
       #imageInput
@@ -139,8 +135,8 @@ interface UploadResult {
       class="hidden"
       accept="image/*"
       (change)="onImageSelected($event)"
-    />
-  `,
+      />
+    `,
   styles: [`
     :host {
       display: block;
@@ -168,14 +164,14 @@ interface UploadResult {
   `],
 })
 export class MarkdownEditorComponent {
-  @Input() content = '';
-  @Input() uploadFn?: (file: File) => Observable<UploadResult>;
+  private destroyRef = inject(DestroyRef);
+  readonly content = model<string>('');
+  readonly uploadFn = input<(file: File) => Observable<UploadResult>>();
 
-  @Output() contentChange = new EventEmitter<string>();
-  @Output() uploadError = new EventEmitter<string>();
+  readonly uploadError = output<string>();
 
-  @ViewChild('editorTextarea') textareaRef!: ElementRef<HTMLTextAreaElement>;
-  @ViewChild('imageInput') imageInputRef!: ElementRef<HTMLInputElement>;
+  readonly textareaRef = viewChild.required<ElementRef<HTMLTextAreaElement>>('editorTextarea');
+  readonly imageInputRef = viewChild.required<ElementRef<HTMLInputElement>>('imageInput');
 
   showPreview = signal(false);
   uploading = signal(false);
@@ -192,21 +188,21 @@ export class MarkdownEditorComponent {
   constructor(private sanitizer: DomSanitizer) {}
 
   previewHtml = computed((): SafeHtml => {
-    return this.sanitizer.bypassSecurityTrustHtml(markdownToHtml(this.content));
+    return this.sanitizer.bypassSecurityTrustHtml(markdownToHtml(this.content()));
   });
 
   onContentChange(value: string): void {
-    this.content = value;
-    this.contentChange.emit(value);
+    this.content.set(value);
   }
 
   insertMarkdown(type: string): void {
-    const textarea = this.textareaRef?.nativeElement;
+    const textarea = this.textareaRef()?.nativeElement;
     if (!textarea) return;
 
     const start = textarea.selectionStart;
     const end = textarea.selectionEnd;
-    const selected = this.content.substring(start, end);
+    const current = this.content();
+    const selected = current.substring(start, end);
 
     let insertion = '';
     let cursorOffset = 0;
@@ -251,12 +247,11 @@ export class MarkdownEditorComponent {
     }
 
     const newContent =
-      this.content.substring(0, start) +
+      current.substring(0, start) +
       insertion +
-      this.content.substring(end);
+      current.substring(end);
 
-    this.content = newContent;
-    this.contentChange.emit(newContent);
+    this.content.set(newContent);
 
     // Restore cursor position
     setTimeout(() => {
@@ -267,8 +262,9 @@ export class MarkdownEditorComponent {
   }
 
   triggerImageUpload(): void {
-    if (this.imageInputRef) {
-      this.imageInputRef.nativeElement.click();
+    const imageInputRef = this.imageInputRef();
+    if (imageInputRef) {
+      imageInputRef.nativeElement.click();
     }
   }
 
@@ -280,7 +276,8 @@ export class MarkdownEditorComponent {
   }
 
   private processImageUpload(file: File): void {
-    if (!this.uploadFn) {
+    const uploadFn = this.uploadFn();
+    if (!uploadFn) {
       this.uploadError.emit('No se configuró la función de carga de imágenes.');
       return;
     }
@@ -294,7 +291,7 @@ export class MarkdownEditorComponent {
     this.uploading.set(true);
     this.uploadingFileName.set(file.name);
 
-    this.uploadFn(file).subscribe({
+    uploadFn(file).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (result) => {
         this.insertImageAtCursor(result.url);
         this.uploading.set(false);
@@ -363,19 +360,19 @@ export class MarkdownEditorComponent {
   }
 
   private insertImageAtCursor(url: string): void {
-    const textarea = this.textareaRef?.nativeElement;
+    const textarea = this.textareaRef()?.nativeElement;
     if (!textarea) return;
 
     const pos = textarea.selectionStart;
     const imageMarkdown = `![image](${url})`;
 
+    const current = this.content();
     const newContent =
-      this.content.substring(0, pos) +
+      current.substring(0, pos) +
       imageMarkdown +
-      this.content.substring(pos);
+      current.substring(pos);
 
-    this.content = newContent;
-    this.contentChange.emit(newContent);
+    this.content.set(newContent);
 
     setTimeout(() => {
       textarea.focus();

@@ -1,5 +1,5 @@
-import { Component, OnInit, OnDestroy, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
+
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { FormBuilder, FormGroup } from '@angular/forms';
 import { Subscription } from 'rxjs';
@@ -37,7 +37,6 @@ import './orders-list.component.css';
   selector: 'app-orders-list',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     InputsearchComponent,
@@ -45,13 +44,13 @@ import './orders-list.component.css';
     OrderStatsComponent,
     OrderCreateModalComponent,
     IconComponent,
-    ResponsiveDataViewComponent,
-  ],
+    ResponsiveDataViewComponent
+],
   templateUrl: './orders-list.component.html',
 })
 export class OrdersListComponent implements OnInit, OnDestroy {
-  orders: OrderListItem[] = [];
-  isLoading = false;
+  readonly orders = signal<OrderListItem[]>([]);
+  readonly isLoading = signal(false);
   searchTerm = '';
   selectedStatus = '';
   selectedPaymentStatus = '';
@@ -60,7 +59,7 @@ export class OrdersListComponent implements OnInit, OnDestroy {
   selectedDateFrom = '';
   selectedDateTo = '';
 
-  stats: OrderStats = {
+  readonly stats = signal<OrderStats>({
     total_orders: 0,
     pending_orders: 0,
     confirmed_orders: 0,
@@ -76,7 +75,7 @@ export class OrdersListComponent implements OnInit, OnDestroy {
     orders_by_payment_status: {} as any,
     orders_by_store: [],
     recent_orders: [],
-  };
+  });
 
   cardConfig!: ItemListCardConfig;
 
@@ -378,7 +377,7 @@ export class OrdersListComponent implements OnInit, OnDestroy {
   }
 
   loadOrders(): void {
-    this.isLoading = true;
+    this.isLoading.set(true);
 
     // Build query parameters
     const params = new URLSearchParams();
@@ -406,7 +405,7 @@ export class OrdersListComponent implements OnInit, OnDestroy {
       .then((response: any) => {
         if (response.data && response.data.length > 0) {
           // Transform backend data to frontend format
-          this.orders = response.data.map((order: any) => ({
+          this.orders.set(response.data.map((order: any) => ({
             id: order.id.toString(),
             order_number: order.order_number,
             customer: {
@@ -436,18 +435,20 @@ export class OrdersListComponent implements OnInit, OnDestroy {
             notes: order.internal_notes || '',
             created_at: order.created_at,
             updated_at: order.updated_at,
-          }));
+          })));
         } else {
           // Fallback to mock data if API fails
-          this.orders = this.generateMockOrders();
+          this.orders.set(this.generateMockOrders());
         }
-        this.isLoading = false;
+        this.updateStats();
+        this.isLoading.set(false);
       })
       .catch((error) => {
         console.error('Error loading orders:', error);
         // Fallback to mock data
-        this.orders = this.generateMockOrders();
-        this.isLoading = false;
+        this.orders.set(this.generateMockOrders());
+        this.updateStats();
+        this.isLoading.set(false);
       });
   }
 
@@ -508,42 +509,27 @@ export class OrdersListComponent implements OnInit, OnDestroy {
   }
 
   updateStats(): void {
-    this.stats.total_orders = this.orders.length;
-    this.stats.pending_orders = this.orders.filter(
-      (order) => order.status === OrderStatus.PENDING,
-    ).length;
-    this.stats.confirmed_orders = this.orders.filter(
-      (order) => order.status === OrderStatus.CONFIRMED,
-    ).length;
-    this.stats.processing_orders = this.orders.filter(
-      (order) => order.status === OrderStatus.PROCESSING,
-    ).length;
-    this.stats.shipped_orders = this.orders.filter(
-      (order) => order.status === OrderStatus.SHIPPED,
-    ).length;
-    this.stats.delivered_orders = this.orders.filter(
-      (order) => order.status === OrderStatus.DELIVERED,
-    ).length;
-    this.stats.cancelled_orders = this.orders.filter(
-      (order) => order.status === OrderStatus.CANCELLED,
-    ).length;
-    this.stats.refunded_orders = this.orders.filter(
-      (order) => order.status === OrderStatus.REFUNDED,
-    ).length;
-
-    this.stats.total_revenue = this.orders
-      .filter((order) => order.payment_status === PaymentStatus.PAID)
-      .reduce((sum, order) => sum + order.total_amount, 0);
-
-    this.stats.pending_revenue = this.orders
-      .filter((order) => order.payment_status === PaymentStatus.PENDING)
-      .reduce((sum, order) => sum + order.total_amount, 0);
-
-    this.stats.average_order_value =
-      this.orders.length > 0
-        ? this.orders.reduce((sum, order) => sum + order.total_amount, 0) /
-          this.orders.length
+    const orders = this.orders();
+    const s = { ...this.stats() };
+    s.total_orders = orders.length;
+    s.pending_orders = orders.filter((o) => o.status === OrderStatus.PENDING).length;
+    s.confirmed_orders = orders.filter((o) => o.status === OrderStatus.CONFIRMED).length;
+    s.processing_orders = orders.filter((o) => o.status === OrderStatus.PROCESSING).length;
+    s.shipped_orders = orders.filter((o) => o.status === OrderStatus.SHIPPED).length;
+    s.delivered_orders = orders.filter((o) => o.status === OrderStatus.DELIVERED).length;
+    s.cancelled_orders = orders.filter((o) => o.status === OrderStatus.CANCELLED).length;
+    s.refunded_orders = orders.filter((o) => o.status === OrderStatus.REFUNDED).length;
+    s.total_revenue = orders
+      .filter((o) => o.payment_status === PaymentStatus.PAID)
+      .reduce((sum, o) => sum + o.total_amount, 0);
+    s.pending_revenue = orders
+      .filter((o) => o.payment_status === PaymentStatus.PENDING)
+      .reduce((sum, o) => sum + o.total_amount, 0);
+    s.average_order_value =
+      orders.length > 0
+        ? orders.reduce((sum, o) => sum + o.total_amount, 0) / orders.length
         : 0;
+    this.stats.set(s);
   }
 
   refreshOrders(): void {
@@ -600,7 +586,7 @@ export class OrdersListComponent implements OnInit, OnDestroy {
   viewOrderDetails(order: OrderListItem): void {}
 
   exportOrders(): void {
-    if (this.orders.length === 0) {
+    if (this.orders().length === 0) {
       return;
     }
 
@@ -641,7 +627,7 @@ export class OrdersListComponent implements OnInit, OnDestroy {
       'Order Date',
     ];
 
-    const rows = this.orders.map((order) => [
+    const rows = this.orders().map((order) => [
       order.order_number,
       `${order.customer.first_name} ${order.customer.last_name}`,
       order.store.name,
@@ -740,7 +726,7 @@ export class OrdersListComponent implements OnInit, OnDestroy {
       id: orderData.id?.toString() || `order_${Date.now()}`,
       order_number:
         orderData.order_number ||
-        `ORD-${String(this.orders.length + 1).padStart(5, '0')}`,
+        `ORD-${String(this.orders().length + 1).padStart(5, '0')}`,
       customer: {
         id: orderData.customer_id?.toString() || '1',
         first_name: `Customer${orderData.customer_id || 1}`,
@@ -771,7 +757,7 @@ export class OrdersListComponent implements OnInit, OnDestroy {
     };
 
     // Add the new order to the beginning of the list
-    this.orders.unshift(newOrder);
+    this.orders.update((list) => [newOrder, ...list]);
 
     // Refresh stats to include the new order
     this.updateStats();

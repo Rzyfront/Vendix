@@ -1,5 +1,5 @@
 import { Component, inject, input, output, effect } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
 
@@ -19,13 +19,12 @@ import {
   selector: 'app-store-edit-modal',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     ModalComponent,
     InputComponent,
-    ButtonComponent,
-  ],
+    ButtonComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen()"
@@ -34,228 +33,209 @@ import {
       [size]="'lg'"
       title="Editar Tienda"
       subtitle="Actualizar la información de la tienda"
-    >
-      <form [formGroup]="storeForm" class="space-y-6" *ngIf="store()">
-        <!-- Basic Information -->
-        <div class="space-y-4">
-          <h3
-            class="text-lg font-semibold text-text-primary border-b border-border pb-2"
-          >
-            Basic Information
-          </h3>
-
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <app-input
-              formControlName="name"
-              label="Store Name"
-              placeholder="Enter store name"
-              [required]="true"
-              [control]="storeForm.get('name')"
-            ></app-input>
-
-            <app-input
-              formControlName="slug"
-              label="Store Slug"
-              placeholder="store-slug"
-              [required]="true"
-              [control]="storeForm.get('slug')"
-            ></app-input>
-          </div>
-
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <app-input
-              formControlName="email"
-              label="Email"
-              type="email"
-              placeholder="store@example.com"
-              [required]="true"
-              [control]="storeForm.get('email')"
-            ></app-input>
-
-            <app-input
-              formControlName="phone"
-              label="Phone"
-              type="tel"
-              placeholder="+1 (555) 123-4567"
-            ></app-input>
-          </div>
-
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <app-input
-              formControlName="store_code"
-              label="Store Code"
-              placeholder="STORE001"
-              [control]="storeForm.get('store_code')"
-            ></app-input>
-
-            <div class="space-y-2">
-              <label class="block text-sm font-medium text-text-primary">
-                Organization
-              </label>
-              <div
-                class="px-3 py-2 border border-border rounded-input bg-gray-50 text-text-secondary"
+      >
+      @if (store()) {
+        <form [formGroup]="storeForm" class="space-y-6">
+          <!-- Basic Information -->
+          <div class="space-y-4">
+            <h3
+              class="text-lg font-semibold text-text-primary border-b border-border pb-2"
               >
-                {{ store()?.organizations?.name || 'N/A' }} (ID:
-                {{ store()?.organization_id }})
+              Basic Information
+            </h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <app-input
+                formControlName="name"
+                label="Store Name"
+                placeholder="Enter store name"
+                [required]="true"
+                [control]="storeForm.get('name')"
+              ></app-input>
+              <app-input
+                formControlName="slug"
+                label="Store Slug"
+                placeholder="store-slug"
+                [required]="true"
+                [control]="storeForm.get('slug')"
+              ></app-input>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <app-input
+                formControlName="email"
+                label="Email"
+                type="email"
+                placeholder="store@example.com"
+                [required]="true"
+                [control]="storeForm.get('email')"
+              ></app-input>
+              <app-input
+                formControlName="phone"
+                label="Phone"
+                type="tel"
+                placeholder="+1 (555) 123-4567"
+              ></app-input>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <app-input
+                formControlName="store_code"
+                label="Store Code"
+                placeholder="STORE001"
+                [control]="storeForm.get('store_code')"
+              ></app-input>
+              <div class="space-y-2">
+                <label class="block text-sm font-medium text-text-primary">
+                  Organization
+                </label>
+                <div
+                  class="px-3 py-2 border border-border rounded-input bg-gray-50 text-text-secondary"
+                  >
+                  {{ store()?.organizations?.name || 'N/A' }} (ID:
+                  {{ store()?.organization_id }})
+                </div>
               </div>
             </div>
-          </div>
-
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <app-input
-              formControlName="website"
-              label="Website"
-              type="url"
-              placeholder="https://example.com"
-            ></app-input>
-
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <app-input
+                formControlName="website"
+                label="Website"
+                type="url"
+                placeholder="https://example.com"
+              ></app-input>
+              <div class="space-y-2">
+                <label
+                  for="store_type"
+                  class="block text-sm font-medium text-text-primary"
+                  >
+                  Store Type
+                </label>
+                <select
+                  id="store_type"
+                  formControlName="store_type"
+                  class="w-full px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary"
+                  >
+                  <option value="physical">Physical</option>
+                  <option value="online">Online</option>
+                  <option value="hybrid">Hybrid</option>
+                  <option value="popup">Popup</option>
+                  <option value="kiosko">Kiosko</option>
+                </select>
+              </div>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <app-input
+                formControlName="domain"
+                label="Domain"
+                placeholder="store.example.com"
+              ></app-input>
+              <app-input
+                formControlName="timezone"
+                label="Timezone"
+                placeholder="America/Bogota"
+              ></app-input>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <app-input
+                formControlName="currency_code"
+                label="Currency Code"
+                placeholder="COP"
+              ></app-input>
+              <app-input
+                formControlName="manager_user_id"
+                label="Manager User ID"
+                type="number"
+                placeholder="1"
+              ></app-input>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <app-input
+                formControlName="color_primary"
+                label="Primary Color"
+                placeholder="#FF0000"
+              ></app-input>
+              <app-input
+                formControlName="color_secondary"
+                label="Secondary Color"
+                placeholder="#00FF00"
+              ></app-input>
+            </div>
             <div class="space-y-2">
               <label
-                for="store_type"
+                for="description"
                 class="block text-sm font-medium text-text-primary"
+                >
+                Description
+              </label>
+              <textarea
+                id="description"
+                formControlName="description"
+                rows="3"
+                class="w-full px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary"
+                placeholder="Brief description of the store"
+              ></textarea>
+            </div>
+          </div>
+          <!-- Address Information -->
+          <div class="space-y-4">
+            <h3
+              class="text-lg font-semibold text-text-primary border-b border-border pb-2"
               >
-                Store Type
+              Address Information
+            </h3>
+            <div class="space-y-2">
+              <label
+                for="address"
+                class="block text-sm font-medium text-text-primary"
+                >
+                Address
+              </label>
+              <textarea
+                id="address"
+                formControlName="address"
+                rows="2"
+                class="w-full px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary"
+                placeholder="Store address"
+              ></textarea>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <app-input
+                formControlName="city"
+                label="City"
+                placeholder="New York"
+              ></app-input>
+              <app-input
+                formControlName="country"
+                label="Country"
+                placeholder="United States"
+              ></app-input>
+            </div>
+          </div>
+          <!-- Store Status -->
+          <div class="space-y-4">
+            <h3
+              class="text-lg font-semibold text-text-primary border-b border-border pb-2"
+              >
+              Store Status
+            </h3>
+            <div class="space-y-2">
+              <label
+                for="is_active"
+                class="block text-sm font-medium text-text-primary"
+                >
+                Status
               </label>
               <select
-                id="store_type"
-                formControlName="store_type"
+                id="is_active"
+                formControlName="is_active"
                 class="w-full px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary"
-              >
-                <option value="physical">Physical</option>
-                <option value="online">Online</option>
-                <option value="hybrid">Hybrid</option>
-                <option value="popup">Popup</option>
-                <option value="kiosko">Kiosko</option>
+                >
+                <option [ngValue]="true">Active</option>
+                <option [ngValue]="false">Inactive</option>
               </select>
             </div>
           </div>
-
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <app-input
-              formControlName="domain"
-              label="Domain"
-              placeholder="store.example.com"
-            ></app-input>
-
-            <app-input
-              formControlName="timezone"
-              label="Timezone"
-              placeholder="America/Bogota"
-            ></app-input>
-          </div>
-
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <app-input
-              formControlName="currency_code"
-              label="Currency Code"
-              placeholder="COP"
-            ></app-input>
-
-            <app-input
-              formControlName="manager_user_id"
-              label="Manager User ID"
-              type="number"
-              placeholder="1"
-            ></app-input>
-          </div>
-
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <app-input
-              formControlName="color_primary"
-              label="Primary Color"
-              placeholder="#FF0000"
-            ></app-input>
-
-            <app-input
-              formControlName="color_secondary"
-              label="Secondary Color"
-              placeholder="#00FF00"
-            ></app-input>
-          </div>
-
-          <div class="space-y-2">
-            <label
-              for="description"
-              class="block text-sm font-medium text-text-primary"
-            >
-              Description
-            </label>
-            <textarea
-              id="description"
-              formControlName="description"
-              rows="3"
-              class="w-full px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary"
-              placeholder="Brief description of the store"
-            ></textarea>
-          </div>
-        </div>
-
-        <!-- Address Information -->
-        <div class="space-y-4">
-          <h3
-            class="text-lg font-semibold text-text-primary border-b border-border pb-2"
-          >
-            Address Information
-          </h3>
-
-          <div class="space-y-2">
-            <label
-              for="address"
-              class="block text-sm font-medium text-text-primary"
-            >
-              Address
-            </label>
-            <textarea
-              id="address"
-              formControlName="address"
-              rows="2"
-              class="w-full px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary"
-              placeholder="Store address"
-            ></textarea>
-          </div>
-
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <app-input
-              formControlName="city"
-              label="City"
-              placeholder="New York"
-            ></app-input>
-
-            <app-input
-              formControlName="country"
-              label="Country"
-              placeholder="United States"
-            ></app-input>
-          </div>
-        </div>
-
-        <!-- Store Status -->
-        <div class="space-y-4">
-          <h3
-            class="text-lg font-semibold text-text-primary border-b border-border pb-2"
-          >
-            Store Status
-          </h3>
-
-          <div class="space-y-2">
-            <label
-              for="is_active"
-              class="block text-sm font-medium text-text-primary"
-            >
-              Status
-            </label>
-            <select
-              id="is_active"
-              formControlName="is_active"
-              class="w-full px-3 py-2 border border-border rounded-input focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary bg-surface text-text-primary"
-            >
-              <option [ngValue]="true">Active</option>
-              <option [ngValue]="false">Inactive</option>
-            </select>
-          </div>
-        </div>
-      </form>
-
+        </form>
+      }
+    
       <div slot="footer" class="flex justify-between items-center">
         <div class="text-sm text-text-secondary">
           <span class="text-red-500">*</span> Required fields
@@ -269,13 +249,13 @@ import {
             (clicked)="onSubmit()"
             [disabled]="!store() || storeForm.invalid || isSubmitting()"
             [loading]="isSubmitting()"
-          >
+            >
             Update Store
           </app-button>
         </div>
       </div>
     </app-modal>
-  `,
+    `,
 })
 export class StoreEditModalComponent {
   private readonly fb = inject(FormBuilder);

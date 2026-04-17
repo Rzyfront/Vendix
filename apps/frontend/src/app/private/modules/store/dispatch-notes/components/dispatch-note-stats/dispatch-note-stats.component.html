@@ -1,41 +1,41 @@
 <ng-container>
   <app-stats
     title="Total Remisiones"
-    [value]="formatNumber(stats.total)"
+    [value]="formatNumber(stats().total)"
     smallText="Remisiones creadas"
     iconName="file-text"
     iconBgColor="bg-blue-100"
     iconColor="text-blue-500"
-    [loading]="loading"
+    [loading]="loading()"
   ></app-stats>
 
   <app-stats
     title="Borradores"
-    [value]="formatNumber(stats.draft)"
+    [value]="formatNumber(stats().draft)"
     smallText="Por confirmar"
     iconName="edit"
     iconBgColor="bg-gray-100"
     iconColor="text-gray-500"
-    [loading]="loading"
+    [loading]="loading()"
   ></app-stats>
 
   <app-stats
     title="Pendientes Entrega"
-    [value]="formatNumber(stats.confirmed)"
+    [value]="formatNumber(stats().confirmed)"
     smallText="Confirmadas sin entregar"
     iconName="clock"
     iconBgColor="bg-amber-100"
     iconColor="text-amber-500"
-    [loading]="loading"
+    [loading]="loading()"
   ></app-stats>
 
   <app-stats
     title="Pendientes Factura"
-    [value]="formatNumber(stats.delivered)"
+    [value]="formatNumber(stats().delivered)"
     smallText="Entregadas sin facturar"
     iconName="check-circle"
     iconBgColor="bg-emerald-100"
     iconColor="text-emerald-500"
-    [loading]="loading"
+    [loading]="loading()"
   ></app-stats>
 </ng-container>

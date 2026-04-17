@@ -1,5 +1,4 @@
-import { Component, Input, Output, EventEmitter } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input, output } from '@angular/core';
 
 import {
   ResponsiveDataViewComponent,
@@ -21,7 +20,6 @@ import { StoreRole } from '../interfaces/store-role.interface';
   selector: 'app-store-roles-list',
   standalone: true,
   imports: [
-    CommonModule,
     ResponsiveDataViewComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
@@ -46,7 +44,7 @@ import { StoreRole } from '../interfaces/store-role.interface';
           >
             Roles
             <span class="text-text-secondary font-normal">
-              ({{ totalCount }})
+              ({{ totalCount() }})
             </span>
           </h2>
 
@@ -75,7 +73,7 @@ import { StoreRole } from '../interfaces/store-role.interface';
               [filters]="filterConfigs"
               [filterValues]="filterValues"
               [actions]="dropdownActions"
-              [isLoading]="loading"
+              [isLoading]="loading()"
               (filterChange)="onFilterChange($event)"
               (clearAllFilters)="onClearFilters()"
               (actionClick)="onActionClick($event)"
@@ -85,51 +83,54 @@ import { StoreRole } from '../interfaces/store-role.interface';
       </div>
 
       <!-- Loading State -->
-      <div *ngIf="loading" class="p-4 md:p-6 text-center">
-        <div
-          class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-        ></div>
-        <p class="mt-2 text-text-secondary">Cargando roles...</p>
-      </div>
+      @if (loading()) {
+        <div class="p-4 md:p-6 text-center">
+          <div
+            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+          ></div>
+          <p class="mt-2 text-text-secondary">Cargando roles...</p>
+        </div>
+      }
 
       <!-- Empty State -->
-      <div
-        *ngIf="!loading && roles.length === 0"
-        class="p-12 text-center text-gray-500"
-      >
-        <app-icon
-          name="shield"
-          [size]="48"
-          class="mx-auto mb-4 text-gray-300"
-        ></app-icon>
-        <h3 class="text-lg font-medium text-gray-900">
-          No se encontraron roles
-        </h3>
-        <p class="mt-1">Comienza creando un nuevo rol personalizado.</p>
-        <div class="mt-6 flex justify-center">
-          <app-button variant="primary" (clicked)="create.emit()">
-            <app-icon slot="icon" name="plus" [size]="16"></app-icon>
-            Nuevo Rol
-          </app-button>
+      @if (!loading() && roles().length === 0) {
+        <div class="p-12 text-center text-gray-500">
+          <app-icon
+            name="shield"
+            [size]="48"
+            class="mx-auto mb-4 text-gray-300"
+          ></app-icon>
+          <h3 class="text-lg font-medium text-gray-900">
+            No se encontraron roles
+          </h3>
+          <p class="mt-1">Comienza creando un nuevo rol personalizado.</p>
+          <div class="mt-6 flex justify-center">
+            <app-button variant="primary" (clicked)="create.emit()">
+              <app-icon slot="icon" name="plus" [size]="16"></app-icon>
+              Nuevo Rol
+            </app-button>
+          </div>
         </div>
-      </div>
+      }
 
       <!-- Data View -->
-      <div *ngIf="!loading && roles.length > 0" class="px-2 pb-2 pt-3 md:p-4">
-        <app-responsive-data-view
-          [data]="roles"
-          [columns]="columns"
-          [cardConfig]="cardConfig"
-          [actions]="tableActions"
-          [loading]="loading"
-          [hoverable]="true"
-          [striped]="true"
-          emptyMessage="No hay roles"
-          emptyIcon="shield"
-          tableSize="md"
-          (sort)="onSortChange($event)"
-        ></app-responsive-data-view>
-      </div>
+      @if (!loading() && roles().length > 0) {
+        <div class="px-2 pb-2 pt-3 md:p-4">
+          <app-responsive-data-view
+            [data]="roles()"
+            [columns]="columns"
+            [cardConfig]="cardConfig"
+            [actions]="tableActions"
+            [loading]="loading()"
+            [hoverable]="true"
+            [striped]="true"
+            emptyMessage="No hay roles"
+            emptyIcon="shield"
+            tableSize="md"
+            (sort)="onSortChange($event)"
+          ></app-responsive-data-view>
+        </div>
+      }
     </app-card>
   `,
   styles: [
@@ -142,17 +143,17 @@ import { StoreRole } from '../interfaces/store-role.interface';
   ],
 })
 export class StoreRolesListComponent {
-  @Input() roles: StoreRole[] = [];
-  @Input() loading = false;
-  @Input() totalCount = 0;
+  readonly roles = input<StoreRole[]>([]);
+  readonly loading = input<boolean>(false);
+  readonly totalCount = input<number>(0);
 
-  @Output() create = new EventEmitter<void>();
-  @Output() edit = new EventEmitter<StoreRole>();
-  @Output() managePermissions = new EventEmitter<StoreRole>();
-  @Output() delete = new EventEmitter<StoreRole>();
-  @Output() searchChange = new EventEmitter<string>();
-  @Output() filterChange = new EventEmitter<Record<string, string>>();
-  @Output() sort = new EventEmitter<{
+  readonly create = output<void>();
+  readonly edit = output<StoreRole>();
+  readonly managePermissions = output<StoreRole>();
+  readonly delete = output<StoreRole>();
+  readonly searchChange = output<string>();
+  readonly filterChange = output<Record<string, string>>();
+  readonly sort = output<{
     column: string;
     direction: 'asc' | 'desc' | null;
   }>();
@@ -297,6 +298,11 @@ export class StoreRolesListComponent {
 
   onActionClick(action: string): void {
     if (action === 'create') {
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
       this.create.emit();
     }
   }

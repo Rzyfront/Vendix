@@ -1,5 +1,6 @@
-import { Component, EventEmitter, Input, Output, inject, OnChanges, SimpleChanges, OnDestroy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, inject, input, output, effect, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { NgClass, CurrencyPipe } from '@angular/common';
 import { ProductsService } from '../../services/products.service';
 import {
   ModalComponent,
@@ -20,10 +21,10 @@ import {
 @Component({
   selector: 'app-bulk-upload-modal',
   standalone: true,
-  imports: [CommonModule, ModalComponent, ButtonComponent, IconComponent, StepsLineComponent, SpinnerComponent],
+  imports: [NgClass, CurrencyPipe, ModalComponent, ButtonComponent, IconComponent, StepsLineComponent, SpinnerComponent],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
@@ -535,10 +536,11 @@ import {
     `,
   ],
 })
-export class BulkUploadModalComponent implements OnChanges, OnDestroy {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() uploadComplete = new EventEmitter<void>();
+export class BulkUploadModalComponent {
+  private destroyRef = inject(DestroyRef);
+  readonly isOpen = input(false);
+  readonly isOpenChange = output<boolean>();
+  readonly uploadComplete = output<void>();
 
   private static readonly INTRO_CACHE_KEY = 'vendix_bulk_product_intro_dismissed';
   private static readonly INTRO_DURATION = 20000;
@@ -579,6 +581,17 @@ export class BulkUploadModalComponent implements OnChanges, OnDestroy {
   private productsService = inject(ProductsService);
   private toastService = inject(ToastService);
 
+  constructor() {
+    effect(() => {
+      const open = this.isOpen();
+      if (open) {
+        this.onModalOpen();
+      } else {
+        this.clearIntroTimer();
+      }
+    });
+  }
+
   // Computed properties
   get canProceed(): boolean {
     if (!this.analysisResult) return false;
@@ -588,20 +601,6 @@ export class BulkUploadModalComponent implements OnChanges, OnDestroy {
   get totalProductsToUpload(): number {
     if (!this.analysisResult) return 0;
     return this.analysisResult.products.filter(p => p.status !== 'error').length;
-  }
-
-  // Lifecycle
-  ngOnChanges(changes: SimpleChanges) {
-    if (changes['isOpen'] && this.isOpen) {
-      this.onModalOpen();
-    }
-    if (changes['isOpen'] && !this.isOpen) {
-      this.clearIntroTimer();
-    }
-  }
-
-  ngOnDestroy() {
-    this.clearIntroTimer();
   }
 
   // Intro logic
@@ -660,7 +659,7 @@ export class BulkUploadModalComponent implements OnChanges, OnDestroy {
   // Cancel/Close
   onCancel() {
     if (this.sessionId && !this.uploadResults) {
-      this.productsService.cancelBulkProductSession(this.sessionId).subscribe();
+      this.productsService.cancelBulkProductSession(this.sessionId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe();
     }
     if ((this.uploadResults?.successful ?? 0) > 0) {
       this.uploadComplete.emit();
@@ -687,7 +686,7 @@ export class BulkUploadModalComponent implements OnChanges, OnDestroy {
 
   // Step 0: File operations
   downloadTemplate(type: 'quick' | 'complete') {
-    this.productsService.getBulkUploadTemplate(type).subscribe({
+    this.productsService.getBulkUploadTemplate(type).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (blob) => {
         const url = window.URL.createObjectURL(blob);
         const link = document.createElement('a');
@@ -757,7 +756,7 @@ export class BulkUploadModalComponent implements OnChanges, OnDestroy {
     this.uploadError = null;
     this.currentStep = 1;
 
-    this.productsService.analyzeBulkProducts(this.selectedFile).subscribe({
+    this.productsService.analyzeBulkProducts(this.selectedFile).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (result) => {
         this.isAnalyzing = false;
         this.analysisResult = result;
@@ -783,7 +782,7 @@ export class BulkUploadModalComponent implements OnChanges, OnDestroy {
     this.isUploading = true;
     this.currentStep = 2;
 
-    this.productsService.uploadBulkProductsFromSession(this.sessionId).subscribe({
+    this.productsService.uploadBulkProductsFromSession(this.sessionId).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (result) => {
         this.isUploading = false;
         this.uploadResults = result;

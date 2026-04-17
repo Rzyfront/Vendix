@@ -1,5 +1,6 @@
-import { Component, ChangeDetectionStrategy, input, output, computed, signal, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, ChangeDetectionStrategy, input, output, computed, signal, inject, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import { FormsModule } from '@angular/forms';
 import { HttpClient } from '@angular/common/http';
 import { environment } from '../../../../../../../../environments/environment';
@@ -16,7 +17,7 @@ import {
 @Component({
   selector: 'app-dynamic-field',
   standalone: true,
-  imports: [CommonModule, FormsModule, InputComponent, SelectorComponent, TextareaComponent, ToggleComponent, IconComponent, ButtonComponent, SpinnerComponent],
+  imports: [FormsModule, InputComponent, SelectorComponent, TextareaComponent, ToggleComponent, IconComponent, ButtonComponent, SpinnerComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div>
@@ -41,7 +42,8 @@ import {
             [size]="'sm'"
             type="text"
             [placeholder]="placeholder()"
-            [value]="value()"
+            [ngModel]="value()"
+            [ngModelOptions]="{ standalone: true }"
             (inputChange)="valueChange.emit($event)"
           />
         }
@@ -50,7 +52,8 @@ import {
             [size]="'sm'"
             type="number"
             [placeholder]="placeholder()"
-            [value]="value()"
+            [ngModel]="value()"
+            [ngModelOptions]="{ standalone: true }"
             [min]="field().options?.min"
             [max]="field().options?.max"
             (inputChange)="valueChange.emit($event)"
@@ -60,7 +63,8 @@ import {
           <app-input
             [size]="'sm'"
             type="date"
-            [value]="value()"
+            [ngModel]="value()"
+            [ngModelOptions]="{ standalone: true }"
             (inputChange)="valueChange.emit($event)"
           />
         }
@@ -69,7 +73,8 @@ import {
             [size]="'sm'"
             type="email"
             [placeholder]="placeholder()"
-            [value]="value()"
+            [ngModel]="value()"
+            [ngModelOptions]="{ standalone: true }"
             (inputChange)="valueChange.emit($event)"
           />
         }
@@ -78,7 +83,8 @@ import {
             [size]="'sm'"
             type="tel"
             [placeholder]="placeholder()"
-            [value]="value()"
+            [ngModel]="value()"
+            [ngModelOptions]="{ standalone: true }"
             (inputChange)="valueChange.emit($event)"
           />
         }
@@ -87,7 +93,8 @@ import {
             [size]="'sm'"
             type="url"
             [placeholder]="placeholder()"
-            [value]="value()"
+            [ngModel]="value()"
+            [ngModelOptions]="{ standalone: true }"
             (inputChange)="valueChange.emit($event)"
           />
         }
@@ -151,6 +158,7 @@ import {
   `,
 })
 export class DynamicFieldComponent {
+  private destroyRef = inject(DestroyRef);
   private http = inject(HttpClient);
 
   field = input.required<any>();
@@ -200,7 +208,7 @@ export class DynamicFieldComponent {
     this.http.post<any>(
       `${environment.apiUrl}/ecommerce/data-collection/${token}/upload`,
       formData,
-    ).subscribe({
+    ).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (res) => {
         const data = res.data || res;
         this.valueChange.emit(data.key);

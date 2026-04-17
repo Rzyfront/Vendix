@@ -1,11 +1,11 @@
 <app-modal
-  [isOpen]="isOpen"
-  (isOpenChange)="isOpenChange.emit($event)"
+  [isOpen]="isOpen()"
+  (isOpenChange)="isOpen.set($event)"
   (cancel)="onCancel()"
   [size]="'md'"
   [title]="isEditMode ? 'Editar Producto' : 'Nuevo Producto'"
   subtitle="Configura los productos esenciales"
->
+  >
 
   <div class="p-2 md:p-4">
     <form [formGroup]="productForm" class="space-y-2 md:space-y-2 md:space-y-4">
@@ -13,17 +13,17 @@
       <!-- Name -->
       <div>
         <app-input label="Nombre del Producto" formControlName="name" placeholder="Ej. Camiseta Algodón Premium"
-          [error]="getErrorMessage('name')" [required]="true"></app-input>
+        [error]="getErrorMessage('name')" [required]="true"></app-input>
       </div>
 
       <!-- Price & SKU Row -->
       <div class="grid grid-cols-2 gap-2 md:gap-4">
         <app-input label="Precio Base" [currency]="true" formControlName="base_price" [error]="getErrorMessage('base_price')"
-          prefix="$" [required]="true" placeholder="0.00"></app-input>
+        prefix="$" [required]="true" placeholder="0.00"></app-input>
 
         <div>
           <app-input label="SKU" formControlName="sku" placeholder="Ej. CAM-001"
-            [error]="getErrorMessage('sku')"></app-input>
+          [error]="getErrorMessage('sku')"></app-input>
           <small class="text-xs text-gray-400 mt-0.5 block">Opcional</small>
         </div>
       </div>
@@ -40,25 +40,29 @@
       @if (productForm.get('track_inventory')?.value) {
         <div class="grid grid-cols-1 gap-2 md:gap-4">
           <!-- Stock Field: Different behavior for create vs edit mode -->
-          <div *ngIf="!isEditMode">
-            <app-input label="Cantidad/Stock" type="number" formControlName="stock_quantity"
-              [error]="getErrorMessage('stock_quantity')" placeholder="0"
+          @if (!isEditMode) {
+            <div>
+              <app-input label="Cantidad/Stock" type="number" formControlName="stock_quantity"
+                [error]="getErrorMessage('stock_quantity')" placeholder="0"
               tooltipText="Stock inicial del producto" [required]="true"></app-input>
-          </div>
-
-          <div *ngIf="isEditMode" class="relative">
-            <div (click)="onStockAdjustmentClick()" class="cursor-pointer group" title="Click para ajustar stock">
-              <app-input label="Stock" type="number" formControlName="stock_quantity"
-                [disabled]="true" placeholder="Click para ajustar stock" class="opacity-75 cursor-pointer"
-                [suffixIcon]="true">
-                <ng-container slot="suffix-icon">
-                  <svg class="h-5 w-5 text-gray-400 group-hover:text-primary-600 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                  </svg>
-                </ng-container>
-              </app-input>
             </div>
-          </div>
+          }
+
+          @if (isEditMode) {
+            <div class="relative">
+              <div (click)="onStockAdjustmentClick()" class="cursor-pointer group" title="Click para ajustar stock">
+                <app-input label="Stock" type="number" formControlName="stock_quantity"
+                  [disabled]="true" placeholder="Click para ajustar stock" class="opacity-75 cursor-pointer"
+                  [suffixIcon]="true">
+                  <ng-container slot="suffix-icon">
+                    <svg class="h-5 w-5 text-gray-400 group-hover:text-primary-600 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                      <path stroke-linecap="round" stroke-linejoin="round" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                    </svg>
+                  </ng-container>
+                </app-input>
+              </div>
+            </div>
+          }
         </div>
       }
 
@@ -67,8 +71,8 @@
         <div>
           <div class="flex gap-2 items-end">
             <app-selector class="flex-1" label="Categoría" [options]="categoryOptions" formControlName="category_id"
-              placeholder="Seleccionar"></app-selector>
-            <button type="button" (click)="isCategoryCreateOpen = true"
+            placeholder="Seleccionar"></app-selector>
+            <button type="button" (click)="isCategoryCreateOpen.set(true)"
               class="p-2 text-gray-500 hover:bg-gray-100 border border-gray-300 bg-white mb-0.5"
               style="border-radius: var(--radius-sm);">
               <app-icon name="plus" size="20"></app-icon>
@@ -80,8 +84,8 @@
         <div>
           <div class="flex gap-2 items-end">
             <app-selector class="flex-1" label="Marca" [options]="brandOptions"
-              formControlName="brand_id" placeholder="Seleccionar"></app-selector>
-            <button type="button" (click)="isBrandCreateOpen = true"
+            formControlName="brand_id" placeholder="Seleccionar"></app-selector>
+            <button type="button" (click)="isBrandCreateOpen.set(true)"
               class="p-2 text-gray-500 hover:bg-gray-100 border border-gray-300 bg-white mb-0.5"
               style="border-radius: var(--radius-sm);">
               <app-icon name="plus" size="20"></app-icon>
@@ -98,7 +102,7 @@
             [options]="taxCategoryOptions" formControlName="tax_category_ids"
             placeholder="Seleccionar impuestos...">
           </app-multi-selector>
-          <button type="button" (click)="isTaxCategoryCreateOpen = true"
+          <button type="button" (click)="isTaxCategoryCreateOpen.set(true)"
             class="p-2 text-gray-500 hover:bg-gray-100 border border-gray-300 bg-white mb-0.5"
             style="border-radius: var(--radius-sm);">
             <app-icon name="plus" size="20"></app-icon>
@@ -127,12 +131,12 @@
   <!-- Footer -->
   <div slot="footer" class="max-w-full">
     <div class="flex items-center justify-end gap-2 md:gap-3 p-2 md:px-4 md:py-3 bg-gray-50 rounded-b-xl">
-      <app-button variant="outline" (clicked)="onCancel()" [disabled]="isSubmitting"
+      <app-button variant="outline" (clicked)="onCancel()" [disabled]="isSubmitting()"
         customClasses="!rounded-xl flex-1 sm:flex-none font-bold">
         Cancelar
       </app-button>
 
-      <app-button variant="primary" (clicked)="onSubmit()" [loading]="isSubmitting" [disabled]="isSubmitting"
+      <app-button variant="primary" (clicked)="onSubmit()" [loading]="isSubmitting()" [disabled]="isSubmitting()"
         customClasses="!rounded-xl flex-1 sm:flex-none font-bold shadow-md shadow-primary-200 active:scale-95 transition-all">
         {{ isEditMode ? 'Guardar Cambios' : 'Crear Producto' }}
       </app-button>
@@ -141,19 +145,19 @@
 </app-modal>
 
 <!-- Quick Create Modals -->
-<app-category-quick-create [isOpen]="isCategoryCreateOpen" (isOpenChange)="isCategoryCreateOpen = $event"
-  (created)="onCategoryCreated($event)" (cancel)="isCategoryCreateOpen = false"></app-category-quick-create>
+<app-category-quick-create [isOpen]="isCategoryCreateOpen()" (isOpenChange)="isCategoryCreateOpen.set($event)"
+(created)="onCategoryCreated($event)" (cancel)="isCategoryCreateOpen.set(false)"></app-category-quick-create>
 
 <app-brand-quick-create
-  [isOpen]="isBrandCreateOpen"
-  (isOpenChange)="isBrandCreateOpen = $event"
+  [isOpen]="isBrandCreateOpen()"
+  (isOpenChange)="isBrandCreateOpen.set($event)"
   (created)="onBrandCreated($event)"
-  (cancel)="isBrandCreateOpen = false"
+  (cancel)="isBrandCreateOpen.set(false)"
 ></app-brand-quick-create>
 
 <app-tax-quick-create
-  [isOpen]="isTaxCategoryCreateOpen"
-  (isOpenChange)="isTaxCategoryCreateOpen = $event"
+  [isOpen]="isTaxCategoryCreateOpen()"
+  (isOpenChange)="isTaxCategoryCreateOpen.set($event)"
   (created)="onTaxCategoryCreated($event)"
-  (cancel)="isTaxCategoryCreateOpen = false">
+  (cancel)="isTaxCategoryCreateOpen.set(false)">
 </app-tax-quick-create>

@@ -1,16 +1,6 @@
-import {
-  Component,
-  Input,
-  Output,
-  EventEmitter,
-  OnChanges,
-  SimpleChanges,
-  signal,
-  computed,
-  effect,
-  inject,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, input, output, signal, computed, effect, inject, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import { FormsModule } from '@angular/forms';
 import { forkJoin, of } from 'rxjs';
 import { catchError } from 'rxjs/operators';
@@ -45,20 +35,19 @@ export interface PopProductConfigResult {
   selector: 'app-pop-product-config-modal',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ModalComponent,
     ScrollableTabsComponent,
     SettingToggleComponent,
     IconComponent,
     ButtonComponent,
-    InputComponent,
-  ],
+    InputComponent
+],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       title="Configurar producto"
-      [subtitle]="product?.name"
+      [subtitle]="product()?.name"
       size="sm"
       (closed)="onClose()"
       (cancel)="onClose()"
@@ -90,19 +79,19 @@ export interface PopProductConfigResult {
               </div>
               <div class="flex-1 min-w-0">
                 <p class="text-sm font-medium text-text-primary truncate">
-                  {{ product?.name }}
+                  {{ product()?.name }}
                 </p>
                 <div class="flex items-center gap-3 mt-0.5">
-                  @if (product?.code) {
+                  @if (product()?.code) {
                     <span class="text-xs text-text-muted font-mono"
-                      >SKU: {{ product?.code }}</span
+                      >SKU: {{ product()?.code }}</span
                     >
                   }
                   <span class="text-xs font-semibold text-text-primary">
                     Costo:
                     {{
                       formatCurrency(
-                        +(product?.cost || product?.cost_price || 0)
+                        +(product()?.cost || product()?.cost_price || 0)
                       )
                     }}
                   </span>
@@ -346,11 +335,11 @@ export interface PopProductConfigResult {
           } @else {
             <!-- Existing Variant Selection Mode -->
             <div class="flex flex-col gap-2">
-              @if (!isEditing) {
+              @if (!isEditing()) {
                 <div class="flex items-center justify-between px-1 pb-1">
                   <span class="text-xs text-text-muted">
                     {{ selectedVariantIds.size }} de
-                    {{ product?.product_variants?.length }} seleccionadas
+                    {{ product()?.product_variants?.length }} seleccionadas
                   </span>
                   <button
                     class="text-xs font-medium text-primary hover:text-primary/80 transition-colors"
@@ -365,7 +354,7 @@ export interface PopProductConfigResult {
                 </div>
               }
 
-              @for (variant of product?.product_variants; track variant.id) {
+              @for (variant of product()?.product_variants; track variant.id) {
                 <button
                   class="w-full flex items-center gap-3 p-3 rounded-xl border transition-all text-left"
                   [class]="
@@ -382,8 +371,8 @@ export interface PopProductConfigResult {
                         ? 'bg-primary border-primary'
                         : 'border-border bg-surface'
                     "
-                    [class.rounded-full]="isEditing"
-                    [class.rounded-md]="!isEditing"
+                    [class.rounded-full]="isEditing()"
+                    [class.rounded-md]="!isEditing()"
                   >
                     @if (isVariantSelected(variant.id)) {
                       <app-icon
@@ -433,7 +422,7 @@ export interface PopProductConfigResult {
                 </button>
               }
 
-              @if (!product?.product_variants?.length) {
+              @if (!product()?.product_variants?.length) {
                 <p class="text-sm text-text-muted text-center py-4">
                   Este producto no tiene variantes configuradas.
                 </p>
@@ -515,15 +504,16 @@ export interface PopProductConfigResult {
     `,
   ],
 })
-export class PopProductConfigModalComponent implements OnChanges {
-  @Input() isOpen = false;
-  @Input() product: PopProduct | null = null;
-  @Input() initialVariant: PopProductVariant | null = null;
-  @Input() initialLotInfo: LotInfo | null = null;
-  @Input() initialPricingType: 'unit' | 'weight' = 'unit';
-  @Input() isEditing = false;
-  @Output() confirmed = new EventEmitter<PopProductConfigResult>();
-  @Output() closed = new EventEmitter<void>();
+export class PopProductConfigModalComponent {
+  private destroyRef = inject(DestroyRef);
+  readonly isOpen = input(false);
+  readonly product = input<PopProduct | null>(null);
+  readonly initialVariant = input<PopProductVariant | null>(null);
+  readonly initialLotInfo = input<LotInfo | null>(null);
+  readonly initialPricingType = input<'unit' | 'weight'>('unit');
+  readonly isEditing = input(false);
+  readonly confirmed = output<PopProductConfigResult>();
+  readonly closed = output<void>();
 
   // Tab state
   activeTab = signal<string>('general');
@@ -578,22 +568,22 @@ export class PopProductConfigModalComponent implements OnChanges {
         this.activeTab.set('general');
       }
     });
-  }
 
-  ngOnChanges(changes: SimpleChanges): void {
-    if (changes['isOpen'] && this.isOpen) {
-      this.resetState();
-    }
+    effect(() => {
+      if (this.isOpen()) {
+        this.resetState();
+      }
+    });
   }
 
   get productHasVariants(): boolean {
-    return !!this.product?.product_variants?.length;
+    return !!this.product()?.product_variants?.length;
   }
 
   get allVariantsSelected(): boolean {
     return (
-      !!this.product?.product_variants?.length &&
-      this.selectedVariantIds.size === this.product.product_variants.length
+      !!this.product()?.product_variants?.length &&
+      this.selectedVariantIds.size === (this.product()?.product_variants?.length ?? 0)
     );
   }
 
@@ -603,7 +593,7 @@ export class PopProductConfigModalComponent implements OnChanges {
       return `Crear ${this.generatedVariants.length} variantes`;
     }
     if (
-      !this.isEditing &&
+      !this.isEditing() &&
       this.hasVariantsToggle() &&
       this.selectedVariantIds.size > 1
     ) {
@@ -634,7 +624,7 @@ export class PopProductConfigModalComponent implements OnChanges {
   }
 
   onToggleVariant(variant: PopProductVariant): void {
-    if (this.isEditing) {
+    if (this.isEditing()) {
       // Single-select when editing an existing cart item
       this.selectedVariantIds.clear();
       this.selectedVariantIds.add(variant.id);
@@ -655,7 +645,7 @@ export class PopProductConfigModalComponent implements OnChanges {
       this.selectedVariantIds = new Set();
     } else {
       this.selectedVariantIds = new Set(
-        this.product?.product_variants?.map((v) => v.id) || [],
+        this.product()?.product_variants?.map((v) => v.id) || [],
       );
     }
   }
@@ -677,10 +667,10 @@ export class PopProductConfigModalComponent implements OnChanges {
     if (
       this.isCreatingVariants() &&
       this.generatedVariants.length > 0 &&
-      this.product?.id
+      this.product()?.id
     ) {
       this.creatingVariants.set(true);
-      const productId = this.product.id;
+      const productId = this.product()!.id;
 
       const createRequests = this.generatedVariants.map((v) =>
         this.productsService
@@ -694,7 +684,7 @@ export class PopProductConfigModalComponent implements OnChanges {
           .pipe(catchError(() => of(null))),
       );
 
-      forkJoin(createRequests).subscribe({
+      forkJoin(createRequests).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (results) => {
           const createdVariants = results
             .filter((r): r is any => r !== null)
@@ -722,8 +712,9 @@ export class PopProductConfigModalComponent implements OnChanges {
           }
 
           // Update local product reference
-          if (this.product) {
-            this.product.product_variants = createdVariants;
+          const currentProduct = this.product();
+          if (currentProduct) {
+            currentProduct.product_variants = createdVariants;
           }
 
           const lotInfo = this.buildLotInfo();
@@ -733,14 +724,14 @@ export class PopProductConfigModalComponent implements OnChanges {
             variants: createdVariants,
             quantity: 1,
             unit_cost: Number(
-              this.product?.cost || this.product?.cost_price || 0,
+              this.product()?.cost || this.product()?.cost_price || 0,
             ),
             pricing_type: pricingType,
             lot_info: lotInfo,
           });
 
           this.creatingVariants.set(false);
-          this.isOpen = false;
+          this.closed.emit();
         },
         error: () => {
           this.creatingVariants.set(false);
@@ -754,19 +745,19 @@ export class PopProductConfigModalComponent implements OnChanges {
     const lotInfo = this.buildLotInfo();
     const pricingType = this.selectedPricingType();
 
-    if (this.hasVariantsToggle() && this.product?.product_variants) {
-      const selectedVariants = this.product.product_variants.filter((v) =>
+    if (this.hasVariantsToggle() && this.product()?.product_variants) {
+      const selectedVariants = (this.product()?.product_variants ?? []).filter((v) =>
         this.selectedVariantIds.has(v.id),
       );
 
-      if (this.isEditing) {
+      if (this.isEditing()) {
         const variant = selectedVariants[0];
         this.confirmed.emit({
           variant,
           quantity: 1,
           unit_cost: variant?.cost_price
             ? Number(variant.cost_price)
-            : Number(this.product?.cost || this.product?.cost_price || 0),
+            : Number(this.product()?.cost || this.product()?.cost_price || 0),
           pricing_type: pricingType,
           lot_info: lotInfo,
         });
@@ -775,7 +766,7 @@ export class PopProductConfigModalComponent implements OnChanges {
           variants: selectedVariants,
           quantity: 1,
           unit_cost: Number(
-            this.product?.cost || this.product?.cost_price || 0,
+            this.product()?.cost || this.product()?.cost_price || 0,
           ),
           pricing_type: pricingType,
           lot_info: lotInfo,
@@ -784,13 +775,13 @@ export class PopProductConfigModalComponent implements OnChanges {
     } else {
       this.confirmed.emit({
         quantity: 1,
-        unit_cost: Number(this.product?.cost || this.product?.cost_price || 0),
+        unit_cost: Number(this.product()?.cost || this.product()?.cost_price || 0),
         pricing_type: pricingType,
         lot_info: lotInfo,
       });
     }
 
-    this.isOpen = false;
+    this.closed.emit();
   }
 
   // --- Variant creation methods ---
@@ -839,9 +830,9 @@ export class PopProductConfigModalComponent implements OnChanges {
 
     const combinations = this.cartesian(validAttributes.map((a) => a.values));
     const baseCost = Number(
-      this.product?.cost || this.product?.cost_price || 0,
+      this.product()?.cost || this.product()?.cost_price || 0,
     );
-    const baseSku = this.product?.code || '';
+    const baseSku = this.product()?.code || '';
 
     this.generatedVariants = combinations.map((combo) => {
       const attributes: Record<string, string> = {};
@@ -861,7 +852,7 @@ export class PopProductConfigModalComponent implements OnChanges {
       if (existing) return existing;
 
       return {
-        name: `${this.product?.name || 'Product'}${nameSuffix}`,
+        name: `${this.product()?.name || 'Product'}${nameSuffix}`,
         sku: baseSku ? `${baseSku}${skuSuffix}` : `VAR${skuSuffix}`,
         cost_price: baseCost,
         attributes,
@@ -893,7 +884,6 @@ export class PopProductConfigModalComponent implements OnChanges {
   }
 
   onClose(): void {
-    this.isOpen = false;
     this.closed.emit();
   }
 
@@ -922,13 +912,13 @@ export class PopProductConfigModalComponent implements OnChanges {
 
     // Pre-fill pricing type
     this.selectedPricingType.set(
-      this.initialPricingType || this.product?.pricing_type || 'unit',
+      this.initialPricingType() || this.product()?.pricing_type || 'unit',
     );
 
     // Pre-fill variant toggle and selection
-    if (this.initialVariant) {
+    if (this.initialVariant()) {
       this.hasVariantsToggle.set(true);
-      this.selectedVariantIds = new Set([this.initialVariant.id]);
+      this.selectedVariantIds = new Set([this.initialVariant()!.id]);
     } else if (this.productHasVariants) {
       this.hasVariantsToggle.set(true);
       this.selectedVariantIds = new Set();
@@ -938,20 +928,21 @@ export class PopProductConfigModalComponent implements OnChanges {
     }
 
     // Pre-fill lot toggle and fields
-    if (this.initialLotInfo) {
+    const lotInfo = this.initialLotInfo();
+    if (lotInfo) {
       this.requiresLotToggle.set(true);
-      this.lotBatchNumber = this.initialLotInfo.batch_number || '';
-      this.lotManufacturingDate = this.initialLotInfo.manufacturing_date
-        ? new Date(this.initialLotInfo.manufacturing_date)
+      this.lotBatchNumber = lotInfo.batch_number || '';
+      this.lotManufacturingDate = lotInfo.manufacturing_date
+        ? new Date(lotInfo.manufacturing_date)
             .toISOString()
             .split('T')[0]
         : '';
-      this.lotExpirationDate = this.initialLotInfo.expiration_date
-        ? new Date(this.initialLotInfo.expiration_date)
+      this.lotExpirationDate = lotInfo.expiration_date
+        ? new Date(lotInfo.expiration_date)
             .toISOString()
             .split('T')[0]
         : '';
-    } else if (this.product?.requires_batch_tracking) {
+    } else if (this.product()?.requires_batch_tracking) {
       this.requiresLotToggle.set(true);
       this.lotBatchNumber = '';
       this.lotManufacturingDate = '';

@@ -1,12 +1,10 @@
 import {
   Component,
-  Input,
-  OnChanges,
-  Output,
-  EventEmitter,
-  SimpleChanges,
+  input,
+  output,
+  computed,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { NgxEchartsDirective, provideEchartsCore } from 'ngx-echarts';
 import type { EChartsOption } from 'echarts';
 import * as echarts from 'echarts/core';
@@ -103,29 +101,31 @@ export const CHART_THEMES: { [key: string]: ChartTheme } = {
 @Component({
   selector: 'app-chart',
   standalone: true,
-  imports: [CommonModule, NgxEchartsDirective],
+  imports: [NgxEchartsDirective],
   providers: [
     provideEchartsCore({ echarts }),
   ],
   template: `
     <div
       class="chart-container"
-      [class]="containerClass"
-      [style.background-color]="theme.backgroundColor"
-    >
-      <div *ngIf="loading" class="chart-loading">
-        <div class="loading-spinner"></div>
-      </div>
-      <div 
-        echarts 
-        [options]="mergedOptions" 
-        [theme]="$any(echartsTheme)"
+      [class]="containerClass()"
+      [style.background-color]="theme().backgroundColor"
+      >
+      @if (loading()) {
+        <div class="chart-loading">
+          <div class="loading-spinner"></div>
+        </div>
+      }
+      <div
+        echarts
+        [options]="mergedOptions()"
+        [theme]="$any(echartsTheme())"
         class="echarts-chart"
         (chartClick)="onChartClick($event)"
         (chartMouseOver)="onChartHover($event)"
       ></div>
     </div>
-  `,
+    `,
   styles: [
     `
       .chart-container {
@@ -151,7 +151,7 @@ export const CHART_THEMES: { [key: string]: ChartTheme } = {
           0 4px 6px -1px rgba(0, 0, 0, 0.1),
           0 2px 4px -1px rgba(0, 0, 0, 0.06);
       }
-      
+
       .echarts-chart {
         width: 100%;
         height: 100%;
@@ -191,78 +191,71 @@ export const CHART_THEMES: { [key: string]: ChartTheme } = {
     `,
   ],
 })
-export class ChartComponent implements OnChanges {
+export class ChartComponent {
   // New Input for ECharts options
-  @Input() options: EChartsOption = {};
+  readonly options = input<EChartsOption>({});
 
   // Kept mostly for compatibility or container styling
-  @Input() size: 'small' | 'medium' | 'large' = 'medium';
-  @Input() className = '';
-  @Input() theme: ChartTheme = CHART_THEMES['corporate'];
-  @Input() loading = false;
+  readonly size = input<'small' | 'medium' | 'large'>('medium');
+  readonly className = input<string>('');
+  readonly theme = input<ChartTheme>(CHART_THEMES['corporate']);
+  readonly loading = input<boolean>(false);
 
   // Deprecated usage
-  @Input() type: ExtendedChartType = 'bar';
-  @Input() data: any = {};
-  @Input() animated = true;
-  @Input() showLegend = true;
-  @Input() showTooltip = true;
-  @Input() exportable = false;
+  readonly type = input<ExtendedChartType>('bar');
+  readonly data = input<any>({});
+  readonly animated = input<boolean>(true);
+  readonly showLegend = input<boolean>(true);
+  readonly showTooltip = input<boolean>(true);
+  readonly exportable = input<boolean>(false);
 
-  @Output() chartClick = new EventEmitter<any>();
-  @Output() chartHover = new EventEmitter<any>();
+  readonly chartClick = output<any>();
+  readonly chartHover = output<any>();
 
-  containerClass = '';
-  mergedOptions: EChartsOption = {};
-  echartsTheme: string | object | undefined;
-
-  constructor() {
-    this.updateContainerClass();
-  }
-
-  ngOnChanges(changes: SimpleChanges): void {
-    this.updateContainerClass();
-    this.mergeOptions();
-  }
-
-  private updateContainerClass(): void {
-    const sizeClasses = {
+  readonly containerClass = computed(() => {
+    const sizeClasses: Record<'small' | 'medium' | 'large', string> = {
       small: 'small',
       medium: '',
       large: 'large',
     };
-    this.containerClass = `${sizeClasses[this.size]} ${this.className}`.trim();
-  }
+    return `${sizeClasses[this.size()]} ${this.className()}`.trim();
+  });
 
-  private mergeOptions(): void {
-    const baseOptions = { ...this.options };
+  readonly mergedOptions = computed<EChartsOption>(() => {
+    const baseOptions = { ...this.options() };
+    const themeVal = this.theme();
+    const showTooltipVal = this.showTooltip();
+    const showLegendVal = this.showLegend();
 
-    if (!baseOptions.color && this.theme.colors) {
-      baseOptions.color = this.theme.colors;
+    if (!baseOptions.color && themeVal.colors) {
+      baseOptions.color = themeVal.colors;
     }
 
-    if (!baseOptions.tooltip && this.showTooltip) {
+    if (!baseOptions.tooltip && showTooltipVal) {
       baseOptions.tooltip = {
         trigger: 'item',
-        backgroundColor: this.theme.backgroundColor ? this.theme.backgroundColor + 'dd' : 'rgba(255, 255, 255, 0.9)',
+        backgroundColor: themeVal.backgroundColor ? themeVal.backgroundColor + 'dd' : 'rgba(255, 255, 255, 0.9)',
         textStyle: {
-          color: this.theme.textColor || '#333'
+          color: themeVal.textColor || '#333'
         }
       };
     }
 
-    if (!baseOptions.legend && this.showLegend) {
+    if (!baseOptions.legend && showLegendVal) {
       baseOptions.legend = {
         show: true,
         textStyle: {
-          color: this.theme.legendColor || this.theme.textColor
+          color: themeVal.legendColor || themeVal.textColor
         }
       };
     }
 
-    this.mergedOptions = baseOptions;
-    this.echartsTheme = this.theme.name === 'Dark' ? 'dark' : undefined;
-  }
+    return baseOptions;
+  });
+
+  readonly echartsTheme = computed<string | undefined>(() => {
+    return this.theme().name === 'Dark' ? 'dark' : undefined;
+  });
 
   onChartClick(event: any): void {
     this.chartClick.emit(event);

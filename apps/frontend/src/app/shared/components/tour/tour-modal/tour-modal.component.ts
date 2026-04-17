@@ -1,16 +1,15 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
   inject,
-  OnInit,
-  OnDestroy,
-  OnChanges,
-  SimpleChanges,
-  NgZone,
+  DestroyRef,
+  effect,
+  input,
+  model,
+  output,
+  signal,
+  viewChild,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { ButtonComponent } from '../../button/button.component';
 import { TourService, TourStep, TourConfig } from '../services/tour.service';
 import { POS_TOUR_CONFIG } from '../configs/pos-tour.config';
@@ -26,93 +25,93 @@ interface SpotlightPosition {
 @Component({
   selector: 'app-tour-modal',
   standalone: true,
-  imports: [CommonModule, ButtonComponent],
+  imports: [ButtonComponent],
   template: `
     <!-- Spotlight Overlay -->
-    <div
-      *ngIf="isOpen && spotlight.visible && spotlight.width > 0"
-      class="tour-spotlight-overlay"
-      [style.top.px]="spotlight.top"
-      [style.left.px]="spotlight.left"
-      [style.width.px]="spotlight.width"
-      [style.height.px]="spotlight.height"
-    ></div>
+    @if (isOpen() && spotlight.visible && spotlight.width > 0) {
+      <div
+        class="tour-spotlight-overlay"
+        [style.top.px]="spotlight.top"
+        [style.left.px]="spotlight.left"
+        [style.width.px]="spotlight.width"
+        [style.height.px]="spotlight.height"
+      ></div>
+    }
 
     <!-- Tour Tooltip - Different design for mobile and desktop -->
-    <div
-      *ngIf="isOpen"
-      class="tour-tooltip"
-      [class.is-mobile]="isMobile"
-      [class.is-desktop]="!isMobile"
-      [class.is-minimized]="isMinimized"
-      [attr.data-position-mode]="isMobile ? 'compact' : 'absolute'"
-      [style.top.px]="tooltipPosition.top"
-      [style.left.px]="tooltipPosition.left"
-    >
-      <div class="tooltip-header">
-        <h3 class="tooltip-title">{{ currentStep?.title }}</h3>
-        <!-- Minimize button for mobile -->
-        <button
-          *ngIf="isMobile"
-          class="minimize-btn"
-          (click)="toggleMinimize()"
-          [attr.aria-label]="isMinimized ? 'Expandir' : 'Minimizar'"
-        >
-          <svg
-            [class.rotated]="isMinimized"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-          >
-            <polyline points="6 9 12 15 18 9"></polyline>
-          </svg>
-        </button>
-      </div>
-
-      <div class="tooltip-content" [class.expanded]="!isMinimized">
-        <p class="tooltip-description">{{ currentStep?.description }}</p>
-
-        <p *ngIf="currentStep?.action" class="tooltip-action">
-          👆 {{ currentStep?.action }}
-        </p>
-      </div>
-
-      <!-- Footer Navigation -->
-      <div class="tooltip-footer" [class.expanded]="!isMinimized">
-        <div class="footer-left">
-          <app-button
-            variant="outline"
-            [size]="isMobile ? 'xsm' : 'xsm'"
-            (clicked)="skipTour()"
-            class="skip-btn"
-          >
-            Saltar
-          </app-button>
+    @if (isOpen()) {
+      <div
+        class="tour-tooltip"
+        [class.is-mobile]="isMobile"
+        [class.is-desktop]="!isMobile"
+        [class.is-minimized]="isMinimized"
+        [attr.data-position-mode]="isMobile ? 'compact' : 'absolute'"
+        [style.top.px]="tooltipPosition.top"
+        [style.left.px]="tooltipPosition.left"
+      >
+        <div class="tooltip-header">
+          <h3 class="tooltip-title">{{ currentStep?.title }}</h3>
+          <!-- Minimize button for mobile -->
+          @if (isMobile) {
+            <button
+              class="minimize-btn"
+              (click)="toggleMinimize()"
+              [attr.aria-label]="isMinimized ? 'Expandir' : 'Minimizar'"
+            >
+              <svg
+                [class.rotated]="isMinimized"
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+              >
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            </button>
+          }
         </div>
-
-        <!-- Progress indicator (desktop only) -->
-        <div class="footer-center" *ngIf="!isMobile">
-          <span class="tour-progress">
-            {{ currentIndex + 1 }} de {{ totalSteps }}
-          </span>
+        <div class="tooltip-content" [class.expanded]="!isMinimized">
+          <p class="tooltip-description">{{ currentStep?.description }}</p>
+          @if (currentStep?.action) {
+            <p class="tooltip-action">👆 {{ currentStep?.action }}</p>
+          }
         </div>
-
-        <div class="footer-right">
-          <app-button
-            variant="primary"
-            [size]="isMobile ? 'sm' : 'xsm'"
-            (clicked)="nextStep()"
-            [disabled]="isProcessing"
-            class="next-btn"
-          >
-            {{ nextButtonText }}
-          </app-button>
+        <!-- Footer Navigation -->
+        <div class="tooltip-footer" [class.expanded]="!isMinimized">
+          <div class="footer-left">
+            <app-button
+              variant="outline"
+              [size]="isMobile ? 'xsm' : 'xsm'"
+              (clicked)="skipTour()"
+              class="skip-btn"
+            >
+              Saltar
+            </app-button>
+          </div>
+          <!-- Progress indicator (desktop only) -->
+          @if (!isMobile) {
+            <div class="footer-center">
+              <span class="tour-progress">
+                {{ currentIndex + 1 }} de {{ totalSteps }}
+              </span>
+            </div>
+          }
+          <div class="footer-right">
+            <app-button
+              variant="primary"
+              [size]="isMobile ? 'sm' : 'xsm'"
+              (clicked)="nextStep()"
+              [disabled]="isProcessing"
+              class="next-btn"
+            >
+              {{ nextButtonText }}
+            </app-button>
+          </div>
         </div>
       </div>
-    </div>
+    }
   `,
   styles: [
     `
@@ -525,15 +524,14 @@ interface SpotlightPosition {
     `,
   ],
 })
-export class TourModalComponent implements OnInit, OnDestroy, OnChanges {
+export class TourModalComponent {
   private tourService = inject(TourService);
-  private ngZone = inject(NgZone);
+  private destroyRef = inject(DestroyRef);
 
-  @Input() isOpen = false;
-  @Input() tourConfig: TourConfig = POS_TOUR_CONFIG;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() completed = new EventEmitter<void>();
-  @Output() skipped = new EventEmitter<void>();
+  readonly isOpen = model<boolean>(false);
+  readonly tourConfig = input<TourConfig>(POS_TOUR_CONFIG);
+  readonly completed = output<void>();
+  readonly skipped = output<void>();
 
   currentIndex = 0;
   currentStep: TourStep | null = null;
@@ -558,12 +556,31 @@ export class TourModalComponent implements OnInit, OnDestroy, OnChanges {
   private recalculateTimeout: any = null;
   private clickListener: ((e: Event) => void) | null = null;
 
-  ngOnInit(): void {
+  constructor() {
     this.checkMobile();
     this.setupResizeObserver();
     this.setupDOMObserver();
     this.setupPathListener();
     this.setupClickListener();
+
+    effect(() => {
+      const open = this.isOpen();
+      // This effect re-runs when isOpen changes via @Input binding
+      // We intentionally only use the value to trigger the effect
+      if (open) {
+        this.startTour();
+      }
+    });
+
+    this.destroyRef.onDestroy(() => {
+      this.clearSpotlight();
+      this.cleanupResizeObserver();
+      this.cleanupDOMObserver();
+      this.cleanupFunctions.forEach((fn) => fn());
+      if (this.recalculateTimeout) {
+        clearTimeout(this.recalculateTimeout);
+      }
+    });
   }
 
   private checkMobile(): void {
@@ -571,26 +588,6 @@ export class TourModalComponent implements OnInit, OnDestroy, OnChanges {
     // Auto-minimize on mobile by default
     if (this.isMobile) {
       this.isMinimized = true;
-    }
-  }
-
-  ngOnDestroy(): void {
-    this.clearSpotlight();
-    this.cleanupResizeObserver();
-    this.cleanupDOMObserver();
-    this.cleanupFunctions.forEach((fn) => fn());
-    if (this.recalculateTimeout) {
-      clearTimeout(this.recalculateTimeout);
-    }
-  }
-
-  ngOnChanges(changes: SimpleChanges): void {
-    if (
-      changes['isOpen'] &&
-      changes['isOpen'].currentValue === true &&
-      changes['isOpen'].previousValue === false
-    ) {
-      this.startTour();
     }
   }
 
@@ -634,14 +631,14 @@ export class TourModalComponent implements OnInit, OnDestroy, OnChanges {
       clearTimeout(this.recalculateTimeout);
     }
     this.recalculateTimeout = setTimeout(() => {
-      if (this.isOpen && this.currentStep?.target) {
+      if (this.isOpen() && this.currentStep?.target) {
         this.updateSpotlight(this.currentStep.target);
       }
     }, 100);
   }
 
   get totalSteps(): number {
-    return this.tourConfig?.steps?.length || 0;
+    return this.tourConfig()?.steps?.length || 0;
   }
 
   get isLastStep(): boolean {
@@ -660,104 +657,93 @@ export class TourModalComponent implements OnInit, OnDestroy, OnChanges {
   }
 
   private setupPathListener(): void {
-    this.ngZone.runOutsideAngular(() => {
-      let lastPath = window.location.pathname;
-      const checkPath = () => {
-        const currentPath = window.location.pathname;
-        if (currentPath !== lastPath && this.isOpen && this.currentStep) {
-          lastPath = currentPath;
-          this.ngZone.run(() => {
-            this.validateCurrentStep();
-            setTimeout(() => {
-              if (this.currentStep?.target) {
-                this.updateSpotlight(this.currentStep.target);
-              }
-            }, 300);
-          });
-        }
-      };
+    let lastPath = window.location.pathname;
+    const checkPath = () => {
+      const currentPath = window.location.pathname;
+      if (currentPath !== lastPath && this.isOpen() && this.currentStep) {
+        lastPath = currentPath;
+        this.validateCurrentStep();
+        setTimeout(() => {
+          if (this.currentStep?.target) {
+            this.updateSpotlight(this.currentStep.target);
+          }
+        }, 300);
+      }
+    };
 
-      window.addEventListener('popstate', checkPath);
-      const interval = setInterval(checkPath, 500);
+    window.addEventListener('popstate', checkPath);
+    const interval = setInterval(checkPath, 500);
 
-      this.cleanupFunctions.push(() => {
-        window.removeEventListener('popstate', checkPath);
-        clearInterval(interval);
-      });
+    this.cleanupFunctions.push(() => {
+      window.removeEventListener('popstate', checkPath);
+      clearInterval(interval);
     });
   }
 
   private setupClickListener(): void {
-    this.ngZone.runOutsideAngular(() => {
-      this.clickListener = async (e: Event) => {
-        if (!this.isOpen || !this.currentStep || this.isProcessing) return;
+    this.clickListener = async (e: Event) => {
+      if (!this.isOpen() || !this.currentStep || this.isProcessing) return;
 
-        // Skip click detection for first and last steps
-        if (this.currentIndex === 0 || this.isLastStep) return;
+      // Skip click detection for first and last steps
+      if (this.currentIndex === 0 || this.isLastStep) return;
 
-        // Check both target (for spotlight) and autoAdvanceTarget (for click detection only)
-        const target = this.getDeviceSelector(this.currentStep.target || '');
-        const autoAdvanceTarget = this.getDeviceAutoAdvanceTarget();
+      // Check both target (for spotlight) and autoAdvanceTarget (for click detection only)
+      const target = this.getDeviceSelector(this.currentStep.target || '');
+      const autoAdvanceTarget = this.getDeviceAutoAdvanceTarget();
 
-        if (!target && !autoAdvanceTarget) return;
+      if (!target && !autoAdvanceTarget) return;
 
-        const clickedElement = e.target as HTMLElement;
-        if (!clickedElement) return;
+      const clickedElement = e.target as HTMLElement;
+      if (!clickedElement) return;
 
-        // Combine selectors from both target and autoAdvanceTarget
-        const allSelectors = [];
-        if (target)
-          allSelectors.push(...target.split(',').map((s) => s.trim()));
-        if (autoAdvanceTarget)
-          allSelectors.push(
-            ...autoAdvanceTarget.split(',').map((s) => s.trim()),
-          );
+      // Combine selectors from both target and autoAdvanceTarget
+      const allSelectors = [];
+      if (target) allSelectors.push(...target.split(',').map((s) => s.trim()));
+      if (autoAdvanceTarget)
+        allSelectors.push(...autoAdvanceTarget.split(',').map((s) => s.trim()));
 
-        let isTargetClicked = false;
+      let isTargetClicked = false;
 
-        for (const sel of allSelectors) {
-          // Check if the clicked element or any of its parents match the selector
-          const matched = clickedElement.closest(sel);
-          if (matched) {
-            isTargetClicked = true;
-            break;
+      for (const sel of allSelectors) {
+        // Check if the clicked element or any of its parents match the selector
+        const matched = clickedElement.closest(sel);
+        if (matched) {
+          isTargetClicked = true;
+          break;
+        }
+      }
+
+      if (isTargetClicked) {
+        // Mobile: Close sidebar after clicking sidebar link
+        if (this.isMobile && target?.includes('app-sidebar')) {
+          setTimeout(() => this.closeMobileSidebarForTour(), 100);
+        }
+
+        // Wait a moment for the action to take effect
+        await new Promise((resolve) => setTimeout(resolve, 200));
+
+        // Validate and advance if valid
+        this.validateCurrentStep().then((isValid) => {
+          if (isValid) {
+            if (this.isLastStep) {
+              this.completeTour();
+            } else {
+              this.loadStep(this.currentIndex + 1);
+            }
           }
-        }
+        });
+      }
+    };
 
-        if (isTargetClicked) {
-          // Mobile: Close sidebar after clicking sidebar link
-          if (this.isMobile && target?.includes('app-sidebar')) {
-            setTimeout(() => this.closeMobileSidebarForTour(), 100);
-          }
+    // Use capture phase to catch clicks before they're handled by other components
+    document.addEventListener('click', this.clickListener, { capture: true });
 
-          // Wait a moment for the action to take effect
-          await new Promise((resolve) => setTimeout(resolve, 200));
-
-          // Validate and advance if valid
-          this.ngZone.run(() => {
-            this.validateCurrentStep().then((isValid) => {
-              if (isValid) {
-                if (this.isLastStep) {
-                  this.completeTour();
-                } else {
-                  this.loadStep(this.currentIndex + 1);
-                }
-              }
-            });
-          });
-        }
-      };
-
-      // Use capture phase to catch clicks before they're handled by other components
-      document.addEventListener('click', this.clickListener, { capture: true });
-
-      this.cleanupFunctions.push(() => {
-        if (this.clickListener) {
-          document.removeEventListener('click', this.clickListener, {
-            capture: true,
-          });
-        }
-      });
+    this.cleanupFunctions.push(() => {
+      if (this.clickListener) {
+        document.removeEventListener('click', this.clickListener, {
+          capture: true,
+        });
+      }
     });
   }
 
@@ -766,7 +752,7 @@ export class TourModalComponent implements OnInit, OnDestroy, OnChanges {
 
     this.isProcessing = true;
     this.currentIndex = index;
-    this.currentStep = this.tourConfig.steps[index];
+    this.currentStep = this.tourConfig().steps[index];
 
     this.clearSpotlight();
 
@@ -1172,23 +1158,21 @@ export class TourModalComponent implements OnInit, OnDestroy, OnChanges {
 
   completeTour(): void {
     this.clearSpotlight();
-    this.tourService.completeTour(this.tourConfig.id);
-    this.isOpen = false;
-    this.isOpenChange.emit(false);
+    this.tourService.completeTour(this.tourConfig().id);
+    this.isOpen.set(false);
     this.completed.emit();
   }
 
   skipTour(): void {
     this.clearSpotlight();
-    this.tourService.skipTour(this.tourConfig.id);
-    this.isOpen = false;
-    this.isOpenChange.emit(false);
+    this.tourService.skipTour(this.tourConfig().id);
+    this.isOpen.set(false);
     this.skipped.emit();
   }
 
   async startTour(): Promise<void> {
     this.currentIndex = 0;
-    this.currentStep = this.tourConfig.steps[0];
+    this.currentStep = this.tourConfig().steps[0];
 
     // Clear any existing spotlight
     this.clearSpotlight();
@@ -1197,8 +1181,7 @@ export class TourModalComponent implements OnInit, OnDestroy, OnChanges {
     this.centerTooltip();
 
     // Show the tooltip
-    this.isOpen = true;
-    this.isOpenChange.emit(true);
+    this.isOpen.set(true);
 
     // Wait for Angular to render, then run hooks
     await this.delay(100);

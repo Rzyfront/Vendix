@@ -1,15 +1,16 @@
-import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, OnInit, inject, signal,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import { RouterModule } from '@angular/router';
-import { Subject, takeUntil } from 'rxjs';
+
 
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import { TableColumn } from '../../../../../../shared/components/table/table.component';
 import {
   ResponsiveDataViewComponent,
-  ItemListCardConfig,
-} from '../../../../../../shared/components/index';
+  ItemListCardConfig} from '../../../../../../shared/components/index';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
@@ -24,7 +25,6 @@ import { EChartsOption } from 'echarts';
   selector: 'vendix-inventory-valuation',
   standalone: true,
   imports: [
-    CommonModule,
     RouterModule,
     CardComponent,
     ChartComponent,
@@ -81,28 +81,47 @@ import { EChartsOption } from 'echarts';
       <!-- Content Grid -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <!-- Pie Chart -->
-        <app-card shadow="none" [padding]="false" overflow="hidden" [showHeader]="true">
+        <app-card
+          shadow="none"
+          [padding]="false"
+          overflow="hidden"
+          [showHeader]="true"
+        >
           <div slot="header" class="flex flex-col">
-            <span class="text-sm font-bold text-[var(--color-text-primary)]">Distribución por Ubicación</span>
+            <span class="text-sm font-bold text-[var(--color-text-primary)]"
+              >Distribución por Ubicación</span
+            >
           </div>
           <div class="p-4">
             @if (loading()) {
               <div class="h-64 flex items-center justify-center">
-                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                <div
+                  class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+                ></div>
               </div>
             } @else {
-              <app-chart
-                [options]="chartOptions()"
-                size="large"
-              ></app-chart>
+              @defer (on viewport) {
+                <app-chart [options]="chartOptions()" size="large"></app-chart>
+              } @placeholder {
+                <div
+                  class="h-64 bg-surface-secondary animate-pulse rounded-xl"
+                ></div>
+              }
             }
           </div>
         </app-card>
 
         <!-- Table -->
-        <app-card shadow="none" [padding]="false" overflow="hidden" [showHeader]="true">
+        <app-card
+          shadow="none"
+          [padding]="false"
+          overflow="hidden"
+          [showHeader]="true"
+        >
           <div slot="header" class="flex flex-col">
-            <span class="text-sm font-bold text-[var(--color-text-primary)]">Detalle por Ubicación</span>
+            <span class="text-sm font-bold text-[var(--color-text-primary)]"
+              >Detalle por Ubicación</span
+            >
           </div>
           <div class="p-4">
             <app-responsive-data-view
@@ -117,15 +136,13 @@ import { EChartsOption } from 'echarts';
         </app-card>
       </div>
     </div>
-  `,
-})
-export class InventoryValuationComponent implements OnInit, OnDestroy {
+  `})
+export class InventoryValuationComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private analyticsService = inject(AnalyticsService);
   private toastService = inject(ToastService);
   private currencyService = inject(CurrencyFormatService);
-  private destroy$ = new Subject<void>();
-
-  loading = signal(true);
+loading = signal(true);
   exporting = signal(false);
   data = signal<InventoryValuation[]>([]);
   chartOptions = signal<EChartsOption>({});
@@ -140,8 +157,7 @@ export class InventoryValuationComponent implements OnInit, OnDestroy {
       sortable: true,
       align: 'right',
       priority: 1,
-      width: '100px',
-    },
+      width: '100px'},
     {
       key: 'average_cost',
       label: 'Costo Prom.',
@@ -149,8 +165,7 @@ export class InventoryValuationComponent implements OnInit, OnDestroy {
       align: 'right',
       priority: 2,
       width: '120px',
-      transform: (val) => this.formatCurrency(val),
-    },
+      transform: (val) => this.formatCurrency(val)},
     {
       key: 'total_value',
       label: 'Valor Total',
@@ -158,8 +173,7 @@ export class InventoryValuationComponent implements OnInit, OnDestroy {
       align: 'right',
       priority: 1,
       width: '140px',
-      transform: (val) => this.formatCurrency(val),
-    },
+      transform: (val) => this.formatCurrency(val)},
     {
       key: 'percentage_of_total',
       label: '% del Total',
@@ -167,8 +181,7 @@ export class InventoryValuationComponent implements OnInit, OnDestroy {
       align: 'right',
       priority: 1,
       width: '100px',
-      transform: (val) => `${val.toFixed(1)}%`,
-    },
+      transform: (val) => `${val.toFixed(1)}%`},
   ];
 
   cardConfig: ItemListCardConfig = {
@@ -177,32 +190,23 @@ export class InventoryValuationComponent implements OnInit, OnDestroy {
       {
         key: 'total_value',
         label: 'Valor',
-        transform: (val: any) => this.formatCurrency(val),
-      },
+        transform: (val: any) => this.formatCurrency(val)},
       {
         key: 'percentage_of_total',
         label: 'Porcentaje',
-        transform: (val: any) => `${val.toFixed(1)}%`,
-      },
-    ],
-  };
+        transform: (val: any) => `${val.toFixed(1)}%`},
+    ]};
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
     this.loadData();
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  loadData(): void {
+loadData(): void {
     this.loading.set(true);
 
     this.analyticsService
       .getInventoryValuation()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           this.data.set(response.data);
@@ -213,8 +217,7 @@ export class InventoryValuationComponent implements OnInit, OnDestroy {
         error: () => {
           this.toastService.error('Error al cargar valoración');
           this.loading.set(false);
-        },
-      });
+        }});
   }
 
   private calculateTotals(data: InventoryValuation[]): void {
@@ -227,22 +230,19 @@ export class InventoryValuationComponent implements OnInit, OnDestroy {
   private updateChart(data: InventoryValuation[]): void {
     const chartData = data.map((item) => ({
       value: item.total_value,
-      name: item.location_name,
-    }));
+      name: item.location_name}));
 
     this.chartOptions.set({
       tooltip: {
         trigger: 'item',
         formatter: (params: any) => {
           return `${params.name}<br/>Valor: ${this.formatCurrency(params.value)}<br/>Porcentaje: ${params.percent}%`;
-        },
-      },
+        }},
       legend: {
         orient: 'vertical',
         right: '5%',
         top: 'middle',
-        textStyle: { color: '#6b7280' },
-      },
+        textStyle: { color: '#6b7280' }},
       series: [
         {
           name: 'Valoración',
@@ -253,33 +253,26 @@ export class InventoryValuationComponent implements OnInit, OnDestroy {
           itemStyle: {
             borderRadius: 4,
             borderColor: '#fff',
-            borderWidth: 2,
-          },
+            borderWidth: 2},
           label: {
-            show: false,
-          },
+            show: false},
           emphasis: {
             label: {
               show: true,
               fontSize: 14,
-              fontWeight: 'bold',
-            },
-          },
+              fontWeight: 'bold'}},
           labelLine: {
-            show: false,
-          },
-          data: chartData,
-        },
+            show: false},
+          data: chartData},
       ],
-      color: ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'],
-    });
+      color: ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4']});
   }
 
   exportReport(): void {
     this.exporting.set(true);
     this.analyticsService
       .exportInventoryAnalytics({})
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (blob) => {
           const url = window.URL.createObjectURL(blob);
@@ -293,8 +286,7 @@ export class InventoryValuationComponent implements OnInit, OnDestroy {
         error: () => {
           this.toastService.error('Error al exportar');
           this.exporting.set(false);
-        },
-      });
+        }});
   }
 
   formatCurrency(value: number): string {

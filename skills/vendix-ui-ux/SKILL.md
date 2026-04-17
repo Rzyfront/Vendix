@@ -622,12 +622,13 @@ This skill defines **what** to do (principles and standards). The following skil
 
 ### Component Implementation
 
-| Need                | Skill                       | Description                                        |
-| ------------------- | --------------------------- | -------------------------------------------------- |
-| Component structure | `vendix-frontend-component` | Folders, naming, signals, OnPush                   |
-| Typed forms         | `vendix-angular-forms`      | Reactive Forms, `FormControl<T>`, getters          |
-| Modals              | `vendix-frontend-modal`     | `ModalComponent`, open/close, NG0100               |
-| Icons               | `vendix-frontend-icons`     | Registration and usage of Lucide with `<app-icon>` |
+| Need                             | Skill                        | Description                                                        |
+| -------------------------------- | ---------------------------- | ------------------------------------------------------------------ |
+| **Zoneless + Signals (CRÍTICO)** | **`vendix-zoneless-signals`** | **Patrones Angular 20: input/output/model, toSignal, CVA, @defer** |
+| Component structure              | `vendix-frontend-component`  | Folders, naming, signals, OnPush                                   |
+| Typed forms                      | `vendix-angular-forms`       | Reactive Forms, `FormControl<T>`, getters                          |
+| Modals                           | `vendix-frontend-modal`      | `ModalComponent`, open/close, NG0100                               |
+| Icons                            | `vendix-frontend-icons`      | Registration and usage of Lucide with `<app-icon>`                 |
 
 ### Layout and Data
 

@@ -34,7 +34,7 @@
         <div class="w-48">
           <app-selector
             label="Mes"
-            [options]="month_options"
+            [options]="monthOptions()"
             [ngModel]="selected_month()"
             (ngModelChange)="onMonthChange($event)"
             size="sm"

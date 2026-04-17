@@ -1,5 +1,6 @@
-import { Component, Input, Output, EventEmitter, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, DestroyRef, effect, inject, input, output } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import { FormBuilder, FormGroup, FormArray, Validators, ReactiveFormsModule } from '@angular/forms';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { toLocalDateString } from '../../../../../../shared/utils/date.util';
@@ -26,24 +27,23 @@ import { InventoryService } from '../../../inventory/services';
   selector: 'app-purchase-order-create-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
     InputComponent,
     IconComponent,
     SelectorComponent,
-    TextareaComponent,
-  ],
+    TextareaComponent
+],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
       title="Nueva Orden de Compra"
       subtitle="Crea una nueva orden de compra para el proveedor"
-    >
+      >
       <form [formGroup]="form">
         <!-- Step 1: Basic Info -->
         <div class="space-y-6">
@@ -65,7 +65,7 @@ import { InventoryService } from '../../../inventory/services';
               ></app-selector>
             </div>
           </div>
-
+    
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
               <label class="block text-sm font-medium text-text-secondary mb-1">Fecha de Orden</label>
@@ -82,7 +82,7 @@ import { InventoryService } from '../../../inventory/services';
               ></app-input>
             </div>
           </div>
-
+    
           <!-- Items Section -->
           <div class="border-t border-border pt-4">
             <div class="flex justify-between items-center mb-4">
@@ -92,55 +92,56 @@ import { InventoryService } from '../../../inventory/services';
                 Agregar Producto
               </app-button>
             </div>
-
+    
             <div formArrayName="items" class="space-y-3">
-              <div
-                *ngFor="let item of items.controls; let i = index"
-                [formGroupName]="i"
-                class="flex items-end gap-3 p-3 bg-muted/10 rounded-lg"
-              >
-                <div class="flex-1">
-                  <label class="block text-xs text-text-secondary mb-1">Producto</label>
-                  <app-input
-                    formControlName="product_name"
-                    placeholder="Buscar producto..."
+              @for (item of items.controls; track item; let i = $index) {
+                <div
+                  [formGroupName]="i"
+                  class="flex items-end gap-3 p-3 bg-muted/10 rounded-lg"
+                  >
+                  <div class="flex-1">
+                    <label class="block text-xs text-text-secondary mb-1">Producto</label>
+                    <app-input
+                      formControlName="product_name"
+                      placeholder="Buscar producto..."
+                      size="sm"
+                    ></app-input>
+                  </div>
+                  <div class="w-24">
+                    <label class="block text-xs text-text-secondary mb-1">Cantidad</label>
+                    <app-input
+                      formControlName="quantity"
+                      type="number"
+                      size="sm"
+                    ></app-input>
+                  </div>
+                  <div class="w-32">
+                    <label class="block text-xs text-text-secondary mb-1">Precio Unit.</label>
+                    <app-input
+                      formControlName="unit_price"
+                      [currency]="true"
+                      size="sm"
+                    ></app-input>
+                  </div>
+                  <div class="w-28 text-right">
+                    <label class="block text-xs text-text-secondary mb-1">Subtotal</label>
+                    <span class="text-sm font-medium text-text-primary">
+                      {{ formatCurrency(getItemSubtotal(i)) }}
+                    </span>
+                  </div>
+                  <app-button
+                    type="button"
+                    variant="ghost"
                     size="sm"
-                  ></app-input>
+                    (clicked)="removeItem(i)"
+                    [disabled]="items.length === 1"
+                    >
+                    <app-icon name="trash-2" [size]="16" class="text-red-500"></app-icon>
+                  </app-button>
                 </div>
-                <div class="w-24">
-                  <label class="block text-xs text-text-secondary mb-1">Cantidad</label>
-                  <app-input
-                    formControlName="quantity"
-                    type="number"
-                    size="sm"
-                  ></app-input>
-                </div>
-                <div class="w-32">
-                  <label class="block text-xs text-text-secondary mb-1">Precio Unit.</label>
-                  <app-input
-                    formControlName="unit_price"
-                    [currency]="true"
-                    size="sm"
-                  ></app-input>
-                </div>
-                <div class="w-28 text-right">
-                  <label class="block text-xs text-text-secondary mb-1">Subtotal</label>
-                  <span class="text-sm font-medium text-text-primary">
-                    {{ formatCurrency(getItemSubtotal(i)) }}
-                  </span>
-                </div>
-                <app-button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  (clicked)="removeItem(i)"
-                  [disabled]="items.length === 1"
-                >
-                  <app-icon name="trash-2" [size]="16" class="text-red-500"></app-icon>
-                </app-button>
-              </div>
+              }
             </div>
-
+    
             <!-- Totals -->
             <div class="mt-4 pt-4 border-t border-border">
               <div class="flex justify-end">
@@ -166,7 +167,7 @@ import { InventoryService } from '../../../inventory/services';
               </div>
             </div>
           </div>
-
+    
           <!-- Notes -->
           <app-textarea
             label="Notas"
@@ -176,10 +177,10 @@ import { InventoryService } from '../../../inventory/services';
             [control]="form.get('notes')"
           ></app-textarea>
         </div>
-
-
+    
+    
       </form>
-
+    
       <div slot="footer" class="flex justify-end gap-3">
         <app-button variant="secondary" type="button" (clicked)="onCancel()">
           Cancelar
@@ -188,45 +189,42 @@ import { InventoryService } from '../../../inventory/services';
           variant="primary"
           type="button"
           (clicked)="onSubmit()"
-          [loading]="isSubmitting"
-          [disabled]="form.invalid || isSubmitting"
-        >
+          [loading]="isSubmitting()"
+          [disabled]="form.invalid || isSubmitting()"
+          >
           Crear Orden
         </app-button>
       </div>
     </app-modal>
-  `,
+    `,
 })
-export class PurchaseOrderCreateModalComponent implements OnInit {
+export class PurchaseOrderCreateModalComponent {
   private currencyService = inject(CurrencyFormatService);
-  @Input() isOpen = false;
-  @Input() suppliers: Supplier[] = [];
-  @Input() isSubmitting = false;
+  private fb = inject(FormBuilder);
+  private inventoryService = inject(InventoryService);
+  private destroyRef = inject(DestroyRef);
 
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() cancel = new EventEmitter<void>();
-  @Output() save = new EventEmitter<CreatePurchaseOrderDto>();
+  readonly isOpen = input<boolean>(false);
+  readonly suppliers = input<Supplier[]>([]);
+  readonly isSubmitting = input<boolean>(false);
+
+  readonly isOpenChange = output<boolean>();
+  readonly cancel = output<void>();
+  readonly save = output<CreatePurchaseOrderDto>();
 
   form: FormGroup;
   supplier_options: SelectorOption[] = [];
   location_options: SelectorOption[] = [];
 
-  constructor(
-    private fb: FormBuilder,
-    private inventoryService: InventoryService
-  ) {
+  constructor() {
     this.form = this.createForm();
-  }
-
-  ngOnInit(): void {
     this.loadLocations();
-  }
-
-  ngOnChanges(): void {
-    this.supplier_options = this.suppliers.map((s) => ({
-      value: s.id,
-      label: s.name,
-    }));
+    effect(() => {
+      this.supplier_options = this.suppliers().map((s) => ({
+        value: s.id,
+        label: s.name,
+      }));
+    });
   }
 
   private createForm(): FormGroup {
@@ -251,16 +249,19 @@ export class PurchaseOrderCreateModalComponent implements OnInit {
   }
 
   loadLocations(): void {
-    this.inventoryService.getLocations().subscribe({
-      next: (response) => {
-        if (response.data) {
-          this.location_options = response.data.map((l) => ({
-            value: l.id,
-            label: l.name,
-          }));
-        }
-      },
-    });
+    this.inventoryService
+      .getLocations()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          if (response.data) {
+            this.location_options = response.data.map((l) => ({
+              value: l.id,
+              label: l.name,
+            }));
+          }
+        },
+      });
   }
 
   get items(): FormArray {

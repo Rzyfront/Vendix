@@ -1,7 +1,8 @@
-import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject, signal, DestroyRef } from '@angular/core';
+
 import { Router } from '@angular/router';
-import { Subject, takeUntil, finalize } from 'rxjs';
+import { finalize } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ReservationListComponent } from './components/reservation-list/reservation-list.component';
 import { ReservationFormModalComponent } from './components/reservation-form-modal/reservation-form-modal.component';
 import { CalendarContainerComponent } from './components/calendar/calendar-container/calendar-container.component';
@@ -25,7 +26,6 @@ import { ToastService, DialogService, IconComponent, TooltipComponent } from '..
   selector: 'app-reservations',
   standalone: true,
   imports: [
-    CommonModule,
     StatsComponent,
     ReservationListComponent,
     ReservationFormModalComponent,
@@ -37,78 +37,71 @@ import { ToastService, DialogService, IconComponent, TooltipComponent } from '..
     QuickActionsPanelComponent,
     CardComponent,
     IconComponent,
-    TooltipComponent,
-  ],
+    TooltipComponent
+],
   templateUrl: './reservations.component.html',
   styleUrls: ['./reservations.component.scss'],
 })
-export class ReservationsComponent implements OnInit, OnDestroy {
+export class ReservationsComponent {
   private reservationsService = inject(ReservationsService);
   private toastService = inject(ToastService);
   private dialogService = inject(DialogService);
   private router = inject(Router);
+  private destroyRef = inject(DestroyRef);
 
-  stats: BookingStats | null = null;
-  bookings: Booking[] = [];
-
-  loading = false;
-  actionLoading = false;
+  stats = signal<BookingStats | null>(null);
+  bookings = signal<Booking[]>([]);
+  loading = signal(false);
+  actionLoading = signal(false);
 
   // Pagination
-  page = 1;
-  limit = 10;
-  totalItems = 0;
+  page = signal(1);
+  limit = signal(10);
+  totalItems = signal(0);
 
   // Filters
-  searchQuery = '';
-  statusFilter: BookingStatus | '' = '';
-  dateFrom = '';
-  dateTo = '';
+  searchQuery = signal('');
+  statusFilter = signal<BookingStatus | ''>('');
+  dateFrom = signal('');
+  dateTo = signal('');
 
   // View toggle
-  activeView: 'calendar' | 'list' = 'calendar';
+  activeView = signal<'calendar' | 'list'>('calendar');
 
   // Modal
-  isFormModalOpen = false;
+  isFormModalOpen = signal(false);
 
   // Reschedule modal
-  isRescheduleModalOpen = false;
-  bookingToReschedule: Booking | null = null;
+  isRescheduleModalOpen = signal(false);
+  bookingToReschedule = signal<Booking | null>(null);
 
   // Detail modal
-  isDetailModalOpen = false;
-  selectedBooking: Booking | null = null;
+  isDetailModalOpen = signal(false);
+  selectedBooking = signal<Booking | null>(null);
 
   // Tap-to-book modal
-  isTapToBookModalOpen = false;
-  tapToBookDate = '';
-  tapToBookTime = '';
+  isTapToBookModalOpen = signal(false);
+  tapToBookDate = signal('');
+  tapToBookTime = signal('');
 
   // Calendar refresh counter
-  calendarRefreshTrigger = 0;
-
-  private destroy$ = new Subject<void>();
+  calendarRefreshTrigger = signal(0);
 
   todayBookings = signal<Booking[]>([]);
   todayLoading = signal(false);
 
-  ngOnInit(): void {
+  constructor() {
     this.loadStats();
     this.loadBookings();
     this.loadTodayBookings();
   }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
   loadStats(): void {
     this.reservationsService
       .getStats()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (stats: BookingStats) => (this.stats = stats),
+        next: (stats: BookingStats) => this.stats.set(stats),
         error: () => {
           this.toastService.error('Error al cargar estadisticas de reservas');
         },
@@ -116,26 +109,26 @@ export class ReservationsComponent implements OnInit, OnDestroy {
   }
 
   loadBookings(): void {
-    this.loading = true;
+    this.loading.set(true);
     const query: BookingQuery = {
-      page: this.page,
-      limit: this.limit,
-      search: this.searchQuery || undefined,
-      status: this.statusFilter || undefined,
-      date_from: this.dateFrom || undefined,
-      date_to: this.dateTo || undefined,
+      page: this.page(),
+      limit: this.limit(),
+      search: this.searchQuery() || undefined,
+      status: this.statusFilter() || undefined,
+      date_from: this.dateFrom() || undefined,
+      date_to: this.dateTo() || undefined,
     };
 
     this.reservationsService
       .getReservations(query)
       .pipe(
-        takeUntil(this.destroy$),
-        finalize(() => (this.loading = false)),
+        takeUntilDestroyed(this.destroyRef),
+        finalize(() => this.loading.set(false)),
       )
       .subscribe({
         next: (response) => {
-          this.bookings = response.data;
-          this.totalItems = response.meta.total;
+          this.bookings.set(response.data);
+          this.totalItems.set(response.meta.total);
         },
         error: () => {
           this.toastService.error('Error al cargar reservas');
@@ -148,7 +141,7 @@ export class ReservationsComponent implements OnInit, OnDestroy {
     this.reservationsService
       .getToday()
       .pipe(
-        takeUntil(this.destroy$),
+        takeUntilDestroyed(this.destroyRef),
         finalize(() => this.todayLoading.set(false)),
       )
       .subscribe({
@@ -158,45 +151,45 @@ export class ReservationsComponent implements OnInit, OnDestroy {
   }
 
   onSearch(query: string): void {
-    this.searchQuery = query;
-    this.page = 1;
+    this.searchQuery.set(query);
+    this.page.set(1);
     this.loadBookings();
   }
 
   onPageChange(page: number): void {
-    this.page = page;
+    this.page.set(page);
     this.loadBookings();
   }
 
   onStatusFilterChange(status: BookingStatus | ''): void {
-    this.statusFilter = status;
-    this.page = 1;
+    this.statusFilter.set(status);
+    this.page.set(1);
     this.loadBookings();
   }
 
   onDateRangeChange(range: { from: string; to: string }): void {
-    this.dateFrom = range.from;
-    this.dateTo = range.to;
-    this.page = 1;
+    this.dateFrom.set(range.from);
+    this.dateTo.set(range.to);
+    this.page.set(1);
     this.loadBookings();
   }
 
   onCreateNew(): void {
-    this.isFormModalOpen = true;
+    this.isFormModalOpen.set(true);
   }
 
   onConfirm(booking: Booking): void {
     this.reservationsService
       .confirmReservation(booking.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
-          this.isDetailModalOpen = false;
+          this.isDetailModalOpen.set(false);
           this.toastService.success('Reserva confirmada');
           this.loadBookings();
           this.loadStats();
           this.loadTodayBookings();
-          this.calendarRefreshTrigger++;
+          this.calendarRefreshTrigger.update(v => v + 1);
         },
         error: () => {
           this.toastService.error('Error al confirmar la reserva');
@@ -216,15 +209,15 @@ export class ReservationsComponent implements OnInit, OnDestroy {
         if (confirmed) {
           this.reservationsService
             .cancelReservation(booking.id)
-            .pipe(takeUntil(this.destroy$))
+            .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe({
               next: () => {
-                this.isDetailModalOpen = false;
+                this.isDetailModalOpen.set(false);
                 this.toastService.success('Reserva cancelada');
                 this.loadBookings();
                 this.loadStats();
                 this.loadTodayBookings();
-                this.calendarRefreshTrigger++;
+                this.calendarRefreshTrigger.update(v => v + 1);
               },
               error: () => {
                 this.toastService.error('Error al cancelar la reserva');
@@ -237,15 +230,15 @@ export class ReservationsComponent implements OnInit, OnDestroy {
   onComplete(booking: Booking): void {
     this.reservationsService
       .completeReservation(booking.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
-          this.isDetailModalOpen = false;
+          this.isDetailModalOpen.set(false);
           this.toastService.success('Reserva completada');
           this.loadBookings();
           this.loadStats();
           this.loadTodayBookings();
-          this.calendarRefreshTrigger++;
+          this.calendarRefreshTrigger.update(v => v + 1);
         },
         error: () => {
           this.toastService.error('Error al completar la reserva');
@@ -265,15 +258,15 @@ export class ReservationsComponent implements OnInit, OnDestroy {
         if (confirmed) {
           this.reservationsService
             .markNoShow(booking.id)
-            .pipe(takeUntil(this.destroy$))
+            .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe({
               next: () => {
-                this.isDetailModalOpen = false;
+                this.isDetailModalOpen.set(false);
                 this.toastService.success('Reserva marcada como No Show');
                 this.loadBookings();
                 this.loadStats();
                 this.loadTodayBookings();
-                this.calendarRefreshTrigger++;
+                this.calendarRefreshTrigger.update(v => v + 1);
               },
               error: () => {
                 this.toastService.error('Error al marcar como No Show');
@@ -284,27 +277,27 @@ export class ReservationsComponent implements OnInit, OnDestroy {
   }
 
   onReschedule(booking: Booking): void {
-    this.bookingToReschedule = booking;
-    this.isRescheduleModalOpen = true;
+    this.bookingToReschedule.set(booking);
+    this.isRescheduleModalOpen.set(true);
   }
 
   onBookingClicked(booking: Booking): void {
-    this.selectedBooking = booking;
-    this.isDetailModalOpen = true;
+    this.selectedBooking.set(booking);
+    this.isDetailModalOpen.set(true);
   }
 
   onStartBooking(booking: Booking): void {
     this.reservationsService
       .startReservation(booking.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
-          this.isDetailModalOpen = false;
+          this.isDetailModalOpen.set(false);
           this.toastService.success('Reserva iniciada');
           this.loadBookings();
           this.loadStats();
           this.loadTodayBookings();
-          this.calendarRefreshTrigger++;
+          this.calendarRefreshTrigger.update(v => v + 1);
         },
         error: () => {
           this.toastService.error('Error al iniciar la reserva');
@@ -313,27 +306,27 @@ export class ReservationsComponent implements OnInit, OnDestroy {
   }
 
   onRescheduledFromDetail(): void {
-    this.isDetailModalOpen = false;
+    this.isDetailModalOpen.set(false);
     this.loadBookings();
     this.loadStats();
     this.loadTodayBookings();
-    this.calendarRefreshTrigger++;
+    this.calendarRefreshTrigger.update(v => v + 1);
   }
 
   onDetailModalClose(): void {
-    this.isDetailModalOpen = false;
+    this.isDetailModalOpen.set(false);
   }
 
   onNotesUpdated(): void {
     this.loadBookings();
     this.loadTodayBookings();
-    this.calendarRefreshTrigger++;
+    this.calendarRefreshTrigger.update(v => v + 1);
   }
 
   onSlotClicked(event: { date: string; time: string }): void {
-    this.tapToBookDate = event.date;
-    this.tapToBookTime = event.time;
-    this.isTapToBookModalOpen = true;
+    this.tapToBookDate.set(event.date);
+    this.tapToBookTime.set(event.time);
+    this.isTapToBookModalOpen.set(true);
   }
 
   onBookingDropped(event: { bookingId: number; newDate: string; newStartTime: string; newEndTime: string }): void {
@@ -349,7 +342,7 @@ export class ReservationsComponent implements OnInit, OnDestroy {
           this.loadBookings();
           this.loadStats();
           this.loadTodayBookings();
-          this.calendarRefreshTrigger++;
+          this.calendarRefreshTrigger.update(v => v + 1);
         },
         error: () => {
           this.toastService.error('Error al reagendar la reserva. El horario no esta disponible.');
@@ -358,40 +351,40 @@ export class ReservationsComponent implements OnInit, OnDestroy {
   }
 
   onFormModalClose(): void {
-    this.isFormModalOpen = false;
+    this.isFormModalOpen.set(false);
   }
 
   onReservationCreated(): void {
-    this.isFormModalOpen = false;
+    this.isFormModalOpen.set(false);
     this.toastService.success('Reserva creada exitosamente');
     this.loadBookings();
     this.loadStats();
     this.loadTodayBookings();
-    this.calendarRefreshTrigger++;
+    this.calendarRefreshTrigger.update(v => v + 1);
   }
 
   onTapToBookCreated(): void {
-    this.isTapToBookModalOpen = false;
+    this.isTapToBookModalOpen.set(false);
     this.loadBookings();
     this.loadStats();
     this.loadTodayBookings();
-    this.calendarRefreshTrigger++;
+    this.calendarRefreshTrigger.update(v => v + 1);
   }
 
   onRescheduleCompleted(): void {
-    this.isRescheduleModalOpen = false;
+    this.isRescheduleModalOpen.set(false);
     this.loadBookings();
     this.loadStats();
     this.loadTodayBookings();
-    this.calendarRefreshTrigger++;
+    this.calendarRefreshTrigger.update(v => v + 1);
   }
 
   onWalkIn(): void {
-    this.isFormModalOpen = true;
+    this.isFormModalOpen.set(true);
   }
 
   onAttendConsultation(booking: Booking): void {
-    this.isDetailModalOpen = false;
+    this.isDetailModalOpen.set(false);
     this.router.navigate(['/admin', 'consultations', booking.id, 'attend']);
   }
 
@@ -404,12 +397,12 @@ export class ReservationsComponent implements OnInit, OnDestroy {
   }
 
   onViewAllToday(): void {
-    this.activeView = 'list';
+    this.activeView.set('list');
     const now = new Date();
     const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-    this.dateFrom = today;
-    this.dateTo = today;
-    this.page = 1;
+    this.dateFrom.set(today);
+    this.dateTo.set(today);
+    this.page.set(1);
     this.loadBookings();
   }
 

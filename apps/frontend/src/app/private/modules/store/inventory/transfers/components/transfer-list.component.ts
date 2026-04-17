@@ -1,5 +1,5 @@
 import { Component, input, output, computed } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 
 import {
   InputsearchComponent,
@@ -22,14 +22,13 @@ import { StockTransfer, TransferStatus } from '../interfaces';
   selector: 'app-transfer-list',
   standalone: true,
   imports: [
-    CommonModule,
     InputsearchComponent,
     OptionsDropdownComponent,
     ResponsiveDataViewComponent,
     IconComponent,
     ButtonComponent,
-    CardComponent,
-  ],
+    CardComponent
+],
   template: `
     <div class="md:space-y-4">
       <app-card [responsive]="true" [padding]="false">

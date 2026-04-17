@@ -1,5 +1,5 @@
-import { Component, Input, Output, EventEmitter, signal, computed } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input, output, signal, computed } from '@angular/core';
+
 import { SystemShippingMethod } from '../interfaces/shipping-methods.interface';
 import {
   ModalComponent,
@@ -12,60 +12,95 @@ import {
   selector: 'app-shipping-methods-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ModalComponent,
     InputsearchComponent,
     IconComponent,
     ButtonComponent,
   ],
   template: `
-    <app-modal [isOpen]="true" [showCloseButton]="true" size="md" (closed)="close.emit()" title="Agregar Método de Envío">
+    <app-modal
+      [isOpen]="true"
+      [showCloseButton]="true"
+      size="md"
+      (closed)="close.emit()"
+      title="Agregar Método de Envío"
+    >
       <div class="flex flex-col gap-4">
         <!-- Subtitle -->
         <p class="text-sm text-text-secondary px-1">
-          Activa un método de envío preconfigurado. Las zonas y tarifas se copiarán automáticamente.
+          Activa un método de envío preconfigurado. Las zonas y tarifas se
+          copiarán automáticamente.
         </p>
 
         <!-- Search -->
-        <app-inputsearch placeholder="Buscar método..." (searchChange)="onSearchChange($event)" />
+        <app-inputsearch
+          placeholder="Buscar método..."
+          (searchChange)="onSearchChange($event)"
+        />
 
         <!-- Loading -->
-        @if (is_loading) {
+        @if (is_loading()) {
           <div class="flex justify-center py-8">
-            <div class="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full"></div>
+            <div
+              class="animate-spin w-6 h-6 border-2 border-primary border-t-transparent rounded-full"
+            ></div>
           </div>
         }
 
         <!-- Methods List -->
-        @if (!is_loading) {
+        @if (!is_loading()) {
           <div class="flex flex-col gap-2.5">
             @for (method of filtered_methods(); track method.id) {
-              <div class="flex items-center gap-3.5 p-3.5 rounded-xl border border-border hover:border-primary/30 hover:bg-primary/[0.02] transition-colors">
+              <div
+                class="flex items-center gap-3.5 p-3.5 rounded-xl border border-border hover:border-primary/30 hover:bg-primary/[0.02] transition-colors"
+              >
                 <!-- Icon -->
-                <div class="w-11 h-11 rounded-[10px] flex items-center justify-center shrink-0"
-                  [style.background]="getIconBg(method.type)">
-                  <app-icon name="truck" [size]="22" [style.color]="getIconColor(method.type)" />
+                <div
+                  class="w-11 h-11 rounded-[10px] flex items-center justify-center shrink-0"
+                  [style.background]="getIconBg(method.type)"
+                >
+                  <app-icon
+                    name="truck"
+                    [size]="22"
+                    [style.color]="getIconColor(method.type)"
+                  />
                 </div>
                 <!-- Info -->
                 <div class="flex flex-col gap-0.5 flex-1 min-w-0">
-                  <span class="font-semibold text-sm text-text-primary">{{ method.name }}</span>
+                  <span class="font-semibold text-sm text-text-primary">{{
+                    method.name
+                  }}</span>
                   <span class="text-xs text-text-secondary">
                     {{ formatDeliveryTime(method.min_days, method.max_days) }}
-                    @if (method.description) { · {{ method.description }} }
+                    @if (method.description) {
+                      · {{ method.description }}
+                    }
                   </span>
                 </div>
                 <!-- Activate Button -->
-                <app-button size="sm" [loading]="is_enabling"
-                  (clicked)="enable.emit(method)">Activar</app-button>
+                <app-button
+                  size="sm"
+                  [loading]="is_enabling()"
+                  (clicked)="enable.emit(method)"
+                  >Activar</app-button
+                >
               </div>
             }
 
             <!-- Empty state -->
             @if (filtered_methods().length === 0) {
               <div class="py-8 text-center">
-                <app-icon name="check-circle" [size]="32" class="text-green-500 mx-auto mb-2" />
-                <p class="text-sm font-medium text-text-primary">¡Todos los métodos están activos!</p>
-                <p class="text-xs text-text-secondary mt-1">Ya has activado todos los métodos disponibles</p>
+                <app-icon
+                  name="check-circle"
+                  [size]="32"
+                  class="text-green-500 mx-auto mb-2"
+                />
+                <p class="text-sm font-medium text-text-primary">
+                  ¡Todos los métodos están activos!
+                </p>
+                <p class="text-xs text-text-secondary mt-1">
+                  Ya has activado todos los métodos disponibles
+                </p>
               </div>
             }
           </div>
@@ -82,27 +117,27 @@ import {
   ],
 })
 export class ShippingMethodsModalComponent {
-  @Input() available_methods: SystemShippingMethod[] = [];
-  @Input() is_loading = false;
-  @Input() is_enabling = false;
+  readonly available_methods = input<SystemShippingMethod[]>([]);
+  readonly is_loading = input<boolean>(false);
+  readonly is_enabling = input<boolean>(false);
 
-  @Output() enable = new EventEmitter<SystemShippingMethod>();
-  @Output() close = new EventEmitter<void>();
-  @Output() refresh = new EventEmitter<void>();
+  readonly enable = output<SystemShippingMethod>();
+  readonly close = output<void>();
+  readonly refresh = output<void>();
 
   // Search state as signal
   search_term = signal('');
 
   // Computed filtered items
   filtered_methods = computed(() => {
-    const methods = this.available_methods;
+    const methods = this.available_methods();
     const term = this.search_term().toLowerCase();
     if (!term) return methods;
     return methods.filter(
       (m) =>
         m.name?.toLowerCase().includes(term) ||
         m.type?.toLowerCase().includes(term) ||
-        m.provider_name?.toLowerCase().includes(term)
+        m.provider_name?.toLowerCase().includes(term),
     );
   });
 
@@ -114,16 +149,22 @@ export class ShippingMethodsModalComponent {
   // Helper methods
   getIconBg(type: string): string {
     const map: Record<string, string> = {
-      custom: '#F1F5F9', pickup: '#ECFDF5', own_fleet: '#DBEAFE',
-      carrier: '#FEF3C7', third_party_provider: '#F5F3FF',
+      custom: '#F1F5F9',
+      pickup: '#ECFDF5',
+      own_fleet: '#DBEAFE',
+      carrier: '#FEF3C7',
+      third_party_provider: '#F5F3FF',
     };
     return map[type] || '#F1F5F9';
   }
 
   getIconColor(type: string): string {
     const map: Record<string, string> = {
-      custom: '#64748B', pickup: '#10B981', own_fleet: '#2563EB',
-      carrier: '#D97706', third_party_provider: '#8B5CF6',
+      custom: '#64748B',
+      pickup: '#10B981',
+      own_fleet: '#2563EB',
+      carrier: '#D97706',
+      third_party_provider: '#8B5CF6',
     };
     return map[type] || '#64748B';
   }

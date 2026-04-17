@@ -1,5 +1,5 @@
 import { Component, input, output } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ReportDefinition } from '../../interfaces/report.interface';
 import { REPORT_CATEGORIES } from '../../config/report-registry';
@@ -7,7 +7,7 @@ import { REPORT_CATEGORIES } from '../../config/report-registry';
 @Component({
   selector: 'vendix-report-card',
   standalone: true,
-  imports: [CommonModule, IconComponent],
+  imports: [IconComponent],
   templateUrl: './report-card.component.html',
   styleUrls: ['./report-card.component.scss'],
 })

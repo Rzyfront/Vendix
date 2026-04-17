@@ -249,7 +249,7 @@
               <app-button
                 variant="primary"
                 size="sm"
-                (clicked)="is_adjustment_modal_open = true"
+                (clicked)="isAdjustmentModalOpen.set(true)"
               >
                 Agregar Ajuste
               </app-button>
@@ -273,9 +273,9 @@
 
       <!-- Adjustment Create Modal -->
       <app-modal
-        [isOpen]="is_adjustment_modal_open"
-        (isOpenChange)="is_adjustment_modal_open = $event"
-        (cancel)="is_adjustment_modal_open = false"
+        [isOpen]="isAdjustmentModalOpen()"
+        (isOpenChange)="isAdjustmentModalOpen.set($event)"
+        (cancel)="isAdjustmentModalOpen.set(false)"
         title="Nuevo Ajuste de Consolidacion"
         size="md"
       >
@@ -329,7 +329,7 @@
           >
             <app-button
               variant="outline"
-              (clicked)="is_adjustment_modal_open = false"
+              (clicked)="isAdjustmentModalOpen.set(false)"
             >
               Cancelar
             </app-button>

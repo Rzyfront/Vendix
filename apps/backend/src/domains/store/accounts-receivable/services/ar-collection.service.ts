@@ -12,23 +12,35 @@ export class ArCollectionService {
       now.getTime() + days * 24 * 60 * 60 * 1000,
     );
 
-    return this.prisma.accounts_receivable.findMany({
+    const rows = await this.prisma.accounts_receivable.findMany({
       where: {
         status: { in: ['open', 'partial'] },
         due_date: { gte: now, lte: future_date },
       },
       include: {
         customer: {
-          select: { id: true, name: true, email: true, phone: true },
+          select: { id: true, first_name: true, last_name: true, email: true, phone: true },
         },
       },
       orderBy: { due_date: 'asc' },
     });
+
+    return rows.map((r) => ({
+      ...r,
+      customer: r.customer
+        ? {
+            id: r.customer.id,
+            name: `${r.customer.first_name} ${r.customer.last_name}`.trim(),
+            email: r.customer.email,
+            phone: r.customer.phone,
+          }
+        : null,
+    }));
   }
 
   // ─── OVERDUE BY CUSTOMER ───────────────────────────────────
   async getOverdueByCustomer() {
-    const overdue = await this.prisma.accounts_receivable.findMany({
+    const raw = await this.prisma.accounts_receivable.findMany({
       where: { status: 'overdue' },
       select: {
         id: true,
@@ -38,11 +50,23 @@ export class ArCollectionService {
         document_number: true,
         customer_id: true,
         customer: {
-          select: { id: true, name: true, email: true, phone: true },
+          select: { id: true, first_name: true, last_name: true, email: true, phone: true },
         },
       },
       orderBy: { days_overdue: 'desc' },
     });
+
+    const overdue = raw.map((r) => ({
+      ...r,
+      customer: r.customer
+        ? {
+            id: r.customer.id,
+            name: `${r.customer.first_name} ${r.customer.last_name}`.trim(),
+            email: r.customer.email,
+            phone: r.customer.phone,
+          }
+        : null,
+    }));
 
     // Group by customer
     const grouped: Record<

@@ -1,7 +1,7 @@
-import { Component, inject, signal, computed, OnInit, OnDestroy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject, signal, computed, DestroyRef } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import { Router, ActivatedRoute } from '@angular/router';
-import { Subject, takeUntil } from 'rxjs';
 import { ReportCardComponent } from '../../components/report-card/report-card.component';
 import { ReportSearchComponent } from '../../components/report-search/report-search.component';
 import { ReportCategoryChipsComponent } from '../../components/report-category-chips/report-category-chips.component';
@@ -14,20 +14,19 @@ import { REPORT_CATEGORIES, REPORT_DEFINITIONS, getCategoryById } from '../../co
   selector: 'vendix-report-list',
   standalone: true,
   imports: [
-    CommonModule,
     ReportCardComponent,
     ReportSearchComponent,
     ReportCategoryChipsComponent,
     IconComponent,
-    StickyHeaderComponent,
-  ],
+    StickyHeaderComponent
+],
   templateUrl: './report-list.component.html',
   styleUrls: ['./report-list.component.scss'],
 })
-export class ReportListComponent implements OnInit, OnDestroy {
+export class ReportListComponent {
   private router = inject(Router);
   private route = inject(ActivatedRoute);
-  private destroy$ = new Subject<void>();
+  private destroyRef = inject(DestroyRef);
 
   searchTerm = signal('');
   activeCategory = signal<ReportCategoryId | null>(null);
@@ -66,21 +65,16 @@ export class ReportListComponent implements OnInit, OnDestroy {
     this.filteredGroups().reduce((sum, g) => sum + g.reports.length, 0)
   );
 
-  ngOnInit(): void {
+  constructor() {
     // Read queryParam for category pre-filter (e.g., from accounting sidebar)
     this.route.queryParamMap
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(params => {
         const category = params.get('category');
         if (category && this.categories.some(c => c.id === category)) {
           this.activeCategory.set(category as ReportCategoryId);
         }
       });
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
   }
 
   onSearchChange(term: string): void {

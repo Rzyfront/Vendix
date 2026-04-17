@@ -1,7 +1,7 @@
-import { Component, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject, effect, signal, computed } from '@angular/core';
+import { DatePipe, DecimalPipe } from '@angular/common';
 import { Store } from '@ngrx/store';
-import { Observable } from 'rxjs';
+import { toSignal } from '@angular/core/rxjs-interop';
 
 import {
   FiscalPeriod,
@@ -24,7 +24,8 @@ import {
   selector: 'vendix-general-ledger',
   standalone: true,
   imports: [
-    CommonModule,
+    DatePipe,
+    DecimalPipe,
     ButtonComponent,
     CardComponent,
     IconComponent,
@@ -33,7 +34,11 @@ import {
   template: `
     <div class="w-full">
       <!-- Unified Container -->
-      <app-card [responsive]="true" [padding]="false" customClasses="md:min-h-[400px]">
+      <app-card
+        [responsive]="true"
+        [padding]="false"
+        customClasses="md:min-h-[400px]"
+      >
         <!-- Header -->
         <div
           class="sticky top-0 z-10 bg-background px-2 py-1.5 -mt-[5px]
@@ -50,7 +55,7 @@ import {
             </h2>
             <div class="flex items-center gap-2 w-full md:w-auto">
               <app-selector
-                [options]="period_options"
+                [options]="periodOptions()"
                 placeholder="Seleccionar periodo..."
                 (selectionChange)="onPeriodChange($event)"
                 class="flex-1 md:w-48"
@@ -64,7 +69,7 @@ import {
 
         <!-- Data Content -->
         <div class="relative p-2 md:p-4">
-          @if (loading$ | async) {
+          @if (loading()) {
             <div
               class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
             >
@@ -74,7 +79,7 @@ import {
             </div>
           }
 
-          @if (report$ | async; as report) {
+          @if (report(); as report) {
             @if (report.accounts.length === 0) {
               <div
                 class="flex flex-col items-center justify-center py-16 text-gray-400"
@@ -233,51 +238,63 @@ import {
     </div>
   `,
 })
-export class GeneralLedgerComponent implements OnInit {
+export class GeneralLedgerComponent {
   private store = inject(Store);
 
-  report$: Observable<GeneralLedgerReport | null> =
-    this.store.select(selectGeneralLedger);
-  loading$: Observable<boolean> = this.store.select(selectReportLoading);
-  periods$: Observable<FiscalPeriod[]> = this.store.select(selectFiscalPeriods);
+  // Signal-based state
+  readonly report = toSignal(this.store.select(selectGeneralLedger), {
+    initialValue: null as GeneralLedgerReport | null,
+  });
+  readonly loading = toSignal(this.store.select(selectReportLoading), {
+    initialValue: false,
+  });
+  readonly periods = toSignal(this.store.select(selectFiscalPeriods), {
+    initialValue: [] as FiscalPeriod[],
+  });
 
-  period_options: { value: any; label: string }[] = [];
-  selected_period_id: number | null = null;
-  expanded_account_ids = new Set<number>();
+  // ✅ Migrated to signals (Section 9 + Section 10 — antipatrón variables planas + Set mutable)
+  readonly selectedPeriodId = signal<number | null>(null);
+  readonly periodOptions = computed(() =>
+    this.periods().map((p) => ({
+      value: p.id,
+      label: p.name,
+    }))
+  );
+  // ✅ Set mutable → signal (Section 10 — legítimo uso en estado de expansión)
+  readonly expandedAccountIds = signal(new Set<number>());
 
-  ngOnInit(): void {
-    this.periods$.subscribe((periods) => {
-      this.period_options = periods.map((p) => ({
-        value: p.id,
-        label: p.name,
-      }));
-    });
+  constructor() {
+    // Auto-update period options when periods change (via computed)
+    // Effect no longer needed — computed handles it
   }
 
   onPeriodChange(value: any): void {
-    this.selected_period_id = value;
+    this.selectedPeriodId.set(value);
     this.loadReport();
   }
 
   loadReport(): void {
-    if (this.selected_period_id) {
+    const periodId = this.selectedPeriodId();
+    if (periodId) {
       this.store.dispatch(
         loadGeneralLedger({
-          query: { fiscal_period_id: this.selected_period_id },
+          query: { fiscal_period_id: periodId },
         }),
       );
     }
   }
 
   toggleAccount(id: number): void {
-    if (this.expanded_account_ids.has(id)) {
-      this.expanded_account_ids.delete(id);
+    const expanded = new Set(this.expandedAccountIds());
+    if (expanded.has(id)) {
+      expanded.delete(id);
     } else {
-      this.expanded_account_ids.add(id);
+      expanded.add(id);
     }
+    this.expandedAccountIds.set(expanded);
   }
 
   isAccountExpanded(id: number): boolean {
-    return this.expanded_account_ids.has(id);
+    return this.expandedAccountIds().has(id);
   }
 }

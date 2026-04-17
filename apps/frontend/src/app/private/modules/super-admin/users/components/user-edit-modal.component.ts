@@ -1,42 +1,38 @@
-import {
-  Component,
+import {Component,
   input,
   output,
   OnInit,
   OnChanges,
-  OnDestroy,
   SimpleChanges,
   inject,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import {
   ReactiveFormsModule,
   FormBuilder,
   FormGroup,
-  Validators,
-} from '@angular/forms';
+  Validators} from '@angular/forms';
 import {
   IconComponent,
   InputComponent,
   ButtonComponent,
   ModalComponent,
-  ToastService,
-} from '../../../../../shared/components/index';
+  ToastService} from '../../../../../shared/components/index';
 import { UsersService } from '../services/users.service';
 import { User, UpdateUserDto, UserState } from '../interfaces/user.interface';
-import { Subject, takeUntil } from 'rxjs';
+
 
 @Component({
   selector: 'app-user-edit-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     IconComponent,
     InputComponent,
     ButtonComponent,
-    ModalComponent,
-  ],
+    ModalComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen()"
@@ -264,9 +260,9 @@ import { Subject, takeUntil } from 'rxjs';
         display: block;
       }
     `,
-  ],
-})
-export class UserEditModalComponent implements OnInit, OnChanges, OnDestroy {
+  ]})
+export class UserEditModalComponent implements OnInit, OnChanges {
+  private destroyRef = inject(DestroyRef);
   user = input<User | null>(null);
   isOpen = input<boolean>(false);
   isOpenChange = output<boolean>();
@@ -293,14 +289,11 @@ export class UserEditModalComponent implements OnInit, OnChanges, OnDestroy {
     ],
     organization_id: [null, [Validators.required]],
     password: ['', [Validators.minLength(8)]],
-    state: [UserState.ACTIVE],
-  });
+    state: [UserState.ACTIVE]});
 
   isUpdating: boolean = false;
   UserState = UserState;
-  private destroy$ = new Subject<void>();
-
-  ngOnInit(): void {
+ngOnInit(): void {
     const user = this.user();
     if (user) {
       this.patchUserForm(user);
@@ -321,20 +314,13 @@ export class UserEditModalComponent implements OnInit, OnChanges, OnDestroy {
       email: user.email,
       organization_id: user.organization_id,
       state: user.state,
-      password: '',
-    });
+      password: ''});
   }
 
   onCancel(): void {
     this.isOpenChange.emit(false);
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  onSubmit(): void {
+onSubmit(): void {
     const currentUser = this.user();
     if (this.userForm.invalid || this.isUpdating || !currentUser) {
       return;
@@ -349,7 +335,7 @@ export class UserEditModalComponent implements OnInit, OnChanges, OnDestroy {
 
     this.usersService
       .updateUser(currentUser.id, updateData)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.isUpdating = false;
@@ -361,8 +347,7 @@ export class UserEditModalComponent implements OnInit, OnChanges, OnDestroy {
           this.isUpdating = false;
           this.toastService.error('Error al actualizar el usuario');
           console.error('Error updating user:', error);
-        },
-      });
+        }});
   }
 
   verifyEmail(): void {
@@ -372,7 +357,7 @@ export class UserEditModalComponent implements OnInit, OnChanges, OnDestroy {
     this.isUpdating = true;
     this.usersService
       .verifyUserEmail(currentUser.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (updatedUser: User) => {
           this.isUpdating = false;
@@ -384,8 +369,7 @@ export class UserEditModalComponent implements OnInit, OnChanges, OnDestroy {
           this.isUpdating = false;
           this.toastService.error('Error al verificar el email');
           console.error('Error verifying email:', error);
-        },
-      });
+        }});
   }
 
   toggle2FA(): void {
@@ -397,7 +381,7 @@ export class UserEditModalComponent implements OnInit, OnChanges, OnDestroy {
 
     this.usersService
       .toggleUser2FA(currentUser.id, newState)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (updatedUser: User) => {
           this.isUpdating = false;
@@ -410,8 +394,7 @@ export class UserEditModalComponent implements OnInit, OnChanges, OnDestroy {
           this.isUpdating = false;
           this.toastService.error('Error al cambiar estado de 2FA');
           console.error('Error toggling 2FA:', error);
-        },
-      });
+        }});
   }
 
   unlockUser(): void {
@@ -421,7 +404,7 @@ export class UserEditModalComponent implements OnInit, OnChanges, OnDestroy {
     this.isUpdating = true;
     this.usersService
       .unlockUser(currentUser.id)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (updatedUser: User) => {
           this.isUpdating = false;
@@ -432,8 +415,7 @@ export class UserEditModalComponent implements OnInit, OnChanges, OnDestroy {
           this.isUpdating = false;
           this.toastService.error('Error al desbloquear el usuario');
           console.error('Error unlocking user:', error);
-        },
-      });
+        }});
   }
 
   formatDate(dateString: string | null | undefined): string {

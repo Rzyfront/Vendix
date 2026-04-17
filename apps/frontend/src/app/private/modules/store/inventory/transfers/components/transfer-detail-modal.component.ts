@@ -1,12 +1,10 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
-  OnChanges,
-  SimpleChanges,
+  input,
+  output,
+  effect,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 
 import {
@@ -21,7 +19,7 @@ import { StockTransfer, StockTransferItem, TransferStatus, CompleteTransferItem 
   selector: 'app-transfer-detail-modal',
   standalone: true,
   imports: [
-    CommonModule,
+    DatePipe,
     FormsModule,
     ModalComponent,
     ButtonComponent,
@@ -29,22 +27,22 @@ import { StockTransfer, StockTransferItem, TransferStatus, CompleteTransferItem 
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
-      [title]="transfer?.transfer_number || 'Detalle'"
-      [subtitle]="getStatusLabel(transfer?.status)"
+      [isOpen]="isOpen()"
+      [title]="transfer()?.transfer_number || 'Detalle'"
+      [subtitle]="getStatusLabel(transfer()?.status)"
       size="md"
       (closed)="onClose()"
       (isOpenChange)="isOpenChange.emit($event)"
     >
-      @if (transfer) {
+      @if (transfer()) {
         <!-- Status Badge -->
         <div class="mb-4">
           <span
             class="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium"
-            [class]="getStatusClasses(transfer.status)"
+            [class]="getStatusClasses(transfer()!.status)"
           >
-            <app-icon [name]="getStatusIcon(transfer.status)" [size]="14" class="mr-1.5"></app-icon>
-            {{ getStatusLabel(transfer.status) }}
+            <app-icon [name]="getStatusIcon(transfer()!.status)" [size]="14" class="mr-1.5"></app-icon>
+            {{ getStatusLabel(transfer()!.status) }}
           </span>
         </div>
 
@@ -55,7 +53,7 @@ import { StockTransfer, StockTransferItem, TransferStatus, CompleteTransferItem 
               <p class="text-xs text-text-secondary mb-1">Origen</p>
               <div class="flex items-center gap-2">
                 <app-icon name="map-pin" [size]="16" class="text-error"></app-icon>
-                <p class="text-sm font-semibold text-text-primary">{{ transfer.from_location.name || '-' }}</p>
+                <p class="text-sm font-semibold text-text-primary">{{ transfer()!.from_location.name || '-' }}</p>
               </div>
             </div>
             <app-icon name="arrow-right" [size]="20" class="text-text-secondary"></app-icon>
@@ -63,7 +61,7 @@ import { StockTransfer, StockTransferItem, TransferStatus, CompleteTransferItem 
               <p class="text-xs text-text-secondary mb-1">Destino</p>
               <div class="flex items-center gap-2">
                 <app-icon name="map-pin" [size]="16" class="text-success"></app-icon>
-                <p class="text-sm font-semibold text-text-primary">{{ transfer.to_location.name || '-' }}</p>
+                <p class="text-sm font-semibold text-text-primary">{{ transfer()!.to_location.name || '-' }}</p>
               </div>
             </div>
           </div>
@@ -77,59 +75,59 @@ import { StockTransfer, StockTransferItem, TransferStatus, CompleteTransferItem 
               <div class="w-2 h-2 rounded-full bg-primary"></div>
               <span class="text-text-secondary w-24">Creada</span>
               <span class="text-text-primary font-medium">
-                {{ transfer.transfer_date | date:'dd/MM/yyyy HH:mm' }}
+                {{ transfer()!.transfer_date | date:'dd/MM/yyyy HH:mm' }}
               </span>
             </div>
-            @if (transfer.approved_date) {
+            @if (transfer()!.approved_date) {
               <div class="flex items-center gap-3 text-sm">
                 <div class="w-2 h-2 rounded-full bg-blue-500"></div>
                 <span class="text-text-secondary w-24">Aprobada</span>
                 <span class="text-text-primary font-medium">
-                  {{ transfer.approved_date | date:'dd/MM/yyyy HH:mm' }}
+                  {{ transfer()!.approved_date | date:'dd/MM/yyyy HH:mm' }}
                 </span>
               </div>
             }
-            @if (transfer.completed_date) {
+            @if (transfer()!.completed_date) {
               <div class="flex items-center gap-3 text-sm">
                 <div class="w-2 h-2 rounded-full bg-emerald-500"></div>
                 <span class="text-text-secondary w-24">Completada</span>
                 <span class="text-text-primary font-medium">
-                  {{ transfer.completed_date | date:'dd/MM/yyyy HH:mm' }}
+                  {{ transfer()!.completed_date | date:'dd/MM/yyyy HH:mm' }}
                 </span>
               </div>
             }
-            @if (transfer.cancelled_date) {
+            @if (transfer()!.cancelled_date) {
               <div class="flex items-center gap-3 text-sm">
                 <div class="w-2 h-2 rounded-full bg-gray-400"></div>
                 <span class="text-text-secondary w-24">Cancelada</span>
                 <span class="text-text-primary font-medium">
-                  {{ transfer.cancelled_date | date:'dd/MM/yyyy HH:mm' }}
+                  {{ transfer()!.cancelled_date | date:'dd/MM/yyyy HH:mm' }}
                 </span>
               </div>
             }
-            @if (transfer.expected_date) {
+            @if (transfer()!.expected_date) {
               <div class="flex items-center gap-3 text-sm">
                 <div class="w-2 h-2 rounded-full bg-amber-400"></div>
                 <span class="text-text-secondary w-24">Esperada</span>
                 <span class="text-text-primary font-medium">
-                  {{ transfer.expected_date | date:'dd/MM/yyyy' }}
+                  {{ transfer()!.expected_date | date:'dd/MM/yyyy' }}
                 </span>
               </div>
             }
           </div>
         </div>
 
-        @if (transfer.notes) {
+        @if (transfer()!.notes) {
           <div class="p-3 bg-surface-secondary rounded-xl border border-border mb-4">
             <p class="text-xs text-text-secondary mb-1">Notas</p>
-            <p class="text-sm text-text-primary">{{ transfer.notes }}</p>
+            <p class="text-sm text-text-primary">{{ transfer()!.notes }}</p>
           </div>
         }
 
         <!-- Items Table -->
         <div class="mb-4">
           <h4 class="text-sm font-medium text-text-secondary mb-3">
-            Productos ({{ transfer.stock_transfer_items.length || 0 }})
+            Productos ({{ transfer()!.stock_transfer_items.length || 0 }})
           </h4>
           <div class="border border-border rounded-xl overflow-hidden">
             <!-- Header -->
@@ -143,7 +141,7 @@ import { StockTransfer, StockTransferItem, TransferStatus, CompleteTransferItem 
             </div>
 
             <!-- Items -->
-            @for (item of transfer.stock_transfer_items; track item.id; let i = $index) {
+            @for (item of transfer()!.stock_transfer_items; track item.id; let i = $index) {
               <div class="grid grid-cols-12 gap-2 p-3 items-center border-b border-border last:border-b-0"
                 [class.bg-primary/5]="isCompleting">
                 <div class="col-span-5">
@@ -220,14 +218,14 @@ import { StockTransfer, StockTransferItem, TransferStatus, CompleteTransferItem 
             Cerrar
           </app-button>
 
-          @if (transfer?.status === 'draft') {
-            <app-button variant="primary" (clicked)="approveTransfer.emit(transfer!)" customClasses="!rounded-xl font-bold">
+          @if (transfer()?.status === 'draft') {
+            <app-button variant="primary" (clicked)="approveTransfer.emit(transfer()!)" customClasses="!rounded-xl font-bold">
               <app-icon name="check" [size]="14" class="mr-1.5" slot="icon"></app-icon>
               Aprobar
             </app-button>
           }
 
-          @if (transfer?.status === 'in_transit' && !isCompleting) {
+          @if (transfer()?.status === 'in_transit' && !isCompleting) {
             <app-button variant="primary" (clicked)="startCompleting()" customClasses="!rounded-xl font-bold">
               <app-icon name="check-circle" [size]="14" class="mr-1.5" slot="icon"></app-icon>
               Recibir
@@ -249,7 +247,7 @@ import { StockTransfer, StockTransferItem, TransferStatus, CompleteTransferItem 
             <app-button
               variant="primary"
               (clicked)="onComplete()"
-              [loading]="isProcessing"
+              [loading]="isProcessing()"
               customClasses="!rounded-xl font-bold shadow-md shadow-primary-200 active:scale-95 transition-all"
             >
               <app-icon name="alert-triangle" [size]="14" class="mr-1.5" slot="icon"></app-icon>
@@ -257,9 +255,9 @@ import { StockTransfer, StockTransferItem, TransferStatus, CompleteTransferItem 
             </app-button>
           }
 
-          @if (transfer?.status === 'draft' || transfer?.status === 'in_transit') {
+          @if (transfer()?.status === 'draft' || transfer()?.status === 'in_transit') {
             @if (!isCompleting) {
-              <app-button variant="outline" (clicked)="cancelTransfer.emit(transfer!)" customClasses="!rounded-xl font-bold !text-error !border-error hover:!bg-error/5">
+              <app-button variant="outline" (clicked)="cancelTransfer.emit(transfer()!)" customClasses="!rounded-xl font-bold !text-error !border-error hover:!bg-error/5">
                 <app-icon name="x-circle" [size]="14" class="mr-1.5" slot="icon"></app-icon>
                 Cancelar
               </app-button>
@@ -270,33 +268,35 @@ import { StockTransfer, StockTransferItem, TransferStatus, CompleteTransferItem 
     </app-modal>
   `,
 })
-export class TransferDetailModalComponent implements OnChanges {
-  @Input() isOpen = false;
-  @Input() transfer: StockTransfer | null = null;
-  @Input() isProcessing = false;
+export class TransferDetailModalComponent {
+  readonly isOpen = input(false);
+  readonly transfer = input<StockTransfer | null>(null);
+  readonly isProcessing = input(false);
 
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() closed = new EventEmitter<void>();
-  @Output() approveTransfer = new EventEmitter<StockTransfer>();
-  @Output() cancelTransfer = new EventEmitter<StockTransfer>();
-  @Output() completeTransfer = new EventEmitter<CompleteTransferItem[]>();
+  readonly isOpenChange = output<boolean>();
+  readonly closed = output<void>();
+  readonly approveTransfer = output<StockTransfer>();
+  readonly cancelTransfer = output<StockTransfer>();
+  readonly completeTransfer = output<CompleteTransferItem[]>();
 
   isCompleting = false;
   confirmingReception = false;
   receivedQuantities: Map<number, number> = new Map();
 
-  ngOnChanges(changes: SimpleChanges): void {
-    if (changes['isOpen'] && this.isOpen) {
-      this.isCompleting = false;
-      this.confirmingReception = false;
-      this.receivedQuantities.clear();
-    }
+  constructor() {
+    effect(() => {
+      if (this.isOpen()) {
+        this.isCompleting = false;
+        this.confirmingReception = false;
+        this.receivedQuantities.clear();
+      }
+    });
   }
 
   startCompleting(): void {
     this.isCompleting = true;
-    if (this.transfer?.stock_transfer_items) {
-      for (const item of this.transfer.stock_transfer_items) {
+    if (this.transfer()?.stock_transfer_items) {
+      for (const item of this.transfer()!.stock_transfer_items) {
         this.receivedQuantities.set(item.id, item.quantity);
       }
     }

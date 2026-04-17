@@ -1,5 +1,5 @@
 import { Component, input, output, signal, computed } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { SelectorComponent, SelectorOption } from '../../../../../../shared/components/selector/selector.component';
 import { toLocalDateString } from '../../../../../../shared/utils/date.util';
@@ -20,10 +20,9 @@ type DatePreset =
   selector: 'vendix-date-range-filter',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
-    SelectorComponent,
-  ],
+    SelectorComponent
+],
   template: `
     <div class="flex flex-col gap-2">
       <!-- Row 1: Preset Selector -->

@@ -1,5 +1,5 @@
 import { Component, input, output, signal, computed } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ReportCategoryId } from '../../interfaces/report.interface';
 import { REPORT_CATEGORIES, REPORT_DEFINITIONS } from '../../config/report-registry';
@@ -7,7 +7,7 @@ import { REPORT_CATEGORIES, REPORT_DEFINITIONS } from '../../config/report-regis
 @Component({
   selector: 'vendix-report-category-chips',
   standalone: true,
-  imports: [CommonModule, IconComponent],
+  imports: [IconComponent],
   templateUrl: './report-category-chips.component.html',
   styleUrls: ['./report-category-chips.component.scss'],
 })

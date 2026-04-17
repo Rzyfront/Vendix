@@ -1,5 +1,5 @@
 import { Component, input, computed, signal } from '@angular/core';
-import { CommonModule, CurrencyPipe, DecimalPipe, PercentPipe } from '@angular/common';
+import { CurrencyPipe, DecimalPipe, PercentPipe } from '@angular/common';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ReportColumn } from '../../interfaces/report.interface';
 
@@ -12,7 +12,7 @@ interface GroupedSection {
 @Component({
   selector: 'app-nested-report',
   standalone: true,
-  imports: [CommonModule, IconComponent],
+  imports: [IconComponent],
   providers: [CurrencyPipe, DecimalPipe, PercentPipe],
   templateUrl: './nested-report.component.html',
   styleUrls: ['./nested-report.component.scss'],

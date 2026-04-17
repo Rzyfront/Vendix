@@ -1,12 +1,6 @@
-import {
-  Component,
-  Input,
-  Output,
-  EventEmitter,
-  inject,
-  OnInit,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, input, output, inject, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import {
   FormsModule,
   ReactiveFormsModule,
@@ -32,7 +26,6 @@ import { SuppliersService } from '../../services/suppliers.service';
   selector: 'app-pop-supplier-quick-create',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     ModalComponent,
@@ -41,7 +34,7 @@ import { SuppliersService } from '../../services/suppliers.service';
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onClose()"
       size="md"
@@ -125,8 +118,8 @@ import { SuppliersService } from '../../services/suppliers.service';
           </app-button>
           <app-button
             variant="primary"
-            [disabled]="supplierForm.invalid || isLoading"
-            [loading]="isLoading"
+            [disabled]="supplierForm.invalid || isLoading()"
+            [loading]="isLoading()"
             (clicked)="onSubmit()"
           >
             Crear Proveedor
@@ -137,20 +130,21 @@ import { SuppliersService } from '../../services/suppliers.service';
   `,
   styleUrls: ['./pop-supplier-quick-create.component.scss'],
 })
-export class PopSupplierQuickCreateComponent implements OnInit {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() close = new EventEmitter<void>();
-  @Output() supplierCreated = new EventEmitter<number>();
+export class PopSupplierQuickCreateComponent {
+  private destroyRef = inject(DestroyRef);
+  readonly isOpen = input(false);
+  readonly isOpenChange = output<boolean>();
+  readonly close = output<void>();
+  readonly supplierCreated = output<number>();
 
   private fb = inject(FormBuilder);
   private suppliersService = inject(SuppliersService);
   private toastService = inject(ToastService);
 
   supplierForm!: FormGroup;
-  isLoading = false;
+  isLoading = signal(false);
 
-  ngOnInit(): void {
+  constructor() {
     this.initForm();
   }
 
@@ -175,7 +169,7 @@ export class PopSupplierQuickCreateComponent implements OnInit {
       return;
     }
 
-    this.isLoading = true;
+    this.isLoading.set(true);
 
     // Clean data: remove empty strings and only send valid fields
     const formValues = this.supplierForm.value;
@@ -191,7 +185,7 @@ export class PopSupplierQuickCreateComponent implements OnInit {
       }
     });
 
-    this.suppliersService.createSupplier(createDto).subscribe({
+    this.suppliersService.createSupplier(createDto).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response: any) => {
         if (response.success && response.data) {
           this.toastService.success('Proveedor creado correctamente');
@@ -204,12 +198,11 @@ export class PopSupplierQuickCreateComponent implements OnInit {
             response.message || 'Error al crear el proveedor',
           );
         }
-        this.isLoading = false;
+        this.isLoading.set(false);
       },
       error: (error: any) => {
         console.error('Error creating supplier:', error);
 
-        // Handle backend validation errors
         let errorMessage = 'Error al crear el proveedor';
 
         if (error.error?.message) {
@@ -223,7 +216,7 @@ export class PopSupplierQuickCreateComponent implements OnInit {
         }
 
         this.toastService.error(errorMessage);
-        this.isLoading = false;
+        this.isLoading.set(false);
       },
     });
   }

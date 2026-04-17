@@ -1,5 +1,5 @@
-import { Component, OnInit, ChangeDetectionStrategy, signal, computed, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, signal, computed, inject, DestroyRef } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
 import { ConsultationsService } from './services/consultations.service';
 import { ConsultationBooking } from './interfaces/consultation.interface';
@@ -13,8 +13,7 @@ import { TooltipComponent } from '../../../../shared/components/tooltip/tooltip.
 @Component({
   selector: 'app-consultations',
   standalone: true,
-  imports: [CommonModule, IconComponent, CardComponent, BadgeComponent, TooltipComponent],
-  changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [IconComponent, CardComponent, BadgeComponent, TooltipComponent],
   template: `
     <div class="p-4 sm:p-6">
       <!-- Header -->
@@ -244,10 +243,11 @@ import { TooltipComponent } from '../../../../shared/components/tooltip/tooltip.
     </div>
   `,
 })
-export class ConsultationsComponent implements OnInit {
+export class ConsultationsComponent {
   private consultationsService = inject(ConsultationsService);
   private toastService = inject(ToastService);
   private router = inject(Router);
+  private destroyRef = inject(DestroyRef);
 
   consultations = signal<ConsultationBooking[]>([]);
   loading = signal(true);
@@ -264,22 +264,24 @@ export class ConsultationsComponent implements OnInit {
     this.consultations().filter(c => c.status === 'completed').length
   );
 
-  ngOnInit() {
+  constructor() {
     this.loadConsultations();
   }
 
   loadConsultations() {
     this.loading.set(true);
-    this.consultationsService.getToday(this.selectedDate()).subscribe({
-      next: (data) => {
-        this.consultations.set(data);
-        this.loading.set(false);
-      },
-      error: (err) => {
-        this.toastService.error(extractApiErrorMessage(err));
-        this.loading.set(false);
-      },
-    });
+    this.consultationsService.getToday(this.selectedDate())
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (data) => {
+          this.consultations.set(data);
+          this.loading.set(false);
+        },
+        error: (err) => {
+          this.toastService.error(extractApiErrorMessage(err));
+          this.loading.set(false);
+        },
+      });
   }
 
   onDateChange(event: Event) {
@@ -289,23 +291,27 @@ export class ConsultationsComponent implements OnInit {
   }
 
   doCheckIn(bookingId: number) {
-    this.consultationsService.checkIn(bookingId).subscribe({
-      next: () => {
-        this.toastService.success('Check-in realizado');
-        this.loadConsultations();
-      },
-      error: (err) => this.toastService.error(extractApiErrorMessage(err)),
-    });
+    this.consultationsService.checkIn(bookingId)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.success('Check-in realizado');
+          this.loadConsultations();
+        },
+        error: (err) => this.toastService.error(extractApiErrorMessage(err)),
+      });
   }
 
   doStart(bookingId: number) {
-    this.consultationsService.start(bookingId).subscribe({
-      next: () => {
-        this.toastService.success('Consulta iniciada');
-        this.loadConsultations();
-      },
-      error: (err) => this.toastService.error(extractApiErrorMessage(err)),
-    });
+    this.consultationsService.start(bookingId)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toastService.success('Consulta iniciada');
+          this.loadConsultations();
+        },
+        error: (err) => this.toastService.error(extractApiErrorMessage(err)),
+      });
   }
 
   goToAttend(bookingId: number) {

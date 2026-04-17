@@ -1,5 +1,4 @@
-import { Component, Input, inject, OnInit } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject, input } from '@angular/core';
 import { StatsComponent } from '../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 import { DispatchNoteStats } from '../../interfaces/dispatch-note.interface';
@@ -7,25 +6,25 @@ import { DispatchNoteStats } from '../../interfaces/dispatch-note.interface';
 @Component({
   selector: 'app-dispatch-note-stats',
   standalone: true,
-  imports: [CommonModule, StatsComponent],
+  imports: [StatsComponent],
   templateUrl: './dispatch-note-stats.component.html',
   styles: [`:host { display: contents; }`],
 })
-export class DispatchNoteStatsComponent implements OnInit {
+export class DispatchNoteStatsComponent {
   private currencyService = inject(CurrencyFormatService);
 
-  @Input() stats: DispatchNoteStats = {
+  readonly stats = input<DispatchNoteStats>({
     total: 0,
     draft: 0,
     confirmed: 0,
     delivered: 0,
     invoiced: 0,
     voided: 0,
-  };
+  });
 
-  @Input() loading = false;
+  readonly loading = input<boolean>(false);
 
-  ngOnInit(): void {
+  constructor() {
     this.currencyService.loadCurrency();
   }
 

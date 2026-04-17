@@ -1,14 +1,9 @@
-import {
-  Component,
-  input,
-  output,
-  inject,
-  OnInit,
-  signal,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, input, output, inject, OnInit, signal, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import {
   ReactiveFormsModule,
+  FormsModule,
   FormBuilder,
   FormGroup,
   Validators,
@@ -32,13 +27,13 @@ import {
   selector: 'app-currency-create-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
+    FormsModule,
     ModalComponent,
     InputComponent,
     ButtonComponent,
-    SelectorComponent,
-  ],
+    SelectorComponent
+],
   template: `
     <app-modal
       [isOpen]="isOpen()"
@@ -115,21 +110,24 @@ import {
 
               <app-input
                 label="Código de Moneda"
-                [value]="currencyDetails()?.code || ''"
+                [ngModel]="currencyDetails()?.code || ''"
+                [ngModelOptions]="{ standalone: true }"
                 [disabled]="true"
                 helpText="Código ISO 4217"
               ></app-input>
 
               <app-input
                 label="Nombre de Moneda"
-                [value]="currencyDetails()?.name || ''"
+                [ngModel]="currencyDetails()?.name || ''"
+                [ngModelOptions]="{ standalone: true }"
                 [disabled]="true"
                 helpText="Nombre completo desde API"
               ></app-input>
 
               <app-input
                 label="Símbolo"
-                [value]="currencyDetails()?.symbol || ''"
+                [ngModel]="currencyDetails()?.symbol || ''"
+                [ngModelOptions]="{ standalone: true }"
                 [disabled]="true"
                 helpText="Símbolo de moneda desde API"
               ></app-input>
@@ -223,6 +221,7 @@ import {
   ],
 })
 export class CurrencyCreateModalComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   isOpen = input<boolean>(false);
   isSubmitting = input<boolean>(false);
   isOpenChange = output<boolean>();
@@ -276,7 +275,7 @@ export class CurrencyCreateModalComponent implements OnInit {
     this.loadCurrencyCodes();
 
     // Escuchar cambios en el selector de código
-    this.selectedCodeControl.valueChanges.subscribe((code: string | null) => {
+    this.selectedCodeControl.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((code: string | null) => {
       this.onCodeSelect(code);
     });
   }

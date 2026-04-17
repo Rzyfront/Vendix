@@ -1,12 +1,12 @@
-import { Component, Input, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input, inject, computed } from '@angular/core';
+
 import { ActivatedRoute, Router } from '@angular/router';
 import { IconComponent } from '../icon/icon.component';
 
 @Component({
   selector: 'app-under-construction',
   standalone: true,
-  imports: [CommonModule, IconComponent],
+  imports: [IconComponent],
   template: `
     <div class="flex flex-col items-center justify-center min-h-[60vh] p-8 text-center">
       <div class="w-24 h-24 mb-6 rounded-full bg-primary/10 flex items-center justify-center">
@@ -14,11 +14,11 @@ import { IconComponent } from '../icon/icon.component';
       </div>
 
       <h1 class="text-2xl font-bold text-foreground mb-2">
-        {{ title }}
+        {{ title() }}
       </h1>
 
       <p class="text-muted-foreground max-w-md mb-6">
-        {{ description }}
+        {{ description() }}
       </p>
 
       <button
@@ -31,22 +31,15 @@ import { IconComponent } from '../icon/icon.component';
     </div>
   `,
 })
-export class UnderConstructionComponent implements OnInit {
-  @Input() title = 'En Construcción';
-  @Input() description = 'Este módulo está siendo desarrollado y estará disponible próximamente.';
+export class UnderConstructionComponent {
+  readonly titleInput = input('En Construcción');
+  readonly descriptionInput = input('Este módulo está siendo desarrollado y estará disponible próximamente.');
 
   private route = inject(ActivatedRoute);
   private router = inject(Router);
 
-  ngOnInit(): void {
-    const data = this.route.snapshot.data;
-    if (data['title']) {
-      this.title = data['title'];
-    }
-    if (data['description']) {
-      this.description = data['description'];
-    }
-  }
+  readonly title = computed(() => this.route.snapshot.data['title'] || this.titleInput());
+  readonly description = computed(() => this.route.snapshot.data['description'] || this.descriptionInput());
 
   goBack(): void {
     window.history.back();

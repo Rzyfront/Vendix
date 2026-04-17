@@ -1,5 +1,6 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, OnInit, OnDestroy, signal, DestroyRef, inject} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import { RouterModule } from '@angular/router';
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { FormBuilder, FormGroup, Validators } from '@angular/forms';
@@ -10,7 +11,10 @@ import {
   OrganizationsService,
   CreateOrganizationDto,
 } from './services/organizations.service';
-import { OrganizationListItem, OrganizationMode } from './interfaces/organization.interface';
+import {
+  OrganizationListItem,
+  OrganizationMode,
+} from './interfaces/organization.interface';
 import { Organization } from '../../../../core/models/organization.model';
 
 // Import new components
@@ -44,7 +48,6 @@ import './organizations.component.css';
   selector: 'app-organizations',
   standalone: true,
   imports: [
-    CommonModule,
     RouterModule,
     FormsModule,
     ReactiveFormsModule,
@@ -63,7 +66,7 @@ import './organizations.component.css';
   template: `
     <div class="space-y-6">
       <!-- Stats Cards -->
-      <app-organization-stats [stats]="stats"></app-organization-stats>
+      <app-organization-stats [stats]="stats()"></app-organization-stats>
 
       <!-- Organizations List -->
       <div class="bg-surface rounded-card shadow-card border border-border">
@@ -73,7 +76,7 @@ import './organizations.component.css';
           >
             <div class="flex-1 min-w-0">
               <h2 class="text-lg font-semibold text-text-primary">
-                All Organizations ({{ pagination.total }})
+                All Organizations ({{ pagination().total }})
               </h2>
             </div>
 
@@ -104,7 +107,7 @@ import './organizations.component.css';
                   variant="outline"
                   size="sm"
                   (clicked)="refreshOrganizations()"
-                  [disabled]="isLoading"
+                  [disabled]="isLoading()"
                   title="Refresh"
                 >
                   <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
@@ -124,82 +127,89 @@ import './organizations.component.css';
             <!-- Paginación info -->
             <div class="flex items-center gap-2 mt-2 sm:mt-0">
               <span class="text-sm text-text-secondary">
-                Page {{ pagination.page }} of {{ pagination.totalPages }}
+                Page {{ pagination().page }} of {{ pagination().totalPages }}
               </span>
             </div>
           </div>
         </div>
 
         <!-- Loading State -->
-        <div *ngIf="isLoading" class="p-8 text-center">
-          <div
-            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-          ></div>
-          <p class="mt-2 text-text-secondary">Cargando organizaciones...</p>
-        </div>
+        @if (isLoading()) {
+          <div class="p-8 text-center">
+            <div
+              class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            ></div>
+            <p class="mt-2 text-text-secondary">Cargando organizaciones...</p>
+          </div>
+        }
 
         <!-- Empty State -->
-        <app-empty-state
-          *ngIf="!isLoading && organizations.length === 0"
-          icon="building"
-          [title]="getEmptyStateTitle()"
-          [description]="getEmptyStateDescription()"
-          actionButtonText="Crear Organizacion"
-          (actionClick)="openCreateOrganizationModal()"
-        >
-        </app-empty-state>
+        @if (!isLoading() && organizations().length === 0) {
+          <app-empty-state
+            icon="building"
+            [title]="getEmptyStateTitle()"
+            [description]="getEmptyStateDescription()"
+            actionButtonText="Crear Organizacion"
+            (actionClick)="openCreateOrganizationModal()"
+          >
+          </app-empty-state>
+        }
 
         <!-- Organizations Table -->
-        <div *ngIf="!isLoading && organizations.length > 0" class="p-6">
-          <app-responsive-data-view
-            [data]="organizations"
-            [columns]="tableColumns"
-            [cardConfig]="cardConfig"
-            [actions]="tableActions"
-            [loading]="isLoading"
-            emptyMessage="No hay organizaciones"
-            emptyIcon="building"
-          >
-          </app-responsive-data-view>
-
-          <!-- Pagination -->
-          <div class="mt-6 flex justify-center">
-            <app-pagination
-              [currentPage]="pagination.page"
-              [totalPages]="pagination.totalPages"
-              [total]="pagination.total"
-              [limit]="pagination.limit"
-              infoStyle="page"
-              (pageChange)="changePage($event)"
-            />
+        @if (!isLoading() && organizations().length > 0) {
+          <div class="p-6">
+            <app-responsive-data-view
+              [data]="organizations()"
+              [columns]="tableColumns"
+              [cardConfig]="cardConfig"
+              [actions]="tableActions"
+              [loading]="isLoading()"
+              emptyMessage="No hay organizaciones"
+              emptyIcon="building"
+            >
+            </app-responsive-data-view>
+            <!-- Pagination -->
+            <div class="mt-6 flex justify-center">
+              <app-pagination
+                [currentPage]="pagination().page"
+                [totalPages]="pagination().totalPages"
+                [total]="pagination().total"
+                [limit]="pagination().limit"
+                infoStyle="page"
+                (pageChange)="changePage($event)"
+              />
+            </div>
           </div>
-        </div>
+        }
       </div>
 
-      <!-- Create Organization Modal -->
-      <app-organization-create-modal
-        [isOpen]="isCreateModalOpen"
-        [isSubmitting]="isCreatingOrganization"
-        (isOpenChange)="onCreateModalChange($event)"
-        (submit)="createOrganization($event)"
-        (cancel)="onCreateModalCancel()"
-      ></app-organization-create-modal>
+      @defer (when isCreateModalOpen) {
+        <app-organization-create-modal
+          [isOpen]="isCreateModalOpen"
+          [isSubmitting]="isCreatingOrganization"
+          (isOpenChange)="onCreateModalChange($event)"
+          (submit)="createOrganization($event)"
+          (cancel)="onCreateModalCancel()"
+        ></app-organization-create-modal>
+      }
 
-      <!-- Edit Organization Modal -->
-      <app-organization-edit-modal
-        [isOpen]="isEditModalOpen"
-        [isSubmitting]="isUpdatingOrganization"
-        [organization]="selectedOrganization"
-        (isOpenChange)="onEditModalChange($event)"
-        (submit)="updateOrganization($event)"
-        (cancel)="onEditModalCancel()"
-      ></app-organization-edit-modal>
+      @defer (when isEditModalOpen) {
+        <app-organization-edit-modal
+          [isOpen]="isEditModalOpen"
+          [isSubmitting]="isUpdatingOrganization"
+          [organization]="selectedOrganization"
+          (isOpenChange)="onEditModalChange($event)"
+          (submit)="updateOrganization($event)"
+          (cancel)="onEditModalCancel()"
+        ></app-organization-edit-modal>
+      }
     </div>
   `,
 })
 export class OrganizationsComponent implements OnInit, OnDestroy {
-  organizations: OrganizationListItem[] = [];
-  isLoading = false;
+  private destroyRef = inject(DestroyRef);
+  readonly organizations = signal<OrganizationListItem[]>([]);
+  readonly isLoading = signal(false);
   searchTerm = '';
   selectedStatus = '';
   selectedMode = '';
@@ -313,21 +323,21 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
     ],
   };
 
-  stats = {
+  readonly stats = signal({
     total: 0,
     active: 0,
     inactive: 0,
     suspended: 0,
     demo: 0,
     test: 0,
-  };
+  });
 
-  pagination = {
+  readonly pagination = signal({
     page: 1,
     limit: 10,
     total: 0,
     totalPages: 0,
-  };
+  });
 
   // Modal state
   isCreateModalOpen = false;
@@ -355,7 +365,7 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
     this.loadStats();
 
     // Subscribe to mode filter changes
-    const modeSub = this.modeControl.valueChanges.subscribe((value) => {
+    const modeSub = this.modeControl.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((value) => {
       this.onModeChange(value || '');
     });
     this.subscriptions.push(modeSub);
@@ -434,7 +444,7 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
 
     const sub = this.organizationsService
       .createOrganization(organizationData as CreateOrganizationDto)
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (response) => {
           if (response.success) {
             this.isCreateModalOpen = false;
@@ -455,22 +465,26 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
   }
 
   loadOrganizations(): void {
-    this.isLoading = true;
+    this.isLoading.set(true);
 
+    const pag = this.pagination();
     const query = {
-      page: this.pagination.page,
-      limit: this.pagination.limit,
+      page: pag.page,
+      limit: pag.limit,
       ...(this.searchTerm && { search: this.searchTerm }),
       ...(this.selectedStatus && { state: this.selectedStatus as any }),
       ...(this.selectedMode
-        ? { mode: this.selectedMode as OrganizationMode, include_non_production: true }
+        ? {
+            mode: this.selectedMode as OrganizationMode,
+            include_non_production: true,
+          }
         : {}),
     };
 
-    const sub = this.organizationsService.getOrganizations(query).subscribe({
+    const sub = this.organizationsService.getOrganizations(query).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         if (response.success) {
-          this.organizations = response.data.map((org: any) => ({
+          this.organizations.set(response.data.map((org: any) => ({
             id: org.id,
             name: org.name,
             slug: org.slug,
@@ -487,16 +501,15 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
               maxUsers: 50, // Default value
               allowMultipleStores: true, // Default value
             },
-          }));
+          })));
 
-          this.pagination.total = response.meta.total;
-          this.pagination.totalPages = response.meta.totalPages;
+          this.pagination.update((p) => ({ ...p, total: response.meta.total, totalPages: response.meta.totalPages }));
         }
-        this.isLoading = false;
+        this.isLoading.set(false);
       },
       error: (error) => {
         console.error('Error loading organizations:', error);
-        this.isLoading = false;
+        this.isLoading.set(false);
         // TODO: Show error notification
       },
     });
@@ -505,15 +518,17 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
   }
 
   loadStats(): void {
-    const sub = this.organizationsService.getOrganizationStatsList().subscribe({
+    const sub = this.organizationsService.getOrganizationStatsList().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         if (response.success) {
-          this.stats.total = response.data.totalOrganizations;
-          this.stats.active = response.data.activeOrganizations;
-          this.stats.inactive = response.data.inactiveOrganizations;
-          this.stats.suspended = response.data.suspendedOrganizations;
-          this.stats.demo = response.data.demoOrganizations || 0;
-          this.stats.test = response.data.testOrganizations || 0;
+          this.stats.set({
+            total: response.data.totalOrganizations,
+            active: response.data.activeOrganizations,
+            inactive: response.data.inactiveOrganizations,
+            suspended: response.data.suspendedOrganizations,
+            demo: response.data.demoOrganizations || 0,
+            test: response.data.testOrganizations || 0,
+          });
         }
       },
       error: (error) => {
@@ -527,16 +542,14 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
   }
 
   updateStats(): void {
-    this.stats.total = this.organizations.length;
-    this.stats.active = this.organizations.filter(
-      (org) => org.status === 'active',
-    ).length;
-    this.stats.inactive = this.organizations.filter(
-      (org) => org.status === 'inactive',
-    ).length;
-    this.stats.suspended = this.organizations.filter(
-      (org) => org.status === 'suspended',
-    ).length;
+    const orgs = this.organizations();
+    this.stats.update((s) => ({
+      ...s,
+      total: orgs.length,
+      active: orgs.filter((org) => org.status === 'active').length,
+      inactive: orgs.filter((org) => org.status === 'inactive').length,
+      suspended: orgs.filter((org) => org.status === 'suspended').length,
+    }));
   }
 
   refreshOrganizations(): void {
@@ -545,13 +558,13 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
 
   onSearchChange(searchTerm: string): void {
     this.searchTerm = searchTerm;
-    this.pagination.page = 1;
+    this.pagination.update((p) => ({ ...p, page: 1 }));
     this.loadOrganizations();
   }
 
   onModeChange(value: string): void {
     this.selectedMode = value;
-    this.pagination.page = 1;
+    this.pagination.update((p) => ({ ...p, page: 1 }));
     this.loadOrganizations();
   }
 
@@ -565,7 +578,7 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
   }
 
   changePage(page: number): void {
-    this.pagination.page = page;
+    this.pagination.update((p) => ({ ...p, page }));
     this.loadOrganizations();
   }
 
@@ -609,7 +622,7 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
         if (confirmed) {
           const sub = this.organizationsService
             .deleteOrganization(org.id)
-            .subscribe({
+            .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
               next: (response) => {
                 if (response.success) {
                   this.loadOrganizations(); // Reload the list
@@ -672,7 +685,7 @@ export class OrganizationsComponent implements OnInit, OnDestroy {
 
     const sub = this.organizationsService
       .updateOrganization(this.selectedOrganization.id, updateData)
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (response) => {
           if (response.success) {
             this.isEditModalOpen = false;

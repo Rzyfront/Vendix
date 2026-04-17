@@ -1,17 +1,18 @@
-import { Component, OnInit, OnDestroy, signal, computed, inject } from '@angular/core';
+import {Component, OnInit, signal, computed, inject,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { HttpClient } from '@angular/common/http';
 import { environment } from '../../../../../../environments/environment';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { FormBuilder, FormGroup } from '@angular/forms';
-import { Subject, takeUntil } from 'rxjs';
+
 import { PaymentMethodsService } from './services/payment-methods.service';
 import {
   PaymentMethodStats,
   StorePaymentMethod,
   SystemPaymentMethod,
-  CombinedPaymentMethod,
-} from './interfaces/payment-methods.interface';
+  CombinedPaymentMethod} from './interfaces/payment-methods.interface';
 import {
   ToastService,
   StatsComponent,
@@ -26,14 +27,12 @@ import {
   ItemListCardConfig,
   CardComponent,
   InputComponent,
-  SelectorComponent,
-} from '../../../../../../app/shared/components/index';
+  SelectorComponent} from '../../../../../../app/shared/components/index';
 
 @Component({
   selector: 'app-payments-settings',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     StatsComponent,
@@ -44,8 +43,8 @@ import {
     ResponsiveDataViewComponent,
     CardComponent,
     InputComponent,
-    SelectorComponent,
-  ],
+    SelectorComponent
+],
   template: `
     <div class="w-full md:space-y-4">
       <!-- Stats: Sticky on mobile, static on desktop -->
@@ -555,12 +554,10 @@ import {
       .cfg-test-msg.ok { color: var(--success); }
       .cfg-test-msg.fail { color: var(--danger); }
     `,
-  ],
-})
-export class PaymentsSettingsComponent implements OnInit, OnDestroy {
-  private destroy$ = new Subject<void>();
-
-  // Signals
+  ]})
+export class PaymentsSettingsComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
+// Signals
   payment_methods = signal<StorePaymentMethod[]>([]);
   available_payment_methods = signal<SystemPaymentMethod[]>([]);
   payment_method_stats = signal<PaymentMethodStats | null>(null);
@@ -587,8 +584,7 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
     private_key: 'Se encuentra en tu dashboard de Wompi > Desarrolladores > Llaves del API. Nunca se comparte con el frontend.',
     events_secret: 'Se encuentra en tu dashboard de Wompi > Desarrolladores > Secretos para integración técnica > Eventos',
     integrity_secret: 'Se encuentra en tu dashboard de Wompi > Desarrolladores > Secretos para integración técnica > Integridad',
-    environment: 'Usa SANDBOX para pruebas con llaves pub_test_/prv_test_. Usa PRODUCTION para pagos reales con llaves pub_prod_/prv_prod_.',
-  };
+    environment: 'Usa SANDBOX para pruebas con llaves pub_test_/prv_test_. Usa PRODUCTION para pagos reales con llaves pub_prod_/prv_prod_.'};
   wompiTestLoading = false;
   wompiTestResult: { success: boolean; message: string } | null = null;
   wompiWebhookUrl = `${environment.apiUrl}/store/webhooks/wompi`;
@@ -613,11 +609,8 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
           cash: '#64748b',
           card: '#3b82f6',
           paypal: '#7c3aed',
-          bank_transfer: '#f59e0b',
-        },
-      },
-      transform: (v: string) => this.getTypeLabel(v),
-    },
+          bank_transfer: '#f59e0b'}},
+      transform: (v: string) => this.getTypeLabel(v)},
     {
       key: 'state',
       label: 'Estado',
@@ -629,11 +622,8 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
           enabled: '#22c55e',
           disabled: '#6b7280',
           requires_configuration: '#f59e0b',
-          available: '#3b82f6',
-        },
-      },
-      transform: (v: string) => this.getStateLabel(v),
-    },
+          available: '#3b82f6'}},
+      transform: (v: string) => this.getStateLabel(v)},
   ];
 
   // Mobile card config
@@ -655,23 +645,18 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
         enabled: '#22c55e',
         disabled: '#6b7280',
         requires_configuration: '#f59e0b',
-        available: '#3b82f6',
-      },
-    },
+        available: '#3b82f6'}},
     badgeTransform: (v: string) => this.getStateLabel(v),
     detailKeys: [
       {
         key: 'type',
         label: 'Tipo',
-        transform: (v: string) => this.getTypeLabel(v),
-      },
+        transform: (v: string) => this.getTypeLabel(v)},
       {
         key: 'is_store_method',
         label: 'Origen',
-        transform: (v: boolean) => (v ? 'Tienda' : 'Sistema'),
-      },
-    ],
-  };
+        transform: (v: boolean) => (v ? 'Tienda' : 'Sistema')},
+    ]};
 
   // Shared actions for main list
   table_actions: TableAction[] = [
@@ -682,15 +667,13 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
         item.state === 'enabled' ? 'pause' : 'check-circle',
       variant: 'ghost',
       action: (item: CombinedPaymentMethod) => this.toggleMethod(item),
-      show: (item: CombinedPaymentMethod) => item.is_store_method,
-    },
+      show: (item: CombinedPaymentMethod) => item.is_store_method},
     {
       label: 'Editar',
       icon: 'edit',
       action: (item: CombinedPaymentMethod) => this.editMethod(item),
       show: (item: CombinedPaymentMethod) => item.is_store_method,
-      variant: 'info',
-    },
+      variant: 'info'},
   ];
 
   // Modal table columns (desktop)
@@ -707,11 +690,8 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
           cash: '#64748b',
           card: '#3b82f6',
           paypal: '#7c3aed',
-          bank_transfer: '#f59e0b',
-        },
-      },
-      transform: (v: string) => this.getTypeLabel(v),
-    },
+          bank_transfer: '#f59e0b'}},
+      transform: (v: string) => this.getTypeLabel(v)},
   ];
 
   // Modal mobile card config
@@ -730,11 +710,8 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
         cash: '#64748b',
         card: '#3b82f6',
         paypal: '#7c3aed',
-        bank_transfer: '#f59e0b',
-      },
-    },
-    badgeTransform: (v: string) => this.getTypeLabel(v),
-  };
+        bank_transfer: '#f59e0b'}},
+    badgeTransform: (v: string) => this.getTypeLabel(v)};
 
   // Modal actions
   modal_actions: TableAction[] = [
@@ -743,8 +720,7 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
       icon: 'plus',
       action: (method: SystemPaymentMethod) => this.enableMethod(method),
       variant: 'primary',
-      disabled: () => this.is_enabling(),
-    },
+      disabled: () => this.is_enabling()},
   ];
 
   // Computed
@@ -769,8 +745,7 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
         is_store_method: true,
         system_payment_method_id: store_method.system_payment_method_id,
         store_payment_method: store_method,
-        created_at: store_method.created_at,
-      });
+        created_at: store_method.created_at});
     });
 
     // Add available methods that are NOT yet added to store
@@ -786,8 +761,7 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
           is_system: available_method.provider === 'system',
           is_store_method: false,
           system_payment_method_id: available_method.id,
-          created_at: available_method.created_at,
-        });
+          created_at: available_method.created_at});
       });
 
     return combined;
@@ -830,13 +804,7 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
     this.loadPaymentMethodStats();
     this.loadAvailablePaymentMethods();
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  onSearchChange(term: string): void {
+onSearchChange(term: string): void {
     this.search_term.set(term);
   }
 
@@ -857,7 +825,7 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
     this.is_loading.set(true);
     this.payment_methods_service
       .getStorePaymentMethods()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: any) => {
           const methods = response.data || response;
@@ -870,15 +838,14 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
           );
           this.payment_methods.set([]);
           this.is_loading.set(false);
-        },
-      });
+        }});
   }
 
   loadPaymentMethodStats(): void {
     this.is_loading_stats.set(true);
     this.payment_methods_service
       .getPaymentMethodStats()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (stats: any) => {
           this.payment_method_stats.set(stats.data || stats);
@@ -890,15 +857,14 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
           );
           this.payment_method_stats.set(null);
           this.is_loading_stats.set(false);
-        },
-      });
+        }});
   }
 
   loadAvailablePaymentMethods(): void {
     this.is_loading_available.set(true);
     this.payment_methods_service
       .getAvailablePaymentMethods()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (methods: any) => {
           const methods_data = methods.data || methods;
@@ -911,8 +877,7 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
           );
           this.available_payment_methods.set([]);
           this.is_loading_available.set(false);
-        },
-      });
+        }});
   }
 
   enableMethod(method: SystemPaymentMethod): void {
@@ -931,16 +896,14 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
         message: `¿Deseas agregar "${method.display_name}" como método de pago?`,
         confirmText: 'Agregar',
         cancelText: 'Cancelar',
-        confirmVariant: 'primary',
-      })
+        confirmVariant: 'primary'})
       .then((confirmed: boolean) => {
         if (confirmed) {
           this.enabling_method_id.set(method.id);
           this.payment_methods_service
             .enablePaymentMethod(method.id, {
-              display_name: method.display_name,
-            })
-            .pipe(takeUntil(this.destroy$))
+              display_name: method.display_name})
+            .pipe(takeUntilDestroyed(this.destroyRef))
             .subscribe({
               next: () => {
                 this.toast_service.success('Método de pago agregado correctamente');
@@ -952,8 +915,7 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
               error: (error: any) => {
                 this.toast_service.error('Error al agregar método de pago: ' + error.message);
                 this.enabling_method_id.set(null);
-              },
-            });
+              }});
         }
       });
   }
@@ -975,8 +937,7 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
         required: is_required,
         description: prop.description || '',
         enum_values: prop.enum,
-        default_value,
-      });
+        default_value});
     }
 
     this.config_form = this.fb.group(controls);
@@ -998,9 +959,8 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
     this.payment_methods_service
       .enablePaymentMethod(this.config_method.id, {
         display_name: this.config_method.display_name,
-        custom_config: this.config_form.value,
-      })
-      .pipe(takeUntil(this.destroy$))
+        custom_config: this.config_form.value})
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toast_service.success('Método de pago configurado y agregado correctamente');
@@ -1014,8 +974,7 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
         error: (error: any) => {
           this.toast_service.error('Error: ' + (error.error?.message || error.message));
           this.config_saving.set(false);
-        },
-      });
+        }});
   }
 
   closeConfigModal(): void {
@@ -1071,24 +1030,21 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
         `${environment.apiUrl}/store/payments/wompi/test-connection`,
         this.config_form.value,
       )
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.wompiTestLoading = false;
           this.wompiTestResult = {
             success: res.success,
-            message: res.message || (res.success ? 'Conexión exitosa con Wompi' : 'Error de conexión'),
-          };
+            message: res.message || (res.success ? 'Conexión exitosa con Wompi' : 'Error de conexión')};
         },
         error: (err) => {
           this.wompiTestLoading = false;
           const msg = err?.error?.message || err?.statusText || 'Error al probar la conexión';
           this.wompiTestResult = {
             success: false,
-            message: typeof msg === 'string' ? msg : 'Error al probar la conexión',
-          };
-        },
-      });
+            message: typeof msg === 'string' ? msg : 'Error al probar la conexión'};
+        }});
   }
 
   toggleMethod(method: CombinedPaymentMethod): void {
@@ -1103,13 +1059,12 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
           message: `¿Deseas desactivar "${method.display_name}"?`,
           confirmText: 'Desactivar',
           cancelText: 'Cancelar',
-          confirmVariant: 'danger',
-        })
+          confirmVariant: 'danger'})
         .then((confirmed: boolean) => {
           if (confirmed) {
             this.payment_methods_service
               .disablePaymentMethod(store_method.id)
-              .pipe(takeUntil(this.destroy$))
+              .pipe(takeUntilDestroyed(this.destroyRef))
               .subscribe({
                 next: () => {
                   this.toast_service.success('Método de pago desactivado');
@@ -1120,14 +1075,13 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
                   this.toast_service.error(
                     'Error al desactivar método: ' + error.message,
                   );
-                },
-              });
+                }});
           }
         });
     } else {
       this.payment_methods_service
         .enableStorePaymentMethod(store_method.id)
-        .pipe(takeUntil(this.destroy$))
+        .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: () => {
             this.toast_service.success('Método de pago activado');
@@ -1138,8 +1092,7 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
             this.toast_service.error(
               'Error al activar método: ' + error.message,
             );
-          },
-        });
+          }});
     }
   }
 
@@ -1189,7 +1142,7 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
 
     this.payment_methods_service
       .updateStorePaymentMethod(store_method.id, update_data)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toast_service.success('Método de pago actualizado correctamente');
@@ -1201,8 +1154,7 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
         error: (error: any) => {
           this.toast_service.error('Error al actualizar: ' + (error.error?.message || error.message));
           this.config_saving.set(false);
-        },
-      });
+        }});
   }
 
   getStateLabel(state: string): string {
@@ -1210,8 +1162,7 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
       enabled: 'Activo',
       disabled: 'Inactivo',
       requires_configuration: 'Config. Requerida',
-      available: 'Disponible',
-    };
+      available: 'Disponible'};
     return state_map[state] || state;
   }
 
@@ -1220,8 +1171,7 @@ export class PaymentsSettingsComponent implements OnInit, OnDestroy {
       cash: 'Efectivo',
       card: 'Tarjeta',
       paypal: 'PayPal',
-      bank_transfer: 'Transferencia',
-    };
+      bank_transfer: 'Transferencia'};
     return type_map[type] || type;
   }
 }

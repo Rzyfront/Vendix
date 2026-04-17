@@ -1,8 +1,10 @@
-import { Component, OnInit, OnDestroy, inject } from '@angular/core';
+import {Component, OnInit, OnDestroy, inject,
+  DestroyRef} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { Store } from '@ngrx/store';
-import { Observable, Subject, combineLatest, takeUntil } from 'rxjs';
+import { Observable, combineLatest } from 'rxjs';
+import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
 
 import { CardComponent } from '../../../../../../../shared/components/card/card.component';
 import { StatsComponent } from '../../../../../../../shared/components/stats/stats.component';
@@ -11,20 +13,17 @@ import { IconComponent } from '../../../../../../../shared/components/icon/icon.
 import { OptionsDropdownComponent } from '../../../../../../../shared/components/options-dropdown/options-dropdown.component';
 import {
   FilterConfig,
-  FilterValues,
-} from '../../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
+  FilterValues } from '../../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import {
   CurrencyPipe,
-  CurrencyFormatService,
-} from '../../../../../../../shared/pipes/currency/currency.pipe';
+  CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 import { ExportButtonComponent } from '../../../components/export-button/export-button.component';
 
 import { DateRangeFilter } from '../../../interfaces/analytics.interface';
 import {
   InventorySummary,
   MovementTrend,
-  InventoryValuation,
-} from '../../../interfaces/inventory-analytics.interface';
+  InventoryValuation } from '../../../interfaces/inventory-analytics.interface';
 
 import * as InventoryActions from './state/inventory-overview.actions';
 import * as InventorySelectors from './state/inventory-overview.selectors';
@@ -47,14 +46,12 @@ import { getDefaultStartDate, getDefaultEndDate, formatChartPeriod } from '../..
     CurrencyPipe,
   ],
   templateUrl: './inventory-overview.component.html',
-  styleUrls: ['./inventory-overview.component.scss'],
-})
+  styleUrls: ['./inventory-overview.component.scss'] })
 export class InventoryOverviewComponent implements OnInit, OnDestroy {
+  private destroyRef = inject(DestroyRef);
   private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
-  private destroy$ = new Subject<void>();
-
-  // Observables from store
+// Observables from store
   summary$: Observable<InventorySummary | null> = this.store.select(
     InventorySelectors.selectSummary,
   );
@@ -89,6 +86,14 @@ export class InventoryOverviewComponent implements OnInit, OnDestroy {
     InventorySelectors.selectOutOfStockPercentage,
   );
 
+  readonly summary = toSignal(this.summary$, { initialValue: null });
+  readonly loading = toSignal(this.loading$, { initialValue: false });
+  readonly loadingTrends = toSignal(this.loadingTrends$, { initialValue: false });
+  readonly loadingValuation = toSignal(this.loadingValuation$, { initialValue: false });
+  readonly exporting = toSignal(this.exporting$, { initialValue: false });
+  readonly lowStockPct = toSignal(this.lowStockPct$, { initialValue: '0' });
+  readonly outOfStockPct = toSignal(this.outOfStockPct$, { initialValue: '0' });
+
   // Chart options
   movementTrendChartOptions: EChartsOption = {};
   valuationChartOptions: EChartsOption = {};
@@ -100,14 +105,12 @@ export class InventoryOverviewComponent implements OnInit, OnDestroy {
       key: 'date_from',
       label: 'Desde',
       type: 'date',
-      defaultValue: getDefaultStartDate(),
-    },
+      defaultValue: getDefaultStartDate() },
     {
       key: 'date_to',
       label: 'Hasta',
       type: 'date',
-      defaultValue: getDefaultEndDate(),
-    },
+      defaultValue: getDefaultEndDate() },
     {
       key: 'granularity',
       label: 'Granularidad',
@@ -119,8 +122,7 @@ export class InventoryOverviewComponent implements OnInit, OnDestroy {
         { value: 'year', label: 'Por Año' },
       ],
       placeholder: 'Seleccionar',
-      defaultValue: 'day',
-    },
+      defaultValue: 'day' },
   ];
 
   filterValues: FilterValues = {};
@@ -135,33 +137,31 @@ export class InventoryOverviewComponent implements OnInit, OnDestroy {
 
     // Sync store state → filterValues
     combineLatest([this.dateRange$, this.granularity$])
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(([dateRange, granularity]) => {
         this.filterValues = {
           date_from: dateRange.start_date || null,
           date_to: dateRange.end_date || null,
-          granularity: granularity || 'day',
-        };
+          granularity: granularity || 'day' };
       });
 
     // Subscribe to movement trends to build trend chart
     combineLatest([this.movementTrends$, this.granularity$])
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(([trends, granularity]) => {
         this.updateMovementTrendChart(trends, granularity);
       });
 
     // Subscribe to valuations for both rose charts (value + quantity)
-    this.valuations$.pipe(takeUntil(this.destroy$)).subscribe((valuations) => {
+    this.valuations$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((valuations) => {
       this.updateValuationChart(valuations);
       this.updateQuantityChart(valuations);
     });
   }
 
   ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-    this.store.dispatch(InventoryActions.clearInventoryOverviewState());
+
+this.store.dispatch(InventoryActions.clearInventoryOverviewState());
   }
 
   onFilterChange(values: FilterValues): void {
@@ -179,9 +179,7 @@ export class InventoryOverviewComponent implements OnInit, OnDestroy {
           dateRange: {
             start_date: dateFrom || '',
             end_date: dateTo || '',
-            preset: 'custom',
-          },
-        }),
+            preset: 'custom' } }),
       );
     }
 
@@ -198,9 +196,7 @@ export class InventoryOverviewComponent implements OnInit, OnDestroy {
         dateRange: {
           start_date: getDefaultStartDate(),
           end_date: getDefaultEndDate(),
-          preset: 'thisMonth',
-        },
-      }),
+          preset: 'thisMonth' } }),
     );
     this.store.dispatch(
       InventoryActions.setGranularity({ granularity: 'day' }),
@@ -216,8 +212,7 @@ export class InventoryOverviewComponent implements OnInit, OnDestroy {
     return {
       border: style.getPropertyValue('--color-border').trim() || '#e5e7eb',
       textSecondary:
-        style.getPropertyValue('--color-text-secondary').trim() || '#6b7280',
-    };
+        style.getPropertyValue('--color-text-secondary').trim() || '#6b7280' };
   }
 
   // ─── Movement Trend Chart (Line + Area) ───
@@ -237,8 +232,7 @@ export class InventoryOverviewComponent implements OnInit, OnDestroy {
       in: '#22c55e',
       out: '#ef4444',
       adjustments: '#f59e0b',
-      transfers: '#3b82f6',
-    };
+      transfers: '#3b82f6' };
 
     this.movementTrendChartOptions = {
       tooltip: {
@@ -249,26 +243,22 @@ export class InventoryOverviewComponent implements OnInit, OnDestroy {
             html += `${p.marker} ${p.seriesName}: <b>${p.value}</b><br/>`;
           }
           return html;
-        },
-      },
+        } },
       legend: {
         data: ['Entradas', 'Salidas', 'Ajustes', 'Transferencias'],
         bottom: 0,
-        textStyle: { color: textSecondary, fontSize: 12 },
-      },
+        textStyle: { color: textSecondary, fontSize: 12 } },
       grid: { left: '3%', right: '4%', bottom: '15%', containLabel: true },
       xAxis: {
         type: 'category',
         data: labels,
         axisLine: { lineStyle: { color: border } },
-        axisLabel: { color: textSecondary },
-      },
+        axisLabel: { color: textSecondary } },
       yAxis: {
         type: 'value',
         axisLine: { show: false },
         axisLabel: { color: textSecondary },
-        splitLine: { lineStyle: { color: border } },
-      },
+        splitLine: { lineStyle: { color: border } } },
       series: [
         this.buildLineSeries(
           'Entradas',
@@ -290,8 +280,7 @@ export class InventoryOverviewComponent implements OnInit, OnDestroy {
           trends.map((t) => t.transfers),
           colors.transfers,
         ),
-      ],
-    };
+      ] };
   }
 
   private buildLineSeries(name: string, data: number[], color: string): any {
@@ -310,12 +299,9 @@ export class InventoryOverviewComponent implements OnInit, OnDestroy {
           colorStops: [
             { offset: 0, color: `${color}33` },
             { offset: 1, color: `${color}05` },
-          ],
-        },
-      },
+          ] } },
       lineStyle: { color, width: 2 },
-      itemStyle: { color },
-    };
+      itemStyle: { color } };
   }
 
   // ─── Valuation by Location Rose Chart ───
@@ -345,14 +331,12 @@ export class InventoryOverviewComponent implements OnInit, OnDestroy {
       tooltip: {
         trigger: 'item',
         formatter: (params: any) =>
-          `${params.name}<br/>Valor: <b>${this.currencyService.format(params.value)}</b> (${params.percent}%)`,
-      },
+          `${params.name}<br/>Valor: <b>${this.currencyService.format(params.value)}</b> (${params.percent}%)` },
       legend: {
         orient: 'vertical',
         right: 10,
         top: 'center',
-        textStyle: { color: textSecondary, fontSize: 12 },
-      },
+        textStyle: { color: textSecondary, fontSize: 12 } },
       series: [
         {
           type: 'pie',
@@ -363,11 +347,8 @@ export class InventoryOverviewComponent implements OnInit, OnDestroy {
           data: sorted.map((v, i) => ({
             name: v.location_name,
             value: v.total_value,
-            itemStyle: { color: locationColors[i % locationColors.length] },
-          })),
-        },
-      ],
-    };
+            itemStyle: { color: locationColors[i % locationColors.length] } })) },
+      ] };
   }
 
   // ─── Quantity by Location Rose Chart ───
@@ -397,14 +378,12 @@ export class InventoryOverviewComponent implements OnInit, OnDestroy {
       tooltip: {
         trigger: 'item',
         formatter: (params: any) =>
-          `${params.name}<br/>Cantidad: <b>${params.value.toLocaleString('es-CO')}</b> uds (${params.percent}%)`,
-      },
+          `${params.name}<br/>Cantidad: <b>${params.value.toLocaleString('es-CO')}</b> uds (${params.percent}%)` },
       legend: {
         orient: 'vertical',
         right: 10,
         top: 'center',
-        textStyle: { color: textSecondary, fontSize: 12 },
-      },
+        textStyle: { color: textSecondary, fontSize: 12 } },
       series: [
         {
           type: 'pie',
@@ -415,11 +394,8 @@ export class InventoryOverviewComponent implements OnInit, OnDestroy {
           data: sorted.map((v, i) => ({
             name: v.location_name,
             value: v.total_quantity,
-            itemStyle: { color: locationColors[i % locationColors.length] },
-          })),
-        },
-      ],
-    };
+            itemStyle: { color: locationColors[i % locationColors.length] } })) },
+      ] };
   }
 
 }

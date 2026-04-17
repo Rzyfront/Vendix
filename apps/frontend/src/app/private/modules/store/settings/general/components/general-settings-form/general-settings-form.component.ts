@@ -1,16 +1,19 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
   OnInit,
   OnChanges,
   inject,
+  input,
+  output,
+  signal,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
-import { SelectorComponent, SelectorOption } from '../../../../../../../shared/components/selector/selector.component';
+import {
+  SelectorComponent,
+  SelectorOption,
+} from '../../../../../../../shared/components/selector/selector.component';
 import { CurrencyService } from '../../../../../../../services/currency.service';
 import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency/currency.pipe';
 
@@ -30,13 +33,18 @@ export interface GeneralSettings {
 @Component({
   selector: 'app-general-settings-form',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, InputComponent, SelectorComponent],
+  imports: [
+    CommonModule,
+    ReactiveFormsModule,
+    InputComponent,
+    SelectorComponent,
+  ],
   templateUrl: './general-settings-form.component.html',
   styleUrls: ['./general-settings-form.component.scss'],
 })
 export class GeneralSettingsForm implements OnInit, OnChanges {
-  @Input() settings!: GeneralSettings;
-  @Output() settingsChange = new EventEmitter<GeneralSettings>();
+  readonly settings = input.required<GeneralSettings>();
+  readonly settingsChange = output<GeneralSettings>();
 
   private currencyService = inject(CurrencyService);
   private currencyFormatService = inject(CurrencyFormatService);
@@ -47,7 +55,9 @@ export class GeneralSettingsForm implements OnInit, OnChanges {
     store_type: new FormControl('physical'),
     // Campos de store_settings
     timezone: new FormControl('America/Bogota'),
-    currency: new FormControl(this.currencyFormatService.currencyCode() || 'COP'),
+    currency: new FormControl(
+      this.currencyFormatService.currencyCode() || 'COP',
+    ),
     language: new FormControl('es'),
     tax_included: new FormControl(false),
   });
@@ -61,7 +71,7 @@ export class GeneralSettingsForm implements OnInit, OnChanges {
   ];
 
   // Cargado dinámicamente desde CurrencyService
-  currencies: SelectorOption[] = [];
+  readonly currencies = signal<SelectorOption[]>([]);
 
   languages: SelectorOption[] = [
     { value: 'es', label: 'Español' },
@@ -119,35 +129,38 @@ export class GeneralSettingsForm implements OnInit, OnChanges {
   async loadCurrencies() {
     try {
       const activeCurrencies = await this.currencyService.getActiveCurrencies();
-      this.currencies = activeCurrencies.map((c) => ({
+      const mapped = activeCurrencies.map((c) => ({
         value: c.code,
         label: `${c.name} (${c.code})`,
       }));
+      this.currencies.set(mapped);
 
       // Si no hay moneda seleccionada y hay monedas disponibles, seleccionar la primera
       const currentCurrency = this.currencyControl.value;
-      if (!currentCurrency && this.currencies.length > 0) {
-        this.currencyControl.setValue(this.currencies[0].value as string);
+      if (!currentCurrency && mapped.length > 0) {
+        this.currencyControl.setValue(mapped[0].value as string);
       }
     } catch (error) {
       console.error('Error loading currencies:', error);
       // Fallback a monedas comunes si falla el servicio
-      this.currencies = [
+      const fallback: SelectorOption[] = [
         { value: 'COP', label: 'Peso Colombiano (COP)' },
         { value: 'USD', label: 'Dólar Americano (USD)' },
         { value: 'EUR', label: 'Euro (EUR)' },
       ];
+      this.currencies.set(fallback);
 
       // Seleccionar la primera por defecto si no hay ninguna
       if (!this.currencyControl.value) {
-        this.currencyControl.setValue(this.currencies[0].value as string);
+        this.currencyControl.setValue(fallback[0].value as string);
       }
     }
   }
 
   patchForm() {
-    if (this.settings) {
-      this.form.patchValue(this.settings);
+    const currentSettings = this.settings();
+    if (currentSettings) {
+      this.form.patchValue(currentSettings);
     }
   }
 
@@ -156,5 +169,4 @@ export class GeneralSettingsForm implements OnInit, OnChanges {
       this.settingsChange.emit(this.form.value);
     }
   }
-
 }

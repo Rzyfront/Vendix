@@ -86,6 +86,10 @@ export class MenuFilterService {
     Ventas: 'analytics_sales',
     Tráfico: 'analytics_traffic',
     Rendimiento: 'analytics_performance',
+    'Analíticas de Inventario': 'analytics_inventory',
+    'Analíticas de Productos': 'analytics_products',
+    'Analíticas de Clientes': 'analytics_customers',
+    Financiero: 'analytics_financial',
 
     // STORE_ADMIN - Reportes
     Reportes: ['reports', 'accounting_reports'],

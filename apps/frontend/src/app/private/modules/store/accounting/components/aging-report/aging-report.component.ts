@@ -1,5 +1,6 @@
-import { Component, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, inject, signal, computed, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { NgClass } from '@angular/common';
 import { CarteraService } from '../../services/cartera.service';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import {
@@ -14,45 +15,48 @@ type AgingTab = 'ar' | 'ap';
 @Component({
   selector: 'vendix-aging-report',
   standalone: true,
-  imports: [CommonModule, CardComponent, IconComponent, ButtonComponent],
+  imports: [CardComponent, IconComponent, ButtonComponent,
+    NgClass,
+  ],
   templateUrl: './aging-report.component.html',
 })
-export class AgingReportComponent implements OnInit {
+export class AgingReportComponent {
+  private destroyRef = inject(DestroyRef);
   private cartera = inject(CarteraService);
   private currency = inject(CurrencyFormatService);
 
-  active_tab: AgingTab = 'ar';
-  loading = true;
-  ar_aging: AgingReport | null = null;
-  ap_aging: AgingReport | null = null;
+  readonly active_tab = signal<AgingTab>('ar');
+  readonly loading = signal(true);
+  readonly ar_aging = signal<AgingReport | null>(null);
+  readonly ap_aging = signal<AgingReport | null>(null);
 
-  get current_report(): AgingReport | null {
-    return this.active_tab === 'ar' ? this.ar_aging : this.ap_aging;
-  }
+  readonly current_report = computed<AgingReport | null>(() =>
+    this.active_tab() === 'ar' ? this.ar_aging() : this.ap_aging(),
+  );
 
-  get entity_label(): string {
-    return this.active_tab === 'ar' ? 'Cliente' : 'Proveedor';
-  }
+  readonly entity_label = computed(() =>
+    this.active_tab() === 'ar' ? 'Cliente' : 'Proveedor',
+  );
 
-  ngOnInit(): void {
+  constructor() {
     this.loadData();
   }
 
   loadData(): void {
-    this.loading = true;
+    this.loading.set(true);
 
-    this.cartera.getArAging().subscribe({
-      next: (res) => { this.ar_aging = res.data; },
+    this.cartera.getArAging().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (res) => { this.ar_aging.set(res.data); },
     });
 
-    this.cartera.getApAging().subscribe({
-      next: (res) => { this.ap_aging = res.data; this.loading = false; },
-      error: () => { this.loading = false; },
+    this.cartera.getApAging().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+      next: (res) => { this.ap_aging.set(res.data); this.loading.set(false); },
+      error: () => { this.loading.set(false); },
     });
   }
 
   switchTab(tab: AgingTab): void {
-    this.active_tab = tab;
+    this.active_tab.set(tab);
   }
 
   formatCurrency(val: number | undefined): string {

@@ -1,13 +1,6 @@
-import {
-  Component,
-  OnInit,
-  OnDestroy,
-  inject,
-  output,
-  ChangeDetectionStrategy,
-  signal,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject, output, signal, DestroyRef } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import { HttpClient } from '@angular/common/http';
 import { environment } from '../../../../../../../environments/environment';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
@@ -17,17 +10,17 @@ import { ButtonComponent } from '../../../../../../shared/components/button/butt
 @Component({
   selector: 'app-pos-reservations-panel',
   standalone: true,
-  imports: [CommonModule, IconComponent, SpinnerComponent, ButtonComponent],
+  imports: [IconComponent, SpinnerComponent, ButtonComponent],
   templateUrl: './pos-reservations-panel.component.html',
   styleUrls: ['./pos-reservations-panel.component.scss'],
-  changeDetection: ChangeDetectionStrategy.OnPush,
 })
-export class PosReservationsPanelComponent implements OnInit, OnDestroy {
+export class PosReservationsPanelComponent {
   close = output<void>();
   quickBook = output<void>();
   walkIn = output<void>();
 
   private http = inject(HttpClient);
+  private destroyRef = inject(DestroyRef);
 
   todayBookings = signal<any[]>([]);
   loading = signal(false);
@@ -50,37 +43,39 @@ export class PosReservationsPanelComponent implements OnInit, OnDestroy {
       const label = h.toString().padStart(2, '0') + ':00';
       this.timeSlots.push(label);
     }
-  }
 
-  ngOnInit() {
     this.loadTodayBookings();
     this.updateCurrentTime();
     this.timeInterval = setInterval(() => this.updateCurrentTime(), 60_000);
-  }
 
-  ngOnDestroy() {
-    if (this.timeInterval) {
-      clearInterval(this.timeInterval);
-      this.timeInterval = null;
-    }
+    inject(DestroyRef).onDestroy(() => {
+      if (this.timeInterval) {
+        clearInterval(this.timeInterval);
+        this.timeInterval = null;
+      }
+    });
   }
 
   loadTodayBookings() {
     this.loading.set(true);
-    this.http.get<any>(`${this.apiUrl}/today`).subscribe({
-      next: (response) => {
-        this.todayBookings.set(response.data || []);
-        this.loading.set(false);
-      },
-      error: () => {
-        this.loading.set(false);
-      },
-    });
+    this.http
+      .get<any>(`${this.apiUrl}/today`)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          this.todayBookings.set(response.data || []);
+          this.loading.set(false);
+        },
+        error: () => {
+          this.loading.set(false);
+        },
+      });
   }
 
   confirm(booking: any) {
     this.http
       .post(`${this.apiUrl}/${booking.id}/confirm`, {})
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => this.loadTodayBookings(),
       });
@@ -89,6 +84,7 @@ export class PosReservationsPanelComponent implements OnInit, OnDestroy {
   complete(booking: any) {
     this.http
       .post(`${this.apiUrl}/${booking.id}/complete`, {})
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => this.loadTodayBookings(),
       });
@@ -97,6 +93,7 @@ export class PosReservationsPanelComponent implements OnInit, OnDestroy {
   noShow(booking: any) {
     this.http
       .post(`${this.apiUrl}/${booking.id}/no-show`, {})
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => this.loadTodayBookings(),
       });
@@ -119,8 +116,13 @@ export class PosReservationsPanelComponent implements OnInit, OnDestroy {
     return labels[status] || status;
   }
 
-  getStatusVariant(status: string): 'success' | 'neutral' | 'error' | 'primary' | 'warning' {
-    const variants: Record<string, 'success' | 'neutral' | 'error' | 'primary' | 'warning'> = {
+  getStatusVariant(
+    status: string,
+  ): 'success' | 'neutral' | 'error' | 'primary' | 'warning' {
+    const variants: Record<
+      string,
+      'success' | 'neutral' | 'error' | 'primary' | 'warning'
+    > = {
       pending: 'warning',
       confirmed: 'primary',
       completed: 'success',

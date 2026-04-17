@@ -14,7 +14,7 @@
 
       <div class="flex items-center gap-2 flex-wrap">
         <vendix-date-range-filter
-          [value]="(dateRange$ | async) ?? undefined"
+          [value]="dateRange()"
           (valueChange)="onDateRangeChange($event)"
         ></vendix-date-range-filter>
       </div>
@@ -37,14 +37,21 @@
       >
     </div>
     <div class="p-4">
-      @if (loadingTopSellers$ | async) {
+      @if (loadingTopSellers()) {
         <div class="h-80 flex items-center justify-center">
           <div
             class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
           ></div>
         </div>
       } @else {
-        <app-chart [options]="topSellersChartOptions" size="large"></app-chart>
+        @defer (on viewport) {
+          <app-chart
+            [options]="topSellersChartOptions"
+            size="large"
+          ></app-chart>
+        } @placeholder {
+          <div class="h-80 bg-surface-secondary animate-pulse rounded-xl"></div>
+        }
       }
     </div>
   </app-card>
@@ -64,10 +71,10 @@
 
     <div class="p-4">
       <app-responsive-data-view
-        [data]="(topSellers$ | async) ?? []"
+        [data]="topSellers()"
         [columns]="tableColumns"
         [cardConfig]="cardConfig"
-        [loading]="(loadingTopSellers$ | async) ?? false"
+        [loading]="(loadingTopSellers()) ?? false"
         emptyMessage="No hay datos de ventas en este período"
         emptyIcon="trophy"
       ></app-responsive-data-view>

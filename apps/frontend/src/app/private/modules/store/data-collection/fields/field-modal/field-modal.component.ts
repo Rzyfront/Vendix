@@ -1,5 +1,5 @@
 import { Component, ChangeDetectionStrategy, input, output, OnInit } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { MetadataField } from '../../interfaces/metadata-field.interface';
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
@@ -12,7 +12,7 @@ import { SettingToggleComponent } from '../../../../../../shared/components/sett
 @Component({
   selector: 'app-field-modal',
   standalone: true,
-  imports: [CommonModule, FormsModule, ModalComponent, InputComponent, SelectorComponent, TextareaComponent, ButtonComponent, SettingToggleComponent],
+  imports: [FormsModule, ModalComponent, InputComponent, SelectorComponent, TextareaComponent, ButtonComponent, SettingToggleComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <app-modal

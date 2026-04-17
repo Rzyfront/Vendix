@@ -1,24 +1,25 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
   ChangeDetectionStrategy,
   OnInit,
+  input,
+  output,
+  signal,
+  inject,
+  DestroyRef,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import { IconComponent } from '../../index';
 import { AuthFacade } from '../../../../core/store/auth/auth.facade';
 import { OnboardingWizardService } from '../../../../core/services/onboarding-wizard.service';
 import { ConfigFacade } from '../../../../core/store/config/config.facade';
 import { AppConfig } from '../../../../core/services/app-config.service';
-import { takeUntil } from 'rxjs';
-import { Subject } from 'rxjs';
 
 @Component({
   selector: 'app-welcome-step',
   standalone: true,
-  imports: [CommonModule, IconComponent],
+  imports: [IconComponent],
   changeDetection: ChangeDetectionStrategy.OnPush,
   styles: [
     `
@@ -368,7 +369,7 @@ import { Subject } from 'rxjs';
           <h1 class="welcome-title">Bienvenido a Vendix</h1>
 
           <p class="welcome-greeting">
-            ¡Hola, {{ userFirstName }}!
+            ¡Hola, {{ userFirstName() }}!
           </p>
 
           <p class="welcome-subtitle">
@@ -383,7 +384,7 @@ import { Subject } from 'rxjs';
             <app-icon
               name="info"
               size="20"
-              [color]="primaryColor"
+              [color]="primaryColor()"
             ></app-icon>
           </div>
           <div class="context-content">
@@ -409,7 +410,7 @@ import { Subject } from 'rxjs';
                 <app-icon
                   name="store"
                   size="24"
-                  [color]="primaryColor"
+                  [color]="primaryColor()"
                 ></app-icon>
               </div>
               <div class="option-text">
@@ -424,7 +425,7 @@ import { Subject } from 'rxjs';
                   name="check-circle"
                   size="14"
                   class="feature-icon"
-                  [color]="primaryColor"
+                  [color]="primaryColor()"
                 ></app-icon>
                 <span>Configuración rápida y sencilla</span>
               </div>
@@ -433,7 +434,7 @@ import { Subject } from 'rxjs';
                   name="check-circle"
                   size="14"
                   class="feature-icon"
-                  [color]="primaryColor"
+                  [color]="primaryColor()"
                 ></app-icon>
                 <span>Todo en 3 pasos básicos</span>
               </div>
@@ -467,7 +468,7 @@ import { Subject } from 'rxjs';
                   name="check-circle"
                   size="14"
                   class="feature-icon"
-                  [color]="primaryColor"
+                  [color]="primaryColor()"
                 ></app-icon>
                 <span>Múltiples tiendas y sucursales</span>
               </div>
@@ -476,7 +477,7 @@ import { Subject } from 'rxjs';
                   name="check-circle"
                   size="14"
                   class="feature-icon"
-                  [color]="primaryColor"
+                  [color]="primaryColor()"
                 ></app-icon>
                 <span>Reportes consolidados</span>
               </div>
@@ -489,7 +490,7 @@ import { Subject } from 'rxjs';
           <app-icon
             name="shield-check"
             size="14"
-            [color]="primaryColor"
+            [color]="primaryColor()"
           ></app-icon>
           <p class="footer-text">
             Tus datos están seguros y puedes cambiarlos luego.
@@ -500,47 +501,41 @@ import { Subject } from 'rxjs';
   `,
 })
 export class WelcomeStepComponent implements OnInit {
-  @Input() userFirstName: string = 'Usuario';
-  @Output() businessTypeSelected = new EventEmitter<{
-    type: 'STORE' | 'ORGANIZATION';
-  }>();
-  @Output() selectionChanged = new EventEmitter<'STORE' | 'ORGANIZATION' | null>();
-  @Output() nextStep = new EventEmitter<void>();
+  // --- Inputs / Outputs ---
+  readonly userFirstName = input<string>('Usuario');
+  readonly businessTypeSelected = output<{ type: 'STORE' | 'ORGANIZATION' }>();
+  readonly selectionChanged = output<'STORE' | 'ORGANIZATION' | null>();
+  readonly nextStep = output<void>();
 
-  private destroy$ = new Subject<void>();
-  primaryColor = '#7ed7a5';
-  secondaryColor = '#2f6f4e';
-  accentColor = '#06b6d4';
+  // --- Services ---
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly authFacade = inject(AuthFacade);
+  private readonly wizardService = inject(OnboardingWizardService);
+  private readonly configFacade = inject(ConfigFacade);
+
+  // --- State signals ---
+  readonly primaryColor = signal('#7ed7a5');
+  readonly secondaryColor = signal('#2f6f4e');
+  readonly accentColor = signal('#06b6d4');
 
   /** Currently selected business type (for two-step selection UX) */
   selectedType: 'STORE' | 'ORGANIZATION' | null = null;
-
-  constructor(
-    private authFacade: AuthFacade,
-    private wizardService: OnboardingWizardService,
-    private configFacade: ConfigFacade,
-  ) { }
 
   ngOnInit(): void {
     this.loadThemeColors();
     this.initializeWizardData();
   }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
   private loadThemeColors(): void {
     // Suscribirse a los colores del tema de la app
     this.configFacade.appConfig$
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((config: AppConfig | null) => {
         if (config?.branding?.colors) {
           // Usar colores del branding dinámico si existen, sino usar los de Vendix
-          this.primaryColor = config.branding.colors.primary || '#7ed7a5';
-          this.secondaryColor = config.branding.colors.secondary || '#2f6f4e';
-          this.accentColor = config.branding.colors.accent || '#06b6d4';
+          this.primaryColor.set(config.branding.colors.primary || '#7ed7a5');
+          this.secondaryColor.set(config.branding.colors.secondary || '#2f6f4e');
+          this.accentColor.set(config.branding.colors.accent || '#06b6d4');
         }
       });
   }
@@ -582,3 +577,4 @@ export class WelcomeStepComponent implements OnInit {
     this.nextStep.emit();
   }
 }
+

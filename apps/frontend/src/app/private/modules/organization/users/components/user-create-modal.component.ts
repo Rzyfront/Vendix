@@ -1,42 +1,37 @@
-import {
-  Component,
-  Input,
-  Output,
-  EventEmitter,
+import {Component,
   OnInit,
-  OnDestroy,
   inject,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
+  input,
+  output,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import {
   ReactiveFormsModule,
   FormBuilder,
   FormGroup,
-  Validators,
-} from '@angular/forms';
+  Validators} from '@angular/forms';
 import {
   InputComponent,
   ButtonComponent,
-  ModalComponent,
-} from '../../../../../shared/components/index';
+  ModalComponent} from '../../../../../shared/components/index';
 import { UsersService } from '../services/users.service';
 import { CreateUserDto, UserState } from '../interfaces/user.interface';
-import { Subject, takeUntil } from 'rxjs';
+
 
 
 @Component({
   selector: 'app-user-create-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     InputComponent,
     ButtonComponent,
-    ModalComponent,
-  ],
+    ModalComponent
+],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
@@ -96,7 +91,6 @@ import { Subject, takeUntil } from 'rxjs';
           ></app-input>
 
 
-
           <div class="space-y-2">
             <label
               class="block text-sm font-medium text-[var(--color-text-primary)]"
@@ -144,19 +138,17 @@ import { Subject, takeUntil } from 'rxjs';
         display: block;
       }
     `,
-  ],
-})
-export class UserCreateModalComponent implements OnInit, OnDestroy {
-  @Input() isOpen: boolean = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() onUserCreated = new EventEmitter<void>();
+  ]})
+export class UserCreateModalComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
+  readonly isOpen = input<boolean>(false);
+  readonly isOpenChange = output<boolean>();
+  readonly onUserCreated = output<void>();
 
   userForm: FormGroup;
   isCreating: boolean = false;
   UserState = UserState;
-  private destroy$ = new Subject<void>();
-
-  usersService = inject(UsersService);
+usersService = inject(UsersService);
 
   constructor(private fb: FormBuilder) {
     this.userForm = this.fb.group({
@@ -185,18 +177,11 @@ export class UserCreateModalComponent implements OnInit, OnDestroy {
           ),
         ],
       ],
-      state: [UserState.PENDING_VERIFICATION],
-    });
+      state: [UserState.PENDING_VERIFICATION]});
   }
 
   ngOnInit(): void { }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  onSubmit(): void {
+onSubmit(): void {
     if (this.userForm.invalid || this.isCreating) {
       // Mark all fields as touched to trigger validation messages
       Object.keys(this.userForm.controls).forEach((key) => {
@@ -210,10 +195,14 @@ export class UserCreateModalComponent implements OnInit, OnDestroy {
 
     this.usersService
       .createUser(userData)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.isCreating = false;
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
           this.onUserCreated.emit();
           this.isOpenChange.emit(false);
           this.resetForm();
@@ -222,8 +211,7 @@ export class UserCreateModalComponent implements OnInit, OnDestroy {
           this.isCreating = false;
           console.error('Error creating user:', error);
           // TODO: Show user-friendly error message
-        },
-      });
+        }});
   }
 
   onCancel(): void {
@@ -238,7 +226,6 @@ export class UserCreateModalComponent implements OnInit, OnDestroy {
       username: '',
       email: '',
       password: '',
-      state: UserState.PENDING_VERIFICATION,
-    });
+      state: UserState.PENDING_VERIFICATION});
   }
 }

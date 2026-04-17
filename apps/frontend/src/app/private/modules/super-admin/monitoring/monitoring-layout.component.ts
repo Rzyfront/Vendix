@@ -1,5 +1,5 @@
-import { Component, ChangeDetectionStrategy, ChangeDetectorRef, inject, OnDestroy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject, DestroyRef } from '@angular/core';
+
 import { RouterModule } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { IconComponent } from '../../../../shared/components/icon/icon.component';
@@ -9,8 +9,7 @@ import { MonitoringService } from './services/monitoring.service';
 @Component({
   selector: 'app-monitoring-layout',
   standalone: true,
-  imports: [CommonModule, RouterModule, IconComponent, StickyHeaderComponent],
-  changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [RouterModule, IconComponent, StickyHeaderComponent],
   template: `
     <app-sticky-header
       title="Monitoreo del Sistema"
@@ -23,31 +22,34 @@ import { MonitoringService } from './services/monitoring.service';
 
     <!-- Tabs -->
     <div class="flex items-center gap-1 border-b border-border px-4 md:px-6">
-      <a *ngFor="let tab of tabs"
-        [routerLink]="tab.path"
-        routerLinkActive #rla="routerLinkActive"
-        class="flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors relative whitespace-nowrap"
-        [class.text-primary]="rla.isActive"
-        [class.text-text-secondary]="!rla.isActive"
-      >
-        <app-icon [name]="tab.icon" [size]="16"></app-icon>
-        {{ tab.label }}
-        <span
-          *ngIf="rla.isActive"
-          class="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-t-full"
-        ></span>
-      </a>
+      @for (tab of tabs; track tab) {
+        <a
+          [routerLink]="tab.path"
+          routerLinkActive #rla="routerLinkActive"
+          class="flex items-center gap-2 px-4 py-2.5 text-sm font-medium transition-colors relative whitespace-nowrap"
+          [class.text-primary]="rla.isActive"
+          [class.text-text-secondary]="!rla.isActive"
+          >
+          <app-icon [name]="tab.icon" [size]="16"></app-icon>
+          {{ tab.label }}
+          @if (rla.isActive) {
+            <span
+              class="absolute bottom-0 left-0 right-0 h-0.5 bg-primary rounded-t-full"
+            ></span>
+          }
+        </a>
+      }
     </div>
 
     <!-- Content -->
     <div class="p-4 md:p-6">
       <router-outlet></router-outlet>
     </div>
-  `,
+    `,
 })
-export class MonitoringLayoutComponent implements OnDestroy {
+export class MonitoringLayoutComponent {
   private readonly monitoringService = inject(MonitoringService);
-  private readonly cdr = inject(ChangeDetectorRef);
+  private readonly destroyRef = inject(DestroyRef);
   private tickInterval: ReturnType<typeof setInterval> | null = null;
 
   autoRefresh = true;
@@ -69,7 +71,6 @@ export class MonitoringLayoutComponent implements OnDestroy {
     ).subscribe(v => {
       this.autoRefresh = v;
       this.updateHeaderActions();
-      this.cdr.markForCheck();
     });
 
     this.monitoringService.manualRefresh$.pipe(
@@ -80,8 +81,13 @@ export class MonitoringLayoutComponent implements OnDestroy {
 
     this.tickInterval = setInterval(() => {
       this.secondsSinceRefresh++;
-      this.cdr.markForCheck();
     }, 1000);
+
+    this.destroyRef.onDestroy(() => {
+      if (this.tickInterval) {
+        clearInterval(this.tickInterval);
+      }
+    });
   }
 
   onHeaderAction(actionId: string): void {
@@ -90,12 +96,6 @@ export class MonitoringLayoutComponent implements OnDestroy {
       this.secondsSinceRefresh = 0;
     } else if (actionId === 'auto-refresh') {
       this.monitoringService.toggleAutoRefresh();
-    }
-  }
-
-  ngOnDestroy(): void {
-    if (this.tickInterval) {
-      clearInterval(this.tickInterval);
     }
   }
 

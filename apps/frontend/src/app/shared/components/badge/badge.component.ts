@@ -1,5 +1,5 @@
-import { Component, Input } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input } from '@angular/core';
+import { NgClass, NgStyle } from '@angular/common';
 
 export type BadgeVariant =
   | 'success'
@@ -26,13 +26,13 @@ const OUTLINE_COLORS: Record<string, { text: string; bg: string; border: string 
 @Component({
   selector: 'app-badge',
   standalone: true,
-  imports: [CommonModule],
+  imports: [NgClass, NgStyle],
   template: `
     <span
       class="inline-flex items-center font-medium"
       [class.rounded-full]="true"
-      [ngClass]="badgeStyle === 'solid' ? [sizeClasses, variantClasses] : [outlineSizeClasses, 'badge-outline']"
-      [ngStyle]="badgeStyle === 'outline' ? outlineStyles : null"
+      [ngClass]="badgeStyle() === 'solid' ? [sizeClasses, variantClasses] : [outlineSizeClasses, 'badge-outline']"
+      [ngStyle]="badgeStyle() === 'outline' ? outlineStyles : null"
     >
       <ng-content></ng-content>
     </span>
@@ -49,9 +49,9 @@ const OUTLINE_COLORS: Record<string, { text: string; bg: string; border: string 
   `],
 })
 export class BadgeComponent {
-  @Input() variant: BadgeVariant = 'neutral';
-  @Input() size: BadgeSize = 'sm';
-  @Input() badgeStyle: BadgeStyle = 'solid';
+  readonly variant = input<BadgeVariant>('neutral');
+  readonly size = input<BadgeSize>('sm');
+  readonly badgeStyle = input<BadgeStyle>('solid');
 
   get sizeClasses(): string {
     const sizes: Record<string, string> = {
@@ -60,7 +60,7 @@ export class BadgeComponent {
       sm:  'px-2.5 py-0.5 text-xs',
       md:  'px-3 py-1 text-sm',
     };
-    return sizes[this.size];
+    return sizes[this.size()];
   }
 
   get variantClasses(): string {
@@ -73,7 +73,7 @@ export class BadgeComponent {
       service: 'bg-purple-100 text-purple-800',
       info:    'bg-blue-100 text-blue-800',
     };
-    return variants[this.variant];
+    return variants[this.variant()];
   }
 
   get outlineSizeClasses(): string {
@@ -83,11 +83,11 @@ export class BadgeComponent {
       sm:  'px-[0.6rem] py-[0.2rem] text-xs',
       md:  'px-3 py-1 text-sm',
     };
-    return sizes[this.size];
+    return sizes[this.size()];
   }
 
   get outlineStyles(): Record<string, string> | null {
-    const v = OUTLINE_COLORS[this.variant];
+    const v = OUTLINE_COLORS[this.variant()];
     if (!v) return null;
     return { color: v.text, background: v.bg, 'border-color': v.border };
   }

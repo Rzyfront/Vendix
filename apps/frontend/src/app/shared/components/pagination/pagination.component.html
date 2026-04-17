@@ -1,9 +1,9 @@
 @if (isVisible) {
 <nav class="pagination-container" aria-label="Pagination">
   <!-- Info text (range style): "Showing X to Y of Z" -->
-  @if (infoStyle === 'range') {
+  @if (infoStyle() === 'range') {
   <span class="pagination-info">
-    Showing {{ rangeStart }} to {{ rangeEnd }} of {{ total }}
+    Showing {{ rangeStart }} to {{ rangeEnd }} of {{ total() }}
   </span>
   }
 
@@ -11,8 +11,8 @@
     <!-- Previous -->
     <button
       class="pagination-arrow"
-      [disabled]="currentPage <= 1"
-      (click)="goToPage(currentPage - 1)"
+      [disabled]="currentPage() <= 1"
+      (click)="goToPage(currentPage() - 1)"
       aria-label="Previous page"
     >
       <app-icon name="chevron-left" [size]="16" />
@@ -38,8 +38,8 @@
     <!-- Next -->
     <button
       class="pagination-arrow"
-      [disabled]="currentPage >= totalPages"
-      (click)="goToPage(currentPage + 1)"
+      [disabled]="currentPage() >= totalPages()"
+      (click)="goToPage(currentPage() + 1)"
       aria-label="Next page"
     >
       <app-icon name="chevron-right" [size]="16" />
@@ -47,9 +47,9 @@
   </div>
 
   <!-- Info text (page style): "Page X of Y (Z items)" -->
-  @if (infoStyle === 'page') {
+  @if (infoStyle() === 'page') {
   <span class="pagination-info">
-    Page {{ currentPage }} of {{ totalPages }} ({{ total }} items)
+    Page {{ currentPage() }} of {{ totalPages() }} ({{ total() }} items)
   </span>
   }
 </nav>

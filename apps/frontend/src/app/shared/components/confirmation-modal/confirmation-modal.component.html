@@ -1,19 +1,19 @@
 <app-modal
   [(isOpen)]="isOpen"
-  [title]="title"
-  [size]="size"
-  [showCloseButton]="showCloseButton"
-  [customClasses]="customClasses"
+  [title]="title()"
+  [size]="size()"
+  [showCloseButton]="showCloseButton()"
+  [customClasses]="customClasses()"
 >
   <div class="modal-body">
-    <p [innerHTML]="message"></p>
+    <p [innerHTML]="message()"></p>
   </div>
   <div slot="footer" class="modal-footer flex justify-end gap-2 md:gap-4">
     <app-button variant="outline" (clicked)="onCancel()">{{
-      cancelText
+      cancelText()
     }}</app-button>
-    <app-button [variant]="confirmVariant" (clicked)="onConfirm()">{{
-      confirmText
+    <app-button [variant]="confirmVariant()" (clicked)="onConfirm()">{{
+      confirmText()
     }}</app-button>
   </div>
 </app-modal>

@@ -1,5 +1,6 @@
-import { Component, inject, OnInit } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, inject, OnInit, signal, computed, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import {
   ReactiveFormsModule,
   FormBuilder,
@@ -37,14 +38,13 @@ interface RegistrationError {
   selector: 'app-register-owner',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     RouterLink,
     InputComponent,
     ButtonComponent,
     CardComponent,
-    IconComponent,
-  ],
+    IconComponent
+],
   template: `
     <div
       class="min-h-screen flex flex-col justify-center px-4 py-6 sm:px-6 sm:py-12 lg:px-8 bg-[var(--color-background)]"
@@ -53,9 +53,9 @@ interface RegistrationError {
         <!-- Branding -->
         <div class="text-center">
           <div class="mx-auto flex items-center justify-center space-x-2 sm:space-x-3 mb-3 sm:mb-4">
-            @if (logoUrl) {
+            @if (logoUrl()) {
               <div class="w-8 h-8 sm:w-10 sm:h-10 rounded-xl flex items-center justify-center overflow-hidden">
-                <img [src]="logoUrl" alt="Logo" class="w-full h-full object-contain" />
+                <img [src]="logoUrl()" alt="Logo" class="w-full h-full object-contain" />
               </div>
             } @else {
               <div
@@ -138,7 +138,7 @@ interface RegistrationError {
             ></app-input>
 
             <!-- Error Display -->
-            @if (hasError) {
+            @if (hasError()) {
               <div
                 class="rounded-md bg-[rgba(239,68,68,0.1)] p-3 sm:p-4 border border-[rgba(239,68,68,0.2)] mt-3 sm:mt-4"
               >
@@ -160,7 +160,7 @@ interface RegistrationError {
                     <h3
                       class="text-xs sm:text-sm font-medium text-[var(--color-destructive)]"
                     >
-                      {{ errorMessage }}
+                      {{ errorMessage() }}
                     </h3>
                   </div>
                 </div>
@@ -173,14 +173,14 @@ interface RegistrationError {
                 variant="primary"
                 size="md"
                 [disabled]="registerForm.invalid"
-                [loading]="isLoading"
+                [loading]="isLoading()"
                 [fullWidth]="true"
                 [showTextWhileLoading]="true"
               >
-                @if (!isLoading) {
+                @if (!isLoading()) {
                   <span>Crear cuenta</span>
                 }
-                @if (isLoading) {
+                @if (isLoading()) {
                   <span>Creando...</span>
                 }
               </app-button>
@@ -229,6 +229,7 @@ interface RegistrationError {
   ],
 })
 export class RegisterOwnerComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private fb = inject(FormBuilder);
   private authService = inject(AuthService);
   private authFacade = inject(AuthFacade);
@@ -239,11 +240,18 @@ export class RegisterOwnerComponent implements OnInit {
   private configFacade = inject(ConfigFacade);
   private store = inject(Store);
 
-  registrationState: RegistrationState = 'idle';
-  registrationError: RegistrationError | null = null;
-  logoUrl: string = '';
+  readonly registrationState = signal<RegistrationState>('idle');
+  readonly registrationError = signal<RegistrationError | null>(null);
+  readonly logoUrl = computed(() => {
+    const appConfig = this.configFacade.getCurrentConfig();
+    if (appConfig) {
+      return appConfig.branding?.logo?.url ||
+        (appConfig.domainConfig?.isMainVendixDomain ? 'vlogo.png' : '');
+    }
+    return '';
+  });
 
-  isLoading = false;
+  readonly isLoading = signal(false);
 
   registerForm: FormGroup = this.fb.group({
     organization_name: ['', [Validators.required]],
@@ -262,13 +270,7 @@ export class RegisterOwnerComponent implements OnInit {
   });
 
   ngOnInit(): void {
-    const appConfig = this.configFacade.getCurrentConfig();
-    if (appConfig) {
-      this.logoUrl = appConfig.branding?.logo?.url || '';
-      if (!this.logoUrl && appConfig.domainConfig?.isMainVendixDomain) {
-        this.logoUrl = 'vlogo.png';
-      }
-    }
+    // logoUrl es ahora computed() — no necesita inicialización
   }
 
   onFieldBlur(fieldName: string): void {
@@ -285,10 +287,10 @@ export class RegisterOwnerComponent implements OnInit {
 
   onSubmit() {
     if (this.registerForm.valid) {
-      this.isLoading = true;
+      this.isLoading.set(true);
       this.clearError();
 
-      this.authService.registerOwner(this.registerForm.value).subscribe({
+      this.authService.registerOwner(this.registerForm.value).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: async (result) => {
           if (result.success && result.data) {
             // Restaurar el estado de la aplicación con el nuevo usuario
@@ -315,7 +317,7 @@ export class RegisterOwnerComponent implements OnInit {
               }),
             );
 
-            this.registrationState = 'success';
+            this.registrationState.set('success');
           } else {
             // Manejar error (mostrar mensaje de error)
             if (result.message) {
@@ -330,7 +332,7 @@ export class RegisterOwnerComponent implements OnInit {
           this.handleRegistrationError(errorMessage);
         },
         complete: () => {
-          this.isLoading = false;
+          this.isLoading.set(false);
         },
       });
     } else {
@@ -347,7 +349,7 @@ export class RegisterOwnerComponent implements OnInit {
   }
 
   private handleRegistrationError(error: string): void {
-    this.registrationState = 'error';
+    this.registrationState.set('error');
     this.setRegistrationError({
       type: 'error',
       message: error,
@@ -355,8 +357,8 @@ export class RegisterOwnerComponent implements OnInit {
   }
 
   private setRegistrationError(error: RegistrationError): void {
-    this.registrationState = error.type;
-    this.registrationError = error;
+    this.registrationState.set(error.type);
+    this.registrationError.set(error);
 
     // Mostrar mensaje en toast
     const toastText = error.message;
@@ -370,16 +372,11 @@ export class RegisterOwnerComponent implements OnInit {
   }
 
   private clearError(): void {
-    this.registrationState = 'idle';
-    this.registrationError = null;
+    this.registrationState.set('idle');
+    this.registrationError.set(null);
   }
 
   // Computed properties for template
-  get hasError(): boolean {
-    return this.registrationState === 'error';
-  }
-
-  get errorMessage(): string {
-    return this.registrationError?.message || '';
-  }
+  readonly hasError = computed(() => this.registrationState() === 'error');
+  readonly errorMessage = computed(() => this.registrationError()?.message || '');
 }

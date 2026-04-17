@@ -16,7 +16,6 @@
           [formControl]="anonymousSalesAsDefaultControl"
           label="Anónimas por Defecto"
           description="Tipo de venta predeterminado"
-          [disabled]="!allowAnonymousSalesControl.value"
           (changed)="onFieldChange()"
         ></app-setting-toggle>
         <app-setting-toggle
@@ -50,7 +49,6 @@
           [formControl]="allowManualWeightEntryControl"
           label="Entrada Manual de Peso"
           description="Ingresar peso manualmente sin báscula"
-          [disabled]="!scaleEnabledControl.value"
           (changed)="onFieldChange()"
         ></app-setting-toggle>
       </div>
@@ -154,35 +152,30 @@
           [formControl]="requireSessionForSalesControl"
           label="Requerir Sesión Activa"
           description="Bloquear ventas POS sin caja abierta"
-          [disabled]="!cashRegisterEnabledControl.value"
           (changed)="onFieldChange()"
         ></app-setting-toggle>
         <app-setting-toggle
           [formControl]="requireClosingCountControl"
           label="Conteo Obligatorio al Cerrar"
           description="Exigir conteo de efectivo al cerrar caja"
-          [disabled]="!cashRegisterEnabledControl.value"
           (changed)="onFieldChange()"
         ></app-setting-toggle>
         <app-setting-toggle
           [formControl]="trackNonCashPaymentsControl"
           label="Registrar Pagos No Efectivo"
           description="Incluir tarjeta/transferencia en la sesión"
-          [disabled]="!cashRegisterEnabledControl.value"
           (changed)="onFieldChange()"
         ></app-setting-toggle>
         <app-setting-toggle
           [formControl]="allowMultipleSessionsControl"
           label="Múltiples Sesiones por Usuario"
           description="Permitir abrir más de una caja por cajero"
-          [disabled]="!cashRegisterEnabledControl.value"
           (changed)="onFieldChange()"
         ></app-setting-toggle>
         <app-setting-toggle
           [formControl]="autoCreateDefaultRegisterControl"
           label="Auto-crear Caja por Defecto"
           description="Crear 'Caja 1' (POS-01) al habilitar"
-          [disabled]="!cashRegisterEnabledControl.value"
           (changed)="onFieldChange()"
         ></app-setting-toggle>
       </div>
@@ -204,7 +197,6 @@
           [formControl]="requireEmailControl"
           label="Requerir Email"
           description="Email obligatorio en el formulario público"
-          [disabled]="!customerQueueEnabledControl.value"
           (changed)="onFieldChange()"
         ></app-setting-toggle>
       </div>

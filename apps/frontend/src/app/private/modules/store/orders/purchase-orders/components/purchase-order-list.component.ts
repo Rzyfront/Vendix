@@ -1,14 +1,12 @@
 import {
   Component,
-  Output,
-  EventEmitter,
-  OnInit,
-  OnDestroy,
+  DestroyRef,
   inject,
+  output,
+  signal,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Subject, takeUntil } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   TableColumn,
@@ -43,7 +41,6 @@ import { PurchaseOrderPrintService } from '../services/purchase-order-print.serv
   selector: 'app-purchase-order-list',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ResponsiveDataViewComponent,
     InputsearchComponent,
@@ -57,22 +54,21 @@ import { PurchaseOrderPrintService } from '../services/purchase-order-print.serv
   templateUrl: './purchase-order-list.component.html',
   styleUrls: ['./purchase-order-list.component.scss'],
 })
-export class PurchaseOrderListComponent implements OnInit, OnDestroy {
+export class PurchaseOrderListComponent {
   private currencyService = inject(CurrencyFormatService);
   private printService = inject(PurchaseOrderPrintService);
+  private destroyRef = inject(DestroyRef);
 
-  @Output() viewOrder = new EventEmitter<PurchaseOrder>();
-  @Output() create = new EventEmitter<void>();
-  @Output() refresh = new EventEmitter<void>();
-  @Output() statsUpdated = new EventEmitter<PurchaseOrderStats>();
-
-  private destroy$ = new Subject<void>();
+  readonly viewOrder = output<PurchaseOrder>();
+  readonly create = output<void>();
+  readonly refresh = output<void>();
+  readonly statsUpdated = output<PurchaseOrderStats>();
 
   // Data
-  orders: PurchaseOrder[] = [];
-  suppliers: any[] = [];
-  loading = false;
-  totalItems = 0;
+  readonly orders = signal<PurchaseOrder[]>([]);
+  readonly suppliers = signal<any[]>([]);
+  readonly loading = signal(false);
+  readonly totalItems = signal(0);
 
   // Pagination
   filters = { page: 1, limit: 10 };
@@ -229,21 +225,14 @@ export class PurchaseOrderListComponent implements OnInit, OnDestroy {
     private suppliersService: SuppliersService,
     private dialogService: DialogService,
     private toastService: ToastService,
-  ) {}
-
-  ngOnInit(): void {
+  ) {
     this.loadOrders();
     this.loadSuppliers();
   }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
   // Load orders with current filters
   loadOrders(): void {
-    this.loading = true;
+    this.loading.set(true);
 
     const query: any = {
       page: this.filters.page,
@@ -258,20 +247,22 @@ export class PurchaseOrderListComponent implements OnInit, OnDestroy {
 
     this.purchaseOrdersService
       .getPurchaseOrders(query)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: any) => {
           const orders = response.data || response;
-          this.orders = Array.isArray(orders) ? orders : [];
-          this.totalItems =
+          const parsedOrders: PurchaseOrder[] = Array.isArray(orders) ? orders : [];
+          this.orders.set(parsedOrders);
+          this.totalItems.set(
             response.meta?.pagination?.total ??
             response.meta?.total ??
-            this.orders.length;
+            parsedOrders.length,
+          );
 
           // Enrich orders with supplier names
           this.enrichOrdersWithSuppliers();
 
-          this.loading = false;
+          this.loading.set(false);
 
           // Calculate and emit stats to parent
           this.calculateAndEmitStats();
@@ -281,7 +272,7 @@ export class PurchaseOrderListComponent implements OnInit, OnDestroy {
           this.toastService.error(
             'Error al cargar las órdenes de compra. Por favor intenta nuevamente.',
           );
-          this.loading = false;
+          this.loading.set(false);
         },
       });
   }
@@ -289,12 +280,12 @@ export class PurchaseOrderListComponent implements OnInit, OnDestroy {
   loadSuppliers(): void {
     this.suppliersService
       .getSuppliers()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: any) => {
-          this.suppliers = response.data || response || [];
+          this.suppliers.set(response.data || response || []);
           // Enrich orders if they were loaded before suppliers
-          if (this.orders.length > 0) {
+          if (this.orders().length > 0) {
             this.enrichOrdersWithSuppliers();
           }
         },
@@ -306,36 +297,39 @@ export class PurchaseOrderListComponent implements OnInit, OnDestroy {
 
   private enrichOrdersWithSuppliers(): void {
     // Backend already includes suppliers data, just extract the name
-    this.orders = this.orders.map((order: any) => {
-      // If suppliers object is already populated, use it
-      if (order.suppliers && order.suppliers.name) {
+    this.orders.update((orders) =>
+      orders.map((order: any) => {
+        // If suppliers object is already populated, use it
+        if (order.suppliers && order.suppliers.name) {
+          return {
+            ...order,
+            supplierName: order.suppliers.name,
+          };
+        }
+        // Fallback to supplier map if needed
+        const supplier = this.suppliers().find(
+          (s: any) => s.id === order.supplier_id,
+        );
         return {
           ...order,
-          supplierName: order.suppliers.name,
+          supplierName: supplier?.name || 'N/A',
         };
-      }
-      // Fallback to supplier map if needed
-      const supplier = this.suppliers.find(
-        (s: any) => s.id === order.supplier_id,
-      );
-      return {
-        ...order,
-        supplierName: supplier?.name || 'N/A',
-      };
-    }) as any;
+      }) as any,
+    );
   }
 
   // Calculate stats from orders and emit to parent
   private calculateAndEmitStats(): void {
+    const orders = this.orders();
     const stats: PurchaseOrderStats = {
-      total: this.orders.length,
-      pending: this.orders.filter((o) =>
+      total: orders.length,
+      pending: orders.filter((o) =>
         ['draft', 'submitted', 'approved', 'ordered', 'partial'].includes(
           o.status,
         ),
       ).length,
-      received: this.orders.filter((o) => o.status === 'received').length,
-      total_value: this.orders.reduce((sum, o) => {
+      received: orders.filter((o) => o.status === 'received').length,
+      total_value: orders.reduce((sum, o) => {
         const amount =
           typeof o.total_amount === 'string'
             ? parseFloat(o.total_amount)
@@ -348,7 +342,7 @@ export class PurchaseOrderListComponent implements OnInit, OnDestroy {
 
   // Pagination
   get totalPages(): number {
-    return Math.ceil(this.totalItems / (this.filters.limit || 10));
+    return Math.ceil(this.totalItems() / (this.filters.limit || 10));
   }
 
   onPageChange(page: number): void {
@@ -391,6 +385,7 @@ export class PurchaseOrderListComponent implements OnInit, OnDestroy {
     return !!(this.searchTerm || this.selectedStatus);
   }
 
+
   // Get empty state title based on filters
   getEmptyStateTitle(): string {
     if (this.hasFilters) {
@@ -423,7 +418,7 @@ export class PurchaseOrderListComponent implements OnInit, OnDestroy {
     if (confirmed) {
       this.purchaseOrdersService
         .cancelPurchaseOrder(order.id)
-        .pipe(takeUntil(this.destroy$))
+        .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: () => {
             this.toastService.success('Orden cancelada exitosamente');

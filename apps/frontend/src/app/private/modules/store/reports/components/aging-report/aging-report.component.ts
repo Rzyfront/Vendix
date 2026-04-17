@@ -1,11 +1,11 @@
 import { Component, input, computed } from '@angular/core';
-import { CommonModule, CurrencyPipe, DecimalPipe, PercentPipe } from '@angular/common';
+import { CurrencyPipe, DecimalPipe, PercentPipe } from '@angular/common';
 import { ReportColumn } from '../../interfaces/report.interface';
 
 @Component({
   selector: 'app-aging-report',
   standalone: true,
-  imports: [CommonModule],
+  imports: [],
   providers: [CurrencyPipe, DecimalPipe, PercentPipe],
   templateUrl: './aging-report.component.html',
   styleUrls: ['./aging-report.component.scss'],

@@ -1,8 +1,10 @@
-import { Component, OnInit, OnDestroy, inject } from '@angular/core';
+import {Component, OnInit, OnDestroy, inject,
+  DestroyRef} from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { RouterLink } from '@angular/router';
 import { Store } from '@ngrx/store';
-import { Observable, Subject, combineLatest, takeUntil } from 'rxjs';
+import { Observable, combineLatest } from 'rxjs';
+import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
 
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
@@ -11,20 +13,17 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
 import { OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
 import {
   FilterConfig,
-  FilterValues,
-} from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
+  FilterValues } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import {
   CurrencyPipe,
-  CurrencyFormatService,
-} from '../../../../../../shared/pipes/currency/currency.pipe';
+  CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
 
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import {
   CustomersSummary,
   CustomerTrend,
-  TopCustomer,
-} from '../../interfaces/customers-analytics.interface';
+  TopCustomer } from '../../interfaces/customers-analytics.interface';
 
 import * as CustomersActions from './state/customers-analytics.actions';
 import * as CustomersSelectors from './state/customers-analytics.selectors';
@@ -47,14 +46,12 @@ import { getDefaultStartDate, getDefaultEndDate, formatChartPeriod } from '../..
     CurrencyPipe,
   ],
   templateUrl: './customer-summary.component.html',
-  styleUrls: ['./customer-summary.component.scss'],
-})
+  styleUrls: ['./customer-summary.component.scss'] })
 export class CustomerSummaryComponent implements OnInit, OnDestroy {
+  private destroyRef = inject(DestroyRef);
   private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
-  private destroy$ = new Subject<void>();
-
-  // Observables from store
+// Observables from store
   summary$: Observable<CustomersSummary | null> = this.store.select(
     CustomersSelectors.selectSummary,
   );
@@ -80,6 +77,11 @@ export class CustomerSummaryComponent implements OnInit, OnDestroy {
     CustomersSelectors.selectGranularity,
   );
 
+  readonly summary = toSignal(this.summary$, { initialValue: null });
+  readonly loading = toSignal(this.loading$, { initialValue: false });
+  readonly loadingTrends = toSignal(this.loadingTrends$, { initialValue: false });
+  readonly exporting = toSignal(this.exporting$, { initialValue: false });
+
   // Chart options
   trendsChartOptions: EChartsOption = {};
   topCustomersChartOptions: EChartsOption = {};
@@ -90,14 +92,12 @@ export class CustomerSummaryComponent implements OnInit, OnDestroy {
       key: 'date_from',
       label: 'Desde',
       type: 'date',
-      defaultValue: getDefaultStartDate(),
-    },
+      defaultValue: getDefaultStartDate() },
     {
       key: 'date_to',
       label: 'Hasta',
       type: 'date',
-      defaultValue: getDefaultEndDate(),
-    },
+      defaultValue: getDefaultEndDate() },
     {
       key: 'granularity',
       label: 'Granularidad',
@@ -110,8 +110,7 @@ export class CustomerSummaryComponent implements OnInit, OnDestroy {
         { value: 'year', label: 'Por Año' },
       ],
       placeholder: 'Seleccionar',
-      defaultValue: 'day',
-    },
+      defaultValue: 'day' },
   ];
 
   filterValues: FilterValues = {};
@@ -126,34 +125,32 @@ export class CustomerSummaryComponent implements OnInit, OnDestroy {
 
     // Sync store state → filterValues for the options dropdown
     combineLatest([this.dateRange$, this.granularity$])
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(([dateRange, granularity]) => {
         this.filterValues = {
           date_from: dateRange.start_date || null,
           date_to: dateRange.end_date || null,
-          granularity: granularity || 'day',
-        };
+          granularity: granularity || 'day' };
       });
 
     // Subscribe to trends to build chart options
     combineLatest([this.trends$, this.granularity$])
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(([trends, granularity]) => {
         this.updateTrendsChart(trends, granularity);
       });
 
     // Subscribe to top customers to build chart options
     this.topCustomers$
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((topCustomers) => {
         this.updateTopCustomersChart(topCustomers);
       });
   }
 
   ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-    this.store.dispatch(CustomersActions.clearCustomersAnalyticsState());
+
+this.store.dispatch(CustomersActions.clearCustomersAnalyticsState());
   }
 
   onFilterChange(values: FilterValues): void {
@@ -171,9 +168,7 @@ export class CustomerSummaryComponent implements OnInit, OnDestroy {
           dateRange: {
             start_date: dateFrom || '',
             end_date: dateTo || '',
-            preset: 'custom',
-          },
-        }),
+            preset: 'custom' } }),
       );
     }
 
@@ -190,9 +185,7 @@ export class CustomerSummaryComponent implements OnInit, OnDestroy {
         dateRange: {
           start_date: getDefaultStartDate(),
           end_date: getDefaultEndDate(),
-          preset: 'thisMonth',
-        },
-      }),
+          preset: 'thisMonth' } }),
     );
     this.store.dispatch(
       CustomersActions.setGranularity({ granularity: 'day' }),
@@ -233,26 +226,22 @@ export class CustomerSummaryComponent implements OnInit, OnDestroy {
         formatter: (params: any) => {
           const data = params[0];
           return `${data.name}<br/>Nuevos Clientes: ${data.value}`;
-        },
-      },
+        } },
       grid: {
         left: '3%',
         right: '4%',
         bottom: '3%',
-        containLabel: true,
-      },
+        containLabel: true },
       xAxis: {
         type: 'category',
         data: labels,
         axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary },
-      },
+        axisLabel: { color: textSecondary } },
       yAxis: {
         type: 'value',
         axisLine: { show: false },
         axisLabel: { color: textSecondary },
-        splitLine: { lineStyle: { color: borderColor } },
-      },
+        splitLine: { lineStyle: { color: borderColor } } },
       series: [
         {
           name: 'Nuevos Clientes',
@@ -269,14 +258,10 @@ export class CustomerSummaryComponent implements OnInit, OnDestroy {
               colorStops: [
                 { offset: 0, color: `${primaryColor}4D` },
                 { offset: 1, color: `${primaryColor}0D` },
-              ],
-            },
-          },
+              ] } },
           lineStyle: { color: primaryColor, width: 2 },
-          itemStyle: { color: primaryColor },
-        },
-      ],
-    };
+          itemStyle: { color: primaryColor } },
+      ] };
   }
 
   private updateTopCustomersChart(topCustomers: TopCustomer[]): void {
@@ -303,23 +288,19 @@ export class CustomerSummaryComponent implements OnInit, OnDestroy {
         formatter: (params: any) => {
           const data = params[0];
           return `${data.name}<br/>Total: ${this.currencyService.format(data.value)}`;
-        },
-      },
+        } },
       grid: {
         left: '3%',
         right: '6%',
         bottom: '3%',
-        containLabel: true,
-      },
+        containLabel: true },
       xAxis: {
         type: 'value',
         axisLine: { show: false },
         axisLabel: {
           color: textSecondary,
-          formatter: (value: number) => this.currencyService.format(value, 0),
-        },
-        splitLine: { lineStyle: { color: borderColor } },
-      },
+          formatter: (value: number) => this.currencyService.format(value, 0) },
+        splitLine: { lineStyle: { color: borderColor } } },
       yAxis: {
         type: 'category',
         data: names,
@@ -327,9 +308,7 @@ export class CustomerSummaryComponent implements OnInit, OnDestroy {
         axisLabel: {
           color: textSecondary,
           width: 120,
-          overflow: 'truncate',
-        },
-      },
+          overflow: 'truncate' } },
       series: [
         {
           name: 'Total Gastado',
@@ -345,14 +324,10 @@ export class CustomerSummaryComponent implements OnInit, OnDestroy {
               colorStops: [
                 { offset: 0, color: `${primaryColor}99` },
                 { offset: 1, color: primaryColor },
-              ],
-            },
-            borderRadius: [0, 4, 4, 0],
-          },
-          barMaxWidth: 32,
-        },
-      ],
-    };
+              ] },
+            borderRadius: [0, 4, 4, 0] },
+          barMaxWidth: 32 },
+      ] };
   }
 
 }

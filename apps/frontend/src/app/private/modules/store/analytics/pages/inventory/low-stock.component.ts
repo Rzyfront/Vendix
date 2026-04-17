@@ -1,14 +1,15 @@
-import { Component, OnInit, OnDestroy, inject, signal, computed } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, OnInit, inject, signal, computed,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import { RouterModule } from '@angular/router';
-import { Subject, takeUntil, forkJoin } from 'rxjs';
+import { forkJoin } from 'rxjs';
 
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { TableColumn } from '../../../../../../shared/components/table/table.component';
 import {
   ResponsiveDataViewComponent,
-  ItemListCardConfig,
-} from '../../../../../../shared/components/index';
+  ItemListCardConfig} from '../../../../../../shared/components/index';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
@@ -17,27 +18,24 @@ import { OptionsDropdownComponent } from '../../../../../../shared/components/op
 import {
   FilterConfig,
   FilterValues,
-  DropdownAction,
-} from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
+  DropdownAction} from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 
 import { AnalyticsService } from '../../services/analytics.service';
 import {
   StockLevelReport,
-  InventorySummary,
-} from '../../interfaces/inventory-analytics.interface';
+  InventorySummary} from '../../interfaces/inventory-analytics.interface';
 
 @Component({
   selector: 'vendix-low-stock',
   standalone: true,
   imports: [
-    CommonModule,
     RouterModule,
     CardComponent,
     ResponsiveDataViewComponent,
     StatsComponent,
     InputsearchComponent,
-    OptionsDropdownComponent,
-  ],
+    OptionsDropdownComponent
+],
   template: `
     <div class="w-full">
       <!-- Stats: Sticky on mobile, static on desktop -->
@@ -153,14 +151,12 @@ import {
         </app-card>
       </div>
     </div>
-  `,
-})
-export class LowStockComponent implements OnInit, OnDestroy {
+  `})
+export class LowStockComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private analyticsService = inject(AnalyticsService);
   private toastService = inject(ToastService);
-  private destroy$ = new Subject<void>();
-
-  // Signals
+// Signals
   loading = signal(true);
   exporting = signal(false);
   data = signal<StockLevelReport[]>([]);
@@ -206,8 +202,7 @@ export class LowStockComponent implements OnInit, OnDestroy {
         { value: '', label: 'Todos' },
         { value: 'out_of_stock', label: 'Agotado' },
         { value: 'low_stock', label: 'Stock Bajo' },
-      ],
-    },
+      ]},
   ];
 
   filterValues: FilterValues = {};
@@ -217,13 +212,11 @@ export class LowStockComponent implements OnInit, OnDestroy {
       label: 'Crear Orden de Compra',
       icon: 'shopping-cart',
       action: 'create-pop',
-      variant: 'primary',
-    },
+      variant: 'primary'},
     {
       label: 'Exportar',
       icon: 'download',
-      action: 'export',
-    },
+      action: 'export'},
   ];
 
   // Columns with SPANISH badges
@@ -234,8 +227,7 @@ export class LowStockComponent implements OnInit, OnDestroy {
       width: '50px',
       align: 'center',
       priority: 1,
-      type: 'image',
-    },
+      type: 'image'},
     { key: 'product_name', label: 'Producto', sortable: true, priority: 1 },
     { key: 'sku', label: 'SKU', sortable: true, priority: 2, width: '120px' },
     {
@@ -244,16 +236,14 @@ export class LowStockComponent implements OnInit, OnDestroy {
       sortable: true,
       align: 'right',
       priority: 1,
-      width: '100px',
-    },
+      width: '100px'},
     {
       key: 'reorder_point',
       label: 'Punto Reorden',
       sortable: true,
       align: 'right',
       priority: 1,
-      width: '120px',
-    },
+      width: '120px'},
     {
       key: 'days_of_stock',
       label: 'Dias de Stock',
@@ -262,8 +252,7 @@ export class LowStockComponent implements OnInit, OnDestroy {
       priority: 2,
       width: '120px',
       defaultValue: '-',
-      transform: (val: any) => `${val} dias`,
-    },
+      transform: (val: any) => `${val} dias`},
     {
       key: 'status',
       label: 'Estado',
@@ -276,16 +265,13 @@ export class LowStockComponent implements OnInit, OnDestroy {
         size: 'sm',
         colorMap: {
           low_stock: '#f59e0b',
-          out_of_stock: '#ef4444',
-        },
-      },
+          out_of_stock: '#ef4444'}},
       transform: (val: string) =>
         val === 'out_of_stock'
           ? 'Agotado'
           : val === 'low_stock'
             ? 'Stock Bajo'
-            : val,
-    },
+            : val},
   ];
 
   cardConfig: ItemListCardConfig = {
@@ -298,9 +284,7 @@ export class LowStockComponent implements OnInit, OnDestroy {
       size: 'sm',
       colorMap: {
         low_stock: '#f59e0b',
-        out_of_stock: '#ef4444',
-      },
-    },
+        out_of_stock: '#ef4444'}},
     badgeTransform: (val: string) =>
       val === 'out_of_stock'
         ? 'Agotado'
@@ -311,33 +295,23 @@ export class LowStockComponent implements OnInit, OnDestroy {
       {
         key: 'quantity_available',
         label: 'Disponible',
-        transform: (val: any) => `${val} uds`,
-      },
+        transform: (val: any) => `${val} uds`},
       {
         key: 'reorder_point',
         label: 'Reorden',
-        transform: (val: any) => `${val} uds`,
-      },
-    ],
-  };
+        transform: (val: any) => `${val} uds`},
+    ]};
 
   ngOnInit(): void {
     this.loadData();
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  loadData(): void {
+loadData(): void {
     this.loading.set(true);
 
     forkJoin({
       alerts: this.analyticsService.getLowStockAlerts({ limit: 100 }),
-      summary: this.analyticsService.getInventorySummary(),
-    })
-      .pipe(takeUntil(this.destroy$))
+      summary: this.analyticsService.getInventorySummary()})
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: ({ alerts, summary }) => {
           this.data.set(alerts.data);
@@ -347,8 +321,7 @@ export class LowStockComponent implements OnInit, OnDestroy {
         error: () => {
           this.toastService.error('Error al cargar alertas de stock');
           this.loading.set(false);
-        },
-      });
+        }});
   }
 
   onSearch(term: string): void {
@@ -379,7 +352,7 @@ export class LowStockComponent implements OnInit, OnDestroy {
     this.exporting.set(true);
     this.analyticsService
       .exportInventoryAnalytics({ status: 'low_stock' })
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (blob) => {
           const url = window.URL.createObjectURL(blob);
@@ -393,7 +366,6 @@ export class LowStockComponent implements OnInit, OnDestroy {
         error: () => {
           this.toastService.error('Error al exportar');
           this.exporting.set(false);
-        },
-      });
+        }});
   }
 }

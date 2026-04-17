@@ -1,19 +1,17 @@
 import {
   Component,
   ElementRef,
-  EventEmitter,
   HostListener,
-  Input,
-  Output,
   TemplateRef,
-  ViewChild,
+  output,
+  signal,
+  viewChild,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
 
 @Component({
   selector: 'app-dropdown',
   standalone: true,
-  imports: [CommonModule],
+  imports: [],
   template: `
     <div class="relative inline-block text-left" #root>
       <button
@@ -24,38 +22,39 @@ import { CommonModule } from '@angular/common';
         <ng-content select="[dropdown-trigger]"></ng-content>
       </button>
 
-      <div
-        *ngIf="open"
-        class="absolute right-0 z-50 mt-2 w-56 origin-top-right rounded-md bg-[var(--color-background)] shadow-lg ring-1 ring-[var(--color-border)] focus:outline-none"
-        role="menu"
-      >
-        <div class="py-1" role="none">
-          <ng-content select="[dropdown-item]"></ng-content>
+      @if (open()) {
+        <div
+          class="absolute right-0 z-50 mt-2 w-56 origin-top-right rounded-md bg-[var(--color-background)] shadow-lg ring-1 ring-[var(--color-border)] focus:outline-none"
+          role="menu"
+        >
+          <div class="py-1" role="none">
+            <ng-content select="[dropdown-item]"></ng-content>
+          </div>
         </div>
-      </div>
+      }
     </div>
   `,
 })
 export class DropdownComponent {
-  @Input() open = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @ViewChild('root') rootRef!: ElementRef<HTMLElement>;
+  open = signal(false);
+  readonly isOpenChange = output<boolean>();
+  readonly rootRef = viewChild.required<ElementRef<HTMLElement>>('root');
 
   toggle() {
-    this.open = !this.open;
-    this.isOpenChange.emit(this.open);
+    this.open.set(!this.open());
+    this.isOpenChange.emit(this.open());
   }
 
   close() {
-    if (this.open) {
-      this.open = false;
+    if (this.open()) {
+      this.open.set(false);
       this.isOpenChange.emit(false);
     }
   }
 
   @HostListener('document:click', ['$event'])
   onDocumentClick(e: MouseEvent) {
-    const root = this.rootRef?.nativeElement;
+    const root = this.rootRef()?.nativeElement;
     if (!root) return;
     if (!root.contains(e.target as Node)) {
       this.close();

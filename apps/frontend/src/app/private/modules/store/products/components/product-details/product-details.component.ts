@@ -1,11 +1,10 @@
-import { Component, Input } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input } from '@angular/core';
 import { Product } from '../../interfaces';
 
 @Component({
   selector: 'app-product-details',
   standalone: true,
-  imports: [CommonModule],
+  imports: [],
   template: `
     <div class="product-details">
       <!-- Product details implementation will go here -->
@@ -22,5 +21,5 @@ import { Product } from '../../interfaces';
   ],
 })
 export class ProductDetailsComponent {
-  @Input() product?: Product;
+  readonly product = input<Product>();
 }

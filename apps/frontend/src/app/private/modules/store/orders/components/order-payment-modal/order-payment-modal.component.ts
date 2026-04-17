@@ -7,7 +7,7 @@ import {
   output,
   signal,
 } from '@angular/core';
-import { CommonModule, DatePipe } from '@angular/common';
+import { DatePipe, NgClass } from '@angular/common';
 import { ReactiveFormsModule, FormControl } from '@angular/forms';
 import { ModalComponent } from '../../../../../../shared/components';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
@@ -30,7 +30,6 @@ interface PaymentMethodDisplay {
   selector: 'app-order-payment-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
@@ -38,6 +37,7 @@ interface PaymentMethodDisplay {
     InputComponent,
     CurrencyPipe,
     DatePipe,
+    NgClass,
   ],
   templateUrl: './order-payment-modal.component.html',
   styleUrls: ['./order-payment-modal.component.css'],

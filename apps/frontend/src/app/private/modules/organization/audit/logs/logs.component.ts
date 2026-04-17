@@ -1,15 +1,21 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
+import {Component,
+  OnInit,
+  OnDestroy,
+  signal,
+  model,
+  inject,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import { FormBuilder, FormGroup, ReactiveFormsModule } from '@angular/forms';
-import { Subject, debounceTime, distinctUntilChanged, takeUntil } from 'rxjs';
+import { debounceTime, distinctUntilChanged } from 'rxjs';
 import {
   AuditLog,
   AuditQueryDto,
   AuditStats,
   AuditAction,
   AuditResource,
-  PaginatedAuditResponse
-} from '../interfaces/audit.interface';
+  PaginatedAuditResponse } from '../interfaces/audit.interface';
 import { AuditService } from '../services/audit.service';
 import {
   TableColumn,
@@ -18,8 +24,7 @@ import {
   ModalComponent,
   ButtonComponent,
   ResponsiveDataViewComponent,
-  ItemListCardConfig,
-} from '../../../../../shared/components/index';
+  ItemListCardConfig } from '../../../../../shared/components/index';
 
 interface StatItem {
   title: string;
@@ -41,52 +46,62 @@ interface StatItem {
     ButtonComponent,
     ResponsiveDataViewComponent,
   ],
-  templateUrl: './logs.component.html',
-})
+  templateUrl: './logs.component.html' })
 export class LogsComponent implements OnInit, OnDestroy {
-  logs: AuditLog[] = [];
-  stats: AuditStats | null = null;
-  statsItems: StatItem[] = [];
-  isLoading = false;
-  private destroy$ = new Subject<void>();
-
-  // Track active subscriptions to prevent duplicates
+  private destroyRef = inject(DestroyRef);
+  readonly logs = model<AuditLog[]>([]);
+  readonly stats = model<AuditStats | null>(null);
+  readonly statsItems = model<StatItem[]>([]);
+  readonly isLoading = model(false);
+// Track active subscriptions to prevent duplicates
   private statsSubscription: any = null;
   private logsSubscription: any = null;
 
   // Modal State
-  selectedLog: AuditLog | null = null;
-  showDetailModal = false;
+  readonly selectedLog = model<AuditLog | null>(null);
+  readonly showDetailModal = model<boolean>(false);
 
   // Filter Form
   filterForm: FormGroup;
 
   // Enums for dropdowns
-  resources = Object.values(AuditResource).map(r => ({ value: r, label: r.charAt(0).toUpperCase() + r.slice(1).replace('_', ' ') }));
-  actions = Object.values(AuditAction).map(a => ({ value: a, label: a.split('_').map(w => w.charAt(0) + w.slice(1).toLowerCase()).join(' ') }));
+  resources = Object.values(AuditResource).map((r) => ({
+    value: r,
+    label: r.charAt(0).toUpperCase() + r.slice(1).replace('_', ' ') }));
+  actions = Object.values(AuditAction).map((a) => ({
+    value: a,
+    label: a
+      .split('_')
+      .map((w) => w.charAt(0) + w.slice(1).toLowerCase())
+      .join(' ') }));
 
   // Table Configuration
   tableColumns: TableColumn[] = [
-    { key: 'action', label: 'Acción', transform: (val: string) => val.replace('_', ' '), priority: 1 },
-    { key: 'resource', label: 'Recurso', transform: (val: string) => val.charAt(0).toUpperCase() + val.slice(1), priority: 2 },
+    {
+      key: 'action',
+      label: 'Acción',
+      transform: (val: string) => val.replace('_', ' '),
+      priority: 1 },
+    {
+      key: 'resource',
+      label: 'Recurso',
+      transform: (val: string) => val.charAt(0).toUpperCase() + val.slice(1),
+      priority: 2 },
     {
       key: 'users',
       label: 'Usuario',
-      transform: (u: any) => u ? `${u.first_name} ${u.last_name}` : 'Sistema',
-      priority: 1
-    },
+      transform: (u: any) => (u ? `${u.first_name} ${u.last_name}` : 'Sistema'),
+      priority: 1 },
     {
       key: 'created_at',
       label: 'Fecha',
       priority: 2,
-      transform: (val: string) => new Date(val).toLocaleString()
-    },
+      transform: (val: string) => new Date(val).toLocaleString() },
     {
       key: 'resource_id',
       label: 'ID Recurso',
       priority: 3,
-      transform: (val: any) => val ? `ID: ${val}` : '-'
-    }
+      transform: (val: any) => (val ? `ID: ${val}` : '-') },
   ];
 
   tableActions: TableAction[] = [
@@ -94,8 +109,7 @@ export class LogsComponent implements OnInit, OnDestroy {
       label: 'Ver Detalle',
       icon: 'eye',
       action: (log: AuditLog) => this.viewDetail(log),
-      variant: 'secondary'
-    }
+      variant: 'secondary' },
   ];
 
   // Card configuration for mobile
@@ -103,28 +117,33 @@ export class LogsComponent implements OnInit, OnDestroy {
     titleKey: 'action',
     titleTransform: (val: string) => val.replace('_', ' '),
     subtitleKey: 'resource',
-    subtitleTransform: (val: string) => val.charAt(0).toUpperCase() + val.slice(1),
+    subtitleTransform: (val: string) =>
+      val.charAt(0).toUpperCase() + val.slice(1),
     detailKeys: [
-      { key: 'users', label: 'Usuario', transform: (u: any) => u ? `${u.first_name} ${u.last_name}` : 'Sistema' },
-      { key: 'created_at', label: 'Fecha', transform: (val: string) => new Date(val).toLocaleString() },
-    ],
-  };
+      {
+        key: 'users',
+        label: 'Usuario',
+        transform: (u: any) =>
+          u ? `${u.first_name} ${u.last_name}` : 'Sistema' },
+      {
+        key: 'created_at',
+        label: 'Fecha',
+        transform: (val: string) => new Date(val).toLocaleString() },
+    ] };
 
   pagination = {
     page: 1,
     limit: 10,
     total: 0,
-    totalPages: 0,
-  };
+    totalPages: 0 };
 
   constructor(
     private auditService: AuditService,
-    private fb: FormBuilder
+    private fb: FormBuilder,
   ) {
     this.filterForm = this.fb.group({
       resource: [''],
-      action: ['']
-    });
+      action: [''] });
   }
 
   ngOnInit(): void {
@@ -132,11 +151,7 @@ export class LogsComponent implements OnInit, OnDestroy {
     this.loadStats();
 
     this.filterForm.valueChanges
-      .pipe(
-        debounceTime(300),
-        distinctUntilChanged(),
-        takeUntil(this.destroy$)
-      )
+      .pipe(debounceTime(300), distinctUntilChanged(), takeUntilDestroyed(this.destroyRef))
       .subscribe(() => {
         this.pagination.page = 1;
         this.loadLogs();
@@ -154,9 +169,7 @@ export class LogsComponent implements OnInit, OnDestroy {
       this.statsSubscription = null;
     }
 
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
+}
 
   loadLogs(): void {
     // Cancel previous subscription if exists
@@ -165,34 +178,35 @@ export class LogsComponent implements OnInit, OnDestroy {
       this.logsSubscription = null;
     }
 
-    this.isLoading = true;
+    this.isLoading.set(true);
     const filters = this.filterForm.value;
     const query: AuditQueryDto = {
       page: this.pagination.page,
       limit: this.pagination.limit,
       resource: filters.resource || undefined,
-      action: filters.action || undefined,
-    };
+      action: filters.action || undefined };
 
-    this.logsSubscription = this.auditService.getAuditLogs(query)
-      .pipe(takeUntil(this.destroy$))
+    this.logsSubscription = this.auditService
+      .getAuditLogs(query)
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response: PaginatedAuditResponse) => {
-          this.logs = response.data || [];
+          this.logs.set(response.data || []);
           if (response.pagination) {
             this.pagination = response.pagination;
           } else {
             // Fallback if backend doesn't send pagination meta
             this.pagination.total = 1000; // Fake total
-            this.pagination.totalPages = Math.ceil(1000 / this.pagination.limit);
+            this.pagination.totalPages = Math.ceil(
+              1000 / this.pagination.limit,
+            );
           }
-          this.isLoading = false;
+          this.isLoading.set(false);
         },
         error: (err) => {
           console.error(err);
-          this.isLoading = false;
-        }
-      });
+          this.isLoading.set(false);
+        } });
   }
 
   loadStats(): void {
@@ -202,69 +216,84 @@ export class LogsComponent implements OnInit, OnDestroy {
       this.statsSubscription = null;
     }
 
-    this.statsSubscription = this.auditService.getAuditStats()
-      .pipe(takeUntil(this.destroy$))
+    this.statsSubscription = this.auditService
+      .getAuditStats()
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (stats) => {
-          this.stats = stats;
+          this.stats.set(stats);
           this.updateStatsItems();
         },
         error: (err) => {
           console.error('Error loading audit stats:', err);
           this.statsSubscription = null;
-        }
-      });
+        } });
   }
 
   updateStatsItems(): void {
-    if (!this.stats) return;
+    const stats = this.stats();
+    if (!stats) return;
 
-    const combined = this.stats.logs_by_action_and_resource || {};
+    const combined = stats.logs_by_action_and_resource || {};
 
     // Para "Usuarios", solo contar cambios reales (CREATE, UPDATE, DELETE), no vistas (VIEW, SEARCH)
-    const userChanges = (combined['CREATE_users'] || 0) +
+    const userChanges =
+      (combined['CREATE_users'] || 0) +
       (combined['UPDATE_users'] || 0) +
       (combined['DELETE_users'] || 0);
 
     // Para "Cambios Config", solo contar cambios reales en settings
-    const settingsChanges = (combined['CREATE_settings'] || 0) +
+    const settingsChanges =
+      (combined['CREATE_settings'] || 0) +
       (combined['UPDATE_settings'] || 0) +
       (combined['DELETE_settings'] || 0);
 
-    this.statsItems = [
-      {
-        title: 'Total Eventos',
-        value: this.stats.total_logs,
-        smallText: 'Registrados',
-        iconName: 'list',
-        iconBgColor: 'bg-blue-100',
-        iconColor: 'text-blue-600'
-      },
-      {
-        title: 'Login',
-        value: this.stats.logs_by_action['LOGIN'] || 0,
-        smallText: 'Accesos',
-        iconName: 'log-in',
-        iconBgColor: 'bg-green-100',
-        iconColor: 'text-green-600'
-      },
-      {
-        title: 'Configuración',
-        value: settingsChanges,
-        smallText: 'Modificaciones',
-        iconName: 'settings',
-        iconBgColor: 'bg-orange-100',
-        iconColor: 'text-orange-600'
-      },
+    this.statsItems.set([
       {
         title: 'Usuarios',
         value: userChanges,
-        smallText: 'Cambios en usuarios',
+        smallText: 'creaciones, cambios, eliminaciones',
         iconName: 'users',
-        iconBgColor: 'bg-indigo-100',
-        iconColor: 'text-indigo-600'
-      }
-    ];
+        iconBgColor: 'bg-blue-100',
+        iconColor: 'text-blue-600' },
+      {
+        title: 'Cambios Config',
+        value: settingsChanges,
+        smallText: 'creaciones, cambios, eliminaciones',
+        iconName: 'settings',
+        iconBgColor: 'bg-purple-100',
+        iconColor: 'text-purple-600' },
+      {
+        title: 'Productos',
+        value:
+          combined['CREATE_products'] +
+          combined['UPDATE_products'] +
+          combined['DELETE_products'],
+        smallText: 'creaciones, cambios, eliminaciones',
+        iconName: 'package',
+        iconBgColor: 'bg-green-100',
+        iconColor: 'text-green-600' },
+      {
+        title: 'Pedidos',
+        value:
+          combined['CREATE_orders'] +
+          combined['UPDATE_orders'] +
+          combined['DELETE_orders'],
+        smallText: 'creaciones, cambios, eliminaciones',
+        iconName: 'shopping-cart',
+        iconBgColor: 'bg-orange-100',
+        iconColor: 'text-orange-600' },
+      {
+        title: 'Pagos',
+        value:
+          combined['CREATE_payments'] +
+          combined['UPDATE_payments'] +
+          combined['DELETE_payments'],
+        smallText: 'creaciones, cambios, eliminaciones',
+        iconName: 'credit-card',
+        iconBgColor: 'bg-red-100',
+        iconColor: 'text-red-600' },
+    ]);
   }
 
   onPageChange(page: number): void {
@@ -278,13 +307,13 @@ export class LogsComponent implements OnInit, OnDestroy {
   }
 
   viewDetail(log: AuditLog): void {
-    this.selectedLog = log;
-    this.showDetailModal = true;
+    this.selectedLog.set(log);
+    this.showDetailModal.set(true);
   }
 
   closeModal(): void {
-    this.showDetailModal = false;
-    this.selectedLog = null;
+    this.showDetailModal.set(false);
+    this.selectedLog.set(null);
   }
 
   formatJson(data: any): string {

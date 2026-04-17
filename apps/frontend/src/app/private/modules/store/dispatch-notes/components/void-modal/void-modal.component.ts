@@ -1,22 +1,19 @@
 import {
   Component,
-  ChangeDetectionStrategy,
+  DestroyRef,
   inject,
   input,
   output,
   signal,
   computed,
-  OnInit,
-  OnDestroy,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
 import {
   ReactiveFormsModule,
   FormGroup,
   FormBuilder,
   Validators,
 } from '@angular/forms';
-import { Subject, takeUntil } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   ModalComponent,
   ButtonComponent,
@@ -30,14 +27,12 @@ import { DispatchNote } from '../../interfaces/dispatch-note.interface';
   selector: 'app-void-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
     TextareaComponent,
     IconComponent,
   ],
-  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <app-modal
       [isOpen]="isOpen()"
@@ -64,12 +59,11 @@ import { DispatchNote } from '../../interfaces/dispatch-note.interface';
               <p class="text-[var(--fs-sm)] text-red-700">
                 Se liberaran las reservas de inventario asociadas a esta remision.
               </p>
-              <p
-                *ngIf="dispatchNote().status === 'confirmed'"
-                class="text-[var(--fs-sm)] text-red-700"
-              >
-                El stock reservado sera liberado y quedara disponible nuevamente.
-              </p>
+              @if (dispatchNote().status === 'confirmed') {
+                <p class="text-[var(--fs-sm)] text-red-700">
+                  El stock reservado sera liberado y quedara disponible nuevamente.
+                </p>
+              }
             </div>
           </div>
         </div>
@@ -152,10 +146,10 @@ import { DispatchNote } from '../../interfaces/dispatch-note.interface';
     </app-modal>
   `,
 })
-export class VoidModalComponent implements OnInit, OnDestroy {
+export class VoidModalComponent {
   private fb = inject(FormBuilder);
   private currencyService = inject(CurrencyFormatService);
-  private destroy$ = new Subject<void>();
+  private destroyRef = inject(DestroyRef);
 
   readonly isOpen = input<boolean>(false);
   readonly isOpenChange = output<boolean>();
@@ -173,17 +167,12 @@ export class VoidModalComponent implements OnInit, OnDestroy {
     return this.reasonLength() >= 10 && this.confirmChecked();
   });
 
-  ngOnInit(): void {
+  constructor() {
     this.form.get('void_reason')!.valueChanges
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((val: string) => {
         this.reasonLength.set((val || '').length);
       });
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
   }
 
   formatCurrency(value: any): string {

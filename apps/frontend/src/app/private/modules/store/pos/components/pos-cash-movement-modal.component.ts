@@ -1,18 +1,21 @@
 import {
   Component,
-  EventEmitter,
-  Input,
-  Output,
-  OnChanges,
-  SimpleChanges,
+  input,
+  output,
+  effect,
+  untracked,
+  inject,
+  signal,
+  DestroyRef,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
   FormBuilder,
   FormGroup,
   Validators,
   ReactiveFormsModule,
 } from '@angular/forms';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   ButtonComponent,
   ModalComponent,
@@ -26,7 +29,6 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
   selector: 'app-pos-cash-movement-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ButtonComponent,
     ModalComponent,
@@ -35,7 +37,7 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'sm'"
@@ -46,11 +48,7 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
         <div
           class="w-10 h-10 rounded-full bg-primary/10 flex items-center justify-center"
         >
-          <app-icon
-            name="cash"
-            [size]="20"
-            class="text-primary"
-          ></app-icon>
+          <app-icon name="cash" [size]="20" class="text-primary"></app-icon>
         </div>
         <div>
           <h2 class="text-lg font-semibold text-text-primary">
@@ -143,14 +141,16 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
           variant="primary"
           size="md"
           (clicked)="onSubmit()"
-          [disabled]="!form.valid || submitting"
+          [disabled]="!form.valid || submitting()"
         >
           <app-icon
-            [name]="form.value.type === 'cash_in' ? 'trending-up' : 'trending-down'"
+            [name]="
+              form.value.type === 'cash_in' ? 'trending-up' : 'trending-down'
+            "
             [size]="16"
             slot="icon"
           ></app-icon>
-          @if (submitting) {
+          @if (submitting()) {
             Registrando...
           } @else {
             Registrar {{ form.value.type === 'cash_in' ? 'Entrada' : 'Salida' }}
@@ -160,32 +160,32 @@ import { ToastService } from '../../../../../shared/components/toast/toast.servi
     </app-modal>
   `,
 })
-export class PosCashMovementModalComponent implements OnChanges {
-  @Input() isOpen = false;
-  @Input() sessionId: number | null = null;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() movementCreated = new EventEmitter<any>();
+export class PosCashMovementModalComponent {
+  readonly isOpen = input<boolean>(false);
+  readonly sessionId = input<number | null>(null);
+  readonly isOpenChange = output<boolean>();
+  readonly movementCreated = output<any>();
 
-  submitting = false;
+  readonly submitting = signal(false);
   form: FormGroup;
 
-  constructor(
-    private fb: FormBuilder,
-    private cashRegisterService: PosCashRegisterService,
-    private toastService: ToastService,
-  ) {
+  private fb = inject(FormBuilder);
+  private cashRegisterService = inject(PosCashRegisterService);
+  private toastService = inject(ToastService);
+
+  constructor() {
     this.form = this.fb.group({
       type: ['cash_in', Validators.required],
       amount: [null, [Validators.required, Validators.min(0.01)]],
       reference: [''],
       notes: [''],
     });
-  }
 
-  ngOnChanges(changes: SimpleChanges) {
-    if (changes['isOpen'] && this.isOpen) {
-      this.form.reset({ type: 'cash_in' });
-    }
+    effect(() => {
+      if (this.isOpen()) {
+        untracked(() => this.form.reset({ type: 'cash_in' }));
+      }
+    });
   }
 
   getFieldError(fieldName: string): string | undefined {
@@ -202,14 +202,15 @@ export class PosCashMovementModalComponent implements OnChanges {
   }
 
   onSubmit() {
-    if (!this.form.valid || !this.sessionId) return;
-    this.submitting = true;
+    if (!this.form.valid || !this.sessionId()) return;
+    this.submitting.set(true);
 
     this.cashRegisterService
-      .addMovement(this.sessionId, this.form.value)
+      .addMovement(this.sessionId()!, this.form.value)
+      .pipe(takeUntilDestroyed())
       .subscribe({
         next: (movement) => {
-          this.submitting = false;
+          this.submitting.set(false);
           this.toastService.success(
             this.form.value.type === 'cash_in'
               ? 'Entrada registrada'
@@ -219,7 +220,7 @@ export class PosCashMovementModalComponent implements OnChanges {
           this.isOpenChange.emit(false);
         },
         error: (err) => {
-          this.submitting = false;
+          this.submitting.set(false);
           this.toastService.error(
             err.error?.message || 'Error al registrar movimiento',
           );

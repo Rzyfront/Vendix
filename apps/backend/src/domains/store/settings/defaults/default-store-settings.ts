@@ -164,6 +164,10 @@ export function getDefaultStoreSettings(): StoreSettings {
         analytics_traffic: true,
         analytics_performance: true,
         analytics_overview: true,
+        analytics_inventory: true,
+        analytics_products: true,
+        analytics_customers: true,
+        analytics_financial: true,
 
         // Reportes
         reports: true,
@@ -186,6 +190,9 @@ export function getDefaultStoreSettings(): StoreSettings {
         cartera_receivables: true,
         cartera_payables: true,
         cartera_aging: true,
+        accounting_withholding_tax: true,
+        accounting_exogenous: true,
+        taxes_ica: true,
 
         // Nómina
         payroll: true,
@@ -207,6 +214,7 @@ export function getDefaultStoreSettings(): StoreSettings {
         settings_users: true,
         settings_roles: true,
         settings_cash_registers: true,
+        settings_habeas_data: true,
 
         // Ayuda
         help: true,

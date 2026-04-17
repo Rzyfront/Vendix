@@ -1,5 +1,4 @@
-import { Component, Input, inject, OnInit } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject, input } from '@angular/core';
 
 // Import shared components
 import { StatsComponent } from '../../../../../../shared/components/index';
@@ -9,19 +8,14 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 @Component({
   selector: 'app-order-stats',
   standalone: true,
-  imports: [CommonModule, StatsComponent],
+  imports: [StatsComponent],
   templateUrl: './order-stats.component.html',
   styleUrls: ['./order-stats.component.scss'],
 })
-export class OrderStatsComponent implements OnInit {
+export class OrderStatsComponent {
   private currencyService = inject(CurrencyFormatService);
 
-  ngOnInit(): void {
-    // Asegurar que la moneda esté cargada
-    this.currencyService.loadCurrency();
-  }
-
-  @Input() stats: ExtendedOrderStats = {
+  readonly stats = input<ExtendedOrderStats>({
     total_orders: 0,
     total_revenue: 0,
     pending_orders: 0,
@@ -31,7 +25,12 @@ export class OrderStatsComponent implements OnInit {
     pendingGrowthRate: 0,
     completedGrowthRate: 0,
     revenueGrowthRate: 0,
-  };
+  });
+
+  constructor() {
+    // Asegurar que la moneda esté cargada
+    this.currencyService.loadCurrency();
+  }
 
   // Formatear número para visualización
   formatNumber(num: number | string): string {

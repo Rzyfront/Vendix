@@ -1,6 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { Store } from '@ngrx/store';
-import { take } from 'rxjs/operators';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { ConfigState } from './config.reducer';
 import * as ConfigSelectors from './config.selectors';
 import { AppConfig } from '../../services/app-config.service';
@@ -11,6 +11,8 @@ import { AppConfig } from '../../services/app-config.service';
 export class ConfigFacade {
   private store = inject(Store<ConfigState>);
 
+  // ─── Observables (backward compatible) ────────────────────────────────────
+
   readonly appConfig$ = this.store.select(ConfigSelectors.selectAppConfig);
   readonly isLoading$ = this.store.select(ConfigSelectors.selectIsLoading);
   readonly error$ = this.store.select(ConfigSelectors.selectError);
@@ -18,9 +20,16 @@ export class ConfigFacade {
     ConfigSelectors.selectDomainConfig,
   );
 
+  // ─── Signal parallels (Angular 20 — backward compatible) ──────────────────
+
+  readonly appConfig = toSignal(this.appConfig$);
+  readonly isLoading = toSignal(this.isLoading$, { initialValue: false });
+  readonly error = toSignal(this.error$);
+  readonly domainConfig = toSignal(this.domainConfig$);
+
+  // ─── Synchronous getters — powered by signals (no take(1) antipattern) ────
+
   getCurrentConfig(): AppConfig | null {
-    let config: AppConfig | null = null;
-    this.appConfig$.pipe(take(1)).subscribe((c) => (config = c));
-    return config;
+    return this.appConfig() ?? null;
   }
 }

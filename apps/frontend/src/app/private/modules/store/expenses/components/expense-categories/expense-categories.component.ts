@@ -1,8 +1,7 @@
-import { Component, ViewChild, TemplateRef, AfterViewInit, Input, Output, EventEmitter } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, ViewChild, TemplateRef, afterNextRender, inject, input, output } from '@angular/core';
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
-import { Observable } from 'rxjs';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { TableColumn } from '../../../../../../shared/components/table/table.component';
 import { ResponsiveDataViewComponent, ItemListCardConfig } from '../../../../../../shared/components/index';
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
@@ -16,7 +15,6 @@ import { ExpenseCategory } from '../../interfaces/expense.interface';
   selector: 'vendix-expense-categories',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ResponsiveDataViewComponent,
     ModalComponent,
@@ -25,7 +23,7 @@ import { ExpenseCategory } from '../../interfaces/expense.interface';
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onClose()"
       title="Gestión de Categorías"
@@ -60,7 +58,7 @@ import { ExpenseCategory } from '../../interfaces/expense.interface';
               <app-button 
                 variant="primary"
                 (clicked)="onSubmit()" 
-                [disabled]="categoryForm.invalid || ((loading$ | async) || false)"
+                [disabled]="categoryForm.invalid || (loading() || false)"
                 class="whitespace-nowrap">
                 Agregar
               </app-button>
@@ -71,10 +69,10 @@ import { ExpenseCategory } from '../../interfaces/expense.interface';
         <!-- Categories Table -->
         <div class="overflow-hidden">
           <app-responsive-data-view
-            [data]="(categories$ | async) || []"
+            [data]="categories() || []"
             [columns]="columns"
             [cardConfig]="cardConfig"
-            [loading]="(loading$ | async) || false"
+            [loading]="loading() || false"
             emptyMessage="No hay categorías"
             emptyIcon="tag">
           </app-responsive-data-view>
@@ -105,13 +103,20 @@ import { ExpenseCategory } from '../../interfaces/expense.interface';
     </app-modal>
   `
 })
-export class ExpenseCategoriesComponent implements AfterViewInit {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
+export class ExpenseCategoriesComponent {
+  readonly isOpen = input<boolean>(false);
+  readonly isOpenChange = output<boolean>();
 
-  categoryForm: FormGroup;
-  categories$: Observable<ExpenseCategory[]>;
-  loading$: Observable<boolean>;
+  private fb = inject(FormBuilder);
+  private store = inject(Store);
+
+  readonly categories = toSignal(this.store.select(selectExpenseCategories), { initialValue: [] });
+  readonly loading = toSignal(this.store.select(selectExpenseCategoriesLoading), { initialValue: false });
+
+  categoryForm: FormGroup = this.fb.group({
+    name: ['', [Validators.required, Validators.minLength(3)]],
+    description: ['']
+  });
 
   @ViewChild('actionsTemplate') actionsTemplate!: TemplateRef<any>;
 
@@ -125,21 +130,8 @@ export class ExpenseCategoriesComponent implements AfterViewInit {
     subtitleKey: 'description',
   };
 
-  constructor(
-    private fb: FormBuilder,
-    private store: Store
-  ) {
-    this.categoryForm = this.fb.group({
-      name: ['', [Validators.required, Validators.minLength(3)]],
-      description: ['']
-    });
-    this.categories$ = this.store.select(selectExpenseCategories);
-    this.loading$ = this.store.select(selectExpenseCategoriesLoading);
-  }
-
-  ngAfterViewInit() {
-    // Add actions column with template
-    setTimeout(() => {
+  constructor() {
+    afterNextRender(() => {
       this.columns = [
         ...this.columns,
         { key: 'actions', label: 'Acciones', width: '80px', align: 'center', template: this.actionsTemplate }

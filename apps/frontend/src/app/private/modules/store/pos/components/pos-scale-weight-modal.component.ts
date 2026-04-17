@@ -1,26 +1,23 @@
 import {
   Component,
-  EventEmitter,
-  Input,
-  Output,
-  OnInit,
-  OnDestroy,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
+  input,
+  output,
+  inject,
+  signal } from '@angular/core';
+import { DecimalPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { Subject, takeUntil } from 'rxjs';
+
 import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../shared/components/input/input.component';
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { PosScaleService } from '../services/pos-scale.service';
-import { ScaleConnectionStatus } from '../../../../../core/models/store-settings.interface';
 
 @Component({
   selector: 'app-pos-scale-weight-modal',
   standalone: true,
   imports: [
-    CommonModule,
+    DecimalPipe,
     FormsModule,
     ModalComponent,
     ButtonComponent,
@@ -30,63 +27,71 @@ import { ScaleConnectionStatus } from '../../../../../core/models/store-settings
   template: `
     <app-modal
       [(isOpen)]="isOpen"
-      [title]="title"
+      [title]="title()"
       size="sm"
       [showCloseButton]="true"
       (isOpenChange)="onModalClose()"
-    >
+      >
       <div class="scale-modal-body">
         <!-- Product info -->
-        <p *ngIf="message" class="text-sm text-text-secondary mb-4 whitespace-pre-line">{{ message }}</p>
-
+        @if (message()) {
+          <p class="text-sm text-text-secondary mb-4 whitespace-pre-line">{{ message() }}</p>
+        }
+    
         <!-- Scale reading display -->
-        <div *ngIf="connectionStatus === 'connected'" class="scale-reading-container">
-          <div class="scale-reading-display">
-            <span class="scale-reading-value">{{ currentWeight | number:'1.3-3' }}</span>
-            <span class="scale-reading-unit">{{ weightUnit }}</span>
+        @if (connectionStatus() === 'connected') {
+          <div class="scale-reading-container">
+            <div class="scale-reading-display">
+              <span class="scale-reading-value">{{ currentWeight() | number:'1.3-3' }}</span>
+              <span class="scale-reading-unit">{{ weightUnit() }}</span>
+            </div>
+            <div class="scale-status-indicator" [class.stable]="isStable()" [class.unstable]="!isStable()">
+              <app-icon [name]="isStable() ? 'check-circle' : 'loader'" [size]="16"></app-icon>
+              <span>{{ isStable() ? 'Lectura estable' : 'Estabilizando...' }}</span>
+            </div>
           </div>
-          <div class="scale-status-indicator" [class.stable]="isStable" [class.unstable]="!isStable">
-            <app-icon [name]="isStable ? 'check-circle' : 'loader'" [size]="16"></app-icon>
-            <span>{{ isStable ? 'Lectura estable' : 'Estabilizando...' }}</span>
-          </div>
-        </div>
-
+        }
+    
         <!-- Disconnected / error states -->
-        <div *ngIf="connectionStatus !== 'connected'" class="scale-disconnected">
-          <div class="disconnected-notice">
-            <app-icon name="alert-triangle" [size]="20" class="text-warning"></app-icon>
-            <span class="text-sm text-text-secondary">
-              {{ connectionStatus === 'connecting' ? 'Conectando báscula...' : 'Báscula desconectada' }}
-            </span>
+        @if (connectionStatus() !== 'connected') {
+          <div class="scale-disconnected">
+            <div class="disconnected-notice">
+              <app-icon name="alert-triangle" [size]="20" class="text-warning"></app-icon>
+              <span class="text-sm text-text-secondary">
+                {{ connectionStatus() === 'connecting' ? 'Conectando báscula...' : 'Báscula desconectada' }}
+              </span>
+            </div>
+            <!-- Manual fallback input -->
+            @if (allowManualFallback() && connectionStatus() !== 'connecting') {
+              <div class="manual-fallback">
+                <label class="text-xs text-text-secondary mb-1 block">Peso manual:</label>
+                <app-input
+                  [placeholder]="'Peso en ' + weightUnit()"
+                  [ngModel]="manualWeight()"
+                  (ngModelChange)="manualWeight.set($event)"
+                  (keyup.enter)="onConfirm()"
+                  type="number"
+                  step="0.001"
+                  min="0"
+                ></app-input>
+              </div>
+            }
           </div>
-
-          <!-- Manual fallback input -->
-          <div *ngIf="allowManualFallback && connectionStatus !== 'connecting'" class="manual-fallback">
-            <label class="text-xs text-text-secondary mb-1 block">Peso manual:</label>
-            <app-input
-              [placeholder]="'Peso en ' + weightUnit"
-              [(ngModel)]="manualWeight"
-              (keyup.enter)="onConfirm()"
-              type="number"
-              step="0.001"
-              min="0"
-            ></app-input>
-          </div>
-        </div>
+        }
       </div>
-
+    
       <div slot="footer" class="modal-footer flex justify-end gap-2 md:gap-4">
         <app-button variant="outline" (clicked)="onCancel()">Cancelar</app-button>
         <app-button
           variant="primary"
           (clicked)="onConfirm()"
           [disabled]="!canConfirm"
-        >
+          >
           Confirmar
         </app-button>
       </div>
     </app-modal>
-  `,
+    `,
   styles: [`
     .scale-modal-body {
       padding: 1rem 0;
@@ -164,55 +169,33 @@ import { ScaleConnectionStatus } from '../../../../../core/models/store-settings
     .manual-fallback {
       padding-top: 0.5rem;
     }
-  `],
-})
-export class PosScaleWeightModalComponent implements OnInit, OnDestroy {
-  @Input() title = 'Lectura de Báscula';
-  @Input() message = '';
-  @Input() weightUnit = 'kg';
-  @Input() allowManualFallback = true;
-  @Input() size: 'sm' | 'md' | 'lg' = 'sm';
-  @Input() showCloseButton = true;
-  @Input() customClasses = '';
+  `] })
+export class PosScaleWeightModalComponent {
+  readonly title = input<string>('Lectura de Báscula');
+  readonly message = input<string>('');
+  readonly weightUnit = input<string>('kg');
+  readonly allowManualFallback = input<boolean>(true);
+  readonly size = input<'sm' | 'md' | 'lg'>('sm');
+  readonly showCloseButton = input<boolean>(true);
+  readonly customClasses = input<string>('');
 
-  @Output() confirm = new EventEmitter<number>();
-  @Output() cancel = new EventEmitter<void>();
+  readonly confirm = output<number>();
+  readonly cancel = output<void>();
 
-  isOpen = true;
-  currentWeight = 0;
-  isStable = false;
-  connectionStatus: ScaleConnectionStatus = 'disconnected';
-  manualWeight = '';
+  private scaleService = inject(PosScaleService);
 
-  private destroy$ = new Subject<void>();
-
-  constructor(private scaleService: PosScaleService) {}
-
-  ngOnInit(): void {
-    this.scaleService.weight$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe(w => this.currentWeight = w);
-
-    this.scaleService.stable$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe(s => this.isStable = s);
-
-    this.scaleService.status$
-      .pipe(takeUntil(this.destroy$))
-      .subscribe(st => this.connectionStatus = st);
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
+  isOpen = signal(true);
+  manualWeight = signal('');
+  readonly currentWeight = this.scaleService.weight;
+  readonly isStable = this.scaleService.stable;
+  readonly connectionStatus = this.scaleService.status;
 
   get canConfirm(): boolean {
-    if (this.connectionStatus === 'connected') {
-      return this.isStable && this.currentWeight > 0;
+    if (this.connectionStatus() === 'connected') {
+      return this.isStable() && this.currentWeight() > 0;
     }
-    if (this.allowManualFallback && this.manualWeight) {
-      const val = parseFloat(this.manualWeight.replace(',', '.'));
+    if (this.allowManualFallback() && this.manualWeight()) {
+      const val = parseFloat(this.manualWeight().replace(',', '.'));
       return !isNaN(val) && val > 0;
     }
     return false;
@@ -222,23 +205,23 @@ export class PosScaleWeightModalComponent implements OnInit, OnDestroy {
     if (!this.canConfirm) return;
 
     let weight: number;
-    if (this.connectionStatus === 'connected') {
-      weight = this.currentWeight;
+    if (this.connectionStatus() === 'connected') {
+      weight = this.currentWeight();
     } else {
-      weight = parseFloat(this.manualWeight.replace(',', '.'));
+      weight = parseFloat(this.manualWeight().replace(',', '.'));
     }
 
     this.confirm.emit(weight);
-    this.isOpen = false;
+    this.isOpen.set(false);
   }
 
   onCancel(): void {
     this.cancel.emit();
-    this.isOpen = false;
+    this.isOpen.set(false);
   }
 
   onModalClose(): void {
-    if (!this.isOpen) {
+    if (!this.isOpen()) {
       this.cancel.emit();
     }
   }

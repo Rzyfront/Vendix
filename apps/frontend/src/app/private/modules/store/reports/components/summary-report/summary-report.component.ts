@@ -1,11 +1,11 @@
 import { Component, input, computed } from '@angular/core';
-import { CommonModule, CurrencyPipe, DecimalPipe, PercentPipe } from '@angular/common';
+import { CurrencyPipe, DecimalPipe, PercentPipe } from '@angular/common';
 import { SummaryLayoutConfig, SummaryField } from '../../interfaces/report.interface';
 
 @Component({
   selector: 'app-summary-report',
   standalone: true,
-  imports: [CommonModule],
+  imports: [],
   providers: [CurrencyPipe, DecimalPipe, PercentPipe],
   templateUrl: './summary-report.component.html',
   styleUrls: ['./summary-report.component.scss'],

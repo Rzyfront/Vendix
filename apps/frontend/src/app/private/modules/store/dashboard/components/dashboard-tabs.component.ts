@@ -1,5 +1,5 @@
 import { Component, input, output } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 
 export interface DashboardTab {
@@ -12,7 +12,7 @@ export interface DashboardTab {
 @Component({
   selector: 'app-dashboard-tabs',
   standalone: true,
-  imports: [CommonModule, IconComponent],
+  imports: [IconComponent],
   template: `
     <div class="sticky top-[84px] z-10 bg-background py-2 -mx-4 px-4
                 md:static md:bg-transparent md:py-0 md:mx-0 md:px-0 md:mb-4">

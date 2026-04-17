@@ -1,5 +1,5 @@
-import { Component, input, output, signal, computed, inject, ChangeDetectionStrategy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input, output, signal, computed, inject } from '@angular/core';
+import { DecimalPipe } from '@angular/common';
 import { HttpClient, HttpParams } from '@angular/common/http';
 import { FormsModule } from '@angular/forms';
 import {
@@ -24,7 +24,6 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
   selector: 'app-reservation-form-modal',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ModalComponent,
     ButtonComponent,
@@ -34,10 +33,10 @@ import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
     ToggleComponent,
     InputComponent,
     SelectorComponent,
+    DecimalPipe,
   ],
   templateUrl: './reservation-form-modal.component.html',
   styleUrls: ['./reservation-form-modal.component.scss'],
-  changeDetection: ChangeDetectionStrategy.OnPush,
 })
 export class ReservationFormModalComponent {
   private http = inject(HttpClient);

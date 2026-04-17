@@ -1,14 +1,15 @@
-import { Component, inject, OnInit, OnDestroy } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { Subject } from 'rxjs';
-import { takeUntil } from 'rxjs/operators';
+import { Component, inject, DestroyRef } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { NgClass } from '@angular/common';
+
+
 import { EnvironmentContextService } from '../../../core/services/environment-context.service';
 import { AppEnvironment } from '../../../core/models/domain-config.interface';
 
 @Component({
   selector: 'app-environment-indicator',
   standalone: true,
-  imports: [CommonModule],
+  imports: [NgClass],
   template: `
     <div class="environment-indicator" [ngClass]="environmentClass">
       <div class="indicator-content">
@@ -141,32 +142,27 @@ import { AppEnvironment } from '../../../core/models/domain-config.interface';
         }
       }
     `,
-  ],
-})
-export class EnvironmentIndicatorComponent implements OnInit, OnDestroy {
+  ] })
+export class EnvironmentIndicatorComponent {
   private environmentContextService = inject(EnvironmentContextService);
-  private destroy$ = new Subject<void>();
-
-  context: any = null;
+  private destroyRef = inject(DestroyRef);
+context: any = null;
   environmentClass = '';
   environmentIcon = 'fas fa-question';
   environmentLabel = 'Entorno Desconocido';
   showSwitchButton = false;
   canSwitch = false;
 
-  ngOnInit(): void {
+  constructor() {
     this.loadEnvironmentContext();
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
+    this.destroyRef.onDestroy(() => {
+    });
   }
 
   private loadEnvironmentContext(): void {
     this.environmentContextService
       .getCurrentEnvironmentContext()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((context) => {
         this.context = context;
         this.updateEnvironmentDisplay(context);
@@ -213,8 +209,7 @@ export class EnvironmentIndicatorComponent implements OnInit, OnDestroy {
 
     // Opcional: disparar un evento personalizado
     const event = new CustomEvent('switchEnvironment', {
-      detail: { context: this.context },
-    });
+      detail: { context: this.context } });
     window.dispatchEvent(event);
   }
 }

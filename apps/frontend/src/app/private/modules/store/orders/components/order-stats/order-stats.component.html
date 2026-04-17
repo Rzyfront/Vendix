@@ -2,8 +2,8 @@
 <ng-container>
   <app-stats
     title="Órdenes"
-    [value]="formatNumber(stats.total_orders)"
-    [smallText]="getGrowthPercentage(stats.ordersGrowthRate || 0) + ' vs mes ant.'"
+    [value]="formatNumber(stats().total_orders)"
+    [smallText]="getGrowthPercentage(stats().ordersGrowthRate || 0) + ' vs mes ant.'"
     iconName="shopping-cart"
     iconBgColor="bg-blue-100"
     iconColor="text-blue-500"
@@ -11,8 +11,8 @@
 
   <app-stats
     title="Pendientes"
-    [value]="formatNumber(stats.pending_orders)"
-    [smallText]="getGrowthPercentage(stats.pendingGrowthRate || 0) + ' vs mes ant.'"
+    [value]="formatNumber(stats().pending_orders)"
+    [smallText]="getGrowthPercentage(stats().pendingGrowthRate || 0) + ' vs mes ant.'"
     iconName="clock"
     iconBgColor="bg-amber-100"
     iconColor="text-amber-500"
@@ -20,8 +20,8 @@
 
   <app-stats
     title="Completadas"
-    [value]="formatNumber(stats.completed_orders)"
-    [smallText]="getGrowthPercentage(stats.completedGrowthRate || 0) + ' vs mes ant.'"
+    [value]="formatNumber(stats().completed_orders)"
+    [smallText]="getGrowthPercentage(stats().completedGrowthRate || 0) + ' vs mes ant.'"
     iconName="check-circle"
     iconBgColor="bg-emerald-100"
     iconColor="text-emerald-500"
@@ -29,8 +29,8 @@
 
   <app-stats
     title="Ingresos"
-    [value]="formatCurrency(stats.total_revenue)"
-    [smallText]="getGrowthPercentage(stats.revenueGrowthRate || 0) + ' vs mes ant.'"
+    [value]="formatCurrency(stats().total_revenue)"
+    [smallText]="getGrowthPercentage(stats().revenueGrowthRate || 0) + ' vs mes ant.'"
     iconName="dollar-sign"
     iconBgColor="bg-purple-100"
     iconColor="text-purple-500"

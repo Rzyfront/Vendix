@@ -1,5 +1,6 @@
-import { Component, OnInit, OnDestroy } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, OnInit, OnDestroy, signal, DestroyRef, inject} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import { Subscription } from 'rxjs';
 
 // Shared Components
@@ -23,18 +24,17 @@ import { InventoryMovement, MovementType } from '../interfaces';
   selector: 'app-movements',
   standalone: true,
   imports: [
-    CommonModule,
     StatsComponent,
     MovementDetailModalComponent,
-    MovementListComponent,
-  ],
+    MovementListComponent
+],
   template: `
     <div class="w-full overflow-x-hidden">
       <!-- Stats Grid: sticky at top on mobile, static on desktop -->
       <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
         <app-stats
           title="Total Movimientos"
-          [value]="stats.total"
+          [value]="stats().total"
           smallText="Movimientos registrados"
           iconName="activity"
           iconBgColor="bg-blue-100"
@@ -43,7 +43,7 @@ import { InventoryMovement, MovementType } from '../interfaces';
 
         <app-stats
           title="Entradas"
-          [value]="stats.stock_in"
+          [value]="stats().stock_in"
           smallText="Ingresos de stock"
           iconName="arrow-down-circle"
           iconBgColor="bg-green-100"
@@ -52,7 +52,7 @@ import { InventoryMovement, MovementType } from '../interfaces';
 
         <app-stats
           title="Salidas"
-          [value]="stats.stock_out"
+          [value]="stats().stock_out"
           smallText="Egresos de stock"
           iconName="arrow-up-circle"
           iconBgColor="bg-red-100"
@@ -61,7 +61,7 @@ import { InventoryMovement, MovementType } from '../interfaces';
 
         <app-stats
           title="Transferencias"
-          [value]="stats.transfers"
+          [value]="stats().transfers"
           smallText="Entre ubicaciones"
           iconName="repeat"
           iconBgColor="bg-purple-100"
@@ -71,8 +71,8 @@ import { InventoryMovement, MovementType } from '../interfaces';
 
       <!-- Movements List -->
       <app-movement-list
-        [movements]="filtered_movements"
-        [isLoading]="is_loading"
+        [movements]="filtered_movements()"
+        [isLoading]="is_loading()"
         (search)="onSearch($event)"
         (filterChange)="onFilterChange($event)"
         (clearFilters)="onClearFilters()"
@@ -82,35 +82,36 @@ import { InventoryMovement, MovementType } from '../interfaces';
 
       <!-- Detail Modal -->
       <app-movement-detail-modal
-        [isOpen]="is_detail_modal_open"
-        [movement]="selected_movement"
-        (isOpenChange)="is_detail_modal_open = $event"
+        [isOpen]="is_detail_modal_open()"
+        [movement]="selected_movement()"
+        (isOpenChange)="is_detail_modal_open.set($event)"
         (close)="closeDetailModal()"
       ></app-movement-detail-modal>
     </div>
   `,
 })
 export class MovementsComponent implements OnInit, OnDestroy {
+  private destroyRef = inject(DestroyRef);
   // Data
-  movements: InventoryMovement[] = [];
-  filtered_movements: InventoryMovement[] = [];
+  readonly movements = signal<InventoryMovement[]>([]);
+  readonly filtered_movements = signal<InventoryMovement[]>([]);
 
   // Stats
-  stats = {
+  readonly stats = signal({
     total: 0,
     stock_in: 0,
     stock_out: 0,
     transfers: 0,
-  };
+  });
 
   // Filters
   current_type: MovementType | 'all' = 'all';
-  search_term = '';
+  search_term = signal('');
 
   // UI State
-  is_loading = false;
-  is_detail_modal_open = false;
-  selected_movement: InventoryMovement | null = null;
+  readonly is_loading = signal(false);
+  readonly is_detail_modal_open = signal(false);
+  readonly selected_movement = signal<InventoryMovement | null>(null);
 
   private subscriptions: Subscription[] = [];
 
@@ -132,33 +133,31 @@ export class MovementsComponent implements OnInit, OnDestroy {
   // ============================================================
 
   loadMovements(): void {
-    this.is_loading = true;
+    this.is_loading.set(true);
     const query =
       this.current_type !== 'all'
         ? { movement_type: this.current_type }
         : {};
 
-    const sub = this.inventoryService.getMovements(query).subscribe({
+    const sub = this.inventoryService.getMovements(query).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         if (response.data) {
-          this.movements = Array.isArray(response.data)
-            ? response.data
-            : [];
+          this.movements.set(Array.isArray(response.data) ? response.data : []);
           this.applyFilters();
           this.calculateStats();
         }
-        this.is_loading = false;
+        this.is_loading.set(false);
       },
       error: (error) => {
         this.toastService.error(error || 'Error al cargar movimientos');
-        this.is_loading = false;
+        this.is_loading.set(false);
       },
     });
     this.subscriptions.push(sub);
   }
 
   applyFilters(): void {
-    let filtered = [...this.movements];
+    let filtered = [...this.movements()];
 
     if (this.current_type !== 'all') {
       filtered = filtered.filter(
@@ -166,8 +165,8 @@ export class MovementsComponent implements OnInit, OnDestroy {
       );
     }
 
-    if (this.search_term) {
-      const term = this.search_term.toLowerCase();
+    if (this.search_term()) {
+      const term = this.search_term().toLowerCase();
       filtered = filtered.filter(
         (m) =>
           m.products?.name?.toLowerCase().includes(term) ||
@@ -178,20 +177,17 @@ export class MovementsComponent implements OnInit, OnDestroy {
       );
     }
 
-    this.filtered_movements = filtered;
+    this.filtered_movements.set(filtered);
   }
 
   calculateStats(): void {
-    this.stats.total = this.movements.length;
-    this.stats.stock_in = this.movements.filter(
-      (m) => m.movement_type === 'stock_in',
-    ).length;
-    this.stats.stock_out = this.movements.filter(
-      (m) => m.movement_type === 'stock_out',
-    ).length;
-    this.stats.transfers = this.movements.filter(
-      (m) => m.movement_type === 'transfer',
-    ).length;
+    const mv = this.movements();
+    this.stats.set({
+      total: mv.length,
+      stock_in: mv.filter((m) => m.movement_type === 'stock_in').length,
+      stock_out: mv.filter((m) => m.movement_type === 'stock_out').length,
+      transfers: mv.filter((m) => m.movement_type === 'transfer').length,
+    });
   }
 
   // ============================================================
@@ -199,7 +195,7 @@ export class MovementsComponent implements OnInit, OnDestroy {
   // ============================================================
 
   onSearch(term: string): void {
-    this.search_term = term;
+    this.search_term.set(term);
     this.applyFilters();
   }
 
@@ -211,7 +207,7 @@ export class MovementsComponent implements OnInit, OnDestroy {
 
   onClearFilters(): void {
     this.current_type = 'all';
-    this.search_term = '';
+    this.search_term.set('');
     this.applyFilters();
   }
 
@@ -224,12 +220,12 @@ export class MovementsComponent implements OnInit, OnDestroy {
   }
 
   viewDetail(movement: InventoryMovement): void {
-    this.selected_movement = movement;
-    this.is_detail_modal_open = true;
+    this.selected_movement.set(movement);
+    this.is_detail_modal_open.set(true);
   }
 
   closeDetailModal(): void {
-    this.is_detail_modal_open = false;
-    this.selected_movement = null;
+    this.is_detail_modal_open.set(false);
+    this.selected_movement.set(null);
   }
 }

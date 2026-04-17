@@ -1,5 +1,5 @@
-import { Component, EventEmitter, Input, Output, OnInit } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input, output, OnInit, computed } from '@angular/core';
+
 import {
   ResponsiveDataViewComponent,
   InputsearchComponent,
@@ -26,7 +26,6 @@ import {
   selector: 'app-ticket-list',
   standalone: true,
   imports: [
-    CommonModule,
     ResponsiveDataViewComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
@@ -47,7 +46,7 @@ import {
           <h2
             class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary"
           >
-            Todos los Tickets ({{ totalItems }})
+            Todos los Tickets ({{ totalItems() }})
           </h2>
 
           <div class="flex items-center gap-2 w-full md:w-auto">
@@ -63,7 +62,7 @@ import {
               [filters]="filterConfigs"
               [filterValues]="filterValues"
               [actions]="dropdownActions"
-              [isLoading]="loading"
+              [isLoading]="loading()"
               (filterChange)="onFilterChange($event)"
               (clearAllFilters)="onClearFilters()"
               (actionClick)="onActionClick($event)"
@@ -73,81 +72,85 @@ import {
       </div>
 
       <!-- Loading State -->
-      <div *ngIf="loading" class="p-4 md:p-6 text-center">
-        <div
-          class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-        ></div>
-        <p class="mt-2 text-text-secondary">Cargando tickets...</p>
-      </div>
+      @if (loading()) {
+        <div class="p-4 md:p-6 text-center">
+          <div
+            class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+          ></div>
+          <p class="mt-2 text-text-secondary">Cargando tickets...</p>
+        </div>
+      }
 
       <!-- Empty State -->
-      <div
-        *ngIf="!loading && tickets.length === 0"
-        class="p-12 text-center text-gray-500"
-      >
-        <app-icon
-          name="ticket"
-          [size]="48"
-          class="mx-auto mb-4 text-gray-300"
-        ></app-icon>
-        <h3 class="text-lg font-medium text-gray-900">No hay tickets aún</h3>
-        <p class="mt-1">
-          Crea tu primer ticket y te ayudaremos lo antes posible.
-        </p>
-        <div class="mt-6 flex justify-center">
-          <app-button variant="primary" (clicked)="create.emit()">
-            <app-icon slot="icon" name="plus" [size]="16"></app-icon>
-            Crear Ticket
-          </app-button>
+      @if (!loading() && tickets().length === 0) {
+        <div class="p-12 text-center text-gray-500">
+          <app-icon
+            name="ticket"
+            [size]="48"
+            class="mx-auto mb-4 text-gray-300"
+          ></app-icon>
+          <h3 class="text-lg font-medium text-gray-900">No hay tickets aún</h3>
+          <p class="mt-1">
+            Crea tu primer ticket y te ayudaremos lo antes posible.
+          </p>
+          <div class="mt-6 flex justify-center">
+            <app-button variant="primary" (clicked)="create.emit()">
+              <app-icon slot="icon" name="plus" [size]="16"></app-icon>
+              Crear Ticket
+            </app-button>
+          </div>
         </div>
-      </div>
+      }
 
       <!-- Responsive Data View -->
-      <div *ngIf="!loading && tickets.length > 0" class="px-2 pb-2 pt-1 md:p-4">
-        <app-responsive-data-view
-          [data]="tickets"
-          [columns]="columns"
-          [cardConfig]="cardConfig"
-          [loading]="loading"
-          [hoverable]="true"
-          [striped]="true"
-          [emptyMessage]="'No se encontraron tickets'"
-          [emptyIcon]="'ticket'"
-          tableSize="md"
-          (rowClick)="onRowClick($event)"
-        ></app-responsive-data-view>
-
-        <!-- Pagination -->
-        <div *ngIf="totalPages > 1" class="mt-4 border-t border-border pt-4">
-          <app-pagination
-            [currentPage]="page"
-            [total]="totalItems"
-            [limit]="limit"
-            [totalPages]="totalPages"
-            infoStyle="none"
-            (pageChange)="onPageChange($event)"
-          ></app-pagination>
+      @if (!loading() && tickets().length > 0) {
+        <div class="px-2 pb-2 pt-1 md:p-4">
+          <app-responsive-data-view
+            [data]="tickets()"
+            [columns]="columns"
+            [cardConfig]="cardConfig"
+            [loading]="loading()"
+            [hoverable]="true"
+            [striped]="true"
+            [emptyMessage]="'No se encontraron tickets'"
+            [emptyIcon]="'ticket'"
+            tableSize="md"
+            (rowClick)="onRowClick($event)"
+          ></app-responsive-data-view>
+          <!-- Pagination -->
+          @if (totalPages() > 1) {
+            <div class="mt-4 border-t border-border pt-4">
+              <app-pagination
+                [currentPage]="page()"
+                [total]="totalItems()"
+                [limit]="limit()"
+                [totalPages]="totalPages()"
+                infoStyle="none"
+                (pageChange)="onPageChange($event)"
+              ></app-pagination>
+            </div>
+          }
         </div>
-      </div>
+      }
     </app-card>
   `,
 })
 export class TicketListComponent implements OnInit {
-  @Input() tickets: Ticket[] = [];
-  @Input() loading = false;
-  @Input() totalItems = 0;
-  @Input() page = 1;
-  @Input() limit = 10;
+  readonly tickets = input<Ticket[]>([]);
+  readonly loading = input<boolean>(false);
+  readonly totalItems = input<number>(0);
+  readonly page = input<number>(1);
+  readonly limit = input<number>(10);
 
-  get totalPages(): number {
-    return Math.ceil(this.totalItems / this.limit);
-  }
+  readonly totalPages = computed(() =>
+    Math.ceil(this.totalItems() / this.limit()),
+  );
 
-  @Output() search = new EventEmitter<string>();
-  @Output() filter = new EventEmitter<FilterValues>();
-  @Output() create = new EventEmitter<void>();
-  @Output() viewDetail = new EventEmitter<Ticket>();
-  @Output() pageChange = new EventEmitter<number>();
+  readonly search = output<string>();
+  readonly filter = output<FilterValues>();
+  readonly create = output<void>();
+  readonly viewDetail = output<Ticket>();
+  readonly pageChange = output<number>();
 
   filterConfigs: FilterConfig[] = [
     {
@@ -320,6 +323,11 @@ export class TicketListComponent implements OnInit {
 
   onActionClick(action: string): void {
     if (action === 'create') {
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
+      // TODO: The 'emit' function requires a mandatory void argument
       this.create.emit();
     }
   }

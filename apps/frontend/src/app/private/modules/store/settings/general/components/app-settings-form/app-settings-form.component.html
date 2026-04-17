@@ -50,13 +50,19 @@
         <!-- Logo Upload -->
         <div class="brand-card">
           <div class="brand-preview relative group">
-            <img *ngIf="logoPreview" [src]="logoPreview" alt="Logo"
-              class="brand-preview-img">
-            <app-icon *ngIf="!logoPreview" name="image" size="20" class="text-gray-300"></app-icon>
-            <button *ngIf="logoPreview" type="button" (click)="removeLogo()"
-              class="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all shadow-lg">
-              <app-icon name="x" size="12"></app-icon>
-            </button>
+            @if (logoPreview) {
+              <img [src]="logoPreview" alt="Logo"
+                class="brand-preview-img">
+            }
+            @if (!logoPreview) {
+              <app-icon name="image" size="20" class="text-gray-300"></app-icon>
+            }
+            @if (logoPreview) {
+              <button type="button" (click)="removeLogo()"
+                class="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all shadow-lg">
+                <app-icon name="x" size="12"></app-icon>
+              </button>
+            }
           </div>
           <div class="brand-info">
             <label class="brand-label">Logo de la App</label>
@@ -72,13 +78,19 @@
         <!-- Favicon Upload -->
         <div class="brand-card">
           <div class="brand-preview relative group">
-            <img *ngIf="faviconPreview" [src]="faviconPreview" alt="Favicon"
-              class="brand-preview-img">
-            <app-icon *ngIf="!faviconPreview" name="feather" size="20" class="text-gray-300"></app-icon>
-            <button *ngIf="faviconPreview" type="button" (click)="removeFavicon()"
-              class="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all shadow-lg">
-              <app-icon name="x" size="12"></app-icon>
-            </button>
+            @if (faviconPreview) {
+              <img [src]="faviconPreview" alt="Favicon"
+                class="brand-preview-img">
+            }
+            @if (!faviconPreview) {
+              <app-icon name="feather" size="20" class="text-gray-300"></app-icon>
+            }
+            @if (faviconPreview) {
+              <button type="button" (click)="removeFavicon()"
+                class="absolute -top-1 -right-1 w-5 h-5 bg-red-500 text-white rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-all shadow-lg">
+                <app-icon name="x" size="12"></app-icon>
+              </button>
+            }
           </div>
           <div class="brand-info">
             <label class="brand-label">Favicon</label>

@@ -1,11 +1,6 @@
-import {
-  Component,
-  OnInit,
-  ChangeDetectionStrategy,
-  signal,
-  inject,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
+import {Component, OnInit, ChangeDetectionStrategy, signal, inject, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import { HttpClient } from '@angular/common/http';
 import { Router } from '@angular/router';
 import { map } from 'rxjs/operators';
@@ -29,15 +24,14 @@ import { environment } from '../../../../../../environments/environment';
   selector: 'app-templates',
   standalone: true,
   imports: [
-    CommonModule,
     StickyHeaderComponent,
     ButtonComponent,
     SpinnerComponent,
     EmptyStateComponent,
     BadgeComponent,
     TemplateModalComponent,
-    IconComponent,
-  ],
+    IconComponent
+],
   changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div>
@@ -157,6 +151,7 @@ import { environment } from '../../../../../../environments/environment';
   `,
 })
 export class TemplatesComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private router = inject(Router);
   private templatesService = inject(DataCollectionTemplatesService);
   private fieldsService = inject(MetadataFieldsService);
@@ -187,7 +182,7 @@ export class TemplatesComponent implements OnInit {
 
   loadTemplates() {
     this.loading.set(true);
-    this.templatesService.getAll().subscribe({
+    this.templatesService.getAll().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (templates) => {
         this.templates.set(templates);
         this.loading.set(false);
@@ -200,7 +195,7 @@ export class TemplatesComponent implements OnInit {
   }
 
   loadAvailableFields() {
-    this.fieldsService.getFields().subscribe({
+    this.fieldsService.getFields().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (fields) => this.availableFields.set(fields),
       error: () => {},
     });
@@ -210,7 +205,7 @@ export class TemplatesComponent implements OnInit {
     this.http
       .get<any>(`${environment.apiUrl}/store/products?limit=200`)
       .pipe(map((r) => r.data))
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (products) => this.availableProducts.set(products),
         error: () => {},
       });
@@ -240,13 +235,13 @@ export class TemplatesComponent implements OnInit {
       ? this.templatesService.update(selected.id, data)
       : this.templatesService.create(data);
 
-    obs.subscribe({
+    obs.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (result: any) => {
         const templateId = selected?.id || result?.id;
         if (templateId && productIds.length > 0) {
           this.templatesService
             .assignProducts(templateId, productIds)
-            .subscribe({
+            .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
               next: () => {
                 this.toastService.success(
                   selected ? 'Plantilla actualizada' : 'Plantilla creada',
@@ -264,7 +259,7 @@ export class TemplatesComponent implements OnInit {
             });
         } else if (templateId && productIds.length === 0 && selected) {
           // Clear existing product assignments when editing and no products selected
-          this.templatesService.assignProducts(templateId, []).subscribe({
+          this.templatesService.assignProducts(templateId, []).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
             next: () => {
               this.toastService.success('Plantilla actualizada');
               this.closeModal();
@@ -301,7 +296,7 @@ export class TemplatesComponent implements OnInit {
   }
 
   duplicateTemplate(id: number) {
-    this.templatesService.duplicate(id).subscribe({
+    this.templatesService.duplicate(id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.toastService.success('Plantilla duplicada');
         this.loadTemplates();
@@ -351,7 +346,7 @@ export class TemplatesComponent implements OnInit {
       return;
     }
 
-    this.templatesService.delete(template.id).subscribe({
+    this.templatesService.delete(template.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
         this.toastService.success('Plantilla eliminada');
         this.loadTemplates();

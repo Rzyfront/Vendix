@@ -1,14 +1,13 @@
-import {
-  Component,
+import {Component,
   OnInit,
-  OnDestroy,
   inject,
   signal,
   computed,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import { Router } from '@angular/router';
-import { Subject, takeUntil } from 'rxjs';
+
 
 import { AccountingService } from '../../../services/accounting.service';
 import { ConsolidationSession } from '../../../interfaces/accounting.interface';
@@ -24,8 +23,7 @@ import {
   TableAction,
   ItemListCardConfig,
   DropdownAction,
-  FilterValues,
-} from '../../../../../../../shared/components/index';
+  FilterValues} from '../../../../../../../shared/components/index';
 import { formatDateOnlyUTC } from '../../../../../../../shared/utils/date.util';
 import { SessionCreateModalComponent } from '../session-create-modal/session-create-modal.component';
 
@@ -33,14 +31,13 @@ import { SessionCreateModalComponent } from '../session-create-modal/session-cre
   selector: 'vendix-consolidation-sessions',
   standalone: true,
   imports: [
-    CommonModule,
     CardComponent,
     StatsComponent,
     InputsearchComponent,
     ResponsiveDataViewComponent,
     OptionsDropdownComponent,
-    SessionCreateModalComponent,
-  ],
+    SessionCreateModalComponent
+],
   template: `
     <div class="w-full">
       <!-- Stats: Sticky on mobile, static on desktop -->
@@ -130,22 +127,23 @@ import { SessionCreateModalComponent } from '../session-create-modal/session-cre
 
       <!-- Create Modal -->
       <vendix-session-create-modal
-        [(isOpen)]="is_create_modal_open"
+        [isOpen]="isCreateModalOpen()"
+        (isOpenChange)="isCreateModalOpen.set($event)"
         (created)="onSessionCreated($event)"
       ></vendix-session-create-modal>
     </div>
-  `,
-})
-export class ConsolidationSessionsComponent implements OnInit, OnDestroy {
-  private destroy$ = new Subject<void>();
-  private accounting_service = inject(AccountingService);
+  `})
+export class ConsolidationSessionsComponent {
+  private destroyRef = inject(DestroyRef);
+private accounting_service = inject(AccountingService);
   private toast_service = inject(ToastService);
   private router = inject(Router);
 
   sessions = signal<ConsolidationSession[]>([]);
   loading = signal(false);
   search_term = signal('');
-  is_create_modal_open = false;
+  // ✅ Migrated to signal for two-way binding (Section 9 — antipatrón variables planas)
+  readonly isCreateModalOpen = signal(false);
 
   filtered_sessions = computed(() => {
     const term = this.search_term().toLowerCase();
@@ -163,8 +161,7 @@ export class ConsolidationSessionsComponent implements OnInit, OnDestroy {
       total: all.length,
       in_progress: all.filter((s) => s.status === 'in_progress').length,
       completed: all.filter((s) => s.status === 'completed').length,
-      draft: all.filter((s) => s.status === 'draft').length,
-    };
+      draft: all.filter((s) => s.status === 'draft').length};
   });
 
   dropdown_actions: DropdownAction[] = [
@@ -172,8 +169,7 @@ export class ConsolidationSessionsComponent implements OnInit, OnDestroy {
       label: 'Nueva Sesion',
       icon: 'plus',
       action: 'create',
-      variant: 'primary',
-    },
+      variant: 'primary'},
   ];
 
   table_actions: TableAction[] = [
@@ -181,8 +177,7 @@ export class ConsolidationSessionsComponent implements OnInit, OnDestroy {
       label: 'Ver',
       icon: 'eye',
       variant: 'secondary',
-      action: (row: ConsolidationSession) => this.onRowClick(row),
-    },
+      action: (row: ConsolidationSession) => this.onRowClick(row)},
   ];
 
   columns: TableColumn[] = [
@@ -191,15 +186,13 @@ export class ConsolidationSessionsComponent implements OnInit, OnDestroy {
       key: 'fiscal_period',
       label: 'Periodo Fiscal',
       priority: 2,
-      transform: (val: any) => val?.name || '-',
-    },
+      transform: (val: any) => val?.name || '-'},
     {
       key: 'session_date',
       label: 'Fecha',
       sortable: true,
       priority: 1,
-      transform: (val: any) => (val ? formatDateOnlyUTC(val) : '-'),
-    },
+      transform: (val: any) => (val ? formatDateOnlyUTC(val) : '-')},
     {
       key: 'status',
       label: 'Estado',
@@ -207,22 +200,19 @@ export class ConsolidationSessionsComponent implements OnInit, OnDestroy {
       priority: 1,
       badge: true,
       badgeConfig: { type: 'status' },
-      transform: (val: any) => this.getStatusLabel(val),
-    },
+      transform: (val: any) => this.getStatusLabel(val)},
     {
       key: 'adjustments_count',
       label: 'Ajustes',
       align: 'center',
       priority: 2,
-      transform: (val: any) => val ?? 0,
-    },
+      transform: (val: any) => val ?? 0},
     {
       key: 'intercompany_count',
       label: 'IC Trans.',
       align: 'center',
       priority: 2,
-      transform: (val: any) => val ?? 0,
-    },
+      transform: (val: any) => val ?? 0},
   ];
 
   card_config: ItemListCardConfig = {
@@ -235,40 +225,29 @@ export class ConsolidationSessionsComponent implements OnInit, OnDestroy {
         draft: 'warn',
         in_progress: 'info',
         completed: 'success',
-        cancelled: 'danger',
-      },
-    },
+        cancelled: 'danger'}},
     badgeTransform: (val: any) => this.getStatusLabel(val),
     detailKeys: [
       {
         key: 'fiscal_period',
         label: 'Periodo',
         icon: 'calendar',
-        transform: (val: any) => val?.name || '-',
-      },
+        transform: (val: any) => val?.name || '-'},
       {
         key: 'adjustments_count',
         label: 'Ajustes',
         icon: 'sliders',
-        transform: (val: any) => `${val ?? 0}`,
-      },
-    ],
-  };
+        transform: (val: any) => `${val ?? 0}`},
+    ]};
 
-  ngOnInit(): void {
+  constructor() {
     this.loadSessions();
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  loadSessions(): void {
+loadSessions(): void {
     this.loading.set(true);
     this.accounting_service
       .getConsolidationSessions()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
           this.sessions.set(res.data || []);
@@ -277,11 +256,9 @@ export class ConsolidationSessionsComponent implements OnInit, OnDestroy {
         error: () => {
           this.toast_service.show({
             variant: 'error',
-            description: 'Error cargando sesiones de consolidacion',
-          });
+            description: 'Error cargando sesiones de consolidacion'});
           this.loading.set(false);
-        },
-      });
+        }});
   }
 
   onSearchChange(term: string): void {
@@ -290,7 +267,7 @@ export class ConsolidationSessionsComponent implements OnInit, OnDestroy {
 
   onActionClick(action: string): void {
     if (action === 'create') {
-      this.is_create_modal_open = true;
+      this.isCreateModalOpen.set(true);
     }
   }
 
@@ -299,7 +276,7 @@ export class ConsolidationSessionsComponent implements OnInit, OnDestroy {
   }
 
   onSessionCreated(session: ConsolidationSession): void {
-    this.is_create_modal_open = false;
+    this.isCreateModalOpen.set(false);
     this.router.navigate(['/store/accounting/consolidation', session.id]);
   }
 
@@ -308,8 +285,7 @@ export class ConsolidationSessionsComponent implements OnInit, OnDestroy {
       draft: 'Borrador',
       in_progress: 'En Progreso',
       completed: 'Completada',
-      cancelled: 'Cancelada',
-    };
+      cancelled: 'Cancelada'};
     return labels[status] || status;
   }
 }

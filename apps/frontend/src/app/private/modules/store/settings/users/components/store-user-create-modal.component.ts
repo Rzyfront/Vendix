@@ -1,33 +1,30 @@
-import {
-  Component,
-  Input,
-  Output,
-  EventEmitter,
-  OnDestroy,
+import {Component,
+  input,
+  output,
+  model,
+  signal,
   inject,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import {
   ReactiveFormsModule,
   FormBuilder,
   FormGroup,
-  Validators,
-} from '@angular/forms';
+  Validators} from '@angular/forms';
 import {
   InputComponent,
   ButtonComponent,
   ModalComponent,
-  ToastService,
-} from '../../../../../../shared/components/index';
+  ToastService} from '../../../../../../shared/components/index';
 import { StoreUsersManagementService } from '../services/store-users-management.service';
 import { CreateStoreUserDto } from '../interfaces/store-user.interface';
-import { Subject, takeUntil } from 'rxjs';
+
 
 @Component({
   selector: 'app-store-user-create-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     InputComponent,
     ButtonComponent,
@@ -35,7 +32,7 @@ import { Subject, takeUntil } from 'rxjs';
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
@@ -44,14 +41,13 @@ import { Subject, takeUntil } from 'rxjs';
     >
       <form [formGroup]="userForm" (ngSubmit)="onSubmit()">
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-
           <app-input
             formControlName="first_name"
             label="Nombre *"
             placeholder="Juan"
             [required]="true"
             [control]="userForm.get('first_name')"
-            [disabled]="isCreating"
+            [disabled]="isCreating()"
           ></app-input>
 
           <app-input
@@ -60,7 +56,7 @@ import { Subject, takeUntil } from 'rxjs';
             placeholder="Perez"
             [required]="true"
             [control]="userForm.get('last_name')"
-            [disabled]="isCreating"
+            [disabled]="isCreating()"
           ></app-input>
 
           <app-input
@@ -68,7 +64,7 @@ import { Subject, takeUntil } from 'rxjs';
             label="Nombre de Usuario"
             placeholder="juanperez"
             [control]="userForm.get('username')"
-            [disabled]="isCreating"
+            [disabled]="isCreating()"
             helpText="Opcional. Solo letras, numeros y guiones bajos"
           ></app-input>
 
@@ -79,7 +75,7 @@ import { Subject, takeUntil } from 'rxjs';
             placeholder="juan@ejemplo.com"
             [required]="true"
             [control]="userForm.get('email')"
-            [disabled]="isCreating"
+            [disabled]="isCreating()"
           ></app-input>
 
           <app-input
@@ -89,10 +85,9 @@ import { Subject, takeUntil } from 'rxjs';
             placeholder="••••••••••"
             [required]="true"
             [control]="userForm.get('password')"
-            [disabled]="isCreating"
+            [disabled]="isCreating()"
             helpText="Minimo 8 caracteres, debe incluir mayuscula, minuscula, numero y caracter especial"
           ></app-input>
-
         </div>
       </form>
 
@@ -100,15 +95,15 @@ import { Subject, takeUntil } from 'rxjs';
         <app-button
           variant="outline"
           (clicked)="onCancel()"
-          [disabled]="isCreating"
+          [disabled]="isCreating()"
         >
           Cancelar
         </app-button>
         <app-button
           variant="primary"
           (clicked)="onSubmit()"
-          [disabled]="userForm.invalid || isCreating"
-          [loading]="isCreating"
+          [disabled]="userForm.invalid || isCreating()"
+          [loading]="isCreating()"
         >
           Crear Usuario
         </app-button>
@@ -121,17 +116,15 @@ import { Subject, takeUntil } from 'rxjs';
         display: block;
       }
     `,
-  ],
-})
-export class StoreUserCreateModalComponent implements OnDestroy {
-  @Input() isOpen: boolean = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() onUserCreated = new EventEmitter<void>();
+  ]})
+export class StoreUserCreateModalComponent {
+  private destroyRef = inject(DestroyRef);
+  readonly isOpen = model<boolean>(false);
+  readonly isOpenChange = output<boolean>();
+  readonly onUserCreated = output<void>();
 
   userForm: FormGroup;
-  isCreating: boolean = false;
-  private destroy$ = new Subject<void>();
-
+  isCreating = signal(false);
   private storeUsersService = inject(StoreUsersManagementService);
   private toastService = inject(ToastService);
 
@@ -160,24 +153,17 @@ export class StoreUserCreateModalComponent implements OnDestroy {
             /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/,
           ),
         ],
-      ],
-    });
+      ]});
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  onSubmit(): void {
-    if (this.userForm.invalid || this.isCreating) {
+onSubmit(): void {
+    if (this.userForm.invalid || this.isCreating()) {
       Object.keys(this.userForm.controls).forEach((key) => {
         this.userForm.get(key)?.markAsTouched();
       });
       return;
     }
 
-    this.isCreating = true;
+    this.isCreating.set(true);
     const userData: CreateStoreUserDto = this.userForm.value;
 
     // Remove username if empty
@@ -187,23 +173,26 @@ export class StoreUserCreateModalComponent implements OnDestroy {
 
     this.storeUsersService
       .createUser(userData)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
-          this.isCreating = false;
+          this.isCreating.set(false);
           this.toastService.success('Usuario creado exitosamente');
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
+          // TODO: The 'emit' function requires a mandatory void argument
           this.onUserCreated.emit();
           this.isOpenChange.emit(false);
           this.resetForm();
         },
         error: (error: any) => {
-          this.isCreating = false;
+          this.isCreating.set(false);
           console.error('Error creating store user:', error);
-          const message =
-            error?.error?.message || 'Error al crear el usuario';
+          const message = error?.error?.message || 'Error al crear el usuario';
           this.toastService.error(message);
-        },
-      });
+        }});
   }
 
   onCancel(): void {
@@ -217,7 +206,6 @@ export class StoreUserCreateModalComponent implements OnDestroy {
       last_name: '',
       username: '',
       email: '',
-      password: '',
-    });
+      password: ''});
   }
 }

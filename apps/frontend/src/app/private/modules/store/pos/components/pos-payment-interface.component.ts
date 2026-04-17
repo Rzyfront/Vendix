@@ -1,15 +1,13 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
-  OnInit,
-  OnDestroy,
-  OnChanges,
-  SimpleChanges,
-  ChangeDetectorRef,
+  input,
+  output,
   inject,
+  effect,
+  DestroyRef,
+  signal,
 } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
   FormBuilder,
   FormGroup,
@@ -18,8 +16,7 @@ import {
   ReactiveFormsModule,
   FormsModule,
 } from '@angular/forms';
-import { CommonModule } from '@angular/common';
-import { Subject, Subscription, takeUntil, debounceTime } from 'rxjs';
+import { Subscription, debounceTime } from 'rxjs';
 import { Router } from '@angular/router';
 import { Store } from '@ngrx/store';
 
@@ -69,7 +66,6 @@ interface PaymentState {
   selector: 'app-pos-payment-interface',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     FormsModule,
     ModalComponent,
@@ -1120,7 +1116,7 @@ interface PaymentState {
       .tab-btn.active {
         background: var(--color-surface);
         color: var(--color-primary);
-        box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
       }
 
       /* Collapsible sub-sections */
@@ -1260,7 +1256,11 @@ interface PaymentState {
 
       .wompi-submethod-btn:hover {
         border-color: var(--wompi-color, var(--color-primary));
-        background: color-mix(in srgb, var(--wompi-color, var(--color-primary)) 8%, transparent);
+        background: color-mix(
+          in srgb,
+          var(--wompi-color, var(--color-primary)) 8%,
+          transparent
+        );
       }
 
       .wompi-submethod-btn .submethod-label {
@@ -1390,21 +1390,20 @@ interface PaymentState {
     `,
   ],
 })
-export class PosPaymentInterfaceComponent
-  implements OnInit, OnDestroy, OnChanges
-{
-  @Input() isOpen = false;
-  @Input() cartState: CartState | null = null;
-  @Output() closed = new EventEmitter<void>();
-  @Output() paymentCompleted = new EventEmitter<any>();
-  @Output() requestCustomer = new EventEmitter<void>();
-  @Output() requestRegisterConfig = new EventEmitter<void>();
-  @Output() draftSaved = new EventEmitter<any>();
-  @Output() customerSelected = new EventEmitter<PosCustomer>();
+export class PosPaymentInterfaceComponent {
+  private destroyRef = inject(DestroyRef);
+  readonly isOpen = input<boolean>(false);
+  readonly cartState = input<CartState | null>(null);
+  readonly closed = output<void>();
+  readonly paymentCompleted = output<any>();
+  readonly requestCustomer = output<void>();
+  readonly requestRegisterConfig = output<void>();
+  readonly draftSaved = output<any>();
+  readonly customerSelected = output<PosCustomer>();
 
-  paymentMethods: PaymentMethod[] = [];
+  paymentMethods = signal<PaymentMethod[]>([]);
   paymentForm: FormGroup;
-  paymentState: PaymentState = {
+  paymentState = signal<PaymentState>({
     selectedMethod: null,
     cashReceived: 0,
     reference: '',
@@ -1412,20 +1411,20 @@ export class PosPaymentInterfaceComponent
     change: 0,
     isAnonymousSale: false,
     paymentForm: 'contado',
-  };
+  });
 
   // Wallet
-  walletInfo: WalletInfo | null = null;
-  walletLoading: boolean = false;
+  walletInfo = signal<WalletInfo | null>(null);
+  walletLoading = signal(false);
 
   // Wompi state
   wompiService = inject(WompiService);
-  selectedWompiSubMethod: WompiSubMethod | null = null;
+  selectedWompiSubMethod = signal<WompiSubMethod | null>(null);
   wompiSubMethods: WompiSubMethodConfig[] = WompiService.SUB_METHODS.filter(
     (m) => m.key !== WompiSubMethod.CARD,
   );
-  wompiAwaitingPayment = false;
-  wompiAwaitingMessage = '';
+  wompiAwaitingPayment = signal(false);
+  wompiAwaitingMessage = signal('');
   wompiPollingSubscription: Subscription | null = null;
   wompiPaymentId: string | null = null;
 
@@ -1443,20 +1442,20 @@ export class PosPaymentInterfaceComponent
     financialInstitutionCode: new FormControl('', [Validators.required]),
     paymentDescription: new FormControl(''),
   });
-  pseFinancialInstitutions: PseFinancialInstitution[] = [];
-  pseBankOptions: { value: string; label: string }[] = [];
+  pseFinancialInstitutions = signal<PseFinancialInstitution[]>([]);
+  pseBankOptions = signal<{ value: string; label: string }[]>([]);
 
   // Store settings
   storeSettingsSubscription: any;
-  allowAnonymousSales = false;
-  anonymousSalesAsDefault = false;
-  requireCashDrawerOpen = false;
-  enableScheduleValidation = false;
-  showOnscreenKeypad = true;
-  paymentFormCollapsed = false;
-  paymentMethodCollapsed = false;
-  businessHours: Record<string, { open: string; close: string }> = {};
-  defaultPaymentForm: 'contado' | 'credito' = 'contado';
+  allowAnonymousSales = signal(false);
+  anonymousSalesAsDefault = signal(false);
+  requireCashDrawerOpen = signal(false);
+  enableScheduleValidation = signal(false);
+  showOnscreenKeypad = signal(true);
+  paymentFormCollapsed = signal(false);
+  paymentMethodCollapsed = signal(false);
+  businessHours = signal<Record<string, { open: string; close: string }>>({});
+  defaultPaymentForm = signal<'contado' | 'credito'>('contado');
 
   // Currency symbol (computed signal from CurrencyFormatService)
   currencySymbol: any;
@@ -1470,21 +1469,21 @@ export class PosPaymentInterfaceComponent
   ];
 
   // Customer management within modal
-  showCustomerSelector = false;
-  customerSearchResults: PosCustomer[] = [];
-  customerSearchQuery = '';
-  isSearchingCustomer = false;
-  showCreateCustomerForm = false;
+  showCustomerSelector = signal(false);
+  customerSearchResults = signal<PosCustomer[]>([]);
+  customerSearchQuery = signal('');
+  isSearchingCustomer = signal(false);
+  showCreateCustomerForm = signal(false);
 
   // Credit configuration state
-  creditNumInstallments = 3;
-  creditFrequency: 'weekly' | 'biweekly' | 'monthly' = 'monthly';
-  creditFirstDate = '';
-  creditInterestRate = 0;
-  creditInitialPayment = 0;
-  creditInitialPaymentMethod: PaymentMethod | null = null;
-  creditType: 'installments' | 'free' = 'installments';
-  creditInterestType: 'simple' | 'compound' = 'simple';
+  creditNumInstallments = signal(3);
+  creditFrequency = signal<'weekly' | 'biweekly' | 'monthly'>('monthly');
+  creditFirstDate = signal('');
+  creditInterestRate = signal(0);
+  creditInitialPayment = signal(0);
+  creditInitialPaymentMethod = signal<PaymentMethod | null>(null);
+  creditType = signal<'installments' | 'free'>('installments');
+  creditInterestType = signal<'simple' | 'compound'>('simple');
 
   creditTypeOptions = [
     { value: 'installments' as const, label: 'Con Cuotas' },
@@ -1496,8 +1495,10 @@ export class PosPaymentInterfaceComponent
     { value: 'compound' as const, label: 'Compuesto' },
   ];
 
-  creditRemainingBalance = 0;
-  creditInstallmentsPreview: { amount: number; due_date: string }[] = [];
+  creditRemainingBalance = signal(0);
+  creditInstallmentsPreview = signal<{ amount: number; due_date: string }[]>(
+    [],
+  );
 
   frequencyOptions = [
     { value: 'weekly' as const, label: 'Semanal' },
@@ -1508,9 +1509,6 @@ export class PosPaymentInterfaceComponent
   customerForm: FormGroup;
 
   // quickCashAmounts = [10, 20, 50, 100]; // Removed as per new requirement
-
-  private destroy$ = new Subject<void>();
-
   get cashReceivedControl(): FormControl {
     return this.paymentForm.get('cashReceived') as FormControl;
   }
@@ -1544,66 +1542,61 @@ export class PosPaymentInterfaceComponent
   }
 
   get customerDisplayName(): string {
-    if (!this.cartState?.customer) {
+    if (!this.cartState()?.customer) {
       return 'Seleccionar cliente';
     }
-    const firstName = this.cartState.customer.first_name || '';
-    const lastName = this.cartState.customer.last_name || '';
+    const firstName = this.cartState()!.customer?.first_name || '';
+    const lastName = this.cartState()!.customer?.last_name || '';
     return `${firstName} ${lastName}`.trim() || 'Cliente sin nombre';
   }
 
   get customerEmail(): string {
-    return this.cartState?.customer?.email || '';
+    return this.cartState()?.customer?.email || '';
   }
 
-  constructor(
-    private fb: FormBuilder,
-    private paymentService: PosPaymentService,
-    private customerService: PosCustomerService,
-    private toastService: ToastService,
-    private router: Router,
-    private store: Store,
-    private cdr: ChangeDetectorRef,
-    private currencyService: CurrencyFormatService,
-    private walletService: PosWalletService,
-  ) {
+  private fb = inject(FormBuilder);
+  private paymentService = inject(PosPaymentService);
+  private customerService = inject(PosCustomerService);
+  private toastService = inject(ToastService);
+  private router = inject(Router);
+  private store = inject(Store);
+  private currencyService = inject(CurrencyFormatService);
+  private walletService = inject(PosWalletService);
+
+  constructor() {
     this.paymentForm = this.createPaymentForm();
     this.customerForm = this.createCustomerForm();
     // Exponer el símbolo de moneda para usar en el template
     this.currencySymbol = this.currencyService.currencySymbol;
-  }
 
-  ngOnInit(): void {
+    inject(DestroyRef).onDestroy(() => {
+      this.wompiPollingSubscription?.unsubscribe();
+    });
+
     this.loadPaymentMethods();
     this.setupFormListeners();
     this.loadStoreSettings();
     // Asegurar que la moneda esté cargada para la interfaz de pago
     this.currencyService.loadCurrency();
     this.setDefaultCreditFirstDate();
-  }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-    this.wompiPollingSubscription?.unsubscribe();
-  }
-
-  ngOnChanges(changes: SimpleChanges): void {
-    // When modal opens, sync anonymous sale state with current settings
-    if (changes['isOpen'] && changes['isOpen'].currentValue === true) {
-      this.syncAnonymousSaleState();
-    }
+    effect(() => {
+      // When modal opens, sync anonymous sale state with current settings
+      if (this.isOpen() === true) {
+        this.syncAnonymousSaleState();
+      }
+    });
   }
 
   private syncAnonymousSaleState(): void {
-    // If anonymous sales are not allowed, always disable
-    if (!this.allowAnonymousSales) {
-      this.paymentState.isAnonymousSale = false;
+    if (!this.allowAnonymousSales()) {
+      this.paymentState.update((s) => ({ ...s, isAnonymousSale: false }));
     } else {
-      // Use the default setting from store settings
-      this.paymentState.isAnonymousSale = this.anonymousSalesAsDefault;
+      this.paymentState.update((s) => ({
+        ...s,
+        isAnonymousSale: this.anonymousSalesAsDefault(),
+      }));
     }
-    this.cdr.markForCheck();
   }
 
   // Track if settings have been loaded at least once
@@ -1629,37 +1622,39 @@ export class PosPaymentInterfaceComponent
 
   private setupFormListeners(): void {
     this.cashReceivedControl.valueChanges
-      .pipe(takeUntil(this.destroy$), debounceTime(100))
+      .pipe(takeUntilDestroyed(this.destroyRef), debounceTime(100))
       .subscribe((value: string | number | null) => {
         if (value !== null && value !== undefined && value !== '') {
-          this.paymentState.cashReceived = parseFloat(value.toString()) || 0;
+          this.paymentState.update((s) => ({
+            ...s,
+            cashReceived: parseFloat(value.toString()) || 0,
+          }));
           this.calculateChange();
         }
       });
 
     this.referenceControl.valueChanges
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((value: string | null) => {
-        this.paymentState.reference = value || '';
+        this.paymentState.update((s) => ({ ...s, reference: value || '' }));
       });
   }
 
   private loadPaymentMethods(): void {
     this.paymentService
       .getPaymentMethods()
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((methods) => {
-        this.paymentMethods = methods;
+        this.paymentMethods.set(methods);
       });
   }
 
   private isWithinBusinessHours(): boolean {
     // If schedule validation is disabled, always allow
-    if (!this.enableScheduleValidation) {
+    if (!this.enableScheduleValidation()) {
       return true;
     }
 
-    // Get current day and time in store timezone
     const now = new Date();
     const dayNames = [
       'sunday',
@@ -1672,75 +1667,62 @@ export class PosPaymentInterfaceComponent
     ];
     const currentDayName = dayNames[now.getDay()];
 
-    // Get business hours for current day
-    const todayHours = this.businessHours?.[currentDayName];
+    const todayHours = this.businessHours()?.[currentDayName];
 
-    // If no hours configured for today, allow by default
     if (!todayHours) {
       return true;
     }
 
-    // If day is marked as closed, don't allow sales
     if (todayHours.open === 'closed' || todayHours.close === 'closed') {
       return false;
     }
 
-    // Parse current time to minutes for comparison
     const currentTime = now.getHours() * 60 + now.getMinutes();
 
-    // Parse opening and closing times
     const [openHour, openMinute] = todayHours.open.split(':').map(Number);
     const [closeHour, closeMinute] = todayHours.close.split(':').map(Number);
 
     const openTime = openHour * 60 + openMinute;
     const closeTime = closeHour * 60 + closeMinute;
 
-    // Check if current time is within business hours
     return currentTime >= openTime && currentTime <= closeTime;
   }
 
   private loadStoreSettings(): void {
     this.storeSettingsSubscription = this.store
       .select(fromAuth.selectStoreSettings)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((storeSettings: any) => {
         // store_settings has structure: { settings: { pos: { ... }, general: { ... }, ... } }
         const settings = storeSettings;
         if (settings?.pos) {
-          const prevAllowAnonymous = this.allowAnonymousSales;
+          const prevAllowAnonymous = this.allowAnonymousSales();
 
-          this.allowAnonymousSales =
-            settings.pos.allow_anonymous_sales || false;
-          this.anonymousSalesAsDefault =
-            settings.pos.anonymous_sales_as_default || false;
-          this.requireCashDrawerOpen =
-            settings.pos.require_cash_drawer_open || false;
-          this.enableScheduleValidation =
-            settings.pos.enable_schedule_validation || false;
+          this.allowAnonymousSales.set(settings.pos.allow_anonymous_sales || false);
+          this.anonymousSalesAsDefault.set(settings.pos.anonymous_sales_as_default || false);
+          this.requireCashDrawerOpen.set(settings.pos.require_cash_drawer_open || false);
+          this.enableScheduleValidation.set(settings.pos.enable_schedule_validation || false);
           this.businessHours = settings.pos.business_hours || {};
           if (settings.pos.default_payment_form) {
-            this.defaultPaymentForm = settings.pos.default_payment_form;
+            this.defaultPaymentForm.set(settings.pos.default_payment_form);
             if (!this.settingsLoaded) {
-              this.paymentState.paymentForm = this.defaultPaymentForm;
+              this.paymentState.update(s => ({ ...s, paymentForm: this.defaultPaymentForm() }));
             }
           }
           this.settingsLoaded = true;
-          this.showOnscreenKeypad = settings.pos.show_onscreen_keypad !== false;
+          this.showOnscreenKeypad.set(settings.pos.show_onscreen_keypad !== false);
 
           // If anonymous sales are not allowed, always disable the toggle
-          if (!this.allowAnonymousSales) {
-            this.paymentState.isAnonymousSale = false;
+          if (!this.allowAnonymousSales()) {
+            this.paymentState.update(s => ({ ...s, isAnonymousSale: false }));
           } else {
             // Only update if this is first load (prevAllowAnonymous is falsy)
             // or if we want to respect the default setting
-            if (!prevAllowAnonymous || this.anonymousSalesAsDefault) {
-              this.paymentState.isAnonymousSale = this.anonymousSalesAsDefault;
+            if (!prevAllowAnonymous || this.anonymousSalesAsDefault()) {
+              this.paymentState.update(s => ({ ...s, isAnonymousSale: this.anonymousSalesAsDefault() }));
             }
             // Otherwise, preserve current user selection
           }
-
-          // Trigger change detection to update UI
-          this.cdr.markForCheck();
         }
       });
   }
@@ -1748,7 +1730,7 @@ export class PosPaymentInterfaceComponent
   private setDefaultCreditFirstDate(): void {
     const date = new Date();
     date.setDate(date.getDate() + 30);
-    this.creditFirstDate = toLocalDateString(date);
+    this.creditFirstDate.set(toLocalDateString(date));
   }
 
   selectPaymentMethod(method: PaymentMethod): void {
@@ -1757,55 +1739,59 @@ export class PosPaymentInterfaceComponent
 
     // Wallet requires customer selection
     if (method.type === 'wallet') {
-      if (!this.cartState?.customer) {
+      if (!this.cartState()?.customer) {
         this.toastService.info('Seleccione un cliente para pagar con Wallet');
         this.requestCustomer.emit();
         return;
       }
       // Load wallet balance
-      this.walletLoading = true;
-      this.walletInfo = null;
-      this.walletService.getCustomerWallet(this.cartState.customer.id).subscribe({
-        next: (wallet) => {
-          this.walletInfo = wallet;
-          this.walletLoading = false;
-          if (!wallet || wallet.available <= 0) {
-            this.toastService.warning('El cliente no tiene saldo disponible en su wallet');
-          }
-        },
-        error: () => {
-          this.walletInfo = null;
-          this.walletLoading = false;
-          this.toastService.error('Error al consultar wallet del cliente');
-        },
-      });
+      this.walletLoading.set(true);
+      this.walletInfo.set(null);
+      this.walletService
+        .getCustomerWallet(this.cartState()!.customer!.id)
+        .subscribe({
+          next: (wallet) => {
+            this.walletInfo.set(wallet);
+            this.walletLoading.set(false);
+            if (!wallet || wallet.available <= 0) {
+              this.toastService.warning(
+                'El cliente no tiene saldo disponible en su wallet',
+              );
+            }
+          },
+          error: () => {
+            this.walletInfo.set(null);
+            this.walletLoading.set(false);
+            this.toastService.error('Error al consultar wallet del cliente');
+          },
+        });
     } else {
       // Reset wallet info when switching to other method
-      this.walletInfo = null;
-      this.walletLoading = false;
+      this.walletInfo.set(null);
+      this.walletLoading.set(false);
     }
 
-    this.paymentState.selectedMethod = method;
-    this.paymentMethodCollapsed = true;
+    this.paymentState.update(s => ({ ...s, selectedMethod: method }));
+    this.paymentMethodCollapsed.set(true);
     this.paymentForm.reset();
-    this.paymentState.change = 0;
+    this.paymentState.update(s => ({ ...s, change: 0 }));
 
     if (method.type === 'cash') {
-      this.cashReceivedControl.setValue(this.cartState?.summary?.total || 0);
+      this.cashReceivedControl.setValue(this.cartState()?.summary?.total || 0);
     }
   }
 
   togglePaymentFormCollapsed(): void {
-    this.paymentFormCollapsed = !this.paymentFormCollapsed;
+    this.paymentFormCollapsed.set(!this.paymentFormCollapsed());
   }
 
   togglePaymentMethodCollapsed(): void {
-    this.paymentMethodCollapsed = !this.paymentMethodCollapsed;
+    this.paymentMethodCollapsed.set(!this.paymentMethodCollapsed());
   }
 
   getPaymentMethodClasses(method: PaymentMethod): string {
     const base_classes = ['payment-method-card'];
-    if (this.paymentState.selectedMethod?.id === method.id) {
+    if (this.paymentState().selectedMethod?.id === method.id) {
       base_classes.push('selected');
     }
     return base_classes.join(' ');
@@ -1816,12 +1802,12 @@ export class PosPaymentInterfaceComponent
   }
 
   setFullAmount(): void {
-    const total = this.cartState?.summary?.total || 0;
+    const total = this.cartState()?.summary?.total || 0;
     this.setCashAmount(total);
   }
 
   setHalfAmount(): void {
-    const total = this.cartState?.summary?.total || 0;
+    const total = this.cartState()?.summary?.total || 0;
     this.setCashAmount(total / 2);
   }
 
@@ -1849,10 +1835,10 @@ export class PosPaymentInterfaceComponent
   }
 
   calculateChange(): void {
-    if (this.paymentState.selectedMethod?.type === 'cash') {
-      const total = this.cartState?.summary?.total || 0;
-      const received = this.paymentState.cashReceived || 0;
-      this.paymentState.change = Math.max(0, received - total);
+    if (this.paymentState().selectedMethod?.type === 'cash') {
+      const total = this.cartState()?.summary?.total || 0;
+      const received = this.paymentState().cashReceived || 0;
+      this.paymentState.update(s => ({ ...s, change: Math.max(0, received - total) }));
     }
   }
 
@@ -1870,35 +1856,37 @@ export class PosPaymentInterfaceComponent
   }
 
   canProcessPayment(): boolean {
-    if (this.paymentState.isProcessing) return false;
+    if (this.paymentState().isProcessing) return false;
 
     // Modo crédito: requiere cliente y saldo válido (cuotas solo para tipo 'installments')
-    if (this.paymentState.paymentForm === 'credito') {
-      const baseValid = !!this.cartState?.customer && this.creditRemainingBalance > 0;
-      if (this.creditType === 'installments') {
-        return baseValid && this.creditNumInstallments > 0;
+    if (this.paymentState().paymentForm === 'credito') {
+      const baseValid =
+        !!this.cartState()?.customer && this.creditRemainingBalance() > 0;
+      if (this.creditType() === 'installments') {
+        return baseValid && this.creditNumInstallments() > 0;
       }
       return baseValid;
     }
 
     // Modo contado: lógica actual
-    if (!this.paymentState.selectedMethod) return false;
+    const selectedMethod = this.paymentState().selectedMethod;
+    if (!selectedMethod) return false;
 
     // Wallet validation
-    if (this.paymentState.selectedMethod.type === 'wallet') {
-      if (!this.cartState?.customer) return false;
-      if (!this.walletInfo) return false;
-      const total = this.cartState?.summary?.total || 0;
-      return this.walletInfo.available >= total;
+    if (selectedMethod.type === 'wallet') {
+      if (!this.cartState()?.customer) return false;
+      if (!this.walletInfo()) return false;
+      const total = this.cartState()?.summary?.total || 0;
+      return (this.walletInfo()?.available ?? 0) >= total;
     }
 
-    if (!this.paymentState.isAnonymousSale && !this.cartState?.customer) {
+    if (!this.paymentState().isAnonymousSale && !this.cartState()?.customer) {
       return false;
     }
 
-    if (this.paymentState.selectedMethod.type === 'cash') {
-      const total = this.cartState?.summary?.total || 0;
-      return this.paymentState.cashReceived >= total;
+    if (selectedMethod.type === 'cash') {
+      const total = this.cartState()?.summary?.total || 0;
+      return this.paymentState().cashReceived >= total;
     }
 
     // Wompi: requires sub-method selection and valid form
@@ -1906,7 +1894,7 @@ export class PosPaymentInterfaceComponent
       return this.isWompiFormValid();
     }
 
-    if (this.paymentState.selectedMethod.requiresReference) {
+    if (selectedMethod.requiresReference) {
       const reference = this.referenceControl.value;
       return reference && reference.trim().length >= 4;
     }
@@ -1915,18 +1903,18 @@ export class PosPaymentInterfaceComponent
   }
 
   processPayment(): void {
-    if (!this.canProcessPayment() || !this.cartState) return;
+    if (!this.canProcessPayment() || !this.cartState()) return;
 
     // Flujo crédito
-    if (this.paymentState.paymentForm === 'credito') {
+    if (this.paymentState().paymentForm === 'credito') {
       this.processCreditSaleWithTerms();
       return;
     }
 
     // Flujo contado (lógica existente)
-    if (!this.paymentState.selectedMethod) return;
+    if (!this.paymentState().selectedMethod) return;
 
-    if (!this.paymentState.isAnonymousSale && !this.cartState.customer) {
+    if (!this.paymentState().isAnonymousSale && !this.cartState()!.customer) {
       this.toastService.info('Seleccione un cliente para continuar');
       this.requestCustomer.emit();
       this.onModalClosed();
@@ -1935,7 +1923,7 @@ export class PosPaymentInterfaceComponent
 
     let register_id = localStorage.getItem('pos_register_id');
 
-    if (!register_id && !this.requireCashDrawerOpen) {
+    if (!register_id && !this.requireCashDrawerOpen()) {
       register_id = 'DEFAULT-POS';
       localStorage.setItem('pos_register_id', register_id);
     }
@@ -1949,8 +1937,13 @@ export class PosPaymentInterfaceComponent
 
     if (!this.isWithinBusinessHours()) {
       const dayNames = [
-        'Domingo', 'Lunes', 'Martes', 'Miércoles',
-        'Jueves', 'Viernes', 'Sábado',
+        'Domingo',
+        'Lunes',
+        'Martes',
+        'Miércoles',
+        'Jueves',
+        'Viernes',
+        'Sábado',
       ];
       const today = dayNames[new Date().getDay()];
       this.toastService.show({
@@ -1961,20 +1954,23 @@ export class PosPaymentInterfaceComponent
       return;
     }
 
-    this.paymentState.isProcessing = true;
+    this.paymentState.update(s => ({ ...s, isProcessing: true }));
 
     const payment_request: any = {
       orderId: 'ORDER_' + Date.now(),
-      amount: this.cartState.summary.total,
-      paymentMethod: this.paymentState.selectedMethod,
-      cashReceived: this.paymentState.cashReceived,
-      reference: this.paymentState.reference,
-      isAnonymousSale: this.paymentState.isAnonymousSale,
+      amount: this.cartState()!.summary.total,
+      paymentMethod: this.paymentState().selectedMethod,
+      cashReceived: this.paymentState().cashReceived,
+      reference: this.paymentState().reference,
+      isAnonymousSale: this.paymentState().isAnonymousSale,
     };
 
     // Pass wallet metadata
-    if (this.paymentState.selectedMethod?.type === 'wallet' && this.walletInfo) {
-      payment_request.metadata = { walletId: this.walletInfo.wallet_id };
+    if (
+      this.paymentState().selectedMethod?.type === 'wallet' &&
+      this.walletInfo()
+    ) {
+      payment_request.metadata = { walletId: this.walletInfo()?.wallet_id };
     }
 
     // Pass Wompi payment method data
@@ -1986,8 +1982,12 @@ export class PosPaymentInterfaceComponent
     }
 
     this.paymentService
-      .processSaleWithPayment(this.cartState, payment_request, 'current_user')
-      .pipe(takeUntil(this.destroy$))
+      .processSaleWithPayment(
+        this.cartState()!,
+        payment_request,
+        'current_user',
+      )
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
           if (response.success) {
@@ -2001,18 +2001,18 @@ export class PosPaymentInterfaceComponent
               return; // Don't close modal, wait for async confirmation
             }
 
-            this.paymentState.isProcessing = false;
+            this.paymentState.update(s => ({ ...s, isProcessing: false }));
             this.paymentCompleted.emit({
               success: true,
               order: response.order,
               payment: response.payment,
               change: response.change,
               message: response.message,
-              isAnonymousSale: this.paymentState.isAnonymousSale,
+              isAnonymousSale: this.paymentState().isAnonymousSale,
             });
             this.onModalClosed();
           } else {
-            this.paymentState.isProcessing = false;
+            this.paymentState.update(s => ({ ...s, isProcessing: false }));
             console.error('Payment failed:', response.message);
             this.toastService.show({
               variant: 'error',
@@ -2022,7 +2022,7 @@ export class PosPaymentInterfaceComponent
           }
         },
         error: (error) => {
-          this.paymentState.isProcessing = false;
+          this.paymentState.update(s => ({ ...s, isProcessing: false }));
           console.error('Payment error:', error);
           this.toastService.show({
             variant: 'error',
@@ -2035,13 +2035,13 @@ export class PosPaymentInterfaceComponent
   }
 
   private processCreditSaleWithTerms(): void {
-    if (!this.cartState || !this.cartState.customer) {
+    if (!this.cartState() || !this.cartState()!.customer) {
       this.toastService.info('Seleccione un cliente para continuar');
       return;
     }
 
     let register_id = localStorage.getItem('pos_register_id');
-    if (!register_id && !this.requireCashDrawerOpen) {
+    if (!register_id && !this.requireCashDrawerOpen()) {
       register_id = 'DEFAULT-POS';
       localStorage.setItem('pos_register_id', register_id);
     }
@@ -2055,8 +2055,13 @@ export class PosPaymentInterfaceComponent
 
     if (!this.isWithinBusinessHours()) {
       const dayNames = [
-        'Domingo', 'Lunes', 'Martes', 'Miércoles',
-        'Jueves', 'Viernes', 'Sábado',
+        'Domingo',
+        'Lunes',
+        'Martes',
+        'Miércoles',
+        'Jueves',
+        'Viernes',
+        'Sábado',
       ];
       const today = dayNames[new Date().getDay()];
       this.toastService.show({
@@ -2067,26 +2072,31 @@ export class PosPaymentInterfaceComponent
       return;
     }
 
-    this.paymentState.isProcessing = true;
+    this.paymentState.update(s => ({ ...s, isProcessing: true }));
 
     const creditConfig = {
-      num_installments: this.creditNumInstallments,
-      frequency: this.creditFrequency,
-      first_installment_date: this.creditFirstDate,
-      interest_rate: this.creditInterestRate,
-      interest_type: this.creditInterestType,
-      initial_payment: this.creditInitialPayment,
-      initial_payment_method_id: this.creditInitialPaymentMethod
-        ? parseInt(this.creditInitialPaymentMethod.id)
+      num_installments: this.creditNumInstallments(),
+      frequency: this.creditFrequency(),
+      first_installment_date: this.creditFirstDate(),
+      interest_rate: this.creditInterestRate(),
+      interest_type: this.creditInterestType(),
+      initial_payment: this.creditInitialPayment(),
+      initial_payment_method_id: this.creditInitialPaymentMethod()
+        ? parseInt(this.creditInitialPaymentMethod()?.id ?? '')
         : undefined,
     };
 
     this.paymentService
-      .processCreditSaleWithTerms(this.cartState, creditConfig, 'current_user', this.creditType)
-      .pipe(takeUntil(this.destroy$))
+      .processCreditSaleWithTerms(
+        this.cartState()!,
+        creditConfig,
+        'current_user',
+        this.creditType(),
+      )
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
-          this.paymentState.isProcessing = false;
+          this.paymentState.update(s => ({ ...s, isProcessing: false }));
           if (response.success) {
             this.paymentCompleted.emit({
               success: true,
@@ -2099,26 +2109,28 @@ export class PosPaymentInterfaceComponent
             this.toastService.show({
               variant: 'error',
               title: 'Error',
-              description: response.message || 'Error al procesar la venta a crédito',
+              description:
+                response.message || 'Error al procesar la venta a crédito',
             });
           }
         },
         error: (error) => {
-          this.paymentState.isProcessing = false;
+          this.paymentState.update(s => ({ ...s, isProcessing: false }));
           this.toastService.show({
             variant: 'error',
             title: 'Error',
-            description: error.message || 'Error al procesar la venta a crédito',
+            description:
+              error.message || 'Error al procesar la venta a crédito',
           });
         },
       });
   }
 
   processCreditSale(): void {
-    if (!this.cartState || this.paymentState.isProcessing) return;
+    if (!this.cartState() || this.paymentState().isProcessing) return;
 
     // Credit sales always require a customer (cannot be anonymous)
-    if (!this.cartState.customer) {
+    if (!this.cartState()!.customer) {
       this.toastService.info('Seleccione un cliente para continuar');
       this.requestCustomer.emit();
       this.onModalClosed();
@@ -2128,7 +2140,7 @@ export class PosPaymentInterfaceComponent
     let register_id = localStorage.getItem('pos_register_id');
 
     // Auto-configure default register if not required
-    if (!register_id && !this.requireCashDrawerOpen) {
+    if (!register_id && !this.requireCashDrawerOpen()) {
       register_id = 'DEFAULT-POS';
       localStorage.setItem('pos_register_id', register_id);
     }
@@ -2160,14 +2172,14 @@ export class PosPaymentInterfaceComponent
       return;
     }
 
-    this.paymentState.isProcessing = true;
+    this.paymentState.update(s => ({ ...s, isProcessing: true }));
 
     this.paymentService
-      .processCreditSale(this.cartState, 'current_user')
-      .pipe(takeUntil(this.destroy$))
+      .processCreditSale(this.cartState()!, 'current_user')
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
-          this.paymentState.isProcessing = false;
+          this.paymentState.update(s => ({ ...s, isProcessing: false }));
           if (response.success) {
             this.paymentCompleted.emit({
               success: true,
@@ -2187,7 +2199,7 @@ export class PosPaymentInterfaceComponent
           }
         },
         error: (error) => {
-          this.paymentState.isProcessing = false;
+          this.paymentState.update(s => ({ ...s, isProcessing: false }));
           console.error('Credit sale error:', error);
           this.toastService.show({
             variant: 'error',
@@ -2200,9 +2212,9 @@ export class PosPaymentInterfaceComponent
   }
 
   saveAsDraft(): void {
-    if (!this.cartState) return;
+    if (!this.cartState()) return;
 
-    if (!this.cartState.customer) {
+    if (!this.cartState()!.customer) {
       this.toastService.show({
         variant: 'error',
         title: 'Cliente Requerido',
@@ -2211,14 +2223,14 @@ export class PosPaymentInterfaceComponent
       return;
     }
 
-    this.paymentState.isProcessing = true;
+    this.paymentState.update(s => ({ ...s, isProcessing: true }));
 
     this.paymentService
-      .saveDraft(this.cartState, 'current_user')
-      .pipe(takeUntil(this.destroy$))
+      .saveDraft(this.cartState()!, 'current_user')
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
-          this.paymentState.isProcessing = false;
+          this.paymentState.update(s => ({ ...s, isProcessing: false }));
           if (response.success) {
             this.draftSaved.emit({
               success: true,
@@ -2229,7 +2241,7 @@ export class PosPaymentInterfaceComponent
           }
         },
         error: (error) => {
-          this.paymentState.isProcessing = false;
+          this.paymentState.update(s => ({ ...s, isProcessing: false }));
           console.error('Save draft error:', error);
           this.toastService.show({
             variant: 'error',
@@ -2241,33 +2253,33 @@ export class PosPaymentInterfaceComponent
   }
 
   onModalClosed(): void {
-    this.paymentState = {
+    this.paymentState.set({
       selectedMethod: null,
       cashReceived: 0,
       reference: '',
       isProcessing: false,
       change: 0,
       isAnonymousSale: false,
-      paymentForm: this.defaultPaymentForm,
-    };
+      paymentForm: this.defaultPaymentForm(),
+    });
     this.paymentForm.reset();
     this.customerForm.reset();
-    this.showCustomerSelector = false;
-    this.customerSearchResults = [];
-    this.customerSearchQuery = '';
-    this.showCreateCustomerForm = false;
-    this.paymentFormCollapsed = false;
-    this.paymentMethodCollapsed = false;
+    this.showCustomerSelector.set(false);
+    this.customerSearchResults.set([]);
+    this.customerSearchQuery.set('');
+    this.showCreateCustomerForm.set(false);
+    this.paymentFormCollapsed.set(false);
+    this.paymentMethodCollapsed.set(false);
     // Reset Wompi state
     this.resetWompiState();
     // Reset credit state
-    this.creditNumInstallments = 3;
-    this.creditFrequency = 'monthly';
-    this.creditInterestRate = 0;
-    this.creditInitialPayment = 0;
-    this.creditInitialPaymentMethod = null;
-    this.creditType = 'installments';
-    this.creditInterestType = 'simple';
+    this.creditNumInstallments.set(3);
+    this.creditFrequency.set('monthly');
+    this.creditInterestRate.set(0);
+    this.creditInitialPayment.set(0);
+    this.creditInitialPaymentMethod.set(null);
+    this.creditType.set('installments');
+    this.creditInterestType.set('simple');
     this.setDefaultCreditFirstDate();
     this.updateCreditCalculations();
     this.closed.emit();
@@ -2275,183 +2287,238 @@ export class PosPaymentInterfaceComponent
 
   // Anonymous Sale Toggle
   toggleAnonymousSale(enabled: boolean): void {
-    this.paymentState.isAnonymousSale = enabled;
+    this.paymentState.update(s => ({ ...s, isAnonymousSale: enabled }));
     if (enabled) {
       // When switching to anonymous, clear customer selector
-      this.showCustomerSelector = false;
-      this.showCreateCustomerForm = false;
+      this.showCustomerSelector.set(false);
+      this.showCreateCustomerForm.set(false);
     } else {
       // When switching to customer sale, show customer selector if no customer selected
-      if (!this.cartState?.customer) {
-        this.showCustomerSelector = true;
+      if (!this.cartState()?.customer) {
+        this.showCustomerSelector.set(true);
       }
     }
   }
 
   setPaymentForm(form: 'contado' | 'credito'): void {
-    this.paymentState.paymentForm = form;
-    this.paymentFormCollapsed = true;
-    this.paymentMethodCollapsed = false;
+    this.paymentState.update(s => ({ ...s, paymentForm: form }));
+    this.paymentFormCollapsed.set(true);
+    this.paymentMethodCollapsed.set(false);
     if (form === 'credito') {
       // Crédito requiere cliente — deshabilitar venta anónima
-      this.paymentState.isAnonymousSale = false;
-      if (!this.cartState?.customer) {
-        this.showCustomerSelector = true;
+      this.paymentState.update(s => ({ ...s, isAnonymousSale: false }));
+      if (!this.cartState()?.customer) {
+        this.showCustomerSelector.set(true);
       }
       this.updateCreditCalculations();
     }
   }
 
   private getCreditRemainingBalance(): number {
-    const total = this.cartState?.summary?.total || 0;
-    return Math.max(0, total - (this.creditInitialPayment || 0));
+    const total = this.cartState()?.summary?.total || 0;
+    return Math.max(0, total - (this.creditInitialPayment() || 0));
   }
 
-  private getCreditInstallmentsPreview(): { amount: number; due_date: string }[] {
+  private getCreditInstallmentsPreview(): {
+    amount: number;
+    due_date: string;
+  }[] {
     const total = this.getCreditRemainingBalance();
-    const n = this.creditNumInstallments;
+    const n = this.creditNumInstallments();
     if (n <= 0 || total <= 0) return [];
 
     const baseAmount = Math.round((total / n) * 100) / 100;
-    const freqDays: Record<string, number> = { weekly: 7, biweekly: 14, monthly: 30 };
-    const startDate = this.creditFirstDate ? new Date(this.creditFirstDate + 'T12:00:00') : new Date();
+    const freqDays: Record<string, number> = {
+      weekly: 7,
+      biweekly: 14,
+      monthly: 30,
+    };
+    const startDate = this.creditFirstDate()
+      ? new Date(this.creditFirstDate() + 'T12:00:00')
+      : new Date();
 
     return Array.from({ length: n }, (_, i) => {
       const due = new Date(startDate);
-      due.setDate(due.getDate() + freqDays[this.creditFrequency] * i);
+      due.setDate(due.getDate() + freqDays[this.creditFrequency()] * i);
       return {
-        amount: i === n - 1 ? Math.round((total - baseAmount * (n - 1)) * 100) / 100 : baseAmount,
+        amount:
+          i === n - 1
+            ? Math.round((total - baseAmount * (n - 1)) * 100) / 100
+            : baseAmount,
         due_date: toLocalDateString(due),
       };
     });
   }
 
   getTotalInstallments(): number {
-    return this.creditInstallmentsPreview.reduce((sum, inst) => sum + inst.amount, 0);
+    return this.creditInstallmentsPreview().reduce(
+      (sum: number, inst: { amount: number; due_date: string }) => sum + inst.amount,
+      0,
+    );
   }
 
   getAnnualRate(): number {
-    const raw = this.creditInterestRate || 0;
+    const raw = this.creditInterestRate() || 0;
     return raw > 1 ? raw : raw * 100;
   }
 
   getPeriodicRate(): number {
     const annual = this.getAnnualRate();
-    const divisors: Record<string, number> = { weekly: 52, biweekly: 26, monthly: 12 };
-    return Math.round((annual / (divisors[this.creditFrequency] || 12)) * 100) / 100;
+    const divisors: Record<string, number> = {
+      weekly: 52,
+      biweekly: 26,
+      monthly: 12,
+    };
+    return (
+      Math.round((annual / (divisors[this.creditFrequency()] || 12)) * 100) / 100
+    );
   }
 
   getPeriodicLabel(): string {
-    const labels: Record<string, string> = { weekly: 'semanal', biweekly: 'quincenal', monthly: 'mensual' };
-    return labels[this.creditFrequency] || 'mensual';
+    const labels: Record<string, string> = {
+      weekly: 'semanal',
+      biweekly: 'quincenal',
+      monthly: 'mensual',
+    };
+    return labels[this.creditFrequency()] || 'mensual';
   }
 
   getInterestAmount(): number {
-    if (this.creditInstallmentsPreview.length === 0) return 0;
-    return Math.round((this.getTotalInstallments() - this.creditRemainingBalance) * 100) / 100;
+    if (this.creditInstallmentsPreview().length === 0) return 0;
+    return (
+      Math.round(
+        (this.getTotalInstallments() - this.creditRemainingBalance()) * 100,
+      ) / 100
+    );
   }
 
   getEffectivePercent(): number {
-    if (this.creditRemainingBalance <= 0) return 0;
-    return Math.round((this.getInterestAmount() / this.creditRemainingBalance) * 10000) / 100;
+    if (this.creditRemainingBalance() <= 0) return 0;
+    return (
+      Math.round(
+        (this.getInterestAmount() / this.creditRemainingBalance()) * 10000,
+      ) / 100
+    );
   }
 
   selectCreditInitialPaymentMethod(method: PaymentMethod): void {
-    this.creditInitialPaymentMethod = method;
+    this.creditInitialPaymentMethod.set(method);
   }
 
   updateCreditCalculations(): void {
-    const total = this.cartState?.summary?.total || 0;
-    const initialPayment = this.creditInitialPayment || 0;
+    const total = this.cartState()?.summary?.total || 0;
+    const initialPayment = this.creditInitialPayment() || 0;
     const amountToFinance = Math.max(0, total - initialPayment);
-    this.creditRemainingBalance = amountToFinance;
+    this.creditRemainingBalance.set(amountToFinance);
 
-    const n = this.creditNumInstallments;
+    const n = this.creditNumInstallments();
     if (n <= 0 || amountToFinance <= 0) {
-      this.creditInstallmentsPreview = [];
+      this.creditInstallmentsPreview.set([]);
       return;
     }
 
-    const rawRate = this.creditInterestRate || 0;
+    const rawRate = this.creditInterestRate() || 0;
     const annualRate = rawRate > 1 ? rawRate / 100 : rawRate;
-    const interestType = this.creditInterestType || 'simple';
-    const freqDays: Record<string, number> = { weekly: 7, biweekly: 14, monthly: 30 };
-    const periodsPerYear: Record<string, number> = { weekly: 52, biweekly: 26, monthly: 12 };
-    const startDate = this.creditFirstDate ? new Date(this.creditFirstDate + 'T12:00:00') : new Date();
+    const interestType = this.creditInterestType() || 'simple';
+    const freqDays: Record<string, number> = {
+      weekly: 7,
+      biweekly: 14,
+      monthly: 30,
+    };
+    const periodsPerYear: Record<string, number> = {
+      weekly: 52,
+      biweekly: 26,
+      monthly: 12,
+    };
+    const startDate = this.creditFirstDate()
+      ? new Date(this.creditFirstDate() + 'T12:00:00')
+      : new Date();
 
     if (annualRate <= 0) {
       // No interest: simple division
       const baseAmount = Math.round((amountToFinance / n) * 100) / 100;
-      this.creditInstallmentsPreview = Array.from({ length: n }, (_, i) => {
+      this.creditInstallmentsPreview.set(Array.from({ length: n }, (_, i) => {
         const due = new Date(startDate);
-        due.setDate(due.getDate() + freqDays[this.creditFrequency] * i);
+        due.setDate(due.getDate() + freqDays[this.creditFrequency()] * i);
         return {
-          amount: i === n - 1 ? Math.round((amountToFinance - baseAmount * (n - 1)) * 100) / 100 : baseAmount,
+          amount:
+            i === n - 1
+              ? Math.round((amountToFinance - baseAmount * (n - 1)) * 100) / 100
+              : baseAmount,
           due_date: toLocalDateString(due),
         };
-      });
+      }));
     } else if (interestType === 'compound') {
       // Compound interest (capitalization): FV = P × (1+r)^n
       // Interest capitalizes each period, then total divided into equal installments
-      const r = annualRate / (periodsPerYear[this.creditFrequency] || 12);
-      const totalWithInterest = Math.round(amountToFinance * Math.pow(1 + r, n) * 100) / 100;
+      const r = annualRate / (periodsPerYear[this.creditFrequency()] || 12);
+      const totalWithInterest =
+        Math.round(amountToFinance * Math.pow(1 + r, n) * 100) / 100;
       const baseAmount = Math.round((totalWithInterest / n) * 100) / 100;
-      this.creditInstallmentsPreview = Array.from({ length: n }, (_, i) => {
+      this.creditInstallmentsPreview.set(Array.from({ length: n }, (_, i) => {
         const due = new Date(startDate);
-        due.setDate(due.getDate() + freqDays[this.creditFrequency] * i);
+        due.setDate(due.getDate() + freqDays[this.creditFrequency()] * i);
         return {
-          amount: i === n - 1 ? Math.round((totalWithInterest - baseAmount * (n - 1)) * 100) / 100 : baseAmount,
+          amount:
+            i === n - 1
+              ? Math.round((totalWithInterest - baseAmount * (n - 1)) * 100) /
+                100
+              : baseAmount,
           due_date: toLocalDateString(due),
         };
-      });
+      }));
     } else {
       // Simple interest: I = P × r × n, distributed equally
-      const r = annualRate / (periodsPerYear[this.creditFrequency] || 12);
+      const r = annualRate / (periodsPerYear[this.creditFrequency()] || 12);
       const totalInterest = Math.round(amountToFinance * r * n * 100) / 100;
       const totalWithInterest = amountToFinance + totalInterest;
       const baseAmount = Math.round((totalWithInterest / n) * 100) / 100;
-      this.creditInstallmentsPreview = Array.from({ length: n }, (_, i) => {
+      this.creditInstallmentsPreview.set(Array.from({ length: n }, (_, i) => {
         const due = new Date(startDate);
-        due.setDate(due.getDate() + freqDays[this.creditFrequency] * i);
+        due.setDate(due.getDate() + freqDays[this.creditFrequency()] * i);
         return {
-          amount: i === n - 1 ? Math.round((totalWithInterest - baseAmount * (n - 1)) * 100) / 100 : baseAmount,
+          amount:
+            i === n - 1
+              ? Math.round((totalWithInterest - baseAmount * (n - 1)) * 100) /
+                100
+              : baseAmount,
           due_date: toLocalDateString(due),
         };
-      });
+      }));
     }
   }
 
   // Customer Management Methods
   openCustomerSelector(): void {
-    this.showCustomerSelector = true;
-    this.showCreateCustomerForm = false;
-    this.paymentState.isAnonymousSale = false;
+    this.showCustomerSelector.set(true);
+    this.showCreateCustomerForm.set(false);
+    this.paymentState.update(s => ({ ...s, isAnonymousSale: false }));
   }
 
   closeCustomerSelector(): void {
-    this.showCustomerSelector = false;
-    this.showCreateCustomerForm = false;
-    this.customerSearchResults = [];
-    this.customerSearchQuery = '';
+    this.showCustomerSelector.set(false);
+    this.showCreateCustomerForm.set(false);
+    this.customerSearchResults.set([]);
+    this.customerSearchQuery.set('');
   }
 
   onCustomerSearch(query: string): void {
-    this.customerSearchQuery = query;
+    this.customerSearchQuery.set(query);
     if (query && query.trim().length >= 2) {
-      this.isSearchingCustomer = true;
+      this.isSearchingCustomer.set(true);
 
       this.customerService
         .searchCustomers({ query: query.trim(), limit: 10 })
-        .pipe(takeUntil(this.destroy$))
+        .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: (response) => {
-            this.customerSearchResults = response.data || [];
-            this.isSearchingCustomer = false;
+            this.customerSearchResults.set(response.data || []);
+            this.isSearchingCustomer.set(false);
           },
           error: (error) => {
             console.error('Error searching customers:', error);
-            this.customerSearchResults = [];
-            this.isSearchingCustomer = false;
+            this.customerSearchResults.set([]);
+            this.isSearchingCustomer.set(false);
             this.toastService.show({
               variant: 'error',
               title: 'Error',
@@ -2460,8 +2527,8 @@ export class PosPaymentInterfaceComponent
           },
         });
     } else {
-      this.customerSearchResults = [];
-      this.isSearchingCustomer = false;
+      this.customerSearchResults.set([]);
+      this.isSearchingCustomer.set(false);
     }
   }
 
@@ -2472,12 +2539,12 @@ export class PosPaymentInterfaceComponent
   }
 
   switchToCreateCustomer(): void {
-    this.showCreateCustomerForm = true;
-    this.customerSearchResults = [];
+    this.showCreateCustomerForm.set(true);
+    this.customerSearchResults.set([]);
   }
 
   switchToCustomerSearch(): void {
-    this.showCreateCustomerForm = false;
+    this.showCreateCustomerForm.set(false);
   }
 
   onCreateCustomer(): void {
@@ -2493,20 +2560,20 @@ export class PosPaymentInterfaceComponent
         document_number: formValue.documentNumber || undefined,
       };
 
-      this.isSearchingCustomer = true;
+      this.isSearchingCustomer.set(true);
 
       this.customerService
         .createQuickCustomer(customerRequest)
-        .pipe(takeUntil(this.destroy$))
+        .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: (customer) => {
-            this.isSearchingCustomer = false;
+            this.isSearchingCustomer.set(false);
             this.customerSelected.emit(customer);
             this.closeCustomerSelector();
             this.toastService.success('Cliente creado correctamente');
           },
           error: (error) => {
-            this.isSearchingCustomer = false;
+            this.isSearchingCustomer.set(false);
             console.error('Error creating customer:', error);
             this.toastService.show({
               variant: 'error',
@@ -2530,9 +2597,9 @@ export class PosPaymentInterfaceComponent
 
   // Getter for insufficient amount
   get isCashAmountInsufficient(): boolean {
-    if (this.paymentState.selectedMethod?.type === 'cash') {
-      const total = this.cartState?.summary?.total || 0;
-      const received = this.paymentState.cashReceived || 0;
+    if (this.paymentState().selectedMethod?.type === 'cash') {
+      const total = this.cartState()?.summary?.total || 0;
+      const received = this.paymentState().cashReceived || 0;
       return received < total;
     }
     return false;
@@ -2540,8 +2607,8 @@ export class PosPaymentInterfaceComponent
 
   get missingAmount(): number {
     if (this.isCashAmountInsufficient) {
-      const total = this.cartState?.summary?.total || 0;
-      const received = this.paymentState.cashReceived || 0;
+      const total = this.cartState()?.summary?.total || 0;
+      const received = this.paymentState().cashReceived || 0;
       return total - received;
     }
     return 0;
@@ -2550,21 +2617,24 @@ export class PosPaymentInterfaceComponent
   // ─── Wompi Methods ───────────────────────────────────────────────────
 
   isWompiSelected(): boolean {
-    return this.wompiService.isWompiMethod(this.paymentState?.selectedMethod);
+    return this.wompiService.isWompiMethod(this.paymentState()?.selectedMethod);
   }
 
   selectWompiSubMethod(sub: WompiSubMethod): void {
-    this.selectedWompiSubMethod = sub;
+    this.selectedWompiSubMethod.set(sub);
 
     // Load PSE banks if needed
-    if (sub === WompiSubMethod.PSE && this.pseFinancialInstitutions.length === 0) {
+    if (
+      sub === WompiSubMethod.PSE &&
+      this.pseFinancialInstitutions.length === 0
+    ) {
       this.wompiService.getPseFinancialInstitutions().subscribe({
         next: (institutions) => {
-          this.pseFinancialInstitutions = institutions;
-          this.pseBankOptions = institutions.map((i) => ({
+          this.pseFinancialInstitutions.set(institutions);
+          this.pseBankOptions.set(institutions.map((i) => ({
             value: i.financial_institution_code,
             label: i.financial_institution_name,
-          }));
+          })));
         },
         error: () => {}, // Silently fail, user can retry
       });
@@ -2572,7 +2642,7 @@ export class PosPaymentInterfaceComponent
   }
 
   buildWompiPaymentMethodData(): any {
-    switch (this.selectedWompiSubMethod) {
+    switch (this.selectedWompiSubMethod()) {
       case WompiSubMethod.NEQUI:
         return { type: 'NEQUI', phone_number: this.nequiPhoneControl.value };
       case WompiSubMethod.PSE:
@@ -2581,19 +2651,21 @@ export class PosPaymentInterfaceComponent
           user_type: this.pseForm.value.userType,
           user_legal_id_type: this.pseForm.value.userLegalIdType,
           user_legal_id: this.pseForm.value.userLegalId,
-          financial_institution_code: this.pseForm.value.financialInstitutionCode,
-          payment_description: this.pseForm.value.paymentDescription || 'Pago Vendix',
+          financial_institution_code:
+            this.pseForm.value.financialInstitutionCode,
+          payment_description:
+            this.pseForm.value.paymentDescription || 'Pago Vendix',
         };
       case WompiSubMethod.BANCOLOMBIA_TRANSFER:
         return { type: 'BANCOLOMBIA_TRANSFER' };
       default:
-        return { type: this.selectedWompiSubMethod };
+        return { type: this.selectedWompiSubMethod() };
     }
   }
 
   isWompiFormValid(): boolean {
-    if (!this.selectedWompiSubMethod) return false;
-    switch (this.selectedWompiSubMethod) {
+    if (!this.selectedWompiSubMethod()) return false;
+    switch (this.selectedWompiSubMethod()) {
       case WompiSubMethod.NEQUI:
         return this.nequiPhoneControl.valid;
       case WompiSubMethod.PSE:
@@ -2604,11 +2676,17 @@ export class PosPaymentInterfaceComponent
   }
 
   resetWompiState(): void {
-    this.selectedWompiSubMethod = null;
-    this.wompiAwaitingPayment = false;
-    this.wompiAwaitingMessage = '';
+    this.selectedWompiSubMethod.set(null);
+    this.wompiAwaitingPayment.set(false);
+    this.wompiAwaitingMessage.set('');
     this.nequiPhoneControl.reset();
-    this.pseForm.reset({ userType: 0, userLegalIdType: 'CC', userLegalId: '', financialInstitutionCode: '', paymentDescription: '' });
+    this.pseForm.reset({
+      userType: 0,
+      userLegalIdType: 'CC',
+      userLegalId: '',
+      financialInstitutionCode: '',
+      paymentDescription: '',
+    });
     this.wompiPollingSubscription?.unsubscribe();
     this.wompiPollingSubscription = null;
     this.wompiPaymentId = null;
@@ -2629,38 +2707,33 @@ export class PosPaymentInterfaceComponent
         if (nextAction.url) {
           const popup = window.open(nextAction.url, '_blank');
           if (!popup) {
-            this.wompiAwaitingMessage =
-              'No se pudo abrir la ventana del banco. Por favor habilita las ventanas emergentes e intenta de nuevo.';
-            this.wompiAwaitingPayment = true;
+            this.wompiAwaitingMessage.set('No se pudo abrir la ventana del banco. Por favor habilita las ventanas emergentes e intenta de nuevo.');
+            this.wompiAwaitingPayment.set(true);
             return;
           }
         }
-        this.wompiAwaitingPayment = true;
-        this.wompiAwaitingMessage =
-          'Se abrió la página del banco. Completa el pago y regresa aquí.';
+        this.wompiAwaitingPayment.set(true);
+        this.wompiAwaitingMessage.set('Se abrió la página del banco. Completa el pago y regresa aquí.');
         this.startWompiPolling();
         break;
       case 'await':
-        this.wompiAwaitingPayment = true;
-        this.wompiAwaitingMessage =
-          this.selectedWompiSubMethod === WompiSubMethod.NEQUI
+        this.wompiAwaitingPayment.set(true);
+        this.wompiAwaitingMessage.set(this.selectedWompiSubMethod() === WompiSubMethod.NEQUI
             ? 'Esperando confirmación en la app de Nequi...'
-            : 'Esperando confirmación del pago...';
+            : 'Esperando confirmación del pago...');
         this.startWompiPolling();
         break;
       case '3ds':
         if (nextAction.url) {
           const popup3ds = window.open(nextAction.url, '_blank');
           if (!popup3ds) {
-            this.wompiAwaitingMessage =
-              'No se pudo abrir la ventana del banco. Por favor habilita las ventanas emergentes e intenta de nuevo.';
-            this.wompiAwaitingPayment = true;
+            this.wompiAwaitingMessage.set('No se pudo abrir la ventana del banco. Por favor habilita las ventanas emergentes e intenta de nuevo.');
+            this.wompiAwaitingPayment.set(true);
             return;
           }
         }
-        this.wompiAwaitingPayment = true;
-        this.wompiAwaitingMessage =
-          'Completa la verificación 3D Secure en la ventana abierta.';
+        this.wompiAwaitingPayment.set(true);
+        this.wompiAwaitingMessage.set('Completa la verificación 3D Secure en la ventana abierta.');
         this.startWompiPolling();
         break;
       case 'none':
@@ -2678,23 +2751,22 @@ export class PosPaymentInterfaceComponent
       .subscribe({
         next: (update: WompiPaymentStatusUpdate) => {
           if (update.status === 'succeeded') {
-            this.wompiAwaitingPayment = false;
-            this.wompiAwaitingMessage = '';
-            this.paymentState.isProcessing = false;
+            this.wompiAwaitingPayment.set(false);
+            this.wompiAwaitingMessage.set('');
+            this.paymentState.update(s => ({ ...s, isProcessing: false }));
             this.paymentCompleted.emit({
               success: true,
               message: 'Pago con Wompi procesado correctamente',
-              isAnonymousSale: this.paymentState.isAnonymousSale,
+              isAnonymousSale: this.paymentState().isAnonymousSale,
             });
             this.onModalClosed();
           } else if (
             update.status === 'failed' ||
             update.status === 'cancelled'
           ) {
-            this.wompiAwaitingPayment = false;
-            this.wompiAwaitingMessage =
-              update.message || 'El pago fue rechazado.';
-            this.paymentState.isProcessing = false;
+            this.wompiAwaitingPayment.set(false);
+            this.wompiAwaitingMessage.set(update.message || 'El pago fue rechazado.');
+            this.paymentState.update(s => ({ ...s, isProcessing: false }));
             this.toastService.show({
               variant: 'error',
               title: 'Pago rechazado',
@@ -2703,9 +2775,9 @@ export class PosPaymentInterfaceComponent
           }
         },
         error: () => {
-          this.wompiAwaitingPayment = false;
-          this.wompiAwaitingMessage = '';
-          this.paymentState.isProcessing = false;
+          this.wompiAwaitingPayment.set(false);
+          this.wompiAwaitingMessage.set('');
+          this.paymentState.update(s => ({ ...s, isProcessing: false }));
           this.toastService.show({
             variant: 'error',
             title: 'Error de verificación',
@@ -2719,9 +2791,9 @@ export class PosPaymentInterfaceComponent
   cancelWompiAwait(): void {
     this.wompiPollingSubscription?.unsubscribe();
     this.wompiPollingSubscription = null;
-    this.wompiAwaitingPayment = false;
-    this.wompiAwaitingMessage = '';
-    this.paymentState.isProcessing = false;
+    this.wompiAwaitingPayment.set(false);
+    this.wompiAwaitingMessage.set('');
+    this.paymentState.update(s => ({ ...s, isProcessing: false }));
   }
 
   navigateToSettings(): void {

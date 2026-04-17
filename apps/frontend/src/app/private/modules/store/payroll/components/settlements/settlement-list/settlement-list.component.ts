@@ -4,7 +4,7 @@ import {
   input,
   output,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 
 import {
@@ -30,7 +30,6 @@ import {
   selector: 'app-settlement-list',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     InputsearchComponent,
     OptionsDropdownComponent,
@@ -38,8 +37,8 @@ import {
     ResponsiveDataViewComponent,
     ButtonComponent,
     IconComponent,
-    CardComponent,
-  ],
+    CardComponent
+],
   templateUrl: './settlement-list.component.html',
 })
 export class SettlementListComponent {

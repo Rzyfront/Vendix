@@ -1,5 +1,5 @@
-import { Component, EventEmitter, Input, Output } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input, output } from '@angular/core';
+import { NgClass } from '@angular/common';
 import {
   ButtonComponent,
   ModalComponent,
@@ -9,10 +9,10 @@ import {
 @Component({
   selector: 'app-pos-schedule-modal',
   standalone: true,
-  imports: [CommonModule, ButtonComponent, ModalComponent, IconComponent],
+  imports: [NgClass, ButtonComponent, ModalComponent, IconComponent],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onClose()"
       size="sm"
@@ -29,7 +29,7 @@ import {
             Horario de Atención
           </h2>
           <p class="text-sm text-text-secondary">
-            {{ isWithinHours ? 'Activo ahora' : 'Fuera de horario' }}
+            {{ isWithinHours() ? 'Activo ahora' : 'Fuera de horario' }}
           </p>
         </div>
       </div>
@@ -38,21 +38,21 @@ import {
         <div
           class="flex items-center gap-2 p-3 rounded-xl"
           [ngClass]="
-            isWithinHours
+            isWithinHours()
               ? 'bg-green-50 border border-green-200'
               : 'bg-amber-50 border border-amber-200'
           "
         >
           <span
             class="h-2.5 w-2.5 rounded-full flex-shrink-0"
-            [ngClass]="isWithinHours ? 'bg-green-500' : 'bg-amber-400'"
+            [ngClass]="isWithinHours() ? 'bg-green-500' : 'bg-amber-400'"
           ></span>
           <span
             class="text-sm font-medium"
-            [ngClass]="isWithinHours ? 'text-green-700' : 'text-amber-700'"
+            [ngClass]="isWithinHours() ? 'text-green-700' : 'text-amber-700'"
           >
             {{
-              isWithinHours
+              isWithinHours()
                 ? 'Dentro del horario de atención'
                 : 'Fuera del horario de atención'
             }}
@@ -63,12 +63,12 @@ import {
           <div
             class="flex items-center justify-between py-2.5 px-3 rounded-lg"
             [ngClass]="{
-              'bg-primary/5 border border-primary/20': day.key === todayKey,
-              'hover:bg-surface/50': day.key !== todayKey,
+              'bg-primary/5 border border-primary/20': day.key === todayKey(),
+              'hover:bg-surface/50': day.key !== todayKey(),
             }"
           >
             <div class="flex items-center gap-2">
-              @if (day.key === todayKey) {
+              @if (day.key === todayKey()) {
                 <span
                   class="h-1.5 w-1.5 rounded-full bg-primary flex-shrink-0"
                 ></span>
@@ -76,14 +76,14 @@ import {
               <span
                 class="text-sm"
                 [ngClass]="
-                  day.key === todayKey
+                  day.key === todayKey()
                     ? 'font-semibold text-text-primary'
                     : 'text-text-secondary'
                 "
               >
                 {{ day.label }}
               </span>
-              @if (day.key === todayKey) {
+              @if (day.key === todayKey()) {
                 <span
                   class="text-[10px] font-medium text-primary bg-primary/10 px-1.5 py-0.5 rounded-md uppercase tracking-wider"
                   >Hoy</span
@@ -121,13 +121,13 @@ import {
   `,
 })
 export class PosScheduleModalComponent {
-  @Input() isOpen = false;
-  @Input() businessHours: Record<string, { open: string; close: string }> = {};
-  @Input() isWithinHours = false;
-  @Input() todayKey = '';
+  readonly isOpen = input<boolean>(false);
+  readonly businessHours = input<Record<string, { open: string; close: string }>>({});
+  readonly isWithinHours = input<boolean>(false);
+  readonly todayKey = input<string>('');
 
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() goToSettings = new EventEmitter<void>();
+  readonly isOpenChange = output<boolean>();
+  readonly goToSettings = output<void>();
 
   daysOfWeek = [
     { key: 'monday', label: 'Lunes', short: 'Lun' },
@@ -140,12 +140,12 @@ export class PosScheduleModalComponent {
   ];
 
   isDayClosed(key: string): boolean {
-    const hours = this.businessHours[key];
+    const hours = this.businessHours()[key];
     return !hours || !hours.open || !hours.close;
   }
 
   getDayHours(key: string): string {
-    const hours = this.businessHours[key];
+    const hours = this.businessHours()[key];
     if (!hours) return 'Cerrado';
     return `${hours.open} – ${hours.close}`;
   }

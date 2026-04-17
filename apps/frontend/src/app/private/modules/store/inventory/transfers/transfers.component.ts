@@ -1,6 +1,8 @@
-import { Component, OnInit, OnDestroy, inject, signal } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { Subject, takeUntil } from 'rxjs';
+import {Component, OnInit, inject, signal,
+  DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
+
 import { HttpClient } from '@angular/common/http';
 import { map } from 'rxjs/operators';
 import { StatsComponent } from '../../../../../shared/components/stats/stats.component';
@@ -17,14 +19,12 @@ import {
   TransferStats,
   TransferQuery,
   CreateTransferRequest,
-  CompleteTransferItem,
-} from './interfaces';
+  CompleteTransferItem} from './interfaces';
 
 @Component({
   selector: 'app-transfers',
   standalone: true,
   imports: [
-    CommonModule,
     StatsComponent,
     TransferListComponent,
     TransferCreateModalComponent,
@@ -89,38 +89,45 @@ import {
         (deleteTransfer)="onDelete($event)"
       ></app-transfer-list>
 
-      <!-- Create Modal -->
-      <app-transfer-create-modal
-        [isOpen]="showCreateModal()"
-        [isSubmitting]="isSubmitting()"
-        [locations]="locationOptions()"
-        (isOpenChange)="showCreateModal.set($event)"
-        (cancel)="showCreateModal.set(false)"
-        (save)="onCreate($event)"
-        (saveAndComplete)="onCreateAndComplete($event)"
-      ></app-transfer-create-modal>
+      @defer (when showCreateModal()) {
+        <app-transfer-create-modal
+          [isOpen]="showCreateModal()"
+          [isSubmitting]="isSubmitting()"
+          [locations]="locationOptions()"
+          (isOpenChange)="showCreateModal.set($event)"
+          (cancel)="showCreateModal.set(false)"
+          (save)="onCreate($event)"
+          (saveAndComplete)="onCreateAndComplete($event)"
+        ></app-transfer-create-modal>
+      }
 
-      <!-- Detail Modal -->
-      <app-transfer-detail-modal
-        [isOpen]="showDetailModal()"
-        [transfer]="selectedTransfer()"
-        [isProcessing]="isSubmitting()"
-        (isOpenChange)="showDetailModal.set($event)"
-        (closed)="showDetailModal.set(false)"
-        (approveTransfer)="onApprove($event)"
-        (cancelTransfer)="onCancel($event)"
-        (completeTransfer)="onComplete($event)"
-      ></app-transfer-detail-modal>
+      @defer (when showDetailModal()) {
+        <app-transfer-detail-modal
+          [isOpen]="showDetailModal()"
+          [transfer]="selectedTransfer()"
+          [isProcessing]="isSubmitting()"
+          (isOpenChange)="showDetailModal.set($event)"
+          (closed)="showDetailModal.set(false)"
+          (approveTransfer)="onApprove($event)"
+          (cancelTransfer)="onCancel($event)"
+          (completeTransfer)="onComplete($event)"
+        ></app-transfer-detail-modal>
+      }
     </div>
-  `,
-})
-export class TransfersComponent implements OnInit, OnDestroy {
+  `})
+export class TransfersComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private transfersService = inject(TransfersService);
   private toastService = inject(ToastService);
   private dialogService = inject(DialogService);
   private http = inject(HttpClient);
 
-  stats = signal<TransferStats>({ total: 0, draft: 0, in_transit: 0, completed: 0, cancelled: 0 });
+  stats = signal<TransferStats>({
+    total: 0,
+    draft: 0,
+    in_transit: 0,
+    completed: 0,
+    cancelled: 0});
   transfers = signal<StockTransfer[]>([]);
   loading = signal(false);
   statsLoading = signal(false);
@@ -133,39 +140,36 @@ export class TransfersComponent implements OnInit, OnDestroy {
 
   searchTerm = '';
   statusFilter = '';
-
-  private destroy$ = new Subject<void>();
-
-  ngOnInit(): void {
+ngOnInit(): void {
     this.loadStats();
     this.loadTransfers();
     this.loadLocations();
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  loadStats(): void {
+loadStats(): void {
     this.statsLoading.set(true);
-    this.transfersService.getStats()
-      .pipe(takeUntil(this.destroy$))
+    this.transfersService
+      .getStats()
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (s) => { this.stats.set(s); this.statsLoading.set(false); },
-        error: () => { this.toastService.error('Error al cargar estadísticas'); this.statsLoading.set(false); },
-      });
+        next: (s) => {
+          this.stats.set(s);
+          this.statsLoading.set(false);
+        },
+        error: () => {
+          this.toastService.error('Error al cargar estadísticas');
+          this.statsLoading.set(false);
+        }});
   }
 
   loadTransfers(): void {
     this.loading.set(true);
     const query: TransferQuery = {
       ...(this.searchTerm && { search: this.searchTerm }),
-      ...(this.statusFilter && { status: this.statusFilter as any }),
-    };
+      ...(this.statusFilter && { status: this.statusFilter as any })};
 
-    this.transfersService.getAll(query)
-      .pipe(takeUntil(this.destroy$))
+    this.transfersService
+      .getAll(query)
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (data) => {
           this.transfers.set(Array.isArray(data) ? data : []);
@@ -174,25 +178,24 @@ export class TransfersComponent implements OnInit, OnDestroy {
         error: () => {
           this.toastService.error('Error al cargar transferencias');
           this.loading.set(false);
-        },
-      });
+        }});
   }
 
   loadLocations(): void {
-    this.http.get<any>(`${environment.apiUrl}/store/inventory/locations`)
+    this.http
+      .get<any>(`${environment.apiUrl}/store/inventory/locations`)
       .pipe(
-        map(r => r.data || r),
-        takeUntil(this.destroy$),
+        map((r) => r.data || r),
+        takeUntilDestroyed(this.destroyRef),
       )
       .subscribe({
         next: (locations: any[]) => {
           const arr = Array.isArray(locations) ? locations : [];
           this.locationOptions.set(
-            arr.map(l => ({ value: l.id, label: l.name })),
+            arr.map((l) => ({ value: l.id, label: l.name })),
           );
         },
-        error: () => {},
-      });
+        error: () => {}});
   }
 
   onSearch(term: string): void {
@@ -223,8 +226,9 @@ export class TransfersComponent implements OnInit, OnDestroy {
 
   onCreate(dto: CreateTransferRequest): void {
     this.isSubmitting.set(true);
-    this.transfersService.create(dto)
-      .pipe(takeUntil(this.destroy$))
+    this.transfersService
+      .create(dto)
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.success('Transferencia creada exitosamente');
@@ -233,28 +237,33 @@ export class TransfersComponent implements OnInit, OnDestroy {
           this.refresh();
         },
         error: (err) => {
-          this.toastService.error(err.message || 'Error al crear transferencia');
+          this.toastService.error(
+            err.message || 'Error al crear transferencia',
+          );
           this.isSubmitting.set(false);
-        },
-      });
+        }});
   }
 
   onCreateAndComplete(dto: CreateTransferRequest): void {
     this.isSubmitting.set(true);
-    this.transfersService.createAndComplete(dto)
-      .pipe(takeUntil(this.destroy$))
+    this.transfersService
+      .createAndComplete(dto)
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
-          this.toastService.success('Transferencia creada y completada. Movimientos de inventario aplicados.');
+          this.toastService.success(
+            'Transferencia creada y completada. Movimientos de inventario aplicados.',
+          );
           this.showCreateModal.set(false);
           this.isSubmitting.set(false);
           this.refresh();
         },
         error: (err) => {
-          this.toastService.error(err.message || 'Error al crear y completar transferencia');
+          this.toastService.error(
+            err.message || 'Error al crear y completar transferencia',
+          );
           this.isSubmitting.set(false);
-        },
-      });
+        }});
   }
 
   async onApprove(transfer: StockTransfer): Promise<void> {
@@ -262,13 +271,13 @@ export class TransfersComponent implements OnInit, OnDestroy {
       title: 'Aprobar transferencia',
       message: `¿Aprobar la transferencia ${transfer.transfer_number}? El stock será reservado en la ubicación de origen.`,
       confirmText: 'Aprobar',
-      cancelText: 'Cancelar',
-    });
+      cancelText: 'Cancelar'});
     if (!confirmed) return;
 
     this.isSubmitting.set(true);
-    this.transfersService.approve(transfer.id)
-      .pipe(takeUntil(this.destroy$))
+    this.transfersService
+      .approve(transfer.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.success('Transferencia aprobada');
@@ -279,8 +288,7 @@ export class TransfersComponent implements OnInit, OnDestroy {
         error: (err) => {
           this.toastService.error(err.message || 'Error al aprobar');
           this.isSubmitting.set(false);
-        },
-      });
+        }});
   }
 
   onStartComplete(transfer: StockTransfer): void {
@@ -293,8 +301,9 @@ export class TransfersComponent implements OnInit, OnDestroy {
     if (!transfer) return;
 
     this.isSubmitting.set(true);
-    this.transfersService.complete(transfer.id, items)
-      .pipe(takeUntil(this.destroy$))
+    this.transfersService
+      .complete(transfer.id, items)
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.success('Transferencia completada');
@@ -305,8 +314,7 @@ export class TransfersComponent implements OnInit, OnDestroy {
         error: (err) => {
           this.toastService.error(err.message || 'Error al completar');
           this.isSubmitting.set(false);
-        },
-      });
+        }});
   }
 
   async onCancel(transfer: StockTransfer): Promise<void> {
@@ -315,20 +323,20 @@ export class TransfersComponent implements OnInit, OnDestroy {
       message: `¿Cancelar la transferencia ${transfer.transfer_number}?${transfer.status === 'in_transit' ? ' El stock reservado será liberado.' : ''}`,
       confirmText: 'Cancelar transferencia',
       cancelText: 'Volver',
-      confirmVariant: 'danger',
-    });
+      confirmVariant: 'danger'});
     if (!confirmed) return;
 
-    this.transfersService.cancel(transfer.id)
-      .pipe(takeUntil(this.destroy$))
+    this.transfersService
+      .cancel(transfer.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.success('Transferencia cancelada');
           this.showDetailModal.set(false);
           this.refresh();
         },
-        error: (err) => this.toastService.error(err.message || 'Error al cancelar'),
-      });
+        error: (err) =>
+          this.toastService.error(err.message || 'Error al cancelar')});
   }
 
   async onDelete(transfer: StockTransfer): Promise<void> {
@@ -337,16 +345,19 @@ export class TransfersComponent implements OnInit, OnDestroy {
       message: `¿Eliminar la transferencia ${transfer.transfer_number}? Esta acción no se puede deshacer.`,
       confirmText: 'Eliminar',
       cancelText: 'Cancelar',
-      confirmVariant: 'danger',
-    });
+      confirmVariant: 'danger'});
     if (!confirmed) return;
 
-    this.transfersService.delete(transfer.id)
-      .pipe(takeUntil(this.destroy$))
+    this.transfersService
+      .delete(transfer.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: () => { this.toastService.success('Transferencia eliminada'); this.refresh(); },
-        error: (err) => this.toastService.error(err.message || 'Error al eliminar'),
-      });
+        next: () => {
+          this.toastService.success('Transferencia eliminada');
+          this.refresh();
+        },
+        error: (err) =>
+          this.toastService.error(err.message || 'Error al eliminar')});
   }
 
   private refresh(): void {

@@ -1,5 +1,5 @@
-import { Component, Input, Output, EventEmitter, OnChanges, SimpleChanges, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input, output, effect, inject } from '@angular/core';
+
 import { FormBuilder, FormGroup, Validators, ReactiveFormsModule } from '@angular/forms';
 
 // Shared Components
@@ -21,22 +21,21 @@ import { CurrencyService } from '../../../../../../services/currency.service';
   selector: 'app-supplier-form-modal',
   standalone: true,
   imports: [
-    CommonModule,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
     InputComponent,
     TextareaComponent,
     SettingToggleComponent,
-    SelectorComponent,
-  ],
+    SelectorComponent
+],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'md'"
-      [title]="supplier ? 'Editar Proveedor' : 'Nuevo Proveedor'"
+      [title]="supplier() ? 'Editar Proveedor' : 'Nuevo Proveedor'"
       subtitle="Administra la información del proveedor"
     >
       <form [formGroup]="form" (ngSubmit)="onSubmit()">
@@ -149,27 +148,27 @@ import { CurrencyService } from '../../../../../../services/currency.service';
           <app-button
             variant="primary"
             type="button"
-            [loading]="isSubmitting"
-            [disabled]="form.invalid || isSubmitting"
+            [loading]="isSubmitting()"
+            [disabled]="form.invalid || isSubmitting()"
             (clicked)="onSubmit()"
           >
-            {{ supplier ? 'Guardar Cambios' : 'Crear Proveedor' }}
+            {{ supplier() ? 'Guardar Cambios' : 'Crear Proveedor' }}
           </app-button>
         </div>
       </div>
     </app-modal>
   `,
 })
-export class SupplierFormModalComponent implements OnChanges, OnInit {
+export class SupplierFormModalComponent {
   private currencyFormatService = inject(CurrencyFormatService);
   private currencyHttpService = inject(CurrencyService);
-  @Input() isOpen = false;
-  @Input() supplier: Supplier | null = null;
-  @Input() isSubmitting = false;
+  readonly isOpen = input(false);
+  readonly supplier = input<Supplier | null>(null);
+  readonly isSubmitting = input(false);
 
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() cancel = new EventEmitter<void>();
-  @Output() save = new EventEmitter<CreateSupplierDto | UpdateSupplierDto>();
+  readonly isOpenChange = output<boolean>();
+  readonly cancel = output<void>();
+  readonly save = output<CreateSupplierDto | UpdateSupplierDto>();
 
   currencyOptions: { value: string; label: string }[] = [];
 
@@ -177,10 +176,16 @@ export class SupplierFormModalComponent implements OnChanges, OnInit {
 
   constructor(private fb: FormBuilder) {
     this.form = this.createForm();
-  }
-
-  async ngOnInit(): Promise<void> {
-    await this.loadCurrencyOptions();
+    this.loadCurrencyOptions();
+    effect(() => {
+      const sup = this.supplier();
+      const isOpen = this.isOpen();
+      if (sup) {
+        this.patchForm(sup);
+      } else if (isOpen && !sup) {
+        this.form.reset({ is_active: true });
+      }
+    });
   }
 
   private async loadCurrencyOptions(): Promise<void> {
@@ -195,14 +200,6 @@ export class SupplierFormModalComponent implements OnChanges, OnInit {
         { value: 'COP', label: 'Peso Colombiano (COP)' },
         { value: 'USD', label: 'Dólar Americano (USD)' },
       ];
-    }
-  }
-
-  ngOnChanges(changes: SimpleChanges): void {
-    if (changes['supplier'] && this.supplier) {
-      this.patchForm(this.supplier);
-    } else if (changes['isOpen'] && this.isOpen && !this.supplier) {
-      this.form.reset({ is_active: true });
     }
   }
 

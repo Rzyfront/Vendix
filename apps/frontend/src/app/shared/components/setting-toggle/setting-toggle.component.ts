@@ -1,11 +1,11 @@
 import {
-    Component,
-    Input,
-    Output,
-    EventEmitter,
-    forwardRef,
+  Component,
+  forwardRef,
+  input,
+  output,
+  signal,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import {
     ControlValueAccessor,
     NG_VALUE_ACCESSOR,
@@ -17,7 +17,7 @@ import { ToggleComponent } from '../toggle/toggle.component';
 @Component({
     selector: 'app-setting-toggle',
     standalone: true,
-    imports: [CommonModule, FormsModule, ReactiveFormsModule, ToggleComponent],
+    imports: [FormsModule, ReactiveFormsModule, ToggleComponent],
     providers: [
         {
             provide: NG_VALUE_ACCESSOR,
@@ -27,33 +27,73 @@ import { ToggleComponent } from '../toggle/toggle.component';
     ],
     template: `
     <div
-      class="flex items-center justify-between p-2 mt-3 bg-gray-50 border border-gray-100 rounded-xl transition-all hover:bg-gray-100/50 cursor-pointer select-none"
-      [class.opacity-50]="disabled"
-      [class.cursor-not-allowed]="disabled"
-      [class.new-highlight]="isNew"
-      (click)="onToggle(!value)"
-    >
-      <div class="flex-1 mr-4">
+      class="setting-toggle-row flex items-center justify-between p-2 mt-3 bg-gray-50 border border-gray-100 rounded-xl hover:bg-gray-100/50 select-none"
+      [class.opacity-50]="disabled()"
+      [class.is-disabled]="disabled()"
+      [class.new-highlight]="isNew()"
+      role="button"
+      [attr.tabindex]="disabled() ? -1 : 0"
+      [attr.aria-pressed]="value()"
+      [attr.aria-disabled]="disabled()"
+      (click)="onToggle(!value())"
+      (keydown.enter)="onToggle(!value()); $event.preventDefault()"
+      (keydown.space)="onToggle(!value()); $event.preventDefault()"
+      >
+      <div class="flex-1 mr-4 pointer-events-none">
         <label class="text-xs font-semibold text-gray-700 block">
-          {{ label }}
-          <span *ngIf="isNew" class="new-badge">Nuevo</span>
+          {{ label() }}
+          @if (isNew()) {
+            <span class="new-badge">Nuevo</span>
+          }
         </label>
-        <p *ngIf="description" class="text-[10px] text-gray-500 leading-tight mt-0.5">
-          {{ description }}
-        </p>
+        @if (description()) {
+          <p class="text-[10px] text-gray-500 leading-tight mt-0.5">
+            {{ description() }}
+          </p>
+        }
       </div>
       <app-toggle
         class="shrink-0"
-        [checked]="value"
-        [disabled]="disabled"
+        [checked]="value()"
+        [disabled]="disabled()"
         (changed)="onToggle($event)"
         (click)="$event.stopPropagation()"
       ></app-toggle>
     </div>
-  `,
+    `,
     styles: [`
       :host {
+        display: block;
         cursor: pointer;
+      }
+
+      .setting-toggle-row {
+        cursor: pointer;
+      }
+      .setting-toggle-row, .setting-toggle-row * {
+        cursor: inherit;
+      }
+      .setting-toggle-row.is-disabled,
+      .setting-toggle-row.is-disabled * {
+        cursor: not-allowed;
+      }
+
+      .setting-toggle-row:active:not(.is-disabled) {
+        background: rgba(0, 0, 0, 0.04);
+        transform: scale(0.997);
+      }
+
+      .setting-toggle-row:focus-visible {
+        outline: 2px solid var(--color-ring, #7ed7a5);
+        outline-offset: 2px;
+      }
+
+      /* Asegura cursor pointer en el button interno del app-toggle */
+      :host ::ng-deep app-toggle button {
+        cursor: pointer;
+      }
+      :host ::ng-deep app-toggle button:disabled {
+        cursor: not-allowed;
       }
 
       .new-highlight {
@@ -74,20 +114,20 @@ import { ToggleComponent } from '../toggle/toggle.component';
     `],
 })
 export class SettingToggleComponent implements ControlValueAccessor {
-    @Input() label: string = '';
-    @Input() description?: string;
-    @Input() disabled = false;
-    @Input() isNew = false;
+    readonly label = input<string>('');
+    readonly description = input<string | undefined>(undefined);
+    readonly isNew = input(false);
 
-    @Output() changed = new EventEmitter<boolean>();
+    readonly changed = output<boolean>();
 
-    value = false;
+    readonly value = signal(false);
+    readonly disabled = signal(false);
 
     private onChange: (value: boolean) => void = () => { };
     private onTouched: () => void = () => { };
 
     writeValue(value: boolean): void {
-        this.value = !!value;
+        this.value.set(!!value);
     }
 
     registerOnChange(fn: (value: boolean) => void): void {
@@ -99,14 +139,14 @@ export class SettingToggleComponent implements ControlValueAccessor {
     }
 
     setDisabledState(disabled: boolean): void {
-        this.disabled = disabled;
+        this.disabled.set(disabled);
     }
 
     onToggle(value: boolean): void {
-        if (this.disabled) return;
-        this.value = value;
-        this.onChange(this.value);
-        this.changed.emit(this.value);
+        if (this.disabled()) return;
+        this.value.set(value);
+        this.onChange(value);
+        this.changed.emit(value);
         this.onTouched();
     }
 }

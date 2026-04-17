@@ -1,15 +1,8 @@
-import {
-  Component,
-  OnInit,
-  OnDestroy,
-  ChangeDetectionStrategy,
-  Output,
-  EventEmitter,
-  inject,
-} from '@angular/core';
-import { CommonModule, DecimalPipe } from '@angular/common';
-import { Observable, Subject } from 'rxjs';
-import { takeUntil } from 'rxjs/operators';
+import { Component, output, inject, DestroyRef } from '@angular/core';
+import { DecimalPipe } from '@angular/common';
+import { Observable } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { toSignal } from '@angular/core/rxjs-interop';
 import {
   PopCartService,
   PopCartState,
@@ -30,8 +23,15 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
 @Component({
   selector: 'app-pop-cart',
   standalone: true,
-  imports: [CommonModule, DecimalPipe, ButtonComponent, IconComponent, TooltipComponent, InputComponent, FormsModule, QuantityControlComponent],
-  changeDetection: ChangeDetectionStrategy.OnPush,
+  imports: [
+    DecimalPipe,
+    ButtonComponent,
+    IconComponent,
+    TooltipComponent,
+    InputComponent,
+    FormsModule,
+    QuantityControlComponent,
+  ],
   template: `
     <div
       class="h-full flex flex-col bg-surface rounded-md shadow-card border border-border"
@@ -41,21 +41,28 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
         <!-- Header Row -->
         <div class="px-5 py-3 border-b border-border/50">
           <div class="flex justify-between items-center gap-4">
-            <h2 class="text-base font-bold text-text-primary flex items-center gap-2">
-              <app-icon name="shopping-cart" [size]="18" class="text-primary"></app-icon>
-              Orden de Compra ({{ (cartState$ | async)?.items?.length || 0 }})
-            </h2>
-            <app-button
-              *ngIf="((cartState$ | async)?.items?.length ?? 0) > 0"
-              variant="outline"
-              size="sm"
-              (clicked)="clearCart()"
-              [loading]="(loading$ | async) ?? false"
-              class="text-destructive hover:text-destructive hover:bg-destructive/10 !px-2 !h-8"
+            <h2
+              class="text-base font-bold text-text-primary flex items-center gap-2"
             >
-              <app-icon name="trash-2" [size]="14" slot="icon"></app-icon>
-              Vaciar
-            </app-button>
+              <app-icon
+                name="shopping-cart"
+                [size]="18"
+                class="text-primary"
+              ></app-icon>
+              Orden de Compra ({{ cartState()?.items?.length || 0 }})
+            </h2>
+            @if ((cartState()?.items?.length ?? 0) > 0) {
+              <app-button
+                variant="outline"
+                size="sm"
+                (clicked)="clearCart()"
+                [loading]="loading()"
+                class="text-destructive hover:text-destructive hover:bg-destructive/10 !px-2 !h-8"
+              >
+                <app-icon name="trash-2" [size]="14" slot="icon"></app-icon>
+                Vaciar
+              </app-button>
+            }
           </div>
         </div>
 
@@ -64,38 +71,63 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
           <div class="space-y-1.5 mb-4">
             <div class="flex justify-between text-xs text-text-secondary">
               <span>Subtotal</span>
-              <span class="font-medium">{{ formatCurrency((summary$ | async)?.subtotal || 0) }}</span>
+              <span class="font-medium">{{
+                formatCurrency(summary()?.subtotal || 0)
+              }}</span>
             </div>
             <div class="flex justify-between text-xs text-text-secondary">
               <span>Impuestos</span>
-              <span class="font-medium">{{ formatCurrency((summary$ | async)?.tax_amount || 0) }}</span>
+              <span class="font-medium">{{
+                formatCurrency(summary()?.tax_amount || 0)
+              }}</span>
             </div>
-            <div class="pt-2 border-t border-border/50 flex justify-between items-center">
-              <span class="font-bold text-text-primary text-base">Total Estimado</span>
+            <div
+              class="pt-2 border-t border-border/50 flex justify-between items-center"
+            >
+              <span class="font-bold text-text-primary text-base"
+                >Total Estimado</span
+              >
               <span class="font-extrabold text-2xl text-primary tracking-tight">
-                {{ formatCurrency((summary$ | async)?.total || 0) }}
+                {{ formatCurrency(summary()?.total || 0) }}
               </span>
             </div>
           </div>
 
           <!-- Checkout Actions -->
-          <ng-container
-            *ngIf="{
-              loading: ((loading$ | async) ?? false),
-              isEmpty: ((isEmpty$ | async) ?? false)
-            } as actionState"
-          >
-            <div class="relative mt-4"
-                 (mouseenter)="(actionState.loading || actionState.isEmpty) && onDisabledActionsHover(actionState.loading, actionState.isEmpty)"
-                 (mouseleave)="hideDisabledActionsTooltip()">
+          @if (
+            {
+              loading: loading(),
+              isEmpty: isEmpty(),
+            };
+            as actionState
+          ) {
+            <div
+              class="relative mt-4"
+              (mouseenter)="
+                (actionState.loading || actionState.isEmpty) &&
+                  onDisabledActionsHover(
+                    actionState.loading,
+                    actionState.isEmpty
+                  )
+              "
+              (mouseleave)="hideDisabledActionsTooltip()"
+            >
               <app-tooltip
                 position="top"
                 color="warning"
                 size="sm"
-                [visible]="disabledActionsTooltipVisible && (actionState.loading || actionState.isEmpty)"
+                [visible]="
+                  disabledActionsTooltipVisible &&
+                  (actionState.loading || actionState.isEmpty)
+                "
                 class="!absolute left-1/2 -translate-x-1/2 top-0 z-10"
-              >{{ getDisabledActionsMessage(actionState.loading, actionState.isEmpty) }}</app-tooltip>
-
+                >{{
+                  getDisabledActionsMessage(
+                    actionState.loading,
+                    actionState.isEmpty
+                  )
+                }}</app-tooltip
+              >
               <div class="grid grid-cols-2 gap-2">
                 <!-- Secondary CTAs (top row) -->
                 <app-button
@@ -108,7 +140,6 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                 >
                   Borrador
                 </app-button>
-
                 <app-button
                   variant="primary"
                   size="sm"
@@ -120,7 +151,6 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                   <app-icon name="file-text" [size]="18" slot="icon"></app-icon>
                   Crear orden
                 </app-button>
-
                 <!-- Primary CTA: Create and Receive (bottom, full width) -->
                 <app-button
                   class="col-span-2"
@@ -135,177 +165,225 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                 </app-button>
               </div>
             </div>
-          </ng-container>
+          }
         </div>
 
         <!-- Supplier Information (Compact) -->
-        <div
-          *ngIf="(cartState$ | async)?.supplierId"
-          class="px-5 py-2.5 bg-primary/5 border-t border-primary/10 flex items-center gap-3"
-        >
-          <div class="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-primary">
-            <app-icon name="truck" [size]="14"></app-icon>
+        @if (cartState()?.supplierId) {
+          <div
+            class="px-5 py-2.5 bg-primary/5 border-t border-primary/10 flex items-center gap-3"
+          >
+            <div
+              class="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-primary"
+            >
+              <app-icon name="truck" [size]="14"></app-icon>
+            </div>
+            <div class="flex-1 min-w-0">
+              <p
+                class="text-[11px] text-text-secondary font-medium leading-none mb-0.5"
+              >
+                Proveedor Seleccionado
+              </p>
+              <p class="text-xs font-bold text-text-primary truncate">
+                ID: {{ cartState()?.supplierId }}
+              </p>
+            </div>
           </div>
-          <div class="flex-1 min-w-0">
-            <p class="text-[11px] text-text-secondary font-medium leading-none mb-0.5">Proveedor Seleccionado</p>
-            <p class="text-xs font-bold text-text-primary truncate">
-              ID: {{ (cartState$ | async)?.supplierId }}
-            </p>
-          </div>
-        </div>
+        }
       </div>
 
       <!-- Cart Content (Scrollable Items) -->
       <div class="flex-1 overflow-y-auto p-4 bg-bg/30">
         <!-- Empty State -->
-        <div
-          *ngIf="isEmpty$ | async"
-          class="flex flex-col items-center pt-10 min-h-[200px] text-center opacity-60"
-        >
-          <div class="w-12 h-12 bg-muted/20 rounded-full flex items-center justify-center mb-3">
-            <app-icon name="shopping-cart" [size]="24" class="text-muted"></app-icon>
+        @if (isEmpty()) {
+          <div
+            class="flex flex-col items-center pt-10 min-h-[200px] text-center opacity-60"
+          >
+            <div
+              class="w-12 h-12 bg-muted/20 rounded-full flex items-center justify-center mb-3"
+            >
+              <app-icon
+                name="shopping-cart"
+                [size]="24"
+                class="text-muted"
+              ></app-icon>
+            </div>
+            <h3 class="text-sm font-semibold text-text-primary mb-1">
+              Orden vacía
+            </h3>
+            <p class="text-[11px] text-text-secondary">
+              Selecciona productos en el panel izquierdo
+            </p>
           </div>
-          <h3 class="text-sm font-semibold text-text-primary mb-1">
-            Orden vacía
-          </h3>
-          <p class="text-[11px] text-text-secondary">
-            Selecciona productos en el panel izquierdo
-          </p>
-        </div>
+        }
 
         <!-- Cart Items List -->
-        <div *ngIf="!(isEmpty$ | async)" class="space-y-2">
-          <div
-            *ngFor="
-              let item of (cartState$ | async)?.items;
-              trackBy: trackByItemId
-            "
-            class="group flex flex-col gap-2 p-2.5 rounded-md border border-border bg-surface hover:bg-muted/30 hover:border-primary/30 transition-all duration-200"
-          >
-            <!-- Top Row: Info and Remove Button -->
-            <div class="flex items-start gap-3">
-              <!-- Item Info -->
-              <div class="flex-1 min-w-0">
-                <div class="flex justify-between items-start gap-2">
-                  <h4
-                    class="text-sm font-semibold text-text-primary truncate leading-tight mb-0.5"
-                    [title]="item.product.name"
+        @if (!isEmpty()) {
+          <div class="space-y-2">
+            @for (
+              item of cartState()?.items;
+              track trackByItemId($index, item)
+            ) {
+              <div
+                class="group flex flex-col gap-2 p-2.5 rounded-md border border-border bg-surface hover:bg-muted/30 hover:border-primary/30 transition-all duration-200"
+              >
+                <!-- Top Row: Info and Remove Button -->
+                <div class="flex items-start gap-3">
+                  <!-- Item Info -->
+                  <div class="flex-1 min-w-0">
+                    <div class="flex justify-between items-start gap-2">
+                      <h4
+                        class="text-sm font-semibold text-text-primary truncate leading-tight mb-0.5"
+                        [title]="item.product.name"
+                      >
+                        {{ item.product.name }}
+                      </h4>
+                      <div
+                        class="relative"
+                        (mouseenter)="hoveredRemoveTooltip = item.id"
+                        (mouseleave)="hoveredRemoveTooltip = null"
+                      >
+                        <button
+                          (click)="removeFromCart(item.id)"
+                          class="p-1 rounded-sm text-text-secondary hover:text-destructive hover:bg-destructive/10 transition-colors"
+                        >
+                          <app-icon name="trash-2" [size]="14"></app-icon>
+                        </button>
+                        <app-tooltip
+                          position="top"
+                          size="sm"
+                          [visible]="hoveredRemoveTooltip === item.id"
+                          class="!absolute left-1/2 -translate-x-1/2 bottom-full z-10"
+                        >
+                          Eliminar
+                        </app-tooltip>
+                      </div>
+                    </div>
+                    <!-- Variant & SKU -->
+                    @if (item.variant) {
+                      <div class="text-[10px] text-primary font-medium mb-0.5">
+                        Variante: {{ item.variant.name || item.variant.sku }}
+                      </div>
+                    }
+                    <div class="text-[10px] text-text-secondary mb-2">
+                      SKU: {{ item.variant?.sku || item.product.code }}
+                    </div>
+                    <div class="flex justify-between items-end">
+                      <!-- Unit Cost Input (Editable for POP) -->
+                      <div class="flex flex-col">
+                        <span
+                          class="text-[10px] text-text-secondary uppercase mb-1"
+                        >
+                          {{
+                            item.product.pricing_type === 'weight'
+                              ? 'Costo / kg'
+                              : 'Costo Unit.'
+                          }}
+                        </span>
+                        <app-input
+                          type="number"
+                          size="sm"
+                          [ngModel]="item.unit_cost"
+                          (ngModelChange)="updateCost(item.id, $event)"
+                          customInputClass="text-right !h-7 !py-0"
+                          customWrapperClass="!mt-0"
+                          min="0"
+                        ></app-input>
+                      </div>
+                      <div class="flex flex-col items-end">
+                        <span
+                          class="text-[10px] text-text-secondary uppercase mb-1"
+                          >Total</span
+                        >
+                        <span class="text-sm font-bold text-primary">
+                          {{ formatCurrency(item.total) }}
+                        </span>
+                      </div>
+                    </div>
+                    <!-- Cost comparison -->
+                    @if (getCostDelta(item); as delta) {
+                      <div class="flex items-center gap-1.5 mt-1 text-[10px]">
+                        <span class="text-text-secondary">
+                          Costo actual: {{ formatCurrency(delta.currentCost) }}
+                        </span>
+                        <app-icon
+                          name="arrow-right"
+                          [size]="10"
+                          class="text-text-muted"
+                        ></app-icon>
+                        <span class="text-text-secondary">
+                          Nuevo: {{ formatCurrency(item.unit_cost) }}
+                        </span>
+                        <span
+                          class="font-bold px-1 py-0.5 rounded"
+                          [class]="
+                            delta.percentage < 0
+                              ? 'text-success bg-success/10'
+                              : delta.percentage > 0
+                                ? 'text-destructive bg-destructive/10'
+                                : 'text-text-muted'
+                          "
+                        >
+                          {{ delta.percentage > 0 ? '+' : ''
+                          }}{{ delta.percentage | number: '1.1-1' }}%
+                        </span>
+                      </div>
+                    }
+                  </div>
+                </div>
+                <!-- Bottom Row: Quantity Controls -->
+                <div
+                  class="flex items-center justify-between pt-2 border-t border-border/50"
+                >
+                  <span
+                    class="text-[10px] uppercase tracking-wider font-bold text-text-secondary/60"
                   >
-                    {{ item.product.name }}
-                  </h4>
-                  <div class="relative"
-                       (mouseenter)="hoveredRemoveTooltip = item.id"
-                       (mouseleave)="hoveredRemoveTooltip = null">
-                    <button
-                      (click)="removeFromCart(item.id)"
-                      class="p-1 rounded-sm text-text-secondary hover:text-destructive hover:bg-destructive/10 transition-colors"
-                    >
-                      <app-icon name="trash-2" [size]="14"></app-icon>
-                    </button>
-                    <app-tooltip position="top" size="sm" [visible]="hoveredRemoveTooltip === item.id"
-                      class="!absolute left-1/2 -translate-x-1/2 bottom-full z-10">
-                      Eliminar
-                    </app-tooltip>
-                  </div>
+                    {{
+                      item.product.pricing_type === 'weight'
+                        ? 'Peso (kg)'
+                        : 'Cantidad'
+                    }}
+                  </span>
+                  @if (item.product.pricing_type === 'weight') {
+                    <app-input
+                      type="number"
+                      size="sm"
+                      [ngModel]="item.quantity"
+                      (ngModelChange)="updateQuantity(item.id, $event)"
+                      customInputClass="text-right !h-7 !py-0 !w-24"
+                      customWrapperClass="!mt-0"
+                      min="0.001"
+                      step="0.001"
+                    ></app-input>
+                  } @else {
+                    <app-quantity-control
+                      [value]="item.quantity"
+                      [min]="1"
+                      [editable]="true"
+                      [disabled]="loading()"
+                      [size]="'sm'"
+                      (valueChange)="updateQuantity(item.id, $event)"
+                    ></app-quantity-control>
+                  }
                 </div>
-                <!-- Variant & SKU -->
-                @if (item.variant) {
-                  <div class="text-[10px] text-primary font-medium mb-0.5">
-                    Variante: {{ item.variant.name || item.variant.sku }}
-                  </div>
-                }
-                <div class="text-[10px] text-text-secondary mb-2">SKU: {{ item.variant?.sku || item.product.code }}</div>
-
-                <div class="flex justify-between items-end">
-                   <!-- Unit Cost Input (Editable for POP) -->
-                  <div class="flex flex-col">
-                    <span class="text-[10px] text-text-secondary uppercase mb-1">
-                      {{ item.product.pricing_type === 'weight' ? 'Costo / kg' : 'Costo Unit.' }}
-                    </span>
-                     <app-input
-                        type="number"
-                        size="sm"
-                        [ngModel]="item.unit_cost"
-                        (ngModelChange)="updateCost(item.id, $event)"
-                        customInputClass="text-right !h-7 !py-0"
-                        customWrapperClass="!mt-0"
-                        min="0"
-                     ></app-input>
-                  </div>
-                  
-                  <div class="flex flex-col items-end">
-                     <span class="text-[10px] text-text-secondary uppercase mb-1">Total</span>
-                     <span class="text-sm font-bold text-primary">
-                        {{ formatCurrency(item.total) }}
-                     </span>
-                  </div>
+                <!-- Config Trigger (Variants / Lot / Unit) -->
+                <div
+                  class="flex items-center gap-1.5 text-[10px] mt-1 px-2 py-1 rounded-md border border-dashed border-border hover:border-primary hover:bg-primary/5 cursor-pointer transition-colors"
+                  (click)="openConfigModal(item)"
+                >
+                  <app-icon
+                    name="settings"
+                    [size]="11"
+                    class="text-primary"
+                  ></app-icon>
+                  <span class="text-text-secondary">{{
+                    getConfigDisplayText(item)
+                  }}</span>
                 </div>
-
-                <!-- Cost comparison -->
-                @if (getCostDelta(item); as delta) {
-                  <div class="flex items-center gap-1.5 mt-1 text-[10px]">
-                    <span class="text-text-secondary">
-                      Costo actual: {{ formatCurrency(delta.currentCost) }}
-                    </span>
-                    <app-icon name="arrow-right" [size]="10" class="text-text-muted"></app-icon>
-                    <span class="text-text-secondary">
-                      Nuevo: {{ formatCurrency(item.unit_cost) }}
-                    </span>
-                    <span
-                      class="font-bold px-1 py-0.5 rounded"
-                      [class]="delta.percentage < 0
-                        ? 'text-success bg-success/10'
-                        : delta.percentage > 0
-                          ? 'text-destructive bg-destructive/10'
-                          : 'text-text-muted'"
-                    >
-                      {{ delta.percentage > 0 ? '+' : '' }}{{ delta.percentage | number:'1.1-1' }}%
-                    </span>
-                  </div>
-                }
               </div>
-            </div>
-
-            <!-- Bottom Row: Quantity Controls -->
-            <div
-              class="flex items-center justify-between pt-2 border-t border-border/50"
-            >
-              <span class="text-[10px] uppercase tracking-wider font-bold text-text-secondary/60">
-                {{ item.product.pricing_type === 'weight' ? 'Peso (kg)' : 'Cantidad' }}
-              </span>
-              @if (item.product.pricing_type === 'weight') {
-                <app-input
-                  type="number"
-                  size="sm"
-                  [ngModel]="item.quantity"
-                  (ngModelChange)="updateQuantity(item.id, $event)"
-                  customInputClass="text-right !h-7 !py-0 !w-24"
-                  customWrapperClass="!mt-0"
-                  min="0.001"
-                  step="0.001"
-                ></app-input>
-              } @else {
-                <app-quantity-control
-                  [value]="item.quantity"
-                  [min]="1"
-                  [editable]="true"
-                  [disabled]="(loading$ | async) ?? false"
-                  [size]="'sm'"
-                  (valueChange)="updateQuantity(item.id, $event)"
-                ></app-quantity-control>
-              }
-            </div>
-            
-            <!-- Config Trigger (Variants / Lot / Unit) -->
-             <div
-                class="flex items-center gap-1.5 text-[10px] mt-1 px-2 py-1 rounded-md border border-dashed border-border hover:border-primary hover:bg-primary/5 cursor-pointer transition-colors"
-                (click)="openConfigModal(item)"
-             >
-                 <app-icon name="settings" [size]="11" class="text-primary"></app-icon>
-                 <span class="text-text-secondary">{{ getConfigDisplayText(item) }}</span>
-             </div>
+            }
           </div>
-        </div>
+        }
       </div>
     </div>
   `,
@@ -315,61 +393,56 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
         display: block;
         height: 100%;
       }
-      
-       /* Chrome, Safari, Edge, Opera */
+
+      /* Chrome, Safari, Edge, Opera */
       input::-webkit-outer-spin-button,
       input::-webkit-inner-spin-button {
         -webkit-appearance: none;
         margin: 0;
       }
-  
+
       /* Firefox */
-      input[type=number] {
+      input[type='number'] {
         -moz-appearance: textfield;
       }
     `,
   ],
 })
-export class PopCartComponent implements OnInit, OnDestroy {
+export class PopCartComponent {
   private currencyService = inject(CurrencyFormatService);
-  private destroy$ = new Subject<void>();
-  private disabledActionsTooltipTimeout: ReturnType<typeof setTimeout> | null = null;
+  private cartService = inject(PopCartService);
+  private toastService = inject(ToastService);
+  private dialogService = inject(DialogService);
+  private destroyRef = inject(DestroyRef);
+  private disabledActionsTooltipTimeout: ReturnType<typeof setTimeout> | null =
+    null;
 
-  cartState$: Observable<PopCartState>;
-  isEmpty$: Observable<boolean>;
-  summary$: Observable<PopCartSummary>;
-  loading$: Observable<boolean>;
+  readonly cartState$ = this.cartService.cartState$;
+  readonly isEmpty$ = this.cartService.isEmpty$;
+  readonly summary$ = this.cartService.summary$;
+  readonly loading$ = this.cartService.loading$;
+
+  // Signal-based properties
+  readonly cartState = toSignal(this.cartState$);
+  readonly isEmpty = toSignal(this.isEmpty$, { initialValue: false });
+  readonly summary = toSignal(this.summary$);
+  readonly loading = toSignal(this.loading$, { initialValue: false });
   hoveredRemoveTooltip: string | null = null;
   disabledActionsTooltipVisible = false;
 
-  @Output() saveDraft = new EventEmitter<void>();
-  @Output() submitOrder = new EventEmitter<void>();
-  @Output() requestLotConfig = new EventEmitter<any>();
-  @Output() requestItemConfig = new EventEmitter<PopCartItem>();
+  readonly saveDraft = output<void>();
+  readonly submitOrder = output<void>();
+  readonly createAndReceive = output<void>();
+  readonly requestLotConfig = output<any>();
+  readonly requestItemConfig = output<PopCartItem>();
 
-  constructor(
-    private cartService: PopCartService,
-    private toastService: ToastService,
-    private dialogService: DialogService,
-  ) {
-    this.cartState$ = this.cartService.cartState$;
-    this.isEmpty$ = this.cartService.isEmpty$;
-    this.summary$ = this.cartService.summary$;
-    this.loading$ = this.cartService.loading$;
-  }
-
-  ngOnInit(): void {
-    // Asegurar que la moneda esté cargada
+  constructor() {
     this.currencyService.loadCurrency();
-  }
-
-  ngOnDestroy(): void {
-    if (this.disabledActionsTooltipTimeout) {
-      clearTimeout(this.disabledActionsTooltipTimeout);
-      this.disabledActionsTooltipTimeout = null;
-    }
-    this.destroy$.next();
-    this.destroy$.complete();
+    this.destroyRef.onDestroy(() => {
+      if (this.disabledActionsTooltipTimeout) {
+        clearTimeout(this.disabledActionsTooltipTimeout);
+      }
+    });
   }
 
   trackByItemId(_index: number, item: PopCartItem): string {
@@ -384,9 +457,9 @@ export class PopCartComponent implements OnInit, OnDestroy {
 
     this.cartService
       .updateCartItem({ itemId, quantity })
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: () => { },
+        next: () => {},
         error: (error) => {
           this.toastService.error(
             error.message || 'Error al actualizar cantidad',
@@ -398,20 +471,21 @@ export class PopCartComponent implements OnInit, OnDestroy {
   updateCost(itemId: string, cost: number): void {
     if (cost < 0) return;
 
-    this.cartService.updateCartItem({ itemId, unit_cost: Number(cost) })
-      .pipe(takeUntil(this.destroy$))
+    this.cartService
+      .updateCartItem({ itemId, unit_cost: Number(cost) })
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: () => { },
+        next: () => {},
         error: (error) => {
           this.toastService.error('Error al actualizar costo');
-        }
+        },
       });
   }
 
   removeFromCart(itemId: string): void {
     this.cartService
       .removeFromCart(itemId)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
           this.toastService.success('Producto eliminado de la orden');
@@ -436,7 +510,7 @@ export class PopCartComponent implements OnInit, OnDestroy {
     if (confirm) {
       this.cartService
         .clearCart()
-        .pipe(takeUntil(this.destroy$))
+        .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: () => {
             this.toastService.info('Orden vaciada');
@@ -451,8 +525,6 @@ export class PopCartComponent implements OnInit, OnDestroy {
   onSaveDraft(): void {
     this.saveDraft.emit();
   }
-
-  @Output() createAndReceive = new EventEmitter<void>();
 
   onSubmitOrder(): void {
     this.submitOrder.emit();
@@ -521,9 +593,14 @@ export class PopCartComponent implements OnInit, OnDestroy {
     return 'Configurar';
   }
 
-  getCostDelta(item: PopCartItem): { currentCost: number; percentage: number } | null {
+  getCostDelta(
+    item: PopCartItem,
+  ): { currentCost: number; percentage: number } | null {
     const currentCost = Number(
-      item.variant?.cost_price || item.product.cost_price || item.product.cost || 0,
+      item.variant?.cost_price ||
+        item.product.cost_price ||
+        item.product.cost ||
+        0,
     );
     if (!currentCost || currentCost <= 0) return null;
     if (item.unit_cost === currentCost) return null;

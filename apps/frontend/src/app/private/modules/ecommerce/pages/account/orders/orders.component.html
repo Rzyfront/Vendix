@@ -7,11 +7,11 @@
         <h1>Mis Pedidos</h1>
     </div>
 
-    @if (is_loading) {
+    @if (is_loading()) {
     <div class="loading">
         <div class="spinner"></div>
     </div>
-    } @else if (orders.length === 0) {
+    } @else if (orders().length === 0) {
     <div class="empty-state">
         <app-icon name="shopping-bag" [size]="64"></app-icon>
         <h2>No tienes pedidos</h2>
@@ -22,7 +22,7 @@
     </div>
     } @else {
     <div class="orders-list">
-        @for (order of orders; track order.id) {
+        @for (order of orders(); track order.id) {
         <a [routerLink]="['/account/orders', order.id]" class="order-card">
             <div class="order-header">
                 <span class="order-number">#{{ order.order_number }}</span>
@@ -48,13 +48,13 @@
         }
     </div>
 
-    @if (total_pages > 1) {
+    @if (total_pages() > 1) {
     <div class="pagination">
-        <button [disabled]="current_page === 1" (click)="goToPage(current_page - 1)">
+        <button [disabled]="current_page() === 1" (click)="goToPage(current_page() - 1)">
             <app-icon name="chevron-left" [size]="16"></app-icon>
         </button>
-        <span>Página {{ current_page }} de {{ total_pages }}</span>
-        <button [disabled]="current_page === total_pages" (click)="goToPage(current_page + 1)">
+        <span>Página {{ current_page() }} de {{ total_pages() }}</span>
+        <button [disabled]="current_page() === total_pages()" (click)="goToPage(current_page() + 1)">
             <app-icon name="chevron-right" [size]="16"></app-icon>
         </button>
     </div>

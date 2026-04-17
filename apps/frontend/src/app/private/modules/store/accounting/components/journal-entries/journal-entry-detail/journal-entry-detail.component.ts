@@ -1,13 +1,11 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
-  OnChanges,
-  SimpleChanges,
+  input,
+  output,
   inject,
+  effect,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { DatePipe, DecimalPipe } from '@angular/common';
 import { Store } from '@ngrx/store';
 
 import { JournalEntry } from '../../../interfaces/accounting.interface';
@@ -24,50 +22,50 @@ import { DialogService } from '../../../../../../../shared/components/dialog/dia
 @Component({
   selector: 'vendix-journal-entry-detail',
   standalone: true,
-  imports: [CommonModule, ModalComponent, ButtonComponent, IconComponent],
+  imports: [DatePipe, DecimalPipe, ModalComponent, ButtonComponent, IconComponent],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onClose()"
-      [title]="'Entry ' + (entry?.entry_number || '')"
+      [title]="'Entry ' + (entry()?.entry_number || '')"
       size="lg"
     >
-      @if (entry) {
+      @if (entry()) {
         <div class="p-4 space-y-4">
           <!-- Header Info -->
           <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
               <p class="text-xs text-gray-500">Número</p>
-              <p class="text-sm font-medium">{{ entry.entry_number }}</p>
+              <p class="text-sm font-medium">{{ entry()?.entry_number }}</p>
             </div>
             <div>
               <p class="text-xs text-gray-500">Fecha</p>
               <p class="text-sm font-medium">
-                {{ entry.entry_date | date: 'mediumDate' }}
+                {{ entry()?.entry_date | date: 'mediumDate' }}
               </p>
             </div>
             <div>
               <p class="text-xs text-gray-500">Tipo</p>
               <p class="text-sm font-medium capitalize">
-                {{ entry.entry_type }}
+                {{ entry()?.entry_type }}
               </p>
             </div>
             <div>
               <p class="text-xs text-gray-500">Estado</p>
               <span
                 class="text-xs px-2 py-0.5 rounded-full font-medium"
-                [class]="getStatusClasses(entry.status)"
+                [class]="getStatusClasses(entry()?.status ?? '')"
               >
-                {{ getStatusLabel(entry.status) }}
+                {{ getStatusLabel(entry()?.status ?? '') }}
               </span>
             </div>
           </div>
 
-          @if (entry.description) {
+          @if (entry()?.description) {
             <div>
               <p class="text-xs text-gray-500">Descripción</p>
-              <p class="text-sm">{{ entry.description }}</p>
+              <p class="text-sm">{{ entry()?.description }}</p>
             </div>
           }
 
@@ -91,9 +89,9 @@ import { DialogService } from '../../../../../../../shared/components/dialog/dia
               </div>
 
               <!-- Lines -->
-              @if (entry.lines?.length) {
+              @if (entry()?.lines?.length) {
                 <div class="divide-y divide-border">
-                  @for (line of entry.lines; track line.id) {
+                  @for (line of entry()?.lines ?? []; track line.id) {
                     <!-- Mobile -->
                     <div class="md:hidden p-3">
                       <div class="flex justify-between items-start">
@@ -159,10 +157,10 @@ import { DialogService } from '../../../../../../../shared/components/dialog/dia
               >
                 <div class="col-span-8 text-sm font-semibold">Totales</div>
                 <div class="col-span-2 text-right text-sm font-mono font-bold">
-                  {{ entry.total_debit | number: '1.2-2' }}
+                  {{ entry()?.total_debit | number: '1.2-2' }}
                 </div>
                 <div class="col-span-2 text-right text-sm font-mono font-bold">
-                  {{ entry.total_credit | number: '1.2-2' }}
+                  {{ entry()?.total_credit | number: '1.2-2' }}
                 </div>
               </div>
             </div>
@@ -175,13 +173,13 @@ import { DialogService } from '../../../../../../../shared/components/dialog/dia
           class="flex items-center justify-between gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100"
         >
           <div class="flex items-center gap-2">
-            @if (entry?.status === 'draft') {
+            @if (entry()?.status === 'draft') {
               <app-button variant="primary" (clicked)="onPost()">
                 <app-icon slot="icon" name="check" [size]="14"></app-icon>
                 Contabilizar
               </app-button>
             }
-            @if (entry?.status === 'posted') {
+            @if (entry()?.status === 'posted') {
               <app-button variant="outline-danger" (clicked)="onVoid()">
                 <app-icon slot="icon" name="x" [size]="14"></app-icon>
                 Anular Asiento
@@ -196,30 +194,32 @@ import { DialogService } from '../../../../../../../shared/components/dialog/dia
     </app-modal>
   `,
 })
-export class JournalEntryDetailComponent implements OnChanges {
-  @Input() isOpen = false;
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Input() entry: JournalEntry | null = null;
+export class JournalEntryDetailComponent {
+  readonly isOpen = input(false);
+  readonly isOpenChange = output<boolean>();
+  readonly entry = input<JournalEntry | null>(null);
 
   private store = inject(Store);
   private dialogService = inject(DialogService);
 
-  ngOnChanges(changes: SimpleChanges): void {
-    if (changes['entry'] && this.entry?.id && this.isOpen) {
-      // Load full entry with lines
-      this.store.dispatch(loadEntry({ id: this.entry.id }));
-    }
+  constructor() {
+    effect(() => {
+      const entry = this.entry();
+      if (entry?.id && this.isOpen()) {
+        this.store.dispatch(loadEntry({ id: entry.id }));
+      }
+    });
   }
 
   onPost(): void {
-    if (this.entry) {
-      this.store.dispatch(postEntry({ id: this.entry.id }));
+    if (this.entry()) {
+      this.store.dispatch(postEntry({ id: this.entry()!.id }));
       this.onClose();
     }
   }
 
   async onVoid(): Promise<void> {
-    if (!this.entry) return;
+    if (!this.entry()) return;
 
     const confirmed = await this.dialogService.confirm({
       title: 'Anular Asiento',
@@ -231,7 +231,7 @@ export class JournalEntryDetailComponent implements OnChanges {
     });
 
     if (confirmed) {
-      this.store.dispatch(voidEntry({ id: this.entry.id }));
+      this.store.dispatch(voidEntry({ id: this.entry()!.id }));
       this.onClose();
     }
   }

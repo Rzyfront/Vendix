@@ -1,28 +1,25 @@
-import {
-  Component,
-  Input,
-  Output,
-  EventEmitter,
+import {Component,
   OnInit,
-  OnDestroy,
   ChangeDetectionStrategy,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
+  input,
+  output,
+  DestroyRef,
+  inject} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+
 import {
   FormsModule,
   ReactiveFormsModule,
   FormBuilder,
   FormGroup,
   Validators,
-  AbstractControl,
-} from '@angular/forms';
-import { Subject, takeUntil } from 'rxjs';
+  AbstractControl} from '@angular/forms';
+
 
 import {
   CreateDomainDto,
   DomainOwnership,
-  AppType,
-} from '../../interfaces/domain.interface';
+  AppType} from '../../interfaces/domain.interface';
 import { OrganizationDomainsService } from '../../services/organization-domains.service';
 
 import {
@@ -32,8 +29,7 @@ import {
   IconComponent,
   SelectorComponent,
   ToggleComponent,
-  SelectorOption,
-} from '../../../../../../shared/components/index';
+  SelectorOption} from '../../../../../../shared/components/index';
 
 interface StoreOption {
   id: number;
@@ -46,7 +42,6 @@ interface StoreOption {
   standalone: true,
   changeDetection: ChangeDetectionStrategy.OnPush,
   imports: [
-    CommonModule,
     FormsModule,
     ReactiveFormsModule,
     ModalComponent,
@@ -54,29 +49,29 @@ interface StoreOption {
     ButtonComponent,
     IconComponent,
     SelectorComponent,
-    ToggleComponent,
-  ],
+    ToggleComponent
+],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       (isOpenChange)="onModalChange($event)"
       (cancel)="onCancel()"
       [size]="'md'"
       title="Crear Nuevo Dominio"
       subtitle="Configura un nuevo dominio para tu organización o tienda"
-    >
+      >
       <form [formGroup]="domainForm" class="space-y-4">
         <!-- Hostname Section -->
         <div
           class="bg-[var(--color-muted)]/50 rounded-lg p-4 border border-[var(--color-border)]"
-        >
+          >
           <h3
             class="text-sm font-semibold text-[var(--color-text-primary)] mb-3 flex items-center gap-2"
-          >
+            >
             <app-icon name="globe" [size]="16" />
             Configuración del Dominio
           </h3>
-
+    
           <div class="space-y-4">
             <!-- Ownership Type -->
             <app-selector
@@ -87,13 +82,13 @@ interface StoreOption {
               [errorText]="getErrorMessage(domainForm.get('ownership'))"
               placeholder="Seleccionar tipo"
               size="md"
-            />
-
+              />
+    
             <!-- Hostname Input -->
             <div class="space-y-2">
               <label
                 class="block text-sm font-medium text-[var(--color-text-primary)]"
-              >
+                >
                 Hostname <span class="text-[var(--color-destructive)]">*</span>
               </label>
               <div class="flex items-center gap-2">
@@ -105,15 +100,16 @@ interface StoreOption {
                   [error]="getErrorMessage(domainForm.get('hostname'))"
                   size="md"
                   class="flex-1"
-                >
+                  >
                   <app-icon name="link" [size]="16" slot="prefix" />
                 </app-input>
-                <span
-                  *ngIf="isVendixSubdomain"
-                  class="text-sm text-[var(--color-text-secondary)] whitespace-nowrap"
-                >
-                  .vendix.com
-                </span>
+                @if (isVendixSubdomain) {
+                  <span
+                    class="text-sm text-[var(--color-text-secondary)] whitespace-nowrap"
+                    >
+                    .vendix.com
+                  </span>
+                }
               </div>
               <p class="text-xs text-[var(--color-text-secondary)]">
                 {{ hostnameHelperText }}
@@ -121,18 +117,18 @@ interface StoreOption {
             </div>
           </div>
         </div>
-
+    
         <!-- Assignment Section -->
         <div
           class="bg-[var(--color-muted)]/50 rounded-lg p-4 border border-[var(--color-border)]"
-        >
+          >
           <h3
             class="text-sm font-semibold text-[var(--color-text-primary)] mb-3 flex items-center gap-2"
-          >
+            >
             <app-icon name="link-2" [size]="16" />
             Asignación
           </h3>
-
+    
           <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
             <!-- Store Selection -->
             <app-selector
@@ -141,8 +137,8 @@ interface StoreOption {
               [options]="storeOptions"
               placeholder="Sin tienda asignada"
               size="md"
-            />
-
+              />
+    
             <!-- App Type -->
             <app-selector
               formControlName="app_type"
@@ -150,21 +146,21 @@ interface StoreOption {
               [options]="appTypeOptions"
               placeholder="Seleccionar aplicación"
               size="md"
-            />
+              />
           </div>
         </div>
-
+    
         <!-- Options Section -->
         <div
           class="bg-[var(--color-muted)]/50 rounded-lg p-4 border border-[var(--color-border)]"
-        >
+          >
           <h3
             class="text-sm font-semibold text-[var(--color-text-primary)] mb-3 flex items-center gap-2"
-          >
+            >
             <app-icon name="settings" [size]="16" />
             Opciones
           </h3>
-
+    
           <div class="flex items-center gap-4">
             <app-toggle formControlName="is_primary" label="Dominio primario" />
             <span class="text-sm text-[var(--color-text-secondary)]">
@@ -173,7 +169,7 @@ interface StoreOption {
           </div>
         </div>
       </form>
-
+    
       <div slot="footer" class="flex justify-between items-center">
         <div class="text-sm text-[var(--color-text-secondary)]">
           <span class="text-[var(--color-destructive)]">*</span> Campos
@@ -183,48 +179,45 @@ interface StoreOption {
           <app-button
             variant="outline"
             (clicked)="onCancel()"
-            [disabled]="isSubmitting"
-          >
+            [disabled]="isSubmitting()"
+            >
             Cancelar
           </app-button>
           <app-button
             variant="primary"
             (clicked)="onSubmit()"
-            [disabled]="domainForm.invalid || isSubmitting"
-            [loading]="isSubmitting"
-          >
+            [disabled]="domainForm.invalid || isSubmitting()"
+            [loading]="isSubmitting()"
+            >
             <app-icon name="plus" [size]="16" slot="icon"></app-icon>
             Crear Dominio
           </app-button>
         </div>
       </div>
     </app-modal>
-  `,
+    `,
   styles: [
     `
       :host {
         display: block;
       }
     `,
-  ],
-})
-export class DomainCreateModalComponent implements OnInit, OnDestroy {
-  @Input() isOpen = false;
-  @Input() isSubmitting = false;
-  @Input() stores: StoreOption[] = [];
+  ]})
+export class DomainCreateModalComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
+  readonly isOpen = input(false);
+  readonly isSubmitting = input(false);
+  readonly stores = input<StoreOption[]>([]);
 
-  @Output() isOpenChange = new EventEmitter<boolean>();
-  @Output() submit = new EventEmitter<CreateDomainDto>();
-  @Output() cancel = new EventEmitter<void>();
+  readonly isOpenChange = output<boolean>();
+  readonly submit = output<CreateDomainDto>();
+  readonly cancel = output<void>();
 
   domainForm!: FormGroup;
   ownershipOptions: SelectorOption[] = [];
   appTypeOptions: SelectorOption[] = [];
   storeOptions: SelectorOption[] = [];
-
-  private destroy$ = new Subject<void>();
-
-  constructor(
+constructor(
     private fb: FormBuilder,
     private domainsService: OrganizationDomainsService,
   ) {
@@ -235,13 +228,7 @@ export class DomainCreateModalComponent implements OnInit, OnDestroy {
     this.loadOptions();
     this.setupOwnershipListener();
   }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
-
-  private initializeForm(): void {
+private initializeForm(): void {
     this.domainForm = this.fb.group({
       hostname: [
         '',
@@ -254,8 +241,7 @@ export class DomainCreateModalComponent implements OnInit, OnDestroy {
       ownership: [DomainOwnership.VENDIX_SUBDOMAIN, [Validators.required]],
       store_id: [null],
       app_type: [AppType.STORE_ECOMMERCE],
-      is_primary: [false],
-    });
+      is_primary: [false]});
   }
 
   private loadOptions(): void {
@@ -271,17 +257,16 @@ export class DomainCreateModalComponent implements OnInit, OnDestroy {
   private updateStoreOptions(): void {
     this.storeOptions = [
       { value: '', label: 'Sin tienda asignada' },
-      ...this.stores.map((store) => ({
+      ...this.stores().map((store) => ({
         value: store.id.toString(),
-        label: store.name,
-      })),
+        label: store.name})),
     ];
   }
 
   private setupOwnershipListener(): void {
     this.domainForm
       .get('ownership')
-      ?.valueChanges.pipe(takeUntil(this.destroy$))
+      ?.valueChanges.pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((ownership) => {
         const hostnameControl = this.domainForm.get('hostname');
         if (ownership === DomainOwnership.VENDIX_SUBDOMAIN) {
@@ -295,7 +280,7 @@ export class DomainCreateModalComponent implements OnInit, OnDestroy {
             Validators.required,
             Validators.minLength(3),
             Validators.pattern(
-              /^[a-zA-Z0-9][a-zA-Z0-9\-\.]*[a-zA-Z0-9]\.[a-zA-Z]{2,}$/,
+              /^[a-zA-Z0-9][a-zA-Z0-9\-\.]*[a-zA-Z0-9]\.[a-zA-Z]{2}$/,
             ),
           ]);
         }
@@ -332,6 +317,10 @@ export class DomainCreateModalComponent implements OnInit, OnDestroy {
 
   onCancel(): void {
     this.isOpenChange.emit(false);
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
+    // TODO: The 'emit' function requires a mandatory void argument
     this.cancel.emit();
   }
 
@@ -355,8 +344,7 @@ export class DomainCreateModalComponent implements OnInit, OnDestroy {
       store_id: formValue.store_id ? parseInt(formValue.store_id, 10) : undefined,
       app_type: formValue.app_type || undefined,
       is_primary: formValue.is_primary || false,
-      config: {},
-    };
+      config: {}};
 
     this.submit.emit(domainData);
   }
@@ -367,8 +355,7 @@ export class DomainCreateModalComponent implements OnInit, OnDestroy {
       ownership: DomainOwnership.VENDIX_SUBDOMAIN,
       store_id: null,
       app_type: AppType.STORE_ECOMMERCE,
-      is_primary: false,
-    });
+      is_primary: false});
   }
 
   getErrorMessage(control: AbstractControl | null): string {

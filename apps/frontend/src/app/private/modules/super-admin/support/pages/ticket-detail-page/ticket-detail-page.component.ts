@@ -1,6 +1,6 @@
 import { Component, inject } from '@angular/core';
 import { ActivatedRoute, Router, RouterModule } from '@angular/router';
-import { CommonModule } from '@angular/common';
+
 import { TicketDetailComponent } from '../../../../store/settings/support/components/ticket-detail/ticket-detail.component';
 
 /**
@@ -10,7 +10,7 @@ import { TicketDetailComponent } from '../../../../store/settings/support/compon
 @Component({
   selector: 'app-ticket-detail-page',
   standalone: true,
-  imports: [CommonModule, RouterModule, TicketDetailComponent],
+  imports: [RouterModule, TicketDetailComponent],
   template: `
     <app-ticket-detail></app-ticket-detail>
   `,

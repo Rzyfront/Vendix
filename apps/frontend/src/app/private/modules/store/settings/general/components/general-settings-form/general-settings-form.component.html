@@ -5,9 +5,9 @@
       <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Información Básica</h4>
       <div class="space-y-4">
         <app-input [formControl]="nameControl" type="text" label="Nombre de la Tienda" placeholder="Mi Tienda" size="sm"
-          (inputChange)="onFieldChange()"></app-input>
+        (inputChange)="onFieldChange()"></app-input>
         <app-selector [formControl]="storeTypeControl" label="Tipo de Tienda" [options]="storeTypes"
-          (valueChange)="onFieldChange()" size="sm"></app-selector>
+        (valueChange)="onFieldChange()" size="sm"></app-selector>
       </div>
     </div>
 
@@ -15,10 +15,10 @@
     <div>
       <h4 class="text-xs font-bold text-gray-400 uppercase tracking-wider mb-4">Preferencias y Localización</h4>
       <div class="space-y-4">
-        <app-selector [formControl]="currencyControl" label="Moneda" [options]="currencies"
-          (valueChange)="onFieldChange()" size="sm"></app-selector>
+        <app-selector [formControl]="currencyControl" label="Moneda" [options]="currencies()"
+        (valueChange)="onFieldChange()" size="sm"></app-selector>
         <app-selector [formControl]="timezoneControl" label="Zona Horaria" [options]="commonTimezones"
-          (valueChange)="onFieldChange()" size="sm"></app-selector>
+        (valueChange)="onFieldChange()" size="sm"></app-selector>
       </div>
     </div>
   </div>
@@ -30,22 +30,22 @@
       'border-purple-200 bg-purple-50 text-purple-700': storeTypeControl.value === 'online',
       'border-emerald-200 bg-emerald-50 text-emerald-700': storeTypeControl.value === 'hybrid'
     }">
-    <ng-container [ngSwitch]="storeTypeControl.value">
-      <ng-container *ngSwitchCase="'physical'">
+    @switch (storeTypeControl.value) {
+      @case ('physical') {
         <span class="font-semibold">Tienda Física:</span> El módulo de <strong>Tienda en línea</strong> no estará disponible. Tendrás acceso al <strong>Punto de Venta</strong> y todos los módulos de gestión presencial.
-      </ng-container>
-      <ng-container *ngSwitchCase="'popup'">
+      }
+      @case ('popup') {
         <span class="font-semibold">Tienda Pop-up:</span> El módulo de <strong>Tienda en línea</strong> no estará disponible. Tendrás acceso al <strong>Punto de Venta</strong> y todos los módulos de gestión presencial.
-      </ng-container>
-      <ng-container *ngSwitchCase="'kiosko'">
+      }
+      @case ('kiosko') {
         <span class="font-semibold">Kiosco:</span> El módulo de <strong>Tienda en línea</strong> no estará disponible. Tendrás acceso al <strong>Punto de Venta</strong> y todos los módulos de gestión presencial.
-      </ng-container>
-      <ng-container *ngSwitchCase="'online'">
+      }
+      @case ('online') {
         <span class="font-semibold">Tienda Online:</span> Los módulos de <strong>Punto de Venta</strong> y <strong>Caja Registradora</strong> no estarán disponibles. Tendrás acceso a la <strong>Tienda en línea</strong> y todos los módulos de comercio digital.
-      </ng-container>
-      <ng-container *ngSwitchCase="'hybrid'">
+      }
+      @case ('hybrid') {
         <span class="font-semibold">Híbrida:</span> Todos los módulos estarán disponibles, incluyendo <strong>Punto de Venta</strong>, <strong>Tienda en línea</strong> y <strong>Caja Registradora</strong>.
-      </ng-container>
-    </ng-container>
+      }
+    }
   </div>
 </div>

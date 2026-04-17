@@ -1,12 +1,5 @@
-import {
-  Component,
-  Input,
-  Output,
-  EventEmitter,
-  OnInit,
-  OnChanges,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, OnInit, OnChanges, input, output } from '@angular/core';
+
 import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
 import { SettingToggleComponent } from '../../../../../../../shared/components/setting-toggle/setting-toggle.component';
 import { TextareaComponent } from '../../../../../../../shared/components';
@@ -18,17 +11,16 @@ export interface ReceiptsSettings {
   receipt_footer: string;
 }
 
-
 @Component({
   selector: 'app-receipts-settings-form',
   standalone: true,
-  imports: [CommonModule, ReactiveFormsModule, SettingToggleComponent, TextareaComponent],
+  imports: [ReactiveFormsModule, SettingToggleComponent, TextareaComponent],
   templateUrl: './receipts-settings-form.component.html',
   styleUrls: ['./receipts-settings-form.component.scss'],
 })
 export class ReceiptsSettingsForm implements OnInit, OnChanges {
-  @Input() settings!: ReceiptsSettings;
-  @Output() settingsChange = new EventEmitter<ReceiptsSettings>();
+  readonly settings = input.required<ReceiptsSettings>();
+  readonly settingsChange = output<ReceiptsSettings>();
 
   form: FormGroup = new FormGroup({
     print_receipt: new FormControl(true),
@@ -38,10 +30,18 @@ export class ReceiptsSettingsForm implements OnInit, OnChanges {
   });
 
   // Getters for form controls
-  get printReceiptControl() { return this.form.get('print_receipt') as FormControl; }
-  get emailReceiptControl() { return this.form.get('email_receipt') as FormControl; }
-  get receiptHeaderControl() { return this.form.get('receipt_header') as FormControl; }
-  get receiptFooterControl() { return this.form.get('receipt_footer') as FormControl; }
+  get printReceiptControl() {
+    return this.form.get('print_receipt') as FormControl;
+  }
+  get emailReceiptControl() {
+    return this.form.get('email_receipt') as FormControl;
+  }
+  get receiptHeaderControl() {
+    return this.form.get('receipt_header') as FormControl;
+  }
+  get receiptFooterControl() {
+    return this.form.get('receipt_footer') as FormControl;
+  }
 
   ngOnInit() {
     this.patchForm();
@@ -52,8 +52,9 @@ export class ReceiptsSettingsForm implements OnInit, OnChanges {
   }
 
   patchForm() {
-    if (this.settings) {
-      this.form.patchValue(this.settings);
+    const currentSettings = this.settings();
+    if (currentSettings) {
+      this.form.patchValue(currentSettings);
     }
   }
 

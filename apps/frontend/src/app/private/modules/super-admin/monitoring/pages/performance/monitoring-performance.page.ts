@@ -1,16 +1,9 @@
-import {
-  Component,
-  ChangeDetectionStrategy,
-  ChangeDetectorRef,
-  OnInit,
-  inject,
-} from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject, DestroyRef } from '@angular/core';
+
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { timer } from 'rxjs';
 import { filter, map, catchError } from 'rxjs/operators';
 import { of } from 'rxjs';
-import { DestroyRef } from '@angular/core';
 import { StatsComponent } from '../../../../../../shared/components';
 
 import {
@@ -30,13 +23,11 @@ import {
   selector: 'app-monitoring-performance-page',
   standalone: true,
   imports: [
-    CommonModule,
     StatsComponent,
     MetricChartComponent,
     TimeRangeSelectorComponent,
-    SlowEndpointsComponent,
+    SlowEndpointsComponent
   ],
-  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="space-y-6">
       <!-- Stats Cards + Time Range -->
@@ -46,13 +37,14 @@ import {
           style="color: var(--color-text-primary);"
         >
           Performance
-          <span
-            *ngIf="performanceSnapshot"
-            class="text-xs font-mono px-2 py-0.5 rounded-full ml-2"
-            style="background: var(--color-surface); color: var(--color-text-muted);"
-          >
-            {{ performanceSnapshot.totalRecorded }} requests tracked
-          </span>
+          @if (performanceSnapshot) {
+            <span
+              class="text-xs font-mono px-2 py-0.5 rounded-full ml-2"
+              style="background: var(--color-surface); color: var(--color-text-muted);"
+            >
+              {{ performanceSnapshot.totalRecorded }} requests tracked
+            </span>
+          }
         </h3>
         <app-time-range-selector
           [selected]="performanceTimeRange"
@@ -74,7 +66,7 @@ import {
           [iconBgColor]="avgResponseTimeIconBg"
           [iconColor]="avgResponseTimeIconColor"
           [loading]="loadingPerformance"
-        />
+          />
         <app-stats
           title="Requests/seg"
           [value]="reqPerSec"
@@ -87,7 +79,7 @@ import {
           iconBgColor="bg-blue-100"
           iconColor="text-blue-500"
           [loading]="loadingPerformance"
-        />
+          />
         <app-stats
           title="Error Rate (5m)"
           [value]="errorRate"
@@ -100,7 +92,7 @@ import {
           [iconBgColor]="errorRateIconBg"
           [iconColor]="errorRateIconColor"
           [loading]="loadingPerformance"
-        />
+          />
         <app-stats
           title="Event Loop p99"
           [value]="eventLoopP99"
@@ -116,7 +108,7 @@ import {
           [iconBgColor]="eventLoopIconBg"
           [iconColor]="eventLoopIconColor"
           [loading]="loadingPerformance"
-        />
+          />
       </div>
 
       <!-- Response Time & Throughput Charts -->
@@ -170,11 +162,10 @@ import {
         ></app-metric-chart>
       </div>
     </div>
-  `,
+    `,
 })
-export class MonitoringPerformancePage implements OnInit {
+export class MonitoringPerformancePage {
   private readonly monitoringService = inject(MonitoringService);
-  private readonly cdr = inject(ChangeDetectorRef);
   private readonly destroyRef = inject(DestroyRef);
 
   performanceSnapshot: PerformanceSnapshot | null = null;
@@ -208,7 +199,7 @@ export class MonitoringPerformancePage implements OnInit {
     this.paused = document.hidden;
   };
 
-  ngOnInit(): void {
+  constructor() {
     document.addEventListener('visibilitychange', this.visibilityHandler);
 
     timer(0, 60_000)
@@ -220,6 +211,10 @@ export class MonitoringPerformancePage implements OnInit {
         this.fetchPerformance();
         this.fetchPerformanceHistory();
       });
+
+    this.destroyRef.onDestroy(() => {
+      document.removeEventListener('visibilitychange', this.visibilityHandler);
+    });
   }
 
   onTimeRangeChange(range: TimeRange): void {
@@ -239,7 +234,6 @@ export class MonitoringPerformancePage implements OnInit {
         this.performanceSnapshot = data;
         this.loadingPerformance = false;
         this.computeSnapshotValues();
-        this.cdr.markForCheck();
       });
   }
 
@@ -254,7 +248,6 @@ export class MonitoringPerformancePage implements OnInit {
       .subscribe((data) => {
         this.performanceHistory = data;
         this.computeHistoryPoints();
-        this.cdr.markForCheck();
       });
   }
 

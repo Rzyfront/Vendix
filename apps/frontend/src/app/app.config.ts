@@ -1,6 +1,6 @@
 import {
   ApplicationConfig,
-  provideZoneChangeDetection,
+  provideZonelessChangeDetection,
   APP_INITIALIZER,
   isDevMode,
 } from '@angular/core';
@@ -9,14 +9,13 @@ import { provideClientHydration } from '@angular/platform-browser';
 import {
   provideHttpClient,
   withFetch,
-  withInterceptorsFromDi,
-  HTTP_INTERCEPTORS,
+  withInterceptors,
 } from '@angular/common/http';
 import { provideStore, Store, provideState } from '@ngrx/store';
 import { provideEffects } from '@ngrx/effects';
 import { provideStoreDevtools } from '@ngrx/store-devtools';
 import { firstValueFrom, timeout, catchError, of, filter } from 'rxjs';
-import { AuthInterceptor } from './core/interceptors/auth.interceptor';
+import { authInterceptorFn } from './core/interceptors/auth.interceptor';
 import { RouteManagerService } from './core/services/route-manager.service';
 import { tenantReducer, TenantEffects } from './core/store/tenant';
 import { authReducer, AuthEffects } from './core/store/auth';
@@ -73,10 +72,10 @@ export function initializeApp(
 
 export const appConfig: ApplicationConfig = {
   providers: [
-    provideZoneChangeDetection({ eventCoalescing: true }),
+    provideZonelessChangeDetection(),
     provideRouter(routes),
     provideClientHydration(),
-    provideHttpClient(withFetch(), withInterceptorsFromDi()),
+    provideHttpClient(withFetch(), withInterceptors([authInterceptorFn])),
 
     // NgRx Store Configuration
     provideStore(
@@ -87,7 +86,7 @@ export const appConfig: ApplicationConfig = {
           strictActionImmutability: true,
           strictStateSerializability: false,
           strictActionSerializability: false,
-          strictActionWithinNgZone: true,
+          strictActionWithinNgZone: false, // Disabled for Zoneless migration
           strictActionTypeUniqueness: true,
         },
       },
@@ -106,11 +105,6 @@ export const appConfig: ApplicationConfig = {
       traceLimit: 75,
     }),
 
-    {
-      provide: HTTP_INTERCEPTORS,
-      useClass: AuthInterceptor,
-      multi: true,
-    },
     {
       provide: APP_INITIALIZER,
       useFactory: initializeApp,

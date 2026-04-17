@@ -87,68 +87,71 @@
     <!-- Table Content Wrapper -->
     <div class="relative min-h-[400px] p-2 md:p-4">
       <!-- Loading Overlay -->
-      <div
-        *ngIf="isLoading()"
-        class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
-      >
+      @if (isLoading()) {
         <div
-          class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
-        ></div>
-      </div>
+          class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
+        >
+          <div
+            class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+          ></div>
+        </div>
+      }
 
       <!-- Empty State -->
-      <div
-        class="p-8 flex justify-center w-full"
-        *ngIf="!isLoading() && auditLogs().length === 0"
-      >
-        <app-empty-state
-          icon="file-text"
-          [title]="getEmptyStateTitle()"
-          [description]="getEmptyStateDescription()"
-          actionButtonText="Actualizar"
-          actionButtonIcon="refresh-cw"
-          [showActionButton]="true"
-          (actionClick)="refreshAuditLogs()"
-        ></app-empty-state>
-      </div>
+      @if (!isLoading() && auditLogs().length === 0) {
+        <div class="p-8 flex justify-center w-full">
+          <app-empty-state
+            icon="file-text"
+            [title]="getEmptyStateTitle()"
+            [description]="getEmptyStateDescription()"
+            actionButtonText="Actualizar"
+            actionButtonIcon="refresh-cw"
+            [showActionButton]="true"
+            (actionClick)="refreshAuditLogs()"
+          ></app-empty-state>
+        </div>
+      }
 
       <!-- Audit Table -->
       <!-- Audit Table -->
-      <app-responsive-data-view
-        *ngIf="auditLogs().length > 0"
-        [data]="auditLogs()"
-        [columns]="tableColumns"
-        [actions]="tableActions"
-        [cardConfig]="cardConfig"
-        [loading]="isLoading()"
-        [hoverable]="true"
-        [striped]="true"
-        size="md"
-        (rowClick)="viewLogDetails($event)"
-      >
-      </app-responsive-data-view>
+      @if (auditLogs().length > 0) {
+        <app-responsive-data-view
+          [data]="auditLogs()"
+          [columns]="tableColumns"
+          [actions]="tableActions"
+          [cardConfig]="cardConfig"
+          [loading]="isLoading()"
+          [hoverable]="true"
+          [striped]="true"
+          size="md"
+          (rowClick)="viewLogDetails($event)"
+        >
+        </app-responsive-data-view>
+      }
     </div>
 
     <!-- Pagination -->
-    <div
-      class="px-6 py-4 border-t border-border bg-muted/30 flex justify-center"
-      *ngIf="auditLogs().length > 0"
-    >
-      <app-pagination
-        [currentPage]="pagination.page"
-        [totalPages]="pagination.totalPages"
-        [total]="pagination.total"
-        [limit]="pagination.limit"
-        infoStyle="range"
-        (pageChange)="onPageChange($event)"
-      />
-    </div>
+    @if (auditLogs().length > 0) {
+      <div
+        class="px-6 py-4 border-t border-border bg-muted/30 flex justify-center"
+      >
+        <app-pagination
+          [currentPage]="pagination.page"
+          [totalPages]="pagination.totalPages"
+          [total]="pagination.total"
+          [limit]="pagination.limit"
+          infoStyle="range"
+          (pageChange)="onPageChange($event)"
+        />
+      </div>
+    }
   </app-card>
 </div>
 
-<!-- Details Modal -->
-<app-audit-details-modal
-  [isOpen]="isDetailsModalOpen()"
-  (isOpenChange)="isDetailsModalOpen.set($event)"
-  [log]="selectedAuditLog()"
-></app-audit-details-modal>
+@defer (when isDetailsModalOpen()) {
+  <app-audit-details-modal
+    [isOpen]="isDetailsModalOpen()"
+    (isOpenChange)="isDetailsModalOpen.set($event)"
+    [log]="selectedAuditLog()"
+  ></app-audit-details-modal>
+}

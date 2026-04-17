@@ -1,14 +1,11 @@
 import {
   Component,
-  Input,
-  Output,
-  EventEmitter,
-  ChangeDetectionStrategy,
-  OnChanges,
-  SimpleChanges,
+  input,
+  output,
+  effect,
   inject,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
+
 import { FormsModule } from '@angular/forms';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { TooltipComponent } from '../../../../../../shared/components/tooltip/tooltip.component';
@@ -20,26 +17,24 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
   selector: 'app-pop-cart-modal',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     IconComponent,
     TooltipComponent,
-    QuantityControlComponent,
-  ],
-  changeDetection: ChangeDetectionStrategy.OnPush,
+    QuantityControlComponent
+],
   template: `
     <!-- Overlay -->
     <div
       class="modal-overlay"
-      [class.open]="isOpen"
+      [class.open]="isOpen()"
       (click)="onOverlayClick($event)"
-    >
+      >
       <!-- Modal Content -->
       <div
         class="modal-content"
-        [class.open]="isOpen"
+        [class.open]="isOpen()"
         (click)="$event.stopPropagation()"
-      >
+        >
         <!-- Header -->
         <div class="modal-header">
           <button class="back-btn" (click)="closed.emit()">
@@ -47,174 +42,189 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
           </button>
           <h2 class="modal-title">
             Orden de Compra
-            <span class="item-count">({{ cartState?.items?.length || 0 }})</span>
+            <span class="item-count">({{ cartState()?.items?.length || 0 }})</span>
           </h2>
           <button
             class="clear-btn"
             (click)="onClearCart()"
-            [disabled]="!cartState?.items?.length"
-          >
+            [disabled]="!cartState()?.items?.length"
+            >
             Vaciar
           </button>
         </div>
-
+    
         <!-- Context Info (Supplier + Location) -->
-        <div class="context-section" [class.context-warning]="!supplierName || !locationName">
+        <div class="context-section" [class.context-warning]="!supplierName() || !locationName()">
           <!-- Missing Config Alert -->
-          <div *ngIf="!supplierName || !locationName" class="config-alert">
-            <div class="alert-content">
-              <app-icon name="alert-circle" [size]="18"></app-icon>
-              <span>Configura proveedor y bodega para continuar</span>
+          @if (!supplierName() || !locationName()) {
+            <div class="config-alert">
+              <div class="alert-content">
+                <app-icon name="alert-circle" [size]="18"></app-icon>
+                <span>Configura proveedor y bodega para continuar</span>
+              </div>
+              <button class="config-btn" (click)="onConfigureClick()">
+                <app-icon name="settings" [size]="14"></app-icon>
+                Configurar
+              </button>
             </div>
-            <button class="config-btn" (click)="onConfigureClick()">
-              <app-icon name="settings" [size]="14"></app-icon>
-              Configurar
-            </button>
-          </div>
-
+          }
+    
           <!-- Normal context display -->
-          <div *ngIf="supplierName && locationName" class="context-items">
-            <div class="context-item">
-              <app-icon name="truck" [size]="16"></app-icon>
-              <span>{{ supplierName }}</span>
+          @if (supplierName() && locationName()) {
+            <div class="context-items">
+              <div class="context-item">
+                <app-icon name="truck" [size]="16"></app-icon>
+                <span>{{ supplierName() }}</span>
+              </div>
+              <div class="context-item">
+                <app-icon name="warehouse" [size]="16"></app-icon>
+                <span>{{ locationName() }}</span>
+              </div>
             </div>
-            <div class="context-item">
-              <app-icon name="warehouse" [size]="16"></app-icon>
-              <span>{{ locationName }}</span>
-            </div>
-          </div>
+          }
         </div>
-
+    
         <!-- Items Container -->
         <div class="items-container">
           <!-- Empty State -->
-          <div *ngIf="!cartState?.items?.length" class="empty-state">
-            <div class="empty-icon">
-              <app-icon name="shopping-bag" [size]="40"></app-icon>
+          @if (!cartState()?.items?.length) {
+            <div class="empty-state">
+              <div class="empty-icon">
+                <app-icon name="shopping-bag" [size]="40"></app-icon>
+              </div>
+              <p class="empty-text">Tu orden está vacía</p>
+              <p class="empty-hint">Selecciona productos para comenzar</p>
             </div>
-            <p class="empty-text">Tu orden está vacía</p>
-            <p class="empty-hint">Selecciona productos para comenzar</p>
-          </div>
-
+          }
+    
           <!-- Cart Items -->
-          <div *ngIf="cartState?.items?.length" class="items-list">
-            <div
-              *ngFor="let item of cartState?.items; trackBy: trackByItemId"
-              class="cart-item"
-            >
-              <!-- Product Image -->
-              <div class="item-image">
-                <img
-                  *ngIf="item.product.image_url"
-                  [src]="item.product.image_url"
-                  [alt]="item.product.name"
-                  (error)="handleImageError($event)"
-                />
+          @if (cartState()?.items?.length) {
+            <div class="items-list">
+              @for (item of cartState()?.items; track trackByItemId($index, item)) {
                 <div
-                  *ngIf="!item.product.image_url"
-                  class="image-placeholder"
-                >
-                  <app-icon name="image" [size]="18"></app-icon>
-                </div>
-              </div>
-
-              <!-- Item Info -->
-              <div class="item-info">
-                <h4 class="item-name">{{ item.product.name }}</h4>
-                <div class="item-meta">
-                  <span *ngIf="item.product.code" class="item-sku">{{ item.product.code }}</span>
-                  <!-- Editable Unit Cost -->
-                  <div class="cost-input">
-                    <span class="currency">$</span>
-                    <input
-                      type="number"
-                      [value]="item.unit_cost"
-                      (change)="onCostChange(item.id, $event)"
-                      min="0"
-                      step="1"
-                      placeholder="Costo"
-                    />
+                  class="cart-item"
+                  >
+                  <!-- Product Image -->
+                  <div class="item-image">
+                    @if (item.product.image_url) {
+                      <img
+                        [src]="item.product.image_url"
+                        [alt]="item.product.name"
+                        (error)="handleImageError($event)"
+                        />
+                    }
+                    @if (!item.product.image_url) {
+                      <div
+                        class="image-placeholder"
+                        >
+                        <app-icon name="image" [size]="18"></app-icon>
+                      </div>
+                    }
                   </div>
+                  <!-- Item Info -->
+                  <div class="item-info">
+                    <h4 class="item-name">{{ item.product.name }}</h4>
+                    <div class="item-meta">
+                      @if (item.product.code) {
+                        <span class="item-sku">{{ item.product.code }}</span>
+                      }
+                      <!-- Editable Unit Cost -->
+                      <div class="cost-input">
+                        <span class="currency">$</span>
+                        <input
+                          type="number"
+                          [value]="item.unit_cost"
+                          (change)="onCostChange(item.id, $event)"
+                          min="0"
+                          step="1"
+                          placeholder="Costo"
+                          />
+                      </div>
+                    </div>
+                  </div>
+                  <!-- Remove Button -->
+                  <div class="remove-btn-wrapper"
+                    (mouseenter)="hoveredRemoveTooltip = item.id"
+                    (mouseleave)="hoveredRemoveTooltip = null">
+                    <button
+                      class="remove-btn"
+                      (click)="onRemoveItem(item.id)"
+                      >
+                      <app-icon name="x" [size]="16"></app-icon>
+                    </button>
+                    <app-tooltip position="top" size="sm" [visible]="hoveredRemoveTooltip === item.id"
+                      class="remove-tooltip">
+                      Eliminar
+                    </app-tooltip>
+                  </div>
+                  <!-- Actions Row: Quantity + Total -->
+                  <div class="item-actions">
+                    <app-quantity-control
+                      [value]="item.quantity"
+                      [min]="1"
+                      [editable]="true"
+                      [size]="'sm'"
+                      (valueChange)="onQuantityChange(item.id, $event)"
+                    ></app-quantity-control>
+                    <span class="item-total">{{ formatCurrency(item.total) }}</span>
+                  </div>
+                  <!-- Lot Config Row (POP-specific) -->
+                  @if (!item.lot_info) {
+                    <div class="item-lot">
+                      <button class="lot-btn" (click)="configureLot.emit(item)">
+                        <app-icon name="tag" [size]="12"></app-icon>
+                        Configurar lote
+                      </button>
+                    </div>
+                  }
+                  @if (item.lot_info) {
+                    <div class="item-lot lot-configured">
+                      <app-icon name="check-circle" [size]="12"></app-icon>
+                      <span>Lote: {{ item.lot_info.batch_number || 'Configurado' }}</span>
+                    </div>
+                  }
                 </div>
-              </div>
-
-              <!-- Remove Button -->
-              <div class="remove-btn-wrapper"
-                   (mouseenter)="hoveredRemoveTooltip = item.id"
-                   (mouseleave)="hoveredRemoveTooltip = null">
-                <button
-                  class="remove-btn"
-                  (click)="onRemoveItem(item.id)"
-                >
-                  <app-icon name="x" [size]="16"></app-icon>
-                </button>
-                <app-tooltip position="top" size="sm" [visible]="hoveredRemoveTooltip === item.id"
-                  class="remove-tooltip">
-                  Eliminar
-                </app-tooltip>
-              </div>
-
-              <!-- Actions Row: Quantity + Total -->
-              <div class="item-actions">
-                <app-quantity-control
-                  [value]="item.quantity"
-                  [min]="1"
-                  [editable]="true"
-                  [size]="'sm'"
-                  (valueChange)="onQuantityChange(item.id, $event)"
-                ></app-quantity-control>
-                <span class="item-total">{{ formatCurrency(item.total) }}</span>
-              </div>
-
-              <!-- Lot Config Row (POP-specific) -->
-              <div class="item-lot" *ngIf="!item.lot_info">
-                <button class="lot-btn" (click)="configureLot.emit(item)">
-                  <app-icon name="tag" [size]="12"></app-icon>
-                  Configurar lote
-                </button>
-              </div>
-              <div class="item-lot lot-configured" *ngIf="item.lot_info">
-                <app-icon name="check-circle" [size]="12"></app-icon>
-                <span>Lote: {{ item.lot_info.batch_number || 'Configurado' }}</span>
-              </div>
+              }
+            </div>
+          }
+        </div>
+    
+        <!-- Summary Section -->
+        @if (cartState()?.items?.length) {
+          <div class="summary-section">
+            <div class="summary-row">
+              <span>Subtotal</span>
+              <span>{{ formatCurrency(cartState()?.summary?.subtotal || 0) }}</span>
+            </div>
+            <div class="summary-row">
+              <span>Impuestos</span>
+              <span>{{ formatCurrency(cartState()?.summary?.tax_amount || 0) }}</span>
+            </div>
+            <div class="summary-row total">
+              <span>Total Estimado</span>
+              <span class="total-amount">{{
+                formatCurrency(cartState()?.summary?.total || 0)
+              }}</span>
             </div>
           </div>
-        </div>
-
-        <!-- Summary Section -->
-        <div class="summary-section" *ngIf="cartState?.items?.length">
-          <div class="summary-row">
-            <span>Subtotal</span>
-            <span>{{ formatCurrency(cartState?.summary?.subtotal || 0) }}</span>
-          </div>
-          <div class="summary-row">
-            <span>Impuestos</span>
-            <span>{{ formatCurrency(cartState?.summary?.tax_amount || 0) }}</span>
-          </div>
-          <div class="summary-row total">
-            <span>Total Estimado</span>
-            <span class="total-amount">{{
-              formatCurrency(cartState?.summary?.total || 0)
-            }}</span>
-          </div>
-        </div>
-
+        }
+    
         <!-- Action Buttons -->
         <div class="modal-actions">
           <div class="modal-actions-row">
             <button
               class="action-btn draft-btn"
               (click)="saveDraft.emit()"
-              [disabled]="!cartState?.items?.length"
-            >
+              [disabled]="!cartState()?.items?.length"
+              >
               <app-icon name="save" [size]="18"></app-icon>
               <span>Borrador</span>
             </button>
             <button
               class="action-btn create-btn"
               (click)="createOrder.emit()"
-              [disabled]="!cartState?.items?.length"
-            >
+              [disabled]="!cartState()?.items?.length"
+              >
               <app-icon name="file-plus" [size]="18"></app-icon>
               <span>Crear orden</span>
             </button>
@@ -222,15 +232,17 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
           <button
             class="action-btn receive-btn"
             (click)="createAndReceive.emit()"
-            [disabled]="!cartState?.items?.length || isProcessing"
-          >
-            <app-icon *ngIf="!isProcessing" name="package-check" [size]="18"></app-icon>
-            <span>{{ isProcessing ? 'Procesando...' : 'Crear + Recibir' }}</span>
+            [disabled]="!cartState()?.items?.length || isProcessing()"
+            >
+            @if (!isProcessing()) {
+              <app-icon name="package-check" [size]="18"></app-icon>
+            }
+            <span>{{ isProcessing() ? 'Procesando...' : 'Crear + Recibir' }}</span>
           </button>
         </div>
       </div>
     </div>
-  `,
+    `,
   styles: [
     `
       :host {
@@ -761,46 +773,40 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
     `,
   ],
 })
-export class PopCartModalComponent implements OnChanges {
+export class PopCartModalComponent {
   private currencyService = inject(CurrencyFormatService);
-  @Input() isOpen: boolean = false;
-  @Input() cartState: PopCartState | null = null;
-  @Input() supplierName: string = '';
-  @Input() locationName: string = '';
-  @Input() isProcessing: boolean = false;
+  readonly isOpen = input(false);
+  readonly cartState = input<PopCartState | null>(null);
+  readonly supplierName = input('');
+  readonly locationName = input('');
+  readonly isProcessing = input(false);
 
   hoveredRemoveTooltip: string | null = null;
 
-  @Output() closed = new EventEmitter<void>();
-  @Output() itemQuantityChanged = new EventEmitter<{
-    itemId: string;
-    quantity: number;
-  }>();
-  @Output() itemCostChanged = new EventEmitter<{
-    itemId: string;
-    cost: number;
-  }>();
-  @Output() itemRemoved = new EventEmitter<string>();
-  @Output() clearCart = new EventEmitter<void>();
-  @Output() configureLot = new EventEmitter<PopCartItem>();
-  @Output() saveDraft = new EventEmitter<void>();
-  @Output() createOrder = new EventEmitter<void>();
-  @Output() createAndReceive = new EventEmitter<void>();
-  @Output() configure = new EventEmitter<void>();
+  readonly closed = output<void>();
+  readonly itemQuantityChanged = output<{ itemId: string; quantity: number }>();
+  readonly itemCostChanged = output<{ itemId: string; cost: number }>();
+  readonly itemRemoved = output<string>();
+  readonly clearCart = output<void>();
+  readonly configureLot = output<PopCartItem>();
+  readonly saveDraft = output<void>();
+  readonly createOrder = output<void>();
+  readonly createAndReceive = output<void>();
+  readonly configure = output<void>();
 
-  onConfigureClick(): void {
-    this.configure.emit();
-    this.closed.emit();
-  }
-
-  ngOnChanges(changes: SimpleChanges): void {
-    if (changes['isOpen']) {
-      if (this.isOpen) {
+  constructor() {
+    effect(() => {
+      if (this.isOpen()) {
         document.body.style.overflow = 'hidden';
       } else {
         document.body.style.overflow = '';
       }
-    }
+    });
+  }
+
+  onConfigureClick(): void {
+    this.configure.emit();
+    this.closed.emit();
   }
 
   onOverlayClick(event: MouseEvent): void {

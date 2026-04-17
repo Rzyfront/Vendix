@@ -1,22 +1,19 @@
 import {
   Component,
-  EventEmitter,
-  Input,
-  Output,
-  OnInit,
-  OnChanges,
-  OnDestroy,
+  input,
+  output,
   inject,
-} from '@angular/core';
-import { Subject, takeUntil, take, filter } from 'rxjs';
-import { CommonModule } from '@angular/common';
+  effect,
+  DestroyRef } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { firstValueFrom } from 'rxjs';
+
 
 import {
   ButtonComponent,
   ModalComponent,
   IconComponent,
-  ToastService,
-} from '../../../../../shared/components';
+  ToastService } from '../../../../../shared/components';
 import { PosPaymentService } from '../services/pos-payment.service';
 import { PosTicketService } from '../services/pos-ticket.service';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
@@ -29,33 +26,32 @@ import * as InvoicingActions from '../../invoicing/state/actions/invoicing.actio
   selector: 'app-pos-order-confirmation',
   standalone: true,
   imports: [
-    CommonModule,
     ButtonComponent,
     ModalComponent,
-    IconComponent,
-  ],
+    IconComponent
+],
   template: `
     <app-modal
-      [isOpen]="isOpen"
+      [isOpen]="isOpen()"
       [size]="'md'"
       [showCloseButton]="true"
       title="¡Venta Completada!"
       [subtitle]="'Orden #' + orderNumber + ' procesada exitosamente'"
       (closed)="onModalClosed()"
-    >
+      >
       <div slot="header"
         class="w-10 h-10 rounded-full bg-success/10 flex items-center justify-center text-success flex-shrink-0">
         <app-icon name="check-circle" [size]="24"></app-icon>
       </div>
-
+    
       <!-- Ticket Visual Representation -->
       <div class="max-w-md mx-auto print:max-w-none">
         <div
           class="bg-surface border border-dashed border-border rounded-xl p-6 shadow-sm relative overflow-hidden receipt-container"
-        >
+          >
           <!-- Decorative edges -->
           <div class="absolute top-0 left-0 right-0 h-1 bg-primary/20"></div>
-
+    
           <div class="text-center border-b border-border pb-6 mb-6">
             <h3 class="text-xl font-bold text-text-primary tracking-tight">
               Vendix POS
@@ -64,7 +60,7 @@ import * as InvoicingActions from '../../invoicing/state/actions/invoicing.actio
               Sistema de Punto de Venta
             </p>
           </div>
-
+    
           <div class="space-y-3 mb-6 text-sm">
             <div class="flex justify-between">
               <span class="text-text-secondary">Fecha:</span>
@@ -74,73 +70,80 @@ import * as InvoicingActions from '../../invoicing/state/actions/invoicing.actio
               <span class="text-text-secondary">Cajero:</span>
               <span class="font-medium text-text-primary">{{ cashierName }}</span>
             </div>
-            <div *ngIf="customerName" class="flex justify-between">
-              <span class="text-text-secondary">Cliente:</span>
-              <span class="font-medium text-text-primary">{{ customerName }}</span>
-            </div>
+            @if (customerName) {
+              <div class="flex justify-between">
+                <span class="text-text-secondary">Cliente:</span>
+                <span class="font-medium text-text-primary">{{ customerName }}</span>
+              </div>
+            }
           </div>
-
+    
           <!-- Items Table -->
           <div class="space-y-4 mb-6">
             <div
               class="flex justify-between text-xs font-bold text-text-secondary uppercase tracking-wider pb-2 border-b border-border"
-            >
+              >
               <span>Producto</span>
               <span>Total</span>
             </div>
             <div class="space-y-3">
-              <div *ngFor="let item of orderItems" class="flex justify-between text-sm">
-                <div class="flex flex-col">
-                  <span class="font-medium text-text-primary">{{ item.name }}</span>
-                  <span class="text-xs text-text-secondary">
-                    <ng-container *ngIf="item.is_weight_product; else unitDetail">
-                      {{ item.weight }} {{ item.weight_unit }} x {{ formatCurrency(item.unitPrice) }}/{{ item.weight_unit }}
-                    </ng-container>
-                    <ng-template #unitDetail>
-                      {{ item.quantity }}x {{ formatCurrency(item.unitPrice) }}
-                    </ng-template>
-                  </span>
+              @for (item of orderItems; track item) {
+                <div class="flex justify-between text-sm">
+                  <div class="flex flex-col">
+                    <span class="font-medium text-text-primary">{{ item.name }}</span>
+                    <span class="text-xs text-text-secondary">
+                      @if (item.is_weight_product) {
+                        {{ item.weight }} {{ item.weight_unit }} x {{ formatCurrency(item.unitPrice) }}/{{ item.weight_unit }}
+                      } @else {
+                        {{ item.quantity }}x {{ formatCurrency(item.unitPrice) }}
+                      }
+                    </span>
+                  </div>
+                  <span class="font-bold text-text-primary">{{ formatCurrency(item.totalPrice) }}</span>
                 </div>
-                <span class="font-bold text-text-primary">{{ formatCurrency(item.totalPrice) }}</span>
-              </div>
+              }
             </div>
           </div>
-
+    
           <!-- Summary -->
           <div class="pt-4 border-t border-border space-y-2.5">
             <div class="flex justify-between text-sm text-text-secondary">
               <span>Subtotal:</span>
               <span>{{ formatCurrency(orderSubtotal) }}</span>
             </div>
-            <div *ngIf="hasDiscount()" class="flex justify-between text-sm text-destructive font-medium">
-              <span>Descuento:</span>
-              <span>-{{ formatCurrency(orderDiscount) }}</span>
-            </div>
+            @if (hasDiscount()) {
+              <div class="flex justify-between text-sm text-destructive font-medium">
+                <span>Descuento:</span>
+                <span>-{{ formatCurrency(orderDiscount) }}</span>
+              </div>
+            }
             <div class="flex justify-between text-sm text-text-secondary">
               <span>Impuesto:</span>
               <span>{{ formatCurrency(orderTax) }}</span>
             </div>
             <div
               class="flex justify-between items-center pt-3 mt-2 border-t-2 border-double border-border"
-            >
+              >
               <span class="text-lg font-bold text-text-primary">Total:</span>
               <span class="text-2xl font-extrabold text-primary">{{ formatCurrency(orderTotal) }}</span>
             </div>
           </div>
-
+    
           <!-- Payment Info -->
-          <div *ngIf="paymentInfo" class="mt-6 pt-4 border-t border-border bg-muted/20 -mx-6 px-6 -mb-6 pb-6 rounded-b-xl">
-            <div class="flex justify-between items-center text-sm">
-              <div class="flex items-center gap-2">
-                <app-icon name="credit-card" [size]="16" class="text-text-secondary"></app-icon>
-                <span class="font-medium text-text-secondary">{{ paymentInfo.method }}:</span>
+          @if (paymentInfo) {
+            <div class="mt-6 pt-4 border-t border-border bg-muted/20 -mx-6 px-6 -mb-6 pb-6 rounded-b-xl">
+              <div class="flex justify-between items-center text-sm">
+                <div class="flex items-center gap-2">
+                  <app-icon name="credit-card" [size]="16" class="text-text-secondary"></app-icon>
+                  <span class="font-medium text-text-secondary">{{ paymentInfo.method }}:</span>
+                </div>
+                <span class="font-bold text-text-primary">{{ formatCurrency(paymentInfo.amount) }}</span>
               </div>
-              <span class="font-bold text-text-primary">{{ formatCurrency(paymentInfo.amount) }}</span>
             </div>
-          </div>
+          }
         </div>
       </div>
-
+    
       <div slot="footer" class="flex flex-col gap-3 w-full">
         <!-- CTA Primario: full-width, prominente -->
         <app-button
@@ -148,31 +151,31 @@ import * as InvoicingActions from '../../invoicing/state/actions/invoicing.actio
           size="lg"
           [fullWidth]="true"
           (clicked)="startNewSale()"
-        >
+          >
           <app-icon name="plus" [size]="20" slot="icon"></app-icon>
           Nueva compra
         </app-button>
-
+    
         <!-- Acciones secundarias: ghost, compactos, en fila -->
         <div class="flex items-center justify-center gap-1 sm:gap-2">
           <app-button variant="ghost" size="sm" (clicked)="printReceipt()" [loading]="printing" title="Imprimir Ticket">
             <app-icon name="printer" [size]="16" slot="icon"></app-icon>
             <span class="hidden sm:inline">Imprimir</span>
           </app-button>
-
+    
           <app-button variant="ghost" size="sm" (clicked)="emailReceipt()" [disabled]="!customerEmail" [loading]="emailing" title="Enviar por Email">
             <app-icon name="mail" [size]="16" slot="icon"></app-icon>
             <span class="hidden sm:inline">Email</span>
           </app-button>
-
+    
           <app-button variant="ghost" size="sm" (clicked)="createInvoice()" [disabled]="!orderId" [loading]="creatingInvoice" title="Crear Factura">
             <app-icon name="file-text" [size]="16" slot="icon"></app-icon>
             <span class="hidden sm:inline">Factura</span>
           </app-button>
-
+    
           <!-- Separador visual entre categorías -->
           <div class="w-px h-5 bg-[var(--color-border)] mx-1"></div>
-
+    
           <app-button variant="ghost" size="sm" (clicked)="goToOrderDetail()" [disabled]="!orderId" title="Ver detalle de la orden">
             <app-icon name="external-link" [size]="16" slot="icon"></app-icon>
             <span class="hidden sm:inline">Ver detalle</span>
@@ -180,7 +183,7 @@ import * as InvoicingActions from '../../invoicing/state/actions/invoicing.actio
         </div>
       </div>
     </app-modal>
-  `,
+    `,
   styles: [
     `
       :host {
@@ -256,14 +259,14 @@ import * as InvoicingActions from '../../invoicing/state/actions/invoicing.actio
         }
       }
     `,
-  ],
-})
-export class PosOrderConfirmationComponent implements OnInit, OnChanges, OnDestroy {
-  @Input() isOpen = false;
-  @Input() orderData: any = null;
-  @Output() closed = new EventEmitter<void>();
-  @Output() newSale = new EventEmitter<void>();
-  @Output() viewDetail = new EventEmitter<string>();
+  ] })
+export class PosOrderConfirmationComponent {
+  private destroyRef = inject(DestroyRef);
+  readonly isOpen = input<boolean>(false);
+  readonly orderData = input<any>(null);
+  readonly closed = output<void>();
+  readonly newSale = output<void>();
+  readonly viewDetail = output<string>();
 
   printing = false;
   emailing = false;
@@ -282,47 +285,38 @@ export class PosOrderConfirmationComponent implements OnInit, OnChanges, OnDestr
   orderTax = 0;
   orderTotal = 0;
   paymentInfo: any = null;
-
-  private destroy$ = new Subject<void>();
-  private authFacade = inject(AuthFacade);
+private authFacade = inject(AuthFacade);
   private toastService = inject(ToastService);
   private ticketService = inject(PosTicketService);
   private currencyService = inject(CurrencyFormatService);
   private store = inject(Store);
   private actions$ = inject(Actions);
 
-  ngOnInit(): void {
+  constructor() {
     const user = this.authFacade.getCurrentUser();
     this.cashierName = user ? `${user.first_name} ${user.last_name}` : 'Cajero';
-
-    // Asegurar que la moneda esté cargada para el modal
     this.currencyService.loadCurrency();
-  }
-
-  ngOnChanges(): void {
-    if (this.orderData) {
-      this.loadOrderData();
-    }
-  }
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
+effect(() => {
+      if (this.orderData()) {
+        this.loadOrderData();
+      }
+    });
   }
 
   private loadOrderData(): void {
-    this.orderId = this.orderData?.id?.toString?.() || null;
-    this.orderNumber = this.orderData.order_number || this.orderData.number || 'N/A';
-    this.currentDate = this.orderData.created_at
-      ? new Date(this.orderData.created_at).toLocaleString('es-AR')
+    const data = this.orderData();
+    this.orderId = data?.id?.toString?.() || null;
+    this.orderNumber = data.order_number || data.number || 'N/A';
+    this.currentDate = data.created_at
+      ? new Date(data.created_at).toLocaleString('es-AR')
       : new Date().toLocaleString('es-AR');
 
     // Show "Consumidor Final" if customer_name is empty or undefined (anonymous sale)
-    this.customerName = this.orderData.customer_name || 'Consumidor Final';
-    this.customerEmail = this.orderData.customer_email || '';
-    this.customerTaxId = this.orderData.customer_tax_id || this.orderData.customer?.tax_id || this.orderData.customer?.document_number || '';
+    this.customerName = data.customer_name || 'Consumidor Final';
+    this.customerEmail = data.customer_email || '';
+    this.customerTaxId = data.customer_tax_id || data.customer?.tax_id || data.customer?.document_number || '';
 
-    this.orderItems = (this.orderData.items || []).map((item: any) => {
+    this.orderItems = (data.items || []).map((item: any) => {
       const unitPrice = Number(item.unit_price || item.unitPrice || 0);
       const quantity = Number(item.quantity || 0);
       const totalPrice = Number(item.total_price || item.totalPrice || 0);
@@ -338,25 +332,22 @@ export class PosOrderConfirmationComponent implements OnInit, OnChanges, OnDestr
         tax,
         weight,
         weight_unit,
-        is_weight_product,
-      };
+        is_weight_product };
     });
 
-    this.orderSubtotal = Number(this.orderData.subtotal || 0);
-    this.orderDiscount = Number(this.orderData.discount_amount || this.orderData.discount || 0);
-    this.orderTax = Number(this.orderData.tax_amount || this.orderData.tax || 0);
-    this.orderTotal = Number(this.orderData.total_amount || this.orderData.total || 0);
+    this.orderSubtotal = Number(data.subtotal || 0);
+    this.orderDiscount = Number(data.discount_amount || data.discount || 0);
+    this.orderTax = Number(data.tax_amount || data.tax || 0);
+    this.orderTotal = Number(data.total_amount || data.total || 0);
 
-    if (this.orderData.payment) {
+    if (data.payment) {
       this.paymentInfo = {
-        method: this.orderData.payment.payment_method || this.orderData.payment.method || 'Pago',
-        amount: Number(this.orderData.payment.amount || this.orderTotal),
-      };
-    } else if (this.orderData.isCreditSale) {
+        method: data.payment.payment_method || data.payment.method || 'Pago',
+        amount: Number(data.payment.amount || this.orderTotal) };
+    } else if (data.isCreditSale) {
       this.paymentInfo = {
         method: 'Venta a Crédito',
-        amount: this.orderTotal,
-      };
+        amount: this.orderTotal };
     }
   }
 
@@ -365,14 +356,14 @@ export class PosOrderConfirmationComponent implements OnInit, OnChanges, OnDestr
   }
 
   printReceipt(): void {
-    if (!this.orderData) return;
+    if (!this.orderData()) return;
 
     this.printing = true;
 
     // Create TicketData from orderData
     const ticketData: any = {
       id: this.orderNumber,
-      date: new Date(this.orderData.created_at || new Date()),
+      date: new Date(this.orderData().created_at || new Date()),
       items: this.orderItems.map(item => ({
         id: item.id || item.name,
         name: item.name,
@@ -383,8 +374,7 @@ export class PosOrderConfirmationComponent implements OnInit, OnChanges, OnDestr
         discount: 0,
         tax: item.tax,
         weight: item.weight || undefined,
-        weight_unit: item.weight_unit || undefined,
-      })),
+        weight_unit: item.weight_unit || undefined })),
       subtotal: this.orderSubtotal,
       tax: this.orderTax,
       discount: this.orderDiscount,
@@ -396,8 +386,7 @@ export class PosOrderConfirmationComponent implements OnInit, OnChanges, OnDestr
         name: this.customerName,
         email: this.customerEmail,
         phone: '',
-        taxId: this.customerTaxId,
-      } : undefined,
+        taxId: this.customerTaxId } : undefined,
       store: {
         name: 'Vendix Store',
         address: '123 Main St, City, State 12345',
@@ -405,17 +394,14 @@ export class PosOrderConfirmationComponent implements OnInit, OnChanges, OnDestr
         email: 'info@vendix.com',
         taxId: 'TAX-123456789',
         id: 1,
-        logo: '',
-      },
+        logo: '' },
       organization: {
         name: 'Vendix',
-        taxId: 'ORG-123',
-      },
+        taxId: 'ORG-123' },
       cashier: this.cashierName,
       transactionId: this.orderNumber,
-      invoiceDataToken: this.orderData?.invoiceDataToken,
-      invoiceDataQrUrl: this.orderData?.invoiceDataQrUrl,
-    };
+      invoiceDataToken: this.orderData()?.invoiceDataToken,
+      invoiceDataQrUrl: this.orderData()?.invoiceDataQrUrl };
 
     this.ticketService.printTicket(ticketData, { printReceipt: true }).subscribe({
       next: (success: boolean) => {
@@ -430,8 +416,7 @@ export class PosOrderConfirmationComponent implements OnInit, OnChanges, OnDestr
         this.printing = false;
         console.error('Error al imprimir ticket:', error);
         this.toastService.error('Error al imprimir ticket');
-      },
-    });
+      } });
   }
 
   emailReceipt(): void {
@@ -457,26 +442,28 @@ export class PosOrderConfirmationComponent implements OnInit, OnChanges, OnDestr
     this.viewDetail.emit(this.orderId);
   }
 
-  createInvoice(): void {
+  async createInvoice(): Promise<void> {
     if (!this.orderId) return;
     this.creatingInvoice = true;
 
     // Listen for the result before dispatching
-    this.actions$.pipe(
-      ofType(InvoicingActions.createFromOrderSuccess, InvoicingActions.createFromOrderFailure),
-      take(1),
-      takeUntil(this.destroy$),
-    ).subscribe((action) => {
-      this.creatingInvoice = false;
-      if (action.type === InvoicingActions.createFromOrderSuccess.type) {
-        this.toastService.success('Factura creada exitosamente');
-      } else {
-        const errorAction = action as ReturnType<typeof InvoicingActions.createFromOrderFailure>;
-        this.toastService.error(errorAction.error || 'Error al crear la factura');
-      }
-    });
+    const actionPromise = firstValueFrom(
+      this.actions$.pipe(
+        ofType(InvoicingActions.createFromOrderSuccess, InvoicingActions.createFromOrderFailure),
+        takeUntilDestroyed(this.destroyRef),
+      ),
+    );
 
     this.store.dispatch(InvoicingActions.createFromOrder({ orderId: Number(this.orderId) }));
+
+    const action = await actionPromise;
+    this.creatingInvoice = false;
+    if (action.type === InvoicingActions.createFromOrderSuccess.type) {
+      this.toastService.success('Factura creada exitosamente');
+    } else {
+      const errorAction = action as ReturnType<typeof InvoicingActions.createFromOrderFailure>;
+      this.toastService.error(errorAction.error || 'Error al crear la factura');
+    }
   }
 
   hasDiscount(): boolean {

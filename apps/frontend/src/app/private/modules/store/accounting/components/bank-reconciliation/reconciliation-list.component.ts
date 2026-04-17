@@ -1,5 +1,6 @@
-import { Component, OnInit, inject, signal, computed } from '@angular/core';
-import { CommonModule, CurrencyPipe, DatePipe } from '@angular/common';
+import {Component, inject, signal, computed, DestroyRef} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { CurrencyPipe, DatePipe } from '@angular/common';
 import { Router } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import {
@@ -25,7 +26,6 @@ import {
   selector: 'vendix-reconciliation-list',
   standalone: true,
   imports: [
-    CommonModule,
     FormsModule,
     ButtonComponent,
     CardComponent,
@@ -330,7 +330,8 @@ import {
     </div>
   `,
 })
-export class ReconciliationListComponent implements OnInit {
+export class ReconciliationListComponent {
+  private destroyRef = inject(DestroyRef);
   private reconciliationService = inject(BankReconciliationService);
   private dialogService = inject(DialogService);
   private toastService = inject(ToastService);
@@ -382,13 +383,13 @@ export class ReconciliationListComponent implements OnInit {
       })),
   );
 
-  ngOnInit(): void {
+  constructor() {
     this.loadData();
   }
 
   private loadData(): void {
     this.loading.set(true);
-    this.reconciliationService.getReconciliations().subscribe({
+    this.reconciliationService.getReconciliations().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (res) => {
         this.reconciliations.set(res.data || []);
         this.loading.set(false);
@@ -398,7 +399,7 @@ export class ReconciliationListComponent implements OnInit {
         this.loading.set(false);
       },
     });
-    this.reconciliationService.getBankAccounts().subscribe({
+    this.reconciliationService.getBankAccounts().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (res) => this.bankAccounts.set(res.data || []),
     });
   }
@@ -432,7 +433,7 @@ export class ReconciliationListComponent implements OnInit {
         period_start: this.newRecForm.period_start,
         period_end: this.newRecForm.period_end,
       })
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (res) => {
           this.creating.set(false);
           this.isCreateModalOpen.set(false);
@@ -467,7 +468,7 @@ export class ReconciliationListComponent implements OnInit {
       })
       .then((confirmed) => {
         if (!confirmed) return;
-        this.reconciliationService.deleteReconciliation(rec.id).subscribe({
+        this.reconciliationService.deleteReconciliation(rec.id).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
           next: () => {
             this.toastService.success('Conciliacion eliminada');
             this.loadData();

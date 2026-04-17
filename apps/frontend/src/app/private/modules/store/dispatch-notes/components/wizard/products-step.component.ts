@@ -1,12 +1,10 @@
 import {
   Component,
-  ChangeDetectionStrategy,
+  DestroyRef,
   signal,
   inject,
-  OnDestroy,
 } from '@angular/core';
-import { CommonModule } from '@angular/common';
-import { Subject, takeUntil } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
   InputsearchComponent,
@@ -24,13 +22,11 @@ import {
   selector: 'app-dispatch-wizard-products-step',
   standalone: true,
   imports: [
-    CommonModule,
     InputsearchComponent,
     IconComponent,
     QuantityControlComponent,
     CurrencyPipe,
   ],
-  changeDetection: ChangeDetectionStrategy.OnPush,
   template: `
     <div class="space-y-2">
       <!-- Product Search -->
@@ -244,20 +240,15 @@ import {
     </div>
   `,
 })
-export class ProductsStepComponent implements OnDestroy {
+export class ProductsStepComponent {
   readonly wizardService = inject(DispatchNoteWizardService);
 
   private readonly productService = inject(PosProductService);
   private readonly currencyService = inject(CurrencyFormatService);
-  private readonly destroy$ = new Subject<void>();
+  private readonly destroyRef = inject(DestroyRef);
 
   readonly searchResults = signal<Product[]>([]);
   readonly loading = signal(false);
-
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
-  }
 
   onSearch(query: string): void {
     if (!query || !query.trim()) {
@@ -268,7 +259,7 @@ export class ProductsStepComponent implements OnDestroy {
     this.loading.set(true);
     this.productService
       .searchProducts({ search: query.trim(), include_stock: true }, 1, 10)
-      .pipe(takeUntil(this.destroy$))
+      .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (result) => {
           this.searchResults.set(result.products || []);

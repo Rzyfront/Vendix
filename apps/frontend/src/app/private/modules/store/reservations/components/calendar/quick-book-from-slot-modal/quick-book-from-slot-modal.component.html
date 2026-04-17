@@ -1,6 +1,11 @@
-<app-modal [isOpen]="isOpen()" (isOpenChange)="$event ? null : onClose()"
-  (opened)="onOpen()" (cancel)="onClose()" title="Nueva Reserva" size="md">
-
+<app-modal
+  [isOpen]="isOpen()"
+  (isOpenChange)="$event ? null : onClose()"
+  (opened)="onOpen()"
+  (cancel)="onClose()"
+  title="Nueva Reserva"
+  size="md"
+>
   <!-- Hero Header -->
   <div class="booking-hero">
     <div class="hero-icon-wrapper">
@@ -29,7 +34,8 @@
     [steps]="wizardSteps"
     [currentStep]="currentStep()"
     size="sm"
-    orientation="horizontal">
+    orientation="horizontal"
+  >
   </app-steps-line>
 
   <!-- Step 1: Service Selection -->
@@ -46,12 +52,19 @@
             <app-icon name="briefcase" [size]="32"></app-icon>
           </div>
           <h4 class="empty-title">Sin servicios disponibles</h4>
-          <p class="empty-description">No hay servicios configurados para reserva. Agrega servicios desde el catálogo de productos.</p>
+          <p class="empty-description">
+            No hay servicios configurados para reserva. Agrega servicios desde
+            el catálogo de productos.
+          </p>
         </div>
       } @else {
         <!-- Service Search -->
         <div class="service-search-wrapper">
-          <app-icon name="search" [size]="16" class="search-prefix-icon"></app-icon>
+          <app-icon
+            name="search"
+            [size]="16"
+            class="search-prefix-icon"
+          ></app-icon>
           <input
             type="text"
             class="search-input"
@@ -71,7 +84,8 @@
             <button
               class="service-card"
               [class.selected]="selectedService()?.id === service.id"
-              (click)="selectService(service)">
+              (click)="selectService(service)"
+            >
               <div class="card-header">
                 <span class="service-name">{{ service.name }}</span>
                 @if (selectedService()?.id === service.id) {
@@ -89,7 +103,7 @@
                 }
                 @if (service.base_price) {
                   <span class="detail-badge price-badge">
-                    ${{ service.base_price | number:'1.0-0' }}
+                    ${{ service.base_price | number: "1.0-0" }}
                   </span>
                 }
               </div>
@@ -99,11 +113,14 @@
 
         @if (hasMoreServices()) {
           <p class="services-hint">
-            Mostrando 5 de {{ services().length }} servicios. Usa el buscador para encontrar más.
+            Mostrando 5 de {{ services().length }} servicios. Usa el buscador
+            para encontrar más.
           </p>
         }
         @if (serviceSearch() && filteredServices().length === 0) {
-          <p class="services-hint">No se encontraron servicios para "{{ serviceSearch() }}"</p>
+          <p class="services-hint">
+            No se encontraron servicios para "{{ serviceSearch() }}"
+          </p>
         }
       }
     </div>
@@ -112,7 +129,6 @@
   <!-- Step 2: Customer + Notes -->
   @if (currentStep() === 1) {
     <div class="step-content fade-in">
-
       <!-- Customer Search Section -->
       <div class="form-section">
         <div class="section-header">
@@ -128,12 +144,18 @@
         @if (selectedCustomer()) {
           <div class="selected-customer-chip">
             <div class="customer-avatar">
-              {{ selectedCustomer().first_name?.charAt(0) }}{{ selectedCustomer().last_name?.charAt(0) }}
+              {{ selectedCustomer().first_name?.charAt(0)
+              }}{{ selectedCustomer().last_name?.charAt(0) }}
             </div>
             <div class="customer-chip-info">
-              <span class="chip-name">{{ selectedCustomer().first_name }} {{ selectedCustomer().last_name }}</span>
+              <span class="chip-name"
+                >{{ selectedCustomer().first_name }}
+                {{ selectedCustomer().last_name }}</span
+              >
               @if (selectedCustomer().email || selectedCustomer().phone) {
-                <span class="chip-detail">{{ selectedCustomer().email || selectedCustomer().phone }}</span>
+                <span class="chip-detail">{{
+                  selectedCustomer().email || selectedCustomer().phone
+                }}</span>
               }
             </div>
             <button class="chip-clear" (click)="clearCustomer()">
@@ -142,7 +164,11 @@
           </div>
         } @else {
           <div class="search-wrapper">
-            <app-icon name="search" [size]="16" class="search-prefix-icon"></app-icon>
+            <app-icon
+              name="search"
+              [size]="16"
+              class="search-prefix-icon"
+            ></app-icon>
             <input
               type="text"
               class="search-input"
@@ -160,12 +186,18 @@
           @if (customers().length > 0) {
             <div class="customer-dropdown">
               @for (customer of customers(); track customer.id) {
-                <button class="customer-option" (click)="selectCustomer(customer)">
+                <button
+                  class="customer-option"
+                  (click)="selectCustomer(customer)"
+                >
                   <div class="option-avatar">
-                    {{ customer.first_name?.charAt(0) }}{{ customer.last_name?.charAt(0) }}
+                    {{ customer.first_name?.charAt(0)
+                    }}{{ customer.last_name?.charAt(0) }}
                   </div>
                   <div class="option-info">
-                    <span class="option-name">{{ customer.first_name }} {{ customer.last_name }}</span>
+                    <span class="option-name"
+                      >{{ customer.first_name }} {{ customer.last_name }}</span
+                    >
                     <div class="option-details">
                       @if (customer.email) {
                         <span class="option-detail">
@@ -190,14 +222,19 @@
 
       <!-- Provider selection -->
       @if (loadingProviders()) {
-        <div class="mt-4 flex items-center gap-2 text-xs text-[var(--color-text-muted)]">
+        <div
+          class="mt-4 flex items-center gap-2 text-xs text-[var(--color-text-muted)]"
+        >
           <app-spinner size="sm" color="primary"></app-spinner>
           Cargando proveedores...
         </div>
       } @else if (providers().length > 0) {
         <div class="form-section">
           <div class="section-header">
-            <div class="section-icon-badge" style="background: rgba(99, 102, 241, 0.1); color: #6366f1;">
+            <div
+              class="section-icon-badge"
+              style="background: rgba(99, 102, 241, 0.1); color: #6366f1"
+            >
               <app-icon name="users" [size]="14"></app-icon>
             </div>
             <span class="section-title">
@@ -206,12 +243,23 @@
             </span>
           </div>
           <div class="flex flex-wrap gap-2">
-            <button type="button" class="provider-chip" [class.selected]="!selectedProvider()" (click)="selectProvider(null)">
+            <button
+              type="button"
+              class="provider-chip"
+              [class.selected]="!selectedProvider()"
+              (click)="selectProvider(null)"
+            >
               <app-icon name="users" [size]="14"></app-icon> Cualquiera
             </button>
             @for (p of providers(); track p.id) {
-              <button type="button" class="provider-chip" [class.selected]="selectedProvider()?.id === p.id" (click)="selectProvider(p)">
-                <app-icon name="user" [size]="14"></app-icon> {{ p.display_name || p.employee?.first_name }}
+              <button
+                type="button"
+                class="provider-chip"
+                [class.selected]="selectedProvider()?.id === p.id"
+                (click)="selectProvider(p)"
+              >
+                <app-icon name="user" [size]="14"></app-icon>
+                {{ p.display_name || p.employee?.first_name }}
               </button>
             }
           </div>
@@ -219,9 +267,21 @@
       }
 
       <!-- Skip availability toggle -->
-      <div class="flex items-center gap-2 mt-3 pt-3 border-t border-[var(--color-border)]">
-        <input type="checkbox" id="qb-skip" [checked]="skipAvailability()" (change)="skipAvailability.set(!skipAvailability())" class="w-4 h-4 rounded"/>
-        <label for="qb-skip" class="text-xs text-[var(--color-text-secondary)] cursor-pointer">Agendar sin verificar disponibilidad</label>
+      <div
+        class="flex items-center gap-2 mt-3 pt-3 border-t border-[var(--color-border)]"
+      >
+        <input
+          type="checkbox"
+          id="qb-skip"
+          [checked]="skipAvailability()"
+          (change)="skipAvailability.set(!skipAvailability())"
+          class="w-4 h-4 rounded"
+        />
+        <label
+          for="qb-skip"
+          class="text-xs text-[var(--color-text-secondary)] cursor-pointer"
+          >Agendar sin verificar disponibilidad</label
+        >
       </div>
 
       <!-- Notes Section -->
@@ -266,7 +326,7 @@
             }
             @if (selectedService()?.base_price) {
               <span class="summary-chip">
-                ${{ selectedService()?.base_price | number:'1.0-0' }}
+                ${{ selectedService()?.base_price | number: "1.0-0" }}
               </span>
             }
           </div>
@@ -279,7 +339,8 @@
             Fecha y Hora
           </div>
           <div class="confirm-value">
-            {{ formatDate(prefilledDate()) }} &middot; {{ formatTime(prefilledTime()) }} → {{ formatTime(getEndTime()) }}
+            {{ formatDate(prefilledDate()) }} &middot;
+            {{ formatTime(prefilledTime()) }} → {{ formatTime(getEndTime()) }}
           </div>
         </div>
 
@@ -290,7 +351,12 @@
               <app-icon name="user" [size]="14"></app-icon>
               Proveedor
             </div>
-            <div class="confirm-value">{{ selectedProvider()?.display_name || selectedProvider()?.employee?.first_name }}</div>
+            <div class="confirm-value">
+              {{
+                selectedProvider()?.display_name ||
+                  selectedProvider()?.employee?.first_name
+              }}
+            </div>
           </div>
         }
 
@@ -302,15 +368,23 @@
           </div>
           <div class="confirm-customer">
             <div class="customer-avatar">
-              {{ selectedCustomer()?.first_name?.charAt(0) }}{{ selectedCustomer()?.last_name?.charAt(0) }}
+              {{ selectedCustomer()?.first_name?.charAt(0)
+              }}{{ selectedCustomer()?.last_name?.charAt(0) }}
             </div>
             <div class="confirm-customer-info">
-              <span class="confirm-customer-name">{{ selectedCustomer()?.first_name }} {{ selectedCustomer()?.last_name }}</span>
+              <span class="confirm-customer-name"
+                >{{ selectedCustomer()?.first_name }}
+                {{ selectedCustomer()?.last_name }}</span
+              >
               @if (selectedCustomer()?.email) {
-                <span class="confirm-customer-detail">{{ selectedCustomer()?.email }}</span>
+                <span class="confirm-customer-detail">{{
+                  selectedCustomer()?.email
+                }}</span>
               }
               @if (selectedCustomer()?.phone) {
-                <span class="confirm-customer-detail">{{ selectedCustomer()?.phone }}</span>
+                <span class="confirm-customer-detail">{{
+                  selectedCustomer()?.phone
+                }}</span>
               }
             </div>
           </div>
@@ -344,7 +418,8 @@
         variant="primary"
         size="sm"
         [disabled]="!selectedCustomer()"
-        (click)="goToConfirmation()">
+        (click)="goToConfirmation()"
+      >
         <app-icon slot="icon" name="arrow-right" [size]="16"></app-icon>
         Continuar
       </app-button>
@@ -355,7 +430,8 @@
         size="sm"
         [disabled]="submitting()"
         [loading]="submitting()"
-        (click)="submit()">
+        (click)="submit()"
+      >
         <app-icon slot="icon" name="check" [size]="16"></app-icon>
         Crear Reserva
       </app-button>

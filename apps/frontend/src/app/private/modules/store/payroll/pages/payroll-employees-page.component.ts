@@ -1,17 +1,15 @@
-import { Component, OnInit, OnDestroy, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject, DestroyRef } from '@angular/core';
+import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import { Store } from '@ngrx/store';
-import { Observable, Subject } from 'rxjs';
-import { takeUntil, filter } from 'rxjs/operators';
+import { Observable } from 'rxjs';
+import { filter } from 'rxjs/operators';
 
 import {
   loadEmployees,
-  loadEmployeeStats,
-} from '../state/actions/payroll.actions';
+  loadEmployeeStats } from '../state/actions/payroll.actions';
 import {
   selectEmployees,
-  selectEmployeesLoading,
-} from '../state/selectors/payroll.selectors';
+  selectEmployeesLoading } from '../state/selectors/payroll.selectors';
 import { Employee } from '../interfaces/payroll.interface';
 
 import { PayrollStatsComponent } from '../components/payroll-stats/payroll-stats.component';
@@ -25,7 +23,6 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
   selector: 'vendix-payroll-employees-page',
   standalone: true,
   imports: [
-    CommonModule,
     PayrollStatsComponent,
     EmployeeListComponent,
     EmployeeCreateComponent,
@@ -34,13 +31,15 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
   ],
   template: `
     <div class="w-full">
-      <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
+      <div
+        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+      >
         <vendix-payroll-stats view="employees"></vendix-payroll-stats>
       </div>
 
       <app-employee-list
-        [employees]="(employees$ | async) || []"
-        [loading]="(employeesLoading$ | async) || false"
+        [employees]="employees() || []"
+        [loading]="employeesLoading() || false"
         (create)="openEmployeeCreateModal()"
         (edit)="editEmployee($event)"
         (detail)="viewEmployee($event)"
@@ -62,30 +61,30 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
         (uploadComplete)="onBulkUploadComplete()"
       ></app-employee-bulk-upload-modal>
     </div>
-  `,
-})
-export class PayrollEmployeesPageComponent implements OnInit, OnDestroy {
+  ` })
+export class PayrollEmployeesPageComponent {
   private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
-  private destroy$ = new Subject<void>();
-
-  employees$: Observable<Employee[]> = this.store.select(selectEmployees);
-  employeesLoading$: Observable<boolean> = this.store.select(selectEmployeesLoading);
+  private destroyRef = inject(DestroyRef);
+readonly employees = toSignal(this.store.select(selectEmployees), {
+    initialValue: [] as Employee[] });
+  readonly employeesLoading = toSignal(
+    this.store.select(selectEmployeesLoading),
+    { initialValue: false },
+  );
 
   isEmployeeCreateModalOpen = false;
   isEmployeeDetailModalOpen = false;
   isEmployeeBulkUploadModalOpen = false;
   selectedEmployee: Employee | null = null;
 
-  ngOnInit(): void {
+  constructor() {
     this.currencyService.loadCurrency();
     this.store.dispatch(loadEmployees());
     this.store.dispatch(loadEmployeeStats());
-  }
 
-  ngOnDestroy(): void {
-    this.destroy$.next();
-    this.destroy$.complete();
+    this.destroyRef.onDestroy(() => {
+    });
   }
 
   openEmployeeCreateModal(): void {

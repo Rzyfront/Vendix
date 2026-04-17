@@ -1,10 +1,5 @@
-import {
-  Component,
-  Input,
-  Output,
-  EventEmitter,
-  forwardRef,
-} from '@angular/core';
+import {Component, forwardRef, input, output, DestroyRef, inject} from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import {
   FormsModule,
@@ -41,84 +36,92 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
       <div class="relative">
         <app-input
           [formControl]="searchControl"
-          [label]="label"
-          [placeholder]="placeholder"
-          [required]="required"
+          [label]="label()"
+          [placeholder]="placeholder()"
+          [required]="required()"
           [control]="searchControl"
           (input)="onSearchInput($event)"
-        >
+          >
           <app-icon name="search" [size]="16" slot="suffix"></app-icon>
         </app-input>
-
+    
         <!-- Dropdown de resultados -->
-        <div
-          *ngIf="showDropdown && searchResults.length > 0"
-          class="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto"
-        >
+        @if (showDropdown && searchResults.length > 0) {
           <div
-            *ngFor="let product of searchResults"
-            class="px-4 py-3 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0"
-            (click)="selectProduct(product)"
-          >
-            <div class="flex justify-between items-start">
-              <div class="flex-1">
-                <div class="font-medium text-gray-900">{{ product.name }}</div>
-                <div class="text-sm text-gray-500">SKU: {{ product.sku }}</div>
-                <div class="text-sm text-gray-500">
-                  Stock: {{ product.stock_quantity }} unidades
-                </div>
-              </div>
-              <div class="text-right ml-4">
-                <div class="font-medium text-gray-900">
-                  {{ product.price | currency }}
-                </div>
-                <div class="text-sm text-gray-500" *ngIf="product.category">
-                  {{ product.category.name }}
-                </div>
-                <div class="text-sm text-gray-500" *ngIf="product.brand">
-                  {{ product.brand.name }}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div
-            *ngIf="searchResults.length === 0 && searchControl.value"
-            class="px-4 py-3 text-gray-500 text-center"
-          >
-            No se encontraron productos
-          </div>
-        </div>
-      </div>
-
-      <!-- Producto seleccionado -->
-      <div *ngIf="selectedProduct" class="mt-2 p-3 bg-gray-50 rounded-md">
-        <div class="flex justify-between items-center">
-          <div>
-            <div class="font-medium">{{ selectedProduct.name }}</div>
-            <div class="text-sm text-gray-500">
-              SKU: {{ selectedProduct.sku }}
-            </div>
-            <div class="text-sm text-green-600">
-              Stock disponible: {{ selectedProduct.stock_quantity }} unidades
-            </div>
-          </div>
-          <div class="text-right">
-            <div class="font-medium">
-              {{ selectedProduct.price | currency }}
-            </div>
-            <button
-              type="button"
-              (click)="clearSelection()"
-              class="mt-1 text-sm text-red-600 hover:text-red-800"
+            class="absolute z-50 w-full mt-1 bg-white border border-gray-300 rounded-md shadow-lg max-h-60 overflow-y-auto"
             >
-              Cambiar producto
-            </button>
+            @for (product of searchResults; track product) {
+              <div
+                class="px-4 py-3 hover:bg-gray-100 cursor-pointer border-b border-gray-100 last:border-b-0"
+                (click)="selectProduct(product)"
+                >
+                <div class="flex justify-between items-start">
+                  <div class="flex-1">
+                    <div class="font-medium text-gray-900">{{ product.name }}</div>
+                    <div class="text-sm text-gray-500">SKU: {{ product.sku }}</div>
+                    <div class="text-sm text-gray-500">
+                      Stock: {{ product.stock_quantity }} unidades
+                    </div>
+                  </div>
+                  <div class="text-right ml-4">
+                    <div class="font-medium text-gray-900">
+                      {{ product.price | currency }}
+                    </div>
+                    @if (product.category) {
+                      <div class="text-sm text-gray-500">
+                        {{ product.category.name }}
+                      </div>
+                    }
+                    @if (product.brand) {
+                      <div class="text-sm text-gray-500">
+                        {{ product.brand.name }}
+                      </div>
+                    }
+                  </div>
+                </div>
+              </div>
+            }
+            @if (searchResults.length === 0 && searchControl.value) {
+              <div
+                class="px-4 py-3 text-gray-500 text-center"
+                >
+                No se encontraron productos
+              </div>
+            }
+          </div>
+        }
+      </div>
+    
+      <!-- Producto seleccionado -->
+      @if (selectedProduct) {
+        <div class="mt-2 p-3 bg-gray-50 rounded-md">
+          <div class="flex justify-between items-center">
+            <div>
+              <div class="font-medium">{{ selectedProduct.name }}</div>
+              <div class="text-sm text-gray-500">
+                SKU: {{ selectedProduct.sku }}
+              </div>
+              <div class="text-sm text-green-600">
+                Stock disponible: {{ selectedProduct.stock_quantity }} unidades
+              </div>
+            </div>
+            <div class="text-right">
+              <div class="font-medium">
+                {{ selectedProduct.price | currency }}
+              </div>
+              <button
+                type="button"
+                (click)="clearSelection()"
+                class="mt-1 text-sm text-red-600 hover:text-red-800"
+                >
+                Cambiar producto
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+      }
     </div>
-  `,
+    `,
   styles: [
     `
       .product-selector {
@@ -134,15 +137,16 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
   ],
 })
 export class ProductSelectorComponent implements ControlValueAccessor {
-  @Input() label: string = 'Producto';
-  @Input() placeholder: string = 'Buscar producto...';
-  @Input() required: boolean = false;
-  @Input() storeId: number | null = null;
-  @Output() productSelected = new EventEmitter<Product>();
-  @Output() inventoryChecked = new EventEmitter<{
+  private destroyRef = inject(DestroyRef);
+  readonly label = input<string>('Producto');
+  readonly placeholder = input<string>('Buscar producto...');
+  readonly required = input<boolean>(false);
+  readonly storeId = input<number | null>(null);
+  readonly productSelected = output<Product>();
+  readonly inventoryChecked = output<{
     available: boolean;
     stock: number;
-  }>();
+}>();
 
   searchControl: any;
   showDropdown = false;
@@ -179,20 +183,21 @@ export class ProductSelectorComponent implements ControlValueAccessor {
   }
 
   private searchProducts(query: string): void {
-    if (!this.storeId) {
+    const storeId = this.storeId();
+    if (!storeId) {
       return;
     }
 
     this.productsService
       .searchProducts({
         search: query,
-        store_id: this.storeId,
+        store_id: storeId,
         is_active: true,
         limit: 10,
         sort_by: 'name',
         sort_order: 'asc',
       })
-      .subscribe({
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (response) => {
           this.searchResults = response.data || [];
           this.showDropdown = true;
@@ -222,8 +227,8 @@ export class ProductSelectorComponent implements ControlValueAccessor {
 
   private checkInventory(product: Product): void {
     this.productsService
-      .checkInventory(product.id, undefined, this.storeId || undefined)
-      .subscribe({
+      .checkInventory(product.id, undefined, this.storeId() || undefined)
+      .pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (inventory) => {
           this.inventoryChecked.emit({
             available: inventory.available,

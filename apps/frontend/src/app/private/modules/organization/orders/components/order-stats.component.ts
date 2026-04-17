@@ -1,5 +1,5 @@
-import { Component, Input } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, input } from '@angular/core';
+
 
 // Import shared components
 import { StatsComponent } from '../../../../../shared/components';
@@ -8,13 +8,13 @@ import { OrderStats } from '../interfaces/order.interface';
 @Component({
   selector: 'app-order-stats',
   standalone: true,
-  imports: [CommonModule, StatsComponent],
+  imports: [StatsComponent],
   template: `
     <div class="space-y-4">
       <div class="stats-container">
         <app-stats
           title="Total Orders"
-          [value]="formatNumber(stats.total_orders)"
+          [value]="formatNumber(stats().total_orders)"
           iconName="shopping-cart"
           iconBgColor="bg-primary/10"
           iconColor="text-primary"
@@ -22,7 +22,7 @@ import { OrderStats } from '../interfaces/order.interface';
 
         <app-stats
           title="Pending"
-          [value]="formatNumber(stats.pending_orders)"
+          [value]="formatNumber(stats().pending_orders)"
           iconName="clock"
           iconBgColor="bg-yellow-100"
           iconColor="text-yellow-600"
@@ -30,7 +30,7 @@ import { OrderStats } from '../interfaces/order.interface';
 
         <app-stats
           title="Confirmed"
-          [value]="formatNumber(stats.confirmed_orders)"
+          [value]="formatNumber(stats().confirmed_orders)"
           iconName="check-circle"
           iconBgColor="bg-blue-100"
           iconColor="text-blue-600"
@@ -38,7 +38,7 @@ import { OrderStats } from '../interfaces/order.interface';
 
         <app-stats
           title="Processing"
-          [value]="formatNumber(stats.processing_orders)"
+          [value]="formatNumber(stats().processing_orders)"
           iconName="refresh-cw"
           iconBgColor="bg-purple-100"
           iconColor="text-purple-600"
@@ -48,7 +48,7 @@ import { OrderStats } from '../interfaces/order.interface';
       <div class="stats-container">
         <app-stats
           title="Delivered"
-          [value]="formatNumber(stats.delivered_orders)"
+          [value]="formatNumber(stats().delivered_orders)"
           iconName="file-check"
           iconBgColor="bg-green-100"
           iconColor="text-green-600"
@@ -56,7 +56,7 @@ import { OrderStats } from '../interfaces/order.interface';
 
         <app-stats
           title="Total Revenue"
-          [value]="'$ ' + formatCurrency(stats.total_revenue)"
+          [value]="'$ ' + formatCurrency(stats().total_revenue)"
           iconName="dollar-sign"
           iconBgColor="bg-emerald-100"
           iconColor="text-emerald-600"
@@ -73,7 +73,7 @@ import { OrderStats } from '../interfaces/order.interface';
   ],
 })
 export class OrderStatsComponent {
-  @Input() stats: OrderStats = {
+  readonly stats = input<OrderStats>({
     total_orders: 0,
     pending_orders: 0,
     confirmed_orders: 0,
@@ -89,7 +89,7 @@ export class OrderStatsComponent {
     orders_by_payment_status: {} as any,
     orders_by_store: [],
     recent_orders: [],
-  };
+});
 
   formatCurrency(value: number): string {
     if (value >= 1000000) {

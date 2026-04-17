@@ -1,7 +1,7 @@
 <div class="w-full">
   <!-- Stats: Sticky on mobile, static on desktop -->
   <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
-    <app-order-stats [stats]="orderStats"></app-order-stats>
+    <app-order-stats [stats]="orderStats()"></app-order-stats>
   </div>
 
   <!-- Orders List (owns search, filters, loading, empty state) -->

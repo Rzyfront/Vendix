@@ -10,7 +10,7 @@
             <img src="vlogo.png" alt="Vendix" class="w-full h-full object-contain" />
           </div>
           <h1 class="text-xl font-semibold text-[var(--color-text-primary)]">
-            {{ tenantConfig?.branding?.name || "Vendix" }}
+            {{ tenantConfig()?.branding?.name || "Vendix" }}
           </h1>
         </div>
 
@@ -47,7 +47,7 @@
           </a>
           <button class="p-2 rounded-lg hover:bg-gray-100 transition-colors duration-200"
             (click)="toggleMobileMenu()">
-            <app-icon [name]="mobileMenuOpen ? 'x' : 'menu'" [size]="24" color="var(--color-text-primary)"></app-icon>
+            <app-icon [name]="mobileMenuOpen() ? 'x' : 'menu'" [size]="24" color="var(--color-text-primary)"></app-icon>
           </button>
         </div>
       </div>
@@ -55,7 +55,7 @@
   </header>
 
   <!-- Mobile Menu Overlay -->
-  @if (mobileMenuOpen) {
+  @if (mobileMenuOpen()) {
   <div class="fixed inset-0 z-[60] md:hidden">
     <!-- Backdrop -->
     <div class="fixed inset-0 bg-black/50 backdrop-blur-sm" (click)="closeMobileMenu()"></div>
@@ -71,7 +71,7 @@
               <img src="vlogo.png" alt="Vendix" class="w-full h-full object-contain" />
             </div>
             <h2 class="text-lg font-semibold text-[var(--color-text-primary)]">
-              {{ tenantConfig?.branding?.name || "Vendix" }}
+              {{ tenantConfig()?.branding?.name || "Vendix" }}
             </h2>
           </div>
           <button class="p-2 rounded-lg hover:bg-gray-100 transition-colors duration-200" (click)="closeMobileMenu()">
@@ -801,7 +801,7 @@
 </div>
 
 <!-- Modal de Términos y Condiciones -->
-@if (showTermsModal) {
+@if (showTermsModal()) {
 <div class="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
   <div class="bg-white rounded-2xl max-w-2xl w-full max-h-[80vh] overflow-hidden shadow-2xl">
     <!-- Header -->
@@ -814,7 +814,7 @@
 
     <!-- Content -->
     <div class="p-2 md:p-4 overflow-y-auto max-h-[60vh]">
-      <div [innerHTML]="termsContent"></div>
+      <div [innerHTML]="termsContent()"></div>
     </div>
 
     <!-- Footer -->

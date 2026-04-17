@@ -1,7 +1,7 @@
 import { Injectable, inject } from '@angular/core';
 import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
-import { take } from 'rxjs/operators';
+import { toSignal } from '@angular/core/rxjs-interop';
 import {
   DomainConfig,
   AppEnvironment,
@@ -21,7 +21,8 @@ import { TenantState } from './tenant.reducer';
 export class TenantFacade {
   private store = inject(Store<TenantState>);
 
-  // State observables
+  // ─── Observables (backward compatible) ────────────────────────────────────
+
   readonly domainConfig$ = this.store.select(
     TenantSelectors.selectDomainConfig,
   );
@@ -69,7 +70,27 @@ export class TenantFacade {
     TenantSelectors.selectOrganizationInfo,
   );
 
-  // Actions
+  // ─── Signal parallels (Angular 20 — backward compatible) ──────────────────
+
+  readonly domainConfig = toSignal(this.domainConfig$);
+  readonly tenantConfig = toSignal(this.tenantConfig$);
+  readonly currentEnvironment = toSignal(this.currentEnvironment$);
+  readonly tenantLoading = toSignal(this.loading$, { initialValue: false });
+  readonly tenantError = toSignal(this.error$);
+  readonly initialized = toSignal(this.initialized$, { initialValue: false });
+  readonly currentOrganization = toSignal(this.currentOrganization$);
+  readonly organizationName = toSignal(this.organizationName$);
+  readonly organizationSlug = toSignal(this.organizationSlug$);
+  readonly currentStore = toSignal(this.currentStore$);
+  readonly storeName = toSignal(this.storeName$);
+  readonly storeSlug = toSignal(this.storeSlug$);
+  readonly domainHostname = toSignal(this.domainHostname$);
+  readonly isVendixDomain = toSignal(this.isVendixDomain$, { initialValue: false });
+  readonly tenantInfo = toSignal(this.tenantInfo$);
+  readonly organizationInfo = toSignal(this.organizationInfo$);
+
+  // ─── Actions ──────────────────────────────────────────────────────────────
+
   initTenant(domainConfig: DomainConfig): void {
     this.store.dispatch(TenantActions.initTenant({ domainConfig }));
   }
@@ -103,35 +124,26 @@ export class TenantFacade {
     return this.store.select(TenantSelectors.selectAllFeatures);
   }
 
-  // Synchronous getters for templates
+  // ─── Synchronous getters — powered by signals (no take(1) antipattern) ────
+
   getCurrentDomainConfig(): DomainConfig | null {
-    let result: DomainConfig | null = null;
-    this.domainConfig$.pipe(take(1)).subscribe((config) => (result = config));
-    return result;
+    return this.domainConfig() ?? null;
   }
 
   getCurrentTenantConfig(): TenantConfig | null {
-    let result: TenantConfig | null = null;
-    this.tenantConfig$.pipe(take(1)).subscribe((config) => (result = config));
-    return result;
+    return this.tenantConfig() ?? null;
   }
 
   getCurrentEnvironment(): AppEnvironment | null {
-    let result: AppEnvironment | null = null;
-    this.currentEnvironment$.pipe(take(1)).subscribe((env) => (result = env));
-    return result;
+    return this.currentEnvironment() ?? null;
   }
 
   getCurrentOrganization(): OrganizationConfig | null {
-    let result: OrganizationConfig | null = null;
-    this.currentOrganization$.pipe(take(1)).subscribe((org) => (result = org));
-    return result;
+    return this.currentOrganization() ?? null;
   }
 
   getCurrentStore(): StoreConfig | null {
-    let result: StoreConfig | null = null;
-    this.currentStore$.pipe(take(1)).subscribe((store) => (result = store));
-    return result;
+    return this.currentStore() ?? null;
   }
 
   /**
@@ -141,13 +153,13 @@ export class TenantFacade {
    */
   getCurrentStoreId(): number | null {
     // 1. Intentar obtener desde el store config
-    const store = this.getCurrentStore();
+    const store = this.currentStore();
     if (store?.id) {
       return parseInt(store.id.toString(), 10);
     }
 
     // 2. Intentar obtener desde el domain config
-    const domain = this.getCurrentDomainConfig();
+    const domain = this.domainConfig();
     if (domain?.store_id) {
       return parseInt(domain.store_id.toString(), 10);
     }
@@ -156,14 +168,10 @@ export class TenantFacade {
   }
 
   isInitialized(): boolean {
-    let result = false;
-    this.initialized$.pipe(take(1)).subscribe((init) => (result = init));
-    return result;
+    return this.initialized();
   }
 
   isLoading(): boolean {
-    let result = false;
-    this.loading$.pipe(take(1)).subscribe((loading) => (result = loading));
-    return result;
+    return this.tenantLoading();
   }
 }
