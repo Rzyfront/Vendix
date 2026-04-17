@@ -1,10 +1,4 @@
-import {
-  Component,
-  output,
-  inject,
-  DestroyRef,
-} from '@angular/core';
-import { AsyncPipe } from '@angular/common';
+import { Component, output, inject, DestroyRef } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import {
   Subject,
@@ -13,6 +7,7 @@ import {
   takeUntil,
   Observable,
 } from 'rxjs';
+import { toSignal } from '@angular/core/rxjs-interop';
 import {
   PosProductService,
   SearchFilters,
@@ -24,7 +19,7 @@ import {
 @Component({
   selector: 'app-pos-product-search',
   standalone: true,
-  imports: [AsyncPipe, FormsModule],
+  imports: [FormsModule],
   template: `
     <div class="product-search-container">
       <div class="search-header">
@@ -39,26 +34,26 @@ import {
               (input)="onSearchInput($event)"
               (keyup.enter)="performSearch()"
               (keyup.escape)="clearSearch()"
-              />
+            />
             @if (searchQuery) {
               <button
                 class="clear-search-btn"
                 (click)="clearSearch()"
                 type="button"
-                >
+              >
                 <i class="fas fa-times"></i>
               </button>
             }
           </div>
         </div>
-    
+
         <div class="search-actions">
           <button
             class="filter-toggle-btn"
             (click)="toggleFilters()"
             [class.active]="showFilters"
             type="button"
-            >
+          >
             <i class="fas fa-filter"></i>
             Filtros
             @if (activeFiltersCount > 0) {
@@ -69,7 +64,7 @@ import {
           </button>
         </div>
       </div>
-    
+
       @if (showFilters) {
         <div class="search-filters">
           <div class="filters-grid">
@@ -80,12 +75,10 @@ import {
                 class="filter-select"
                 [(ngModel)]="filters.category"
                 (change)="applyFilters()"
-                >
+              >
                 <option value="">Todas las categorías</option>
-                @for (category of categories$ | async; track category) {
-                  <option
-                    [value]="category.id"
-                    >
+                @for (category of categories(); track category.id) {
+                  <option [value]="category.id">
                     {{ category.name }}
                   </option>
                 }
@@ -98,9 +91,9 @@ import {
                 class="filter-select"
                 [(ngModel)]="filters.brand"
                 (change)="applyFilters()"
-                >
+              >
                 <option value="">Todas las marcas</option>
-                @for (brand of brands$ | async; track brand) {
+                @for (brand of brands(); track brand.id) {
                   <option [value]="brand.id">
                     {{ brand.name }}
                   </option>
@@ -118,7 +111,7 @@ import {
                 placeholder="0.00"
                 step="0.01"
                 min="0"
-                />
+              />
             </div>
             <div class="filter-group">
               <label for="max-price-filter">Precio Máximo</label>
@@ -131,7 +124,7 @@ import {
                 placeholder="999.99"
                 step="0.01"
                 min="0"
-                />
+              />
             </div>
             <div class="filter-group">
               <label class="checkbox-label">
@@ -139,7 +132,7 @@ import {
                   type="checkbox"
                   [(ngModel)]="filters.inStock"
                   (change)="applyFilters()"
-                  />
+                />
                 Solo productos con stock
               </label>
             </div>
@@ -150,7 +143,7 @@ import {
                 class="filter-select"
                 [(ngModel)]="filters.sortBy"
                 (change)="applyFilters()"
-                >
+              >
                 <option value="">Relevancia</option>
                 <option value="name">Nombre</option>
                 <option value="price">Precio</option>
@@ -166,7 +159,7 @@ import {
                   class="filter-select"
                   [(ngModel)]="filters.sortOrder"
                   (change)="applyFilters()"
-                  >
+                >
                   <option value="asc">Ascendente</option>
                   <option value="desc">Descendente</option>
                 </select>
@@ -178,27 +171,21 @@ import {
               class="btn btn-secondary"
               (click)="clearFilters()"
               type="button"
-              >
+            >
               Limpiar Filtros
             </button>
           </div>
         </div>
       }
-    
-      @if (
-        showSuggestions &&
-        (suggestions$ | async)?.length &&
-        (suggestions$ | async)!.length > 0
-        ) {
-        <div
-          class="search-suggestions"
-          >
+
+      @if (showSuggestions && suggestions()!.length > 0) {
+        <div class="search-suggestions">
           <div class="suggestions-list">
-            @for (suggestion of suggestions$ | async; track suggestion) {
+            @for (suggestion of suggestions(); track suggestion) {
               <div
                 class="suggestion-item"
                 (click)="selectSuggestion(suggestion)"
-                >
+              >
                 <i class="fas fa-history"></i>
                 {{ suggestion }}
               </div>
@@ -206,9 +193,8 @@ import {
           </div>
         </div>
       }
-    
     </div>
-    `,
+  `,
   styles: [
     `
       .product-search-container {
@@ -472,23 +458,25 @@ export class PosProductSearchComponent {
     sortOrder: 'asc',
   };
 
-  categories$!: Observable<Category[]>;
-  brands$!: Observable<Brand[]>;
-  suggestions$!: Observable<string[]>;
-
   private searchSubject = new Subject<string>();
   private destroy$ = new Subject<void>();
   private productService = inject(PosProductService);
+
+  readonly categories = toSignal(this.productService.getCategories(), {
+    initialValue: [] as Category[],
+  });
+  readonly brands = toSignal(this.productService.getBrands(), {
+    initialValue: [] as Brand[],
+  });
+  readonly suggestions = toSignal(this.productService.getSearchHistory(), {
+    initialValue: [] as string[],
+  });
 
   constructor() {
     inject(DestroyRef).onDestroy(() => {
       this.destroy$.next();
       this.destroy$.complete();
     });
-
-    this.categories$ = this.productService.getCategories();
-    this.brands$ = this.productService.getBrands();
-    this.suggestions$ = this.productService.getSearchHistory();
 
     this.searchSubject
       .pipe(debounceTime(300), distinctUntilChanged(), takeUntil(this.destroy$))

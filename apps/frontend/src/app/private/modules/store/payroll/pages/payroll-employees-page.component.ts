@@ -1,5 +1,5 @@
 import { Component, inject, DestroyRef } from '@angular/core';
-import { AsyncPipe } from '@angular/common';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { Store } from '@ngrx/store';
 import { Observable, Subject } from 'rxjs';
 import { takeUntil, filter } from 'rxjs/operators';
@@ -25,7 +25,6 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
   selector: 'vendix-payroll-employees-page',
   standalone: true,
   imports: [
-    AsyncPipe,
     PayrollStatsComponent,
     EmployeeListComponent,
     EmployeeCreateComponent,
@@ -34,13 +33,15 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
   ],
   template: `
     <div class="w-full">
-      <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
+      <div
+        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+      >
         <vendix-payroll-stats view="employees"></vendix-payroll-stats>
       </div>
 
       <app-employee-list
-        [employees]="(employees$ | async) || []"
-        [loading]="(employeesLoading$ | async) || false"
+        [employees]="employees() || []"
+        [loading]="employeesLoading() || false"
         (create)="openEmployeeCreateModal()"
         (edit)="editEmployee($event)"
         (detail)="viewEmployee($event)"
@@ -70,8 +71,13 @@ export class PayrollEmployeesPageComponent {
   private destroyRef = inject(DestroyRef);
   private destroy$ = new Subject<void>();
 
-  employees$: Observable<Employee[]> = this.store.select(selectEmployees);
-  employeesLoading$: Observable<boolean> = this.store.select(selectEmployeesLoading);
+  readonly employees = toSignal(this.store.select(selectEmployees), {
+    initialValue: [] as Employee[],
+  });
+  readonly employeesLoading = toSignal(
+    this.store.select(selectEmployeesLoading),
+    { initialValue: false },
+  );
 
   isEmployeeCreateModalOpen = false;
   isEmployeeDetailModalOpen = false;

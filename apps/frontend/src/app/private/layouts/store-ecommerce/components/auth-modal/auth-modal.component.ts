@@ -12,7 +12,6 @@ import {
   Validators,
   ReactiveFormsModule,
 } from '@angular/forms';
-import { AsyncPipe } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { filter } from 'rxjs/operators';
 import { ModalComponent } from '../../../../../shared/components/modal/modal.component';
@@ -23,14 +22,16 @@ import { InputComponent } from '../../../../../shared/components/input/input.com
 import { IconComponent } from '../../../../../shared/components/icon/icon.component';
 import { ToastService } from '../../../../../shared/components/toast/toast.service';
 import { extractApiErrorMessage } from '../../../../../core/utils/api-error-handler';
-import { LegalService, PendingDocument } from '../../../../../public/ecommerce/services/legal.service';
+import {
+  LegalService,
+  PendingDocument,
+} from '../../../../../public/ecommerce/services/legal.service';
 import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/components/legal-preview-modal/legal-preview-modal.component';
 
 @Component({
   selector: 'app-auth-modal',
   standalone: true,
   imports: [
-    AsyncPipe,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
@@ -39,7 +40,13 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
     LegalPreviewModalComponent,
   ],
   template: `
-    <app-modal [isOpen]="isOpen()" (closed)="onClose()" size="sm" title=" " [overlayCloseButton]="true">
+    <app-modal
+      [isOpen]="isOpen()"
+      (closed)="onClose()"
+      size="sm"
+      title=" "
+      [overlayCloseButton]="true"
+    >
       <!-- Custom Header with Logo -->
       <div
         slot="header"
@@ -105,9 +112,16 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
 
         <!-- Error Message -->
         @if (errorMessage) {
-          <div class="p-4 rounded-lg bg-red-50 border border-red-200" role="alert">
+          <div
+            class="p-4 rounded-lg bg-red-50 border border-red-200"
+            role="alert"
+          >
             <div class="flex items-start gap-3">
-              <app-icon name="alert-circle" [size]="20" class="text-red-500 mt-0.5 flex-shrink-0"></app-icon>
+              <app-icon
+                name="alert-circle"
+                [size]="20"
+                class="text-red-500 mt-0.5 flex-shrink-0"
+              ></app-icon>
               <div class="flex-1">
                 <p class="text-sm font-medium text-red-800">{{ errorTitle }}</p>
                 <p class="text-sm text-red-700 mt-1">{{ errorMessage }}</p>
@@ -116,7 +130,12 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
           </div>
         }
 
-        <form id="authForm" [formGroup]="authForm" (ngSubmit)="onSubmit()" class="space-y-4">
+        <form
+          id="authForm"
+          [formGroup]="authForm"
+          (ngSubmit)="onSubmit()"
+          class="space-y-4"
+        >
           @if (!isLogin) {
             <div class="grid grid-cols-2 gap-4">
               <app-input
@@ -152,13 +171,24 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
 
           <!-- Password requirements (always visible in register mode) -->
           @if (!isLogin) {
-            <div class="flex items-start gap-2 p-3 rounded-lg bg-blue-50 border border-blue-100">
-              <app-icon name="info" [size]="16" class="text-blue-500 mt-0.5 flex-shrink-0"></app-icon>
+            <div
+              class="flex items-start gap-2 p-3 rounded-lg bg-blue-50 border border-blue-100"
+            >
+              <app-icon
+                name="info"
+                [size]="16"
+                class="text-blue-500 mt-0.5 flex-shrink-0"
+              ></app-icon>
               <div class="text-xs text-blue-700">
                 <p class="font-medium">Requisitos de contraseña:</p>
                 <ul class="mt-1 space-y-0.5">
-                  <li [class.text-green-600]="hasMinLength">{{ hasMinLength ? '✓' : '○' }} Mínimo 8 caracteres</li>
-                  <li [class.text-green-600]="hasSpecialChar">{{ hasSpecialChar ? '✓' : '○' }} Al menos un carácter especial</li>
+                  <li [class.text-green-600]="hasMinLength">
+                    {{ hasMinLength ? '✓' : '○' }} Mínimo 8 caracteres
+                  </li>
+                  <li [class.text-green-600]="hasSpecialChar">
+                    {{ hasSpecialChar ? '✓' : '○' }} Al menos un carácter
+                    especial
+                  </li>
                 </ul>
               </div>
             </div>
@@ -167,7 +197,9 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
           <!-- Documentos Legales -->
           @if (!isLogin && pendingDocuments.length > 0) {
             <div class="space-y-3 pt-2">
-              <p class="text-xs font-medium text-[var(--color-text-primary)]">Documentos Legales</p>
+              <p class="text-xs font-medium text-[var(--color-text-primary)]">
+                Documentos Legales
+              </p>
               @for (doc of pendingDocuments; track doc.document_id) {
                 <div class="flex items-start gap-2">
                   <input
@@ -176,9 +208,19 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
                     [checked]="acceptedDocuments[doc.document_id]"
                     (change)="toggleDoc(doc.document_id)"
                     class="mt-1 h-3.5 w-3.5 rounded border-gray-300 text-[var(--color-primary)] focus:ring-[var(--color-primary)]"
+                  />
+                  <label
+                    [for]="'doc-' + doc.document_id"
+                    class="text-[11px] leading-tight text-[var(--color-text-secondary)]"
                   >
-                  <label [for]="'doc-' + doc.document_id" class="text-[11px] leading-tight text-[var(--color-text-secondary)]">
-                    Acepto los <button type="button" (click)="previewDocument(doc)" class="text-[var(--color-primary)] font-medium hover:underline focus:outline-none">{{ doc.title }}</button>
+                    Acepto los
+                    <button
+                      type="button"
+                      (click)="previewDocument(doc)"
+                      class="text-[var(--color-primary)] font-medium hover:underline focus:outline-none"
+                    >
+                      {{ doc.title }}
+                    </button>
                   </label>
                 </div>
               }
@@ -194,7 +236,7 @@ import { LegalPreviewModalComponent } from '../../../../../public/ecommerce/comp
           form="authForm"
           [variant]="'primary'"
           [fullWidth]="true"
-          [loading]="(loading$ | async) || false"
+          [loading]="loading() || false"
         >
           {{ isLogin ? 'Iniciar sesión' : 'Crear cuenta' }}
         </app-button>
@@ -234,7 +276,7 @@ export class AuthModalComponent {
   private destroyRef = inject(DestroyRef);
   private toast = inject(ToastService);
 
-  loading$ = this.authFacade.loading$;
+  loading = this.authFacade.authLoading;
   authForm: FormGroup;
 
   constructor() {
@@ -330,19 +372,31 @@ export class AuthModalComponent {
   /**
    * Maps backend error messages to user-friendly messages
    */
-  private mapErrorToUserFriendly(error: string): { title: string; message: string } {
+  private mapErrorToUserFriendly(error: string): {
+    title: string;
+    message: string;
+  } {
     const errorLower = error.toLowerCase();
 
     // Invalid credentials
-    if (errorLower.includes('credenciales') || errorLower.includes('invalid') || errorLower.includes('incorrect')) {
+    if (
+      errorLower.includes('credenciales') ||
+      errorLower.includes('invalid') ||
+      errorLower.includes('incorrect')
+    ) {
       return {
         title: 'Credenciales incorrectas',
-        message: 'El correo o la contraseña no coinciden. Verifica tus datos e intenta de nuevo.',
+        message:
+          'El correo o la contraseña no coinciden. Verifica tus datos e intenta de nuevo.',
       };
     }
 
     // User not found
-    if (errorLower.includes('no encontrado') || errorLower.includes('not found') || errorLower.includes('no existe')) {
+    if (
+      errorLower.includes('no encontrado') ||
+      errorLower.includes('not found') ||
+      errorLower.includes('no existe')
+    ) {
       return {
         title: 'Usuario no encontrado',
         message: 'No existe una cuenta con este correo electrónico.',
@@ -350,34 +404,54 @@ export class AuthModalComponent {
     }
 
     // Email already exists
-    if (errorLower.includes('ya existe') || errorLower.includes('duplicate') || errorLower.includes('already exists')) {
+    if (
+      errorLower.includes('ya existe') ||
+      errorLower.includes('duplicate') ||
+      errorLower.includes('already exists')
+    ) {
       return {
         title: 'Correo ya registrado',
-        message: 'Ya existe una cuenta con este correo. Intenta iniciar sesión.',
+        message:
+          'Ya existe una cuenta con este correo. Intenta iniciar sesión.',
       };
     }
 
     // Account locked
-    if (errorLower.includes('bloqueado') || errorLower.includes('locked') || errorLower.includes('suspended')) {
+    if (
+      errorLower.includes('bloqueado') ||
+      errorLower.includes('locked') ||
+      errorLower.includes('suspended')
+    ) {
       return {
         title: 'Cuenta bloqueada',
-        message: 'Tu cuenta ha sido bloqueada temporalmente. Contacta al soporte si necesitas ayuda.',
+        message:
+          'Tu cuenta ha sido bloqueada temporalmente. Contacta al soporte si necesitas ayuda.',
       };
     }
 
     // Rate limit
-    if (errorLower.includes('too many') || errorLower.includes('rate limit') || errorLower.includes('demasiados')) {
+    if (
+      errorLower.includes('too many') ||
+      errorLower.includes('rate limit') ||
+      errorLower.includes('demasiados')
+    ) {
       return {
         title: 'Demasiados intentos',
-        message: 'Has realizado demasiados intentos. Espera unos minutos antes de intentar de nuevo.',
+        message:
+          'Has realizado demasiados intentos. Espera unos minutos antes de intentar de nuevo.',
       };
     }
 
     // Network errors
-    if (errorLower.includes('network') || errorLower.includes('timeout') || errorLower.includes('conexión')) {
+    if (
+      errorLower.includes('network') ||
+      errorLower.includes('timeout') ||
+      errorLower.includes('conexión')
+    ) {
       return {
         title: 'Error de conexión',
-        message: 'No se pudo conectar al servidor. Verifica tu conexión a internet.',
+        message:
+          'No se pudo conectar al servidor. Verifica tu conexión a internet.',
       };
     }
 
@@ -444,7 +518,7 @@ export class AuthModalComponent {
     this.previewDoc = {
       title: doc.title,
       content: doc.content,
-      version: doc.version
+      version: doc.version,
     };
     this.showPreviewModal = true;
   }
@@ -457,12 +531,12 @@ export class AuthModalComponent {
     // Gather metadata for acceptance
     const metadata = {
       ip: 'unknown', // Could be extracted from headers if available
-      userAgent: navigator.userAgent || 'unknown'
+      userAgent: navigator.userAgent || 'unknown',
     };
 
-    docIds.forEach(id => {
+    docIds.forEach((id) => {
       this.legalService.acceptDocument(id, metadata).subscribe({
-        error: (err) => console.error(`Error accepting document ${id}`, err)
+        error: (err) => console.error(`Error accepting document ${id}`, err),
       });
     });
   }
@@ -503,15 +577,21 @@ export class AuthModalComponent {
   onSubmit(): void {
     if (this.authForm.invalid) {
       this.authForm.markAllAsTouched();
-      this.toast.warning('Completa todos los campos requeridos', 'Formulario incompleto');
+      this.toast.warning(
+        'Completa todos los campos requeridos',
+        'Formulario incompleto',
+      );
       return;
     }
 
     // Verificar aceptación de documentos legales en registro
     if (!this.isLogin && this.pendingDocuments.length > 0) {
-      const allAccepted = this.pendingDocuments.every(doc => this.acceptedDocuments[doc.document_id]);
+      const allAccepted = this.pendingDocuments.every(
+        (doc) => this.acceptedDocuments[doc.document_id],
+      );
       if (!allAccepted) {
-        this.errorMessage = 'Debes aceptar todos los documentos legales para continuar.';
+        this.errorMessage =
+          'Debes aceptar todos los documentos legales para continuar.';
         return;
       }
     }

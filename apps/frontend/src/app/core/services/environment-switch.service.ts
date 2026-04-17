@@ -3,7 +3,7 @@ import { HttpClient } from '@angular/common/http';
 import { Router } from '@angular/router';
 import { Location } from '@angular/common';
 import { Observable, of } from 'rxjs';
-import { catchError, take, timeout, filter } from 'rxjs/operators';
+import { catchError } from 'rxjs/operators';
 import { AuthFacade } from '../../core/store/auth/auth.facade';
 import { AuthService } from './auth.service';
 import { AppConfigService } from './app-config.service';
@@ -195,17 +195,25 @@ export class EnvironmentSwitchService {
   }
 
   private async waitForAuthStateSync(): Promise<void> {
+    const TIMEOUT_MS = 3000;
+    const CHECK_INTERVAL_MS = 100;
+    const startTime = Date.now();
+
     return new Promise((resolve) => {
-      this.authFacade.isAuthenticated$
-        .pipe(
-          filter((isAuth) => isAuth === true),
-          take(1),
-          timeout(3000),
-        )
-        .subscribe({
-          next: () => resolve(),
-          error: () => resolve(),
-        });
+      const checkInterval = setInterval(() => {
+        const isAuthenticated = this.authFacade.isAuthenticated();
+
+        if (isAuthenticated) {
+          clearInterval(checkInterval);
+          resolve();
+          return;
+        }
+
+        if (Date.now() - startTime >= TIMEOUT_MS) {
+          clearInterval(checkInterval);
+          resolve();
+        }
+      }, CHECK_INTERVAL_MS);
     });
   }
 

@@ -4,7 +4,8 @@ import {
   inject,
   OnInit,
   OnDestroy,
-  output
+  output,
+  computed,
 } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { Router } from '@angular/router';
@@ -39,10 +40,10 @@ export interface UserMenuOption {
         (click)="toggleDropdown()"
         [attr.aria-expanded]="isOpen"
         aria-label="Menú de usuario"
-        >
+      >
         <div class="user-avatar" style="position: relative;">
           <span class="user-initials">{{ user.initials || 'US' }}</span>
-          @if (hasNewModules$ | async) {
+          @if (hasNewModules()) {
             <span class="settings-badge"></span>
           }
         </div>
@@ -55,25 +56,25 @@ export interface UserMenuOption {
           [size]="14"
           class="chevron-icon"
           [class.rotate]="isOpen"
-          >
+        >
         </app-icon>
       </button>
-    
+
       <!-- Mobile: Minimal trigger -->
       <button
         class="user-trigger user-trigger-minimal flex md:hidden"
         (click)="toggleDropdown()"
         [attr.aria-expanded]="isOpen"
         aria-label="Menú de usuario"
-        >
+      >
         <div class="user-avatar-minimal" style="position: relative;">
           <span class="user-initials">{{ user.initials || 'US' }}</span>
-          @if (hasNewModules$ | async) {
+          @if (hasNewModules()) {
             <span class="settings-badge"></span>
           }
         </div>
       </button>
-    
+
       <div class="dropdown-menu" [class.show]="isOpen">
         <div class="dropdown-header">
           <div class="header-avatar">{{ user.initials || 'US' }}</div>
@@ -82,29 +83,31 @@ export interface UserMenuOption {
             <p class="header-email">{{ user.email || 'user@example.com' }}</p>
           </div>
         </div>
-    
+
         <div class="dropdown-divider"></div>
-    
+
         <!-- New Modules Info Banner -->
-        @if ((newModuleCount$ | async); as count) {
-          <div
-            class="new-modules-banner"
-            >
+        @if (newModuleCount(); as count) {
+          <div class="new-modules-banner">
             <app-icon name="info" [size]="16" class="banner-icon"></app-icon>
             <span class="banner-text">
-              Tienes <strong>{{ count }}</strong> {{ count === 1 ? 'módulo nuevo disponible' : 'módulos nuevos disponibles' }}.
-              Actívalos en <strong>Configuración</strong>.
+              Tienes <strong>{{ count }}</strong>
+              {{
+                count === 1
+                  ? 'módulo nuevo disponible'
+                  : 'módulos nuevos disponibles'
+              }}. Actívalos en <strong>Configuración</strong>.
             </span>
           </div>
         }
-    
+
         <div class="dropdown-content">
           @for (option of visibleMenuOptions; track option) {
             <button
               class="dropdown-item"
               [class.danger]="option.type === 'danger'"
               (click)="handleOptionClick(option)"
-              >
+            >
               <app-icon
                 [name]="option.icon"
                 [size]="18"
@@ -112,20 +115,17 @@ export interface UserMenuOption {
               ></app-icon>
               <span class="item-label">{{ option.label }}</span>
               @if (
-                option.label === 'Configuración de usuario' &&
-                (newModuleCount$ | async); as count
-                ) {
-                <span
-                  class="settings-sync-badge"
-                  >{{ count }}</span
-                  >
-                }
-              </button>
-            }
-          </div>
+                option.label === 'Configuración de usuario' && newModuleCount();
+                as count
+              ) {
+                <span class="settings-sync-badge">{{ count }}</span>
+              }
+            </button>
+          }
         </div>
       </div>
-    `,
+    </div>
+  `,
   styleUrls: ['./user-dropdown.component.scss'],
 })
 export class UserDropdownComponent implements OnInit, OnDestroy {
@@ -133,8 +133,6 @@ export class UserDropdownComponent implements OnInit, OnDestroy {
 
   isOpen = false;
   isFullscreen = false;
-  hasNewModules$: Observable<boolean>;
-  newModuleCount$: Observable<number>;
   private destroy$ = new Subject<void>();
 
   private router = inject(Router);
@@ -147,22 +145,11 @@ export class UserDropdownComponent implements OnInit, OnDestroy {
   private fullscreenService = inject(FullscreenService);
   private userUiService = inject(UserUiService);
 
-  userContext$: Observable<{
-    user?: any;
-    organization?: any;
-    store?: any;
-    environment?: any;
-    isAuthenticated: boolean;
-    hasOrganization: boolean;
-    hasStore: boolean;
-  }>;
+  // Signal-based properties from facades
+  readonly hasNewModules = this.authFacade.hasNewModules;
+  readonly newModuleCount = this.authFacade.newModuleCount;
 
-  constructor() {
-    // Inicializar el observable en el constructor
-    this.userContext$ = this.globalFacade.userContext$;
-    this.hasNewModules$ = this.authFacade.hasNewModules$;
-    this.newModuleCount$ = this.authFacade.newModuleCount$;
-  }
+  constructor() {}
 
   ngOnInit() {
     // Suscribirse a cambios de fullscreen
@@ -175,14 +162,17 @@ export class UserDropdownComponent implements OnInit, OnDestroy {
 
     // Refresh default_panel_ui from API to detect new modules accurately
     // This ensures badges work even if localStorage has stale defaults
-    this.authService.getSettings().pipe(take(1)).subscribe({
-      next: (response) => {
-        const settings = response.data || response;
-        if (settings.default_panel_ui) {
-          this.authFacade.setDefaultPanelUi(settings.default_panel_ui);
-        }
-      },
-    });
+    this.authService
+      .getSettings()
+      .pipe(take(1))
+      .subscribe({
+        next: (response) => {
+          const settings = response.data || response;
+          if (settings.default_panel_ui) {
+            this.authFacade.setDefaultPanelUi(settings.default_panel_ui);
+          }
+        },
+      });
   }
 
   ngOnDestroy() {

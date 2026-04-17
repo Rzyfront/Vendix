@@ -1,5 +1,5 @@
 import { Component, inject, DestroyRef } from '@angular/core';
-import { AsyncPipe } from '@angular/common';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { Store } from '@ngrx/store';
 import { Observable, Subject } from 'rxjs';
 import { takeUntil, filter } from 'rxjs/operators';
@@ -39,7 +39,6 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
   selector: 'vendix-payroll',
   standalone: true,
   imports: [
-    AsyncPipe,
     PayrollStatsComponent,
     EmployeeListComponent,
     EmployeeCreateComponent,
@@ -75,8 +74,8 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
       <!-- Employees Tab -->
       @if (activeTab === 'employees') {
         <app-employee-list
-          [employees]="(employees$ | async) || []"
-          [loading]="(employeesLoading$ | async) || false"
+          [employees]="employees() || []"
+          [loading]="employeesLoading() || false"
           (create)="openEmployeeCreateModal()"
           (edit)="editEmployee($event)"
           (detail)="viewEmployee($event)"
@@ -105,8 +104,8 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
       <!-- Payroll Runs Tab -->
       @if (activeTab === 'payroll-runs') {
         <app-payroll-run-list
-          [payrollRuns]="(payrollRuns$ | async) || []"
-          [loading]="(payrollRunsLoading$ | async) || false"
+          [payrollRuns]="payrollRuns() || []"
+          [loading]="payrollRunsLoading() || false"
           (create)="openPayrollRunCreateModal()"
           (detail)="viewPayrollRun($event)"
           (refresh)="refreshPayrollRuns()"
@@ -132,14 +131,27 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
   `,
 })
 export class PayrollComponent {
+  private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
   private destroyRef = inject(DestroyRef);
   private destroy$ = new Subject<void>();
 
-  employees$: Observable<Employee[]>;
-  employeesLoading$: Observable<boolean>;
-  payrollRuns$: Observable<PayrollRun[]>;
-  payrollRunsLoading$: Observable<boolean>;
+  readonly employees = toSignal(this.store.select(selectEmployees), {
+    initialValue: [] as Employee[],
+  });
+  readonly employeesLoading = toSignal(
+    this.store.select(selectEmployeesLoading),
+    {
+      initialValue: false,
+    },
+  );
+  readonly payrollRuns = toSignal(this.store.select(selectPayrollRuns), {
+    initialValue: [] as PayrollRun[],
+  });
+  readonly payrollRunsLoading = toSignal(
+    this.store.select(selectPayrollRunsLoading),
+    { initialValue: false },
+  );
 
   // Tab state
   tabs: ScrollableTab[] = [
@@ -166,12 +178,7 @@ export class PayrollComponent {
   selectedEmployee: Employee | null = null;
   selectedPayrollRun: PayrollRun | null = null;
 
-  constructor(private store: Store) {
-    this.employees$ = this.store.select(selectEmployees);
-    this.employeesLoading$ = this.store.select(selectEmployeesLoading);
-    this.payrollRuns$ = this.store.select(selectPayrollRuns);
-    this.payrollRunsLoading$ = this.store.select(selectPayrollRunsLoading);
-
+  constructor() {
     this.currencyService.loadCurrency();
     this.store.dispatch(loadEmployees());
     this.store.dispatch(loadEmployeeStats());

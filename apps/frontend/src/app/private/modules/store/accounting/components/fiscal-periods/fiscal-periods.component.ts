@@ -1,5 +1,5 @@
-import { Component, inject } from '@angular/core';
-import { AsyncPipe } from '@angular/common';
+import { Component, inject, computed, signal } from '@angular/core';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { Store } from '@ngrx/store';
 import { Observable, map } from 'rxjs';
 
@@ -33,7 +33,6 @@ interface PeriodStats {
   selector: 'vendix-fiscal-periods',
   standalone: true,
   imports: [
-    AsyncPipe,
     CardComponent,
     StatsComponent,
     ResponsiveDataViewComponent,
@@ -46,7 +45,7 @@ interface PeriodStats {
       <div
         class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
       >
-        @if (stats$ | async; as stats) {
+        @if (stats(); as stats) {
           <app-stats
             title="Total Periodos"
             [value]="stats.total"
@@ -96,7 +95,7 @@ interface PeriodStats {
               class="text-[13px] font-bold text-gray-600 tracking-wide
                        md:text-lg md:font-semibold md:text-text-primary"
             >
-              Periodos Fiscales ({{ (periods$ | async)?.length || 0 }})
+              Periodos Fiscales ({{ periods()?.length || 0 }})
             </h2>
             <div class="flex items-center gap-2 w-full md:w-auto">
               <app-options-dropdown
@@ -111,11 +110,11 @@ interface PeriodStats {
         <!-- Data Content -->
         <div class="relative p-2 md:p-4">
           <app-responsive-data-view
-            [data]="(periods$ | async) || []"
+            [data]="periods() || []"
             [columns]="columns"
             [cardConfig]="card_config"
             [actions]="table_actions"
-            [loading]="(loading$ | async) || false"
+            [loading]="loading()"
             emptyMessage="No se encontraron periodos fiscales"
             emptyIcon="calendar"
           ></app-responsive-data-view>
@@ -132,19 +131,26 @@ interface PeriodStats {
 export class FiscalPeriodsComponent {
   private store = inject(Store);
 
-  periods$: Observable<FiscalPeriod[]> = this.store.select(selectFiscalPeriods);
-  loading$: Observable<boolean> = this.store.select(selectFiscalPeriodsLoading);
+  // State via toSignal
+  readonly periods = toSignal(this.store.select(selectFiscalPeriods), {
+    initialValue: [] as FiscalPeriod[],
+  });
+  readonly loading = toSignal(this.store.select(selectFiscalPeriodsLoading), {
+    initialValue: false,
+  });
 
-  stats$: Observable<PeriodStats> = this.periods$.pipe(
-    map((periods) => ({
+  // Stats computed from periods
+  readonly stats = computed(() => {
+    const periods = this.periods();
+    return {
       total: periods.length,
       open: periods.filter((p) => p.status === 'open').length,
       closing: periods.filter((p) => p.status === 'closing').length,
       closed: periods.filter((p) => p.status === 'closed').length,
-    })),
-  );
+    };
+  });
 
-  is_create_modal_open = false;
+  readonly is_create_modal_open = signal(false);
 
   dropdown_actions: DropdownAction[] = [
     {
@@ -213,22 +219,20 @@ export class FiscalPeriodsComponent {
         key: 'start_date',
         label: 'Inicio',
         icon: 'calendar',
-        transform: (val: any) =>
-          val ? formatDateOnlyUTC(val) : '-',
+        transform: (val: any) => (val ? formatDateOnlyUTC(val) : '-'),
       },
       {
         key: 'end_date',
         label: 'Fin',
         icon: 'calendar',
-        transform: (val: any) =>
-          val ? formatDateOnlyUTC(val) : '-',
+        transform: (val: any) => (val ? formatDateOnlyUTC(val) : '-'),
       },
     ],
   };
 
   onActionClick(action: string): void {
     if (action === 'create') {
-      this.is_create_modal_open = true;
+      this.is_create_modal_open.set(true);
     }
   }
 

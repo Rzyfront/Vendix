@@ -1,8 +1,8 @@
 import { Component, inject } from '@angular/core';
-import { AsyncPipe } from '@angular/common';
 import { Router, ActivatedRoute } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
+import { toSignal } from '@angular/core/rxjs-interop';
 
 import {
   loadInvoices,
@@ -28,7 +28,6 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
   selector: 'vendix-invoicing',
   standalone: true,
   imports: [
-    AsyncPipe,
     InvoiceStatsComponent,
     InvoiceListComponent,
     InvoiceCreateComponent,
@@ -77,8 +76,8 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
 
       <!-- Invoice List -->
       <app-invoice-list
-        [invoices]="(invoices$ | async) || []"
-        [loading]="(loading$ | async) || false"
+        [invoices]="invoices() || []"
+        [loading]="loading() || false"
         (create)="openCreateModal()"
         (view)="viewInvoice($event)"
         (resolutions)="openResolutionsModal()"
@@ -118,9 +117,16 @@ export class InvoicingComponent {
   private currencyService = inject(CurrencyFormatService);
   private router = inject(Router);
   private route = inject(ActivatedRoute);
+  private store = inject(Store);
 
-  invoices$: Observable<Invoice[]>;
-  loading$: Observable<boolean>;
+  invoices$ = this.store.select(selectInvoices);
+  loading$ = this.store.select(selectInvoicesLoading);
+
+  // Signal-based properties
+  readonly invoices = toSignal(this.invoices$, {
+    initialValue: [] as Invoice[],
+  });
+  readonly loading = toSignal(this.loading$, { initialValue: false });
 
   // Modal states
   isCreateModalOpen = false;
@@ -130,9 +136,7 @@ export class InvoicingComponent {
   selectedInvoice: Invoice | null = null;
   creditNoteSourceInvoice: Invoice | null = null;
 
-  constructor(private store: Store) {
-    this.invoices$ = this.store.select(selectInvoices);
-    this.loading$ = this.store.select(selectInvoicesLoading);
+  constructor() {
     this.currencyService.loadCurrency();
     this.store.dispatch(loadInvoices());
     this.store.dispatch(loadInvoiceStats());

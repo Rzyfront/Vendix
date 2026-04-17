@@ -1,15 +1,30 @@
 import { Component, inject, input, output, signal } from '@angular/core';
-import { AsyncPipe } from '@angular/common';
-import { FormBuilder, FormGroup, FormArray, Validators, ReactiveFormsModule } from '@angular/forms';
+import {
+  FormBuilder,
+  FormGroup,
+  FormArray,
+  Validators,
+  ReactiveFormsModule,
+} from '@angular/forms';
 import { Store } from '@ngrx/store';
 import { Observable, map } from 'rxjs';
-import { createInvoice, createFromOrder } from '../../state/actions/invoicing.actions';
-import { selectInvoicesLoading, selectActiveResolutions } from '../../state/selectors/invoicing.selectors';
+import { toSignal } from '@angular/core/rxjs-interop';
+import {
+  createInvoice,
+  createFromOrder,
+} from '../../state/actions/invoicing.actions';
+import {
+  selectInvoicesLoading,
+  selectActiveResolutions,
+} from '../../state/selectors/invoicing.selectors';
 import { InvoiceResolution } from '../../interfaces/invoice.interface';
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { InputComponent } from '../../../../../../shared/components/input/input.component';
-import { SelectorComponent, SelectorOption } from '../../../../../../shared/components/selector/selector.component';
+import {
+  SelectorComponent,
+  SelectorOption,
+} from '../../../../../../shared/components/selector/selector.component';
 import { TextareaComponent } from '../../../../../../shared/components/textarea/textarea.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { toLocalDateString } from '../../../../../../shared/utils/date.util';
@@ -18,15 +33,14 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
   selector: 'vendix-invoice-create',
   standalone: true,
   imports: [
-    AsyncPipe,
     ReactiveFormsModule,
     ModalComponent,
     ButtonComponent,
     InputComponent,
     SelectorComponent,
     TextareaComponent,
-    IconComponent
-],
+    IconComponent,
+  ],
   template: `
     <app-modal
       [isOpen]="isOpen()"
@@ -34,7 +48,7 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
       (cancel)="onClose()"
       title="Nueva Factura"
       size="lg"
-      >
+    >
       <div class="p-4">
         <!-- Mode toggle: Manual vs From Order -->
         <div class="flex gap-2 mb-4">
@@ -48,7 +62,7 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
             [class.text-text-primary]="mode() !== 'manual'"
             [class.border-border]="mode() !== 'manual'"
             (click)="mode.set('manual')"
-            >
+          >
             Factura Manual
           </button>
           <button
@@ -61,11 +75,11 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
             [class.text-text-primary]="mode() !== 'from_order'"
             [class.border-border]="mode() !== 'from_order'"
             (click)="mode.set('from_order')"
-            >
+          >
             Desde Pedido
           </button>
         </div>
-    
+
         <!-- From Order Mode -->
         @if (mode() === 'from_order') {
           <div class="space-y-4">
@@ -80,10 +94,14 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
             ></app-input>
           </div>
         }
-    
+
         <!-- Manual Mode -->
         @if (mode() === 'manual') {
-          <form [formGroup]="invoiceForm" (ngSubmit)="onSubmit()" class="space-y-4">
+          <form
+            [formGroup]="invoiceForm"
+            (ngSubmit)="onSubmit()"
+            class="space-y-4"
+          >
             <!-- Invoice Type -->
             <app-selector
               label="Tipo de Factura"
@@ -95,12 +113,14 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
             <app-selector
               label="Resolución"
               formControlName="resolution_id"
-              [options]="(resolutionOptions$ | async) || []"
+              [options]="resolutionOptionsSignal() || []"
               placeholder="Seleccione una resolución"
             ></app-selector>
             <!-- Customer Info -->
             <div class="border border-border rounded-lg p-3 space-y-3">
-              <h4 class="text-sm font-medium text-text-primary">Datos del Cliente</h4>
+              <h4 class="text-sm font-medium text-text-primary">
+                Datos del Cliente
+              </h4>
               <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <app-input
                   label="Nombre / Razón Social"
@@ -157,18 +177,30 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
             <!-- Items -->
             <div class="border border-border rounded-lg p-3 space-y-3">
               <div class="flex items-center justify-between">
-                <h4 class="text-sm font-medium text-text-primary">Productos / Servicios</h4>
-                <app-button variant="outline" size="sm" type="button" (clicked)="addItem()">
+                <h4 class="text-sm font-medium text-text-primary">
+                  Productos / Servicios
+                </h4>
+                <app-button
+                  variant="outline"
+                  size="sm"
+                  type="button"
+                  (clicked)="addItem()"
+                >
                   <app-icon slot="icon" name="plus" [size]="14"></app-icon>
                   Agregar
                 </app-button>
               </div>
               <div formArrayName="items" class="space-y-3">
                 @for (item of itemsArray.controls; track item; let i = $index) {
-                  <div [formGroupName]="i"
-                    class="border border-gray-200 rounded-lg p-3 space-y-2 relative">
-                    <button type="button" (click)="removeItem(i)"
-                      class="absolute top-2 right-2 text-gray-400 hover:text-red-500 transition-colors">
+                  <div
+                    [formGroupName]="i"
+                    class="border border-gray-200 rounded-lg p-3 space-y-2 relative"
+                  >
+                    <button
+                      type="button"
+                      (click)="removeItem(i)"
+                      class="absolute top-2 right-2 text-gray-400 hover:text-red-500 transition-colors"
+                    >
                       <app-icon name="x" [size]="16"></app-icon>
                     </button>
                     <app-input
@@ -229,27 +261,34 @@ import { toLocalDateString } from '../../../../../../shared/utils/date.util';
           </form>
         }
       </div>
-    
+
       <!-- Footer -->
       <div slot="footer">
-        <div class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100">
-          <app-button
-            variant="outline"
-            (clicked)="onClose()">
+        <div
+          class="flex items-center justify-end gap-3 p-3 bg-gray-50 rounded-b-xl border-t border-gray-100"
+        >
+          <app-button variant="outline" (clicked)="onClose()">
             Cancelar
           </app-button>
-    
+
           <app-button
             variant="primary"
             (clicked)="onSubmit()"
-            [disabled]="mode() === 'manual' ? (invoiceForm.invalid || submitting()) : (!orderIdControl.value || submitting())"
-            [loading]="submitting()">
-            {{ mode() === 'from_order' ? 'Crear desde Pedido' : 'Crear Factura' }}
+            [disabled]="
+              mode() === 'manual'
+                ? invoiceForm.invalid || submitting()
+                : !orderIdControl.value || submitting()
+            "
+            [loading]="submitting()"
+          >
+            {{
+              mode() === 'from_order' ? 'Crear desde Pedido' : 'Crear Factura'
+            }}
           </app-button>
         </div>
       </div>
     </app-modal>
-    `
+  `,
 })
 export class InvoiceCreateComponent {
   readonly isOpen = input<boolean>(false);
@@ -262,11 +301,27 @@ export class InvoiceCreateComponent {
   readonly submitting = signal(false);
 
   invoiceForm: FormGroup;
-  orderIdControl = this.fb.control(null, [Validators.required, Validators.min(1)]);
+  orderIdControl = this.fb.control(null, [
+    Validators.required,
+    Validators.min(1),
+  ]);
 
-  resolutions$: Observable<InvoiceResolution[]>;
-  resolutionOptions$: Observable<SelectorOption[]>;
-  loading$: Observable<boolean>;
+  resolutions$ = this.store.select(selectActiveResolutions);
+  loading$ = this.store.select(selectInvoicesLoading);
+
+  resolutionOptions$: Observable<SelectorOption[]> = this.resolutions$.pipe(
+    map((resolutions) =>
+      resolutions.map((r) => ({
+        label: `${r.prefix} - ${r.resolution_number}`,
+        value: r.id,
+      })),
+    ),
+  );
+
+  // Signal-based properties
+  readonly resolutionOptionsSignal = toSignal(this.resolutionOptions$, {
+    initialValue: [] as SelectorOption[],
+  });
 
   invoiceTypeOptions: SelectorOption[] = [
     { label: 'Factura de Venta', value: 'sales_invoice' },
@@ -275,16 +330,6 @@ export class InvoiceCreateComponent {
   ];
 
   constructor() {
-    this.resolutions$ = this.store.select(selectActiveResolutions);
-    this.loading$ = this.store.select(selectInvoicesLoading);
-
-    this.resolutionOptions$ = this.resolutions$.pipe(
-      map(resolutions => resolutions.map(r => ({
-        label: `${r.prefix} - ${r.resolution_number}`,
-        value: r.id,
-      }))),
-    );
-
     const today = toLocalDateString();
 
     this.invoiceForm = this.fb.group({
@@ -307,13 +352,15 @@ export class InvoiceCreateComponent {
   }
 
   addItem(): void {
-    this.itemsArray.push(this.fb.group({
-      product_name: ['', [Validators.required]],
-      quantity: [1, [Validators.required, Validators.min(1)]],
-      unit_price: [0, [Validators.required, Validators.min(0)]],
-      discount_amount: [0],
-      tax_rate: [19],
-    }));
+    this.itemsArray.push(
+      this.fb.group({
+        product_name: ['', [Validators.required]],
+        quantity: [1, [Validators.required, Validators.min(1)]],
+        unit_price: [0, [Validators.required, Validators.min(0)]],
+        discount_amount: [0],
+        tax_rate: [19],
+      }),
+    );
   }
 
   removeItem(index: number): void {
@@ -340,27 +387,31 @@ export class InvoiceCreateComponent {
     this.submitting.set(true);
     const formValue = this.invoiceForm.value;
 
-    this.store.dispatch(createInvoice({
-      invoice: {
-        invoice_type: formValue.invoice_type,
-        resolution_id: formValue.resolution_id ? Number(formValue.resolution_id) : undefined,
-        customer_name: formValue.customer_name,
-        customer_tax_id: formValue.customer_tax_id || undefined,
-        customer_email: formValue.customer_email || undefined,
-        customer_phone: formValue.customer_phone || undefined,
-        customer_address: formValue.customer_address || undefined,
-        issue_date: formValue.issue_date,
-        due_date: formValue.due_date || undefined,
-        notes: formValue.notes || undefined,
-        items: formValue.items.map((item: any) => ({
-          product_name: item.product_name,
-          quantity: Number(item.quantity),
-          unit_price: Number(item.unit_price),
-          discount_amount: Number(item.discount_amount) || 0,
-          tax_rate: Number(item.tax_rate) || 0,
-        })),
-      },
-    }));
+    this.store.dispatch(
+      createInvoice({
+        invoice: {
+          invoice_type: formValue.invoice_type,
+          resolution_id: formValue.resolution_id
+            ? Number(formValue.resolution_id)
+            : undefined,
+          customer_name: formValue.customer_name,
+          customer_tax_id: formValue.customer_tax_id || undefined,
+          customer_email: formValue.customer_email || undefined,
+          customer_phone: formValue.customer_phone || undefined,
+          customer_address: formValue.customer_address || undefined,
+          issue_date: formValue.issue_date,
+          due_date: formValue.due_date || undefined,
+          notes: formValue.notes || undefined,
+          items: formValue.items.map((item: any) => ({
+            product_name: item.product_name,
+            quantity: Number(item.quantity),
+            unit_price: Number(item.unit_price),
+            discount_amount: Number(item.discount_amount) || 0,
+            tax_rate: Number(item.tax_rate) || 0,
+          })),
+        },
+      }),
+    );
 
     this.submitting.set(false);
     this.resetForm();

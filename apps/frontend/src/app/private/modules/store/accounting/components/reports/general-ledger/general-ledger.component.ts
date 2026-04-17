@@ -1,7 +1,8 @@
-import { Component, inject } from '@angular/core';
-import { AsyncPipe, DatePipe, DecimalPipe } from '@angular/common';
+import { Component, inject, effect } from '@angular/core';
+import { DatePipe, DecimalPipe } from '@angular/common';
 import { Store } from '@ngrx/store';
-import { Observable } from 'rxjs';
+import { Observable, first } from 'rxjs';
+import { toSignal } from '@angular/core/rxjs-interop';
 
 import {
   FiscalPeriod,
@@ -24,7 +25,6 @@ import {
   selector: 'vendix-general-ledger',
   standalone: true,
   imports: [
-    AsyncPipe,
     DatePipe,
     DecimalPipe,
     ButtonComponent,
@@ -35,7 +35,11 @@ import {
   template: `
     <div class="w-full">
       <!-- Unified Container -->
-      <app-card [responsive]="true" [padding]="false" customClasses="md:min-h-[400px]">
+      <app-card
+        [responsive]="true"
+        [padding]="false"
+        customClasses="md:min-h-[400px]"
+      >
         <!-- Header -->
         <div
           class="sticky top-0 z-10 bg-background px-2 py-1.5 -mt-[5px]
@@ -66,7 +70,7 @@ import {
 
         <!-- Data Content -->
         <div class="relative p-2 md:p-4">
-          @if (loading$ | async) {
+          @if (loading()) {
             <div
               class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
             >
@@ -76,7 +80,7 @@ import {
             </div>
           }
 
-          @if (report$ | async; as report) {
+          @if (report(); as report) {
             @if (report.accounts.length === 0) {
               <div
                 class="flex flex-col items-center justify-center py-16 text-gray-400"
@@ -238,17 +242,25 @@ import {
 export class GeneralLedgerComponent {
   private store = inject(Store);
 
-  report$: Observable<GeneralLedgerReport | null> =
-    this.store.select(selectGeneralLedger);
-  loading$: Observable<boolean> = this.store.select(selectReportLoading);
-  periods$: Observable<FiscalPeriod[]> = this.store.select(selectFiscalPeriods);
+  // Signal-based state
+  readonly report = toSignal(this.store.select(selectGeneralLedger), {
+    initialValue: null as GeneralLedgerReport | null,
+  });
+  readonly loading = toSignal(this.store.select(selectReportLoading), {
+    initialValue: false,
+  });
+  readonly periods = toSignal(this.store.select(selectFiscalPeriods), {
+    initialValue: [] as FiscalPeriod[],
+  });
 
   period_options: { value: any; label: string }[] = [];
   selected_period_id: number | null = null;
   expanded_account_ids = new Set<number>();
 
   constructor() {
-    this.periods$.subscribe((periods) => {
+    // Initialize period options when periods are loaded
+    effect(() => {
+      const periods = this.periods();
       this.period_options = periods.map((p) => ({
         value: p.id,
         label: p.name,

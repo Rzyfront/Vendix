@@ -1,5 +1,5 @@
 import { Component, input, output, inject } from '@angular/core';
-import { AsyncPipe, DecimalPipe } from '@angular/common';
+import { DecimalPipe } from '@angular/common';
 import {
   FormBuilder,
   FormGroup,
@@ -7,6 +7,7 @@ import {
   Validators,
 } from '@angular/forms';
 import { Observable } from 'rxjs';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { PosPaymentService } from '../services/pos-payment.service';
 import {
   PaymentMethod,
@@ -17,7 +18,7 @@ import {
 @Component({
   selector: 'app-pos-payment',
   standalone: true,
-  imports: [AsyncPipe, DecimalPipe, ReactiveFormsModule],
+  imports: [DecimalPipe, ReactiveFormsModule],
   template: `
     <div class="pos-payment-container">
       <div class="payment-header">
@@ -31,12 +32,12 @@ import {
         <div class="payment-methods">
           <h3 class="text-lg font-semibold mb-4">Seleccionar Método de Pago</h3>
           <div class="methods-grid">
-            @for (method of paymentMethods$ | async; track method) {
+            @for (method of paymentMethods(); track method.id) {
               <div
                 class="method-card"
                 [class.selected]="selectedMethod?.id === method.id"
                 (click)="selectPaymentMethod(method)"
-                >
+              >
                 <div class="method-icon">
                   <i class="fas fa-{{ method.icon }}"></i>
                 </div>
@@ -63,120 +64,132 @@ import {
                   placeholder="0.00"
                   step="0.01"
                   min="0"
-                  />
+                />
                 @if (cashReceived && cashReceived > totalAmount()) {
-                  <div
-                    class="change-info"
-                    >
+                  <div class="change-info">
                     <span class="change-amount"
                       >Cambio: \${{
-                      cashReceived - totalAmount() | number: '1.2-2'
+                        cashReceived - totalAmount() | number: '1.2-2'
                       }}</span
-                      >
-                    </div>
-                  }
-                </div>
-              }
-              @if (selectedMethod.requiresReference) {
-                <div class="form-group">
-                  <label for="reference">{{ selectedMethod.referenceLabel }}</label>
-                  <input
-                    type="text"
-                    id="reference"
-                    formControlName="reference"
-                    class="form-control"
-                    [placeholder]="selectedMethod.referenceLabel"
-                    [maxLength]="selectedMethod.type === 'card' ? 4 : 50"
-                    />
-                </div>
-              }
-              <div class="form-actions">
-                <button
-                  type="button"
-                  class="btn btn-secondary"
-                  (click)="cancelPayment()"
-                  >
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  class="btn btn-primary"
-                  [disabled]="!paymentForm.valid || processing"
-                  >
-                  {{ getProcessingText() }}
-                </button>
-              </div>
-            </form>
-          </div>
-        }
-
-        @if (processing) {
-          <div class="payment-processing">
-            <div class="processing-content">
-              <div class="spinner"></div>
-              <p>{{ getProcessingMessage() }}</p>
-            </div>
-          </div>
-        }
-
-        @if (awaitingConfirmation) {
-          <div class="payment-awaiting">
-            <div class="awaiting-content">
-              <div class="spinner"></div>
-              <p class="text-lg font-semibold">{{ awaitingMessage }}</p>
-              <p class="text-sm text-gray-500 mt-2">El estado se actualizará automáticamente cuando el pago sea confirmado.</p>
-              <div class="awaiting-actions mt-4">
-                <button class="btn btn-secondary" (click)="cancelAwaitingPayment()">
-                  Cancelar espera
-                </button>
-                <button class="btn btn-primary" (click)="checkPaymentStatus()">
-                  Verificar estado
-                </button>
-              </div>
-            </div>
-          </div>
-        }
-
-        @if (paymentResult) {
-          <div class="payment-result">
-            <div
-              class="result-content"
-              [class.success]="paymentResult.success"
-              [class.error]="!paymentResult.success"
-              >
-              <div class="result-icon">
-                <i
-              class="fas fa-{{
-                paymentResult.success ? 'check-circle' : 'exclamation-circle'
-              }}"
-                ></i>
-              </div>
-              <h3>
-                {{ paymentResult.success ? '¡Pago Exitoso!' : 'Error en el Pago' }}
-              </h3>
-              <p>{{ paymentResult.message }}</p>
-              @if (paymentResult.change) {
-                <div class="change-display">
-                  <strong
-                    >Cambio: \${{ paymentResult.change | number: '1.2-2' }}</strong
                     >
                   </div>
                 }
-                @if (paymentResult.transactionId) {
-                  <div class="transaction-id">
-                    <small>ID de Transacción: {{ paymentResult.transactionId }}</small>
-                  </div>
-                }
-                <div class="result-actions">
-                  <button class="btn btn-primary" (click)="onPaymentComplete()">
-                    {{ paymentResult.success ? 'Continuar' : 'Reintentar' }}
-                  </button>
-                </div>
               </div>
+            }
+            @if (selectedMethod.requiresReference) {
+              <div class="form-group">
+                <label for="reference">{{
+                  selectedMethod.referenceLabel
+                }}</label>
+                <input
+                  type="text"
+                  id="reference"
+                  formControlName="reference"
+                  class="form-control"
+                  [placeholder]="selectedMethod.referenceLabel"
+                  [maxLength]="selectedMethod.type === 'card' ? 4 : 50"
+                />
+              </div>
+            }
+            <div class="form-actions">
+              <button
+                type="button"
+                class="btn btn-secondary"
+                (click)="cancelPayment()"
+              >
+                Cancelar
+              </button>
+              <button
+                type="submit"
+                class="btn btn-primary"
+                [disabled]="!paymentForm.valid || processing"
+              >
+                {{ getProcessingText() }}
+              </button>
             </div>
-          }
+          </form>
         </div>
-    `,
+      }
+
+      @if (processing) {
+        <div class="payment-processing">
+          <div class="processing-content">
+            <div class="spinner"></div>
+            <p>{{ getProcessingMessage() }}</p>
+          </div>
+        </div>
+      }
+
+      @if (awaitingConfirmation) {
+        <div class="payment-awaiting">
+          <div class="awaiting-content">
+            <div class="spinner"></div>
+            <p class="text-lg font-semibold">{{ awaitingMessage }}</p>
+            <p class="text-sm text-gray-500 mt-2">
+              El estado se actualizará automáticamente cuando el pago sea
+              confirmado.
+            </p>
+            <div class="awaiting-actions mt-4">
+              <button
+                class="btn btn-secondary"
+                (click)="cancelAwaitingPayment()"
+              >
+                Cancelar espera
+              </button>
+              <button class="btn btn-primary" (click)="checkPaymentStatus()">
+                Verificar estado
+              </button>
+            </div>
+          </div>
+        </div>
+      }
+
+      @if (paymentResult) {
+        <div class="payment-result">
+          <div
+            class="result-content"
+            [class.success]="paymentResult.success"
+            [class.error]="!paymentResult.success"
+          >
+            <div class="result-icon">
+              <i
+                class="fas fa-{{
+                  paymentResult.success ? 'check-circle' : 'exclamation-circle'
+                }}"
+              ></i>
+            </div>
+            <h3>
+              {{
+                paymentResult.success ? '¡Pago Exitoso!' : 'Error en el Pago'
+              }}
+            </h3>
+            <p>{{ paymentResult.message }}</p>
+            @if (paymentResult.change) {
+              <div class="change-display">
+                <strong
+                  >Cambio: \${{
+                    paymentResult.change | number: '1.2-2'
+                  }}</strong
+                >
+              </div>
+            }
+            @if (paymentResult.transactionId) {
+              <div class="transaction-id">
+                <small
+                  >ID de Transacción: {{ paymentResult.transactionId }}</small
+                >
+              </div>
+            }
+            <div class="result-actions">
+              <button class="btn btn-primary" (click)="onPaymentComplete()">
+                {{ paymentResult.success ? 'Continuar' : 'Reintentar' }}
+              </button>
+            </div>
+          </div>
+        </div>
+      }
+    </div>
+  `,
   styles: [
     `
       .pos-payment-container {
@@ -426,7 +439,12 @@ export class PosPaymentComponent {
   readonly paymentComplete = output<PaymentResponse>();
   readonly paymentCancelled = output<void>();
 
-  paymentMethods$: Observable<PaymentMethod[]>;
+  private paymentService = inject(PosPaymentService);
+  private fb = inject(FormBuilder);
+
+  readonly paymentMethods = toSignal(this.paymentService.getPaymentMethods(), {
+    initialValue: [] as PaymentMethod[],
+  });
   selectedMethod: PaymentMethod | null = null;
   paymentForm: FormGroup;
   processing: boolean = false;
@@ -434,11 +452,7 @@ export class PosPaymentComponent {
   awaitingConfirmation: boolean = false;
   awaitingMessage: string = '';
 
-  private paymentService = inject(PosPaymentService);
-  private fb = inject(FormBuilder);
-
   constructor() {
-    this.paymentMethods$ = this.paymentService.getPaymentMethods();
     this.paymentForm = this.fb.group({
       cashReceived: ['', [Validators.required, Validators.min(0)]],
       reference: [''],
@@ -513,11 +527,13 @@ export class PosPaymentComponent {
           window.open(result.nextAction.url, '_blank');
           this.processing = false;
           this.awaitingConfirmation = true;
-          this.awaitingMessage = 'Se abrió la página del banco. Completa el pago y vuelve aquí.';
+          this.awaitingMessage =
+            'Se abrió la página del banco. Completa el pago y vuelve aquí.';
         } else if (result.nextAction?.type === 'await') {
           this.processing = false;
           this.awaitingConfirmation = true;
-          this.awaitingMessage = 'Esperando confirmación en la app de Nequi del cliente...';
+          this.awaitingMessage =
+            'Esperando confirmación en la app de Nequi del cliente...';
         } else {
           this.paymentResult = result;
           this.processing = false;

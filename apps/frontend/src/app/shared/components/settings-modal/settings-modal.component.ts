@@ -8,7 +8,6 @@ import {
   viewChild,
   effect,
   ChangeDetectionStrategy,
-  ChangeDetectorRef,
 } from '@angular/core';
 
 import {

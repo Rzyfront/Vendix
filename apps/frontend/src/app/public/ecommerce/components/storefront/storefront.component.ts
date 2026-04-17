@@ -34,7 +34,7 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
                 [src]="branding.logo"
                 [alt]="storeName + ' Logo'"
                 class="logo-image"
-                />
+              />
             }
             @if (!branding?.logo) {
               <div class="logo-fallback">
@@ -47,7 +47,7 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
               </div>
             }
           </div>
-    
+
           <nav class="store-nav">
             <div class="search-bar">
               <app-inputsearch
@@ -60,24 +60,22 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
             </div>
             <div class="nav-actions">
               <!-- Authenticated User Actions -->
-              @if (isAuthenticated$ | async) {
+              @if (isAuthenticated()) {
                 <button
                   class="icon-btn"
                   (click)="navigateToFavorites()"
                   title="Favoritos"
-                  >
+                >
                   <app-icon name="heart" [size]="22"></app-icon>
                   @if (wishlist.length > 0) {
-                    <span class="badge">{{
-                      wishlist.length
-                    }}</span>
+                    <span class="badge">{{ wishlist.length }}</span>
                   }
                 </button>
                 <button
                   class="icon-btn"
                   (click)="navigateToProfile()"
                   title="Mi Perfil"
-                  >
+                >
                   <app-icon name="user-circle" [size]="22"></app-icon>
                 </button>
               } @else {
@@ -86,7 +84,7 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
                     class="icon-btn"
                     (click)="navigateToLogin()"
                     title="Iniciar sesión"
-                    >
+                  >
                     <app-icon name="user" [size]="22"></app-icon>
                   </button>
                   <div class="guest-dropdown">
@@ -95,27 +93,25 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
                   </div>
                 </div>
               }
-    
+
               <!-- Guest Actions -->
-    
+
               <!-- Cart is always visible -->
               <button
                 class="icon-btn cart-btn"
                 (click)="toggleCart()"
                 title="Carrito"
-                >
+              >
                 <app-icon name="shopping-cart" [size]="22"></app-icon>
                 @if (cartItems.length > 0) {
-                  <span class="badge badge-accent">{{
-                    cartItems.length
-                  }}</span>
+                  <span class="badge badge-accent">{{ cartItems.length }}</span>
                 }
               </button>
             </div>
           </nav>
         </div>
       </header>
-    
+
       <!-- Main Content -->
       <main class="storefront-main">
         <!-- Hero Banner -->
@@ -127,12 +123,12 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
               (click)="scrollToProducts()"
               variant="primary"
               size="lg"
-              >
+            >
               Ver Productos
             </app-button>
           </div>
         </section>
-    
+
         <!-- Categories -->
         @if (categories.length) {
           <section class="categories-section">
@@ -143,7 +139,7 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
                   class="category-card"
                   (click)="filterByCategory(category.id)"
                   [class.active]="selectedCategory === category.id"
-                  >
+                >
                   <div class="category-icon">{{ category.icon }}</div>
                   <span>{{ category.name }}</span>
                 </div>
@@ -151,7 +147,7 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
             </div>
           </section>
         }
-    
+
         <!-- Products Grid -->
         <section class="products-section" id="products">
           <div class="section-header">
@@ -165,7 +161,7 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
               </select>
             </div>
           </div>
-    
+
           <div class="products-grid">
             @for (product of filteredProducts; track product) {
               <div class="product-card">
@@ -175,7 +171,7 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
                       [src]="product.image"
                       [alt]="product.name"
                       class="product-img"
-                      />
+                    />
                     @if (product.onSale) {
                       <div class="sale-badge">Oferta</div>
                     }
@@ -199,15 +195,15 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
                         variant="primary"
                         size="sm"
                         [disabled]="product.stock === 0"
-                        >
+                      >
                         {{
-                        product.stock > 0 ? 'Agregar al Carrito' : 'Sin Stock'
+                          product.stock > 0 ? 'Agregar al Carrito' : 'Sin Stock'
                         }}
                       </app-button>
                       <button
                         class="wishlist-btn"
                         (click)="toggleWishlist(product)"
-                        >
+                      >
                         ♡
                       </button>
                     </div>
@@ -216,7 +212,7 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
               </div>
             }
           </div>
-    
+
           @if (filteredProducts.length === 0) {
             <div class="no-products">
               <p>No se encontraron productos que coincidan con tu búsqueda.</p>
@@ -224,7 +220,7 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
           }
         </section>
       </main>
-    
+
       <!-- Shopping Cart Sidebar -->
       @if (showCart) {
         <div class="cart-sidebar">
@@ -235,7 +231,11 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
           <div class="cart-items">
             @for (item of cartItems; track item) {
               <div class="cart-item">
-                <img [src]="item.image" [alt]="item.name" class="cart-item-image" />
+                <img
+                  [src]="item.image"
+                  [alt]="item.name"
+                  class="cart-item-image"
+                />
                 <div class="cart-item-info">
                   <h5>{{ item.name }}</h5>
                   <p>
@@ -256,13 +256,17 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
           </div>
           <div class="cart-footer">
             <div class="cart-total">Total: {{ cartTotal | currency }}</div>
-            <app-button variant="primary" size="lg" (click)="proceedToCheckout()">
+            <app-button
+              variant="primary"
+              size="lg"
+              (click)="proceedToCheckout()"
+            >
               Proceder al Pago
             </app-button>
           </div>
         </div>
       }
-    
+
       <!-- Footer -->
       <footer class="storefront-footer">
         <div class="footer-content">
@@ -281,7 +285,7 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
         </div>
       </footer>
     </div>
-    `,
+  `,
   styleUrls: ['./storefront.component.scss'],
 })
 export class StorefrontComponent implements OnInit {
@@ -315,7 +319,7 @@ export class StorefrontComponent implements OnInit {
   private authFacade = inject(AuthFacade);
   private router = inject(Router);
 
-  isAuthenticated$ = this.authFacade.isAuthenticated$;
+  isAuthenticated = this.authFacade.isAuthenticated;
 
   async ngOnInit() {
     const appConfig = this.configFacade.getCurrentConfig();

@@ -1,5 +1,5 @@
 import { Component, inject, DestroyRef } from '@angular/core';
-import { AsyncPipe } from '@angular/common';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { Store } from '@ngrx/store';
 import { Actions, ofType } from '@ngrx/effects';
 import { Observable, Subject } from 'rxjs';
@@ -28,7 +28,6 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
   selector: 'vendix-payroll-runs-page',
   standalone: true,
   imports: [
-    AsyncPipe,
     PayrollStatsComponent,
     PayrollRunListComponent,
     PayrollRunCreateComponent,
@@ -36,13 +35,15 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
   ],
   template: `
     <div class="w-full">
-      <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
+      <div
+        class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+      >
         <vendix-payroll-stats view="payroll-runs"></vendix-payroll-stats>
       </div>
 
       <app-payroll-run-list
-        [payrollRuns]="(payrollRuns$ | async) || []"
-        [loading]="(payrollRunsLoading$ | async) || false"
+        [payrollRuns]="payrollRuns() || []"
+        [loading]="payrollRunsLoading() || false"
         (create)="openPayrollRunCreateModal()"
         (detail)="viewPayrollRun($event)"
         (refresh)="refreshPayrollRuns()"
@@ -66,8 +67,13 @@ export class PayrollRunsPageComponent {
   private destroyRef = inject(DestroyRef);
   private destroy$ = new Subject<void>();
 
-  payrollRuns$: Observable<PayrollRun[]> = this.store.select(selectPayrollRuns);
-  payrollRunsLoading$: Observable<boolean> = this.store.select(selectPayrollRunsLoading);
+  readonly payrollRuns = toSignal(this.store.select(selectPayrollRuns), {
+    initialValue: [] as PayrollRun[],
+  });
+  readonly payrollRunsLoading = toSignal(
+    this.store.select(selectPayrollRunsLoading),
+    { initialValue: false },
+  );
 
   isPayrollRunCreateModalOpen = false;
   isPayrollRunDetailModalOpen = false;
@@ -78,21 +84,26 @@ export class PayrollRunsPageComponent {
     this.store.dispatch(loadPayrollRuns());
     this.store.dispatch(loadPayrollRunStats());
 
-    this.store.select(selectCurrentPayrollRun).pipe(
-      takeUntil(this.destroy$),
-      filter((run): run is PayrollRun => run !== null),
-    ).subscribe((run) => {
-      if (this.isPayrollRunDetailModalOpen && this.selectedPayrollRun?.id === run.id) {
-        this.selectedPayrollRun = run;
-      }
-    });
+    this.store
+      .select(selectCurrentPayrollRun)
+      .pipe(
+        takeUntil(this.destroy$),
+        filter((run): run is PayrollRun => run !== null),
+      )
+      .subscribe((run) => {
+        if (
+          this.isPayrollRunDetailModalOpen &&
+          this.selectedPayrollRun?.id === run.id
+        ) {
+          this.selectedPayrollRun = run;
+        }
+      });
 
-    this.actions$.pipe(
-      ofType(cancelPayrollRunSuccess),
-      takeUntil(this.destroy$),
-    ).subscribe(() => {
-      this.isPayrollRunDetailModalOpen = false;
-    });
+    this.actions$
+      .pipe(ofType(cancelPayrollRunSuccess), takeUntil(this.destroy$))
+      .subscribe(() => {
+        this.isPayrollRunDetailModalOpen = false;
+      });
 
     this.destroyRef.onDestroy(() => {
       this.destroy$.next();

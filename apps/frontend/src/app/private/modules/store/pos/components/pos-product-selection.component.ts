@@ -9,6 +9,7 @@ import {
   DestroyRef,
 } from '@angular/core';
 import { Subject, debounceTime, distinctUntilChanged, takeUntil } from 'rxjs';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { FormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
 
@@ -23,7 +24,10 @@ import {
   FilterValues,
   BadgeComponent,
 } from '../../../../../shared/components';
-import { CurrencyPipe, CurrencyFormatService } from '../../../../../shared/pipes/currency';
+import {
+  CurrencyPipe,
+  CurrencyFormatService,
+} from '../../../../../shared/pipes/currency';
 import { Router } from '@angular/router';
 
 import { PosCartService } from '../services/pos-cart.service';
@@ -40,7 +44,11 @@ import {
   selectUser,
   selectStoreSettings,
 } from '../../../../../core/store/auth/auth.selectors';
-import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfaces';
+import {
+  ProductQueryDto,
+  Brand,
+  ProductCategory,
+} from '../../products/interfaces';
 
 @Component({
   selector: 'app-pos-product-selection',
@@ -59,9 +67,11 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
   template: `
     <div
       class="h-full flex flex-col bg-surface rounded-card lg:rounded-card shadow-card border border-border overflow-hidden"
-      >
+    >
       <!-- Products Header -->
-      <div class="px-3 lg:px-6 py-3 lg:py-4 border-b border-border product-header">
+      <div
+        class="px-3 lg:px-6 py-3 lg:py-4 border-b border-border product-header"
+      >
         <!-- Single header row: count badge + search + filters -->
         <div class="flex items-center gap-2 lg:gap-3 w-full">
           <!-- Input de búsqueda -->
@@ -72,8 +82,8 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
             [debounceTime]="300"
             [(ngModel)]="searchQuery"
             (searchChange)="onSearch($event)"
-            />
-    
+          />
+
           <!-- Componente de filtros -->
           <app-options-dropdown
             [filters]="filterConfigs"
@@ -85,18 +95,18 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
             (clearAllFilters)="onClearFilters()"
             class="shrink-0"
           ></app-options-dropdown>
-    
+
           <!-- Botón cliente / Cola -->
           @if (queueEnabled() && queueCount() > 0) {
             <button
               class="relative flex items-center justify-center w-10 sm:w-11 h-10 sm:h-11 rounded-[10px] bg-accent/10 hover:bg-accent/20 transition-colors border border-accent/30 shrink-0"
               (click)="openQueueModal.emit()"
               title="Cola de clientes ({{ queueCount() }})"
-              >
+            >
               <app-icon name="users" [size]="18" class="text-accent"></app-icon>
               <span
                 class="absolute -top-1.5 -right-1.5 min-w-[20px] h-5 flex items-center justify-center rounded-full bg-accent text-white text-xs font-bold px-1"
-                >
+              >
                 {{ queueCount() }}
               </span>
             </button>
@@ -106,8 +116,10 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
               size="md"
               customClasses="w-10 sm:w-11 !px-0 bg-surface !rounded-[10px] shrink-0"
               (clicked)="openCustomerModal.emit()"
-              [title]="selectedCustomer() ? selectedCustomer().name : 'Agregar cliente'"
-              >
+              [title]="
+                selectedCustomer() ? selectedCustomer().name : 'Agregar cliente'
+              "
+            >
               <app-icon
                 slot="icon"
                 [name]="selectedCustomer() ? 'user-check' : 'user-plus'"
@@ -118,7 +130,7 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
           }
         </div>
       </div>
-    
+
       <!-- Products Content -->
       <div class="flex-1 overflow-y-auto min-h-0 p-3 lg:p-6 relative z-0">
         <!-- Loading State -->
@@ -130,16 +142,16 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
             <p class="mt-2 text-text-secondary">Cargando productos...</p>
           </div>
         }
-    
+
         <!-- Empty State -->
         @if (!loading() && filteredProducts().length === 0) {
           <div
             class="flex flex-col items-center justify-center h-64 text-center p-8"
-            >
+          >
             <div
               class="w-20 h-20 rounded-2xl flex items-center justify-center mb-4"
               style="background-color: var(--color-primary-light)"
-              >
+            >
               <app-icon
                 name="package-open"
                 [size]="36"
@@ -157,33 +169,36 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
                 variant="outline"
                 size="md"
                 (clicked)="onClearSearch()"
-                >
+              >
                 Limpiar búsqueda
               </app-button>
             }
           </div>
         }
-    
+
         <!-- Modern Compact Products Grid -->
         @if (!loading() && filteredProducts().length > 0) {
           <div
             class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-2 sm:gap-3"
-            >
+          >
             <!-- Modern Product Card (iOS-style) -->
-            @for (product of filteredProducts(); track trackByProductId($index, product)) {
+            @for (
+              product of filteredProducts();
+              track trackByProductId($index, product)
+            ) {
               <div
                 (click)="onAddToCart(product)"
                 class="group relative bg-surface border border-border rounded-card shadow-sm hover:shadow-lg transition-all duration-200 cursor-pointer overflow-hidden product-card"
-            [class]="
-              product.track_inventory !== false && product.stock === 0
-                ? 'opacity-60 cursor-not-allowed'
-                : 'cursor-pointer hover:border-primary active:scale-[0.97]'
-            "
-                >
+                [class]="
+                  product.track_inventory !== false && product.stock === 0
+                    ? 'opacity-60 cursor-not-allowed'
+                    : 'cursor-pointer hover:border-primary active:scale-[0.97]'
+                "
+              >
                 <!-- Product Image or Icon -->
                 <div
                   class="aspect-square bg-gradient-to-br from-surface to-muted/30 relative overflow-hidden"
-                  >
+                >
                   <!-- Product Image -->
                   @if (product.image_url || product.image) {
                     <img
@@ -191,16 +206,16 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
                       [alt]="product.name"
                       class="w-full h-full object-cover"
                       (error)="onImageError($event)"
-                      />
+                    />
                   }
                   <!-- Default Icon when no image -->
                   @if (!product.image && !product.image_url) {
                     <div
                       class="absolute inset-0 flex items-center justify-center"
-                      >
+                    >
                       <div
                         class="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center"
-                        >
+                      >
                         <app-icon
                           name="image"
                           [size]="24"
@@ -216,12 +231,22 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
                         [variant]="product.stock === 0 ? 'error' : 'warning'"
                         size="xs"
                         badgeStyle="outline"
-                        class="absolute top-2 right-2 z-[1]">
-                        {{ product.stock === 0 ? 'AGOTADO' : 'Últimas ' + product.stock }}
+                        class="absolute top-2 right-2 z-[1]"
+                      >
+                        {{
+                          product.stock === 0
+                            ? 'AGOTADO'
+                            : 'Últimas ' + product.stock
+                        }}
                       </app-badge>
                     }
                   } @else {
-                    <app-badge variant="info" size="xs" badgeStyle="outline" class="absolute top-2 right-2 z-[1]">
+                    <app-badge
+                      variant="info"
+                      size="xs"
+                      badgeStyle="outline"
+                      class="absolute top-2 right-2 z-[1]"
+                    >
                       Disponible
                     </app-badge>
                   }
@@ -229,17 +254,27 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
                   @if (product.has_variants) {
                     <div
                       class="absolute top-2 left-2 px-1.5 py-1 rounded-md text-[10px] font-semibold backdrop-blur-md bg-black/60 border border-white/10 flex items-center gap-1"
-                      >
-                      <app-icon name="layers" [size]="12" [color]="'#ffffff'"></app-icon>
-                      <span class="text-white">{{ product.product_variants?.length }}</span>
+                    >
+                      <app-icon
+                        name="layers"
+                        [size]="12"
+                        [color]="'#ffffff'"
+                      ></app-icon>
+                      <span class="text-white">{{
+                        product.product_variants?.length
+                      }}</span>
                     </div>
                   }
                   <!-- Weight Product Badge -->
                   @if (product.pricing_type === 'weight') {
                     <div
                       class="absolute bottom-2 left-2 px-1.5 py-1 rounded-md text-[10px] font-semibold backdrop-blur-md bg-blue-600/80 border border-white/10 flex items-center gap-1"
-                      >
-                      <app-icon name="scale" [size]="12" [color]="'#ffffff'"></app-icon>
+                    >
+                      <app-icon
+                        name="scale"
+                        [size]="12"
+                        [color]="'#ffffff'"
+                      ></app-icon>
                       <span class="text-white">Peso</span>
                     </div>
                   }
@@ -250,7 +285,7 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
                   <h3
                     class="text-text-primary font-medium text-xs sm:text-sm leading-tight line-clamp-2 mb-1 sm:mb-2 group-hover:text-primary transition-colors"
                     [title]="product.name"
-                    >
+                  >
                     {{ product.name }}
                   </h3>
                   <!-- Product Description (hidden on mobile, shortened on desktop) -->
@@ -258,7 +293,7 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
                     <p
                       class="hidden sm:block text-text-secondary text-xs line-clamp-1 mb-2"
                       [title]="product.description"
-                      >
+                    >
                       {{ product.description }}
                     </p>
                   }
@@ -266,75 +301,103 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
                   <div class="flex items-center justify-between">
                     <!-- Price -->
                     <div class="flex flex-col">
-                      <span class="text-text-primary font-bold text-xs sm:text-sm lg:text-base xl:text-lg leading-tight truncate">
-                        {{ product.final_price | currency }}@if (product.pricing_type === 'weight') {
-                        <span class="text-[10px] font-normal text-text-secondary">/{{ defaultWeightUnit }}</span>
-                      }
-                    </span>
-                    <!-- Stock indicator for non-variant products -->
-                    @if (product.track_inventory !== false) {
-                      @if (!product.has_variants) {
-                        <span
-                          class="text-[10px] sm:text-xs leading-tight"
-                      [class]="product.stock === 0
-                        ? 'text-error font-semibold'
-                        : product.stock <= 5
-                          ? 'text-warning font-medium'
-                          : 'text-text-muted'"
+                      <span
+                        class="text-text-primary font-bold text-xs sm:text-sm lg:text-base xl:text-lg leading-tight truncate"
+                      >
+                        {{ product.final_price | currency }}
+                        @if (product.pricing_type === 'weight') {
+                          <span
+                            class="text-[10px] font-normal text-text-secondary"
+                            >/{{ defaultWeightUnit }}</span
                           >
-                          {{ product.stock === 0 ? 'Sin stock' : product.stock + ' en stock' }}
-                        </span>
+                        }
+                      </span>
+                      <!-- Stock indicator for non-variant products -->
+                      @if (product.track_inventory !== false) {
+                        @if (!product.has_variants) {
+                          <span
+                            class="text-[10px] sm:text-xs leading-tight"
+                            [class]="
+                              product.stock === 0
+                                ? 'text-error font-semibold'
+                                : product.stock <= 5
+                                  ? 'text-warning font-medium'
+                                  : 'text-text-muted'
+                            "
+                          >
+                            {{
+                              product.stock === 0
+                                ? 'Sin stock'
+                                : product.stock + ' en stock'
+                            }}
+                          </span>
+                        }
+                      } @else {
+                        @if (!product.has_variants) {
+                          <span
+                            class="text-[10px] sm:text-xs leading-tight text-blue-600 font-medium"
+                          >
+                            Disponible
+                          </span>
+                        }
                       }
-                    } @else {
-                      @if (!product.has_variants) {
-                        <span class="text-[10px] sm:text-xs leading-tight text-blue-600 font-medium">
-                          Disponible
-                        </span>
-                      }
-                    }
+                    </div>
                   </div>
-                </div>
-                <!-- Additional Product Details + Add Button -->
-                <div
-                  class="hidden sm:flex items-center justify-between mt-2 pt-2 border-t border-border/60 gap-2"
+                  <!-- Additional Product Details + Add Button -->
+                  <div
+                    class="hidden sm:flex items-center justify-between mt-2 pt-2 border-t border-border/60 gap-2"
                   >
-                  <div class="flex-1 min-w-0 flex items-center gap-2 text-xs text-text-muted">
-                    @if (product.sku) {
-                      <span class="font-mono truncate max-w-[80px]" [title]="product.sku">{{
-                        product.sku
-                      }}</span>
-                    }
-                    @if (product.category_name) {
-                      <span class="truncate">{{
-                        product.category_name
-                      }}</span>
-                    }
-                  </div>
-                  <button
-                    class="shrink-0 w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 shadow-sm text-[var(--color-text-on-primary)]"
-                  [ngClass]="
-                    product.stock === 0
-                      ? 'opacity-50 cursor-not-allowed bg-muted'
-                      : 'bg-[var(--color-primary)] hover:opacity-90 hover:scale-110 active:scale-95'
-                  "
-                    [disabled]="product.stock === 0"
-                    (click)="$event.stopPropagation(); onAddToCart(product)"
-                    aria-label="Agregar al carrito"
+                    <div
+                      class="flex-1 min-w-0 flex items-center gap-2 text-xs text-text-muted"
                     >
-                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                      <line x1="12" y1="5" x2="12" y2="19"></line>
-                      <line x1="5" y1="12" x2="19" y2="12"></line>
-                    </svg>
-                  </button>
+                      @if (product.sku) {
+                        <span
+                          class="font-mono truncate max-w-[80px]"
+                          [title]="product.sku"
+                          >{{ product.sku }}</span
+                        >
+                      }
+                      @if (product.category_name) {
+                        <span class="truncate">{{
+                          product.category_name
+                        }}</span>
+                      }
+                    </div>
+                    <button
+                      class="shrink-0 w-7 h-7 rounded-full flex items-center justify-center transition-all duration-200 shadow-sm text-[var(--color-text-on-primary)]"
+                      [ngClass]="
+                        product.stock === 0
+                          ? 'opacity-50 cursor-not-allowed bg-muted'
+                          : 'bg-[var(--color-primary)] hover:opacity-90 hover:scale-110 active:scale-95'
+                      "
+                      [disabled]="product.stock === 0"
+                      (click)="$event.stopPropagation(); onAddToCart(product)"
+                      aria-label="Agregar al carrito"
+                    >
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        width="14"
+                        height="14"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2.5"
+                        stroke-linecap="round"
+                        stroke-linejoin="round"
+                      >
+                        <line x1="12" y1="5" x2="12" y2="19"></line>
+                        <line x1="5" y1="12" x2="19" y2="12"></line>
+                      </svg>
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
-          }
-        </div>
-      }
+            }
+          </div>
+        }
+      </div>
     </div>
-    </div>
-    
+
     <!-- Variant Selector Modal -->
     @if (showVariantSelector && selectedProductForVariant) {
       <app-pos-variant-selector
@@ -344,7 +407,7 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
         (closed)="onVariantSelectorClosed()"
       ></app-pos-variant-selector>
     }
-    `,
+  `,
   styles: [
     `
       :host {
@@ -412,7 +475,6 @@ import { ProductQueryDto, Brand, ProductCategory } from '../../products/interfac
         color: var(--color-primary);
         font-weight: var(--fw-bold);
       }
-
     `,
   ],
 })
@@ -560,26 +622,32 @@ export class PosProductSelectionComponent {
 
   private updateFilterOptions(): void {
     // Update category options
-    const categoryFilter = this.filterConfigs.find(f => f.key === 'category_id');
+    const categoryFilter = this.filterConfigs.find(
+      (f) => f.key === 'category_id',
+    );
     if (categoryFilter) {
       categoryFilter.options = [
         { value: '', label: 'Todas las Categorías' },
-        ...this.categories.filter(c => c.id !== '').map(cat => ({
-          value: cat.id.toString(),
-          label: cat.name,
-        })),
+        ...this.categories
+          .filter((c) => c.id !== '')
+          .map((cat) => ({
+            value: cat.id.toString(),
+            label: cat.name,
+          })),
       ];
     }
 
     // Update brand options
-    const brandFilter = this.filterConfigs.find(f => f.key === 'brand_id');
+    const brandFilter = this.filterConfigs.find((f) => f.key === 'brand_id');
     if (brandFilter) {
       brandFilter.options = [
         { value: '', label: 'Todas las Marcas' },
-        ...this.brands.filter(b => b.id !== '').map(brand => ({
-          value: brand.id.toString(),
-          label: brand.name,
-        })),
+        ...this.brands
+          .filter((b) => b.id !== '')
+          .map((brand) => ({
+            value: brand.id.toString(),
+            label: brand.name,
+          })),
       ];
     }
 
@@ -675,8 +743,7 @@ export class PosProductSelectionComponent {
     // Update selected category for filtering
     if (categoryId) {
       this.selectedCategory =
-        this.categories.find((c) => c.id === categoryId) ||
-        this.categories[0];
+        this.categories.find((c) => c.id === categoryId) || this.categories[0];
     } else {
       this.selectedCategory = this.categories[0];
     }
@@ -684,8 +751,7 @@ export class PosProductSelectionComponent {
     // Update selected brand for filtering
     if (brandId) {
       this.selectedBrand =
-        this.brands.find((b) => b.id.toString() === brandId) ||
-        this.brands[0];
+        this.brands.find((b) => b.id.toString() === brandId) || this.brands[0];
     } else {
       this.selectedBrand = this.brands[0];
     }
@@ -712,8 +778,9 @@ export class PosProductSelectionComponent {
 
     if (filters.brand_id) {
       this.selectedBrand =
-        this.brands.find((b) => b.id.toString() === filters.brand_id!.toString()) ||
-        this.brands[0];
+        this.brands.find(
+          (b) => b.id.toString() === filters.brand_id!.toString(),
+        ) || this.brands[0];
     } else {
       this.selectedBrand = this.brands[0];
     }
@@ -743,7 +810,10 @@ export class PosProductSelectionComponent {
 
   async onAddToCart(product: any): Promise<void> {
     // Interceptar servicios que requieren reserva (SIEMPRE antes de validaciones de precio)
-    if (product.product_type === 'service' || product.requires_booking === true) {
+    if (
+      product.product_type === 'service' ||
+      product.requires_booking === true
+    ) {
       this.bookingRequired.emit(product);
       return;
     }
@@ -772,7 +842,6 @@ export class PosProductSelectionComponent {
       return;
     }
 
-
     await this.addToCartNormal(product);
   }
 
@@ -784,11 +853,16 @@ export class PosProductSelectionComponent {
     if (!product) return;
 
     // If product is weight-based and scale is enabled, prompt for weight
-    const isWeightProduct = product.pricing_type === 'weight' && this.scaleEnabled;
+    const isWeightProduct =
+      product.pricing_type === 'weight' && this.scaleEnabled;
     if (isWeightProduct) {
       const unit = this.defaultWeightUnit;
       const variantPrice = variant.price_override ?? product.final_price;
-      const weight = await this.getWeightFromScaleOrManual(product.name, variantPrice, unit);
+      const weight = await this.getWeightFromScaleOrManual(
+        product.name,
+        variantPrice,
+        unit,
+      );
       if (weight === undefined) return;
 
       if (weight <= 0) {
@@ -807,13 +881,19 @@ export class PosProductSelectionComponent {
         .subscribe({
           next: () => {
             this.addingToCart.delete(product.id);
-            const variantLabel = variant.attributes?.map(a => a.attribute_value).join(' / ') || '';
-            this.toastService.success(`${product.name} (${variantLabel}) ${weight} ${unit} agregado al carrito`);
+            const variantLabel =
+              variant.attributes?.map((a) => a.attribute_value).join(' / ') ||
+              '';
+            this.toastService.success(
+              `${product.name} (${variantLabel}) ${weight} ${unit} agregado al carrito`,
+            );
             this.productAddedToCart.emit({ product, quantity: 1 });
           },
           error: (error) => {
             this.addingToCart.delete(product.id);
-            this.toastService.warning(error.message || 'Error al agregar variante al carrito');
+            this.toastService.warning(
+              error.message || 'Error al agregar variante al carrito',
+            );
           },
         });
       return;
@@ -831,13 +911,18 @@ export class PosProductSelectionComponent {
       .subscribe({
         next: () => {
           this.addingToCart.delete(product.id);
-          const variantLabel = variant.attributes?.map(a => a.attribute_value).join(' / ') || '';
-          this.toastService.success(`${product.name} (${variantLabel}) agregado al carrito`);
+          const variantLabel =
+            variant.attributes?.map((a) => a.attribute_value).join(' / ') || '';
+          this.toastService.success(
+            `${product.name} (${variantLabel}) agregado al carrito`,
+          );
           this.productAddedToCart.emit({ product, quantity: 1 });
         },
         error: (error) => {
           this.addingToCart.delete(product.id);
-          this.toastService.warning(error.message || 'Error al agregar variante al carrito');
+          this.toastService.warning(
+            error.message || 'Error al agregar variante al carrito',
+          );
         },
       });
   }
@@ -862,12 +947,17 @@ export class PosProductSelectionComponent {
     }
 
     // Check if product is sold by weight and scale is enabled
-    const isWeightProduct = product.pricing_type === 'weight' && this.scaleEnabled;
+    const isWeightProduct =
+      product.pricing_type === 'weight' && this.scaleEnabled;
 
     // For weight products, require weight input
     if (isWeightProduct) {
       const unit = this.defaultWeightUnit;
-      const weight = await this.getWeightFromScaleOrManual(product.name, product.final_price, unit);
+      const weight = await this.getWeightFromScaleOrManual(
+        product.name,
+        product.final_price,
+        unit,
+      );
       if (weight === undefined) return;
 
       if (weight <= 0) {
@@ -900,7 +990,9 @@ export class PosProductSelectionComponent {
         },
         error: (error) => {
           this.addingToCart.delete(product.id);
-          this.toastService.warning(error.message || 'Error al agregar producto al carrito');
+          this.toastService.warning(
+            error.message || 'Error al agregar producto al carrito',
+          );
         },
       });
   }
@@ -923,13 +1015,15 @@ export class PosProductSelectionComponent {
         next: () => {
           this.addingToCart.delete(product.id);
           this.toastService.success(
-            `${product.name} (${weight} ${unit}) agregado al carrito - ${this.formatPrice(totalPrice)}`
+            `${product.name} (${weight} ${unit}) agregado al carrito - ${this.formatPrice(totalPrice)}`,
           );
           this.productAddedToCart.emit({ product, quantity: 1 });
         },
         error: (error) => {
           this.addingToCart.delete(product.id);
-          this.toastService.warning(error.message || 'Error al agregar producto al carrito');
+          this.toastService.warning(
+            error.message || 'Error al agregar producto al carrito',
+          );
         },
       });
   }
@@ -967,7 +1061,9 @@ export class PosProductSelectionComponent {
       return isNaN(weight) ? undefined : weight;
     }
 
-    this.toastService.warning('Báscula no conectada y pesado manual deshabilitado');
+    this.toastService.warning(
+      'Báscula no conectada y pesado manual deshabilitado',
+    );
     return undefined;
   }
 
@@ -1048,32 +1144,43 @@ export class PosProductSelectionComponent {
   }
 
   private loadScaleSettings(): void {
-    this.store.select(selectStoreSettings).pipe(takeUntil(this.destroy$)).subscribe((storeSettings: any) => {
-      if (storeSettings?.pos?.scale) {
-        this.scaleEnabled = storeSettings.pos.scale.enabled ?? false;
-        this.defaultWeightUnit = storeSettings.pos.scale.default_weight_unit || 'kg';
-        this.allowManualWeightEntry = storeSettings.pos.scale.allow_manual_weight_entry ?? true;
+    this.store
+      .select(selectStoreSettings)
+      .pipe(takeUntil(this.destroy$))
+      .subscribe((storeSettings: any) => {
+        if (storeSettings?.pos?.scale) {
+          this.scaleEnabled = storeSettings.pos.scale.enabled ?? false;
+          this.defaultWeightUnit =
+            storeSettings.pos.scale.default_weight_unit || 'kg';
+          this.allowManualWeightEntry =
+            storeSettings.pos.scale.allow_manual_weight_entry ?? true;
 
-        if (storeSettings.pos.scale.device) {
-          this.scaleService.configure(storeSettings.pos.scale.device);
+          if (storeSettings.pos.scale.device) {
+            this.scaleService.configure(storeSettings.pos.scale.device);
+          }
         }
-      }
-    });
+      });
   }
 
   private checkAuthState(): void {
     // Use store selectors instead of direct localStorage access
-    this.store.select(selectAccessToken).subscribe((token: any) => {
-      if (!token) {
-        this.toastService.error(
-          'No estás autenticado. Por favor, inicia sesión.',
-        );
-      }
-    });
+    this.store
+      .select(selectAccessToken)
+      .pipe(takeUntilDestroyed())
+      .subscribe((token: any) => {
+        if (!token) {
+          this.toastService.error(
+            'No estás autenticado. Por favor, inicia sesión.',
+          );
+        }
+      });
 
-    this.store.select(selectUser).subscribe((user: any) => {
-      // User data handled by store
-    });
+    this.store
+      .select(selectUser)
+      .pipe(takeUntilDestroyed())
+      .subscribe((user: any) => {
+        // User data handled by store
+      });
 
     // Keep store check for now since it's critical for POS
     const currentStore = localStorage.getItem('current_store');

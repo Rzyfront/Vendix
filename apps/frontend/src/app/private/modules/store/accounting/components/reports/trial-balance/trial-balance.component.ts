@@ -1,5 +1,6 @@
-import { Component, OnInit, inject } from '@angular/core';
-import { CommonModule } from '@angular/common';
+import { Component, inject, computed, effect, signal } from '@angular/core';
+import { DecimalPipe } from '@angular/common';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { Store } from '@ngrx/store';
 import { Observable } from 'rxjs';
 
@@ -24,7 +25,7 @@ import {
   selector: 'vendix-trial-balance',
   standalone: true,
   imports: [
-    CommonModule,
+    DecimalPipe,
     ButtonComponent,
     CardComponent,
     IconComponent,
@@ -33,7 +34,11 @@ import {
   template: `
     <div class="w-full">
       <!-- Unified Container -->
-      <app-card [responsive]="true" [padding]="false" customClasses="md:min-h-[400px]">
+      <app-card
+        [responsive]="true"
+        [padding]="false"
+        customClasses="md:min-h-[400px]"
+      >
         <!-- Header -->
         <div
           class="sticky top-0 z-10 bg-background px-2 py-1.5 -mt-[5px]
@@ -64,7 +69,7 @@ import {
 
         <!-- Data Content -->
         <div class="relative p-2 md:p-4">
-          @if (loading$ | async) {
+          @if (loading()) {
             <div
               class="absolute inset-0 bg-surface/50 z-10 flex items-center justify-center"
             >
@@ -74,7 +79,7 @@ import {
             </div>
           }
 
-          @if (report$ | async; as report) {
+          @if (report(); as report) {
             <!-- Table Header (desktop) -->
             <div
               class="hidden md:grid md:grid-cols-12 gap-2 px-4 py-3 bg-gray-50 rounded-lg
@@ -191,36 +196,45 @@ import {
     </div>
   `,
 })
-export class TrialBalanceComponent implements OnInit {
+export class TrialBalanceComponent {
   private store = inject(Store);
 
-  report$: Observable<TrialBalanceReport | null> =
-    this.store.select(selectTrialBalance);
-  loading$: Observable<boolean> = this.store.select(selectReportLoading);
-  periods$: Observable<FiscalPeriod[]> = this.store.select(selectFiscalPeriods);
+  // State via toSignal
+  readonly report = toSignal(this.store.select(selectTrialBalance), {
+    initialValue: null,
+  });
+  readonly loading = toSignal(this.store.select(selectReportLoading), {
+    initialValue: false,
+  });
+  readonly periods = toSignal(this.store.select(selectFiscalPeriods), {
+    initialValue: [] as FiscalPeriod[],
+  });
 
-  period_options: { value: any; label: string }[] = [];
-  selected_period_id: number | null = null;
+  readonly period_options = computed(() =>
+    this.periods().map((p) => ({
+      value: p.id,
+      label: p.name,
+    })),
+  );
+  readonly selected_period_id = signal<number | null>(null);
 
-  ngOnInit(): void {
-    this.periods$.subscribe((periods) => {
-      this.period_options = periods.map((p) => ({
-        value: p.id,
-        label: p.name,
-      }));
+  constructor() {
+    effect(() => {
+      const options = this.period_options();
     });
   }
 
   onPeriodChange(value: any): void {
-    this.selected_period_id = value;
+    this.selected_period_id.set(value);
     this.loadReport();
   }
 
   loadReport(): void {
-    if (this.selected_period_id) {
+    const periodId = this.selected_period_id();
+    if (periodId) {
       this.store.dispatch(
         loadTrialBalance({
-          query: { fiscal_period_id: this.selected_period_id },
+          query: { fiscal_period_id: periodId },
         }),
       );
     }

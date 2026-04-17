@@ -1,7 +1,7 @@
 import { Component, input, output, inject } from '@angular/core';
-import { AsyncPipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Observable } from 'rxjs';
+import { toSignal } from '@angular/core/rxjs-interop';
 import { PosTicketService } from '../services/pos-ticket.service';
 import {
   TicketData,
@@ -12,7 +12,7 @@ import {
 @Component({
   selector: 'app-pos-ticket-printer',
   standalone: true,
-  imports: [AsyncPipe, FormsModule],
+  imports: [FormsModule],
   template: `
     <div class="ticket-printer-container">
       <div class="printer-header">
@@ -30,11 +30,9 @@ import {
             class="printer-select"
             [(ngModel)]="selectedPrinter"
             (change)="onPrinterChange()"
-            >
-            @for (printer of printers$ | async; track printer) {
-              <option
-                [value]="printer.name"
-                >
+          >
+            @for (printer of printers(); track printer.name) {
+              <option [value]="printer.name">
                 {{ printer.name }} ({{ printer.type }})
               </option>
             }
@@ -44,7 +42,7 @@ import {
             (click)="testPrinter()"
             type="button"
             title="Probar impresora"
-            >
+          >
             <i class="fas fa-print"></i>
           </button>
         </div>
@@ -58,7 +56,7 @@ import {
                 type="checkbox"
                 [(ngModel)]="printOptions.printReceipt"
                 (change)="onOptionsChange()"
-                />
+              />
               Imprimir ticket físico
             </label>
           </div>
@@ -69,7 +67,7 @@ import {
                 type="checkbox"
                 [(ngModel)]="printOptions.openCashDrawer"
                 (change)="onOptionsChange()"
-                />
+              />
               Abrir caja registradora
             </label>
           </div>
@@ -81,7 +79,7 @@ import {
                 [(ngModel)]="printOptions.emailReceipt"
                 (change)="onOptionsChange()"
                 [disabled]="!hasCustomerEmail()"
-                />
+              />
               Enviar por email
               @if (ticketData()?.customer?.email) {
                 <span class="customer-info">
@@ -98,7 +96,7 @@ import {
                 [(ngModel)]="printOptions.smsReceipt"
                 (change)="onOptionsChange()"
                 [disabled]="!hasCustomerPhone()"
-                />
+              />
               Enviar por SMS
               @if (ticketData()?.customer?.phone) {
                 <span class="customer-info">
@@ -118,7 +116,7 @@ import {
               (change)="onOptionsChange()"
               min="1"
               max="10"
-              />
+            />
           </div>
         </div>
 
@@ -135,7 +133,7 @@ import {
           class="btn btn-secondary"
           (click)="togglePreview()"
           type="button"
-          >
+        >
           <i class="fas fa-eye"></i>
           {{ showPreview ? 'Ocultar' : 'Mostrar' }} Vista Previa
         </button>
@@ -144,13 +142,13 @@ import {
           (click)="printOrder()"
           [disabled]="printing"
           type="button"
-          >
+        >
           <i class="fas fa-print"></i>
           {{ printing ? 'Imprimiendo...' : 'Imprimir' }}
         </button>
       </div>
     </div>
-    `,
+  `,
   styles: [
     `
       .ticket-printer-container {
@@ -414,7 +412,11 @@ export class PosTicketPrinterComponent {
   readonly printComplete = output<boolean>();
   readonly printerClosed = output<void>();
 
-  printers$!: Observable<PrinterConfig[]>;
+  private ticketService = inject(PosTicketService);
+
+  readonly printers = toSignal(this.ticketService.getPrinterConfig(), {
+    initialValue: [] as PrinterConfig[],
+  });
   selectedPrinter: string = '';
   printOptions: PrintOptions = {
     printReceipt: true,
@@ -428,10 +430,7 @@ export class PosTicketPrinterComponent {
   ticketPreview: string = '';
   printing: boolean = false;
 
-  private ticketService = inject(PosTicketService);
-
   constructor() {
-    this.printers$ = this.ticketService.getPrinterConfig();
     this.loadPreview();
   }
 

@@ -1,14 +1,8 @@
-import {
-  Component,
-  input,
-  output,
-  inject,
-  DestroyRef,
-} from '@angular/core';
-import { AsyncPipe } from '@angular/common';
+import { Component, input, output, inject, DestroyRef } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Observable, Subject } from 'rxjs';
 import { takeUntil, map, distinctUntilChanged, skip } from 'rxjs/operators';
+import { toSignal } from '@angular/core/rxjs-interop';
 import {
   PosCartService,
   CartState,
@@ -26,76 +20,88 @@ import { PosApiService } from '../services/pos-api.service';
 @Component({
   selector: 'app-pos-cart',
   standalone: true,
-  imports: [
-    AsyncPipe,
-    FormsModule,
-    IconComponent,
-    QuantityControlComponent,
-  ],
+  imports: [FormsModule, IconComponent, QuantityControlComponent],
   template: `
     <div
       class="h-full flex flex-col bg-surface rounded-card shadow-card border border-border overflow-hidden"
-      >
+    >
       <!-- Cart Header & Summary Section (Fixed at top) -->
       <div class="flex-none bg-surface border-b border-border shadow-sm">
         <!-- Header Row -->
         <div class="px-5 py-3 border-b border-border/50">
           <h2
             class="text-base font-bold text-text-primary flex items-center gap-2"
-            >
+          >
             <app-icon
               name="shopping-cart"
               [size]="18"
               class="text-primary"
             ></app-icon>
-            Carrito ({{ (cartState$ | async)?.items?.length || 0 }})
+            Carrito ({{ cartState()?.items?.length || 0 }})
           </h2>
         </div>
-    
+
         <!-- Totals Row (High Contrast) -->
         <div class="px-3 py-3 bg-muted/20">
           <div class="space-y-1.5 mb-4">
             <div class="flex justify-between text-xs text-text-secondary">
               <span>Subtotal</span>
               <span class="font-medium">{{
-                formatCurrency((summary$ | async)?.subtotal || 0)
+                formatCurrency(summary()?.subtotal || 0)
               }}</span>
             </div>
             <div class="flex justify-between text-xs text-text-secondary">
               <span>Impuestos</span>
               <span class="font-medium">{{
-                formatCurrency((summary$ | async)?.taxAmount || 0)
+                formatCurrency(summary()?.taxAmount || 0)
               }}</span>
             </div>
-    
+
             <!-- Promotions & Coupons (hidden in quotation mode) -->
             @if (!isQuotationMode() && !isLayawayMode()) {
               <!-- Promotions Applied -->
               @if (getPromotionDiscounts().length > 0) {
                 <div class="pt-1.5 border-t border-border/30">
                   <div class="flex items-center gap-1.5 mb-1">
-                    <app-icon name="tag" [size]="12" class="text-green-600"></app-icon>
-                    <span class="text-[11px] font-semibold text-green-700">Promociones aplicadas</span>
-                    <span class="inline-flex items-center justify-center w-4 h-4 rounded-full bg-green-100 text-green-700 text-[9px] font-bold">
+                    <app-icon
+                      name="tag"
+                      [size]="12"
+                      class="text-green-600"
+                    ></app-icon>
+                    <span class="text-[11px] font-semibold text-green-700"
+                      >Promociones aplicadas</span
+                    >
+                    <span
+                      class="inline-flex items-center justify-center w-4 h-4 rounded-full bg-green-100 text-green-700 text-[9px] font-bold"
+                    >
                       {{ getPromotionDiscounts().length }}
                     </span>
                   </div>
                   @for (disc of getPromotionDiscounts(); track disc) {
-                    <div class="flex items-center justify-between text-[11px] py-0.5">
+                    <div
+                      class="flex items-center justify-between text-[11px] py-0.5"
+                    >
                       <div class="flex items-center gap-1 min-w-0">
-                        <span class="text-green-700 truncate">{{ disc.description }}</span>
+                        <span class="text-green-700 truncate">{{
+                          disc.description
+                        }}</span>
                         @if (disc.is_auto_applied) {
-                          <span class="inline-flex items-center px-1 rounded text-[8px] font-medium bg-green-100 text-green-600">auto</span>
+                          <span
+                            class="inline-flex items-center px-1 rounded text-[8px] font-medium bg-green-100 text-green-600"
+                            >auto</span
+                          >
                         }
                       </div>
                       <div class="flex items-center gap-1 shrink-0">
-                        <span class="font-medium text-green-700">-{{ formatCurrency(disc.amount) }}</span>
+                        <span class="font-medium text-green-700"
+                          >-{{ formatCurrency(disc.amount) }}</span
+                        >
                         @if (!disc.is_auto_applied) {
                           <button
                             (click)="removePromoDiscount(disc.id)"
                             class="p-0.5 rounded text-text-secondary hover:text-destructive hover:bg-destructive/10 transition-colors"
                             title="Eliminar promoción"
-                            >
+                          >
                             <app-icon name="x" [size]="10"></app-icon>
                           </button>
                         }
@@ -104,22 +110,30 @@ import { PosApiService } from '../services/pos-api.service';
                   }
                 </div>
               }
-    
+
               <!-- Coupon Code Input / Applied Coupon -->
               <div class="pt-1.5 border-t border-border/30">
                 @if (getAppliedCoupon(); as coupon) {
                   <div class="flex items-center justify-between py-0.5">
                     <div class="flex items-center gap-1.5">
-                      <app-icon name="ticket" [size]="12" class="text-primary"></app-icon>
-                      <span class="text-[11px] font-semibold text-primary">{{ coupon.coupon_code }}</span>
+                      <app-icon
+                        name="ticket"
+                        [size]="12"
+                        class="text-primary"
+                      ></app-icon>
+                      <span class="text-[11px] font-semibold text-primary">{{
+                        coupon.coupon_code
+                      }}</span>
                     </div>
                     <div class="flex items-center gap-1">
-                      <span class="text-[11px] font-medium text-green-700">-{{ formatCurrency(getCouponDiscountAmount()) }}</span>
+                      <span class="text-[11px] font-medium text-green-700"
+                        >-{{ formatCurrency(getCouponDiscountAmount()) }}</span
+                      >
                       <button
                         (click)="removeCoupon()"
                         class="p-0.5 rounded text-text-secondary hover:text-destructive hover:bg-destructive/10 transition-colors"
                         title="Eliminar cupón"
-                        >
+                      >
                         <app-icon name="x" [size]="10"></app-icon>
                       </button>
                     </div>
@@ -132,29 +146,29 @@ import { PosApiService } from '../services/pos-api.service';
                       placeholder="Código de cupón"
                       class="flex-1 px-2 py-1.5 text-xs rounded-md border border-border bg-surface text-text-primary placeholder:text-text-muted focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary/20 uppercase"
                       (keydown.enter)="applyCoupon()"
-                      />
+                    />
                     <button
                       (click)="applyCoupon()"
                       [disabled]="!couponCode.trim() || couponLoading"
                       class="px-3 py-1.5 text-xs font-semibold rounded-md bg-primary/10 text-primary hover:bg-primary/20 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                      >
+                    >
                       {{ couponLoading ? '...' : 'Aplicar' }}
                     </button>
                   </div>
                 }
               </div>
             }
-    
+
             <div
               class="pt-2 border-t border-border/50 flex justify-between items-center"
-              >
+            >
               <span class="font-bold text-text-primary text-base">Total</span>
               <span class="font-extrabold text-2xl text-primary tracking-tight">
-                {{ formatCurrency((summary$ | async)?.total || 0) }}
+                {{ formatCurrency(summary()?.total || 0) }}
               </span>
             </div>
           </div>
-    
+
           <!-- Checkout Actions -->
           <div class="cart-actions">
             @if (isQuotationMode()) {
@@ -163,8 +177,8 @@ import { PosApiService } from '../services/pos-api.service';
                 type="button"
                 class="cart-btn checkout-btn"
                 (click)="quote.emit()"
-                [disabled]="(isEmpty$ | async) ?? false"
-                >
+                [disabled]="isEmpty() ?? false"
+              >
                 <app-icon name="file-text" [size]="18"></app-icon>
                 <span>Crear Cotización</span>
               </button>
@@ -174,8 +188,8 @@ import { PosApiService } from '../services/pos-api.service';
                 type="button"
                 class="cart-btn checkout-btn"
                 (click)="layaway.emit()"
-                [disabled]="(isEmpty$ | async) ?? false"
-                >
+                [disabled]="isEmpty() ?? false"
+              >
                 <app-icon name="calendar" [size]="18"></app-icon>
                 <span>Crear Plan Separé</span>
               </button>
@@ -186,8 +200,8 @@ import { PosApiService } from '../services/pos-api.service';
                   type="button"
                   class="cart-btn save-btn"
                   (click)="saveCart()"
-                  [disabled]="(isEmpty$ | async) ?? false"
-                  >
+                  [disabled]="isEmpty() ?? false"
+                >
                   <app-icon name="save" [size]="16"></app-icon>
                   <span>Guardar</span>
                 </button>
@@ -195,8 +209,8 @@ import { PosApiService } from '../services/pos-api.service';
                   type="button"
                   class="cart-btn shipping-btn"
                   (click)="shipping.emit()"
-                  [disabled]="(isEmpty$ | async) ?? false"
-                  >
+                  [disabled]="isEmpty() ?? false"
+                >
                   <app-icon name="truck" [size]="16"></app-icon>
                   <span>Envío</span>
                 </button>
@@ -205,49 +219,52 @@ import { PosApiService } from '../services/pos-api.service';
                 type="button"
                 class="cart-btn checkout-btn"
                 (click)="proceedToPayment()"
-                [disabled]="(isEmpty$ | async) ?? false"
-                >
-                <app-icon [name]="isEditMode() ? 'check' : 'credit-card'" [size]="18"></app-icon>
+                [disabled]="isEmpty() ?? false"
+              >
+                <app-icon
+                  [name]="isEditMode() ? 'check' : 'credit-card'"
+                  [size]="18"
+                ></app-icon>
                 <span>{{ isEditMode() ? 'Actualizar Orden' : 'Cobrar' }}</span>
               </button>
             }
           </div>
         </div>
-    
+
         <!-- Customer Information (Compact) -->
-        @if ((cartState$ | async)?.customer) {
+        @if (cartState()?.customer) {
           <div
             class="px-5 py-2.5 bg-primary/5 border-t border-primary/10 flex items-center gap-3"
-            >
+          >
             <div
               class="w-7 h-7 rounded-full bg-primary/10 flex items-center justify-center text-primary"
-              >
+            >
               <app-icon name="user" [size]="14"></app-icon>
             </div>
             <div class="flex-1 min-w-0">
               <p
                 class="text-[11px] text-text-secondary font-medium leading-none mb-0.5"
-                >
+              >
                 Cliente
               </p>
               <p class="text-xs font-bold text-text-primary truncate">
-                {{ (cartState$ | async)?.customer?.name }}
+                {{ cartState()?.customer?.name }}
               </p>
             </div>
           </div>
         }
       </div>
-    
+
       <!-- Cart Content (Scrollable Items) -->
       <div class="flex-1 overflow-y-auto p-4 bg-bg/30">
         <!-- Empty State -->
-        @if (isEmpty$ | async) {
+        @if (isEmpty()) {
           <div
             class="flex flex-col items-center pt-10 min-h-[200px] text-center opacity-60"
-            >
+          >
             <div
               class="w-12 h-12 bg-muted/20 rounded-full flex items-center justify-center mb-3"
-              >
+            >
               <app-icon
                 name="shopping-cart"
                 [size]="24"
@@ -262,63 +279,71 @@ import { PosApiService } from '../services/pos-api.service';
             </p>
           </div>
         }
-    
+
         <!-- Cart Items List -->
-        @if (!(isEmpty$ | async)) {
+        @if (!isEmpty()) {
           <div class="space-y-2">
             @for (
-              item of (cartState$ | async)?.items; track trackByItemId($index,
-              item)) {
+              item of cartState()?.items;
+              track trackByItemId($index, item)
+            ) {
               <div
                 class="group grid grid-cols-[40px_1fr_auto] gap-x-2.5 gap-y-1.5 p-2.5 rounded-md border border-border bg-surface hover:bg-muted/30 hover:border-primary/30 transition-all duration-200"
-                >
+              >
                 <!-- Product Image -->
                 <div
                   class="row-span-1 w-10 h-10 shrink-0 bg-muted rounded-md overflow-hidden relative border border-border/50"
-                  >
+                >
                   @if (item.product.image_url || item.product.image) {
                     <img
                       [src]="item.product.image_url || item.product.image"
                       [alt]="item.product.name"
                       class="absolute inset-0 w-full h-full object-cover"
                       (error)="handleImageError($event)"
-                      />
+                    />
                   }
                   @if (!item.product.image_url && !item.product.image) {
                     <div
                       class="absolute inset-0 flex items-center justify-center text-text-secondary"
-                      >
+                    >
                       <app-icon name="image" [size]="14"></app-icon>
                     </div>
                   }
                 </div>
                 <!-- Item Info -->
                 <div class="min-w-0 flex flex-col justify-center">
-                  <h4 class="text-sm font-semibold text-text-primary truncate leading-tight">
+                  <h4
+                    class="text-sm font-semibold text-text-primary truncate leading-tight"
+                  >
                     {{ item.product.name }}
                   </h4>
                   @if (item.variant_display_name) {
                     <p
                       class="text-[10px] text-primary font-medium truncate leading-tight"
-                      >
+                    >
                       {{ item.variant_display_name }}
                     </p>
                   }
                   <div class="flex items-center gap-2 mt-0.5">
                     <span class="text-[10px] text-text-muted">
-                      Base: {{ formatCurrency(item.unitPrice) }}{{ item.is_weight_product ? '/' + (item.weight_unit || 'kg') : '' }}
+                      Base: {{ formatCurrency(item.unitPrice)
+                      }}{{
+                        item.is_weight_product
+                          ? '/' + (item.weight_unit || 'kg')
+                          : ''
+                      }}
                     </span>
                     @if (item.is_weight_product && item.weight) {
                       <span
                         class="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-semibold bg-blue-100 text-blue-800"
-                        >
+                      >
                         {{ item.weight }} {{ item.weight_unit || 'kg' }}
                       </span>
                     }
                     @if (getItemTaxAmount(item) > 0) {
                       <span
                         class="inline-flex items-center px-1 py-0.5 rounded text-[9px] font-medium bg-orange-100 text-orange-800"
-                        >
+                      >
                         +{{ formatCurrency(getItemTaxAmount(item)) }}
                       </span>
                     }
@@ -329,29 +354,43 @@ import { PosApiService } from '../services/pos-api.service';
                   (click)="removeFromCart(item.id)"
                   class="p-1 rounded-sm text-text-secondary hover:text-destructive hover:bg-destructive/10 transition-colors self-start"
                   title="Eliminar"
-                  >
+                >
                   <app-icon name="trash-2" [size]="14"></app-icon>
                 </button>
                 <!-- Actions Row: Quantity + Total -->
                 <div
                   class="col-span-3 flex items-center justify-between pt-2 mt-1 border-t border-border/50"
-                  >
+                >
                   <!-- Weight products: show clickable weight badge instead of quantity control -->
                   @if (item.is_weight_product) {
                     <button
                       (click)="editWeight(item)"
                       class="flex items-center gap-1.5 px-2 py-1 bg-blue-50 rounded-lg border border-blue-200 hover:bg-blue-100 hover:border-blue-300 transition-colors cursor-pointer"
                       title="Editar peso"
+                    >
+                      <app-icon
+                        name="scale"
+                        [size]="14"
+                        class="text-blue-600"
+                      ></app-icon>
+                      <span class="text-xs font-bold text-blue-700"
+                        >{{ item.weight }} {{ item.weight_unit || 'kg' }}</span
                       >
-                      <app-icon name="scale" [size]="14" class="text-blue-600"></app-icon>
-                      <span class="text-xs font-bold text-blue-700">{{ item.weight }} {{ item.weight_unit || 'kg' }}</span>
-                      <app-icon name="edit" [size]="10" class="text-blue-400"></app-icon>
+                      <app-icon
+                        name="edit"
+                        [size]="10"
+                        class="text-blue-400"
+                      ></app-icon>
                     </button>
                   } @else {
                     <app-quantity-control
                       [value]="item.quantity"
                       [min]="1"
-                      [max]="item.product.track_inventory !== false ? item.product.stock : 999"
+                      [max]="
+                        item.product.track_inventory !== false
+                          ? item.product.stock
+                          : 999
+                      "
                       [editable]="true"
                       [size]="'sm'"
                       (valueChange)="updateQuantity(item.id, $event)"
@@ -367,7 +406,7 @@ import { PosApiService } from '../services/pos-api.service';
         }
       </div>
     </div>
-    `,
+  `,
   styles: [
     `
       :host {
@@ -446,8 +485,7 @@ import { PosApiService } from '../services/pos-api.service';
       .shipping-btn:hover:not(:disabled) {
         opacity: 1;
       }
-
-`,
+    `,
   ],
 })
 export class PosCartComponent {
@@ -459,9 +497,11 @@ export class PosCartComponent {
   private scaleService = inject(PosScaleService);
   private posApiService = inject(PosApiService);
 
-  cartState$: Observable<CartState>;
-  isEmpty$: Observable<boolean>;
-  summary$: Observable<any>;
+  readonly cartState = toSignal(this.cartService.cartState);
+  readonly isEmpty = toSignal(this.cartService.isEmpty, {
+    initialValue: false,
+  });
+  readonly summary = toSignal(this.cartService.summary);
 
   activePromotions: any[] = [];
   couponCode = '';
@@ -477,17 +517,14 @@ export class PosCartComponent {
   readonly layaway = output<void>();
 
   constructor() {
-    this.cartState$ = this.cartService.cartState;
-    this.isEmpty$ = this.cartService.isEmpty;
-    this.summary$ = this.cartService.summary;
-
     inject(DestroyRef).onDestroy(() => {
       this.destroy$.next();
       this.destroy$.complete();
     });
 
     // Load active promotions
-    this.posApiService.getActivePromotions()
+    this.posApiService
+      .getActivePromotions()
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (response) => {
@@ -500,16 +537,25 @@ export class PosCartComponent {
       });
 
     // Re-apply promotions when cart items change (use item count to avoid infinite loops)
-    this.cartState$
+    this.cartService.cartState
       .pipe(
-        map(state => JSON.stringify(state.items.map(i => ({ id: i.product.id, qty: i.quantity, vid: i.variant_id })))),
+        map((state) =>
+          JSON.stringify(
+            state.items.map((i) => ({
+              id: i.product.id,
+              qty: i.quantity,
+              vid: i.variant_id,
+            })),
+          ),
+        ),
         distinctUntilChanged(),
         skip(1), // Skip initial emission
         takeUntil(this.destroy$),
       )
       .subscribe(() => {
         if (this.activePromotions.length > 0) {
-          this.cartService.applyPromotions(this.activePromotions)
+          this.cartService
+            .applyPromotions(this.activePromotions)
             .pipe(takeUntil(this.destroy$))
             .subscribe();
         }
@@ -530,7 +576,7 @@ export class PosCartComponent {
       .updateCartItem({ itemId, quantity })
       .pipe(takeUntil(this.destroy$))
       .subscribe({
-        next: () => { },
+        next: () => {},
         error: (error) => {
           this.toastService.error(
             error.message || 'Error al actualizar cantidad',
@@ -618,7 +664,7 @@ export class PosCartComponent {
           cancelText: 'Cancelar',
           inputType: 'number',
         },
-        { size: 'sm' }
+        { size: 'sm' },
       );
 
       if (!weightStr) return;
@@ -648,7 +694,9 @@ export class PosCartComponent {
   }
 
   getPromotionDiscounts(): CartDiscount[] {
-    return this.cartService.getCurrentState().appliedDiscounts.filter(d => d.promotion_id);
+    return this.cartService
+      .getCurrentState()
+      .appliedDiscounts.filter((d) => d.promotion_id);
   }
 
   removePromoDiscount(discountId: string): void {
@@ -660,7 +708,9 @@ export class PosCartComponent {
           this.toastService.success('Promoción eliminada');
         },
         error: (error) => {
-          this.toastService.error(error.message || 'Error al eliminar promoción');
+          this.toastService.error(
+            error.message || 'Error al eliminar promoción',
+          );
         },
       });
   }
@@ -670,18 +720,23 @@ export class PosCartComponent {
     if (!code) return;
 
     const currentState = this.cartService.getCurrentState();
-    const subtotal = currentState.summary.subtotal + currentState.summary.taxAmount;
+    const subtotal =
+      currentState.summary.subtotal + currentState.summary.taxAmount;
     const customerId = currentState.customer?.id;
-    const productIds = currentState.items.map(item => parseInt(item.product.id));
+    const productIds = currentState.items.map((item) =>
+      parseInt(item.product.id),
+    );
 
     this.couponLoading = true;
-    this.posApiService.validateCoupon(code, subtotal, customerId, productIds)
+    this.posApiService
+      .validateCoupon(code, subtotal, customerId, productIds)
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: (response) => {
           const validation = response?.data || response;
           if (validation?.valid) {
-            this.cartService.applyCouponDiscount(validation)
+            this.cartService
+              .applyCouponDiscount(validation)
               .pipe(takeUntil(this.destroy$))
               .subscribe({
                 next: () => {
@@ -690,7 +745,9 @@ export class PosCartComponent {
                   this.couponLoading = false;
                 },
                 error: (error) => {
-                  this.toastService.error(error.message || 'Error al aplicar cupón');
+                  this.toastService.error(
+                    error.message || 'Error al aplicar cupón',
+                  );
                   this.couponLoading = false;
                 },
               });
@@ -700,14 +757,17 @@ export class PosCartComponent {
           }
         },
         error: (error) => {
-          this.toastService.error(error?.error?.message || 'Cupón no válido o expirado');
+          this.toastService.error(
+            error?.error?.message || 'Cupón no válido o expirado',
+          );
           this.couponLoading = false;
         },
       });
   }
 
   removeCoupon(): void {
-    this.cartService.removeCoupon()
+    this.cartService
+      .removeCoupon()
       .pipe(takeUntil(this.destroy$))
       .subscribe({
         next: () => {
@@ -725,7 +785,7 @@ export class PosCartComponent {
 
   getCouponDiscountAmount(): number {
     const state = this.cartService.getCurrentState();
-    const couponDiscount = state.appliedDiscounts.find(d => d.coupon_id);
+    const couponDiscount = state.appliedDiscounts.find((d) => d.coupon_id);
     return couponDiscount?.amount || 0;
   }
 
@@ -755,4 +815,3 @@ export class PosCartComponent {
     event.target.style.display = 'none';
   }
 }
-
