@@ -12,6 +12,7 @@ export interface BulkProductAnalysisItem {
   categories_will_create: string[];
   warehouse_code?: string;
   warehouse_name?: string;
+  track_inventory?: boolean;
   action: 'create' | 'update';
   status: 'ready' | 'warning' | 'error';
   warnings: string[];

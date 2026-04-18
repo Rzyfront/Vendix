@@ -497,7 +497,7 @@ private cartService = inject(PosCartService);
 
   readonly cartState = this.cartService.cartState;
   readonly isEmpty = toSignal(this.cartService.isEmpty, { initialValue: false });
-  readonly summary = toSignal(this.cartService.summary);
+  readonly summary = toSignal(this.cartService.summary, { initialValue: null! });
 
   activePromotions: any[] = [];
   couponCode = '';

@@ -1,4 +1,4 @@
-import {Component, inject, OnInit, input, output, model, DestroyRef} from '@angular/core';
+import {Component, inject, OnInit, input, output, model, signal, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
@@ -589,8 +589,8 @@ import {
         <app-button
           variant="primary"
           (clicked)="onSubmit()"
-          [disabled]="!orderForm.valid || isSubmitting"
-          [loading]="isSubmitting"
+          [disabled]="!orderForm.valid || isSubmitting()"
+          [loading]="isSubmitting()"
         >
           <app-icon name="cart" [size]="16" slot="icon"></app-icon>
           Create Order
@@ -622,7 +622,7 @@ export class OrderCreateModalComponent implements OnInit {
   readonly orderCreated = output<CreateOrderDto>();
 
   orderForm!: FormGroup;
-  isSubmitting = false;
+  readonly isSubmitting = signal(false);
   items: Array<{
     product_id: string;
     quantity: number;
@@ -889,7 +889,7 @@ export class OrderCreateModalComponent implements OnInit {
 
   onSubmit(): void {
     if (this.orderForm.valid) {
-      this.isSubmitting = true;
+      this.isSubmitting.set(true);
 
       const formValue = this.orderForm.value;
       const orderType = formValue.order_type;
@@ -1032,13 +1032,13 @@ export class OrderCreateModalComponent implements OnInit {
       this.http.post(apiUrl, orderData).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (response: any) => {
           this.orderCreated.emit(response.data || response);
-          this.isSubmitting = false;
+          this.isSubmitting.set(false);
           this.isOpenChange.emit(false);
           this.resetForm();
         },
         error: (error) => {
           console.error('Error creating order:', error);
-          this.isSubmitting = false;
+          this.isSubmitting.set(false);
           // Handle error - show message to user
         },
       });

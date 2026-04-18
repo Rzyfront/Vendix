@@ -3,6 +3,7 @@ import {Component,
   output,
   model,
   inject,
+  signal,
   DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
@@ -61,15 +62,15 @@ import { CreateStoreRoleDto } from '../interfaces/store-role.interface';
         <app-button
           variant="outline"
           (clicked)="onCancel()"
-          [disabled]="isCreating"
+          [disabled]="isCreating()"
         >
           Cancelar
         </app-button>
         <app-button
           variant="primary"
           (clicked)="onSubmit()"
-          [disabled]="roleForm.invalid || isCreating"
-          [loading]="isCreating"
+          [disabled]="roleForm.invalid || isCreating()"
+          [loading]="isCreating()"
         >
           Crear Rol
         </app-button>
@@ -90,8 +91,8 @@ export class StoreRoleCreateModalComponent {
   readonly onRoleCreated = output<void>();
 
   roleForm: FormGroup;
-  isCreating: boolean = false;
-private storeRolesService = inject(StoreRolesService);
+  readonly isCreating = signal(false);
+  private storeRolesService = inject(StoreRolesService);
   private toastService = inject(ToastService);
 
   constructor(private fb: FormBuilder) {
@@ -107,14 +108,14 @@ private storeRolesService = inject(StoreRolesService);
       description: ['']});
   }
 onSubmit(): void {
-    if (this.roleForm.invalid || this.isCreating) {
+    if (this.roleForm.invalid || this.isCreating()) {
       Object.keys(this.roleForm.controls).forEach((key) => {
         this.roleForm.get(key)?.markAsTouched();
       });
       return;
     }
 
-    this.isCreating = true;
+    this.isCreating.set(true);
     this.roleForm.disable({ emitEvent: false });
     const roleData: CreateStoreRoleDto = this.roleForm.value;
 
@@ -128,7 +129,7 @@ onSubmit(): void {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
-          this.isCreating = false;
+          this.isCreating.set(false);
           this.roleForm.enable({ emitEvent: false });
           this.toastService.success('Rol creado exitosamente');
           this.onRoleCreated.emit();
@@ -136,7 +137,7 @@ onSubmit(): void {
           this.resetForm();
         },
         error: (error: any) => {
-          this.isCreating = false;
+          this.isCreating.set(false);
           this.roleForm.enable({ emitEvent: false });
           console.error('Error creating store role:', error);
           const message = error?.error?.message || 'Error al crear el rol';

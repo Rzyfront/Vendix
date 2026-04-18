@@ -1,0 +1,34 @@
+{
+  "root": true,
+  "ignorePatterns": ["dist/", "node_modules/"],
+  "parser": "@typescript-eslint/parser",
+  "parserOptions": {
+    "ecmaVersion": 2022,
+    "sourceType": "module",
+    "project": ["apps/frontend/tsconfig*.json"]
+  },
+  "plugins": ["@typescript-eslint"],
+  "rules": {
+    "no-restricted-syntax": [
+      "error",
+      {
+        "selector": "PropertyDefinition[value.type='Literal'][key.name=/^(loading|isLoading|isCreating|isSaving|isSubmitting)$/]",
+        "message": "UI state must be signal(), not plain boolean. See vendix-zoneless-signals SKILL §9"
+      }
+    ]
+  },
+  "overrides": [
+    {
+      "files": ["*.component.ts"],
+      "rules": {
+        "no-restricted-syntax": [
+          "error",
+          {
+            "selector": "PropertyDefinition[value.type='Literal'][key.name=/^(loading|isLoading|isCreating|isSaving|isSubmitting)$/]",
+            "message": "UI state must be signal(), not plain boolean. See vendix-zoneless-signals SKILL §9"
+          }
+        ]
+      }
+    }
+  ]
+}

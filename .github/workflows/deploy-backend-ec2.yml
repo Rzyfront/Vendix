@@ -121,6 +121,23 @@ jobs:
           CORS_ORIGIN=\$(echo "\$APP_SECRETS" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('CORS_ORIGIN', ''))")
           ADDITIONAL_CORS_ORIGINS=\$(echo "\$APP_SECRETS" | python3 -c "import sys, json; data=json.load(sys.stdin); print(data.get('ADDITIONAL_CORS_ORIGINS', ''))")
 
+          echo "🔧 Ensuring Redis env vars are in /opt/vendix/.env..."
+          sudo grep -q '^REDIS_HOST=' /opt/vendix/.env || echo 'REDIS_HOST=vendix-redis' | sudo tee -a /opt/vendix/.env > /dev/null
+          sudo grep -q '^REDIS_PORT=' /opt/vendix/.env || echo 'REDIS_PORT=6379' | sudo tee -a /opt/vendix/.env > /dev/null
+
+          echo "🌐 Ensuring vendix-net network exists..."
+          sudo docker network inspect vendix-net >/dev/null 2>&1 || sudo docker network create vendix-net
+
+          echo "🗄️  Ensuring vendix-redis container is running..."
+          if ! sudo docker ps --filter name=^/vendix-redis$ --filter status=running -q | grep -q .; then
+            sudo docker rm -f vendix-redis 2>/dev/null || true
+            sudo docker run -d --name vendix-redis \\
+              --network vendix-net \\
+              --restart unless-stopped \\
+              -v vendix-redis-data:/data \\
+              redis:7-alpine redis-server --appendonly yes --save 60 1000
+          fi
+
           echo "🛑 Stopping current container..."
           sudo docker stop vendix-backend || true
           sudo docker rm vendix-backend || true
@@ -128,6 +145,7 @@ jobs:
           echo "🚀 Starting new container..."
           sudo docker run -d \\
             --name vendix-backend \\
+            --network vendix-net \\
             --restart unless-stopped \\
             -p 3000:3000 \\
             --env-file /opt/vendix/.env \\

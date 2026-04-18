@@ -1,4 +1,4 @@
-import { Component, input, computed } from '@angular/core';
+import { Component, input, computed, signal } from '@angular/core';
 import { CurrencyPipe, DecimalPipe, PercentPipe } from '@angular/common';
 import { ReportColumn } from '../../interfaces/report.interface';
 
@@ -13,7 +13,9 @@ import { ReportColumn } from '../../interfaces/report.interface';
 export class AgingReportComponent {
   data = input.required<any[]>();
   columns = input.required<ReportColumn[]>();
-  loading = input(false);
+  readonly loadingInput = input(false, { alias: 'loading' });
+  private readonly internalLoading = signal(false);
+  readonly loading = computed(() => this.loadingInput() || this.internalLoading());
   entityLabel = input('Entidad');
 
   private currencyPipe = new CurrencyPipe('es-CO');

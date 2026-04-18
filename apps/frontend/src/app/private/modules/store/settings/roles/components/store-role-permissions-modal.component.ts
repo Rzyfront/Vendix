@@ -4,6 +4,7 @@ import {Component,
   model,
   OnChanges,
   inject,
+  signal,
   DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
@@ -93,7 +94,7 @@ const ACTION_LABELS: Record<string, string> = {
       [title]="'Permisos: ' + (role()?.name || '')"
       subtitle="Configura los permisos de acceso para este rol"
     >
-      @if (isLoadingPermissions) {
+      @if (isLoadingPermissions()) {
         <div class="p-6 text-center">
           <div
             class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
@@ -102,7 +103,7 @@ const ACTION_LABELS: Record<string, string> = {
         </div>
       }
 
-      @if (!isLoadingPermissions) {
+      @if (!isLoadingPermissions()) {
         <div class="space-y-3">
           <!-- Search & Module Filter -->
           <div class="flex flex-col sm:flex-row gap-2">
@@ -262,14 +263,14 @@ const ACTION_LABELS: Record<string, string> = {
         <app-button
           variant="outline"
           (clicked)="onCancel()"
-          [disabled]="isSaving"
+          [disabled]="isSaving()"
           >Cancelar</app-button
         >
         <app-button
           variant="primary"
           (clicked)="onSave()"
-          [disabled]="isSaving"
-          [loading]="isSaving"
+          [disabled]="isSaving()"
+          [loading]="isSaving()"
         >
           {{
             getChangeCount() > 0
@@ -305,9 +306,9 @@ export class StoreRolePermissionsModalComponent
   moduleFilter = '';
   availableModules: string[] = [];
 
-  isLoadingPermissions: boolean = false;
-  isSaving: boolean = false;
-private storeRolesService = inject(StoreRolesService);
+  readonly isLoadingPermissions = signal(false);
+  readonly isSaving = signal(false);
+  private storeRolesService = inject(StoreRolesService);
   private toastService = inject(ToastService);
 ngOnChanges(): void {
     if (this.isOpen() && this.role()) {
@@ -321,7 +322,7 @@ ngOnChanges(): void {
     const currentRole = this.role();
     if (!currentRole) return;
 
-    this.isLoadingPermissions = true;
+    this.isLoadingPermissions.set(true);
 
     forkJoin({
       available: this.storeRolesService.getAvailablePermissions(),
@@ -343,11 +344,11 @@ ngOnChanges(): void {
           this.selectedPermissionIds = new Set(storePermissionIds);
           this.originalPermissionIds = new Set(storePermissionIds);
 
-          this.isLoadingPermissions = false;
+          this.isLoadingPermissions.set(false);
         },
         error: (error) => {
           console.error('Error loading permissions:', error);
-          this.isLoadingPermissions = false;
+          this.isLoadingPermissions.set(false);
           this.toastService.error('Error al cargar los permisos');
         }});
   }
@@ -487,7 +488,7 @@ ngOnChanges(): void {
 
   onSave(): void {
     const currentRole = this.role();
-    if (!currentRole || this.isSaving) return;
+    if (!currentRole || this.isSaving()) return;
 
     const toAdd: number[] = [];
     const toRemove: number[] = [];
@@ -510,7 +511,7 @@ ngOnChanges(): void {
       return;
     }
 
-    this.isSaving = true;
+    this.isSaving.set(true);
     const operations: any[] = [];
 
     if (toAdd.length > 0) {
@@ -528,7 +529,7 @@ ngOnChanges(): void {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
-          this.isSaving = false;
+          this.isSaving.set(false);
           this.toastService.success('Permisos actualizados exitosamente');
           // TODO: The 'emit' function requires a mandatory void argument
           // TODO: The 'emit' function requires a mandatory void argument
@@ -539,7 +540,7 @@ ngOnChanges(): void {
           this.isOpenChange.emit(false);
         },
         error: (error: any) => {
-          this.isSaving = false;
+          this.isSaving.set(false);
           console.error('Error updating permissions:', error);
           const message =
             error?.error?.message || 'Error al actualizar los permisos';

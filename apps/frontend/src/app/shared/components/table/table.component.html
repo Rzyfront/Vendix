@@ -42,120 +42,8 @@
     }
 
     <!-- Body -->
-    <tbody>
-      <!-- Data rows -->
-      @if (data().length > 0) {
-        @for (item of data(); track $index; let i = $index) {
-          <tr [class]="getRowClasses(i)" (click)="onRowClick(item)"
-            [class.clickable-row]="true">
-            <!-- Data cells -->
-            @for (column of columns(); track column.key) {
-              <td [class]="getCellClasses(column)">
-                <!-- Badge template -->
-                @if (column.badge) {
-                  <span class="status-badge" [ngClass]="
-                      getBadgeClasses(column, getNestedValue(item, column.key))
-                    " [style.background-color]="
-                      getBadgeBackgroundColor(
-                        column,
-                        getNestedValue(item, column.key)
-                      )
-                    " [style.color]="
-                      getBadgeTextColor(column, getNestedValue(item, column.key))
-                    " [style.border-color]="
-                      getBadgeBorderColor(column, getNestedValue(item, column.key))
-                    ">
-                    {{
-                    column.transform
-                    ? column.transform(getNestedValue(item, column.key), item)
-                    : getNestedValue(item, column.key)
-                    }}
-                  </span>
-                }
-
-                <!-- Custom template if provided (only when not a badge) -->
-                @if (!column.badge && column.template) {
-                  <ng-container [ngTemplateOutlet]="column.template"
-                    [ngTemplateOutletContext]="{ $implicit: item, column: column }"></ng-container>
-                }
-
-                <!-- Image content -->
-                @if (column.type === 'image' && !column.badge && !column.template) {
-                  <div class="cell-image-container">
-                    @if (getNestedValue(item, column.key)) {
-                      <img [src]="getNestedValue(item, column.key)"
-                        [alt]="column.label" class="cell-image"
-                        onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
-                    }
-                    <div class="cell-image-placeholder"
-                      [style.display]="getNestedValue(item, column.key) ? 'none' : 'flex'">
-                      <app-icon name="image" [size]="16" class="text-gray-400"></app-icon>
-                    </div>
-                  </div>
-                }
-
-                <!-- Default content (only when not a badge, not an image, and no custom template) -->
-                @if (!column.badge && !column.template && column.type !== 'image') {
-                  <span class="cell-content" [ngClass]="column.cellClass ? column.cellClass(getNestedValue(item, column.key), item) : ''" [ngStyle]="column.cellStyle ? column.cellStyle(getNestedValue(item, column.key), item) : {}">
-                    @if (
-                      getNestedValue(item, column.key) !== null &&
-                      getNestedValue(item, column.key) !== undefined &&
-                      getNestedValue(item, column.key) !== ''
-                    ) {
-                      {{
-                      column.transform
-                      ? column.transform(getNestedValue(item, column.key), item)
-                      : getNestedValue(item, column.key)
-                      }}
-                    } @else {
-                      <span class="cell-content-empty">{{
-                        column.defaultValue || "No data"
-                        }}</span>
-                    }
-                  </span>
-                }
-              </td>
-            }
-
-            <!-- Actions cell -->
-            @if (actions() || actionsTemplate) {
-              <td class="actions-cell">
-                <!-- Custom actions template -->
-                @if (actionsTemplate) {
-                  <ng-container [ngTemplateOutlet]="actionsTemplate"
-                    [ngTemplateOutletContext]="{ $implicit: item }"></ng-container>
-                } @else {
-                  <!-- Default actions -->
-                  <div class="table-actions">
-                    @for (action of actions()!; track $index) {
-                      @if (isActionVisible(action, item)) {
-                        <button [class]="getActionClasses(action, item)"
-                          [disabled]="isActionDisabled(action, item)" (click)="
-                            executeAction(action, item); $event.stopPropagation()
-                          " [attr.title]="getActionTooltip(action, item)">
-                          <!-- Icon if provided -->
-                          @if (getActionIcon(action, item)) {
-                            <app-icon [name]="getActionIcon(action, item)"
-                              [size]="12"></app-icon>
-                          }
-
-                          <!-- Label (only show if no icon or on larger sizes) -->
-                          @if (!getActionIcon(action, item) || size() === 'lg') {
-                            <span>{{ getActionLabel(action, item) }}</span>
-                          }
-                        </button>
-                      }
-                    }
-                  </div>
-                }
-              </td>
-            }
-          </tr>
-        }
-      }
-
-      <!-- Empty state -->
-      @if (!loading() && data().length === 0) {
+    @if (data().length === 0 && !loading()) {
+      <tbody>
         <tr>
           <td [attr.colspan]="columns().length + (actions() || actionsTemplate ? 1 : 0)" class="empty-cell">
             <div class="empty-state">
@@ -168,7 +56,136 @@
             </div>
           </td>
         </tr>
+      </tbody>
+    } @else {
+      @defer (on viewport) {
+        <tbody>
+          @for (item of data(); track $index; let i = $index) {
+            <tr [class]="getRowClasses(i)" (click)="onRowClick(item)"
+              [class.clickable-row]="true">
+              <!-- Data cells -->
+              @for (column of columns(); track column.key) {
+                <td [class]="getCellClasses(column)">
+                  <!-- Badge template -->
+                  @if (column.badge) {
+                    <span class="status-badge" [ngClass]="
+                        getBadgeClasses(column, getNestedValue(item, column.key))
+                      " [style.background-color]="
+                        getBadgeBackgroundColor(
+                          column,
+                          getNestedValue(item, column.key)
+                        )
+                      " [style.color]="
+                        getBadgeTextColor(column, getNestedValue(item, column.key))
+                      " [style.border-color]="
+                        getBadgeBorderColor(column, getNestedValue(item, column.key))
+                      ">
+                      {{
+                      column.transform
+                      ? column.transform(getNestedValue(item, column.key), item)
+                      : getNestedValue(item, column.key)
+                      }}
+                    </span>
+                  }
+
+                  <!-- Custom template if provided (only when not a badge) -->
+                  @if (!column.badge && column.template) {
+                    <ng-container [ngTemplateOutlet]="column.template"
+                      [ngTemplateOutletContext]="{ $implicit: item, column: column }"></ng-container>
+                  }
+
+                  <!-- Image content -->
+                  @if (column.type === 'image' && !column.badge && !column.template) {
+                    <div class="cell-image-container">
+                      @if (getNestedValue(item, column.key)) {
+                        <img [src]="getNestedValue(item, column.key)"
+                          [alt]="column.label" class="cell-image"
+                          onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';" />
+                      }
+                      <div class="cell-image-placeholder"
+                        [style.display]="getNestedValue(item, column.key) ? 'none' : 'flex'">
+                        <app-icon name="image" [size]="16" class="text-gray-400"></app-icon>
+                      </div>
+                    </div>
+                  }
+
+                  <!-- Default content (only when not a badge, not an image, and no custom template) -->
+                  @if (!column.badge && !column.template && column.type !== 'image') {
+                    <span class="cell-content" [ngClass]="column.cellClass ? column.cellClass(getNestedValue(item, column.key), item) : ''" [ngStyle]="column.cellStyle ? column.cellStyle(getNestedValue(item, column.key), item) : {}">
+                      @if (
+                        getNestedValue(item, column.key) !== null &&
+                        getNestedValue(item, column.key) !== undefined &&
+                        getNestedValue(item, column.key) !== ''
+                      ) {
+                        {{
+                        column.transform
+                        ? column.transform(getNestedValue(item, column.key), item)
+                        : getNestedValue(item, column.key)
+                        }}
+                      } @else {
+                        <span class="cell-content-empty">{{
+                          column.defaultValue || "No data"
+                          }}</span>
+                      }
+                    </span>
+                  }
+                </td>
+              }
+
+              <!-- Actions cell -->
+              @if (actions() || actionsTemplate) {
+                <td class="actions-cell">
+                  <!-- Custom actions template -->
+                  @if (actionsTemplate) {
+                    <ng-container [ngTemplateOutlet]="actionsTemplate"
+                      [ngTemplateOutletContext]="{ $implicit: item }"></ng-container>
+                  } @else {
+                    <!-- Default actions -->
+                    <div class="table-actions">
+                      @for (action of actions()!; track $index) {
+                        @if (isActionVisible(action, item)) {
+                          <button [class]="getActionClasses(action, item)"
+                            [disabled]="isActionDisabled(action, item)" (click)="
+                              executeAction(action, item); $event.stopPropagation()
+                            " [attr.title]="getActionTooltip(action, item)">
+                            <!-- Icon if provided -->
+                            @if (getActionIcon(action, item)) {
+                              <app-icon [name]="getActionIcon(action, item)"
+                                [size]="12"></app-icon>
+                            }
+
+                            <!-- Label (only show if no icon or on larger sizes) -->
+                            @if (!getActionIcon(action, item) || size() === 'lg') {
+                              <span>{{ getActionLabel(action, item) }}</span>
+                            }
+                          </button>
+                        }
+                      }
+                    </div>
+                  }
+                </td>
+              }
+            </tr>
+          }
+        </tbody>
+      } @placeholder {
+        <tbody>
+          @for (item of [1,2,3,4,5,6,7,8]; track item) {
+            <tr class="animate-pulse">
+              @for (column of columns(); track column.key) {
+                <td [class]="getCellClasses(column)">
+                  <div class="h-4 bg-gray-200 rounded w-3/4"></div>
+                </td>
+              }
+              @if (actions() || actionsTemplate) {
+                <td class="actions-cell">
+                  <div class="h-4 bg-gray-200 rounded w-12"></div>
+                </td>
+              }
+            </tr>
+          }
+        </tbody>
       }
-    </tbody>
+    }
   </table>
 </div>

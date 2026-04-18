@@ -277,6 +277,7 @@ import {
                         <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Producto</th>
                         <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">SKU</th>
                         <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Tipo</th>
+                        <th class="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase">Controla Inventario</th>
                         <th class="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase">Precio</th>
                         <th class="px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase">Acción</th>
                         <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Estado</th>
@@ -295,6 +296,17 @@ import {
                               }">
                               {{ item.product_type === 'service' ? 'Servicio' : 'Producto' }}
                             </span>
+                          </td>
+                          <td class="px-3 py-2 text-sm text-center">
+                            @if (item.product_type === 'service') {
+                              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">No</span>
+                            } @else if (item.track_inventory === true) {
+                              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">Sí</span>
+                            } @else if (item.track_inventory === false) {
+                              <span class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-700">No</span>
+                            } @else {
+                              <span class="text-xs text-gray-400">—</span>
+                            }
                           </td>
                           <td class="px-3 py-2 text-sm text-right text-gray-700">{{ item.base_price | currency:'COP':'symbol-narrow':'1.0-0' }}</td>
                           <td class="px-3 py-2 text-sm text-center">
@@ -320,7 +332,7 @@ import {
                         <!-- Warnings/Errors expandable row -->
                         @if (item.warnings.length > 0 || item.errors.length > 0) {
                           <tr class="bg-gray-50">
-                            <td colspan="6" class="px-3 py-2">
+                            <td colspan="7" class="px-3 py-2">
                               @for (warning of item.warnings; track warning) {
                                 <p class="text-xs text-amber-700 flex items-start gap-1">
                                   <app-icon name="alert-triangle" [size]="12" class="shrink-0 mt-0.5"></app-icon>
@@ -358,7 +370,7 @@ import {
                       </span>
                     </div>
                     <p class="text-xs text-gray-500 font-mono mb-2">{{ item.sku || '—' }}</p>
-                    <div class="flex gap-3 text-xs text-gray-600 mb-1">
+                    <div class="flex flex-wrap gap-2 text-xs text-gray-600 mb-1">
                       <span>{{ item.base_price | currency:'COP':'symbol-narrow':'1.0-0' }}</span>
                       <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium"
                         [ngClass]="{
@@ -374,6 +386,18 @@ import {
                         }">
                         {{ item.product_type === 'service' ? 'Servicio' : 'Producto' }}
                       </span>
+                    </div>
+                    <div class="flex items-center gap-1.5 text-[11px] text-gray-600 mt-1">
+                      <span class="font-medium text-gray-500">Inventario:</span>
+                      @if (item.product_type === 'service') {
+                        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-700">No</span>
+                      } @else if (item.track_inventory === true) {
+                        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-100 text-green-700">Sí</span>
+                      } @else if (item.track_inventory === false) {
+                        <span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-gray-100 text-gray-700">No</span>
+                      } @else {
+                        <span class="text-gray-400">—</span>
+                      }
                     </div>
                     @if (item.warnings.length > 0 || item.errors.length > 0) {
                       <div class="mt-2 pt-2 border-t border-gray-100 space-y-1">

@@ -1,4 +1,4 @@
-import { Component, input, output } from '@angular/core';
+import { Component, input, output, signal, computed } from '@angular/core';
 
 import { TableComponent } from '../table/table.component';
 import { ItemListComponent } from '../item-list/item-list.component';
@@ -115,7 +115,9 @@ export class ResponsiveDataViewComponent {
 
   // Shared configuration
   readonly actions = input<TableAction[]>();
-  readonly loading = input(false);
+  readonly loadingInput = input(false, { alias: 'loading' });
+  private readonly internalLoading = signal(false);
+  readonly loading = computed(() => this.loadingInput() || this.internalLoading());
   readonly emptyMessage = input('No hay datos disponibles');
 
   // Empty state enhanced inputs

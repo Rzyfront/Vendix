@@ -1,4 +1,4 @@
-import {Component, input, output, OnInit, inject, DestroyRef} from '@angular/core';
+import {Component, input, output, OnInit, inject, signal, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
@@ -185,7 +185,7 @@ import {
         </app-button>
         <app-button
           variant="primary"
-          [loading]="isSubmitting"
+          [loading]="isSubmitting()"
           [disabled]="form.invalid"
           (clicked)="onSubmit()"
         >
@@ -209,7 +209,7 @@ export class ZoneModalComponent implements OnInit {
   private toast = inject(ToastService);
 
   form: FormGroup;
-  isSubmitting = false;
+  readonly isSubmitting = signal(false);
 
   departments: Department[] = [];
   cities: City[] = [];
@@ -310,7 +310,7 @@ export class ZoneModalComponent implements OnInit {
       return;
     }
 
-    this.isSubmitting = true;
+    this.isSubmitting.set(true);
     const values = this.form.value;
 
     const parseList = (text: string): string[] =>
@@ -340,7 +340,7 @@ export class ZoneModalComponent implements OnInit {
 
     request$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: () => {
-        this.isSubmitting = false;
+        this.isSubmitting.set(false);
         this.toast.show({
           variant: 'success',
           description:
@@ -362,7 +362,7 @@ export class ZoneModalComponent implements OnInit {
         this.close.emit();
       },
       error: (err) => {
-        this.isSubmitting = false;
+        this.isSubmitting.set(false);
         this.toast.show({
           variant: 'error',
           description:

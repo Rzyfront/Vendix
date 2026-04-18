@@ -5,6 +5,7 @@ import {Component,
   input,
   output,
   model,
+  signal,
   DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
@@ -189,7 +190,7 @@ import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
         <app-button
           variant="outline-danger"
           (clicked)="onCancel()"
-          [disabled]="isSaving"
+          [disabled]="isSaving()"
           size="sm"
         >
           Cancelar
@@ -197,8 +198,8 @@ import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
         <app-button
           variant="primary"
           (clicked)="onSubmit()"
-          [disabled]="configForm.invalid || isSaving || !!jsonError"
-          [loading]="isSaving"
+          [disabled]="configForm.invalid || isSaving() || !!jsonError"
+          [loading]="isSaving()"
           size="sm"
         >
           Guardar Configuración
@@ -221,7 +222,7 @@ export class UserConfigModalComponent implements OnInit, OnChanges {
   readonly onSaved = output<void>();
 
   configForm: FormGroup;
-  isSaving: boolean = false;
+  readonly isSaving = signal(false);
   activeTab: 'general' | 'roles' | 'stores' | 'panel_ui' = 'general';
   jsonError: string | null = null;
 constructor(
@@ -389,7 +390,7 @@ loadConfiguration(): void {
     const user = this.user();
     if (this.configForm.invalid || this.jsonError || !user) return;
 
-    this.isSaving = true;
+    this.isSaving.set(true);
     const formVal = this.configForm.value;
 
     const roles = formVal.rolesInput
@@ -413,7 +414,7 @@ loadConfiguration(): void {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
-          this.isSaving = false;
+          this.isSaving.set(false);
 
           // Update auth state if editing current user's configuration
           const currentUserId = this.authFacade.getUserId();
@@ -439,7 +440,7 @@ loadConfiguration(): void {
         },
         error: (err: any) => {
           console.error('Failed to save config', err);
-          this.isSaving = false;
+          this.isSaving.set(false);
         }});
   }
 }

@@ -3,6 +3,7 @@ import {Component,
   inject,
   input,
   output,
+  signal,
   DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
@@ -47,7 +48,7 @@ import { CreateUserDto, UserState } from '../interfaces/user.interface';
             placeholder="Juan"
             [required]="true"
             [control]="userForm.get('first_name')"
-            [disabled]="isCreating"
+            [disabled]="isCreating()"
           ></app-input>
 
           <app-input
@@ -56,7 +57,7 @@ import { CreateUserDto, UserState } from '../interfaces/user.interface';
             placeholder="Pérez"
             [required]="true"
             [control]="userForm.get('last_name')"
-            [disabled]="isCreating"
+            [disabled]="isCreating()"
           ></app-input>
 
           <app-input
@@ -65,7 +66,7 @@ import { CreateUserDto, UserState } from '../interfaces/user.interface';
             placeholder="juanperez"
             [required]="true"
             [control]="userForm.get('username')"
-            [disabled]="isCreating"
+            [disabled]="isCreating()"
             helpText="Mínimo 3 caracteres, solo letras, números y guiones bajos"
           ></app-input>
 
@@ -76,7 +77,7 @@ import { CreateUserDto, UserState } from '../interfaces/user.interface';
             placeholder="juan@ejemplo.com"
             [required]="true"
             [control]="userForm.get('email')"
-            [disabled]="isCreating"
+            [disabled]="isCreating()"
           ></app-input>
 
           <app-input
@@ -86,7 +87,7 @@ import { CreateUserDto, UserState } from '../interfaces/user.interface';
             placeholder="••••••••••"
             [required]="true"
             [control]="userForm.get('password')"
-            [disabled]="isCreating"
+            [disabled]="isCreating()"
             helpText="Mínimo 8 caracteres, debe incluir mayúscula, minúscula, número y carácter especial"
           ></app-input>
 
@@ -100,7 +101,7 @@ import { CreateUserDto, UserState } from '../interfaces/user.interface';
             <select
               formControlName="state"
               class="w-full px-3 py-2 border border-[var(--color-border)] rounded-md bg-[var(--color-surface)] text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:border-[var(--color-primary)]"
-              [disabled]="isCreating"
+              [disabled]="isCreating()"
             >
               <option value="">Seleccionar estado</option>
               <option [value]="UserState.ACTIVE">Activo</option>
@@ -117,15 +118,15 @@ import { CreateUserDto, UserState } from '../interfaces/user.interface';
         <app-button
           variant="outline"
           (clicked)="onCancel()"
-          [disabled]="isCreating"
+          [disabled]="isCreating()"
         >
           Cancelar
         </app-button>
         <app-button
           variant="primary"
           (clicked)="onSubmit()"
-          [disabled]="userForm.invalid || isCreating"
-          [loading]="isCreating"
+          [disabled]="userForm.invalid || isCreating()"
+          [loading]="isCreating()"
         >
           Crear Usuario
         </app-button>
@@ -146,9 +147,9 @@ export class UserCreateModalComponent implements OnInit {
   readonly onUserCreated = output<void>();
 
   userForm: FormGroup;
-  isCreating: boolean = false;
+  readonly isCreating = signal(false);
   UserState = UserState;
-usersService = inject(UsersService);
+  usersService = inject(UsersService);
 
   constructor(private fb: FormBuilder) {
     this.userForm = this.fb.group({
@@ -182,7 +183,7 @@ usersService = inject(UsersService);
 
   ngOnInit(): void { }
 onSubmit(): void {
-    if (this.userForm.invalid || this.isCreating) {
+    if (this.userForm.invalid || this.isCreating()) {
       // Mark all fields as touched to trigger validation messages
       Object.keys(this.userForm.controls).forEach((key) => {
         this.userForm.get(key)?.markAsTouched();
@@ -190,7 +191,7 @@ onSubmit(): void {
       return;
     }
 
-    this.isCreating = true;
+    this.isCreating.set(true);
     const userData: CreateUserDto = this.userForm.value;
 
     this.usersService
@@ -198,7 +199,7 @@ onSubmit(): void {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: () => {
-          this.isCreating = false;
+          this.isCreating.set(false);
           // TODO: The 'emit' function requires a mandatory void argument
           // TODO: The 'emit' function requires a mandatory void argument
           // TODO: The 'emit' function requires a mandatory void argument
@@ -208,7 +209,7 @@ onSubmit(): void {
           this.resetForm();
         },
         error: (error: any) => {
-          this.isCreating = false;
+          this.isCreating.set(false);
           console.error('Error creating user:', error);
           // TODO: Show user-friendly error message
         }});
