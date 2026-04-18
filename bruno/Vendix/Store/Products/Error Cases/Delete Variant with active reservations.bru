@@ -1,0 +1,32 @@
+meta {
+  name: Delete Variant with active reservations
+  type: http
+  seq: 25
+}
+
+delete {
+  url: http://{{url}}/products/variants/{{variantWithReservationId}}
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Delete variant with active reservations is blocked", function() {
+    expect(res.status).to.equal(409);
+    expect(res.body).to.have.property('success', false);
+  });
+
+  test("Error code is PROD_HAS_RESERVATIONS_001", function() {
+    expect(res.body).to.have.property('code', 'PROD_HAS_RESERVATIONS_001');
+  });
+
+  test("Error message mentions active reservations", function() {
+    expect(res.body).to.have.property('message');
+    expect(res.body.message.toLowerCase()).to.include('reserva');
+  });
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

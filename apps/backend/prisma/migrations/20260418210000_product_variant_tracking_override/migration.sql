@@ -16,3 +16,26 @@ CHECK (is_on_sale = false OR sale_price IS NOT NULL) NOT VALID;
 
 ALTER TABLE "products" ADD CONSTRAINT "chk_products_sale_price_requires_sale" 
 CHECK (is_on_sale = false OR sale_price IS NOT NULL) NOT VALID;
+
+-- 4. Check constraints for sale_price > 0 when is_on_sale=true (NOT VALID)
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'chk_product_variants_sale_price_positive'
+  ) THEN
+    ALTER TABLE "product_variants" ADD CONSTRAINT "chk_product_variants_sale_price_positive"
+      CHECK (NOT is_on_sale OR sale_price > 0) NOT VALID;
+  END IF;
+END
+$$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'chk_products_sale_price_positive'
+  ) THEN
+    ALTER TABLE "products" ADD CONSTRAINT "chk_products_sale_price_positive"
+      CHECK (NOT is_on_sale OR sale_price > 0) NOT VALID;
+  END IF;
+END
+$$;

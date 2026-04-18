@@ -1,4 +1,4 @@
-import { Component, output, inject, DestroyRef, computed } from '@angular/core';
+import { Component, input, output, inject, DestroyRef, computed } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Subject, debounceTime, distinctUntilChanged, Observable } from 'rxjs';
 import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
@@ -8,11 +8,13 @@ import {
   Product,
   Category,
   Brand } from '../services/pos-product.service';
+import { IconComponent } from '../../../../../shared/components';
+import { PriceResolverService } from '../../../../../shared/services/pricing';
 
 @Component({
   selector: 'app-pos-product-search',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, IconComponent],
   template: `
     <div class="product-search-container">
       <!-- Banner: Sin variantes disponibles -->
@@ -203,6 +205,25 @@ import {
         padding: 20px;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
         margin-bottom: 20px;
+      }
+
+      .variants-warning-banner {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 16px;
+        margin-bottom: 12px;
+        background-color: #fef9c3;
+        border: 1px solid #facc15;
+        border-radius: 10px;
+        color: #854d0e;
+        font-size: 14px;
+        font-weight: 500;
+      }
+
+      .variants-warning-banner app-icon {
+        flex-shrink: 0;
+        color: #ca8a04;
       }
 
       .search-header {
@@ -440,12 +461,7 @@ import {
   ] })
 export class PosProductSearchComponent {
   
-  /** Check if product has variants but none are in stock */
-  hasVariantsWithoutStock = computed(() => {
-    // This would need access to the selected product which is managed by parent
-    // For now, we check if search results indicate variants issue
-    return false; // Placeholder - parent component should control this
-  });
+  readonly hasVariantsWithoutStock = input<boolean>(false);
   private destroyRef = inject(DestroyRef);
   readonly search = output<SearchFilters>();
   readonly productSelected = output<Product>();

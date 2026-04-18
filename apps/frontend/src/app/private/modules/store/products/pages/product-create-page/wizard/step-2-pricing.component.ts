@@ -2,9 +2,10 @@ import { Component, input, output, computed, inject, OnInit, OnDestroy } from '@
 import { CommonModule } from '@angular/common';
 import { FormGroup, ReactiveFormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { InputComponent, SelectorComponent, MultiSelectorComponent, SettingToggleComponent, BadgeComponent, IconComponent } from '../../../../../../shared/components';
-import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
-import { TaxCategory } from '../../interfaces';
+import { InputComponent, MultiSelectorComponent, SettingToggleComponent } from '../../../../../../../shared/components';
+import type { MultiSelectorOption } from '../../../../../../../shared/components';
+import { CurrencyFormatService } from '../../../../../../../shared/pipes/currency';
+import { TaxCategory } from '../../../interfaces';
 
 @Component({
   selector: 'app-step-2-pricing',
@@ -13,11 +14,8 @@ import { TaxCategory } from '../../interfaces';
     CommonModule,
     ReactiveFormsModule,
     InputComponent,
-    SelectorComponent,
     MultiSelectorComponent,
     SettingToggleComponent,
-    BadgeComponent,
-    IconComponent,
   ],
   template: `
     <div class="step-container">
@@ -28,17 +26,17 @@ import { TaxCategory } from '../../interfaces';
         </p>
       </div>
 
-      <form [formGroup]="form" class="step-form">
+      <form [formGroup]="form()" class="step-form">
         <!-- Precio Base -->
         <div class="form-field">
           <app-input
             [formControl]="basePriceControl"
-            type="currency"
+            type="number"
             label="Precio base"
             placeholder="0.00"
-            [prefix]="currencySymbol()"
+            
             [error]="getError('base_price')"
-            required
+            [required]="true"
           />
         </div>
 
@@ -47,10 +45,10 @@ import { TaxCategory } from '../../interfaces';
           <div class="form-field">
             <app-input
               [formControl]="costPriceControl"
-              type="currency"
+              type="number"
               label="Costo"
               placeholder="0.00"
-              [prefix]="currencySymbol()"
+              
               [error]="getError('cost_price')"
             />
           </div>
@@ -60,7 +58,7 @@ import { TaxCategory } from '../../interfaces';
               type="number"
               label="Margen (%)"
               placeholder="0"
-              suffix="%"
+              
               [error]="getError('profit_margin')"
             />
           </div>
@@ -108,10 +106,10 @@ import { TaxCategory } from '../../interfaces';
             <div class="sale-fields animate-slide">
               <app-input
                 [formControl]="salePriceControl"
-                type="currency"
+                type="number"
                 label="Precio de venta"
                 placeholder="0.00"
-                [prefix]="currencySymbol()"
+                
                 [error]="getSalePriceError()"
               />
               <p class="sale-hint">
@@ -315,8 +313,8 @@ export class Step2PricingComponent implements OnInit, OnDestroy {
 
   readonly validityChange = output<{ isValid: boolean; completionPercent: number; errors: string[] }>();
 
-  readonly currencySymbol = computed(() => this.currencyService.getCurrency().symbol || '$');
-  readonly currencyCode = computed(() => this.currencyService.getCurrency().code || 'USD');
+  readonly currencySymbol = computed(() => this.currencyService.currencySymbol() || '$');
+  readonly currencyCode = computed(() => this.currencyService.currencyCode() || 'USD');
 
   readonly taxCategoryOptions = computed<MultiSelectorOption[]>(() =>
     this.taxCategories().map((tc) => {

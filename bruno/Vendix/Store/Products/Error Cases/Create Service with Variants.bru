@@ -1,0 +1,50 @@
+meta {
+  name: Create Service with Variants
+  type: http
+  seq: 17
+}
+
+post {
+  url: http://{{url}}/products
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "name": "Servicio de Consultoria",
+    "base_price": 500.00,
+    "sku": "SVC-CONSULT-001",
+    "product_type": "service",
+    "state": "active",
+    "variants": [
+      {
+        "sku": "SVC-CONSULT-001-BASIC",
+        "name": "Consultoria Basica",
+        "price_override": 300.00,
+        "stock_quantity": 0
+      }
+    ]
+  }
+}
+
+tests {
+  test("Service product with variants is rejected", function() {
+    expect(res.status).to.equal(400);
+    expect(res.body).to.have.property('success', false);
+  });
+
+  test("Error code is PROD_SVC_VARIANTS_001", function() {
+    expect(res.body).to.have.property('code', 'PROD_SVC_VARIANTS_001');
+  });
+
+  test("Error message mentions services cannot have variants", function() {
+    expect(res.body).to.have.property('message');
+    expect(res.body.message).to.include('SERVICIO');
+  });
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

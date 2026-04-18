@@ -1,0 +1,38 @@
+meta {
+  name: Change to SERVICE with existing variants
+  type: http
+  seq: 23
+}
+
+patch {
+  url: http://{{url}}/products/{{productWithVariantsId}}
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "product_type": "service"
+  }
+}
+
+tests {
+  test("Change product type to SERVICE with existing variants is rejected", function() {
+    expect(res.status).to.equal(409);
+    expect(res.body).to.have.property('success', false);
+  });
+
+  test("Error code is PROD_SVC_HAS_VARIANTS_001", function() {
+    expect(res.body).to.have.property('code', 'PROD_SVC_HAS_VARIANTS_001');
+  });
+
+  test("Error message mentions existing variants block SERVICE conversion", function() {
+    expect(res.body).to.have.property('message');
+    expect(res.body.message).to.include('SERVICE');
+  });
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

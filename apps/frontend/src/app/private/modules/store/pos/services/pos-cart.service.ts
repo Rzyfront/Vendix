@@ -23,7 +23,7 @@ export type {
 } from '../models/cart.model';
 import { PosCustomer } from '../models/customer.model';
 import { PosProductService, Product, PosProductVariant } from './pos-product.service';
-import { PriceResolverService } from '../../../../shared/services/pricing';
+import { PriceResolverService } from '../../../../../shared/services/pricing';
 
 @Injectable({
   providedIn: 'root',

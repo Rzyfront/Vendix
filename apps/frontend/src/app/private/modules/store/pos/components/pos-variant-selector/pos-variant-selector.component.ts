@@ -11,11 +11,12 @@ import {
   PosProductVariant,
 } from '../../services/pos-product.service';
 import { PriceResolverService } from '../../../../../../shared/services/pricing';
+import { PosProductMissingVariantsBannerComponent } from '../pos-product-missing-variants-banner/pos-product-missing-variants-banner.component';
 
 @Component({
   selector: 'app-pos-variant-selector',
   standalone: true,
-  imports: [IconComponent, CurrencyPipe],
+  imports: [IconComponent, CurrencyPipe, PosProductMissingVariantsBannerComponent],
   template: `
     <!-- Backdrop -->
     <div
@@ -47,6 +48,13 @@ import { PriceResolverService } from '../../../../../../shared/services/pricing'
 
         <!-- Variant List -->
         <div class="flex-1 overflow-y-auto p-3">
+          @if (variants().length === 0) {
+            <app-pos-product-missing-variants-banner
+              [productName]="product().name"
+              [showEditButton]="true"
+              (editClick)="onEditProduct()"
+            />
+          }
           <div class="flex flex-col gap-2">
             @for (variant of variants(); track variant.id) {
               <button
@@ -139,6 +147,7 @@ export class PosVariantSelectorComponent {
   readonly variants = input.required<PosProductVariant[]>();
   readonly variantSelected = output<PosProductVariant>();
   readonly closed = output<void>();
+  readonly editProductRequested = output<string | number>();
 
   /** Group variants by their first attribute for visual sections */
   get groupedAttributes(): { name: string; variants: PosProductVariant[] }[] {
@@ -194,6 +203,11 @@ export class PosVariantSelectorComponent {
 
   onClose(): void {
     this.closed.emit();
+  }
+
+  onEditProduct(): void {
+    this.editProductRequested.emit(this.product().id);
+    this.onClose();
   }
 
   onBackdropClick(event: MouseEvent): void {

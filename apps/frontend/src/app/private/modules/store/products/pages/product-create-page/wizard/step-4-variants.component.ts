@@ -1,9 +1,9 @@
 import { Component, input, output, signal, computed, OnInit, OnDestroy } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { FormGroup, FormArray, ReactiveFormsModule } from '@angular/forms';
+import { FormGroup, FormArray, FormControl, ReactiveFormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { InputComponent, SettingToggleComponent, IconComponent, ButtonComponent, CardComponent, BadgeComponent, ExpandableCardComponent, SelectorComponent } from '../../../../../../shared/components';
-import { ProductUtils } from '../../utils/product.utils';
+import { SettingToggleComponent, IconComponent } from '../../../../../../../shared/components';
+import { ProductUtils } from '../../../utils/product.utils';
 
 interface VariantAttribute {
   name: string;
@@ -24,6 +24,7 @@ interface GeneratedVariant {
   image_url?: string;
   image_file?: File;
   image_id?: number;
+  track_inventory_override?: boolean;
 }
 
 @Component({
@@ -32,14 +33,8 @@ interface GeneratedVariant {
   imports: [
     CommonModule,
     ReactiveFormsModule,
-    InputComponent,
     SettingToggleComponent,
     IconComponent,
-    ButtonComponent,
-    CardComponent,
-    BadgeComponent,
-    ExpandableCardComponent,
-    SelectorComponent,
   ],
   template: `
     <div class="step-container">
@@ -161,53 +156,63 @@ interface GeneratedVariant {
                       <div class="variant-details animate-slide">
                         <div class="variant-form">
                           <div class="form-row">
-                            <app-input
-                              [label]="'SKU'"
-                              [value]="variant.sku"
-                              (valueChange)="updateVariantSku(i, $event)"
-                              type="text"
-                              placeholder="SKU de la variante"
-                            />
-                            <app-input
-                              [label]="'Precio'"
-                              [value]="variant.price"
-                              (valueChange)="updateVariantPrice(i, $event)"
-                              type="currency"
-                              prefix="$"
-                            />
+                            <div class="form-field">
+                              <label>SKU</label>
+                              <input
+                                type="text"
+                                class="variant-input"
+                                placeholder="SKU de la variante"
+                                [value]="variant.sku"
+                                (input)="updateVariantSku(i, $any($event.target).value)"
+                              />
+                            </div>
+                            <div class="form-field">
+                              <label>Precio</label>
+                              <input
+                                type="number"
+                                class="variant-input"
+                                [value]="variant.price"
+                                (input)="updateVariantPrice(i, +$any($event.target).value)"
+                              />
+                            </div>
                           </div>
 
                           <div class="form-row">
-                            <app-input
-                              [label]="'Costo'"
-                              [value]="variant.cost_price"
-                              (valueChange)="updateVariantCost(i, $event)"
-                              type="currency"
-                              prefix="$"
-                            />
-                            <app-input
-                              [label]="'Margen (%)'"
-                              [value]="variant.profit_margin"
-                              (valueChange)="updateVariantMargin(i, $event)"
-                              type="number"
-                              suffix="%"
-                            />
+                            <div class="form-field">
+                              <label>Costo</label>
+                              <input
+                                type="number"
+                                class="variant-input"
+                                [value]="variant.cost_price"
+                                (input)="updateVariantCost(i, +$any($event.target).value)"
+                              />
+                            </div>
+                            <div class="form-field">
+                              <label>Margen (%)</label>
+                              <input
+                                type="number"
+                                class="variant-input"
+                                [value]="variant.profit_margin"
+                                (input)="updateVariantMargin(i, +$any($event.target).value)"
+                              />
+                            </div>
                           </div>
 
                           @if (trackInventory()) {
                             <div class="form-row">
-                              <app-input
-                                [label]="'Stock'"
-                                [value]="variant.stock"
-                                (valueChange)="updateVariantStock(i, $event)"
-                                type="number"
-                              />
+                              <div class="form-field">
+                                <label>Stock</label>
+                                <input
+                                  type="number"
+                                  class="variant-input"
+                                  [value]="variant.stock"
+                                  (input)="updateVariantStock(i, +$any($event.target).value)"
+                                />
+                              </div>
                               <div class="track-inventory-override">
                                 <app-setting-toggle
-                                  [label]="'Seguir inventario'"
-                                  [checked]="variant.track_inventory_override"
-                                  (checkedChange)="updateVariantTrackInventory(i, $event)"
-                                />
+                                  [formControl]="$any(hasVariantsToggle)"
+                                >Seguir inventario</app-setting-toggle>
                               </div>
                             </div>
                           }
@@ -613,7 +618,7 @@ export class Step4VariantsComponent implements OnInit, OnDestroy {
   readonly removedVariantKeys = signal<Set<string>>(new Set());
 
   // FormControl for the toggle (since hasVariants is not a FormControl)
-  hasVariantsToggle = { value: false };
+  hasVariantsToggle = new FormControl(false);
   private _hasVariants = signal(false);
 
   readonly previewVariantCount = computed(() => {

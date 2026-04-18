@@ -1410,15 +1410,22 @@ export class ProductDetailComponent implements OnInit {
   selectedPriceResolution = computed(() => {
     const p = this.product();
     if (!p) return null;
+    const variant = this.selectedVariant();
     return this.priceResolver.resolve(
       {
         id: String(p.id),
         base_price: p.base_price,
-        is_on_sale: p.is_on_sale,
-        sale_price: p.sale_price,
+        is_on_sale: p.is_on_sale ?? false,
+        sale_price: p.sale_price ?? null,
         track_inventory: p.track_inventory ?? true,
       },
-      this.selectedVariant() ?? undefined
+      variant ? {
+        id: String(variant.id),
+        price_override: variant.price_override ?? null,
+        is_on_sale: variant.is_on_sale ?? false,
+        sale_price: variant.sale_price ?? null,
+        track_inventory_override: null,
+      } : undefined
     );
   });
 

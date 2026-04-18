@@ -24,4 +24,14 @@ export class WhatsappCheckoutDto {
   @ValidateNested({ each: true })
   @Type(() => WhatsappCartItemDto)
   items?: WhatsappCartItemDto[];
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  shipping_method_id?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  shipping_rate_id?: number;
 }

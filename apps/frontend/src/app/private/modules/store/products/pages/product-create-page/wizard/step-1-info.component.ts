@@ -3,11 +3,12 @@ import { CommonModule } from '@angular/common';
 import { FormGroup, ReactiveFormsModule, FormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { ProductFormWizardService } from '../../../services/product-form-wizard.service';
-import { InputComponent, TextareaComponent, SelectorComponent, MultiSelectorComponent, ButtonComponent, IconComponent, SettingToggleComponent } from '../../../../../../shared/components';
-import { ProductCategory, Brand, TaxCategory } from '../../interfaces';
-import { CategoriesService } from '../../services/categories.service';
-import { BrandsService } from '../../services/brands.service';
-import { TaxesService } from '../../services/taxes.service';
+import { InputComponent, TextareaComponent, SelectorComponent, MultiSelectorComponent, IconComponent } from '../../../../../../../shared/components';
+import type { SelectorOption, MultiSelectorOption } from '../../../../../../../shared/components';
+import { ProductCategory, Brand, TaxCategory } from '../../../interfaces';
+import { CategoriesService } from '../../../services/categories.service';
+import { BrandsService } from '../../../services/brands.service';
+import { TaxesService } from '../../../services/taxes.service';
 
 @Component({
   selector: 'app-step-1-info',
@@ -20,9 +21,7 @@ import { TaxesService } from '../../services/taxes.service';
     TextareaComponent,
     SelectorComponent,
     MultiSelectorComponent,
-    ButtonComponent,
     IconComponent,
-    SettingToggleComponent,
   ],
   template: `
     <div class="step-container">
@@ -33,7 +32,7 @@ import { TaxesService } from '../../services/taxes.service';
         </p>
       </div>
 
-      <form [formGroup]="form" class="step-form">
+      <form [formGroup]="form()" class="step-form">
         <!-- Nombre -->
         <div class="form-field">
           <app-input
@@ -42,7 +41,7 @@ import { TaxesService } from '../../services/taxes.service';
             label="Nombre del producto"
             placeholder="Ej: Camisa de algodón básica"
             [error]="getError('name')"
-            required
+            [required]="true"
           />
         </div>
 
@@ -53,7 +52,7 @@ import { TaxesService } from '../../services/taxes.service';
             type="text"
             label="Slug (URL)"
             placeholder="camisa Algodón-básica"
-            prefix="/products/"
+            helperText="/products/"
             [error]="getError('slug')"
           />
           <p class="field-hint">Se genera automáticamente si está vacío.</p>
@@ -76,7 +75,6 @@ import { TaxesService } from '../../services/taxes.service';
             [options]="categoryOptions()"
             label="Categorías"
             placeholder="Seleccionar categorías"
-            [searchable]="true"
           />
         </div>
 
@@ -87,7 +85,6 @@ import { TaxesService } from '../../services/taxes.service';
             [options]="brandOptions()"
             label="Marca"
             placeholder="Seleccionar marca (opcional)"
-            [allowClear]="true"
           />
         </div>
 

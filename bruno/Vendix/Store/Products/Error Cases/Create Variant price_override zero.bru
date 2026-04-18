@@ -1,0 +1,51 @@
+meta {
+  name: Create Variant price_override zero
+  type: http
+  seq: 24
+}
+
+post {
+  url: http://{{url}}/products
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "name": "Producto con variante invalida",
+    "base_price": 100.00,
+    "sku": "PROD-VAR-ZERO-001",
+    "product_type": "physical",
+    "state": "active",
+    "track_inventory": true,
+    "variants": [
+      {
+        "sku": "PROD-VAR-ZERO-001-V1",
+        "name": "Variante invalida precio",
+        "price_override": 0,
+        "stock_quantity": 0
+      }
+    ]
+  }
+}
+
+tests {
+  test("Variant with price_override=0 is rejected", function() {
+    expect(res.status).to.equal(400);
+    expect(res.body).to.have.property('success', false);
+  });
+
+  test("Error code is PROD_VAR_PRICE_001", function() {
+    expect(res.body).to.have.property('code', 'PROD_VAR_PRICE_001');
+  });
+
+  test("Error message mentions price_override must be null or > 0", function() {
+    expect(res.body).to.have.property('message');
+    expect(res.body.message.toLowerCase()).to.include('price_override');
+  });
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

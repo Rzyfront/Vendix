@@ -655,6 +655,26 @@
                   </div>
                 }
 
+                @if (selectedShippingMethod() && shippingRatesForSelectedMethod().length > 0) {
+                  <div class="mb-3">
+                    <label class="block text-xs font-bold text-amber-800 mb-1"
+                      >Tarifa</label
+                    >
+                    <select
+                      [value]="selectedShippingRateId() ?? ''"
+                      (change)="selectedShippingRateId.set($any($event.target).value ? +$any($event.target).value : null)"
+                      class="w-full px-3 py-2 border border-amber-300 rounded-lg text-sm focus:ring-2 focus:ring-amber-400 focus:border-amber-400 bg-white"
+                    >
+                      <option [value]="''">Seleccionar tarifa…</option>
+                      @for (r of shippingRatesForSelectedMethod(); track r.id) {
+                        <option [value]="r.id">
+                          {{ r.name || ('Tarifa #' + r.id) }} — {{ r.base_cost | currency }}
+                        </option>
+                      }
+                    </select>
+                  </div>
+                }
+
                 @if (selectedShippingMethod()) {
                   <div class="mb-3" [formGroup]="shippingAssignForm">
                     <label class="block text-xs font-bold text-amber-800 mb-1"

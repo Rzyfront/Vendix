@@ -2,7 +2,7 @@ import { Component, input, output, computed, inject, OnInit, OnDestroy } from '@
 import { CommonModule } from '@angular/common';
 import { FormGroup, ReactiveFormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { InputComponent, SettingToggleComponent, IconComponent, ButtonComponent, QuantityControlComponent } from '../../../../../../shared/components';
+import { InputComponent, SettingToggleComponent, IconComponent } from '../../../../../../../shared/components';
 
 @Component({
   selector: 'app-step-3-inventory',
@@ -13,8 +13,6 @@ import { InputComponent, SettingToggleComponent, IconComponent, ButtonComponent,
     InputComponent,
     SettingToggleComponent,
     IconComponent,
-    ButtonComponent,
-    QuantityControlComponent,
   ],
   template: `
     <div class="step-container">
@@ -25,7 +23,7 @@ import { InputComponent, SettingToggleComponent, IconComponent, ButtonComponent,
         </p>
       </div>
 
-      <form [formGroup]="form" class="step-form">
+      <form [formGroup]="form()" class="step-form">
         <!-- Seguimiento de inventario -->
         <div class="form-field">
           <app-setting-toggle
@@ -50,7 +48,7 @@ import { InputComponent, SettingToggleComponent, IconComponent, ButtonComponent,
             </div>
 
             <!-- Almacén/ubicación -->
-            @if (showLocationInfo) {
+            @if (showLocationInfo()) {
               <div class="location-info">
                 <app-icon name="map-pin" [size]="16" />
                 <span>El stock se распределит automáticamente entre las ubicaciones activas.</span>
@@ -83,7 +81,7 @@ import { InputComponent, SettingToggleComponent, IconComponent, ButtonComponent,
                 label="Peso (kg)"
                 placeholder="0.00"
                 [min]="0"
-                [step]="0.01"
+                [step]="'0.01'"
               />
             </div>
 

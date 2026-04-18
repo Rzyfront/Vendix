@@ -628,6 +628,51 @@ export class OrderFlowService {
     const hasMethod = !!order.shipping_method_id;
     const isDirectDelivery = deliveryType === 'direct_delivery';
 
+    if (state === 'created') {
+      actions.push({
+        code: 'pay',
+        label_key: 'ORD_ACTION_PAY',
+        enabled: true,
+      });
+      if (!hasMethod && !isDirectDelivery) {
+        actions.push({
+          code: 'assign_shipping',
+          label_key: 'ORD_ACTION_ASSIGN_SHIPPING',
+          enabled: true,
+        });
+      }
+      actions.push({
+        code: 'cancel',
+        label_key: 'ORD_ACTION_CANCEL',
+        enabled: true,
+      });
+    }
+
+    if (state === 'pending_payment') {
+      actions.push({
+        code: 'confirm_payment',
+        label_key: 'ORD_ACTION_CONFIRM_PAYMENT',
+        enabled: true,
+      });
+      actions.push({
+        code: 'cancel_payment',
+        label_key: 'ORD_ACTION_CANCEL_PAYMENT',
+        enabled: true,
+      });
+      if (!hasMethod && !isDirectDelivery) {
+        actions.push({
+          code: 'assign_shipping',
+          label_key: 'ORD_ACTION_ASSIGN_SHIPPING',
+          enabled: true,
+        });
+      }
+      actions.push({
+        code: 'cancel',
+        label_key: 'ORD_ACTION_CANCEL',
+        enabled: true,
+      });
+    }
+
     if (state === 'processing') {
       if (!hasMethod && !isDirectDelivery) {
         actions.push({

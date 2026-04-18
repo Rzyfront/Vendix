@@ -1,0 +1,44 @@
+meta {
+  name: Stock from Stock Levels
+  type: http
+  seq: 5
+}
+
+post {
+  url: {{url}}/ecommerce/checkout
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "payment_method_id": 5,
+    "items": [
+      {
+        "product_id": 20,
+        "quantity": 999999
+      }
+    ]
+  }
+}
+
+tests {
+  test("Checkout rejected for insufficient stock from stock_levels", function() {
+    expect(res.status).to.equal(400);
+    expect(res.body).to.have.property('success', false);
+  });
+
+  test("Error code is ECOM_CART_003", function() {
+    expect(res.body).to.have.property('code', 'ECOM_CART_003');
+  });
+
+  test("Error message indicates insufficient stock", function() {
+    expect(res.body).to.have.property('message');
+    expect(res.body.message).to.include('stock');
+  });
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

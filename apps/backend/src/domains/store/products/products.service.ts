@@ -269,8 +269,8 @@ export class ProductsService {
           if (variants && variants.length > 0) {
             if (createProductDto.product_type === ProductType.SERVICE) {
               throw new VendixHttpException(
-                ErrorCodes.PROD_SVC_001,
-                'Services cannot have variants',
+                ErrorCodes.PROD_SVC_VARIANTS_001,
+                'Los productos tipo SERVICIO no pueden tener variantes',
               );
             }
             for (const variantData of variants) {
@@ -1182,13 +1182,29 @@ export class ProductsService {
         const effectiveProductType = updateProductDto.product_type ?? existingProduct.product_type;
         if (effectiveProductType === ProductType.SERVICE) {
           throw new VendixHttpException(
-            ErrorCodes.PROD_SVC_001,
-            'Services cannot have variants',
+            ErrorCodes.PROD_SVC_VARIANTS_001,
+            'Los productos tipo SERVICIO no pueden tener variantes',
           );
         }
         const productSku = updateProductDto.sku || existingProduct.sku;
         if (!productSku || productSku.trim() === '') {
           throw new VendixHttpException(ErrorCodes.PROD_VALIDATE_002);
+        }
+      }
+
+      // BLOCK: cannot change to SERVICE if existing variants present
+      if (
+        updateProductDto.product_type === ProductType.SERVICE &&
+        existingProduct.product_type !== ProductType.SERVICE
+      ) {
+        const existingVariantCount = await this.prisma.product_variants.count({
+          where: { product_id: id },
+        });
+        if (existingVariantCount > 0) {
+          throw new VendixHttpException(
+            ErrorCodes.PROD_SVC_HAS_VARIANTS_001,
+            'No se puede cambiar a SERVICE un producto con variantes existentes',
+          );
         }
       }
 

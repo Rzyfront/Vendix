@@ -456,8 +456,8 @@ export class StoreOrdersService {
     );
   }
 
-  assignShippingMethod(orderId: string, dto: { shipping_method_id: number; shipping_cost?: number }): Observable<Order> {
-    const url = `${this.apiUrl}/store/orders/${orderId}`;
+  assignShippingMethod(orderId: string, dto: { shipping_method_id: number; shipping_rate_id?: number; shipping_cost?: number }): Observable<Order> {
+    const url = `${this.apiUrl}/store/orders/${orderId}/shipping`;
     return this.http.patch<Order>(url, dto).pipe(
       catchError((error) => {
         console.error('Error assigning shipping method:', error);

@@ -1,7 +1,7 @@
 import { Component, input, output, computed, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ProductFormWizardService } from '../../../services/product-form-wizard.service';
-import { StepsLineComponent, ButtonComponent, IconComponent } from '../../../../../../shared/components';
+import { StepsLineComponent, StepsLineItem, ButtonComponent, IconComponent } from '../../../../../../../shared/components';
 
 @Component({
   selector: 'app-product-wizard-shell',

@@ -599,8 +599,14 @@ export class OrdersService {
   }
 
   async assignShipping(orderId: number, dto: AssignShippingMethodDto) {
+    const context = RequestContextService.getContext();
+    const storeId = context?.store_id;
+    if (!storeId) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+
     const order = await this.prisma.orders.findFirst({
-      where: { id: orderId },
+      where: { id: orderId, store_id: storeId },
     });
 
     if (!order) {
@@ -613,7 +619,7 @@ export class OrdersService {
     }
 
     const method = await this.prisma.shipping_methods.findFirst({
-      where: { id: dto.shipping_method_id, is_active: true },
+      where: { id: dto.shipping_method_id, store_id: storeId, is_active: true },
     });
 
     if (!method) {

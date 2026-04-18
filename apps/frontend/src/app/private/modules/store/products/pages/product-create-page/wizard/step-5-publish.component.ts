@@ -2,7 +2,7 @@ import { Component, input, output, computed, OnInit, OnDestroy } from '@angular/
 import { CommonModule } from '@angular/common';
 import { FormGroup, ReactiveFormsModule } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-import { ButtonComponent, IconComponent, CardComponent, BadgeComponent, AlertBannerComponent } from '../../../../../../shared/components';
+import { IconComponent, BadgeComponent, AlertBannerComponent } from '../../../../../../../shared/components';
 
 @Component({
   selector: 'app-step-5-publish',
@@ -10,9 +10,7 @@ import { ButtonComponent, IconComponent, CardComponent, BadgeComponent, AlertBan
   imports: [
     CommonModule,
     ReactiveFormsModule,
-    ButtonComponent,
     IconComponent,
-    CardComponent,
     BadgeComponent,
     AlertBannerComponent,
   ],
@@ -56,10 +54,7 @@ import { ButtonComponent, IconComponent, CardComponent, BadgeComponent, AlertBan
 
             <div class="summary-item">
               <span class="summary-label">Estado</span>
-              <app-badge
-                [variant]="stateBadgeVariant()"
-                [label]="stateLabel()"
-              />
+              <app-badge [variant]="stateBadgeVariant()">{{ stateLabel() }}</app-badge>
             </div>
 
             @if (hasVariants()) {
@@ -96,20 +91,16 @@ import { ButtonComponent, IconComponent, CardComponent, BadgeComponent, AlertBan
 
         <!-- Errores de validación -->
         @if (validationErrors().length > 0) {
-          <app-alert-banner
-            variant="error"
-            title="Errores encontrados"
-            [message]="validationErrors()[0]"
-          />
+          <app-alert-banner variant="danger">
+            Errores encontrados: {{ validationErrors()[0] }}
+          </app-alert-banner>
         }
 
         <!-- Advertencias -->
         @if (warnings().length > 0) {
-          <app-alert-banner
-            variant="warning"
-            title="Advertencias"
-            [message]="warnings()[0]"
-          />
+          <app-alert-banner variant="warning">
+            Advertencias: {{ warnings()[0] }}
+          </app-alert-banner>
         }
 
         <!-- Info de publicación -->
@@ -299,7 +290,7 @@ export class Step5PublishComponent implements OnInit, OnDestroy {
     const s = this.state();
     if (s === 'active') return 'success';
     if (s === 'inactive') return 'warning';
-    return 'default';
+    return 'neutral';
   });
 
   readonly stateLabel = computed(() => {

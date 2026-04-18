@@ -593,6 +593,11 @@ export class UpdateProductDto {
   stock_transfer_mode?: 'first' | 'distribute' | 'reset';
 
   @IsOptional()
+  @IsString()
+  @IsIn(['first', 'distribute', 'reset'])
+  variant_removal_stock_mode?: 'first' | 'distribute' | 'reset';
+
+  @IsOptional()
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => CreateVariantWithStockDto)

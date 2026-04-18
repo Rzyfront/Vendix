@@ -1,7 +1,7 @@
 import { Component, input, output, computed, inject } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ProductFormWizardService, StepValidity } from '../../../services/product-form-wizard.service';
-import { BadgeComponent, IconComponent } from '../../../../../../shared/components';
+import { BadgeComponent, IconComponent } from '../../../../../../../shared/components';
 
 @Component({
   selector: 'app-wizard-checklist',
@@ -47,10 +47,7 @@ import { BadgeComponent, IconComponent } from '../../../../../../shared/componen
               }
             </div>
             @if (step.completionPercent > 0) {
-              <app-badge 
-                [variant]="step.isValid ? 'success' : 'warning'"
-                [label]="step.completionPercent + '%'"
-              />
+              <app-badge [variant]="step.isValid ? 'success' : 'warning'">{{ step.completionPercent }}%</app-badge>
             }
           </li>
         }

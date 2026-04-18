@@ -161,7 +161,10 @@ export class ProductVariantService {
   ) {
     // BLOCK: price_override must be null or > 0 (reject 0 as ambiguous)
     if (createVariantDto.price_override !== null && createVariantDto.price_override !== undefined && createVariantDto.price_override <= 0) {
-      throw new BadRequestException('price_override must be null or greater than 0');
+      throw new VendixHttpException(
+        ErrorCodes.PROD_VAR_PRICE_001,
+        'price_override de variante debe ser null o mayor que 0',
+      );
     }
 
     // BLOCK: is_on_sale=true requires sale_price > 0 and sale_price < base_price (or price_override for variant)
@@ -174,11 +177,17 @@ export class ProductVariantService {
       // If no override, sale_price must be > 0 and < basePrice
       if (priceOverride != null) {
         if (salePrice != null && salePrice <= 0) {
-          throw new BadRequestException('When is_on_sale=true, sale_price must be greater than 0');
+          throw new VendixHttpException(
+            ErrorCodes.PROD_VAR_SALE_PRICE_001,
+            'sale_price de variante inválido: debe ser > 0 y < precio de referencia',
+          );
         }
       } else {
         if (salePrice == null || salePrice <= 0 || salePrice >= basePrice) {
-          throw new BadRequestException('When is_on_sale=true without price_override, sale_price must be > 0 and < base_price');
+          throw new VendixHttpException(
+            ErrorCodes.PROD_VAR_SALE_PRICE_001,
+            'sale_price de variante inválido: debe ser > 0 y < precio de referencia',
+          );
         }
       }
     }
@@ -327,7 +336,10 @@ export class ProductVariantService {
 
     // BLOCK: price_override must be null or > 0 (reject 0 as ambiguous)
     if (variantData.price_override !== null && variantData.price_override !== undefined && variantData.price_override <= 0) {
-      throw new BadRequestException('price_override must be null or greater than 0');
+      throw new VendixHttpException(
+        ErrorCodes.PROD_VAR_PRICE_001,
+        'price_override de variante debe ser null o mayor que 0',
+      );
     }
 
     // BLOCK: is_on_sale=true requires sale_price > 0 and sale_price < base_price (or price_override for variant)
@@ -338,11 +350,17 @@ export class ProductVariantService {
 
       if (priceOverride != null) {
         if (salePrice != null && salePrice <= 0) {
-          throw new BadRequestException('When is_on_sale=true, sale_price must be greater than 0');
+          throw new VendixHttpException(
+            ErrorCodes.PROD_VAR_SALE_PRICE_001,
+            'sale_price de variante inválido: debe ser > 0 y < precio de referencia',
+          );
         }
       } else {
         if (salePrice == null || salePrice <= 0 || salePrice >= basePrice) {
-          throw new BadRequestException('When is_on_sale=true without price_override, sale_price must be > 0 and < base_price');
+          throw new VendixHttpException(
+            ErrorCodes.PROD_VAR_SALE_PRICE_001,
+            'sale_price de variante inválido: debe ser > 0 y < precio de referencia',
+          );
         }
       }
     }
@@ -439,6 +457,17 @@ export class ProductVariantService {
 
     if (!existingVariant) {
       throw new NotFoundException('Variante no encontrada');
+    }
+
+    // BLOCK: cannot delete variant with active stock reservations
+    const activeReservationsCount = await this.prisma.stock_reservations.count({
+      where: { product_variant_id: variantId, status: 'active' },
+    });
+    if (activeReservationsCount > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.PROD_HAS_RESERVATIONS_001,
+        'Operación bloqueada: existen reservas de stock activas',
+      );
     }
 
     const unscopedPrisma = this.prisma.withoutScope() as any;
