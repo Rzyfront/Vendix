@@ -167,15 +167,15 @@ import { PayrollItemDetailComponent } from '../payroll-item-detail/payroll-item-
           }
 
           <!-- 7. PROCESAMIENTO COMPLETO (en body, al final del scroll) -->
-          @if (showQuickProcess && !fastTracking()) {
+@if (showQuickProcess && !fastTracking()) {
             <div class="mt-6 pt-4 border-t border-[var(--color-border)]">
               <label class="flex items-start gap-3 p-3 rounded-xl cursor-pointer select-none transition-all"
-                     [class]="quickProcessEnabled
-                       ? 'bg-[var(--color-primary)]/10 border-2 border-[var(--color-primary)]/30'
-                       : 'bg-[var(--color-background)] border border-[var(--color-border)] hover:border-[var(--color-primary)]/20'">
+                     [class]="quickProcessEnabled()
+                        ? 'bg-[var(--color-primary)]/10 border-2 border-[var(--color-primary)]/30'
+                        : 'bg-[var(--color-background)] border border-[var(--color-border)] hover:border-[var(--color-primary)]/20'">
                 <input type="checkbox"
-                       [checked]="quickProcessEnabled"
-                       (change)="quickProcessEnabled = $any($event.target).checked"
+                       [checked]="quickProcessEnabled()"
+                       (change)="quickProcessEnabled.set($any($event.target).checked)"
                        class="mt-0.5 w-4 h-4 rounded border-[var(--color-border)] text-[var(--color-primary)] focus:ring-[var(--color-primary)]" />
                 <div>
                   <p class="text-sm font-semibold text-[var(--color-text-primary)]">Procesamiento completo</p>
@@ -196,37 +196,37 @@ import { PayrollItemDetailComponent } from '../payroll-item-detail/payroll-item-
           <!-- 8. CANCELAR NOMINA (en body, al final, con doble confirmacion) -->
           @if (canProcess && payrollRun()!.status !== 'draft') {
             <div class="mt-4 pt-4 border-t border-[var(--color-border)]">
-              @if (!cancelConfirmStep) {
-                <button (click)="cancelConfirmStep = 1"
+              @if (!cancelConfirmStep()) {
+                <button (click)="cancelConfirmStep.set(1)"
                         class="text-xs text-red-400 hover:text-red-600 underline underline-offset-2 transition-colors">
                   Cancelar esta nomina
                 </button>
-              } @else if (cancelConfirmStep === 1) {
+              } @else if (cancelConfirmStep() === 1) {
                 <div class="p-3 bg-red-50 rounded-xl border border-red-200">
                   <p class="text-sm font-semibold text-red-700">Cancelar nomina {{ payrollRun()!.payroll_number }}</p>
                   <p class="text-xs text-red-600 mt-1">
                     Esta accion no se puede deshacer. Todos los asientos contables asociados permaneceran registrados.
                   </p>
                   <div class="flex items-center gap-2 mt-3">
-                    <app-button variant="danger" size="sm" (clicked)="cancelConfirmStep = 2">
+                    <app-button variant="danger" size="sm" (clicked)="cancelConfirmStep.set(2)">
                       Si, quiero cancelar
                     </app-button>
-                    <app-button variant="ghost" size="sm" (clicked)="cancelConfirmStep = 0">
+                    <app-button variant="ghost" size="sm" (clicked)="cancelConfirmStep.set(0)">
                       No, volver
                     </app-button>
                   </div>
                 </div>
-              } @else if (cancelConfirmStep === 2) {
+              } @else if (cancelConfirmStep() === 2) {
                 <div class="p-3 bg-red-100 rounded-xl border-2 border-red-300">
                   <p class="text-sm font-bold text-red-800">Confirmacion final</p>
                   <p class="text-xs text-red-700 mt-1">
                     Presione "Confirmar cancelacion" para cancelar definitivamente la nomina {{ payrollRun()!.payroll_number }}.
                   </p>
                   <div class="flex items-center gap-2 mt-3">
-                    <app-button variant="danger" size="sm" (clicked)="onCancelPayroll(); cancelConfirmStep = 0" [loading]="loading()">
+                    <app-button variant="danger" size="sm" (clicked)="onCancelPayroll(); cancelConfirmStep.set(0)" [loading]="loading()">
                       Confirmar cancelacion
                     </app-button>
-                    <app-button variant="ghost" size="sm" (clicked)="cancelConfirmStep = 0">
+                    <app-button variant="ghost" size="sm" (clicked)="cancelConfirmStep.set(0)">
                       No, volver
                     </app-button>
                   </div>
@@ -255,7 +255,7 @@ import { PayrollItemDetailComponent } from '../payroll-item-detail/payroll-item-
                 <span class="text-xs font-semibold text-[var(--color-text-primary)]">{{ fastTrackCurrentLabel() }}</span>
               </div>
             } @else if (canProcess) {
-              @if (quickProcessEnabled) {
+              @if (quickProcessEnabled()) {
                 <app-button variant="primary" (clicked)="onFastTrack()" [loading]="loading()">
                   <app-icon name="zap" [size]="16" class="mr-1"></app-icon>
                   Procesar Completo
@@ -274,9 +274,9 @@ import { PayrollItemDetailComponent } from '../payroll-item-detail/payroll-item-
 
     <!-- Sub-modal de detalle por empleado -->
     <vendix-payroll-item-detail
-      [isOpen]="employeeDetailOpen"
+      [isOpen]="employeeDetailOpen()"
       [item]="selectedItem"
-      (isOpenChange)="employeeDetailOpen = $event"
+      (isOpenChange)="employeeDetailOpen.set($event)"
     ></vendix-payroll-item-detail>
   `,
 })
@@ -289,7 +289,7 @@ export class PayrollRunDetailComponent {
   private store = inject(Store);
   private actions$ = inject(Actions);
   private destroyRef = inject(DestroyRef);
-private fastTrackCancel$ = new Subject<void>();
+private fastTrackCancel$ = new Subject<void>(); // LEGÍTIMO — cancellation token para fast-track pipeline
 
   // ── StepsLine ─────────────────────────────────────────
   statusSteps: StepsLineItem[] = [
@@ -302,7 +302,7 @@ private fastTrackCancel$ = new Subject<void>();
   currentStatusIndex = 0;
 
   // ── Quick process ─────────────────────────────────────
-  quickProcessEnabled = false;
+  quickProcessEnabled = signal(false);
   readonly loading = signal(false);
 
   // ── Fast-track state ──────────────────────────────────
@@ -310,10 +310,10 @@ private fastTrackCancel$ = new Subject<void>();
   readonly fastTrackCurrentLabel = signal('');
 
   // ── Cancel confirmation (0=hidden, 1=first confirm, 2=final confirm) ──
-  cancelConfirmStep: 0 | 1 | 2 = 0;
+  readonly cancelConfirmStep = signal<0 | 1 | 2>(0);
 
   // ── Employee detail sub-modal ─────────────────────────
-  employeeDetailOpen = false;
+  readonly employeeDetailOpen = signal(false);
   selectedItem: PayrollItem | null = null;
 
   // ── ResponsiveDataView ────────────────────────────────
@@ -396,7 +396,7 @@ private fastTrackCancel$ = new Subject<void>();
     });
   }
 
-  // ── Computed getters ──────────────────────────────────
+// ── Computed getters ──────────────────────────────────
 
   get showQuickProcess(): boolean {
     const run = this.payrollRun();
@@ -443,12 +443,11 @@ private fastTrackCancel$ = new Subject<void>();
     return variants[run.status] || 'primary';
   }
 
-  // ── Employee detail ───────────────────────────────────
+  // ── Employee detail ──────────────────────────────────
 
   onEmployeeClick(row: any): void {
-    // Find the original PayrollItem from the row's _originalItem reference
     this.selectedItem = row._originalItem || null;
-    this.employeeDetailOpen = true;
+    this.employeeDetailOpen.set(true);
   }
 
   // ── Step actions ──────────────────────────────────────
@@ -498,6 +497,7 @@ private fastTrackCancel$ = new Subject<void>();
     if (run) {
       this.store.dispatch(cancelPayrollRun({ id: run.id }));
     }
+    this.cancelConfirmStep.set(0);
   }
 
   // ── Fast-track ────────────────────────────────────────
