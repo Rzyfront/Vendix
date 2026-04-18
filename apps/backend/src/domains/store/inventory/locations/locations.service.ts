@@ -256,25 +256,31 @@ export class LocationsService {
   }
 
   /**
-   * Busca una ubicación activa por código (scope auto-aplica org/store)
+   * Busca una ubicación activa por código, restringido al store actual.
+   * El filtro explícito store_id evita matches cross-store con códigos idénticos
+   * (ahora que la uniqueness es a nivel store, no org).
    */
   async findByCode(code: string): Promise<any | null> {
+    const context = RequestContextService.getContext();
     return this.prisma.inventory_locations.findFirst({
       where: {
         code: { equals: code, mode: 'insensitive' },
         is_active: true,
+        ...(context?.store_id ? { store_id: context.store_id } : {}),
       },
     });
   }
 
   /**
-   * Busca una ubicación activa por nombre (scope auto-aplica org/store)
+   * Busca una ubicación activa por nombre, restringido al store actual.
    */
   async findByName(name: string): Promise<any | null> {
+    const context = RequestContextService.getContext();
     return this.prisma.inventory_locations.findFirst({
       where: {
         name: { equals: name, mode: 'insensitive' },
         is_active: true,
+        ...(context?.store_id ? { store_id: context.store_id } : {}),
       },
     });
   }
