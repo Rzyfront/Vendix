@@ -1236,7 +1236,7 @@ model inventory_locations {
   dispatch_notes           dispatch_notes[]           @relation("dispatch_notes_location")
   dispatch_note_items      dispatch_note_items[]      @relation("dispatch_note_items_location")
 
-  @@unique([organization_id, code])
+  @@unique([store_id, code])
   @@index([organization_id, store_id])
   @@index([organization_id, type])
 }
