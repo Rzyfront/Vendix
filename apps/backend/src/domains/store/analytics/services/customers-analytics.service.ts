@@ -138,7 +138,7 @@ export class CustomersAnalyticsService {
 
     const truncSql = Prisma.raw(`'${getDateTruncInterval(granularity)}'`);
 
-    // New customers by period (using store_users creation date)
+    // New customers by period (using users.created_at with customer role)
     const results = await (this.prisma.withoutScope() as any).$queryRaw<
       Array<{
         period: Date;
@@ -146,23 +146,39 @@ export class CustomersAnalyticsService {
       }>
     >`
       SELECT
-        DATE_TRUNC(${truncSql}, su."createdAt") AS period,
-        COUNT(DISTINCT su.user_id) AS new_customers
-      FROM store_users su
-      WHERE su.store_id = ${storeId}
-        AND su."createdAt" >= ${startDate}
-        AND su."createdAt" <= ${endDate}
-      GROUP BY DATE_TRUNC(${truncSql}, su."createdAt")
+        DATE_TRUNC(${truncSql}, u.created_at) AS period,
+        COUNT(DISTINCT u.id) AS new_customers
+      FROM users u
+      WHERE EXISTS (
+        SELECT 1 FROM store_users su2
+        WHERE su2.user_id = u.id AND su2.store_id = ${storeId}
+      )
+      AND EXISTS (
+        SELECT 1 FROM user_roles ur
+        JOIN roles r ON r.id = ur.role_id
+        WHERE ur.user_id = u.id AND r.name = 'customer'
+      )
+      AND u.created_at >= ${startDate}
+      AND u.created_at <= ${endDate}
+      GROUP BY DATE_TRUNC(${truncSql}, u.created_at)
       ORDER BY period ASC
     `;
 
     // Get cumulative total before start date
     const cumulativeBefore = await (this.prisma.withoutScope() as any)
       .$queryRaw<Array<{ count: bigint }>>`
-      SELECT COUNT(DISTINCT su.user_id) AS count
-      FROM store_users su
-      WHERE su.store_id = ${storeId}
-        AND su."createdAt" < ${startDate}
+      SELECT COUNT(DISTINCT u.id) AS count
+      FROM users u
+      WHERE EXISTS (
+        SELECT 1 FROM store_users su2
+        WHERE su2.user_id = u.id AND su2.store_id = ${storeId}
+      )
+      AND EXISTS (
+        SELECT 1 FROM user_roles ur
+        JOIN roles r ON r.id = ur.role_id
+        WHERE ur.user_id = u.id AND r.name = 'customer'
+      )
+      AND u.created_at < ${startDate}
     `;
 
     let cumulative = Number(cumulativeBefore[0]?.count || 0);
@@ -308,25 +324,24 @@ export class CustomersAnalyticsService {
     }
     const storeId = context.store_id;
 
-    // Get all store customers with their order aggregates
-    const storeUsers = await this.prisma.store_users.findMany({
-      where: { store_id: storeId },
-      include: {
-        user: {
-          select: {
-            id: true,
-            first_name: true,
-            last_name: true,
-            email: true,
-            phone: true,
-            created_at: true,
-            state: true,
-          },
-        },
+    // Get all store customers (with customer role) and their order aggregates
+    const storeCustomers = await this.prisma.users.findMany({
+      where: {
+        store_users: { some: { store_id: storeId } },
+        user_roles: { some: { roles: { name: 'customer' } } },
+      },
+      select: {
+        id: true,
+        first_name: true,
+        last_name: true,
+        email: true,
+        phone: true,
+        created_at: true,
+        state: true,
       },
     });
 
-    const userIds = storeUsers.map((su) => su.user_id);
+    const userIds = storeCustomers.map((u) => u.id);
 
     // Get order aggregates per customer in period
     const orderAggs = await this.prisma.orders.groupBy({
@@ -343,9 +358,8 @@ export class CustomersAnalyticsService {
 
     const aggMap = new Map(orderAggs.map((a) => [a.customer_id, a]));
 
-    return storeUsers.map((su) => {
-      const user = su.user;
-      const agg: any = aggMap.get(su.user_id);
+    return storeCustomers.map((user) => {
+      const agg: any = aggMap.get(user.id);
       const customerName =
         `${user.first_name || ''} ${user.last_name || ''}`.trim() || 'Cliente';
 

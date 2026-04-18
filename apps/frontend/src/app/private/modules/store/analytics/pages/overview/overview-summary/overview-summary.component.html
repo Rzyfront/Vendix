@@ -55,7 +55,7 @@
 
   <!-- Filter Bar -->
   <div
-    class="sticky top-[99px] z-10 bg-background px-3 py-1.5 md:static md:bg-transparent md:px-6 md:py-1.5 md:border-b md:border-border"
+    class="bg-background px-3 py-1.5 md:px-6 md:py-1.5 md:border-b md:border-border"
   >
     <div class="flex items-center justify-between gap-2">
       <div class="min-w-0">
@@ -255,14 +255,22 @@
         </div>
       } @else {
         @for (category of viewsByCategory() | keyvalue; track category.key) {
-          <div class="category-group">
-            <h3 class="category-label">{{ getCategoryLabel(category.key) }}</h3>
+          <section class="category-group">
+            <div class="category-header" [style.--cat-color]="getCategoryColor(category.key)">
+              <div class="category-line"></div>
+              <div class="category-label">
+                <app-icon [name]="getCategoryIcon(category.key)" [size]="16"></app-icon>
+                <span>{{ getCategoryLabel(category.key) }}</span>
+                <span class="category-count">{{ category.value.length }}</span>
+              </div>
+              <div class="category-line"></div>
+            </div>
             <div class="cards-grid">
               @for (view of category.value; track view.key) {
                 <app-analytics-card [view]="view"></app-analytics-card>
               }
             </div>
-          </div>
+          </section>
         }
       }
     </div>

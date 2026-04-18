@@ -247,6 +247,14 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
     return ANALYTICS_CATEGORIES.find((c) => c.id === categoryId)?.label ?? categoryId;
   }
 
+  getCategoryIcon(categoryId: AnalyticsCategoryId): string {
+    return ANALYTICS_CATEGORIES.find((c) => c.id === categoryId)?.icon ?? 'folder';
+  }
+
+  getCategoryColor(categoryId: AnalyticsCategoryId): string {
+    return ANALYTICS_CATEGORIES.find((c) => c.id === categoryId)?.color ?? 'var(--color-primary)';
+  }
+
   // Template helpers
   getGrowthText(growth?: number): string {
     if (growth === undefined || growth === null) return '';

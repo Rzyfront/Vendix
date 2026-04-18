@@ -1,19 +1,28 @@
-<button
-  type="button"
+<div
   class="analytics-card"
   (click)="onClick()"
-  [attr.aria-label]="'Abrir ' + view().title"
+  (mouseenter)="showTooltip.set(true)"
+  (mouseleave)="showTooltip.set(false)"
+  [style.--card-color]="categoryColor()"
 >
   <div class="card-icon">
-    <app-icon [name]="view().icon" [size]="24"></app-icon>
+    <app-icon [name]="view().icon" [size]="20" />
   </div>
 
   <div class="card-content">
-    <h3 class="card-title">{{ view().title }}</h3>
+    <h4 class="card-title">{{ view().title }}</h4>
     <p class="card-description">{{ view().description }}</p>
   </div>
 
-  <div class="card-arrow">
-    <app-icon name="chevron-right" [size]="20"></app-icon>
-  </div>
-</button>
+  <span class="card-badge">{{ categoryLabel() }}</span>
+
+  @if (showTooltip()) {
+    <div class="card-tooltip">
+      <div class="tooltip-header">
+        <app-icon [name]="view().icon" [size]="16" />
+        <span>{{ view().title }}</span>
+      </div>
+      <p class="tooltip-body">{{ view().detailedDescription || view().description }}</p>
+    </div>
+  }
+</div>
