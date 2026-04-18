@@ -1256,9 +1256,10 @@ export class ProductsService {
         stock_by_location,
         variants,
         stock_transfer_mode,
+        variant_removal_stock_mode,
         price, // Exclude as it's not in DB
         ...productData
-      } = updateProductDto;
+      } = updateProductDto as UpdateProductDto & { price?: number };
 
       const result = await this.prisma.$transaction(
         async (prisma) => {
