@@ -344,10 +344,46 @@ export class ProductsBulkImageService {
    * Does NOT filter by image extension — consumers handle that.
    */
   private parseAndGroupZipEntries(fileBuffer: Buffer): Map<string, AdmZip.IZipEntry[]> {
+    if (!fileBuffer || fileBuffer.length < 22) {
+      console.error(
+        '[bulk-images] Invalid ZIP buffer',
+        JSON.stringify({
+          received: !!fileBuffer,
+          size: fileBuffer?.length ?? 0,
+          magic: fileBuffer?.slice(0, 4).toString('hex') ?? null,
+        }),
+      );
+      throw new VendixHttpException(
+        ErrorCodes.BULK_IMG_ZIP_CORRUPT,
+        'El archivo ZIP está corrupto o no es válido',
+      );
+    }
+
+    const magic = fileBuffer.slice(0, 4).toString('hex');
+    const isZipMagic = magic === '504b0304' || magic === '504b0506' || magic === '504b0708';
+    if (!isZipMagic) {
+      console.error(
+        '[bulk-images] File is not a valid ZIP (bad magic)',
+        JSON.stringify({ size: fileBuffer.length, magic }),
+      );
+      throw new VendixHttpException(
+        ErrorCodes.BULK_IMG_ZIP_CORRUPT,
+        'El archivo ZIP está corrupto o no es válido',
+      );
+    }
+
     let zip: AdmZip;
     try {
       zip = new AdmZip(fileBuffer);
-    } catch {
+    } catch (error) {
+      console.error(
+        '[bulk-images] AdmZip failed to parse buffer',
+        JSON.stringify({
+          size: fileBuffer.length,
+          magic,
+          message: (error as Error)?.message,
+        }),
+      );
       throw new VendixHttpException(
         ErrorCodes.BULK_IMG_ZIP_CORRUPT,
         'El archivo ZIP está corrupto o no es válido',

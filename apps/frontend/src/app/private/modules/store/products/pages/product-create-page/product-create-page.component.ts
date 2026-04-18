@@ -5,7 +5,7 @@ import {
   inject,
 } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { DatePipe } from '@angular/common';
+import { DatePipe, DecimalPipe, KeyValuePipe } from '@angular/common';
 import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { map } from 'rxjs/operators';
 import { RouterModule, ActivatedRoute, Router, Params } from '@angular/router';
@@ -19,16 +19,25 @@ import {
 } from '@angular/forms';
 import {
   ButtonComponent,
+  InputComponent,
+  InputButtonsComponent,
   ToastService,
   IconComponent,
+  SelectorComponent,
   SelectorOption,
+  MultiSelectorComponent,
   MultiSelectorOption,
+  TextareaComponent,
   ModalComponent,
   DialogService,
+  SettingToggleComponent,
   StickyHeaderComponent,
   StickyHeaderActionButton,
+  BadgeComponent,
+  TooltipComponent,
 } from '../../../../../../shared/components';
 import {
+  CurrencyPipe,
   CurrencyFormatService,
 } from '../../../../../../shared/pipes/currency';
 import {
@@ -59,14 +68,7 @@ import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-h
 import { ProductUtils } from '../../utils/product.utils';
 import { PromotionsService } from '../../../marketing/promotions/services/promotions.service';
 import { environment } from '../../../../../../../environments/environment';
-import { ProductWizardShellComponent } from './wizard/product-wizard-shell.component';
-import { WizardChecklistComponent } from './wizard/wizard-checklist.component';
-import { Step1InfoComponent } from './wizard/step-1-info.component';
-import { Step2PricingComponent } from './wizard/step-2-pricing.component';
-import { Step3InventoryComponent } from './wizard/step-3-inventory.component';
-import { Step4VariantsComponent } from './wizard/step-4-variants.component';
-import { Step5PublishComponent } from './wizard/step-5-publish.component';
-import { ProductFormWizardService } from '../../services/product-form-wizard.service';
+import { saleLessThanBaseValidator } from '../../utils/product-validators';
 
 interface VariantAttribute {
   name: string;
@@ -100,21 +102,25 @@ export type { GeneratedVariant };
     ReactiveFormsModule,
     FormsModule,
     ButtonComponent,
+    InputComponent,
+    InputButtonsComponent,
     IconComponent,
+    SelectorComponent,
+    MultiSelectorComponent,
+    TextareaComponent,
     ModalComponent,
+    SettingToggleComponent,
     CategoryQuickCreateComponent,
     BrandQuickCreateComponent,
     TaxQuickCreateComponent,
     AdjustmentCreateModalComponent,
     StickyHeaderComponent,
+    CurrencyPipe,
+    BadgeComponent,
+    TooltipComponent,
     DatePipe,
-    ProductWizardShellComponent,
-    WizardChecklistComponent,
-    Step1InfoComponent,
-    Step2PricingComponent,
-    Step3InventoryComponent,
-    Step4VariantsComponent,
-    Step5PublishComponent,
+    DecimalPipe,
+    KeyValuePipe,
   ],
   templateUrl: './product-create-page.component.html',
   styles: [
@@ -340,7 +346,6 @@ export class ProductCreatePageComponent {
   private promotionsService = inject(PromotionsService);
   private reservationsService = inject(ReservationsService);
   private http = inject(HttpClient);
-  readonly wizardService = inject(ProductFormWizardService);
 
   // Data Collection Templates (for consultation configuration)
   dataCollectionTemplates: {
@@ -387,8 +392,6 @@ export class ProductCreatePageComponent {
   categoryOptions: MultiSelectorOption[] = [];
   brandOptions: SelectorOption[] = [];
   taxCategoryOptions: MultiSelectorOption[] = [];
-  allCategories: ProductCategory[] = [];
-  allBrands: Brand[] = [];
   stateOptions: SelectorOption[] = [
     { value: ProductState.ACTIVE, label: 'Activo' },
     { value: ProductState.INACTIVE, label: 'Inactivo' },
@@ -650,6 +653,8 @@ export class ProductCreatePageComponent {
       consultation_template_id: [null],
       preconsultation_template_id: [null],
       preparation_time_minutes: [null as number | null],
+    }, {
+      validators: [saleLessThanBaseValidator()],
     });
 
     this.setupPriceCalculations(form);
@@ -735,7 +740,7 @@ export class ProductCreatePageComponent {
       );
   }
 
-  allTaxCategories: TaxCategory[] = [];
+  private allTaxCategories: TaxCategory[] = [];
 
   private loadProduct(id: number): void {
     this.productsService.getProductById(id).subscribe({
@@ -838,6 +843,10 @@ export class ProductCreatePageComponent {
         attributes: v.attributes || {},
         image_url: v.product_images?.image_url || undefined,
         image_id: v.image_id || undefined,
+        track_inventory_override:
+          v.track_inventory_override === undefined
+            ? undefined
+            : v.track_inventory_override,
       }));
 
       // Reconstruct variantAttributes from loaded variants
@@ -867,7 +876,6 @@ export class ProductCreatePageComponent {
   private loadCategories(): void {
     this.categoriesService.getAllCategories().subscribe({
       next: (categories: ProductCategory[]) => {
-        this.allCategories = categories;
         this.categoryOptions = categories.map((cat: ProductCategory) => ({
           value: cat.id,
           label: cat.name,
@@ -913,7 +921,6 @@ export class ProductCreatePageComponent {
   private loadBrands(): void {
     this.brandsService.getAllBrands().subscribe({
       next: (brands: Brand[]) => {
-        this.allBrands = brands;
         this.brandOptions = brands.map((brand: Brand) => ({
           value: brand.id,
           label: brand.name,
@@ -1649,9 +1656,29 @@ export class ProductCreatePageComponent {
   onSubmit(): void {
     if (this.productForm.invalid || this.isSubmitting()) {
       this.productForm.markAllAsTouched();
+      const saleErr = this.productForm.errors?.['saleLessThanBase'];
+      if (saleErr) {
+        this.toastService.error(
+          'El precio de oferta debe ser menor al precio base.',
+          'Precio de oferta inválido',
+        );
+      } else {
+        this.toastService.error(
+          'Por favor, completa todos los campos requeridos correctamente',
+          'Formulario inválido',
+        );
+      }
+      return;
+    }
+
+    // Block SERVICE products from having variants
+    if (
+      this.productForm.get('product_type')?.value === 'service' &&
+      this.hasVariants
+    ) {
       this.toastService.error(
-        'Por favor, completa todos los campos requeridos correctamente',
-        'Formulario inválido',
+        'Los productos tipo SERVICIO no pueden tener variantes. Desactiva las variantes o cambia el tipo de producto.',
+        'Configuración inválida',
       );
       return;
     }
@@ -1778,7 +1805,8 @@ export class ProductCreatePageComponent {
         id: v.id,
         sku: v.sku,
         name: v.name,
-        price_override: Number(v.price),
+        // Only send price_override when intentionally non-zero; 0 is ambiguous (backend rejects)
+        price_override: Number(v.price) > 0 ? Number(v.price) : null,
         cost_price: Number(v.cost_price),
         profit_margin: Number(v.profit_margin),
         is_on_sale: !!v.is_on_sale,
@@ -1789,6 +1817,11 @@ export class ProductCreatePageComponent {
         variant_image_url: v.image_url?.startsWith('data:')
           ? v.image_url
           : undefined,
+        // null = heredar track_inventory del producto; true/false = override explícito
+        track_inventory_override:
+          v.track_inventory_override === undefined
+            ? null
+            : v.track_inventory_override,
       }));
 
       // Set base stock_quantity to the sum of variant stocks for immediate UI consistency
@@ -2125,36 +2158,44 @@ export class ProductCreatePageComponent {
     this.router.navigate(['/admin/reservations/schedules']);
   }
 
-  // Wizard handlers
-  onStepValidityChange(
-    stepIndex: number,
-    validity: { isValid: boolean; completionPercent: number; errors: string[] },
+  // ─── Variant track_inventory_override helpers ──────────────────────────────
+  readonly variantTrackInventoryOptions: SelectorOption[] = [
+    { value: 'inherit', label: 'Heredar del producto' },
+    { value: 'track', label: 'Manejar stock' },
+    { value: 'availability_only', label: 'Solo disponibilidad (sin stock)' },
+  ];
+
+  /** Convert the tri-state override boolean | null into a selector string value. */
+  getVariantTrackInventoryValue(variant: GeneratedVariant): string {
+    if (variant.track_inventory_override === true) return 'track';
+    if (variant.track_inventory_override === false) return 'availability_only';
+    return 'inherit';
+  }
+
+  /** Handle selector change → map back to boolean | null and enforce parent rules. */
+  updateVariantTrackInventoryOverride(
+    variant: GeneratedVariant,
+    value: string,
   ): void {
-    this.wizardService.updateStepValidity(stepIndex, validity);
-  }
+    const parentTrackInventory =
+      this.productForm.get('track_inventory')?.value === true;
 
-  onWizardStepClick(stepIndex: number): void {
-    this.wizardService.goToStep(stepIndex);
-  }
+    let next: boolean | null | undefined;
+    if (value === 'track') next = true;
+    else if (value === 'availability_only') next = false;
+    else next = undefined;
 
-  onWizardReset(): void {
-    this.wizardService.resetWizard();
-  }
+    // Guardrail: if parent does NOT track inventory, a variant cannot force 'track'.
+    if (!parentTrackInventory && next === true) {
+      this.toastService.error(
+        'El producto no rastrea inventario. La variante no puede activar control de stock.',
+        'Configuración incompatible',
+      );
+      return;
+    }
 
-  get wizardSubmitLabel(): string {
-    if (this.isEditMode()) return 'Guardar cambios';
-    return this.isService ? 'Crear servicio' : 'Crear producto';
-  }
-
-  get stepBasePrice(): number {
-    return Number(this.productForm.get('base_price')?.value || 0);
-  }
-
-  get stepBaseSku(): string {
-    return this.productForm.get('sku')?.value || '';
-  }
-
-  get stepTrackInventory(): boolean {
-    return !!this.productForm.get('track_inventory')?.value;
+    variant.track_inventory_override = next;
+    // Trigger CD for the template — array mutation is not signal-backed here
+    this.generatedVariants = [...this.generatedVariants];
   }
 }

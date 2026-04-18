@@ -296,7 +296,7 @@ export interface UpdateProductDto {
 export interface CreateProductVariantDto {
   sku: string;
   name?: string;
-  price_override?: number;
+  price_override?: number | null;
   price?: number;
   cost_price?: number;
   profit_margin?: number;
@@ -306,6 +306,7 @@ export interface CreateProductVariantDto {
   image_id?: number;
   attributes?: Record<string, any>;
   variant_image_url?: string;
+  track_inventory_override?: boolean | null;
 }
 
 export interface CreateProductImageDto {
