@@ -110,6 +110,85 @@
         </div>
       </section>
 
+      <!-- Shipping Block -->
+      @if (shippingBlock(); as block) {
+        <section class="card-section card-section--shipping">
+          <div class="section-header">
+            @switch (block.type) {
+              @case ('pickup') {
+                <app-icon name="map-pin" [size]="18"></app-icon>
+              }
+              @case ('home_delivery') {
+                <app-icon name="truck" [size]="18"></app-icon>
+              }
+              @default {
+                <app-icon name="package" [size]="18"></app-icon>
+              }
+            }
+            <h3>{{ block.title }}</h3>
+          </div>
+          <div class="section-divider"></div>
+          <div class="shipping-block-content">
+            @if (block.type === 'pickup') {
+              <div class="shipping-detail">
+                <p class="shipping-method-name">{{ block.method }}</p>
+                <p class="shipping-info-text">Recoge tu pedido en {{ block.storeName }}</p>
+              </div>
+            }
+            @if (block.type === 'home_delivery') {
+              <div class="shipping-detail">
+                <p class="shipping-method-name">{{ block.method }}</p>
+                @if (block.carrier) {
+                  <p class="shipping-info-text">Transportista: {{ block.carrier }}</p>
+                }
+                @if (block.tracking) {
+                  <div class="tracking-number-row">
+                    <span class="tracking-label">Rastreo:</span>
+                    <code class="tracking-code">{{ block.tracking }}</code>
+                  </div>
+                }
+                @if (block.minDays && block.maxDays) {
+                  <p class="shipping-info-text">Entrega estimada: {{ block.minDays }}-{{ block.maxDays }} días hábiles</p>
+                }
+                <p class="shipping-cost-text">Costo: {{ block.cost | currency }}</p>
+              </div>
+            }
+            @if (block.type === 'other') {
+              <div class="shipping-detail">
+                <p class="shipping-method-name">{{ block.method }}</p>
+                @if (block.note) {
+                  <p class="shipping-info-text">{{ block.note }}</p>
+                }
+                @if (block.cost > 0) {
+                  <p class="shipping-cost-text">Costo: {{ block.cost | currency }}</p>
+                }
+              </div>
+            }
+          </div>
+        </section>
+      }
+
+      <!-- Order Timeline -->
+      @if (orderTimelineSteps().length > 0) {
+        <section class="card-section card-section--timeline">
+          <div class="section-header">
+            <app-icon name="activity" [size]="16"></app-icon>
+            <h3>Seguimiento</h3>
+          </div>
+          <div class="section-divider"></div>
+          <div class="order-timeline">
+            @for (step of orderTimelineSteps(); track step.key) {
+              <div class="timeline-step" [class]="step.status">
+                <div class="timeline-dot"></div>
+                <div class="timeline-content">
+                  <span class="timeline-label">{{ step.label }}</span>
+                </div>
+              </div>
+            }
+          </div>
+        </section>
+      }
+
       <!-- Info Grid: Shipping + Payment side by side -->
       <div class="info-grid">
         <!-- Shipping -->

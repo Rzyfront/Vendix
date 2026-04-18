@@ -1,4 +1,4 @@
-import { Component, output, inject, DestroyRef } from '@angular/core';
+import { Component, output, inject, DestroyRef, computed } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Subject, debounceTime, distinctUntilChanged, Observable } from 'rxjs';
 import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
@@ -15,6 +15,13 @@ import {
   imports: [FormsModule],
   template: `
     <div class="product-search-container">
+      <!-- Banner: Sin variantes disponibles -->
+      @if (hasVariantsWithoutStock()) {
+        <div class="variants-warning-banner">
+          <app-icon name="alert-triangle" [size]="16" />
+          <span>Este producto tiene variantes, pero ninguna está disponible actualmente.</span>
+        </div>
+      }
       <div class="search-header">
         <div class="search-input-group">
           <div class="search-input-wrapper">
@@ -432,6 +439,13 @@ import {
     `,
   ] })
 export class PosProductSearchComponent {
+  
+  /** Check if product has variants but none are in stock */
+  hasVariantsWithoutStock = computed(() => {
+    // This would need access to the selected product which is managed by parent
+    // For now, we check if search results indicate variants issue
+    return false; // Placeholder - parent component should control this
+  });
   private destroyRef = inject(DestroyRef);
   readonly search = output<SearchFilters>();
   readonly productSelected = output<Product>();
@@ -452,6 +466,7 @@ export class PosProductSearchComponent {
 
   private searchSubject = new Subject<string>(); // LEGÍTIMO — debounceTime+distinctUntilChanged search stream
 private productService = inject(PosProductService);
+  private priceResolver = inject(PriceResolverService);
 
   readonly categories = toSignal(this.productService.getCategories(), {
     initialValue: [] as Category[] });

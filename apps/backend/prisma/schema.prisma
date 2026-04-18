@@ -809,6 +809,10 @@ model orders {
   // Payment Links
   payment_links payment_links[]
 
+  // ETA (Estimated Time of Arrival)
+  estimated_ready_at     DateTime?
+  estimated_delivered_at DateTime?
+
   // Invoice Data Requests
   invoice_data_requests invoice_data_requests[]
 
@@ -944,6 +948,7 @@ model product_variants {
   is_on_sale               Boolean                    @default(false)
   sale_price               Decimal?                   @db.Decimal(12, 2)
   stock_quantity           Int                        @default(0)
+  track_inventory_override Boolean?
   attributes               Json?
   image_id                 Int?
   created_at               DateTime?                  @default(now()) @db.Timestamp(6)
@@ -975,76 +980,77 @@ model product_variants {
 }
 
 model products {
-  id                       Int                        @id @default(autoincrement())
-  store_id                 Int
-  brand_id                 Int?
-  name                     String                     @db.VarChar(255)
-  slug                     String                     @db.VarChar(255)
-  description              String?
-  base_price               Decimal                    @db.Decimal(12, 2)
-  cost_price               Decimal?                   @db.Decimal(12, 2)
-  profit_margin            Decimal?                   @db.Decimal(5, 2)
-  sku                      String?                    @db.VarChar(100)
-  stock_quantity           Int?                       @default(0)
-  state                    product_state_enum         @default(inactive)
-  pricing_type             pricing_type_enum          @default(unit)
-  product_type             product_type_enum          @default(physical)
-  service_duration_minutes Int?
-  service_modality         service_modality_enum?
-  service_pricing_type     service_pricing_type_enum?
-  requires_booking         Boolean                    @default(false)
-  booking_mode             booking_mode_enum          @default(provider_required)
-  buffer_minutes           Int?                       @default(0)
-  is_recurring             Boolean                    @default(false)
-  service_instructions     String?                    @db.Text
+  id                          Int                        @id @default(autoincrement())
+  store_id                    Int
+  brand_id                    Int?
+  name                        String                     @db.VarChar(255)
+  slug                        String                     @db.VarChar(255)
+  description                 String?
+  base_price                  Decimal                    @db.Decimal(12, 2)
+  cost_price                  Decimal?                   @db.Decimal(12, 2)
+  profit_margin               Decimal?                   @db.Decimal(5, 2)
+  sku                         String?                    @db.VarChar(100)
+  stock_quantity              Int?                       @default(0)
+  state                       product_state_enum         @default(inactive)
+  pricing_type                pricing_type_enum          @default(unit)
+  product_type                product_type_enum          @default(physical)
+  service_duration_minutes    Int?
+  service_modality            service_modality_enum?
+  service_pricing_type        service_pricing_type_enum?
+  requires_booking            Boolean                    @default(false)
+  booking_mode                booking_mode_enum          @default(provider_required)
+  buffer_minutes              Int?                       @default(0)
+  is_recurring                Boolean                    @default(false)
+  service_instructions        String?                    @db.Text
+  preparation_time_minutes    Int?
   is_consultation             Boolean                    @default(false)
   send_preconsultation        Boolean                    @default(false)
   consultation_template_id    Int?
   consultation_template       data_collection_templates? @relation("product_consultation_template", fields: [consultation_template_id], references: [id], onDelete: SetNull)
   preconsultation_template_id Int?
   preconsultation_template    data_collection_templates? @relation("product_preconsultation_template", fields: [preconsultation_template_id], references: [id], onDelete: SetNull)
-  available_for_ecommerce  Boolean                    @default(false)
-  is_on_sale               Boolean                    @default(false)
-  sale_price               Decimal?                   @db.Decimal(12, 2)
-  weight                   Decimal?                   @db.Decimal(12, 3)
-  dimensions               Json?
-  track_inventory          Boolean                    @default(true)
-  min_stock_level          Int?                       @default(0)
-  max_stock_level          Int?                       @default(0)
-  reorder_point            Int?                       @default(0)
-  reorder_quantity         Int?                       @default(0)
-  requires_serial_numbers  Boolean                    @default(false)
-  requires_batch_tracking  Boolean                    @default(false)
-  created_at               DateTime?                  @default(now()) @db.Timestamp(6)
-  updated_at               DateTime?                  @default(now()) @db.Timestamp(6)
-  inventory_adjustments    inventory_adjustments[]
-  inventory_batches        inventory_batches[]
-  inventory_movements      inventory_movements[]
-  inventory_serial_numbers inventory_serial_numbers[]
-  inventory_transactions   inventory_transactions[]
-  order_items              order_items[]
-  product_categories       product_categories[]
-  product_images           product_images[]
-  product_tax_assignments  product_tax_assignments[]
-  product_variants         product_variants[]
-  brands                   brands?                    @relation(fields: [brand_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-  stores                   stores                     @relation(fields: [store_id], references: [id], onUpdate: NoAction)
-  purchase_order_items     purchase_order_items[]
-  return_order_items       return_order_items[]
-  reviews                  reviews[]
-  sales_order_items        sales_order_items[]
-  stock_levels             stock_levels[]
-  stock_reservations       stock_reservations[]
-  stock_transfer_items     stock_transfer_items[]
-  supplier_products        supplier_products[]
-  cart_items               cart_items[]
-  wishlist_items           wishlist_items[]
-  invoice_items            invoice_items[]
-  quotation_items          quotation_items[]
-  promotion_products       promotion_products[]
-  coupon_products          coupon_products[]
-  inventory_cost_layers    inventory_cost_layers[]
-  layaway_items            layaway_items[]
+  available_for_ecommerce     Boolean                    @default(false)
+  is_on_sale                  Boolean                    @default(false)
+  sale_price                  Decimal?                   @db.Decimal(12, 2)
+  weight                      Decimal?                   @db.Decimal(12, 3)
+  dimensions                  Json?
+  track_inventory             Boolean                    @default(true)
+  min_stock_level             Int?                       @default(0)
+  max_stock_level             Int?                       @default(0)
+  reorder_point               Int?                       @default(0)
+  reorder_quantity            Int?                       @default(0)
+  requires_serial_numbers     Boolean                    @default(false)
+  requires_batch_tracking     Boolean                    @default(false)
+  created_at                  DateTime?                  @default(now()) @db.Timestamp(6)
+  updated_at                  DateTime?                  @default(now()) @db.Timestamp(6)
+  inventory_adjustments       inventory_adjustments[]
+  inventory_batches           inventory_batches[]
+  inventory_movements         inventory_movements[]
+  inventory_serial_numbers    inventory_serial_numbers[]
+  inventory_transactions      inventory_transactions[]
+  order_items                 order_items[]
+  product_categories          product_categories[]
+  product_images              product_images[]
+  product_tax_assignments     product_tax_assignments[]
+  product_variants            product_variants[]
+  brands                      brands?                    @relation(fields: [brand_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  stores                      stores                     @relation(fields: [store_id], references: [id], onUpdate: NoAction)
+  purchase_order_items        purchase_order_items[]
+  return_order_items          return_order_items[]
+  reviews                     reviews[]
+  sales_order_items           sales_order_items[]
+  stock_levels                stock_levels[]
+  stock_reservations          stock_reservations[]
+  stock_transfer_items        stock_transfer_items[]
+  supplier_products           supplier_products[]
+  cart_items                  cart_items[]
+  wishlist_items              wishlist_items[]
+  invoice_items               invoice_items[]
+  quotation_items             quotation_items[]
+  promotion_products          promotion_products[]
+  coupon_products             coupon_products[]
+  inventory_cost_layers       inventory_cost_layers[]
+  layaway_items               layaway_items[]
 
   // Bookings
   bookings          bookings[]
@@ -1788,6 +1794,7 @@ model shipping_methods {
   tracking_url                 String?
   min_days                     Int?
   max_days                     Int?
+  transit_time_minutes         Int                       @default(0)
   is_active                    Boolean                   @default(true)
   is_system                    Boolean                   @default(false)
   display_order                Int                       @default(0)
@@ -5381,7 +5388,7 @@ model entity_metadata_fields {
   created_at    DateTime                   @default(now()) @db.Timestamp(6)
   updated_at    DateTime                   @default(now()) @db.Timestamp(6)
 
-  store          stores                      @relation(fields: [store_id], references: [id])
+  store          stores                   @relation(fields: [store_id], references: [id])
   values         entity_metadata_values[]
   template_items data_collection_items[]
 
@@ -5429,13 +5436,13 @@ model data_collection_templates {
   created_at  DateTime             @default(now()) @db.Timestamp(6)
   updated_at  DateTime             @default(now()) @db.Timestamp(6)
 
-  store       stores                              @relation(fields: [store_id], references: [id])
-  sections    data_collection_sections[]
-  tabs      data_collection_tabs[]
-  products    data_collection_template_products[]
-  submissions data_collection_submissions[]
-  consultation_products     products[]  @relation("product_consultation_template")
-  preconsultation_products  products[]  @relation("product_preconsultation_template")
+  store                    stores                              @relation(fields: [store_id], references: [id])
+  sections                 data_collection_sections[]
+  tabs                     data_collection_tabs[]
+  products                 data_collection_template_products[]
+  submissions              data_collection_submissions[]
+  consultation_products    products[]                          @relation("product_consultation_template")
+  preconsultation_products products[]                          @relation("product_preconsultation_template")
 
   @@index([store_id, status])
   @@index([store_id, entity_type])
@@ -5450,26 +5457,26 @@ model data_collection_tabs {
   created_at  DateTime @default(now()) @db.Timestamp(6)
   updated_at  DateTime @default(now()) @db.Timestamp(6)
 
-  template data_collection_templates @relation(fields: [template_id], references: [id], onDelete: Cascade)
+  template data_collection_templates  @relation(fields: [template_id], references: [id], onDelete: Cascade)
   sections data_collection_sections[]
 
   @@index([template_id, sort_order])
 }
 
 model data_collection_sections {
-  id          Int      @id @default(autoincrement())
-  template_id Int
-  title       String   @db.VarChar(255)
-  description String?  @db.Text
-  sort_order  Int      @default(0)
+  id                Int      @id @default(autoincrement())
+  template_id       Int
+  title             String   @db.VarChar(255)
+  description       String?  @db.Text
+  sort_order        Int      @default(0)
   tab_id            Int?
   parent_section_id Int?
   icon              String?  @db.VarChar(100)
-  created_at  DateTime @default(now()) @db.Timestamp(6)
-  updated_at  DateTime @default(now()) @db.Timestamp(6)
+  created_at        DateTime @default(now()) @db.Timestamp(6)
+  updated_at        DateTime @default(now()) @db.Timestamp(6)
 
-  template data_collection_templates @relation(fields: [template_id], references: [id], onDelete: Cascade)
-  items    data_collection_items[]
+  template       data_collection_templates  @relation(fields: [template_id], references: [id], onDelete: Cascade)
+  items          data_collection_items[]
   tab            data_collection_tabs?      @relation(fields: [tab_id], references: [id], onDelete: SetNull)
   parent_section data_collection_sections?  @relation("section_nesting", fields: [parent_section_id], references: [id], onDelete: Cascade)
   child_sections data_collection_sections[] @relation("section_nesting")
@@ -5480,10 +5487,10 @@ model data_collection_sections {
 }
 
 model data_collection_items {
-  id                Int      @id @default(autoincrement())
-  section_id        Int
-  metadata_field_id Int
-  sort_order        Int      @default(0)
+  id                 Int      @id @default(autoincrement())
+  section_id         Int
+  metadata_field_id  Int
+  sort_order         Int      @default(0)
   is_required        Boolean  @default(false)
   include_in_summary Boolean  @default(false)
   help_text          String?  @db.Text
@@ -5529,10 +5536,11 @@ model data_collection_submissions {
   created_at      DateTime               @default(now()) @db.Timestamp(6)
   updated_at      DateTime               @default(now()) @db.Timestamp(6)
 
-  store     stores                      @relation(fields: [store_id], references: [id])
-  template  data_collection_templates   @relation(fields: [template_id], references: [id])
-  booking   bookings?                   @relation(fields: [booking_id], references: [id])
-  customer  users?                      @relation("submission_customer", fields: [customer_id], references: [id])
+  store    stores                    @relation(fields: [store_id], references: [id])
+  template data_collection_templates @relation(fields: [template_id], references: [id])
+  booking  bookings?                 @relation(fields: [booking_id], references: [id])
+  customer users?                    @relation("submission_customer", fields: [customer_id], references: [id])
+
   @@index([store_id, status])
   @@index([booking_id])
   @@index([customer_id])

@@ -33,6 +33,7 @@ import { IconComponent } from '../../../../../shared/components/icon/icon.compon
 import { QuantityControlComponent } from '../../../../../shared/components/quantity-control/quantity-control.component';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
 import { ShareModalComponent } from '../../components/share-modal/share-modal.component';
+import { PriceResolverService } from '../../../../../shared/services/pricing';
 
 @Component({
   selector: 'app-product-detail',
@@ -178,19 +179,11 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
                   (displayPriceLabel() ? minVariantPrice() : displayPrice())
                     | currency
                 }}</span>
-                @if (selectedVariant(); as sv) {
-                  @if (sv.is_on_sale || sv.price_override) {
-                    <span
-                      class="original-price"
-                      style="text-decoration: line-through; opacity: 0.6; margin-left: 10px;"
-                      >{{ p.base_price | currency }}</span
-                    >
-                  }
-                } @else if (p.is_on_sale) {
+                @if (selectedPriceResolution()?.isOnSale) {
                   <span
                     class="original-price"
                     style="text-decoration: line-through; opacity: 0.6; margin-left: 10px;"
-                    >{{ p.base_price | currency }}</span
+                    >{{ selectedPriceResolution()?.compareAtPrice | currency }}</span
                   >
                 }
               </div>
@@ -279,7 +272,7 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
                   size="sm"
                   customClasses="btn-cart"
                   [disabled]="
-                    !isService() && !isOnDemand() && displayStock() === 0
+                    !isService() && !isOnDemand() && (displayStock() === 0 || hasMissingVariantAttributes())
                   "
                   (clicked)="onAddToCart(p)"
                 >
@@ -310,7 +303,7 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
                 [fullWidth]="true"
                 customClasses="btn-buy-now"
                 [disabled]="
-                  !isService() && !isOnDemand() && displayStock() === 0
+                  !isService() && !isOnDemand() && (displayStock() === 0 || hasMissingVariantAttributes())
                 "
                 (clicked)="onBuyNow(p)"
               >
@@ -331,14 +324,15 @@ import { ShareModalComponent } from '../../components/share-modal/share-modal.co
                 } @else if (isOnDemand()) {
                   <span class="s-dot on-demand"></span>
                   <span class="s-text">Disponible bajo pedido</span>
-                } @else if (displayStock() > 0) {
-                  <span [class.warn]="displayStock() <= 5" class="s-dot"></span>
-                  <span class="s-text">{{
-                    displayStock() <= 5 ? 'Pocas unidades' : 'En stock'
-                  }}</span>
-                } @else {
+                } @else if (displayStock() === 0) {
                   <span class="s-dot err"></span>
-                  <span class="s-text">Sin stock</span>
+                  <span class="s-text">Agotado</span>
+                } @else if (displayStock() <= 5) {
+                  <span class="s-dot warn"></span>
+                  <span class="s-text">Pocas unidades</span>
+                } @else {
+                  <span class="s-dot"></span>
+                  <span class="s-text">En stock</span>
                 }
               </div>
 
@@ -1307,6 +1301,7 @@ export class ProductDetailComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
   private fb = inject(FormBuilder);
   private reviewsService = inject(EcommerceReviewsService);
+  private priceResolver = inject(PriceResolverService);
 
   // States
   product = signal<ProductDetail | null>(null);
@@ -1411,6 +1406,22 @@ export class ProductDetailComponent implements OnInit {
     return p.variants.find((v) => v.id === vid) || null;
   });
 
+  /** Price resolution using PriceResolverService */
+  selectedPriceResolution = computed(() => {
+    const p = this.product();
+    if (!p) return null;
+    return this.priceResolver.resolve(
+      {
+        id: String(p.id),
+        base_price: p.base_price,
+        is_on_sale: p.is_on_sale,
+        sale_price: p.sale_price,
+        track_inventory: p.track_inventory ?? true,
+      },
+      this.selectedVariant() ?? undefined
+    );
+  });
+
   /** Minimum price across all variants */
   minVariantPrice = computed((): number => {
     const p = this.product();
@@ -1445,6 +1456,16 @@ export class ProductDetailComponent implements OnInit {
       return p.variants.reduce((sum, v) => sum + (v.stock_quantity || 0), 0);
     }
     return p?.stock_quantity || 0;
+  });
+
+  /** Check if variant attributes are missing when product has variants with attributes */
+  hasMissingVariantAttributes = computed((): boolean => {
+    const p = this.product();
+    if (!p?.variants?.length) return false;
+    const groups = this.attributeGroups();
+    if (!groups.length) return false;
+    const sel = this.selectedAttributes();
+    return Object.keys(sel).length < groups.length;
   });
 
   /** True when the product does not track inventory (bajo pedido / made-to-order) */

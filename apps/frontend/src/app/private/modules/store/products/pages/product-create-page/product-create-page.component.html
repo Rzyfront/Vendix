@@ -574,6 +574,29 @@
           </div>
         </section>
 
+        <!-- Operaciones Section -->
+        <section
+          class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4 md:space-y-5"
+        >
+          <div class="flex items-center gap-2">
+            <app-icon name="clock" size="18" class="text-primary-600"></app-icon>
+            <h2 class="text-base font-bold text-gray-900">
+              Operaciones
+            </h2>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3 md:gap-4">
+            <app-input
+              label="Tiempo de preparación"
+              type="number"
+              formControlName="preparation_time_minutes"
+              placeholder="Usa default de tienda"
+              helperText="minutos"
+              customWrapperClass="!mt-0"
+            ></app-input>
+          </div>
+        </section>
+
         <!-- Clasificación y Etiquetas Section -->
         <section
           class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4"

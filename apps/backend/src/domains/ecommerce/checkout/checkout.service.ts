@@ -162,14 +162,42 @@ export class CheckoutService {
         throw new VendixHttpException(ErrorCodes.ECOM_CART_002);
       }
 
+      // Validate stock using stock_levels (source of truth), NOT denormalized stock_quantity
       if (item.product.track_inventory) {
-        const available = item.product_variant
-          ? (item.product_variant.stock_quantity ?? 0)
-          : (item.product.stock_quantity ?? 0);
+        // Get actual available stock from stock_levels table
+        const stockLevel = await this.store_prisma.stock_levels.findFirst({
+          where: {
+            product_id: item.product_id,
+            product_variant_id: item.product_variant_id || null,
+          },
+          select: {
+            quantity_available: true,
+          },
+        });
+
+        const available = stockLevel?.quantity_available ?? 0;
+
         if (item.quantity > available) {
-          throw new VendixHttpException(ErrorCodes.ECOM_CART_003);
+          const productName = item.product.name;
+          const variantInfo = item.product_variant?.name ? ` (${item.product_variant.name})` : '';
+          throw new VendixHttpException(
+            ErrorCodes.ECOM_CART_003,
+            `Insufficient stock for ${productName}${variantInfo}: requested ${item.quantity}, available ${available}`,
+          );
         }
       }
+    }
+
+    const hasPhysicalItems = cart_items.some((item: any) => {
+      const product = item.product;
+      if (!product) return true;
+      if (product.product_type === 'service') return false;
+      if (product.requires_shipping === false) return false;
+      return true;
+    });
+
+    if (hasPhysicalItems && !dto.shipping_method_id && !dto.shipping_rate_id) {
+      throw new VendixHttpException(ErrorCodes.ORD_SHIP_REQUIRED_001);
     }
 
     let shipping_address_id = dto.shipping_address_id;
@@ -290,12 +318,13 @@ export class CheckoutService {
 
         // Variant-aware net price: use variant.price_override if present,
         // then product sale_price if on sale, otherwise product base_price
+        // Use ?? instead of || to properly handle 0 as a valid price_override
         let netPrice: number;
-        if (item.product_variant?.price_override) {
+        if (item.product_variant?.price_override != null) {
           netPrice = Number(item.product_variant.price_override);
         } else {
           netPrice =
-            productWithTaxes.is_on_sale && productWithTaxes.sale_price
+            productWithTaxes.is_on_sale && productWithTaxes.sale_price != null
               ? Number(productWithTaxes.sale_price)
               : Number(productWithTaxes.base_price);
         }
@@ -600,12 +629,28 @@ export class CheckoutService {
         throw new VendixHttpException(ErrorCodes.ECOM_CART_002);
       }
 
+      // Validate stock using stock_levels (source of truth), NOT denormalized stock_quantity
       if (item.product.track_inventory) {
-        const available = item.product_variant
-          ? (item.product_variant.stock_quantity ?? 0)
-          : (item.product.stock_quantity ?? 0);
+        // Get actual available stock from stock_levels table
+        const stockLevel = await this.store_prisma.stock_levels.findFirst({
+          where: {
+            product_id: item.product_id,
+            product_variant_id: item.product_variant_id || null,
+          },
+          select: {
+            quantity_available: true,
+          },
+        });
+
+        const available = stockLevel?.quantity_available ?? 0;
+
         if (item.quantity > available) {
-          throw new VendixHttpException(ErrorCodes.ECOM_CART_003);
+          const productName = item.product.name;
+          const variantInfo = item.product_variant?.name ? ` (${item.product_variant.name})` : '';
+          throw new VendixHttpException(
+            ErrorCodes.ECOM_CART_003,
+            `Insufficient stock for ${productName}${variantInfo}: requested ${item.quantity}, available ${available}`,
+          );
         }
       }
     }
@@ -629,12 +674,13 @@ export class CheckoutService {
           },
         });
 
+        // Use ?? instead of || to properly handle 0 as a valid price_override
         let netPrice: number;
-        if (item.product_variant?.price_override) {
+        if (item.product_variant?.price_override != null) {
           netPrice = Number(item.product_variant.price_override);
         } else {
           netPrice =
-            productWithTaxes.is_on_sale && productWithTaxes.sale_price
+            productWithTaxes.is_on_sale && productWithTaxes.sale_price != null
               ? Number(productWithTaxes.sale_price)
               : Number(productWithTaxes.base_price);
         }

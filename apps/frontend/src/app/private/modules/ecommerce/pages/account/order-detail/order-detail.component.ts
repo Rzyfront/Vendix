@@ -73,6 +73,76 @@ export class OrderDetailComponent implements OnInit, OnDestroy {
     }
     return 'Te notificaremos cuando esté en camino.';
   });
+
+  readonly shippingBlock = computed(() => {
+    const o = this.order();
+    if (!o || !this.hasPhysicalItems()) return null;
+
+    const deliveryType = (o as any).delivery_type || 'other';
+    const method = (o as any).shipping_method;
+    const rate = (o as any).shipping_rate;
+
+    if (deliveryType === 'pickup') {
+      return {
+        type: 'pickup' as const,
+        title: o.state === 'shipped' ? '¡Tu pedido está listo para recoger!' : 'Retiro en tienda',
+        method: method?.name || 'Retiro en tienda',
+        storeName: (o as any).store_name || 'Tienda',
+      };
+    }
+
+    if (deliveryType === 'home_delivery') {
+      return {
+        type: 'home_delivery' as const,
+        title: 'Envío a domicilio',
+        method: method?.name || 'Envío estándar',
+        carrier: method?.provider_name || null,
+        tracking: (o as any).tracking_number || null,
+        minDays: method?.min_days || null,
+        maxDays: method?.max_days || null,
+        cost: o.shipping_cost || 0,
+      };
+    }
+
+    return {
+      type: 'other' as const,
+      title: 'Envío coordinado',
+      method: method?.name || 'Coordinar envío',
+      note: 'Coordinaremos el envío contigo',
+      cost: o.shipping_cost || 0,
+    };
+  });
+
+  readonly orderTimelineSteps = computed(() => {
+    const o = this.order();
+    if (!o) return [];
+
+    const deliveryType = (o as any).delivery_type || 'other';
+    const states = [
+      { key: 'created', label: 'Pedido creado' },
+      { key: 'processing', label: 'En preparación' },
+      { key: 'shipped', label: deliveryType === 'pickup' ? 'Listo para recoger' : 'Enviado' },
+      { key: 'delivered', label: deliveryType === 'pickup' ? 'Recogido' : 'Entregado' },
+    ];
+
+    const stateOrder = ['created', 'pending_payment', 'processing', 'shipped', 'delivered', 'finished'];
+    const currentState = o.state || 'created';
+    const currentIndex = stateOrder.indexOf(currentState);
+
+    return states.map((step) => {
+      const stepIndex = stateOrder.indexOf(step.key);
+      let status: 'completed' | 'current' | 'upcoming' = 'upcoming';
+      if (currentIndex >= stepIndex) status = 'completed';
+      if (step.key === currentState || (step.key === 'shipped' && currentState === 'shipped')) {
+        if (status !== 'completed' || step.key === currentState) status = 'current';
+      }
+      if (status === 'completed' && step.key !== currentState && currentIndex === stepIndex) {
+        status = 'current';
+      }
+      return { ...step, status };
+    });
+  });
+
   private wompiPollTimer: ReturnType<typeof setInterval> | null = null;
 private toast = inject(ToastService);
 
@@ -202,14 +272,17 @@ if (this.wompiPollTimer) {
   }
 
   getStateLabel(state: string): string {
+    const o = this.order();
+    const deliveryType = o ? (o as any).delivery_type : null;
     const labels: Record<string, string> = {
       pending: 'Pendiente',
       confirmed: 'Confirmado',
       processing: 'En proceso',
-      shipped: 'Enviado',
-      delivered: 'Entregado',
+      shipped: deliveryType === 'pickup' ? 'Listo para recoger' : 'Enviado',
+      delivered: deliveryType === 'pickup' ? 'Recogido' : 'Entregado',
       completed: 'Completado',
-      cancelled: 'Cancelado' };
+      cancelled: 'Cancelado',
+    };
     return labels[state] || state;
   }
 
@@ -226,14 +299,17 @@ if (this.wompiPollTimer) {
   }
 
   getStateIcon(state: string): string {
+    const o = this.order();
+    const deliveryType = o ? (o as any).delivery_type : null;
     const icons: Record<string, string> = {
       pending: 'clock',
       confirmed: 'check-circle',
       processing: 'loader-2',
-      shipped: 'truck',
+      shipped: deliveryType === 'pickup' ? 'package-check' : 'truck',
       delivered: 'package-check',
       completed: 'check-circle',
-      cancelled: 'circle-x' };
+      cancelled: 'circle-x',
+    };
     return icons[state] || 'circle';
   }
 

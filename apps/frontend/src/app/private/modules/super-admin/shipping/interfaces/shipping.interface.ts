@@ -23,6 +23,7 @@ export interface ShippingMethod {
   provider_name?: string;
   min_days?: number;
   max_days?: number;
+  transit_time_minutes?: number;
   is_active: boolean;
   is_system: boolean;
   display_order: number;

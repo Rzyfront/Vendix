@@ -6,6 +6,7 @@ import { ProductsBulkService } from './products-bulk.service';
 import { ProductsBulkImageController } from './products-bulk-image.controller';
 import { ProductsBulkImageService } from './products-bulk-image.service';
 import { ProductVariantService } from './services/product-variant.service';
+import { PriceResolverService } from './services/price-resolver.service';
 import { ResponseModule } from '@common/responses/response.module';
 import { InventoryModule } from '../inventory/inventory.module';
 import { PrismaModule } from '../../../prisma/prisma.module';
@@ -20,8 +21,9 @@ import { AccessValidationService } from '@common/services/access-validation.serv
     ProductsBulkService,
     ProductsBulkImageService,
     ProductVariantService,
+    PriceResolverService,
     AccessValidationService,
   ],
-  exports: [ProductsService, ProductsBulkService, ProductsBulkImageService, ProductVariantService],
+  exports: [ProductsService, ProductsBulkService, ProductsBulkImageService, ProductVariantService, PriceResolverService],
 })
 export class ProductsModule {}

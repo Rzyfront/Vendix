@@ -7,6 +7,7 @@ import {
   IsArray,
   IsNumber,
   Min,
+  Max,
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
@@ -40,6 +41,13 @@ export class CreateShippingMethodDto {
   @IsInt()
   @IsOptional()
   max_days?: number;
+
+  @IsInt()
+  @Min(0)
+  @Max(10080)
+  @IsOptional()
+  @Type(() => Number)
+  transit_time_minutes?: number;
 
   @IsBoolean()
   @IsOptional()

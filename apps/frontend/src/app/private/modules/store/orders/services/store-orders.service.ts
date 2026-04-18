@@ -466,6 +466,17 @@ export class StoreOrdersService {
     );
   }
 
+  getAvailableActions(orderId: string): Observable<any[]> {
+    const url = `${this.apiUrl}/store/orders/${orderId}/flow/available-actions`;
+
+    return this.http.get<any[]>(url).pipe(
+      catchError((error) => {
+        console.error('Error fetching available actions:', error);
+        return throwError(() => new Error('Failed to fetch available actions'));
+      }),
+    );
+  }
+
   updateOrderItems(orderId: string, dto: any): Observable<Order> {
     const url = `${this.apiUrl}/store/orders/${orderId}/items`;
     return this.http.put<any>(url, dto).pipe(

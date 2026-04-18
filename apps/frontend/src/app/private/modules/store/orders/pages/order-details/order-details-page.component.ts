@@ -238,8 +238,33 @@ export class OrderDetailsPageComponent {
   readonly showShippingAssignment = computed(() => {
     const order = this.order();
     if (!order) return false;
-    const terminalStates: OrderState[] = ['cancelled', 'refunded', 'finished'];
-    return order.delivery_type === 'other' && !terminalStates.includes(order.state);
+    const terminalStates: OrderState[] = ['shipped', 'delivered', 'finished', 'cancelled', 'refunded'];
+    if (terminalStates.includes(order.state as OrderState)) return false;
+    if (order.delivery_type === 'direct_delivery') return false;
+    return !order.shipping_method_id;
+  });
+
+  readonly shippingMethodInfo = computed(() => {
+    const order = this.order();
+    if (!order?.shipping_method) return null;
+    const method = order.shipping_method;
+    return {
+      name: method.name,
+      type: method.type,
+      provider: method.provider_name,
+      minDays: method.min_days,
+      maxDays: method.max_days,
+      logoUrl: method.logo_url,
+      rate: order.shipping_rate?.name || null,
+      cost: order.shipping_cost,
+    };
+  });
+
+  readonly canEditShipping = computed(() => {
+    const order = this.order();
+    if (!order) return false;
+    const lockedStates: OrderState[] = ['shipped', 'delivered', 'finished', 'cancelled', 'refunded'];
+    return !lockedStates.includes(order.state as OrderState) && order.delivery_type !== 'direct_delivery';
   });
 
   readonly selectedShippingMethod = computed(() => {

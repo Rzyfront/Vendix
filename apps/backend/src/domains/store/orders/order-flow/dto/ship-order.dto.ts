@@ -1,4 +1,4 @@
-import { IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsInt, IsOptional, IsString, MaxLength, Min } from 'class-validator';
 
 export class ShipOrderDto {
   @IsOptional()
@@ -15,4 +15,14 @@ export class ShipOrderDto {
   @IsString()
   @MaxLength(500)
   notes?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  shipping_method_id?: number;
+
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  shipping_rate_id?: number;
 }

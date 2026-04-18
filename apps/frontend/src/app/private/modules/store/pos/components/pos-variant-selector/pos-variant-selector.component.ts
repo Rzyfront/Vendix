@@ -2,6 +2,7 @@ import {
   Component,
   input,
   output,
+  inject,
 } from '@angular/core';
 import { IconComponent } from '../../../../../../shared/components';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
@@ -9,6 +10,7 @@ import {
   Product,
   PosProductVariant,
 } from '../../services/pos-product.service';
+import { PriceResolverService } from '../../../../../../shared/services/pricing';
 
 @Component({
   selector: 'app-pos-variant-selector',
@@ -48,13 +50,20 @@ import {
           <div class="flex flex-col gap-2">
             @for (variant of variants(); track variant.id) {
               <button
-                class="w-full flex items-center gap-3 p-3 rounded-xl border transition-all text-left"
+                class="w-full flex items-center gap-3 p-3 rounded-xl border transition-all text-left relative"
                 [class]="isVariantAvailable(variant)
                   ? 'border-border hover:border-primary hover:bg-primary/5 cursor-pointer active:scale-[0.98]'
                   : 'border-border/50 opacity-50 cursor-not-allowed'"
                 [disabled]="!isVariantAvailable(variant)"
                 (click)="onSelectVariant(variant)"
               >
+                <!-- Sale Badge -->
+                @if (isVariantOnSale(variant)) {
+                  <span class="absolute top-2 right-2 px-1.5 py-0.5 bg-error text-white text-[10px] font-bold rounded">
+                    OFERTA
+                  </span>
+                }
+
                 <!-- Variant Image or Icon -->
                 <div class="w-14 h-14 rounded-lg bg-muted/50 flex-shrink-0 overflow-hidden">
                   @if (variant.image_url) {
@@ -84,14 +93,17 @@ import {
 
                 <!-- Price & Stock -->
                 <div class="flex flex-col items-end flex-shrink-0">
-                  <span class="font-bold text-sm text-text-primary">
-                    {{ getVariantFinalPrice(variant) | currency }}
-                  </span>
-                  @if (getVariantPriceDiff(variant); as diff) {
-                    <span class="text-[10px] mt-0.5"
-                      [class]="diff > 0 ? 'text-error' : 'text-success'">
-                      {{ diff > 0 ? '+' : '' }}{{ diff | currency }}
-                    </span>
+                  @if (getVariantPriceResolution(variant); as resolution) {
+                    <div class="flex items-center gap-2">
+                      <span class="font-bold text-sm" [class]="resolution.isOnSale ? 'text-error' : 'text-text-primary'">
+                        {{ resolution.unitPrice | currency }}
+                      </span>
+                    </div>
+                    @if (resolution.isOnSale && resolution.compareAtPrice) {
+                      <span class="text-[10px] text-text-muted line-through mt-0.5">
+                        {{ resolution.compareAtPrice | currency }}
+                      </span>
+                    }
                   }
                   @if (product().track_inventory !== false) {
                     @if (variant.stock > 0) {
@@ -121,6 +133,8 @@ import {
   `],
 })
 export class PosVariantSelectorComponent {
+  private priceResolver = inject(PriceResolverService);
+
   readonly product = input.required<Product>();
   readonly variants = input.required<PosProductVariant[]>();
   readonly variantSelected = output<PosProductVariant>();
@@ -151,41 +165,26 @@ export class PosVariantSelectorComponent {
     return variant.stock > 0;
   }
 
+  /** Check if a specific variant is on sale */
+  isVariantOnSale(variant: PosProductVariant): boolean {
+    const productLike = this.toProductLike(this.product());
+    const variantLike = this.toVariantLike(variant);
+    const resolution = this.priceResolver.resolve(productLike, variantLike);
+    return resolution.isOnSale;
+  }
+
+  /** Get price resolution for a variant using PriceResolverService */
+  getVariantPriceResolution(variant: PosProductVariant) {
+    const productLike = this.toProductLike(this.product());
+    const variantLike = this.toVariantLike(variant);
+    return this.priceResolver.resolve(productLike, variantLike);
+  }
+
   getVariantLabel(variant: PosProductVariant): string {
     if (variant.attributes && variant.attributes.length > 0) {
       return variant.attributes.map(a => a.attribute_value).join(' / ');
     }
     return variant.sku || `Variante #${variant.id}`;
-  }
-
-  getVariantFinalPrice(variant: PosProductVariant): number {
-    const basePrice = variant.price_override ?? this.product().price;
-    // Tax rates are stored as decimals in DB (e.g., 0.19 for 19%) — do NOT divide by 100
-    const taxRate = this.product().tax_assignments?.reduce((sum, ta) => {
-      return sum + (ta.tax_categories?.tax_rates?.reduce(
-        (rateSum, tr) => rateSum + parseFloat(tr.rate || '0'),
-        0,
-      ) || 0);
-    }, 0) || 0;
-    return basePrice * (1 + taxRate);
-  }
-
-  /** Get price difference between variant and base product price */
-  getVariantPriceDiff(variant: PosProductVariant): number | null {
-    const variantPrice = this.getVariantFinalPrice(variant);
-    const basePrice = this.getBaseFinalPrice();
-    const diff = variantPrice - basePrice;
-    return Math.abs(diff) > 0.01 ? diff : null;
-  }
-
-  private getBaseFinalPrice(): number {
-    const taxRate = this.product().tax_assignments?.reduce((sum, ta) => {
-      return sum + (ta.tax_categories?.tax_rates?.reduce(
-        (rateSum, tr) => rateSum + parseFloat(tr.rate || '0'),
-        0,
-      ) || 0);
-    }, 0) || 0;
-    return this.product().price * (1 + taxRate);
   }
 
   onSelectVariant(variant: PosProductVariant): void {
@@ -201,5 +200,27 @@ export class PosVariantSelectorComponent {
     if (event.target === event.currentTarget) {
       this.onClose();
     }
+  }
+
+  /** Convert Product to ProductLike */
+  private toProductLike(product: Product): any {
+    return {
+      id: product.id,
+      base_price: product.price,
+      is_on_sale: product.is_on_sale ?? false,
+      sale_price: product.sale_price ?? null,
+      track_inventory: product.track_inventory ?? true,
+    };
+  }
+
+  /** Convert PosProductVariant to VariantLike */
+  private toVariantLike(variant: PosProductVariant): any {
+    return {
+      id: variant.id,
+      price_override: variant.price_override ?? null,
+      is_on_sale: variant.is_on_sale ?? false,
+      sale_price: variant.sale_price ?? null,
+      track_inventory_override: null,
+    };
   }
 }

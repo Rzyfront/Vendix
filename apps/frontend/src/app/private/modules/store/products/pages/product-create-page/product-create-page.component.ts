@@ -88,7 +88,10 @@ interface GeneratedVariant {
   image_url?: string;
   image_file?: File;
   image_id?: number;
+  track_inventory_override?: boolean;
 }
+
+export type { GeneratedVariant };
 
 @Component({
   selector: 'app-product-create-page',
@@ -421,6 +424,10 @@ export class ProductCreatePageComponent {
     return this.productForm.get('product_type')?.value === 'service';
   }
 
+  get preparationTimeMinutesControl(): FormControl<number | null> {
+    return this.productForm.get('preparation_time_minutes') as FormControl<number | null>;
+  }
+
   get hasDuplicateSkus(): boolean {
     const skus = this.generatedVariants
       .map((v) => v.sku?.trim())
@@ -644,6 +651,7 @@ export class ProductCreatePageComponent {
       send_preconsultation: [false],
       consultation_template_id: [null],
       preconsultation_template_id: [null],
+      preparation_time_minutes: [null as number | null],
     });
 
     this.setupPriceCalculations(form);
@@ -792,6 +800,7 @@ export class ProductCreatePageComponent {
       consultation_template_id: product.consultation_template_id || null,
       preconsultation_template_id:
         (product as any).preconsultation_template_id || null,
+      preparation_time_minutes: product.preparation_time_minutes || null,
       weight: product.weight || 0,
       dimensions: {
         length: product.dimensions?.length || 0,
@@ -1722,6 +1731,9 @@ export class ProductCreatePageComponent {
           ? formValue.pricing_type.value
           : formValue.pricing_type || 'unit',
       product_type: formValue.product_type || 'physical',
+      preparation_time_minutes: formValue.preparation_time_minutes
+        ? Number(formValue.preparation_time_minutes)
+        : undefined,
       // Service-specific fields
       ...(isServiceType && {
         service_duration_minutes: formValue.service_duration_minutes

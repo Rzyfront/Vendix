@@ -7,6 +7,7 @@ import {
   output,
   signal,
 } from '@angular/core';
+import { DatePipe } from '@angular/common';
 
 import { FormsModule, ReactiveFormsModule } from '@angular/forms';
 import { FormBuilder, FormGroup } from '@angular/forms';
@@ -45,6 +46,7 @@ import {
     InputComponent,
     SelectorComponent,
     TextareaComponent,
+    DatePipe,
   ],
   templateUrl: './order-details.component.html',
 })

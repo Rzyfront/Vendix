@@ -84,6 +84,8 @@ export interface OrderListItem {
   delivery_type?: DeliveryType;
   shipping_method_id?: number;
   shipping_method_name?: string;
+  estimated_ready_at?: string;
+  estimated_delivered_at?: string;
 }
 
 export interface OrderDetails extends OrderListItem {
@@ -92,6 +94,8 @@ export interface OrderDetails extends OrderListItem {
   transaction_id?: string;
   tracking_number?: string;
   estimated_delivery?: string;
+  estimated_ready_at?: string;
+  estimated_delivered_at?: string;
   delivered_at?: string;
   cancelled_at?: string;
   cancellation_reason?: string;

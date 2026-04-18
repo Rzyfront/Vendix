@@ -257,6 +257,9 @@ export async function seedOrganizationsAndStores(
           accepted_methods: ['credit_card', 'debit_card', 'cash'],
           cash_on_delivery: true,
         },
+        operations: {
+          default_preparation_time_minutes: 15,
+        },
       },
     },
   });
@@ -289,6 +292,9 @@ export async function seedOrganizationsAndStores(
         payments: {
           accepted_methods: ['credit_card', 'debit_card'],
           cash_on_delivery: false,
+        },
+        operations: {
+          default_preparation_time_minutes: 15,
         },
       },
     },

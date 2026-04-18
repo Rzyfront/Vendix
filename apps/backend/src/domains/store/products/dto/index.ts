@@ -15,6 +15,7 @@ import {
   IsJSON,
   IsNumber,
   Min,
+  Max,
   ValidateNested,
   IsNotEmpty,
 } from 'class-validator';
@@ -343,6 +344,13 @@ export class CreateProductDto {
   @IsString()
   service_instructions?: string;
 
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(10080)
+  @Type(() => Number)
+  preparation_time_minutes?: number;
+
   // Consultation-specific fields
   @IsOptional()
   @IsBoolean()
@@ -531,6 +539,13 @@ export class UpdateProductDto {
   @IsOptional()
   @IsString()
   service_instructions?: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(10080)
+  @Type(() => Number)
+  preparation_time_minutes?: number;
 
   // Consultation-specific fields
   @IsOptional()
@@ -727,6 +742,14 @@ export class CreateProductVariantDto {
   @IsOptional()
   @IsInt()
   image_id?: number;
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  track_inventory_override?: boolean;
+  @IsOptional()
+  @IsString()
+  @IsIn(['first', 'distribute', 'reset'])
+  variant_removal_stock_mode?: 'first' | 'distribute' | 'reset';
 }
 
 export class UpdateProductVariantDto {
@@ -793,6 +816,14 @@ export class UpdateProductVariantDto {
   @IsOptional()
   @IsInt()
   image_id?: number;
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  track_inventory_override?: boolean;
+  @IsOptional()
+  @IsString()
+  @IsIn(['first', 'distribute', 'reset'])
+  variant_removal_stock_mode?: 'first' | 'distribute' | 'reset';
 }
 
 export class UpdateProductWithVariantsDto {

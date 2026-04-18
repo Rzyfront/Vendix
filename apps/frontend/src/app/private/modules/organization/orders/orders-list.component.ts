@@ -243,6 +243,15 @@ export class OrdersListComponent implements OnInit, OnDestroy {
         transform: (value: number) => `$${value.toFixed(2)}`,
       },
       {
+        key: 'estimated_delivered_at',
+        label: 'ETA',
+        sortable: false,
+        width: '100px',
+        priority: 3,
+        transform: (_: any, item: any) =>
+          this.formatEta(item?.estimated_ready_at, item?.estimated_delivered_at),
+      },
+      {
         key: 'status',
         label: 'Status',
         sortable: true,
@@ -319,6 +328,12 @@ export class OrdersListComponent implements OnInit, OnDestroy {
           key: 'order_date',
           label: 'Date',
           transform: (v: string) => this.formatDate(v),
+        },
+        {
+          key: 'estimated_delivered_at',
+          label: 'ETA',
+          transform: (_: any, item: any) =>
+            this.formatEta(item?.estimated_ready_at, item?.estimated_delivered_at),
         },
       ],
     };
@@ -435,6 +450,8 @@ export class OrdersListComponent implements OnInit, OnDestroy {
             notes: order.internal_notes || '',
             created_at: order.created_at,
             updated_at: order.updated_at,
+            estimated_ready_at: order.estimated_ready_at,
+            estimated_delivered_at: order.estimated_delivered_at,
           })));
         } else {
           // Fallback to mock data if API fails
@@ -648,11 +665,25 @@ export class OrdersListComponent implements OnInit, OnDestroy {
 
   // Helper methods
   formatDate(dateString: string): string {
-    return new Date(dateString).toLocaleDateString('es-ES', {
+    return new Date(dateString).toLocaleDateString('es-CO', {
       year: 'numeric',
       month: 'short',
       day: 'numeric',
     });
+  }
+
+  formatEta(estimatedReadyAt?: string, estimatedDeliveredAt?: string): string {
+    const target = estimatedDeliveredAt || estimatedReadyAt;
+    if (!target) return '-';
+    const date = new Date(target);
+    const now = new Date();
+    const diffMs = date.getTime() - now.getTime();
+    const diffMin = Math.round(Math.abs(diffMs) / 60000);
+    const prefix = diffMs > 0 ? 'en' : 'hace';
+    if (diffMin < 60) return `${prefix} ${diffMin} min`;
+    const diffHours = Math.floor(diffMin / 60);
+    const remainMin = diffMin % 60;
+    return `${prefix} ${diffHours}h ${remainMin}m`;
   }
 
   formatCurrency(amount: number): string {

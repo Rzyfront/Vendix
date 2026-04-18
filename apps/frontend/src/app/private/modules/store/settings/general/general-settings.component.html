@@ -94,6 +94,20 @@
           </div>
         </section>
 
+        <!-- Operations Section -->
+        <section id="section-operations" class="settings-section">
+          <div class="section-header">
+            <div class="section-icon section-icon--teal">
+              <app-icon name="clock" size="18"></app-icon>
+            </div>
+            <h2 class="section-title">Operaciones</h2>
+          </div>
+          <div class="section-body">
+            <app-operations-settings-form [settings]="settings.operations || { default_preparation_time_minutes: 15 }"
+              (settingsChange)="onSectionChange('operations', $event)" />
+          </div>
+        </section>
+
         <!-- Notifications Section -->
         <section id="section-notifications" class="settings-section">
           <div class="section-header">

@@ -574,7 +574,7 @@
 
         <!-- ═══ COLUMNA DERECHA (SIDEBAR) ═══ -->
         <div class="flex flex-col gap-3 lg:pt-0 pt-1">
-          <!-- SHIPPING METHOD ASSIGNMENT (only for delivery_type 'other') -->
+          <!-- SHIPPING METHOD ASSIGNMENT (universal) -->
           @if (showShippingAssignment()) {
             <div
               class="bg-amber-50 rounded-xl border border-amber-200 p-4 shadow-sm"
@@ -592,8 +592,7 @@
 
               @if (!showShippingMethodCard()) {
                 <p class="text-xs text-amber-700 mb-3">
-                  Esta orden no tiene un metodo de envio asignado. Puedes
-                  asignar uno para definir el tipo de entrega.
+                  Esta orden no tiene un metodo de envio asignado. Asigna uno para definir el tipo de entrega.
                 </p>
                 <app-button
                   variant="primary"
@@ -602,10 +601,9 @@
                   customClasses="!bg-amber-600 hover:!bg-amber-700"
                 >
                   <app-icon slot="icon" name="package" size="16"></app-icon>
-                  Seleccionar
+                  Seleccionar Metodo
                 </app-button>
               } @else {
-                <!-- Expanded: method list -->
                 @if (isLoadingShippingMethods()) {
                   <div class="flex justify-center py-4">
                     <div
@@ -657,7 +655,6 @@
                   </div>
                 }
 
-                <!-- Shipping cost field (shown when a method is selected) -->
                 @if (selectedShippingMethod()) {
                   <div class="mb-3" [formGroup]="shippingAssignForm">
                     <label class="block text-xs font-bold text-amber-800 mb-1"
@@ -674,7 +671,6 @@
                   </div>
                 }
 
-                <!-- Action buttons -->
                 <div class="flex items-center gap-2">
                   <app-button
                     variant="outline"
@@ -699,6 +695,58 @@
                 </div>
               }
             </div>
+          }
+
+          <!-- SHIPPING INFO BLOCK (always visible when method assigned) -->
+          @if (shippingMethodInfo(); as info) {
+            <app-card shadow="sm" [responsivePadding]="true">
+              <div class="flex items-center justify-between mb-3">
+                <h2
+                  class="text-xs font-bold text-gray-900 uppercase tracking-wider flex items-center gap-2"
+                >
+                  <app-icon name="truck" size="14" class="text-primary-600"></app-icon>
+                  Informacion de Envio
+                </h2>
+                @if (canEditShipping() && !showShippingAssignment()) {
+                  <button
+                    class="text-xs text-primary-600 hover:text-primary-700 font-medium flex items-center gap-1"
+                    (click)="openShippingAssignCard()"
+                  >
+                    <app-icon name="edit" size="12"></app-icon>
+                    Cambiar
+                  </button>
+                }
+              </div>
+              <div class="space-y-2 text-sm">
+                <div class="flex items-center gap-2">
+                  <span class="text-text-secondary font-medium">Metodo:</span>
+                  <span class="font-semibold text-gray-900">{{ info.name }}</span>
+                  <span class="text-xs px-1.5 py-0.5 bg-primary/10 text-primary rounded font-medium">{{ info.type }}</span>
+                </div>
+                @if (info.provider) {
+                  <div class="flex items-center gap-2">
+                    <span class="text-text-secondary font-medium">Transportista:</span>
+                    <span class="text-gray-900">{{ info.provider }}</span>
+                  </div>
+                }
+                @if (info.rate) {
+                  <div class="flex items-center gap-2">
+                    <span class="text-text-secondary font-medium">Tarifa:</span>
+                    <span class="text-gray-900">{{ info.rate }}</span>
+                  </div>
+                }
+                <div class="flex items-center gap-2">
+                  <span class="text-text-secondary font-medium">Costo:</span>
+                  <span class="font-bold text-gray-900">{{ info.cost | currency }}</span>
+                </div>
+                @if (info.minDays && info.maxDays) {
+                  <div class="flex items-center gap-2">
+                    <span class="text-text-secondary font-medium">Entrega estimada:</span>
+                    <span class="text-gray-900">{{ info.minDays }}-{{ info.maxDays }} dias habiles</span>
+                  </div>
+                }
+              </div>
+            </app-card>
           }
 
           <!-- 4. PROGRESO DE LA ORDEN -->

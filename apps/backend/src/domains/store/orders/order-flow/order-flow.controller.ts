@@ -44,6 +44,13 @@ export class OrderFlowController {
     return this.responseService.success(transitions, 'Valid transitions retrieved');
   }
 
+  @Get('available-actions')
+  @Permissions('store:orders:order_flow:read')
+  async getAvailableActions(@Param('orderId', ParseIntPipe) orderId: number) {
+    const actions = await this.orderFlowService.getAvailableActions(orderId);
+    return this.responseService.success(actions, 'Available actions retrieved');
+  }
+
   @Post('pay')
   @Permissions('store:orders:order_flow:create')
   @HttpCode(HttpStatus.OK)

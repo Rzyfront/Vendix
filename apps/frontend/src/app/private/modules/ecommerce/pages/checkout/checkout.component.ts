@@ -4,6 +4,7 @@ import {
   OnInit,
   DestroyRef,
   signal,
+  computed,
   inject,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -17,6 +18,7 @@ import {
   Validators,
 } from '@angular/forms';
 import { CartService, Cart, CartItem } from '../../services/cart.service';
+import { environment } from '../../../../../../environments/environment';
 import {
   CheckoutService,
   PaymentMethod,
@@ -86,6 +88,17 @@ export class CheckoutComponent implements OnInit {
 
   address_form!: FormGroup;
   readonly notes = signal('');
+
+  readonly etaPreview = signal<{ readyAt: string; deliveredAt: string; prepMinutes: number; transitMinutes: number } | null>(null);
+  readonly etaLabel = computed(() => {
+    const eta = this.etaPreview();
+    if (!eta) return '';
+    if (this.selected_shipping_method_id) {
+      const totalMin = eta.prepMinutes + eta.transitMinutes;
+      return `Entrega estimada: ~${totalMin} min`;
+    }
+    return `Listo en ~${eta.prepMinutes} min`;
+  });
 
   readonly is_loading = signal(true);
   readonly is_submitting = signal(false);
@@ -297,8 +310,10 @@ export class CheckoutComponent implements OnInit {
     // Load cart
     this.cart_service.cart$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe((cart) => {
       this.cart.set(cart);
-      // Restore pending booking only after cart is loaded
       this.restorePendingBooking();
+      if (cart && cart.items.length > 0) {
+        this.loadEtaPreview();
+      }
       if (!this.orderPlaced && (!cart || cart.items.length === 0)) {
         this.router.navigate(['/cart']);
       }
@@ -458,8 +473,29 @@ export class CheckoutComponent implements OnInit {
     this.selected_shipping_method_type = option.method_type || null;
     this.shipping_cost = cost;
 
-    // Reload payment methods based on shipping type
     this.loadPaymentMethods(option.method_type);
+    this.loadEtaPreview(option.method_id);
+  }
+
+  async loadEtaPreview(shippingMethodId?: number) {
+    const cartId = this.cart()?.id;
+    if (!cartId) return;
+    try {
+      const params = new URLSearchParams({ cart_id: String(cartId) });
+      if (shippingMethodId) params.set('shipping_method_id', String(shippingMethodId));
+      const response = await fetch(`${environment.apiUrl}/store/orders/preview-eta?${params}`, {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('token')}`,
+          'Content-Type': 'application/json',
+        },
+      });
+      if (response.ok) {
+        const data = await response.json();
+        this.etaPreview.set(data);
+      }
+    } catch {
+      // silently fail - ETA is non-critical
+    }
   }
 
   loadPaymentMethods(shippingType?: string): void {
