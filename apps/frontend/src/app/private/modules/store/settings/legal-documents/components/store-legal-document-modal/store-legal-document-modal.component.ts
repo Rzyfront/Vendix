@@ -8,6 +8,7 @@ import {
   SimpleChanges,
   inject,
   computed,
+  signal,
 } from '@angular/core';
 
 import {
@@ -190,8 +191,8 @@ import { toUTCDateString } from '../../../../../../../shared/utils/date.util';
           <app-button
             variant="primary"
             (clicked)="onSubmit()"
-            [disabled]="form.invalid || isSubmitting"
-            [loading]="isSubmitting"
+            [disabled]="form.invalid || isSubmitting()"
+            [loading]="isSubmitting()"
           >
             {{ isEditMode() ? 'Guardar Cambios' : 'Publicar' }}
           </app-button>
@@ -211,7 +212,7 @@ export class StoreLegalDocumentModalComponent implements OnInit, OnChanges {
 
   private fb = inject(FormBuilder);
   form: FormGroup;
-  isSubmitting = false;
+  readonly isSubmitting = signal(false);
 
   documentTypeOptions: SelectorOption[] = [
     { label: 'Términos de Servicio', value: 'TERMS_OF_SERVICE' },
@@ -283,7 +284,7 @@ export class StoreLegalDocumentModalComponent implements OnInit, OnChanges {
 
   private resetForm() {
     this.form.reset();
-    this.isSubmitting = false;
+    this.isSubmitting.set(false);
   }
 
   patchForm(doc: StoreLegalDocument) {
@@ -304,7 +305,7 @@ export class StoreLegalDocumentModalComponent implements OnInit, OnChanges {
       return;
     }
 
-    this.isSubmitting = true;
+    this.isSubmitting.set(true);
     const formValue = this.form.getRawValue();
 
     let dto: CreateStoreDocumentDto | UpdateStoreDocumentDto;

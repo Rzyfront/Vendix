@@ -1,4 +1,4 @@
-import { Component, computed, input, output } from '@angular/core';
+import { Component, computed, input, output, signal } from '@angular/core';
 
 
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
@@ -20,7 +20,9 @@ const SPANISH_MONTHS = [
 })
 export class TodayReservationsPanelComponent {
   bookings = input<Booking[]>([]);
-  loading = input(false);
+  readonly loadingInput = input(false, { alias: 'loading' });
+  private readonly internalLoading = signal(false);
+  readonly loading = computed(() => this.loadingInput() || this.internalLoading());
 
   bookingClicked = output<Booking>();
   viewAllClicked = output<void>();

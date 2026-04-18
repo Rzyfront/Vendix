@@ -1,4 +1,4 @@
-import { Component, inject, DestroyRef, computed, signal } from '@angular/core';
+import { Component, inject, DestroyRef, computed, signal, model } from '@angular/core';
 
 import { FormsModule } from '@angular/forms';
 import { ActivatedRoute, Router } from '@angular/router';
@@ -12,7 +12,7 @@ import { NestedReportComponent } from '../../components/nested-report/nested-rep
 import { AgingReportComponent } from '../../components/aging-report/aging-report.component';
 import { DateRangeFilterComponent } from '../../../analytics/components/date-range-filter/date-range-filter.component';
 import { DateRangeFilter } from '../../../analytics/interfaces/analytics.interface';
-import { SummaryLayoutConfig } from '../../interfaces/report.interface';
+import { SummaryLayoutConfig, ReportColumn } from '../../interfaces/report.interface';
 import { ReportsActions } from '../../state/reports.actions';
 import {
   selectSelectedReport,
@@ -69,16 +69,16 @@ export class ReportDetailComponent {
   private destroyRef = inject(DestroyRef);
 
   // State from NgRx
-  report = toSignal(this.store.select(selectSelectedReport));
-  private dateRange$ = toSignal(this.store.select(selectDateRange));
+  report = toSignal(this.store.select(selectSelectedReport), { initialValue: null as any });
+  private dateRange$ = toSignal<DateRangeFilter | undefined>(this.store.select(selectDateRange), { initialValue: undefined });
   dateRange = computed<DateRangeFilter | undefined>(() => this.dateRange$());
-  reportData = toSignal(this.store.select(selectReportData));
-  loading = toSignal(this.store.select(selectLoading));
-  exporting = toSignal(this.store.select(selectExporting));
-  error = toSignal(this.store.select(selectError));
-  isSummary = toSignal(this.store.select(selectIsSummary));
-  summaryData = toSignal(this.store.select(selectSummaryData));
-  reportMeta = toSignal(this.store.select(selectReportMeta));
+  reportData = toSignal(this.store.select(selectReportData), { initialValue: null as any[] | null });
+  loading = toSignal(this.store.select(selectLoading), { initialValue: false });
+  exporting = toSignal(this.store.select(selectExporting), { initialValue: false });
+  error = toSignal(this.store.select(selectError), { initialValue: null });
+  isSummary = toSignal(this.store.select(selectIsSummary), { initialValue: false });
+  summaryData = toSignal(this.store.select(selectSummaryData), { initialValue: null as Record<string, any> | null });
+  reportMeta = toSignal(this.store.select(selectReportMeta), { initialValue: null as Record<string, any> | null });
 
   // Pagination signals
   currentPage = toSignal(this.store.select(selectCurrentPage), { initialValue: 1 });
@@ -105,8 +105,8 @@ export class ReportDetailComponent {
     const data = this.reportData();
     if (!report || !data?.length) return [];
 
-    const footerCols = report.columns.filter(c => c.footer);
-    return footerCols.slice(0, 4).map(col => {
+    const footerCols = report.columns.filter((c: ReportColumn) => c.footer);
+    return footerCols.slice(0, 4).map((col: ReportColumn) => {
       const values = data.map(r => Number(r[col.key]) || 0);
       let value: number;
       switch (col.footer) {
@@ -250,7 +250,7 @@ export class ReportDetailComponent {
     if (r?.summaryLayout) return r.summaryLayout;
     // Fallback: generate layout from columns
     return {
-      fields: r!.columns.map((col) => ({
+      fields: r!.columns.map((col: ReportColumn) => ({
         key: col.key,
         label: col.header,
         type: col.type as 'currency' | 'number' | 'text' | 'percentage',
@@ -278,7 +278,7 @@ export class ReportDetailComponent {
   tableColumns = computed<TableColumn[]>(() => {
     const r = this.report();
     if (!r) return [];
-    return r.columns.map(col => ({
+    return r.columns.map((col: ReportColumn) => ({
       key: col.key,
       label: col.header,
       align: col.align || (['number', 'currency', 'percentage'].includes(col.type) ? 'right' as const : 'left' as const),
@@ -291,13 +291,13 @@ export class ReportDetailComponent {
     if (!r) return { titleKey: 'id' };
 
     const cols = r.columns;
-    const textCol = cols.find(c => c.type === 'text');
-    const currencyCol = cols.find(c => c.type === 'currency');
-    const detailCols = cols.filter(c => c !== textCol && c !== currencyCol);
+    const textCol = cols.find((c: ReportColumn) => c.type === 'text');
+    const currencyCol = cols.find((c: ReportColumn) => c.type === 'currency');
+    const detailCols = cols.filter((c: ReportColumn) => c !== textCol && c !== currencyCol);
 
     return {
       titleKey: textCol?.key || cols[0].key,
-      detailKeys: detailCols.map(c => ({
+      detailKeys: detailCols.map((c: ReportColumn) => ({
         key: c.key,
         label: c.header,
         transform: (value: any) => this.formatReportValue(value, c.type),

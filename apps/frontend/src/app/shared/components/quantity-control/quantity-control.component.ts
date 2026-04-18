@@ -1,4 +1,4 @@
-import { Component, effect, input, output } from '@angular/core';
+import { Component, input, output, effect, signal, computed } from '@angular/core';
 
 import { FormsModule } from '@angular/forms';
 import { IconComponent } from '../icon/icon.component';
@@ -100,7 +100,9 @@ export class QuantityControlComponent {
   readonly step = input(1);
   readonly editable = input(true);
   readonly disabled = input(false);
-  readonly loading = input(false);
+  readonly loadingInput = input(false, { alias: 'loading' });
+  private readonly internalLoading = signal(false);
+  readonly loading = computed(() => this.loadingInput() || this.internalLoading());
   readonly size = input<QuantityControlSize>('sm');
   readonly styleVariant = input<FormStyleVariant>('modern');
 

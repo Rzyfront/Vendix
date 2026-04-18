@@ -1,4 +1,4 @@
-import { Component, HostBinding, input, output } from '@angular/core';
+import { Component, HostBinding, input, output, signal, computed } from '@angular/core';
 
 
 export type ButtonVariant =
@@ -166,9 +166,11 @@ export class ButtonComponent {
   readonly variant = input<ButtonVariant>('primary');
   readonly size = input<ButtonSize>('md');
   readonly type = input<'button' | 'submit' | 'reset'>('button');
-  readonly form = input<string>(); // Associates button with a form by id (for buttons outside the form)
+  readonly form = input<string>();
   readonly disabled = input(false);
-  readonly loading = input(false);
+  readonly loadingInput = input(false, { alias: 'loading' });
+  private readonly internalLoading = signal(false);
+  readonly loading = computed(() => this.loadingInput() || this.internalLoading());
   readonly showTextWhileLoading = input(false);
   readonly fullWidth = input(false);
   readonly iconOnlyMobile = input(false);

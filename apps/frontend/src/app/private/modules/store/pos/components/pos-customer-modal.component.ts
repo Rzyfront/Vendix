@@ -71,9 +71,9 @@ import { StoreContextService } from '../../../../../core/services/store-context.
             {{
             customer()
             ? 'Editar Cliente'
-            : currentStep === 'search'
+            : currentStep() === 'search'
             ? 'Buscar Cliente'
-            : currentStep === 'queue'
+            : currentStep() === 'queue'
             ? 'Cola de Clientes'
             : 'Crear Cliente Rápido'
             }}
@@ -82,9 +82,9 @@ import { StoreContextService } from '../../../../../core/services/store-context.
             {{
             customer()
             ? 'Edita la información del cliente seleccionado'
-            : currentStep === 'search'
+            : currentStep() === 'search'
             ? 'Busca un cliente existente o crea uno nuevo'
-            : currentStep === 'queue'
+            : currentStep() === 'queue'
             ? 'Selecciona un cliente de la cola de espera'
             : 'Agrega un nuevo cliente para la venta actual'
             }}
@@ -118,20 +118,20 @@ import { StoreContextService } from '../../../../../core/services/store-context.
           <button
             (click)="switchToSearchMode()"
             class="flex-1 px-4 py-3 text-sm font-medium transition-colors"
-            [class.text-[var(--color-primary)]]="currentStep === 'search'"
-            [class.border-b-2]="currentStep === 'search'"
-            [class.border-[var(--color-primary)]]="currentStep === 'search'"
-            [class.text-[var(--color-text-secondary)]]="currentStep !== 'search'"
+            [class.text-[var(--color-primary)]]="currentStep() === 'search'"
+            [class.border-b-2]="currentStep() === 'search'"
+            [class.border-[var(--color-primary)]]="currentStep() === 'search'"
+            [class.text-[var(--color-text-secondary)]]="currentStep() !== 'search'"
             >
             Buscar
           </button>
           <button
             (click)="switchToCreateMode()"
             class="flex-1 px-4 py-3 text-sm font-medium transition-colors"
-            [class.text-[var(--color-primary)]]="currentStep === 'create'"
-            [class.border-b-2]="currentStep === 'create'"
-            [class.border-[var(--color-primary)]]="currentStep === 'create'"
-            [class.text-[var(--color-text-secondary)]]="currentStep !== 'create'"
+            [class.text-[var(--color-primary)]]="currentStep() === 'create'"
+            [class.border-b-2]="currentStep() === 'create'"
+            [class.border-[var(--color-primary)]]="currentStep() === 'create'"
+            [class.text-[var(--color-text-secondary)]]="currentStep() !== 'create'"
             >
             Crear
           </button>
@@ -139,10 +139,10 @@ import { StoreContextService } from '../../../../../core/services/store-context.
             <button
               (click)="switchToQueueMode()"
               class="flex-1 px-4 py-3 text-sm font-medium transition-colors relative"
-              [class.text-[var(--color-primary)]]="currentStep === 'queue'"
-              [class.border-b-2]="currentStep === 'queue'"
-              [class.border-[var(--color-primary)]]="currentStep === 'queue'"
-              [class.text-[var(--color-text-secondary)]]="currentStep !== 'queue'"
+              [class.text-[var(--color-primary)]]="currentStep() === 'queue'"
+              [class.border-b-2]="currentStep() === 'queue'"
+              [class.border-[var(--color-primary)]]="currentStep() === 'queue'"
+              [class.text-[var(--color-text-secondary)]]="currentStep() !== 'queue'"
               >
               Cola
               @if (queueEntries().length > 0) {
@@ -158,7 +158,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
       <!-- Modal Content -->
       <div class="p-6">
         <!-- Search Step -->
-        @if (currentStep === 'search') {
+        @if (currentStep() === 'search') {
           <div class="space-y-4">
             <!-- Document Quick Lookup -->
             <div class="mb-4 p-4 bg-[var(--color-primary-light)]/30 rounded-lg border border-[var(--color-primary)]/20">
@@ -318,7 +318,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
         }
     
         <!-- Create Step -->
-        @if (currentStep === 'create') {
+        @if (currentStep() === 'create') {
           <div class="space-y-4">
             @if (customer()) {
               <div class="flex items-center gap-2 mb-4">
@@ -405,7 +405,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
         }
     
         <!-- Queue Step -->
-        @if (currentStep === 'queue') {
+        @if (currentStep() === 'queue') {
           <div class="space-y-4">
             @if (queueLoading()) {
               <div class="flex justify-center py-8">
@@ -500,7 +500,7 @@ import { StoreContextService } from '../../../../../core/services/store-context.
       </div>
     
       <!-- Modal Footer -->
-      @if (currentStep === 'create') {
+      @if (currentStep() === 'create') {
         <div
           class="flex justify-between items-center p-6 border-t border-[var(--color-border)] bg-[var(--color-surface)]"
           >
@@ -535,7 +535,7 @@ export class PosCustomerModalComponent {
 
   customerForm: FormGroup;
   readonly loading = signal(false);
-  currentStep: 'search' | 'create' | 'queue' = 'search';
+  readonly currentStep = signal<'search' | 'create' | 'queue'>('search');
   readonly searchResults = signal<PosCustomer[]>([]);
   readonly searchPerformed = signal(false);
 
@@ -573,7 +573,7 @@ this.setupFormListeners();
     effect(() => {
       if (this.customer()) {
         this.populateFormForEdit();
-        this.currentStep = 'create';
+        this.currentStep.set('create');
       }
     });
 
@@ -652,7 +652,7 @@ this.setupFormListeners();
   }
 
   switchToCreateMode(): void {
-    this.currentStep = 'create';
+    this.currentStep.set('create');
   }
 
   onDocumentLookup(): void {
@@ -679,7 +679,7 @@ this.setupFormListeners();
   }
 
   createFromLookup(): void {
-    this.currentStep = 'create';
+    this.currentStep.set('create');
     this.customerForm.patchValue({
       documentNumber: this.documentLookupQuery });
   }
@@ -697,7 +697,7 @@ this.setupFormListeners();
   }
 
   switchToSearchMode(): void {
-    this.currentStep = 'search';
+    this.currentStep.set('search');
     this.customerForm.reset();
     this.searchResults.set([]);
     this.searchPerformed.set(false);
@@ -795,7 +795,7 @@ this.setupFormListeners();
   // Queue methods
 
   switchToQueueMode(): void {
-    this.currentStep = 'queue';
+    this.currentStep.set('queue');
     this.loadQueueData();
   }
 
@@ -880,7 +880,7 @@ this.setupFormListeners();
 
   onModalClosed(): void {
     this.customerForm.reset();
-    this.currentStep = 'search';
+    this.currentStep.set('search');
     this.searchResults.set([]);
     this.searchPerformed.set(false);
     this.documentLookupQuery = '';

@@ -1,4 +1,4 @@
-import { Component, input, computed } from '@angular/core';
+import { Component, input, computed, signal } from '@angular/core';
 import { CurrencyPipe, DatePipe, DecimalPipe, PercentPipe } from '@angular/common';
 import { ReportColumn } from '../../interfaces/report.interface';
 
@@ -13,7 +13,9 @@ import { ReportColumn } from '../../interfaces/report.interface';
 export class ReportTableComponent {
   columns = input.required<ReportColumn[]>();
   data = input.required<any[]>();
-  loading = input(false);
+  readonly loadingInput = input(false, { alias: 'loading' });
+  private readonly internalLoading = signal(false);
+  readonly loading = computed(() => this.loadingInput() || this.internalLoading());
   trackKey = input<string>('id');
 
   private currencyPipe = new CurrencyPipe('es-CO');
