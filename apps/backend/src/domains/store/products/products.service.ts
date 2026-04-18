@@ -1401,8 +1401,15 @@ export class ProductsService {
             const isTransitionToVariants =
               allExistingVariants.length === 0 && variants.length > 0;
 
-            // BLOCK: Changing track_inventory when variants exist requires explicit stock_transfer_mode
-            if (updateProductDto.track_inventory !== undefined && allExistingVariants.length > 0) {
+            // BLOCK: Actually CHANGING track_inventory value (not just echoing it) when
+            // variants exist requires explicit stock_transfer_mode. Comparing against
+            // existingProduct avoids false positives when the frontend always sends the
+            // current value in the payload.
+            if (
+              updateProductDto.track_inventory !== undefined &&
+              updateProductDto.track_inventory !== existingProduct.track_inventory &&
+              allExistingVariants.length > 0
+            ) {
               if (!updateProductDto.stock_transfer_mode) {
                 throw new VendixHttpException(
                   ErrorCodes.PROD_VALIDATE_001,
