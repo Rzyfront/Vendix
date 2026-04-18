@@ -328,6 +328,50 @@ export type { GeneratedVariant };
           background-position: 0% 50%;
         }
       }
+
+      /* ── Inline tooltip help icon (styled tooltip, not native [title]) ── */
+      .help-icon-inline {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        cursor: help;
+        transition: color 0.2s ease;
+      }
+
+      .help-icon-inline[data-tooltip]:hover::after {
+        content: attr(data-tooltip);
+        position: absolute;
+        bottom: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 0.375rem 0.5rem;
+        background: var(--color-text-primary);
+        color: var(--color-surface);
+        font-size: var(--fs-xs);
+        border-radius: var(--radius-sm);
+        white-space: normal;
+        box-shadow: var(--shadow-md);
+        z-index: 50;
+        margin-bottom: 0.375rem;
+        pointer-events: none;
+        max-width: 280px;
+        width: max-content;
+        text-align: center;
+        line-height: 1.4;
+      }
+
+      .help-icon-inline[data-tooltip]:hover::before {
+        content: '';
+        position: absolute;
+        bottom: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        border: 4px solid transparent;
+        border-top-color: var(--color-text-primary);
+        margin-bottom: -0.125rem;
+        z-index: 50;
+        pointer-events: none;
+      }
     `,
   ],
 })
@@ -951,7 +995,10 @@ export class ProductCreatePageComponent {
   }
 
   get totalVariantStock(): number {
-    return this.generatedVariants.reduce((sum, v) => sum + (v.stock || 0), 0);
+    return this.generatedVariants.reduce(
+      (sum, v) => sum + (Number(v.stock) || 0),
+      0,
+    );
   }
 
   toggleVariants(isChecked: boolean): void {

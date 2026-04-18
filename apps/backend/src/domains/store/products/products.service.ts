@@ -667,6 +667,7 @@ export class ProductsService {
           ...(include_stock && {
             stock_levels: {
               select: {
+                product_variant_id: true,
                 quantity_available: true,
                 quantity_reserved: true,
                 inventory_locations: {
@@ -819,19 +820,27 @@ export class ProductsService {
       };
     }
 
-    // Calcular stock totals dinámicamente para cada producto
+    // Calcular stock totals dinámicamente para cada producto.
+    // Cuando el producto tiene variantes, excluir filas base para no duplicar stock.
     const productsWithStock = await Promise.all(
       products.map(async (product) => {
-        const totalStockAvailable =
-          product.stock_levels?.reduce(
-            (sum, stock) => sum + stock.quantity_available,
-            0,
-          ) || 0;
-        const totalStockReserved =
-          product.stock_levels?.reduce(
-            (sum, stock) => sum + stock.quantity_reserved,
-            0,
-          ) || 0;
+        const hasVariants =
+          ((product as any)._count?.product_variants ??
+            (product as any).product_variants?.length ??
+            0) > 0;
+        const stockLevelsForTotals = hasVariants
+          ? product.stock_levels?.filter(
+              (sl: any) => sl.product_variant_id !== null,
+            ) || []
+          : product.stock_levels || [];
+        const totalStockAvailable = stockLevelsForTotals.reduce(
+          (sum: number, stock: any) => sum + stock.quantity_available,
+          0,
+        );
+        const totalStockReserved = stockLevelsForTotals.reduce(
+          (sum: number, stock: any) => sum + stock.quantity_reserved,
+          0,
+        );
 
         const raw_image_url = product.product_images?.[0]?.image_url || null;
         const signed_image_url = await this.s3Service.signUrl(raw_image_url);
@@ -982,6 +991,7 @@ export class ProductsService {
         },
         stock_levels: {
           select: {
+            product_variant_id: true,
             quantity_available: true,
             quantity_reserved: true,
             reorder_point: true,
@@ -1013,12 +1023,19 @@ export class ProductsService {
       throw new VendixHttpException(ErrorCodes.PROD_FIND_001);
     }
 
-    // Calcular stock totals dinámicamente
-    const totalStockAvailable = product.stock_levels.reduce(
+    // Calcular stock totals dinámicamente.
+    // Si el producto tiene variantes, sumar solo filas de variantes (excluir base)
+    // para evitar contar stock base huérfano dos veces.
+    const hasVariants =
+      (product._count?.product_variants ?? product.product_variants?.length ?? 0) > 0;
+    const stockLevelsForTotals = hasVariants
+      ? product.stock_levels.filter((sl: any) => sl.product_variant_id !== null)
+      : product.stock_levels;
+    const totalStockAvailable = stockLevelsForTotals.reduce(
       (sum, stock) => sum + stock.quantity_available,
       0,
     );
-    const totalStockReserved = product.stock_levels.reduce(
+    const totalStockReserved = stockLevelsForTotals.reduce(
       (sum, stock) => sum + stock.quantity_reserved,
       0,
     );
@@ -1690,8 +1707,9 @@ export class ProductsService {
               }
             }
 
-            // Sync product stock from remaining variants
-            await this.stockLevelManager.syncProductStock(prisma, id);
+            // Enforce stock_levels mode: eliminar filas base huérfanas si hay variantes.
+            // Invariante: producto con variantes no mantiene filas (product_variant_id IS NULL).
+            await this.stockLevelManager.enforceStockLevelsMode(prisma, id);
           }
 
           // Guard: skip base stock updates when product has variants

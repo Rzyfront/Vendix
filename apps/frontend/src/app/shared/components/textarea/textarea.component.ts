@@ -12,11 +12,12 @@ import {
   AbstractControl,
 } from '@angular/forms';
 import { FormStyleVariant } from '../../types/form.types';
+import { IconComponent } from '../icon/icon.component';
 
 @Component({
   selector: 'app-textarea',
   standalone: true,
-  imports: [],
+  imports: [IconComponent],
   providers: [
     {
       provide: NG_VALUE_ACCESSOR,
@@ -31,8 +32,14 @@ import { FormStyleVariant } from '../../types/form.types';
         <label
           [for]="textareaId"
           [class]="labelClasses"
+          class="label-with-tooltip"
           >
-          {{ label() }}
+          <span>{{ label() }}</span>
+          @if (tooltipText()) {
+            <span class="help-icon" [attr.data-tooltip]="tooltipText()">
+              <app-icon name="help-circle" [size]="14"></app-icon>
+            </span>
+          }
           @if (required()) {
             <span class="text-[var(--color-destructive)] ml-1"
               >*</span
@@ -86,6 +93,59 @@ import { FormStyleVariant } from '../../types/form.types';
       resize: vertical;
       min-height: 80px;
     }
+
+    .label-with-tooltip {
+      display: flex;
+      align-items: center;
+      gap: 0.25rem;
+    }
+
+    .help-icon {
+      color: var(--color-text-muted);
+      cursor: help;
+      position: relative;
+      display: inline-flex;
+      transition: color 0.2s ease;
+    }
+
+    .help-icon:hover {
+      color: var(--color-warning);
+    }
+
+    .help-icon[data-tooltip]:hover::after {
+      content: attr(data-tooltip);
+      position: absolute;
+      bottom: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      padding: 0.375rem 0.5rem;
+      background: var(--color-text-primary);
+      color: var(--color-surface);
+      font-size: var(--fs-xs);
+      border-radius: var(--radius-sm);
+      white-space: normal;
+      box-shadow: var(--shadow-md);
+      z-index: 50;
+      margin-bottom: 0.375rem;
+      pointer-events: none;
+      max-width: 300px;
+      width: max-content;
+      text-align: center;
+      line-height: 1.4;
+    }
+
+    .help-icon[data-tooltip]:hover::before {
+      content: '';
+      position: absolute;
+      bottom: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      border: 4px solid transparent;
+      border-top-color: var(--color-text-primary);
+      margin-bottom: -0.125rem;
+      z-index: 50;
+      pointer-events: none;
+    }
   `],
 })
 export class TextareaComponent implements ControlValueAccessor {
@@ -97,6 +157,7 @@ export class TextareaComponent implements ControlValueAccessor {
   readonly required = input(false);
   readonly error = input<string>();
   readonly helperText = input<string | undefined>(undefined);
+  readonly tooltipText = input<string>('');
   readonly control = input<AbstractControl | null>();
   readonly styleVariant = input<FormStyleVariant>('modern');
   readonly customStyle = input('');
