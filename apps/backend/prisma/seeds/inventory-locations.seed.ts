@@ -105,8 +105,8 @@ export async function seedInventoryLocations(
   for (const location of locations) {
     const existing = await client.inventory_locations.findUnique({
       where: {
-        organization_id_code: {
-          organization_id: location.organization_id,
+        store_id_code: {
+          store_id: location.store_id,
           code: location.code,
         },
       },
