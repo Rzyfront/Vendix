@@ -99,7 +99,7 @@ export class OptionsDropdownComponent {
   readonly localFilterValues = signal<FilterValues>({});
 
   /** Emits debounce trigger — value is the debounce time to apply */
-  private readonly debounceTrigger$ = new Subject<number>();
+  private readonly debounceTrigger$ = new Subject<number>(); // LEGÍTIMO — debounce pipeline para filterChange
 
   constructor() {
     // Sync filterValues input → local state

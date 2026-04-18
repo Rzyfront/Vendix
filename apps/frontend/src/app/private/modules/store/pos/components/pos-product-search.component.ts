@@ -450,7 +450,7 @@ export class PosProductSearchComponent {
     sortBy: undefined,
     sortOrder: 'asc' };
 
-  private searchSubject = new Subject<string>();
+  private searchSubject = new Subject<string>(); // LEGÍTIMO — debounceTime+distinctUntilChanged search stream
 private productService = inject(PosProductService);
 
   readonly categories = toSignal(this.productService.getCategories(), {

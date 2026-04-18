@@ -314,7 +314,7 @@ export class PopProductSelectionComponent {
   private productsService = inject(ProductsService);
   private cartService = inject(PopCartService);
   private toastService = inject(ToastService);
-  private searchSubject$ = new Subject<string>();
+  private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+distinctUntilChanged search stream
 
   constructor() {
     this.setupSearchSubscription();

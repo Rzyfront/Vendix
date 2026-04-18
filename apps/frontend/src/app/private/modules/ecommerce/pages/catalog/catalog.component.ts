@@ -74,7 +74,7 @@ export class CatalogComponent implements OnInit {
   readonly shareProduct = signal<EcommerceProduct | null>(null);
 
   private destroyRef = inject(DestroyRef);
-  private search_subject = new Subject<string>();
+  private search_subject = new Subject<string>(); // LEGÍTIMO — debounceTime+distinctUntilChanged search stream
 
   // Wishlist state
   readonly wishlist_product_ids = signal<Set<number>>(new Set<number>());

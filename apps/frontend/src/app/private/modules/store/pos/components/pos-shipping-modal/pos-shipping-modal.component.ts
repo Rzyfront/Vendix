@@ -932,7 +932,7 @@ export class PosShippingModalComponent {
   paymentForm: FormGroup;
 
   currencySymbol: any;
-private customerSearchSubject = new Subject<string>();
+private customerSearchSubject = new Subject<string>(); // LEGÍTIMO — debounceTime customer search stream
 
   get addressLine1Control(): FormControl {
     return this.addressForm.get('address_line1') as FormControl;
