@@ -288,10 +288,17 @@ export async function seedProductsAndCategories(
   const createdBrands: any[] = [];
   for (const brand of brands) {
     const createdBrand = await client.brands.upsert({
-      where: { name: brand.name },
+      where: {
+        store_id_name: {
+          store_id: techStore1.id,
+          name: brand.name,
+        },
+      },
       update: {},
       create: {
+        store_id: techStore1.id,
         name: brand.name,
+        slug: brand.name.toLowerCase().replace(/\s+/g, '-'),
         description: brand.description,
       },
     });

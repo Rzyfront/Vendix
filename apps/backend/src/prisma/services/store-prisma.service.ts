@@ -59,6 +59,7 @@ export class StorePrismaService extends BasePrismaService {
     'booking_confirmation_tokens',
     'email_templates',
     'messaging_channels',
+    'brands',
   ];
 
   constructor() {
@@ -517,7 +518,7 @@ export class StorePrismaService extends BasePrismaService {
   }
 
   get brands() {
-    return this.baseClient.brands;
+    return this.scoped_client.brands;
   }
 
   get product_categories() {

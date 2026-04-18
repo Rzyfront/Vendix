@@ -9,6 +9,7 @@ import { CreateBrandDto, UpdateBrandDto, BrandQueryDto } from './dto';
 import { S3Service } from '@common/services/s3.service';
 import { extractS3KeyFromUrl } from '@common/helpers/s3-url.helper';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { RequestContextService } from '@common/context/request-context.service';
 
 @Injectable()
 export class BrandsService {
@@ -16,17 +17,35 @@ export class BrandsService {
     private prisma: StorePrismaService,
     private s3Service: S3Service,
   ) {}
+
+  private generateSlug(name: string): string {
+    return name
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+  }
+
   async create(createBrandDto: CreateBrandDto, user: any) {
+    const context = RequestContextService.getContext();
+    const store_id = context?.store_id;
+
+    if (!store_id) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+
     try {
-      // CRITICAL: Sanitize logo_url to extract S3 key before storing
-      // This prevents storing signed URLs that expire after 24 hours
       const sanitizedLogoUrl = extractS3KeyFromUrl(createBrandDto.logo_url);
+      const slug = this.generateSlug(createBrandDto.name);
 
       const brand = await this.prisma.brands.create({
         data: {
           name: createBrandDto.name,
+          slug,
           description: createBrandDto.description,
           logo_url: sanitizedLogoUrl,
+          store_id,
         },
       });
 
@@ -36,7 +55,7 @@ export class BrandsService {
       };
     } catch (error) {
       if (error.code === 'P2002') {
-        throw new ConflictException('Brand name already exists');
+        throw new ConflictException('Brand name already exists in this store');
       }
       throw error;
     }
@@ -96,61 +115,8 @@ export class BrandsService {
   }
 
   async findByStore(storeId: number, query: BrandQueryDto) {
-    const {
-      page = 1,
-      limit = 10,
-      search,
-      sort_by = 'created_at',
-      sort_order = 'desc',
-    } = query;
-
-    const skip = (page - 1) * limit;
-
-    const where: any = {
-      state: { not: 'archived' }, // Excluir archivados por defecto
-    };
-
-    if (search) {
-      where.OR = [
-        { name: { contains: search, mode: 'insensitive' } },
-        { description: { contains: search, mode: 'insensitive' } },
-      ];
-    }
-
-    // ✅ SIMPLIFICADO: Brands es global, no necesita filtrar por store
-    // Las marcas globales están disponibles para todos los stores
-
-    const [brands, total] = await Promise.all([
-      this.prisma.brands.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy: { [sort_by]: sort_order },
-        include: {
-          _count: {
-            select: { products: true },
-          },
-        },
-      }),
-      this.prisma.brands.count({ where }),
-    ]);
-
-    const signedBrands = await Promise.all(
-      brands.map(async (brand) => ({
-        ...brand,
-        logo_url: await this.s3Service.signUrl(brand.logo_url, true),
-      })),
-    );
-
-    return {
-      data: signedBrands,
-      meta: {
-        total,
-        page,
-        limit,
-        totalPages: Math.ceil(total / limit),
-      },
-    };
+    // Scope is applied automatically by StorePrismaService
+    return this.findAll(query);
   }
 
   async findOne(id: number, options?: { includeInactive?: boolean }) {
@@ -176,11 +142,11 @@ export class BrandsService {
   async update(id: number, updateBrandDto: UpdateBrandDto, user: any) {
     const brand = await this.findOne(id);
 
-    // Build update data
     const updateData: any = {};
 
     if (updateBrandDto.name) {
       updateData.name = updateBrandDto.name;
+      updateData.slug = this.generateSlug(updateBrandDto.name);
     }
 
     if (updateBrandDto.description !== undefined) {
@@ -188,7 +154,6 @@ export class BrandsService {
     }
 
     if (updateBrandDto.logo_url !== undefined) {
-      // CRITICAL: Sanitize logo_url to extract S3 key before storing
       updateData.logo_url = extractS3KeyFromUrl(updateBrandDto.logo_url);
     }
 
@@ -209,7 +174,7 @@ export class BrandsService {
       };
     } catch (error) {
       if (error.code === 'P2002') {
-        throw new ConflictException('Brand name already exists');
+        throw new ConflictException('Brand name already exists in this store');
       }
       throw error;
     }
@@ -218,7 +183,6 @@ export class BrandsService {
   async remove(id: number, user: any) {
     const brand = await this.findOne(id);
 
-    // Check if brand has products
     const productCount = await this.prisma.products.count({
       where: { brand_id: id },
     });
@@ -229,7 +193,6 @@ export class BrandsService {
       );
     }
 
-    // Eliminación lógica: cambiar estado a archived
     await this.prisma.brands.update({
       where: { id },
       data: {
@@ -238,6 +201,7 @@ export class BrandsService {
       },
     });
   }
+
   private async validateUniqueName(name: string, excludeId?: number) {
     const where: any = { name };
     if (excludeId) {
@@ -246,7 +210,7 @@ export class BrandsService {
 
     const existing = await this.prisma.brands.findFirst({ where });
     if (existing) {
-      throw new ConflictException('Brand name already exists');
+      throw new ConflictException('Brand name already exists in this store');
     }
   }
 }
