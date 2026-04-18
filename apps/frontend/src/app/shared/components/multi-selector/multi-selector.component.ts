@@ -102,7 +102,7 @@ export type MultiSelectorSize = 'sm' | 'md' | 'lg';
         <!-- Dropdown -->
         @if (isOpen()) {
           <div
-            class="absolute z-50 w-full mt-1 bg-[var(--color-surface)] border border-border shadow-lg max-h-60 overflow-auto"
+            class="absolute z-[10000] w-full mt-1 bg-[var(--color-surface)] border border-border shadow-lg max-h-60 overflow-auto"
             style="border-radius: var(--radius-sm);"
             >
             <!-- Search input -->
@@ -120,7 +120,7 @@ export type MultiSelectorSize = 'sm' | 'md' | 'lg';
             </div>
             <!-- Options -->
             <div class="py-1">
-              @for (option of filteredOptions(); track option) {
+              @for (option of filteredOptions(); track option.value) {
                 <button
                   type="button"
                   [disabled]="option.disabled"
@@ -223,7 +223,11 @@ export class MultiSelectorComponent implements ControlValueAccessor {
 
   @HostListener('document:click', ['$event'])
   onDocumentClick(event: MouseEvent): void {
-    if (!this.elementRef.nativeElement.contains(event.target)) {
+    const target = event.target as Node | null;
+    if (!target) return;
+    const path = event.composedPath();
+    const isInside = path.some((node) => node === this.elementRef.nativeElement);
+    if (!isInside) {
       this.isOpen.set(false);
     }
   }

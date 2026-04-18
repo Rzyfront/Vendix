@@ -91,7 +91,7 @@
             <app-multi-selector
               class="flex-1"
               label="Categoría"
-              [options]="categoryOptions"
+              [options]="categoryOptions()"
               formControlName="category_ids"
               placeholder="Seleccionar categorías..."
             ></app-multi-selector>
@@ -112,7 +112,7 @@
             <app-multi-selector
               class="flex-1"
               label="Marca"
-              [options]="brandOptions"
+              [options]="brandOptions()"
               formControlName="brand_ids"
               placeholder="Seleccionar marca..."
             ></app-multi-selector>
@@ -135,7 +135,7 @@
           <app-multi-selector
             class="flex-1"
             label="Impuestos (IVA)"
-            [options]="taxCategoryOptions"
+            [options]="taxCategoryOptions()"
             formControlName="tax_category_ids"
             placeholder="Seleccionar impuestos..."
           >
