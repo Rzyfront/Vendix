@@ -1,4 +1,5 @@
-import { Component, inject, OnInit, computed, signal } from '@angular/core';
+import { Component, inject, OnInit, computed, signal, DestroyRef, effect } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { StoreSettingsService } from './services/store-settings.service';
 import { StoreSettings } from '../../../../../core/models/store-settings.interface';
@@ -37,6 +38,7 @@ import { firstValueFrom } from 'rxjs';
   styleUrls: ['./general-settings.component.scss'],
 })
 export class GeneralSettingsComponent implements OnInit {
+  private destroyRef = inject(DestroyRef);
   private settings_service = inject(StoreSettingsService);
   private toast_service = inject(ToastService);
   private configFacade = inject(ConfigFacade);
@@ -94,9 +96,12 @@ export class GeneralSettingsComponent implements OnInit {
     }
   ]);
 
+  private readonly configEffect = effect(() => {
+    this.isVendixDomain = !!this.configFacade.getCurrentConfig()?.domainConfig?.isVendixDomain;
+  });
+
   ngOnInit() {
     this.loadSettings();
-    this.isVendixDomain = !!this.configFacade.getCurrentConfig()?.domainConfig?.isVendixDomain;
     this.resolveStoreAppUrl();
   }
 
@@ -111,7 +116,7 @@ export class GeneralSettingsComponent implements OnInit {
   }
 
   loadSettings() {
-    this.settings_service.getSettings().subscribe({
+    this.settings_service.getSettings().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         this.settings = response.data;
         // Clean shipping data if present to prevent 400 Bad Request
@@ -130,7 +135,7 @@ export class GeneralSettingsComponent implements OnInit {
   }
 
   loadTemplates() {
-    this.settings_service.getSystemTemplates().subscribe({
+    this.settings_service.getSystemTemplates().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         this.templates = response.data;
       },
@@ -232,7 +237,7 @@ export class GeneralSettingsComponent implements OnInit {
       }, {} as Partial<StoreSettings>);
 
       // Save all settings
-      this.settings_service.saveSettingsNow(sanitizedSettings).subscribe({
+      this.settings_service.saveSettingsNow(sanitizedSettings).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: () => {
           this.isSaving.set(false);
           this.hasUnsavedChanges.set(false);
@@ -257,7 +262,7 @@ export class GeneralSettingsComponent implements OnInit {
         '¿Estás seguro de restablecer todas las configuraciones a valores por defecto?',
       )
     ) {
-      this.settings_service.resetToDefault().subscribe({
+      this.settings_service.resetToDefault().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: () => this.loadSettings(),
         error: (error) => {
           console.error('Error resetting settings:', error);
@@ -278,7 +283,7 @@ export class GeneralSettingsComponent implements OnInit {
         `¿Aplicar la plantilla "${template_name}"? Esto reemplazará toda la configuración actual.`,
       )
     ) {
-      this.settings_service.applyTemplate(template_name).subscribe({
+      this.settings_service.applyTemplate(template_name).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
         next: (response) => {
           this.settings = response.data;
           this.showTemplates = false;

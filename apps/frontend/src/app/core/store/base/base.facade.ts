@@ -18,10 +18,10 @@ export class BaseFacade<T = any> {
   );
 
   // ─── Signal parallels (Angular 20 — backward compatible) ──────────────────
-  readonly data = toSignal(this.data$);
+  readonly data = toSignal(this.data$, { initialValue: null as T | null });
   readonly loading = toSignal(this.loading$, { initialValue: false });
-  readonly error = toSignal(this.error$);
-  readonly lastUpdated = toSignal(this.lastUpdated$);
+  readonly error = toSignal(this.error$, { initialValue: null });
+  readonly lastUpdated = toSignal(this.lastUpdated$, { initialValue: null as Date | null });
 
   // Actions
   loadData(id?: string, params?: any): void {

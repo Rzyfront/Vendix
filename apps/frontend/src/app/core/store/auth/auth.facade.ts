@@ -132,13 +132,13 @@ export class AuthFacade {
   // Consumers can migrate from `| async` / `take(1)` to these signals.
   // Naming: same as Observable but without the `$` suffix.
 
-  readonly user = toSignal(this.user$);
-  readonly userSettings = toSignal(this.userSettings$);
-  readonly tokens = toSignal(this.tokens$);
+  readonly user = toSignal(this.user$, { initialValue: null as any });
+  readonly userSettings = toSignal(this.userSettings$, { initialValue: null as any });
+  readonly tokens = toSignal(this.tokens$, { initialValue: null as { access_token: string; refresh_token: string } | null });
   readonly isAuthenticated = toSignal(this.isAuthenticated$, { initialValue: false });
   readonly authLoading = toSignal(this.loading$, { initialValue: false });
   readonly authError = toSignal(this.error$, { initialValue: null });
-  readonly userRole = toSignal(this.userRole$);
+  readonly userRole = toSignal(this.userRole$, { initialValue: null as string | null });
   readonly userRoles = toSignal(this.userRoles$, { initialValue: [] as string[] });
   readonly userPermissions = toSignal(this.userPermissions$, { initialValue: [] as string[] });
   readonly adminFlag = toSignal(this.isAdmin$, { initialValue: false });
@@ -146,34 +146,34 @@ export class AuthFacade {
   readonly managerFlag = toSignal(this.isManager$, { initialValue: false });
   readonly employeeFlag = toSignal(this.isEmployee$, { initialValue: false });
   readonly customerFlag = toSignal(this.isCustomer$, { initialValue: false });
-  readonly userId = toSignal(this.userId$);
-  readonly userEmail = toSignal(this.userEmail$);
-  readonly userName = toSignal(this.userName$);
-  readonly authInfo = toSignal(this.authInfo$);
+  readonly userId = toSignal(this.userId$, { initialValue: null as number | null });
+  readonly userEmail = toSignal(this.userEmail$, { initialValue: null as string | null });
+  readonly userName = toSignal(this.userName$, { initialValue: null as string | null });
+  readonly authInfo = toSignal(this.authInfo$, { initialValue: null as any });
   readonly onboardingCompleted = toSignal(this.onboardingCompleted$, { initialValue: false });
-  readonly onboardingCurrentStep = toSignal(this.onboardingCurrentStep$);
+  readonly onboardingCurrentStep = toSignal(this.onboardingCurrentStep$, { initialValue: undefined as string | undefined });
   readonly onboardingCompletedSteps = toSignal(this.onboardingCompletedSteps$, { initialValue: [] as string[] });
   readonly onboardingNeeded = toSignal(this.needsOnboarding$, { initialValue: false });
-  readonly userOrganization = toSignal(this.userOrganization$);
-  readonly userOrganizationName = toSignal(this.userOrganizationName$);
-  readonly userOrganizationSlug = toSignal(this.userOrganizationSlug$);
-  readonly organizationOnboarding = toSignal(this.organizationOnboarding$);
+  readonly userOrganization = toSignal(this.userOrganization$, { initialValue: null as any });
+  readonly userOrganizationName = toSignal(this.userOrganizationName$, { initialValue: null as string | null });
+  readonly userOrganizationSlug = toSignal(this.userOrganizationSlug$, { initialValue: null as string | null });
+  readonly organizationOnboarding = toSignal(this.organizationOnboarding$, { initialValue: null as any });
   readonly organizationOnboardingNeeded = toSignal(this.needsOrganizationOnboarding$, { initialValue: false });
-  readonly userStore = toSignal(this.userStore$);
-  readonly userStoreName = toSignal(this.userStoreName$);
-  readonly userStoreSlug = toSignal(this.userStoreSlug$);
-  readonly userStoreType = toSignal(this.userStoreType$);
-  readonly storeSettings = toSignal(this.storeSettings$);
-  readonly panelUiConfig = toSignal(this.panelUiConfig$);
-  readonly selectedAppType = toSignal(this.selectedAppType$);
-  readonly currentAppPanelUi = toSignal(this.currentAppPanelUi$);
+  readonly userStore = toSignal(this.userStore$, { initialValue: null as any });
+  readonly userStoreName = toSignal(this.userStoreName$, { initialValue: null as string | null });
+  readonly userStoreSlug = toSignal(this.userStoreSlug$, { initialValue: null as string | null });
+  readonly userStoreType = toSignal(this.userStoreType$, { initialValue: null as any });
+  readonly storeSettings = toSignal(this.storeSettings$, { initialValue: null as any });
+  readonly panelUiConfig = toSignal(this.panelUiConfig$, { initialValue: null as any });
+  readonly selectedAppType = toSignal(this.selectedAppType$, { initialValue: null as any });
+  readonly currentAppPanelUi = toSignal(this.currentAppPanelUi$, { initialValue: null as any });
   readonly visibleModules = toSignal(this.visibleModules$, { initialValue: [] as string[] });
-  readonly defaultPanelUi = toSignal(this.defaultPanelUi$);
+  readonly defaultPanelUi = toSignal(this.defaultPanelUi$, { initialValue: null as any });
   readonly hasNewModules = toSignal(this.hasNewModules$, { initialValue: false });
   readonly newModuleCount = toSignal(this.newModuleCount$, { initialValue: 0 });
   readonly newModuleKeys = toSignal(this.newModuleKeys$, { initialValue: [] as string[] });
-  readonly userDomainSettings = toSignal(this.userDomainSettings$);
-  readonly userDomainHostname = toSignal(this.userDomainHostname$);
+  readonly userDomainSettings = toSignal(this.userDomainSettings$, { initialValue: null as any });
+  readonly userDomainHostname = toSignal(this.userDomainHostname$, { initialValue: null as string | null });
 
   // ─── Actions ──────────────────────────────────────────────────────────────
 

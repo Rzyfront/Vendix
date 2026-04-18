@@ -1,4 +1,4 @@
-import { Component, OnInit, inject } from '@angular/core';
+import { Component, OnInit, inject, effect } from '@angular/core';
 
 import { ConfigFacade } from '../../../../core/store/config';
 import { ThemeService } from '../../../../core/services';
@@ -146,7 +146,9 @@ export class OrgLandingComponent implements OnInit {
   private configFacade = inject(ConfigFacade);
   private themeService = inject(ThemeService);
 
-  ngOnInit() {
+  ngOnInit() {}
+
+  private readonly configEffect = effect(() => {
     const appConfig = this.configFacade.getCurrentConfig();
     if (!appConfig) {
       this.loadDefaultData();
@@ -162,14 +164,12 @@ export class OrgLandingComponent implements OnInit {
       appConfig.domainConfig.customConfig?.features || {},
     );
 
-    // Build Hero Slides
     this.buildHeroSlides();
 
-    // Apply domain branding colors to CSS variables
     if (appConfig.branding) {
       this.themeService.applyBranding(appConfig.branding);
     }
-  }
+  });
 
   private loadDefaultData() {
     this.features = this.mapFeatures({});

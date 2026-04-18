@@ -23,13 +23,13 @@ export class AIChatFacade {
 
   // ─── Signal parallels (Angular 20 — backward compatible) ──────────────────
   readonly conversations = toSignal(this.conversations$, { initialValue: [] as any[] });
-  readonly activeConversationId = toSignal(this.activeConversationId$);
+  readonly activeConversationId = toSignal(this.activeConversationId$, { initialValue: null as number | null });
   readonly messages = toSignal(this.messages$, { initialValue: [] as any[] });
-  readonly streamingContent = toSignal(this.streamingContent$);
+  readonly streamingContent = toSignal(this.streamingContent$, { initialValue: '' });
   readonly isStreaming = toSignal(this.isStreaming$, { initialValue: false });
   readonly isSending = toSignal(this.isSending$, { initialValue: false });
   readonly loading = toSignal(this.loading$, { initialValue: false });
-  readonly error = toSignal(this.error$);
+  readonly error = toSignal(this.error$, { initialValue: null });
 
   loadConversations(): void {
     this.store.dispatch(AIChatActions.loadConversations());

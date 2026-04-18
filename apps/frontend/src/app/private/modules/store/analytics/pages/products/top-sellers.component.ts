@@ -56,7 +56,7 @@ topSellers$: Observable<TopSellingProduct[]> = this.store.select(
 
   readonly topSellers = toSignal(this.topSellers$, { initialValue: [] as TopSellingProduct[] });
   readonly loadingTopSellers = toSignal(this.loadingTopSellers$, { initialValue: false });
-  readonly dateRange = toSignal(this.dateRange$);
+  readonly dateRange = toSignal(this.dateRange$, { initialValue: null! });
 
   topSellersChartOptions: EChartsOption = {};
 

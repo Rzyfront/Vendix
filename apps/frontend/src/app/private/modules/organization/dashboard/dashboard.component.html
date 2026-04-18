@@ -108,7 +108,7 @@
         </div>
       </div>
       <div class="p-6">
-        @defer (on viewport) {
+        @defer (on immediate) {
           <app-chart
             [options]="revenueChartData()"
             size="medium"
@@ -137,7 +137,7 @@
       </div>
       <div class="p-6">
         <div class="relative h-64">
-          @defer (on viewport) {
+          @defer (on immediate) {
             <app-chart
               [options]="storeDistributionData()"
               size="small"
