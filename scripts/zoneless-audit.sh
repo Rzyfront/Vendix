@@ -195,13 +195,45 @@ fi
 echo ""
 echo "=== 9. take(1) SUBSCRIBE SINCRONO ==="
 
-take1_count=$(grep -rln "take(1)" $FRONTEND --include='*.ts' | wc -l)
-echo "take(1) en archivos: $take1_count"
+# Allowlist: archivos donde take(1) es legítimo.
+# - auth.interceptor.ts: espera primer emit de Subject refreshToken$ (race de refresh)
+TAKE1_ALLOWLIST_REGEX='auth\.interceptor\.ts$'
+
+# Excluir líneas de comentario (// ... o * ...) y take(1) dentro de // en misma línea.
+# Luego deduplicar archivos y restar allowlist.
+take1_count=$(grep -rn "take(1)" $FRONTEND --include='*.ts' 2>/dev/null \
+  | awk -F: '
+    {
+      file=$1
+      content=""
+      for (i=3; i<=NF; i++) content = content (i>3?":":"") $i
+      if (content ~ /^[[:space:]]*(\/\/|\*)/) next
+      if (content ~ /\/\/[^"\x27]*take\(1\)/) next
+      print file
+    }' \
+  | sort -u \
+  | grep -vE "$TAKE1_ALLOWLIST_REGEX" \
+  | wc -l | tr -d ' ')
+echo "take(1) en archivos (codigo, excl. allowlist): $take1_count"
 if [ "$take1_count" -gt 0 ]; then
   echo -e "${RED}❌ take(1) encontrado — patron sincrono antiproduccion${NC}"
+  echo "   Archivos:"
+  grep -rn "take(1)" $FRONTEND --include='*.ts' 2>/dev/null \
+    | awk -F: '
+      {
+        file=$1
+        content=""
+        for (i=3; i<=NF; i++) content = content (i>3?":":"") $i
+        if (content ~ /^[[:space:]]*(\/\/|\*)/) next
+        if (content ~ /\/\/[^"\x27]*take\(1\)/) next
+        print file
+      }' \
+    | sort -u \
+    | grep -vE "$TAKE1_ALLOWLIST_REGEX" \
+    | sed 's/^/   /'
   errors=$((errors + 1))
 else
-  echo -e "${GREEN}✅ No se encontro take(1)${NC}"
+  echo -e "${GREEN}✅ No se encontro take(1) antipatron${NC}"
 fi
 
 echo ""
