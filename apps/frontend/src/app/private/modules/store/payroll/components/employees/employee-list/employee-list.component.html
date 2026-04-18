@@ -35,7 +35,7 @@
     }
 
     <!-- Empty State -->
-    @if (!loading && employees.length === 0) {
+    @if (!loading() && employees().length === 0) {
       <app-empty-state
         icon="users"
         [title]="getEmptyStateTitle()"

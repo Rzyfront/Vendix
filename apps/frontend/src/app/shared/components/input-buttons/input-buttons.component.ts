@@ -1,4 +1,4 @@
-import { Component, forwardRef, input, output } from '@angular/core';
+import { Component, forwardRef, input, output, signal } from '@angular/core';
 
 import { ControlValueAccessor, NG_VALUE_ACCESSOR } from '@angular/forms';
 import { FormStyleVariant } from '../../types/form.types';
@@ -135,7 +135,7 @@ export class InputButtonsComponent implements ControlValueAccessor {
   readonly label = input<string>('');
   readonly options = input<InputButtonOption[]>([]);
   readonly disabled = input<boolean>(false);
-  private disabledState = false;
+  readonly disabledState = signal(false);
   readonly helperText = input<string>('');
   readonly tooltipText = input<string>('');
   readonly required = input(false);
@@ -145,13 +145,13 @@ export class InputButtonsComponent implements ControlValueAccessor {
 
   readonly valueChange = output<string>();
 
-  value = '';
+  readonly value = signal('');
 
   private onChange = (_: string) => {};
   private onTouched = () => {};
 
   writeValue(value: string): void {
-    this.value = value || '';
+    this.value.set(value || '');
   }
 
   registerOnChange(fn: (value: string) => void): void {
@@ -163,16 +163,16 @@ export class InputButtonsComponent implements ControlValueAccessor {
   }
 
   setDisabledState(isDisabled: boolean): void {
-    this.disabledState = isDisabled;
+    this.disabledState.set(isDisabled);
   }
 
   isDisabled(): boolean {
-    return this.disabled() || this.disabledState;
+    return this.disabled() || this.disabledState();
   }
 
   selectOption(optionValue: string): void {
     if (this.isDisabled()) return;
-    this.value = optionValue;
+    this.value.set(optionValue);
     this.onChange(optionValue);
     this.onTouched();
     this.valueChange.emit(optionValue);
@@ -210,7 +210,7 @@ export class InputButtonsComponent implements ControlValueAccessor {
   }
 
   getButtonClasses(optionValue: string): string {
-    const isSelected = this.value === optionValue;
+    const isSelected = this.value() === optionValue;
     const base = [
       'flex-1',
       'h-full',
