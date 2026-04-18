@@ -14,10 +14,9 @@ import {
   InputComponent,
   ToastService,
   IconComponent,
-  SelectorComponent,
-  SelectorOption,
   MultiSelectorComponent,
   MultiSelectorOption,
+  SelectorOption,
   DialogService,
   SettingToggleComponent,
 } from '../../../../../shared/components';
@@ -48,11 +47,10 @@ import { TaxQuickCreateComponent } from './tax-quick-create.component';
     ButtonComponent,
     InputComponent,
     IconComponent,
-    SelectorComponent,
+    MultiSelectorComponent,
     SettingToggleComponent,
     CategoryQuickCreateComponent,
     BrandQuickCreateComponent,
-    MultiSelectorComponent,
     TaxQuickCreateComponent,
   ],
   templateUrl: './product-create-modal/product-create-modal.component.html',
@@ -81,9 +79,9 @@ export class ProductCreateModalComponent {
   }
 
   productForm: FormGroup;
-  categoryOptions: SelectorOption[] = [];
-  brandOptions: SelectorOption[] = [];
-  taxCategoryOptions: MultiSelectorOption[] = [];
+  categoryOptions = signal<SelectorOption[]>([]);
+  brandOptions = signal<SelectorOption[]>([]);
+  taxCategoryOptions = signal<MultiSelectorOption[]>([]);
 
   // Quick create modals state
   isCategoryCreateOpen = signal(false);
@@ -91,6 +89,7 @@ export class ProductCreateModalComponent {
   isTaxCategoryCreateOpen = signal(false);
 
   private allTaxCategories: TaxCategory[] = [];
+  private isInitialized = signal(false);
 
   constructor() {
     this.productForm = this.createForm();
@@ -105,14 +104,19 @@ export class ProductCreateModalComponent {
       }
     });
 
-    // React to isOpen changes
+    // React to isOpen changes - solo ejecutar una vez por apertura
     effect(() => {
-      if (this.isOpen()) {
+      if (this.isOpen() && !this.isInitialized()) {
         this.currencyService.loadCurrency();
         this.loadCategoriesAndBrands();
         if (!this.product()) {
           this.resetForm();
         }
+        this.isInitialized.set(true);
+      }
+      // Cuando el modal se cierra, resetear el flag para la próxima apertura
+      if (!this.isOpen()) {
+        this.isInitialized.set(false);
       }
     });
   }
@@ -132,8 +136,8 @@ export class ProductCreateModalComponent {
       stock_quantity: [0, [Validators.required, Validators.min(0)]],
       track_inventory: [true],
       sku: [''],
-      category_id: [null],
-      brand_id: [null],
+      category_ids: [[]],
+      brand_ids: [[]],
       tax_category_ids: [[] as number[]],
       state: [ProductState.ACTIVE],
     });
@@ -158,8 +162,8 @@ export class ProductCreateModalComponent {
       stock_quantity: val.stock_quantity || 0,
       track_inventory: val.track_inventory ?? true,
       sku: val.sku || '',
-      category_ids: val.category_id ? [Number(val.category_id)] : [],
-      brand_id: val.brand_id || null,
+      category_ids: val.category_ids || [],
+      brand_ids: val.brand_ids || [],
       tax_category_ids: val.tax_category_ids || [],
       state: val.state || 'active',
     };
@@ -188,9 +192,9 @@ export class ProductCreateModalComponent {
   }
 
   private loadCategoriesAndBrands(): void {
-    this.loadCategories();
-    this.loadBrands();
-    this.loadTaxCategories();
+    if (this.categoryOptions().length === 0) this.loadCategories();
+    if (this.brandOptions().length === 0) this.loadBrands();
+    if (this.taxCategoryOptions().length === 0) this.loadTaxCategories();
   }
 
   // Populate form when product data is available (edit mode)
@@ -204,32 +208,33 @@ export class ProductCreateModalComponent {
       stock_quantity: prod.stock_quantity || 0,
       track_inventory: prod.track_inventory !== false,
       // Try to get category from new structure or legacy if exists
-      category_id:
-        (prod as any).category_ids?.[0] ||
-        prod.categories?.[0]?.id ||
-        null,
-      brand_id: prod.brand_id || null,
-      tax_category_ids:
-        (prod.product_tax_assignments || []).map(
-          (ta: any) => ta.tax_category_id,
-        ),
+      category_ids:
+        (prod as any).category_ids?.length > 0
+          ? (prod as any).category_ids
+          : prod.categories?.[0]?.id
+            ? [prod.categories[0].id]
+            : [],
+      brand_ids: prod.brand_id ? [prod.brand_id] : [],
+      tax_category_ids: (prod.product_tax_assignments || []).map(
+        (ta: any) => ta.tax_category_id,
+      ),
       state: prod.state || ProductState.ACTIVE,
     });
   }
 
   private loadCategories(): void {
-    this.categoriesService.getCategories().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+    this.categoriesService.getAllCategories().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (categories: ProductCategory[]) => {
-        this.categoryOptions = categories.map((cat: ProductCategory) => ({
+        this.categoryOptions.set(categories.map((cat: ProductCategory) => ({
           value: cat.id,
           label: cat.name,
           description: cat.description,
-        }));
+        })));
       },
       error: (error: any) => {
         const message = extractApiErrorMessage(error);
         this.toastService.error(message, 'Error al cargar categorías');
-        this.categoryOptions = [];
+        this.categoryOptions.set([]);
       },
     });
   }
@@ -238,7 +243,7 @@ export class ProductCreateModalComponent {
     this.taxesService.getTaxCategories().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (taxCategories: TaxCategory[]) => {
         this.allTaxCategories = taxCategories;
-        this.taxCategoryOptions = taxCategories.map((cat: TaxCategory) => {
+        this.taxCategoryOptions.set(taxCategories.map((cat: TaxCategory) => {
           const rawRate = cat.rate ?? cat.tax_rates?.[0]?.rate ?? 0;
           const rate = parseFloat(String(rawRate));
           const finalRate = isNaN(rate) ? 0 : rate;
@@ -248,7 +253,7 @@ export class ProductCreateModalComponent {
             label: `${cat.name} (${(finalRate * 100).toFixed(0)}%)`,
             description: cat.description,
           };
-        });
+        }));
       },
       error: (error: any) => {
         const message = extractApiErrorMessage(error);
@@ -261,67 +266,56 @@ export class ProductCreateModalComponent {
   }
 
   private loadBrands(): void {
-    this.brandsService.getBrands().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
+    this.brandsService.getAllBrands().pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (brands: Brand[]) => {
-        this.brandOptions = brands.map((brand: Brand) => ({
+        this.brandOptions.set(brands.map((brand: Brand) => ({
           value: brand.id,
           label: brand.name,
           description: brand.description,
-        }));
+        })));
       },
       error: (error: any) => {
         const message = extractApiErrorMessage(error);
         this.toastService.error(message, 'Error al cargar marcas');
-        this.brandOptions = [];
+        this.brandOptions.set([]);
       },
     });
   }
 
   onCategoryCreated(category: ProductCategory): void {
-    // Add new option optimistically (triggers OnPush change detection)
-    this.categoryOptions = [
-      ...this.categoryOptions,
+    this.categoryOptions.update(options => [
+      ...options,
       {
         value: category.id,
         label: category.name,
         description: category.description,
       },
-    ];
-    this.productForm.patchValue({ category_id: category.id });
+    ]);
+    this.productForm.patchValue({ category_ids: [category.id] });
     this.isCategoryCreateOpen.set(false);
   }
 
   onBrandCreated(brand: Brand): void {
-    // Add new option optimistically (triggers OnPush change detection)
-    this.brandOptions = [
-      ...this.brandOptions,
-      { value: brand.id, label: brand.name, description: brand.description },
-    ];
-    this.productForm.patchValue({ brand_id: brand.id });
+    this.brandOptions.update(options => [
+      ...options,
+      {
+        value: brand.id,
+        label: brand.name,
+        description: brand.description,
+      },
+    ]);
+    this.productForm.patchValue({ brand_ids: [brand.id] });
     this.isBrandCreateOpen.set(false);
   }
 
   onTaxCategoryCreated(taxCategory: TaxCategory): void {
-    const rawRate = taxCategory.rate ?? taxCategory.tax_rates?.[0]?.rate ?? 0;
-    const rate = parseFloat(String(rawRate));
-    const finalRate = isNaN(rate) ? 0 : rate;
-
-    this.allTaxCategories = [...this.allTaxCategories, taxCategory];
-    this.taxCategoryOptions = [
-      ...this.taxCategoryOptions,
-      {
-        value: taxCategory.id,
-        label: `${taxCategory.name} (${(finalRate * 100).toFixed(0)}%)`,
-        description: taxCategory.description,
-      },
-    ];
-
-    const currentIds: number[] =
-      this.productForm.get('tax_category_ids')?.value || [];
-    this.productForm.patchValue({
-      tax_category_ids: [...currentIds, taxCategory.id],
-    });
-    this.isTaxCategoryCreateOpen.set(false);
+    this.loadTaxCategories();
+    const currentIds = this.productForm.get('tax_category_ids')?.value || [];
+    if (taxCategory && taxCategory.id) {
+      this.productForm.patchValue({
+        tax_category_ids: [...currentIds, taxCategory.id],
+      });
+    }
   }
 
   onCancel() {
@@ -343,9 +337,9 @@ export class ProductCreateModalComponent {
       track_inventory: !!val.track_inventory,
       stock_quantity: val.track_inventory ? val.stock_quantity : null,
       sku: val.sku || undefined,
-      // Map single category to array for backend compat
-      category_ids: val.category_id ? [Number(val.category_id)] : [],
-      brand_id: val.brand_id,
+      // Map categories to array for backend
+      category_ids: val.category_ids || [],
+      brand_id: val.brand_ids?.[0] ? Number(val.brand_ids[0]) : null,
       tax_category_ids: val.tax_category_ids || [],
       state: val.state,
     };

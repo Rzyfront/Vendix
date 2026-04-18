@@ -17,7 +17,7 @@ import { ProductCategory } from '../interfaces';
 export class CategoriesService {
   private readonly apiUrl = environment.apiUrl;
 
-  constructor(private http: HttpClient) { }
+  constructor(private http: HttpClient) {}
 
   getCategories(storeId?: number): Observable<ProductCategory[]> {
     const params = storeId
@@ -33,12 +33,26 @@ export class CategoriesService {
       );
   }
 
-  getCategoryById(id: number): Observable<ProductCategory> {
+  getAllCategories(storeId?: number): Observable<ProductCategory[]> {
+    const params = new HttpParams().set('limit', '200').set('page', '1');
     return this.http
-      .get<ApiResponse<ProductCategory>>(`${this.apiUrl}/store/categories/${id}`)
+      .get<
+        ApiResponse<ProductCategory[]>
+      >(`${this.apiUrl}/store/categories`, { params })
       .pipe(
         map((response) => response.data),
-        catchError(this.handleError)
+        catchError(this.handleError),
+      );
+  }
+
+  getCategoryById(id: number): Observable<ProductCategory> {
+    return this.http
+      .get<
+        ApiResponse<ProductCategory>
+      >(`${this.apiUrl}/store/categories/${id}`)
+      .pipe(
+        map((response) => response.data),
+        catchError(this.handleError),
       );
   }
 
@@ -46,10 +60,12 @@ export class CategoriesService {
     category: Partial<ProductCategory>,
   ): Observable<ProductCategory> {
     return this.http
-      .post<ApiResponse<ProductCategory>>(`${this.apiUrl}/store/categories`, category)
+      .post<
+        ApiResponse<ProductCategory>
+      >(`${this.apiUrl}/store/categories`, category)
       .pipe(
         map((response) => response.data),
-        catchError(this.handleError)
+        catchError(this.handleError),
       );
   }
 
@@ -58,10 +74,9 @@ export class CategoriesService {
     category: Partial<ProductCategory>,
   ): Observable<ProductCategory> {
     return this.http
-      .patch<ApiResponse<ProductCategory>>(
-        `${this.apiUrl}/store/categories/${id}`,
-        category,
-      )
+      .patch<
+        ApiResponse<ProductCategory>
+      >(`${this.apiUrl}/store/categories/${id}`, category)
       .pipe(
         map((response) => response.data),
         catchError(this.handleError),
