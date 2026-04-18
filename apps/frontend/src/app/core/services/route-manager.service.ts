@@ -24,10 +24,25 @@ export class RouteManagerService {
   public routesConfigured$ = this.routesConfigured.asObservable();
 
   private initialized = false;
+  private bootTimeout: ReturnType<typeof setTimeout> | null = null;
 
   constructor() {
     // Initialize the route manager
     this.init();
+    this.startBootTimeout();
+  }
+
+  private startBootTimeout(): void {
+    if (typeof window === 'undefined') return;
+
+    this.bootTimeout = setTimeout(() => {
+      if (!this.routesConfigured) {
+        console.warn(
+          '[RouteManagerService] Boot timeout - routes not configured after 5s, forcing fallback',
+        );
+        this.configureFallbackRoutes();
+      }
+    }, 5000);
   }
 
   /**
@@ -84,6 +99,11 @@ export class RouteManagerService {
    * Public method to allow manual reconfiguration (e.g., during environment switch).
    */
   public configureDynamicRoutes(appConfig: AppConfig): void {
+    if (this.bootTimeout) {
+      clearTimeout(this.bootTimeout);
+      this.bootTimeout = null;
+    }
+
     // Si no tenemos config válida, fallback inmediato
     if (!appConfig || !appConfig.routes) {
       this.router.resetConfig(this.getFallbackRoutes());
@@ -195,6 +215,10 @@ export class RouteManagerService {
    * This is called by APP_INITIALIZER when there's a timeout.
    */
   configureFallbackRoutes(): void {
+    if (this.bootTimeout) {
+      clearTimeout(this.bootTimeout);
+      this.bootTimeout = null;
+    }
     this.router.resetConfig(this.getFallbackRoutes());
     this.routesConfigured.next(true);
   }

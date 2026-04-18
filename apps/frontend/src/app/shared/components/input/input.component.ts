@@ -266,7 +266,7 @@ export class InputComponent implements ControlValueAccessor {
   readonly size = input<InputSize>('md');
   readonly styleVariant = input<FormStyleVariant>('modern');
   readonly disabled = input<boolean>(false);
-  private disabledState = false;
+  private disabledState = signal(false);
   readonly readonly = input(false);
   readonly required = input(false);
   readonly error = input<string>();
@@ -330,11 +330,11 @@ export class InputComponent implements ControlValueAccessor {
   }
 
   setDisabledState(isDisabled: boolean): void {
-    this.disabledState = isDisabled;
+    this.disabledState.set(isDisabled);
   }
 
   isDisabled(): boolean {
-    return this.disabled() || this.disabledState;
+    return this.disabled() || this.disabledState();
   }
 
   get labelClasses(): string {

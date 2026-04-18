@@ -1187,6 +1187,7 @@ export class BulkProductUploadDto {
 }
 
 export class BulkUploadItemResultDto {
+  row_number?: number;
   product_name?: string;
   sku?: string;
   action?: 'create' | 'update';

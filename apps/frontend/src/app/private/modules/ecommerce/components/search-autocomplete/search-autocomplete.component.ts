@@ -23,7 +23,7 @@ export class SearchAutocompleteComponent {
   readonly show_dropdown = signal(false);
   readonly selected_index = signal(-1);
 
-  private search_subject = new Subject<string>();
+  private search_subject = new Subject<string>(); // LEGÍTIMO — debounceTime search stream
   private destroyRef = inject(DestroyRef);
 
   private catalog_service = inject(CatalogService);

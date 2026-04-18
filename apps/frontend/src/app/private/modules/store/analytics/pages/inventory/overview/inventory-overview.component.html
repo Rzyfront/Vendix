@@ -117,7 +117,7 @@
             ></div>
           </div>
         } @else {
-          @defer (on viewport) {
+          @defer (on immediate) {
             <app-chart
               [options]="movementTrendChartOptions"
               size="large"
@@ -156,7 +156,7 @@
               ></div>
             </div>
           } @else {
-            @defer (on viewport) {
+            @defer (on immediate) {
               <app-chart
                 [options]="valuationChartOptions"
                 size="large"
@@ -193,7 +193,7 @@
               ></div>
             </div>
           } @else {
-            @defer (on viewport) {
+            @defer (on immediate) {
               <app-chart
                 [options]="quantityChartOptions"
                 size="large"

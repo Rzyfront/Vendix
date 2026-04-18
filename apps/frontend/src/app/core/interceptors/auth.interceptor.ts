@@ -6,8 +6,8 @@ import {
   HttpInterceptorFn,
   HttpRequest,
 } from '@angular/common/http';
-import { EMPTY, Observable, Subject, throwError } from 'rxjs';
-import { catchError, switchMap, take } from 'rxjs/operators';
+import { EMPTY, Observable, Subject, throwError, timer } from 'rxjs';
+import { catchError, switchMap, take, timeout } from 'rxjs/operators';
 import { environment } from '../../../environments/environment';
 import { AuthService } from '../services/auth.service';
 import { SessionService } from '../services/session.service';
@@ -96,6 +96,7 @@ function handle401Error(
 
     if (refreshToken) {
       return authService.refreshToken().pipe(
+        timeout(15000),
         switchMap((response: any) => {
           isRefreshing = false;
           const newToken = response.data?.access_token;
@@ -111,10 +112,13 @@ function handle401Error(
           sessionService.terminateSession('token_refresh_failed');
           return EMPTY;
         }),
-        catchError(() => {
+        catchError((err) => {
           isRefreshing = false;
-          // Terminar sesión limpiamente
-          sessionService.terminateSession('token_refresh_failed');
+          if (err instanceof Error && err.name === 'TimeoutError') {
+            sessionService.terminateSession('token_refresh_timeout');
+          } else {
+            sessionService.terminateSession('token_refresh_failed');
+          }
           return EMPTY;
         }),
       );

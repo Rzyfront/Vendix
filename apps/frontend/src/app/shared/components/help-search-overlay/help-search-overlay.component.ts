@@ -307,7 +307,7 @@ export class HelpSearchOverlayComponent {
   private helpCenterService = inject(HelpCenterService);
   private router = inject(Router);
   private destroyRef = inject(DestroyRef);
-private searchSubject$ = new Subject<string>();
+  private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+distinctUntilChanged search stream
 
   readonly dialogRef = viewChild.required<ElementRef<HTMLDialogElement>>('dialogRef');
 

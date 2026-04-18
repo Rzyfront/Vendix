@@ -204,7 +204,7 @@ export class HeaderComponent {
   }> = this.breadcrumbService.breadcrumb$;
 
   // --- Signal-based properties ---
-  readonly breadcrumb = toSignal(this.breadcrumb$);
+  readonly breadcrumb = toSignal(this.breadcrumb$, { initialValue: null! });
 
   // --- State signals ---
   readonly storeLogo = signal<string | null>(null);

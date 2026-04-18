@@ -557,7 +557,7 @@ export class PosCustomerModalComponent {
   readonly lookupResult = signal<PosCustomer | null>(null);
   readonly lookupPerformed = signal(false);
   readonly lookupLoading = signal(false);
-private searchSubject$ = new Subject<string>();
+private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+distinctUntilChanged search stream
   private dialogService = inject(DialogService);
   private fb = inject(FormBuilder);
   private customerService = inject(PosCustomerService);

@@ -98,7 +98,7 @@ export class DispatchNoteListComponent {
     },
   ];
 
-  filter_values: FilterValues = {};
+  readonly filter_values = signal<FilterValues>({});
 
   dropdown_actions: DropdownAction[] = [];
 
@@ -299,7 +299,7 @@ export class DispatchNoteListComponent {
   }
 
   onFilterChange(values: FilterValues): void {
-    this.filter_values = values;
+    this.filter_values.set(values);
     this.selected_status = (values['status'] as string) || '';
     this.filters.page = 1;
     this.loadDispatchNotes();
@@ -308,7 +308,7 @@ export class DispatchNoteListComponent {
   clearFilters(): void {
     this.search_term.set('');
     this.selected_status = '';
-    this.filter_values = {};
+    this.filter_values.set({});
     this.filters.page = 1;
     this.loadDispatchNotes();
   }

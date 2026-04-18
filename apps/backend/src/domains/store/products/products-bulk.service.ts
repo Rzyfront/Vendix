@@ -584,7 +584,9 @@ export class ProductsBulkService {
     // Cache de bodegas para evitar N+1 queries
     const locationCache = new Map<string, any>();
 
-    for (const productData of products) {
+    for (let rowIndex = 0; rowIndex < products.length; rowIndex++) {
+      const productData = products[rowIndex];
+      const rowNumber = rowIndex + 2; // header = fila 1
       try {
         // Pre-procesar: Crear marcas y categorías si son strings
         await this.preprocessProductData(productData, storeId);
@@ -708,7 +710,18 @@ export class ProductsBulkService {
         } else if (error instanceof BadRequestException) {
           userMessage = error.message;
         } else if (error?.code === 'P2002') {
-          userMessage = 'Ya existe un producto con este SKU o datos duplicados';
+          const target = Array.isArray(error?.meta?.target)
+            ? (error.meta.target as string[]).join(', ')
+            : error?.meta?.target || 'desconocido';
+
+          if (typeof target === 'string' && target.includes('slug')) {
+            const generated = generateSlug(productData.name || '');
+            userMessage = `El nombre genera un slug duplicado ("${generated}"). Otro producto en la tienda ya lo usa.`;
+          } else if (typeof target === 'string' && target.includes('sku')) {
+            userMessage = `SKU "${productData.sku}" ya existe en la tienda (posiblemente archivado).`;
+          } else {
+            userMessage = `Violación de unicidad en campo(s): ${target}`;
+          }
           errorCode = 'BULK_PROD_VALIDATE_001';
         } else if (error?.code === 'P2003') {
           userMessage = 'Referencia inválida (marca, categoría u otro campo relacionado)';
@@ -725,6 +738,9 @@ export class ProductsBulkService {
         }
 
         results.push({
+          row_number: rowNumber,
+          product_name: productData.name || undefined,
+          sku: productData.sku || undefined,
           product: null,
           status: 'error',
           message: userMessage,

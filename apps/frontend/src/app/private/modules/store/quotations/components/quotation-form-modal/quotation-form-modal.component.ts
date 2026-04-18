@@ -364,8 +364,8 @@ export class QuotationFormModalComponent {
   );
 
   /** RxJS subjects for debounced search */
-  private readonly customerSearch$ = new Subject<string>();
-  private readonly productSearch$ = new Subject<string>();
+  private readonly customerSearch$ = new Subject<string>(); // LEGÍTIMO — debounceTime+switchMap customer search
+  private readonly productSearch$ = new Subject<string>(); // LEGÍTIMO — debounceTime+switchMap product search
 
   get itemsArray(): FormArray {
     return this.form.get('items') as FormArray;
