@@ -1,5 +1,5 @@
-import {Component, effect, inject, OnInit, signal, DestroyRef} from '@angular/core';
-import {toSignal, takeUntilDestroyed} from '@angular/core/rxjs-interop';
+import {Component, effect, inject, signal} from '@angular/core';
+import {toSignal} from '@angular/core/rxjs-interop';
 import { RouterOutlet } from '@angular/router';
 import { ConfigFacade } from './core/store/config';
 import { RouteManagerService } from './core/services/route-manager.service';
@@ -44,8 +44,7 @@ import { AppLoadingComponent } from './shared/components/app-loading/app-loading
     }
   `,
 })
-export class AppComponent implements OnInit {
-  private destroyRef = inject(DestroyRef);
+export class AppComponent {
   private routeManager = inject(RouteManagerService);
   private configFacade = inject(ConfigFacade);
   private toastService = inject(ToastService);
@@ -55,16 +54,22 @@ export class AppComponent implements OnInit {
     initialValue: null as any,
   });
 
+  private readonly routesConfigured = toSignal(this.routeManager.routesConfigured$, {
+    initialValue: false,
+  });
+
   constructor() {
     effect(() => {
-      if (!this.is_loading()) {
+      if (this.routesConfigured()) {
+        this.is_loading.set(false);
         this.removePrerenderGate();
       }
     });
-  }
 
-  ngOnInit() {
-    this.setupRouteErrorHandling();
+    setTimeout(() => {
+      this.is_loading.set(false);
+      console.error('[AppComponent] Boot timeout - routes did not configure');
+    }, 10000);
   }
 
   private removePrerenderGate(): void {
@@ -73,22 +78,5 @@ export class AppComponent implements OnInit {
     document.documentElement.classList.remove('vendix-prerender-hidden');
     document.getElementById('vendix-prerender-gate')?.remove();
     document.querySelector('.vendix-gate-spinner')?.remove();
-  }
-
-  private setupRouteErrorHandling(): void {
-    this.routeManager.routesConfigured$.pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
-      next: (configured) => {
-        this.is_loading.set(!configured);
-      },
-      error: (error) => {
-        console.error('[AppComponent] Route manager error:', error);
-        this.is_loading.set(false);
-        this.toastService.error(
-          'Ocurrió un error al cargar la aplicación',
-          'Error de Inicialización',
-          10000,
-        );
-      },
-    });
   }
 }

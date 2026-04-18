@@ -1,11 +1,11 @@
-import {Component, inject, signal,
+import {Component, inject, signal, effect, untracked,
   DestroyRef} from '@angular/core';
 import { NgClass } from '@angular/common';
 import { HttpClient } from '@angular/common/http';
 import { Store } from '@ngrx/store';
 
 import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
-import { filter, switchMap, take, of, catchError } from 'rxjs';
+import { of, catchError } from 'rxjs';
 
 
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
@@ -345,33 +345,38 @@ export class AccountMappingsComponent {
         this.has_changes.set(false);
       });
 
-    this.tenantFacade.currentEnvironment$
-      .pipe(
-        filter((env): env is AppType => !!env),
-        take(1),
-        switchMap((env) => {
-          const endpoint = this.getSettingsEndpoint(env);
-          if (!endpoint) {
-            this.flows_loaded.set(true);
-            return of(null);
-          }
-          return this.http
-            .get<any>(`${environment.apiUrl}${endpoint}`)
-            .pipe(catchError(() => of(null)));
-        }),
-        takeUntilDestroyed(this.destroyRef),
-      )
-      .subscribe((res) => {
-        if (res) {
-          const settings = res?.data?.settings || res?.data || res;
-          this.flow_toggles.set(
-            settings?.module_flows?.accounting ||
-              settings?.accounting_flows ||
-              {},
-          );
-        }
+    // Reacciona al signal currentEnvironment. Guardado con flows_loaded
+    // leído en untracked para evitar re-ejecutar cuando nosotros mismos
+    // lo seteamos en true.
+    effect(() => {
+      const env = this.tenantFacade.currentEnvironment() as AppType | null;
+      if (!env) return;
+      if (untracked(() => this.flows_loaded())) return;
+
+      const endpoint = this.getSettingsEndpoint(env);
+      if (!endpoint) {
         this.flows_loaded.set(true);
-      });
+        return;
+      }
+
+      this.http
+        .get<any>(`${environment.apiUrl}${endpoint}`)
+        .pipe(
+          catchError(() => of(null)),
+          takeUntilDestroyed(this.destroyRef),
+        )
+        .subscribe((res) => {
+          if (res) {
+            const settings = res?.data?.settings || res?.data || res;
+            this.flow_toggles.set(
+              settings?.module_flows?.accounting ||
+                settings?.accounting_flows ||
+                {},
+            );
+          }
+          this.flows_loaded.set(true);
+        });
+    });
   }
 
   private getSettingsEndpoint(env: AppType): string | null {

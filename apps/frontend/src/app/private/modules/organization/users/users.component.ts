@@ -82,7 +82,7 @@ export class UsersComponent implements OnInit {
   readonly userToDelete = signal<User | null>(null);
   readonly showDeleteModal = signal(false);
   readonly viewMode = signal<'table' | 'cards'>('table');
-  private readonly searchSubject$ = new Subject<string>();
+  private readonly searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+distinctUntilChanged search stream
 // Form for filters
   filterForm: FormGroup;
 

@@ -110,7 +110,7 @@
             ></div>
           </div>
         } @else {
-          @defer (on viewport) {
+          @defer (on immediate) {
             <app-chart [options]="gaugeChartOptions" size="medium"></app-chart>
           } @placeholder {
             <div
@@ -191,7 +191,7 @@
             ></div>
           </div>
         } @else {
-          @defer (on viewport) {
+          @defer (on immediate) {
             <app-chart
               [options]="comparativeChartOptions"
               size="large"

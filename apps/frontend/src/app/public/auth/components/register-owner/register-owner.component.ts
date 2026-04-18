@@ -1,4 +1,4 @@
-import {Component, inject, OnInit, signal, computed, DestroyRef} from '@angular/core';
+import {Component, inject, OnInit, signal, computed, DestroyRef, effect} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
@@ -242,13 +242,16 @@ export class RegisterOwnerComponent implements OnInit {
 
   readonly registrationState = signal<RegistrationState>('idle');
   readonly registrationError = signal<RegistrationError | null>(null);
-  readonly logoUrl = computed(() => {
+  readonly logoUrl = signal('');
+
+  private readonly brandingEffect = effect(() => {
     const appConfig = this.configFacade.getCurrentConfig();
     if (appConfig) {
-      return appConfig.branding?.logo?.url ||
-        (appConfig.domainConfig?.isMainVendixDomain ? 'vlogo.png' : '');
+      this.logoUrl.set(
+        appConfig.branding?.logo?.url ||
+        (appConfig.domainConfig?.isMainVendixDomain ? 'vlogo.png' : '')
+      );
     }
-    return '';
   });
 
   readonly isLoading = signal(false);

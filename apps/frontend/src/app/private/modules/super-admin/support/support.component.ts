@@ -86,12 +86,12 @@ export class SupportComponent implements OnInit {
   });
 
   // User search debounce
-  private userSearchSubject = new Subject<string>();
-  private userSearchDestroy$ = new Subject<void>();
+  private userSearchSubject = new Subject<string>(); // LEGÍTIMO — debounceTime+distinctUntilChanged search stream
+  private userSearchDestroy$ = new Subject<void>(); // LEGÍTIMO — destroy$ cancellation pattern
 
   // UI State
   readonly isLoading = signal(false);
-  isDeleting = false;
+  readonly isDeleting = signal(false);
   searchQuery = '';
   pagination = { page: 1, limit: 10, total: 0, totalPages: 0 };
 

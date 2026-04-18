@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, signal, computed } from '@angular/core';
+import { Component, OnInit, inject, signal, computed, effect } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { Router, RouterModule } from '@angular/router';
@@ -289,14 +289,30 @@ import { CurrencyPipe } from '../../../../shared/pipes/currency/currency.pipe';
   `,
   styleUrls: ['./storefront.component.scss'],
 })
-export class StorefrontComponent implements OnInit {
-  // Constants
+export class StorefrontComponent {
+  private configFacade = inject(ConfigFacade);
+  private authFacade = inject(AuthFacade);
+  private router = inject(Router);
+
+  private readonly appConfigEffect = effect(() => {
+    const appConfig = this.configFacade.getCurrentConfig();
+    if (appConfig) {
+      const domainConfig = appConfig.domainConfig;
+      this.categories.set(this.generateSampleCategories());
+      this.products.set(this.generateSampleProducts());
+      this.filteredProducts.set([...this.products()]);
+    } else {
+      this.loadDefaultData();
+    }
+  });
+
+  readonly isAuthenticated = this.authFacade.isAuthenticated;
+
   readonly storeName = 'Tienda';
   readonly heroTitle = 'Bienvenido a Nuestra Tienda';
   readonly contactInfo = 'Tel: +1 234 567 8900 | Email: info@tienda.com';
   readonly storeHours = 'Lunes a Viernes: 9:00 AM - 6:00 PM';
 
-  // Signals para estado de UI
   readonly storeDescription = signal('');
   readonly branding = signal<any>({});
   readonly heroDescription = signal('Descubre los mejores productos con precios increíbles');
@@ -305,14 +321,12 @@ export class StorefrontComponent implements OnInit {
   readonly sortBy = signal('name');
   readonly showCart = signal(false);
 
-  // Data arrays
   readonly categories = signal<any[]>([]);
   readonly products = signal<any[]>([]);
   readonly filteredProducts = signal<any[]>([]);
   readonly cartItems = signal<any[]>([]);
   readonly wishlist = signal<any[]>([]);
 
-  // Computed
   readonly cartTotal = computed(() =>
     this.cartItems().reduce(
       (total, item) => total + item.price * item.quantity,
@@ -320,32 +334,7 @@ export class StorefrontComponent implements OnInit {
     )
   );
 
-  private configFacade = inject(ConfigFacade);
-  private authFacade = inject(AuthFacade);
-  private router = inject(Router);
-
-  // Reference to authFacade signal
-  readonly isAuthenticated = this.authFacade.isAuthenticated;
-
-  async ngOnInit() {
-    const appConfig = this.configFacade.getCurrentConfig();
-    if (!appConfig) {
-      this.loadDefaultData();
-      return;
-    }
-
-    const domainConfig = appConfig.domainConfig;
-    // const tenantConfig = appConfig.tenantConfig;
-
-    // this.storeName = domainConfig.store_slug || 'Tienda'; // readonly, no mutable
-    // this.branding.set(tenantConfig?.branding || {});
-    // this.storeDescription.set(tenantConfig?.store?.description || '');
-
-    // Cargar datos de ejemplo
-    this.categories.set(this.generateSampleCategories());
-    this.products.set(this.generateSampleProducts());
-    this.filteredProducts.set([...this.products()]);
-  }
+  ngOnInit() {}
 
   private loadDefaultData() {
     this.categories.set(this.generateSampleCategories());

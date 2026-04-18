@@ -7,7 +7,8 @@ import * as AuthActions from '../store/auth/auth.actions';
 export type LogoutReason =
   | 'explicit'
   | 'session_expired'
-  | 'token_refresh_failed';
+  | 'token_refresh_failed'
+  | 'token_refresh_timeout';
 
 /**
  * SessionService - Coordina el cierre de sesión de forma centralizada.

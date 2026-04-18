@@ -151,7 +151,7 @@ export class ReservationFormModalComponent {
     return false;
   });
 
-  private searchSubject = new Subject<string>();
+  private searchSubject = new Subject<string>(); // LEGÍTIMO — debounceTime+switchMap customer search stream
 
   constructor() {
     // Debounced customer search

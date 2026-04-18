@@ -128,7 +128,7 @@ export class InputsearchComponent
 
   readonly value = signal('');
   readonly isFocused = signal(false);
-private searchSubject$ = new Subject<string>();
+private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+distinctUntilChanged search stream
 
   // ControlValueAccessor methods
   private onChange: (value: string) => void = () => {};

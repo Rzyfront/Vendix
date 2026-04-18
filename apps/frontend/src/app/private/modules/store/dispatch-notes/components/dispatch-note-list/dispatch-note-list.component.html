@@ -21,7 +21,7 @@
           </app-button>
 
           <app-options-dropdown class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
-            [filters]="filter_configs" [filterValues]="filter_values" [actions]="dropdown_actions" [isLoading]="loading()"
+            [filters]="filter_configs" [filterValues]="filter_values()" [actions]="dropdown_actions" [isLoading]="loading()"
             (filterChange)="onFilterChange($event)" (clearAllFilters)="clearFilters()"
             (actionClick)="onActionClick($event)"></app-options-dropdown>
         </div>

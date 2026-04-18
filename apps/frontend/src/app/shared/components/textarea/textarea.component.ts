@@ -2,7 +2,8 @@ import {
   Component,
   forwardRef,
   input,
-  output
+  output,
+  signal,
 } from '@angular/core';
 
 import {
@@ -45,9 +46,9 @@ import { FormStyleVariant } from '../../types/form.types';
           <textarea
             [id]="textareaId"
             [placeholder]="placeholder()"
-            [disabled]="disabled"
+            [disabled]="disabled()"
             [readonly]="readonly()"
-            [value]="value"
+            [value]="value()"
             [rows]="rows()"
             [class]="textareaClasses"
             [style]="customStyle()"
@@ -91,7 +92,7 @@ export class TextareaComponent implements ControlValueAccessor {
   readonly label = input<string | undefined>(undefined);
   readonly placeholder = input('');
   readonly rows = input(3);
-  disabled = false;
+  readonly disabled = signal(false);
   readonly readonly = input(false);
   readonly required = input(false);
   readonly error = input<string>();
@@ -107,7 +108,7 @@ export class TextareaComponent implements ControlValueAccessor {
   readonly textareaFocus = output<void>();
   readonly textareaBlur = output<void>();
 
-  value = '';
+  readonly value = signal('');
   textareaId = `textarea-${Math.random().toString(36).substr(2, 9)}`;
 
   // ControlValueAccessor implementation
@@ -115,7 +116,7 @@ export class TextareaComponent implements ControlValueAccessor {
   private onTouched = () => { };
 
   writeValue(value: string): void {
-    this.value = value || '';
+    this.value.set(value || '');
   }
 
   registerOnChange(fn: (value: string) => void): void {
@@ -127,7 +128,7 @@ export class TextareaComponent implements ControlValueAccessor {
   }
 
   setDisabledState(isDisabled: boolean): void {
-    this.disabled = isDisabled;
+    this.disabled.set(isDisabled);
   }
 
   get labelClasses(): string {
@@ -239,9 +240,10 @@ export class TextareaComponent implements ControlValueAccessor {
 
   onInput(event: Event): void {
     const target = event.target as HTMLTextAreaElement;
-    this.value = target.value;
-    this.onChange(this.value);
-    this.valueChange.emit(this.value);
+    const newValue = target.value;
+    this.value.set(newValue);
+    this.onChange(newValue);
+    this.valueChange.emit(newValue);
   }
 
   onBlur(): void {

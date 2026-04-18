@@ -423,9 +423,9 @@ export class PopCartComponent {
   readonly loading$ = this.cartService.loading$;
 
   // Signal-based properties
-  readonly cartState = toSignal(this.cartState$);
+  readonly cartState = toSignal(this.cartState$, { initialValue: null! });
   readonly isEmpty = toSignal(this.isEmpty$, { initialValue: false });
-  readonly summary = toSignal(this.summary$);
+  readonly summary = toSignal(this.summary$, { initialValue: null! });
   readonly loading = toSignal(this.loading$, { initialValue: false });
   hoveredRemoveTooltip: string | null = null;
   disabledActionsTooltipVisible = false;

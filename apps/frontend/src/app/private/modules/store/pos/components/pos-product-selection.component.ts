@@ -531,7 +531,7 @@ export class PosProductSelectionComponent {
   readonly openCustomerModal = output<void>();
   readonly openQueueModal = output<void>();
 
-  private searchSubject$ = new Subject<string>();
+  private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+distinctUntilChanged search stream
   private productService = inject(PosProductService);
   private cartService = inject(PosCartService);
   private toastService = inject(ToastService);

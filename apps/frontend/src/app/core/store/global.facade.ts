@@ -33,15 +33,15 @@ export class GlobalFacade {
   readonly debugInfo$ = this.store.select(GlobalSelectors.selectDebugInfo);
 
   // ─── Signal parallels (Angular 20 — backward compatible) ──────────────────
-  readonly appState = toSignal(this.appState$);
-  readonly userContext = toSignal(this.userContext$);
-  readonly appReady = toSignal(this.appReady$);
-  readonly brandingContext = toSignal(this.brandingContext$);
-  readonly permissionContext = toSignal(this.permissionContext$);
-  readonly navigationContext = toSignal(this.navigationContext$);
-  readonly globalLoadingState = toSignal(this.globalLoadingState$);
-  readonly dataFreshness = toSignal(this.dataFreshness$);
-  readonly debugInfo = toSignal(this.debugInfo$);
+  readonly appState = toSignal(this.appState$, { initialValue: null as any });
+  readonly userContext = toSignal(this.userContext$, { initialValue: null as any });
+  readonly appReady = toSignal(this.appReady$, { initialValue: null as any });
+  readonly brandingContext = toSignal(this.brandingContext$, { initialValue: null as any });
+  readonly permissionContext = toSignal(this.permissionContext$, { initialValue: null as any });
+  readonly navigationContext = toSignal(this.navigationContext$, { initialValue: null as any });
+  readonly globalLoadingState = toSignal(this.globalLoadingState$, { initialValue: null as any });
+  readonly dataFreshness = toSignal(this.dataFreshness$, { initialValue: null as any });
+  readonly debugInfo = toSignal(this.debugInfo$, { initialValue: null as any });
 
   // Synchronous getters for templates
   getUserContext(): any {

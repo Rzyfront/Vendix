@@ -350,7 +350,7 @@ export class HabeasDataComponent {
   private authFacade = inject(AuthFacade);
   private toastService = inject(ToastService);
   private destroyRef = inject(DestroyRef);
-  private searchSubject$ = new Subject<string>();
+  private searchSubject$ = new Subject<string>(); // LEGÍTIMO — debounceTime+distinctUntilChanged search stream
 
   private userId = 0;
 

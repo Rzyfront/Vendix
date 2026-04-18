@@ -72,7 +72,7 @@ export class UsersComponent implements OnInit {
   readonly showCreateModal = signal(false);
   readonly showEditModal = signal(false);
 
-  private searchSubject = new Subject<string>();
+  private searchSubject = new Subject<string>(); // LEGÍTIMO — debounceTime+distinctUntilChanged search stream
 // Form for filters
   filterForm: FormGroup = this.fb.group({
     search: [''],
