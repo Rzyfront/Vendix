@@ -1,0 +1,19 @@
+<button
+  type="button"
+  class="analytics-card"
+  (click)="onClick()"
+  [attr.aria-label]="'Abrir ' + view().title"
+>
+  <div class="card-icon">
+    <app-icon [name]="view().icon" [size]="24"></app-icon>
+  </div>
+
+  <div class="card-content">
+    <h3 class="card-title">{{ view().title }}</h3>
+    <p class="card-description">{{ view().description }}</p>
+  </div>
+
+  <div class="card-arrow">
+    <app-icon name="chevron-right" [size]="20"></app-icon>
+  </div>
+</button>

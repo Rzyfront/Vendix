@@ -29,11 +29,15 @@ export class CustomersAnalyticsService {
     }
     const storeId = context.store_id;
 
-    // Total customers in the store (via store_users)
-    const totalCustomers = await this.prisma.store_users.count({
-      where: {
-        store_id: storeId,
-      },
+    // Customer role filter (correct - counts users with 'customer' role in the store)
+    const customerRoleFilter = {
+      store_users: { some: { store_id: storeId } },
+      user_roles: { some: { roles: { name: 'customer' } } },
+    };
+
+    // Total customers in the store (via users with customer role)
+    const totalCustomers = await this.prisma.users.count({
+      where: customerRoleFilter,
     });
 
     // Active customers: distinct customers with at least 1 completed order in period
@@ -46,19 +50,19 @@ export class CustomersAnalyticsService {
       },
     });
 
-    // New customers in period (store_users created in date range)
-    const newCustomers = await this.prisma.store_users.count({
+    // New customers in period (store_users created in date range with customer role)
+    const newCustomers = await this.prisma.users.count({
       where: {
-        store_id: storeId,
-        createdAt: { gte: startDate, lte: endDate },
+        ...customerRoleFilter,
+        created_at: { gte: startDate, lte: endDate },
       },
     });
 
     // New customers in previous period (for growth calculation)
-    const previousNewCustomers = await this.prisma.store_users.count({
+    const previousNewCustomers = await this.prisma.users.count({
       where: {
-        store_id: storeId,
-        createdAt: { gte: previousStartDate, lte: previousEndDate },
+        ...customerRoleFilter,
+        created_at: { gte: previousStartDate, lte: previousEndDate },
       },
     });
 

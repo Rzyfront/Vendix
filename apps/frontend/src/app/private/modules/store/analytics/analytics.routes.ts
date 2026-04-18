@@ -11,6 +11,7 @@ import { inventoryOverviewReducer } from './pages/inventory/overview/state/inven
 import { InventoryOverviewEffects } from './pages/inventory/overview/state/inventory-overview.effects';
 import { customersAnalyticsReducer } from './pages/customers/state/customers-analytics.reducer';
 import { CustomersAnalyticsEffects } from './pages/customers/state/customers-analytics.effects';
+import { AnalyticsCategoryId } from './config/analytics-registry';
 
 export const analyticsRoutes: Routes = [
   {
@@ -21,7 +22,7 @@ export const analyticsRoutes: Routes = [
         pathMatch: 'full',
         redirectTo: 'overview',
       },
-      // Overview Analytics
+      // Overview Analytics (standalone - no shell)
       {
         path: 'overview',
         providers: [
@@ -33,13 +34,18 @@ export const analyticsRoutes: Routes = [
             (c) => c.OverviewSummaryComponent,
           ),
       },
-      // Sales Analytics
+      // Sales Analytics (shell)
       {
         path: 'sales',
+        loadComponent: () =>
+          import('./components/analytics-shell/analytics-shell.component').then(
+            (c) => c.AnalyticsShellComponent,
+          ),
         providers: [
           provideState({ name: 'salesSummary', reducer: salesSummaryReducer }),
           provideEffects(SalesSummaryEffects),
         ],
+        data: { categoryId: 'sales' as AnalyticsCategoryId },
         children: [
           {
             path: '',
@@ -90,9 +96,14 @@ export const analyticsRoutes: Routes = [
           },
         ],
       },
-      // Inventory Analytics
+      // Inventory Analytics (shell)
       {
         path: 'inventory',
+        loadComponent: () =>
+          import('./components/analytics-shell/analytics-shell.component').then(
+            (c) => c.AnalyticsShellComponent,
+          ),
+        data: { categoryId: 'inventory' as AnalyticsCategoryId },
         children: [
           {
             path: '',
@@ -140,13 +151,18 @@ export const analyticsRoutes: Routes = [
           },
         ],
       },
-      // Products Analytics
+      // Products Analytics (shell)
       {
         path: 'products',
+        loadComponent: () =>
+          import('./components/analytics-shell/analytics-shell.component').then(
+            (c) => c.AnalyticsShellComponent,
+          ),
         providers: [
           provideState({ name: 'productsAnalytics', reducer: productsAnalyticsReducer }),
           provideEffects(ProductsAnalyticsEffects),
         ],
+        data: { categoryId: 'products' as AnalyticsCategoryId },
         children: [
           {
             path: '',
@@ -176,9 +192,14 @@ export const analyticsRoutes: Routes = [
           },
         ],
       },
-      // Purchases Analytics
+      // Purchases Analytics (shell)
       {
         path: 'purchases',
+        loadComponent: () =>
+          import('./components/analytics-shell/analytics-shell.component').then(
+            (c) => c.AnalyticsShellComponent,
+          ),
+        data: { categoryId: 'purchases' as AnalyticsCategoryId },
         children: [
           {
             path: '',
@@ -201,13 +222,18 @@ export const analyticsRoutes: Routes = [
           },
         ],
       },
-      // Customers Analytics
+      // Customers Analytics (shell)
       {
         path: 'customers',
+        loadComponent: () =>
+          import('./components/analytics-shell/analytics-shell.component').then(
+            (c) => c.AnalyticsShellComponent,
+          ),
         providers: [
           provideState({ name: 'customersAnalytics', reducer: customersAnalyticsReducer }),
           provideEffects(CustomersAnalyticsEffects),
         ],
+        data: { categoryId: 'customers' as AnalyticsCategoryId },
         children: [
           {
             path: '',
@@ -237,9 +263,14 @@ export const analyticsRoutes: Routes = [
           },
         ],
       },
-      // Reviews Analytics
+      // Reviews Analytics (shell)
       {
         path: 'reviews',
+        loadComponent: () =>
+          import('./components/analytics-shell/analytics-shell.component').then(
+            (c) => c.AnalyticsShellComponent,
+          ),
+        data: { categoryId: 'reviews' as AnalyticsCategoryId },
         children: [
           {
             path: '',
@@ -255,7 +286,7 @@ export const analyticsRoutes: Routes = [
           },
         ],
       },
-      // Expenses Analytics
+      // Expenses Analytics (NO shell - discarded from sidebar per issue, routes kept for backward compatibility)
       {
         path: 'expenses',
         children: [
@@ -280,9 +311,14 @@ export const analyticsRoutes: Routes = [
           },
         ],
       },
-      // Financial Analytics
+      // Financial Analytics (shell)
       {
         path: 'financial',
+        loadComponent: () =>
+          import('./components/analytics-shell/analytics-shell.component').then(
+            (c) => c.AnalyticsShellComponent,
+          ),
+        data: { categoryId: 'financial' as AnalyticsCategoryId },
         children: [
           {
             path: '',

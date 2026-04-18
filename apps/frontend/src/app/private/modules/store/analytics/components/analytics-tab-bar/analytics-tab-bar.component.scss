@@ -1,0 +1,132 @@
+:host {
+  display: block;
+}
+
+.tab-bar {
+  position: relative;
+  width: 100%;
+  background-color: var(--color-surface);
+}
+
+.tabs-container {
+  display: flex;
+  gap: 0.25rem;
+  overflow-x: auto;
+  scroll-behavior: smooth;
+  scroll-snap-type: x mandatory;
+  -webkit-overflow-scrolling: touch;
+  padding: 0.25rem;
+  margin: -0.25rem;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@media (max-width: 767px) {
+  .tab-bar {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    border-bottom: 1px solid var(--color-border);
+  }
+}
+
+.tab-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.625rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--color-text-secondary);
+  text-decoration: none;
+  white-space: nowrap;
+  border-radius: var(--radius-md);
+  scroll-snap-align: start;
+  transition:
+    color 150ms ease,
+    background-color 150ms ease;
+
+  &:hover {
+    color: var(--color-text-primary);
+    background-color: var(--color-surface-hover);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--color-primary);
+    outline-offset: 2px;
+  }
+
+  &.active {
+    color: var(--color-primary);
+    background-color: var(--color-primary-50);
+
+    .tab-label {
+      font-weight: 600;
+    }
+  }
+
+  app-icon {
+    flex-shrink: 0;
+  }
+}
+
+.tab-label {
+  line-height: 1;
+}
+
+.fade-left,
+.fade-right {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 2rem;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.fade-left {
+  left: 0;
+  background: linear-gradient(to right, var(--color-background), transparent);
+}
+
+.fade-right {
+  right: 0;
+  background: linear-gradient(to left, var(--color-background), transparent);
+}
+
+@media (min-width: 768px) {
+  .tabs-container {
+    justify-content: center;
+    gap: 0.5rem;
+  }
+
+  .tab-button {
+    padding: 0.75rem 1.25rem;
+    border-radius: var(--radius-lg);
+    position: relative;
+
+    &.active {
+      background-color: transparent;
+
+      &::after {
+        content: '';
+        position: absolute;
+        bottom: -0.25rem;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 2rem;
+        height: 0.125rem;
+        background-color: var(--color-primary);
+        border-radius: 9999px;
+      }
+    }
+  }
+
+  .fade-left,
+  .fade-right {
+    display: none;
+  }
+}

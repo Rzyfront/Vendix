@@ -216,9 +216,14 @@ export const APP_MODULES: { [key: string]: AppModule[]; ORG_ADMIN: AppModule[]; 
           description: 'M\u00e9tricas de ventas',
         },
         {
-          key: 'analytics_traffic',
-          label: 'Tr\u00e1fico',
-          description: 'An\u00e1lisis de tr\u00e1fico web',
+          key: 'analytics_purchases',
+          label: 'Compras',
+          description: 'Órdenes de compra y proveedores',
+        },
+        {
+          key: 'analytics_reviews',
+          label: 'Reseñas',
+          description: 'Opiniones y valoraciones de clientes',
         },
         {
           key: 'analytics_performance',

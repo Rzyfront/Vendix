@@ -1,0 +1,33 @@
+<nav
+  class="tab-bar"
+  role="tablist"
+  aria-label="Navegacion de analiticas"
+>
+  @if (showFadeLeft()) {
+    <div class="fade-left" aria-hidden="true"></div>
+  }
+
+  <div
+    class="tabs-container"
+    (scroll)="onScroll($event)"
+    role="tablist"
+  >
+    @for (tab of tabs(); track trackByViewKey($index, tab)) {
+      <a
+        [routerLink]="tab.route"
+        routerLinkActive="active"
+        [routerLinkActiveOptions]="{ exact: tab.key === 'overview_summary' }"
+        class="tab-button"
+        role="tab"
+        [attr.aria-current]="isActive(tab.route) ? 'page' : null"
+      >
+        <app-icon [name]="tab.icon" [size]="16"></app-icon>
+        <span class="tab-label">{{ tab.title }}</span>
+      </a>
+    }
+  </div>
+
+  @if (showFadeRight()) {
+    <div class="fade-right" aria-hidden="true"></div>
+  }
+</nav>
