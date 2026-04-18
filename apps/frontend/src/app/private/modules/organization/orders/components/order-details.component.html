@@ -141,6 +141,22 @@
                 </p>
               </div>
             }
+            @if (od.estimated_ready_at) {
+              <div>
+                <p class="text-sm text-text-secondary">Listo estimado</p>
+                <p class="font-medium text-text-primary">
+                  {{ od.estimated_ready_at | date:'short' }}
+                </p>
+              </div>
+            }
+            @if (od.estimated_delivered_at) {
+              <div>
+                <p class="text-sm text-text-secondary">Entrega estimada</p>
+                <p class="font-medium text-text-primary">
+                  {{ od.estimated_delivered_at | date:'short' }}
+                </p>
+              </div>
+            }
             @if (od.delivered_at) {
               <div>
                 <p class="text-sm text-text-secondary">Entregado en</p>

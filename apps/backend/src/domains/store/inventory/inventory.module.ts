@@ -9,6 +9,7 @@ import { InventoryController } from './inventory.controller';
 import { InventoryValidationService } from './services/inventory-validation.service';
 import { InventoryIntegrationService } from './shared/services/inventory-integration.service';
 import { StockLevelManager } from './shared/services/stock-level-manager.service';
+import { StockValidatorService } from './shared/services/stock-validator.service';
 import { InventoryBatchesService } from './batches/inventory-batches.service';
 import { InventorySerialNumbersService } from './serial-numbers/inventory-serial-numbers.service';
 import { InventoryTransactionsService } from './transactions/inventory-transactions.service';
@@ -30,6 +31,7 @@ import { CostingService } from './shared/services/costing.service';
     InventoryValidationService,
     InventoryIntegrationService,
     StockLevelManager,
+    StockValidatorService,
     CostingService,
     InventoryBatchesService,
     InventorySerialNumbersService,
@@ -44,6 +46,7 @@ import { CostingService } from './shared/services/costing.service';
     InventoryValidationService,
     InventoryIntegrationService,
     StockLevelManager,
+    StockValidatorService,
     CostingService,
     InventoryBatchesService,
     InventorySerialNumbersService,

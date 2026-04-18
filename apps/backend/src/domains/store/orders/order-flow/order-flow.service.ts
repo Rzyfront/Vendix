@@ -9,6 +9,7 @@ import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { order_state_enum } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { RequestContextService } from '@common/context/request-context.service';
+import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import {
   PayOrderDto,
   PaymentType,
@@ -21,6 +22,8 @@ import { SettingsService } from '../../settings/settings.service';
 import { SessionsService } from '../../cash-registers/sessions/sessions.service';
 import { MovementsService } from '../../cash-registers/movements/movements.service';
 import { StockLevelManager } from '../../inventory/shared/services/stock-level-manager.service';
+import { OrderEtaService } from '../services/order-eta.service';
+import { deriveDeliveryType } from '../../shipping/shipping-derivation.util';
 
 type OrderState = order_state_enum;
 
@@ -49,6 +52,7 @@ export class OrderFlowService {
     private readonly sessionsService: SessionsService,
     private readonly movementsService: MovementsService,
     private readonly stockLevelManager: StockLevelManager,
+    private readonly orderEtaService: OrderEtaService,
   ) {}
 
   private async getOrder(orderId: number) {
@@ -316,6 +320,9 @@ export class OrderFlowService {
       // Record cash register movement (non-blocking)
       this.recordPayOrderCashMovement(order.store_id, orderId, Number(order.grand_total), paymentMethod.system_payment_method.type).catch(() => {});
 
+      // Compute and persist ETA
+      await this.computeAndPersistEta(orderId, new Date());
+
       return {
         order: updatedOrder,
         payment: { transaction_id: transactionId, change },
@@ -369,6 +376,9 @@ export class OrderFlowService {
         // Record cash register movement (non-blocking)
         this.recordPayOrderCashMovement(order.store_id, orderId, Number(order.grand_total), paymentMethod.system_payment_method.type).catch(() => {});
 
+        // Compute and persist ETA
+        await this.computeAndPersistEta(orderId, new Date());
+
         return {
           order: updatedOrder,
           payment: { transaction_id: transactionId, change },
@@ -385,6 +395,9 @@ export class OrderFlowService {
 
       // Record cash register movement (non-blocking)
       this.recordPayOrderCashMovement(order.store_id, orderId, Number(order.grand_total), paymentMethod.system_payment_method.type).catch(() => {});
+
+      // Compute and persist ETA
+      await this.computeAndPersistEta(orderId, new Date());
 
       return {
         order: updatedOrder,
@@ -551,6 +564,43 @@ export class OrderFlowService {
       );
     }
 
+    if (order.delivery_type !== 'direct_delivery' && !order.shipping_method_id && !dto.shipping_method_id) {
+      throw new VendixHttpException(ErrorCodes.ORD_SHIP_REQUIRED_001);
+    }
+
+    if (!order.shipping_method_id && dto.shipping_method_id) {
+      const method = await this.prisma.shipping_methods.findFirst({
+        where: { id: dto.shipping_method_id, is_active: true },
+      });
+      if (!method) {
+        throw new VendixHttpException(ErrorCodes.ORD_SHIP_INVALID_METHOD_001);
+      }
+
+      const deliveryType = deriveDeliveryType(method.type);
+      let shippingCost = 0;
+
+      if (dto.shipping_rate_id) {
+        const rate = await this.prisma.shipping_rates.findFirst({
+          where: { id: dto.shipping_rate_id, is_active: true },
+        });
+        if (!rate || rate.shipping_method_id !== method.id) {
+          throw new VendixHttpException(ErrorCodes.ORD_SHIP_RATE_MISMATCH_001);
+        }
+        shippingCost = Number(rate.base_cost);
+      }
+
+      await this.prisma.orders.update({
+        where: { id: orderId },
+        data: {
+          shipping_method_id: method.id,
+          shipping_rate_id: dto.shipping_rate_id ?? null,
+          delivery_type: deliveryType,
+          shipping_cost: shippingCost,
+          updated_at: new Date(),
+        },
+      });
+    }
+
     this.validateTransition(order.state as OrderState, 'shipped');
     const updatedOrder = await this.updateOrderState(orderId, 'shipped', {
       shipped_at: new Date(),
@@ -561,6 +611,147 @@ export class OrderFlowService {
 
     this.logger.log(`Order #${orderId} shipped`);
     return updatedOrder;
+  }
+
+  async getAvailableActions(orderId: number) {
+    const order = await this.getOrder(orderId);
+
+    const actions: Array<{
+      code: string;
+      label_key: string;
+      enabled: boolean;
+      reason?: string;
+    }> = [];
+
+    const state = order.state as OrderState;
+    const deliveryType = order.delivery_type;
+    const hasMethod = !!order.shipping_method_id;
+    const isDirectDelivery = deliveryType === 'direct_delivery';
+
+    if (state === 'created') {
+      actions.push({
+        code: 'pay',
+        label_key: 'ORD_ACTION_PAY',
+        enabled: true,
+      });
+      if (!hasMethod && !isDirectDelivery) {
+        actions.push({
+          code: 'assign_shipping',
+          label_key: 'ORD_ACTION_ASSIGN_SHIPPING',
+          enabled: true,
+        });
+      }
+      actions.push({
+        code: 'cancel',
+        label_key: 'ORD_ACTION_CANCEL',
+        enabled: true,
+      });
+    }
+
+    if (state === 'pending_payment') {
+      actions.push({
+        code: 'confirm_payment',
+        label_key: 'ORD_ACTION_CONFIRM_PAYMENT',
+        enabled: true,
+      });
+      actions.push({
+        code: 'cancel_payment',
+        label_key: 'ORD_ACTION_CANCEL_PAYMENT',
+        enabled: true,
+      });
+      if (!hasMethod && !isDirectDelivery) {
+        actions.push({
+          code: 'assign_shipping',
+          label_key: 'ORD_ACTION_ASSIGN_SHIPPING',
+          enabled: true,
+        });
+      }
+      actions.push({
+        code: 'cancel',
+        label_key: 'ORD_ACTION_CANCEL',
+        enabled: true,
+      });
+    }
+
+    if (state === 'processing') {
+      if (!hasMethod && !isDirectDelivery) {
+        actions.push({
+          code: 'assign_shipping',
+          label_key: 'ORD_ACTION_ASSIGN_SHIPPING',
+          enabled: true,
+        });
+        actions.push({
+          code: 'ready_for_pickup',
+          label_key: 'ORD_ACTION_READY_FOR_PICKUP',
+          enabled: false,
+          reason: 'ORD_SHIP_REQUIRED_001',
+        });
+        actions.push({
+          code: 'ship_with_tracking',
+          label_key: 'ORD_ACTION_SHIP_WITH_TRACKING',
+          enabled: false,
+          reason: 'ORD_SHIP_REQUIRED_001',
+        });
+      } else if (hasMethod) {
+        const method = await this.prisma.shipping_methods.findFirst({
+          where: { id: order.shipping_method_id },
+          select: { type: true },
+        });
+
+        const methodType = method?.type;
+
+        if (methodType === 'pickup') {
+          actions.push({
+            code: 'ready_for_pickup',
+            label_key: 'ORD_ACTION_READY_FOR_PICKUP',
+            enabled: true,
+          });
+        } else {
+          actions.push({
+            code: 'ship_with_tracking',
+            label_key: 'ORD_ACTION_SHIP_WITH_TRACKING',
+            enabled: true,
+          });
+        }
+      }
+
+      if (isDirectDelivery) {
+        actions.push({
+          code: 'mark_delivered',
+          label_key: 'ORD_ACTION_MARK_DELIVERED',
+          enabled: true,
+        });
+      }
+
+      actions.push({
+        code: 'cancel',
+        label_key: 'ORD_ACTION_CANCEL',
+        enabled: true,
+      });
+    }
+
+    if (state === 'shipped') {
+      actions.push({
+        code: 'mark_delivered',
+        label_key: 'ORD_ACTION_MARK_DELIVERED',
+        enabled: true,
+      });
+    }
+
+    if (state === 'delivered') {
+      actions.push({
+        code: 'confirm_delivery',
+        label_key: 'ORD_ACTION_CONFIRM_DELIVERY',
+        enabled: true,
+      });
+      actions.push({
+        code: 'refund',
+        label_key: 'ORD_ACTION_REFUND',
+        enabled: true,
+      });
+    }
+
+    return actions;
   }
 
   /**
@@ -1018,5 +1209,48 @@ export class OrderFlowService {
 
   private async generateTransactionId(): Promise<string> {
     return `TXN-${Date.now()}-${Math.random().toString(36).substring(2, 11).toUpperCase()}`;
+  }
+
+  private async computeAndPersistEta(orderId: number, paidAt: Date): Promise<void> {
+    try {
+      const orderWithItems = await this.prisma.orders.findUnique({
+        where: { id: orderId },
+        include: {
+          order_items: {
+            include: {
+              products: {
+                select: { preparation_time_minutes: true },
+              },
+            },
+          },
+          shipping_method: {
+            select: { transit_time_minutes: true },
+          },
+        },
+      });
+
+      if (!orderWithItems) return;
+
+      const settings = await this.settingsService.getSettings();
+
+      const eta = this.orderEtaService.computeEta(
+        orderWithItems.order_items.map((item) => ({
+          preparation_time_minutes: item.products?.preparation_time_minutes ?? null,
+        })),
+        orderWithItems.shipping_method?.transit_time_minutes ?? 0,
+        (settings as any)?.operations,
+        paidAt,
+      );
+
+      await this.prisma.orders.update({
+        where: { id: orderId },
+        data: {
+          estimated_ready_at: eta.readyAt,
+          estimated_delivered_at: eta.deliveredAt,
+        },
+      });
+    } catch (error) {
+      this.logger.error(`Failed to compute ETA for order #${orderId}: ${error.message}`);
+    }
   }
 }

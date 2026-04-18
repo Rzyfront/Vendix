@@ -69,6 +69,7 @@ export interface Product {
   send_preconsultation?: boolean;
   consultation_template_id?: number;
   preconsultation_template_id?: number | null;
+  preparation_time_minutes?: number;
   final_price: number;
   created_at: Date;
   updated_at: Date;
@@ -235,6 +236,7 @@ export interface CreateProductDto {
   send_preconsultation?: boolean;
   consultation_template_id?: number | null;
   preconsultation_template_id?: number | null;
+  preparation_time_minutes?: number;
   brand_id?: number | null;
   category_ids?: number[];
   tax_category_ids?: number[];

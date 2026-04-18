@@ -306,6 +306,11 @@ export class CreatePosPaymentDto {
   @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)
+  allow_oversell?: boolean = false;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
   send_email_confirmation?: boolean = false;
 
   @IsOptional()

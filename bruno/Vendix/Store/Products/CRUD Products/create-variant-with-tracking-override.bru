@@ -1,0 +1,50 @@
+meta {
+  name: Create Variant with Tracking Override
+  type: http
+  seq: 2
+}
+
+post {
+  url: http://{{url}}/products/{{productId}}/variants
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "sku": "VAR-TRACKING-OVERRIDE-001",
+    "name": "Variant with Tracking Override",
+    "price_override": 59.99,
+    "stock_quantity": 30,
+    "track_inventory_override": true
+  }
+}
+
+vars:post-response {
+  variantWithTrackingId: res.body.data.id
+}
+
+tests {
+  test("Variant created with tracking override", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body).to.have.property('success', true);
+    expect(res.body).to.have.property('data');
+  });
+
+  test("track_inventory_override field is present", function() {
+    expect(res.body.data).to.have.property('track_inventory_override');
+    expect(res.body.data.track_inventory_override).to.equal(true);
+  });
+
+  test("Variant data is complete", function() {
+    expect(res.body.data).to.have.property('id');
+    expect(res.body.data).to.have.property('sku', 'VAR-TRACKING-OVERRIDE-001');
+    expect(res.body.data).to.have.property('price_override', 59.99);
+    expect(res.body.data).to.have.property('stock_quantity', 30);
+  });
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

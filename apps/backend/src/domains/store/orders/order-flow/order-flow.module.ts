@@ -9,6 +9,7 @@ import { StockLevelManager } from '../../inventory/shared/services/stock-level-m
 import { InventoryTransactionsService } from '../../inventory/transactions/inventory-transactions.service';
 import { CashRegistersModule } from '../../cash-registers/cash-registers.module';
 import { SettingsModule } from '../../settings/settings.module';
+import { OrderEtaService } from '../services/order-eta.service';
 
 @Module({
   imports: [PrismaModule, ResponseModule, CashRegistersModule, SettingsModule],
@@ -19,7 +20,8 @@ import { SettingsModule } from '../../settings/settings.module';
     RefundFlowService,
     StockLevelManager,
     InventoryTransactionsService,
+    OrderEtaService,
   ],
-  exports: [OrderFlowService, RefundFlowService],
+  exports: [OrderFlowService, RefundFlowService, OrderEtaService],
 })
 export class OrderFlowModule {}

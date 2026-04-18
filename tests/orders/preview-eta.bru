@@ -1,0 +1,16 @@
+meta {
+  name: Preview ETA
+  type: http
+  method: GET
+  url: {{backend_url}}/store/orders/preview-eta
+}
+
+query {
+  cart_id: 1
+  shipping_method_id: 1
+}
+
+headers {
+  Authorization: Bearer {{auth_token}}
+  Content-Type: application/json
+}

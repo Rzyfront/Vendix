@@ -228,9 +228,12 @@ Every PR that includes a migration MUST verify:
 - [ ] `migration.sql` has been manually reviewed
 - [ ] All `ALTER TYPE ... ADD VALUE` use `IF NOT EXISTS` or the `DO $$ ... END $$` pattern
 - [ ] All `CREATE TYPE` use the idempotent `DO $$ ... END $$` pattern
-- [ ] No destructive operations without explicit approval (DROP TABLE, DROP COLUMN)
+- [ ] **No `TRUNCATE ... CASCADE`, no `DROP TABLE`, no unscoped `DELETE FROM`** (see Rule 7)
+- [ ] No destructive operations (DROP TABLE, DROP COLUMN, data wipe) without explicit user approval documented in the PR
+- [ ] If migration clears a table with inbound FKs, FKs are dropped FIRST and recreated at the end
 - [ ] Migration tested locally with `prisma migrate deploy` (not just `migrate dev`)
 - [ ] If migration modifies enums, tested on a **fresh database** AND on a database with **existing data**
+- [ ] If migration touches data in tables with FK dependents, tested against a **representative dataset** (not empty DB)
 
 ---
 
@@ -332,6 +335,106 @@ If it reports "modified after applied", you have a checksum mismatch that MUST b
 
 ---
 
+## Rule 7: NEVER Destructive Data Operations (TRUNCATE CASCADE is BANNED)
+
+> **This rule has absolute priority. Violating it destroys production data.**
+
+Migrations must preserve existing row-level data unless the user has explicitly authorized data loss AND a prod snapshot was taken before apply. Schema evolution is allowed; silent data wipes are NOT.
+
+### The Killer: `TRUNCATE ... CASCADE`
+
+PostgreSQL's `TRUNCATE target CASCADE` cascades **at the TABLE level, not the row level**. It ignores `ON DELETE RESTRICT`, `ON DELETE SET NULL`, and every other FK rule. Any table with an FK pointing (directly or transitively) to `target` is also truncated — entirely, all rows gone.
+
+#### Real incident (April 2026, dev DB)
+
+A migration aimed to reset the `brands` table for multi-tenant conversion:
+
+```sql
+-- ❌ DESTRUCTIVE - silently wiped products, variants, order_items
+UPDATE products SET brand_id = NULL WHERE brand_id IS NOT NULL;
+TRUNCATE TABLE brands RESTART IDENTITY CASCADE;
+```
+
+Intent: disassociate products from brands, then clear brands.
+Reality: `TRUNCATE CASCADE` truncated `products`, `product_variants`, `order_items`, and everything downstream. Sales history lost.
+
+The `UPDATE ... SET brand_id = NULL` was cosmetic — it does not remove the FK constraint, which is what CASCADE follows.
+
+### The Safe Pattern for Clearing a Table With Inbound FKs
+
+```sql
+BEGIN;
+
+-- 1. Drop FK(s) pointing into the target table FIRST
+ALTER TABLE products DROP CONSTRAINT IF EXISTS products_brand_id_fkey;
+
+-- 2. (Optional) Null out references to preserve child rows explicitly
+UPDATE products SET brand_id = NULL WHERE brand_id IS NOT NULL;
+
+-- 3. Clear target WITHOUT CASCADE - no dependent table is touched
+DELETE FROM brands;
+-- or TRUNCATE TABLE brands;  (NO CASCADE keyword)
+
+-- 4. Recreate FK with the desired ON DELETE behavior
+ALTER TABLE products
+  ADD CONSTRAINT products_brand_id_fkey
+  FOREIGN KEY (brand_id) REFERENCES brands(id)
+  ON DELETE SET NULL ON UPDATE NO ACTION;
+
+COMMIT;
+```
+
+### Banned Patterns
+
+| Pattern | Why banned | Safe alternative |
+|---------|------------|------------------|
+| `TRUNCATE ... CASCADE` | Silent table-level cascade, bypasses ON DELETE rules | Drop inbound FKs → `DELETE FROM` or `TRUNCATE` (no CASCADE) → recreate FKs |
+| `DELETE FROM table` without `WHERE` | Unscoped row wipe | Add explicit `WHERE` that proves intent, or justify in PR |
+| `DROP TABLE foo` | Irrecoverable without backup | Rename to `foo_deprecated_YYYYMMDD`; drop in later migration after verifying no reads |
+| `ALTER TABLE ... DROP COLUMN` on populated column | Data loss | Mark column as deprecated in code first; drop in follow-up migration |
+| `ON DELETE CASCADE` on parent tables holding business data | Chained deletion of unrelated rows | `ON DELETE RESTRICT` or `ON DELETE SET NULL` |
+| `UPDATE foo SET x = Y` without `WHERE` | Mass mutation | Scope with `WHERE`; show expected row count in PR |
+
+### Destructive Data Operation Decision Tree
+
+Before writing any SQL that modifies existing rows:
+
+```
+Is this statement INSERT-only and only adds new rows? → Safe, proceed.
+  ↓ No
+Does it modify/delete existing rows?
+  ↓ Yes
+Does the user's request EXPLICITLY authorize this data change?
+  ↓ No → STOP. Find a non-destructive alternative or ask the user.
+  ↓ Yes
+Is the affected data recoverable from backup/snapshot?
+  ↓ No → STOP. Require snapshot before proceeding.
+  ↓ Yes
+Is the blast radius documented in the migration header comment?
+  ↓ No → Document it (which tables, estimated row count, why).
+  ↓ Yes
+Have you checked inbound FKs for cascade risk? (`pg_constraint`)
+  ↓ No → Check now. CASCADE bans apply.
+  ↓ Yes → Proceed with safe pattern (drop FKs first).
+```
+
+### Required PR Comment for Any Data-Modifying Migration
+
+```markdown
+## Data Impact
+- **Tables affected:** brands (cleared), products (brand_id set to NULL)
+- **Tables preserved:** products, variants, order_items, inventory
+- **Expected row changes:** brands N → 0; products M rows updated (brand_id NULL)
+- **FK drop/recreate:** products_brand_id_fkey dropped pre-clear, recreated with ON DELETE SET NULL
+- **Cascade risk check:** verified no remaining FKs point to brands (pg_constraint query)
+- **User approval:** @username approved in #channel / PR comment
+- **Snapshot:** RDS snapshot `vendix-prod-YYYYMMDD-pre-brands-reset` taken before deploy
+```
+
+A migration modifying data without this section MUST NOT merge.
+
+---
+
 ## Common Prisma Migration Errors
 
 | Error     | Cause                            | Solution                                                   |
@@ -382,6 +485,9 @@ PGPASSWORD=<password> psql -h <rds-host> -U postgres -d vendix_db
 5. **KNOW** how to recover: the fix is always at the DB level, not in code
 6. **NEVER** edit the SQL of a migration that has already been applied — create a new corrective migration instead
 7. **NEVER** accept a `prisma migrate dev` database reset when there is data you want to keep — use the "resolve + apply manual" pattern (Rule 6)
+8. **NEVER** use `TRUNCATE ... CASCADE`, `DROP TABLE`, or unscoped `DELETE FROM`/`UPDATE` in a migration — they silently destroy data across tables (Rule 7)
+9. **ALWAYS** drop inbound FKs BEFORE clearing a table, then recreate after — never rely on `ON DELETE` rules to protect data during CASCADE
+10. **ANY** migration that mutates existing rows requires: explicit user approval + PR-documented data impact + prod snapshot before deploy
 
 ---
 

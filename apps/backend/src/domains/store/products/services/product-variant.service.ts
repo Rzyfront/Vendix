@@ -91,6 +91,29 @@ export class ProductVariantService {
         throw new BadRequestException('Producto no encontrado o inactivo');
       }
 
+      // BLOCK: Services cannot have variants
+      if (product.product_type === 'service') {
+        throw new VendixHttpException(
+          ErrorCodes.PROD_SVC_001,
+          'Services cannot have variants',
+        );
+      }
+
+      // BLOCK: Check for active stock reservations
+      const hasActiveReservations = await prisma.stock_reservations.findFirst({
+        where: {
+          product_id: product_id,
+          product_variant_id: null,
+          status: 'active',
+        },
+      });
+      if (hasActiveReservations) {
+        throw new VendixHttpException(
+          ErrorCodes.INV_STOCK_001,
+          'Cannot add variant to product with active stock reservations. Release reservations first.',
+        );
+      }
+
       // Verificar que el SKU no esté vacío
       if (!createVariantDto.sku || createVariantDto.sku.trim() === '') {
         throw new VendixHttpException(ErrorCodes.PROD_VALIDATE_003);
@@ -136,6 +159,39 @@ export class ProductVariantService {
     createVariantDto: CreateProductVariantDto,
     user_id?: number,
   ) {
+    // BLOCK: price_override must be null or > 0 (reject 0 as ambiguous)
+    if (createVariantDto.price_override !== null && createVariantDto.price_override !== undefined && createVariantDto.price_override <= 0) {
+      throw new VendixHttpException(
+        ErrorCodes.PROD_VAR_PRICE_001,
+        'price_override de variante debe ser null o mayor que 0',
+      );
+    }
+
+    // BLOCK: is_on_sale=true requires sale_price > 0 and sale_price < base_price (or price_override for variant)
+    if (createVariantDto.is_on_sale) {
+      const basePrice = Number(product.base_price);
+      const salePrice = createVariantDto.sale_price;
+      const priceOverride = createVariantDto.price_override;
+
+      // If variant has price_override, the check is against the override
+      // If no override, sale_price must be > 0 and < basePrice
+      if (priceOverride != null) {
+        if (salePrice != null && salePrice <= 0) {
+          throw new VendixHttpException(
+            ErrorCodes.PROD_VAR_SALE_PRICE_001,
+            'sale_price de variante inválido: debe ser > 0 y < precio de referencia',
+          );
+        }
+      } else {
+        if (salePrice == null || salePrice <= 0 || salePrice >= basePrice) {
+          throw new VendixHttpException(
+            ErrorCodes.PROD_VAR_SALE_PRICE_001,
+            'sale_price de variante inválido: debe ser > 0 y < precio de referencia',
+          );
+        }
+      }
+    }
+
     // Crear variante usando scoped client
     const variant = await prisma.product_variants.create({
       data: {
@@ -143,8 +199,9 @@ export class ProductVariantService {
         sku: createVariantDto.sku,
         name: createVariantDto.name,
         attributes: createVariantDto.attributes,
+        // Use ?? instead of || to properly handle 0 as a valid price_override
         price_override:
-          createVariantDto.price_override || createVariantDto.price,
+          createVariantDto.price_override ?? createVariantDto.price,
         cost_price: createVariantDto.cost_price,
         profit_margin: createVariantDto.profit_margin,
         is_on_sale: createVariantDto.is_on_sale,
@@ -210,6 +267,21 @@ export class ProductVariantService {
         throw new NotFoundException('Variante no encontrada');
       }
 
+      // BLOCK: Check for active stock reservations on this variant
+      const hasActiveReservations = await prisma.stock_reservations.findFirst({
+        where: {
+          product_id: existingVariant.product_id,
+          product_variant_id: variantId,
+          status: 'active',
+        },
+      });
+      if (hasActiveReservations) {
+        throw new VendixHttpException(
+          ErrorCodes.INV_STOCK_001,
+          'Cannot modify variant with active stock reservations. Release reservations first.',
+        );
+      }
+
       if (updateVariantDto.sku && updateVariantDto.sku.trim() !== '') {
         const existingSku = await prisma.product_variants.findFirst({
           where: {
@@ -261,6 +333,37 @@ export class ProductVariantService {
     user_id?: number,
   ) {
     const { stock_quantity, ...variantData } = updateVariantDto;
+
+    // BLOCK: price_override must be null or > 0 (reject 0 as ambiguous)
+    if (variantData.price_override !== null && variantData.price_override !== undefined && variantData.price_override <= 0) {
+      throw new VendixHttpException(
+        ErrorCodes.PROD_VAR_PRICE_001,
+        'price_override de variante debe ser null o mayor que 0',
+      );
+    }
+
+    // BLOCK: is_on_sale=true requires sale_price > 0 and sale_price < base_price (or price_override for variant)
+    if (variantData.is_on_sale) {
+      const basePrice = Number(existingVariant.products?.base_price || 0);
+      const salePrice = variantData.sale_price;
+      const priceOverride = variantData.price_override;
+
+      if (priceOverride != null) {
+        if (salePrice != null && salePrice <= 0) {
+          throw new VendixHttpException(
+            ErrorCodes.PROD_VAR_SALE_PRICE_001,
+            'sale_price de variante inválido: debe ser > 0 y < precio de referencia',
+          );
+        }
+      } else {
+        if (salePrice == null || salePrice <= 0 || salePrice >= basePrice) {
+          throw new VendixHttpException(
+            ErrorCodes.PROD_VAR_SALE_PRICE_001,
+            'sale_price de variante inválido: debe ser > 0 y < precio de referencia',
+          );
+        }
+      }
+    }
 
     // Actualizar variante
     const variant = await prisma.product_variants.update({
@@ -354,6 +457,17 @@ export class ProductVariantService {
 
     if (!existingVariant) {
       throw new NotFoundException('Variante no encontrada');
+    }
+
+    // BLOCK: cannot delete variant with active stock reservations
+    const activeReservationsCount = await this.prisma.stock_reservations.count({
+      where: { product_variant_id: variantId, status: 'active' },
+    });
+    if (activeReservationsCount > 0) {
+      throw new VendixHttpException(
+        ErrorCodes.PROD_HAS_RESERVATIONS_001,
+        'Operación bloqueada: existen reservas de stock activas',
+      );
     }
 
     const unscopedPrisma = this.prisma.withoutScope() as any;

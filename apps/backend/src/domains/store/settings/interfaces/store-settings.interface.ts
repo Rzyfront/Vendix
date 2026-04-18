@@ -237,6 +237,9 @@ export interface StoreSettings {
   // Reservations - Booking reminders, confirmation, and check-in
   reservations?: ReservationsSettings;
 
+  // Operations - Preparation and delivery defaults
+  operations?: OperationsSettings;
+
   // Secciones existentes
   general: GeneralSettings;
   inventory: InventorySettings;
@@ -376,4 +379,8 @@ export interface ReservationsSettings {
   reminders: BookingReminderRule[];
   confirmation: BookingConfirmationSettings;
   check_in: BookingCheckInSettings;
+}
+
+export interface OperationsSettings {
+  default_preparation_time_minutes: number;
 }

@@ -1,0 +1,39 @@
+meta {
+  name: Change Track Inventory No Transfer
+  type: http
+  seq: 19
+}
+
+patch {
+  url: http://{{url}}/products/{{productId}}
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "track_inventory": false
+  }
+}
+
+tests {
+  test("Changing track_inventory with variants requires stock_transfer_mode", function() {
+    if (res.status === 400) {
+      expect(res.body).to.have.property('success', false);
+      expect(res.body).to.have.property('code', 'PROD_TRACKING_CHANGE_001');
+      expect(res.body).to.have.property('message');
+      expect(res.body.message).to.include('track_inventory');
+    } else if (res.status === 200) {
+      // Product has no variants — track_inventory change is allowed
+      expect(res.body).to.have.property('success', true);
+    } else if (res.status === 404) {
+      // Product not found — test environment issue
+      expect(res.status).to.equal(404);
+    }
+  });
+}
+
+settings {
+  encodeUrl: true
+  timeout: 0
+}

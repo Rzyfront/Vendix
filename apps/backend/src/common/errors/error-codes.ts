@@ -368,6 +368,59 @@ export const ErrorCodes = {
     devMessage: 'El SKU de la variante no puede estar vacío',
   },
 
+  // Product/Service & Variants Validation
+  PROD_SVC_VARIANTS_001: {
+    code: 'PROD_SVC_VARIANTS_001',
+    httpStatus: 400,
+    devMessage: 'Los productos tipo SERVICIO no pueden tener variantes',
+  },
+  PROD_SVC_HAS_VARIANTS_001: {
+    code: 'PROD_SVC_HAS_VARIANTS_001',
+    httpStatus: 409,
+    devMessage: 'No se puede cambiar a SERVICE un producto con variantes existentes',
+  },
+  PROD_TRACKING_CHANGE_001: {
+    code: 'PROD_TRACKING_CHANGE_001',
+    httpStatus: 400,
+    devMessage: 'Cambiar track_inventory con variantes requiere stock_transfer_mode',
+  },
+  PROD_SALE_PRICE_001: {
+    code: 'PROD_SALE_PRICE_001',
+    httpStatus: 400,
+    devMessage: 'sale_price inválido: debe ser > 0 y < base_price cuando is_on_sale=true',
+  },
+  PROD_VAR_SALE_PRICE_001: {
+    code: 'PROD_VAR_SALE_PRICE_001',
+    httpStatus: 400,
+    devMessage: 'sale_price de variante inválido: debe ser > 0 y < precio de referencia',
+  },
+  PROD_VAR_PRICE_001: {
+    code: 'PROD_VAR_PRICE_001',
+    httpStatus: 400,
+    devMessage: 'price_override de variante debe ser null o mayor que 0',
+  },
+  PROD_VAR_REMOVE_001: {
+    code: 'PROD_VAR_REMOVE_001',
+    httpStatus: 400,
+    devMessage: 'Eliminar variantes con stock requiere variant_removal_stock_mode',
+  },
+  PROD_HAS_RESERVATIONS_001: {
+    code: 'PROD_HAS_RESERVATIONS_001',
+    httpStatus: 409,
+    devMessage: 'Operación bloqueada: existen reservas de stock activas',
+  },
+  PROD_SKU_COLLISION_001: {
+    code: 'PROD_SKU_COLLISION_001',
+    httpStatus: 409,
+    devMessage: 'SKU colisiona con SKU de variante en la misma tienda',
+  },
+  INV_VARIANT_TRACKING_001: {
+    code: 'INV_VARIANT_TRACKING_001',
+    httpStatus: 400,
+    devMessage: 'track_inventory_override inválido',
+  },
+
+
   // Orders
   ORD_FIND_001: {
     code: 'ORD_FIND_001',
@@ -398,6 +451,21 @@ export const ErrorCodes = {
     code: 'ORD_SHIP_001',
     httpStatus: 404,
     devMessage: 'Shipping method not found',
+  },
+  ORD_SHIP_REQUIRED_001: {
+    code: 'ORD_SHIP_REQUIRED_001',
+    httpStatus: 400,
+    devMessage: 'Shipping method is required to ship this order',
+  },
+  ORD_SHIP_INVALID_METHOD_001: {
+    code: 'ORD_SHIP_INVALID_METHOD_001',
+    httpStatus: 400,
+    devMessage: 'Invalid or inactive shipping method',
+  },
+  ORD_SHIP_RATE_MISMATCH_001: {
+    code: 'ORD_SHIP_RATE_MISMATCH_001',
+    httpStatus: 400,
+    devMessage: 'Shipping rate does not belong to the selected method',
   },
 
   // Inventory
@@ -1557,6 +1625,9 @@ export const ErrorCodes = {
 
   // Email Templates
   EMAIL_TPL_001: { code: 'EMAIL_TPL_001', httpStatus: 404, devMessage: 'Email template not found' },
+
+  // Shipping Assignment
+  ORD_SHIP_LOCKED_001: { code: 'ORD_SHIP_LOCKED_001', httpStatus: 409, devMessage: 'Cannot change shipping method after order has been shipped' },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
 export type ErrorCodeKey = keyof typeof ErrorCodes;

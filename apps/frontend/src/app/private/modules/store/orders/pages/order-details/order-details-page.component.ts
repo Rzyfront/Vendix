@@ -30,6 +30,7 @@ import { PaymentMethodsService } from '../../../settings/payments/services/payme
 import { StorePaymentMethod, PaymentMethodState } from '../../../settings/payments/interfaces/payment-methods.interface';
 import { ShippingMethodsService } from '../../../settings/shipping/services/shipping-methods.service';
 import { StoreShippingMethod } from '../../../settings/shipping/interfaces/shipping-methods.interface';
+import { ShippingRate } from '../../../settings/shipping/interfaces/shipping-zones.interface';
 import { CurrencyFormatService, CurrencyPipe } from '../../../../../../shared/pipes/currency';
 import { OrderPaymentModalComponent } from '../../components/order-payment-modal/order-payment-modal.component';
 import { OrderRefundModalComponent } from '../../components/order-refund-modal/order-refund-modal.component';
@@ -101,6 +102,7 @@ export class OrderDetailsPageComponent {
   isLoadingShippingMethods = signal(false);
   showShippingMethodCard = signal(false);
   selectedShippingMethodId = signal<number | null>(null);
+  selectedShippingRateId = signal<number | null>(null);
   shippingAssignForm!: FormGroup;
 
   // Reactive forms (ship, deliver, cancel — pay and refund are in their own components)
@@ -238,14 +240,45 @@ export class OrderDetailsPageComponent {
   readonly showShippingAssignment = computed(() => {
     const order = this.order();
     if (!order) return false;
-    const terminalStates: OrderState[] = ['cancelled', 'refunded', 'finished'];
-    return order.delivery_type === 'other' && !terminalStates.includes(order.state);
+    const terminalStates: OrderState[] = ['shipped', 'delivered', 'finished', 'cancelled', 'refunded'];
+    if (terminalStates.includes(order.state as OrderState)) return false;
+    if (order.delivery_type === 'direct_delivery') return false;
+    return !order.shipping_method_id;
+  });
+
+  readonly shippingMethodInfo = computed(() => {
+    const order = this.order();
+    if (!order?.shipping_method) return null;
+    const method = order.shipping_method;
+    return {
+      name: method.name,
+      type: method.type,
+      provider: method.provider_name,
+      minDays: method.min_days,
+      maxDays: method.max_days,
+      logoUrl: method.logo_url,
+      rate: order.shipping_rate?.name || null,
+      cost: order.shipping_cost,
+    };
+  });
+
+  readonly canEditShipping = computed(() => {
+    const order = this.order();
+    if (!order) return false;
+    const lockedStates: OrderState[] = ['shipped', 'delivered', 'finished', 'cancelled', 'refunded'];
+    return !lockedStates.includes(order.state as OrderState) && order.delivery_type !== 'direct_delivery';
   });
 
   readonly selectedShippingMethod = computed(() => {
     const id = this.selectedShippingMethodId();
     if (!id) return null;
     return this.shippingMethods().find(m => m.id === id) || null;
+  });
+
+  readonly shippingRatesForSelectedMethod = computed<ShippingRate[]>(() => {
+    const m = this.selectedShippingMethod() as (StoreShippingMethod & { shipping_rates?: ShippingRate[]; rates?: ShippingRate[] }) | null;
+    if (!m) return [];
+    return m.shipping_rates ?? m.rates ?? [];
   });
 
   // ── Sorted Timeline (chronological ascending, deduplicated) ──
@@ -1264,6 +1297,7 @@ export class OrderDetailsPageComponent {
 
   onShippingMethodSelect(methodId: number): void {
     this.selectedShippingMethodId.set(methodId);
+    this.selectedShippingRateId.set(null);
     this.shippingAssignForm.patchValue({ shipping_method_id: methodId });
   }
 
@@ -1272,9 +1306,11 @@ export class OrderDetailsPageComponent {
     if (!this.orderId || !methodId) return;
 
     this.isProcessingAction.set(true);
-    const dto: { shipping_method_id: number; shipping_cost?: number } = {
+    const dto: { shipping_method_id: number; shipping_rate_id?: number; shipping_cost?: number } = {
       shipping_method_id: methodId,
     };
+    const rateId = this.selectedShippingRateId();
+    if (rateId) dto.shipping_rate_id = rateId;
     const cost = this.shippingAssignForm.get('shipping_cost')?.value;
     if (cost !== null && cost !== undefined && cost !== '') {
       dto.shipping_cost = Number(cost);
@@ -1288,6 +1324,7 @@ export class OrderDetailsPageComponent {
           this.isProcessingAction.set(false);
           this.showShippingMethodCard.set(false);
           this.selectedShippingMethodId.set(null);
+          this.selectedShippingRateId.set(null);
           this.toastService.success('Metodo de envio asignado exitosamente');
           this.loadData();
         },
@@ -1301,6 +1338,7 @@ export class OrderDetailsPageComponent {
   skipShippingAssignment(): void {
     this.showShippingMethodCard.set(false);
     this.selectedShippingMethodId.set(null);
+    this.selectedShippingRateId.set(null);
   }
 
   // ── Installment Actions ─────────────────────────────────────

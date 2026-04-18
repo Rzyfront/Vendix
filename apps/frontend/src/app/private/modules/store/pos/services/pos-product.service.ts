@@ -14,6 +14,8 @@ export interface Product {
   price: number;
   final_price: number;
   cost?: number;
+  is_on_sale?: boolean;
+  sale_price?: number | null;
   category: string;
   brand?: string;
   stock: number;
@@ -82,6 +84,8 @@ export interface PosProductVariant {
   cost_price: number | null;
   stock: number;
   is_active: boolean;
+  is_on_sale?: boolean;
+  sale_price?: number | null;
   attributes: PosVariantAttribute[];
   image_url?: string;
 }

@@ -305,6 +305,11 @@ export function getDefaultStoreSettings(): StoreSettings {
       },
     },
 
+    // Operations - Preparation and delivery defaults
+    operations: {
+      default_preparation_time_minutes: 15,
+    },
+
     // Legacy: Mantener por compatibilidad (redundante con branding)
     app: {
       name: 'Vendix',

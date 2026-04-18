@@ -258,6 +258,13 @@
               </div>
             }
 
+            @if (etaLabel()) {
+              <div class="eta-banner">
+                <span class="eta-icon">&#128336;</span>
+                <span>{{ etaLabel() }}</span>
+              </div>
+            }
+
             <h2>Metodo de Pago</h2>
 
             <div class="payment-list">

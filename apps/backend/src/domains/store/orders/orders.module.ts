@@ -11,6 +11,7 @@ import { OrderFlowModule } from './order-flow/order-flow.module';
 import { SettingsModule } from '../settings/settings.module';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import { InventoryTransactionsService } from '../inventory/transactions/inventory-transactions.service';
+import { OrderEtaService } from './services/order-eta.service';
 
 @Module({
   imports: [
@@ -24,7 +25,7 @@ import { InventoryTransactionsService } from '../inventory/transactions/inventor
     SettingsModule,
   ],
   controllers: [OrdersController],
-  providers: [OrdersService, StockLevelManager, InventoryTransactionsService],
-  exports: [OrdersService, OrderFlowModule],
+  providers: [OrdersService, StockLevelManager, InventoryTransactionsService, OrderEtaService],
+  exports: [OrdersService, OrderFlowModule, OrderEtaService],
 })
 export class OrdersModule {}

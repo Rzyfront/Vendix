@@ -60,16 +60,24 @@ import { SelectorComponent, SelectorOption } from '../../../../../../shared/comp
             type="number"
             formControlName="min_days"
             placeholder="0"
-            suffixText="Días"
+            helperText="Días"
           ></app-input>
           <app-input
             label="Días Máximos"
             type="number"
             formControlName="max_days"
             placeholder="5"
-            suffixText="Días"
+            helperText="Días"
           ></app-input>
         </div>
+
+        <app-input
+          label="Tiempo de tránsito (minutos)"
+          type="number"
+          formControlName="transit_time_minutes"
+          placeholder="Ej: 120"
+          helperText="Tiempo estimado de tránsito en minutos"
+        ></app-input>
     
         <div class="flex items-center justify-between p-4 rounded-xl border border-[var(--color-border)] bg-gray-50/30 mt-6">
           <div class="flex items-center gap-3">
@@ -125,6 +133,7 @@ export class ShippingMethodModalComponent implements OnInit {
       provider_name: [''],
       min_days: [null],
       max_days: [null],
+      transit_time_minutes: [null],
       is_active: [true],
     });
   }

@@ -1,4 +1,4 @@
-import { Component, output, inject, DestroyRef } from '@angular/core';
+import { Component, input, output, inject, DestroyRef, computed } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { Subject, debounceTime, distinctUntilChanged, Observable } from 'rxjs';
 import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
@@ -8,13 +8,22 @@ import {
   Product,
   Category,
   Brand } from '../services/pos-product.service';
+import { IconComponent } from '../../../../../shared/components';
+import { PriceResolverService } from '../../../../../shared/services/pricing';
 
 @Component({
   selector: 'app-pos-product-search',
   standalone: true,
-  imports: [FormsModule],
+  imports: [FormsModule, IconComponent],
   template: `
     <div class="product-search-container">
+      <!-- Banner: Sin variantes disponibles -->
+      @if (hasVariantsWithoutStock()) {
+        <div class="variants-warning-banner">
+          <app-icon name="alert-triangle" [size]="16" />
+          <span>Este producto tiene variantes, pero ninguna está disponible actualmente.</span>
+        </div>
+      }
       <div class="search-header">
         <div class="search-input-group">
           <div class="search-input-wrapper">
@@ -196,6 +205,25 @@ import {
         padding: 20px;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
         margin-bottom: 20px;
+      }
+
+      .variants-warning-banner {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 12px 16px;
+        margin-bottom: 12px;
+        background-color: #fef9c3;
+        border: 1px solid #facc15;
+        border-radius: 10px;
+        color: #854d0e;
+        font-size: 14px;
+        font-weight: 500;
+      }
+
+      .variants-warning-banner app-icon {
+        flex-shrink: 0;
+        color: #ca8a04;
       }
 
       .search-header {
@@ -432,6 +460,8 @@ import {
     `,
   ] })
 export class PosProductSearchComponent {
+  
+  readonly hasVariantsWithoutStock = input<boolean>(false);
   private destroyRef = inject(DestroyRef);
   readonly search = output<SearchFilters>();
   readonly productSelected = output<Product>();
@@ -452,6 +482,7 @@ export class PosProductSearchComponent {
 
   private searchSubject = new Subject<string>(); // LEGÍTIMO — debounceTime+distinctUntilChanged search stream
 private productService = inject(PosProductService);
+  private priceResolver = inject(PriceResolverService);
 
   readonly categories = toSignal(this.productService.getCategories(), {
     initialValue: [] as Category[] });

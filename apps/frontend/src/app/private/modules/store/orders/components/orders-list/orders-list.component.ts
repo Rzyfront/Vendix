@@ -8,6 +8,7 @@ import {
   computed,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
+import { NgClass } from '@angular/common';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { forkJoin } from 'rxjs';
 
@@ -46,6 +47,7 @@ import { OrderPrintService } from '../../services/order-print.service';
   standalone: true,
   imports: [
     FormsModule,
+    NgClass,
     ResponsiveDataViewComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
@@ -76,6 +78,7 @@ export class OrdersListComponent {
   readonly selectedChannel = signal('');
   readonly selectedPaymentStatus = signal('');
   readonly selectedDateRange = signal('');
+  readonly missingShippingMethod = signal(false);
 
   // Outputs
   readonly create = output<void>();
@@ -101,6 +104,7 @@ export class OrdersListComponent {
     channel: undefined,
     payment_status: undefined,
     date_range: undefined,
+    missing_shipping_method: undefined,
     page: 1,
     limit: 10,
     sort_by: 'created_at',
@@ -329,7 +333,8 @@ export class OrdersListComponent {
       this.selectedStatus() ||
       this.selectedChannel() ||
       this.selectedPaymentStatus() ||
-      this.selectedDateRange()
+      this.selectedDateRange() ||
+      this.missingShippingMethod()
     ),
   );
 
@@ -381,6 +386,7 @@ export class OrdersListComponent {
     this.selectedChannel.set('');
     this.selectedPaymentStatus.set('');
     this.selectedDateRange.set('');
+    this.missingShippingMethod.set(false);
     this.filterValues.set({});
 
     this._filters.search = '';
@@ -388,8 +394,17 @@ export class OrdersListComponent {
     this._filters.channel = undefined;
     this._filters.payment_status = undefined;
     this._filters.date_range = undefined;
+    this._filters.missing_shipping_method = undefined;
     this._filters.page = 1;
 
+    this.loadOrders();
+  }
+
+  toggleMissingShippingMethod(): void {
+    const next = !this.missingShippingMethod();
+    this.missingShippingMethod.set(next);
+    this._filters.missing_shipping_method = next || undefined;
+    this._filters.page = 1;
     this.loadOrders();
   }
 

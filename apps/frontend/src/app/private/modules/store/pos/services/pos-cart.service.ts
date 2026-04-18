@@ -23,6 +23,7 @@ export type {
 } from '../models/cart.model';
 import { PosCustomer } from '../models/customer.model';
 import { PosProductService, Product, PosProductVariant } from './pos-product.service';
+import { PriceResolverService } from '../../../../../shared/services/pricing';
 
 @Injectable({
   providedIn: 'root',
@@ -31,7 +32,10 @@ export class PosCartService {
   readonly cartState = signal<CartState>(this.getInitialState());
   readonly loading = signal<boolean>(false);
 
-  constructor(private productService: PosProductService) { }
+  constructor(
+    private productService: PosProductService,
+    private priceResolver: PriceResolverService,
+  ) { }
 
   // Observable getters
   get cartState$(): Observable<CartState> {

@@ -10,6 +10,7 @@ import { NotificationsSettingsForm } from './components/notifications-settings-f
 import { PosSettingsForm } from './components/pos-settings-form/pos-settings-form.component';
 import { ReceiptsSettingsForm } from './components/receipts-settings-form/receipts-settings-form.component';
 import { AppSettingsForm } from './components/app-settings-form/app-settings-form.component';
+import { OperationsSettingsForm } from './components/operations-settings-form/operations-settings-form.component';
 import { LucideAngularModule } from "lucide-angular";
 import { IconComponent } from '../../../../../shared/components/index';
 import { ScrollableTabsComponent } from '../../../../../shared/components/scrollable-tabs/scrollable-tabs.component';
@@ -31,6 +32,7 @@ import { firstValueFrom } from 'rxjs';
     PosSettingsForm,
     ReceiptsSettingsForm,
     AppSettingsForm,
+    OperationsSettingsForm,
     ScrollableTabsComponent,
     StickyHeaderComponent
 ],
@@ -65,6 +67,7 @@ export class GeneralSettingsComponent implements OnInit {
     { id: 'identity', label: 'Identidad', icon: 'user' },
     { id: 'branding', label: 'Marca', icon: 'palette' },
     { id: 'inventory', label: 'Inventario', icon: 'package' },
+    { id: 'operations', label: 'Operaciones', icon: 'clock' },
     { id: 'notifications', label: 'Alertas', icon: 'bell' },
     { id: 'pos', label: 'POS', icon: 'monitor' },
     { id: 'receipts', label: 'Recibos', icon: 'file-text' },
@@ -227,7 +230,7 @@ export class GeneralSettingsComponent implements OnInit {
 
       // Only send sections managed by this component to prevent legacy/unknown properties from round-tripping
       const knownSections: (keyof StoreSettings)[] = [
-        'general', 'inventory', 'checkout', 'notifications', 'pos', 'receipts', 'app',
+        'general', 'inventory', 'checkout', 'notifications', 'pos', 'receipts', 'app', 'operations',
       ];
       const sanitizedSettings = knownSections.reduce((acc, key) => {
         if (this.settings[key] !== undefined) {

@@ -5,7 +5,7 @@ import {
   inject,
 } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
-import { DatePipe, DecimalPipe, KeyValuePipe } from '@angular/common';
+import { DatePipe } from '@angular/common';
 import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { map } from 'rxjs/operators';
 import { RouterModule, ActivatedRoute, Router, Params } from '@angular/router';
@@ -19,25 +19,16 @@ import {
 } from '@angular/forms';
 import {
   ButtonComponent,
-  InputComponent,
-  InputButtonsComponent,
   ToastService,
   IconComponent,
-  SelectorComponent,
   SelectorOption,
-  MultiSelectorComponent,
   MultiSelectorOption,
-  TextareaComponent,
   ModalComponent,
   DialogService,
-  SettingToggleComponent,
   StickyHeaderComponent,
   StickyHeaderActionButton,
-  BadgeComponent,
-  TooltipComponent,
 } from '../../../../../../shared/components';
 import {
-  CurrencyPipe,
   CurrencyFormatService,
 } from '../../../../../../shared/pipes/currency';
 import {
@@ -68,6 +59,14 @@ import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-h
 import { ProductUtils } from '../../utils/product.utils';
 import { PromotionsService } from '../../../marketing/promotions/services/promotions.service';
 import { environment } from '../../../../../../../environments/environment';
+import { ProductWizardShellComponent } from './wizard/product-wizard-shell.component';
+import { WizardChecklistComponent } from './wizard/wizard-checklist.component';
+import { Step1InfoComponent } from './wizard/step-1-info.component';
+import { Step2PricingComponent } from './wizard/step-2-pricing.component';
+import { Step3InventoryComponent } from './wizard/step-3-inventory.component';
+import { Step4VariantsComponent } from './wizard/step-4-variants.component';
+import { Step5PublishComponent } from './wizard/step-5-publish.component';
+import { ProductFormWizardService } from '../../services/product-form-wizard.service';
 
 interface VariantAttribute {
   name: string;
@@ -88,7 +87,10 @@ interface GeneratedVariant {
   image_url?: string;
   image_file?: File;
   image_id?: number;
+  track_inventory_override?: boolean;
 }
+
+export type { GeneratedVariant };
 
 @Component({
   selector: 'app-product-create-page',
@@ -98,25 +100,21 @@ interface GeneratedVariant {
     ReactiveFormsModule,
     FormsModule,
     ButtonComponent,
-    InputComponent,
-    InputButtonsComponent,
     IconComponent,
-    SelectorComponent,
-    MultiSelectorComponent,
-    TextareaComponent,
     ModalComponent,
-    SettingToggleComponent,
     CategoryQuickCreateComponent,
     BrandQuickCreateComponent,
     TaxQuickCreateComponent,
     AdjustmentCreateModalComponent,
     StickyHeaderComponent,
-    CurrencyPipe,
-    BadgeComponent,
-    TooltipComponent,
     DatePipe,
-    DecimalPipe,
-    KeyValuePipe,
+    ProductWizardShellComponent,
+    WizardChecklistComponent,
+    Step1InfoComponent,
+    Step2PricingComponent,
+    Step3InventoryComponent,
+    Step4VariantsComponent,
+    Step5PublishComponent,
   ],
   templateUrl: './product-create-page.component.html',
   styles: [
@@ -342,6 +340,7 @@ export class ProductCreatePageComponent {
   private promotionsService = inject(PromotionsService);
   private reservationsService = inject(ReservationsService);
   private http = inject(HttpClient);
+  readonly wizardService = inject(ProductFormWizardService);
 
   // Data Collection Templates (for consultation configuration)
   dataCollectionTemplates: {
@@ -388,6 +387,8 @@ export class ProductCreatePageComponent {
   categoryOptions: MultiSelectorOption[] = [];
   brandOptions: SelectorOption[] = [];
   taxCategoryOptions: MultiSelectorOption[] = [];
+  allCategories: ProductCategory[] = [];
+  allBrands: Brand[] = [];
   stateOptions: SelectorOption[] = [
     { value: ProductState.ACTIVE, label: 'Activo' },
     { value: ProductState.INACTIVE, label: 'Inactivo' },
@@ -419,6 +420,10 @@ export class ProductCreatePageComponent {
 
   get isService(): boolean {
     return this.productForm.get('product_type')?.value === 'service';
+  }
+
+  get preparationTimeMinutesControl(): FormControl<number | null> {
+    return this.productForm.get('preparation_time_minutes') as FormControl<number | null>;
   }
 
   get hasDuplicateSkus(): boolean {
@@ -644,6 +649,7 @@ export class ProductCreatePageComponent {
       send_preconsultation: [false],
       consultation_template_id: [null],
       preconsultation_template_id: [null],
+      preparation_time_minutes: [null as number | null],
     });
 
     this.setupPriceCalculations(form);
@@ -729,7 +735,7 @@ export class ProductCreatePageComponent {
       );
   }
 
-  private allTaxCategories: TaxCategory[] = [];
+  allTaxCategories: TaxCategory[] = [];
 
   private loadProduct(id: number): void {
     this.productsService.getProductById(id).subscribe({
@@ -792,6 +798,7 @@ export class ProductCreatePageComponent {
       consultation_template_id: product.consultation_template_id || null,
       preconsultation_template_id:
         (product as any).preconsultation_template_id || null,
+      preparation_time_minutes: product.preparation_time_minutes || null,
       weight: product.weight || 0,
       dimensions: {
         length: product.dimensions?.length || 0,
@@ -860,6 +867,7 @@ export class ProductCreatePageComponent {
   private loadCategories(): void {
     this.categoriesService.getAllCategories().subscribe({
       next: (categories: ProductCategory[]) => {
+        this.allCategories = categories;
         this.categoryOptions = categories.map((cat: ProductCategory) => ({
           value: cat.id,
           label: cat.name,
@@ -905,6 +913,7 @@ export class ProductCreatePageComponent {
   private loadBrands(): void {
     this.brandsService.getAllBrands().subscribe({
       next: (brands: Brand[]) => {
+        this.allBrands = brands;
         this.brandOptions = brands.map((brand: Brand) => ({
           value: brand.id,
           label: brand.name,
@@ -1722,6 +1731,9 @@ export class ProductCreatePageComponent {
           ? formValue.pricing_type.value
           : formValue.pricing_type || 'unit',
       product_type: formValue.product_type || 'physical',
+      preparation_time_minutes: formValue.preparation_time_minutes
+        ? Number(formValue.preparation_time_minutes)
+        : undefined,
       // Service-specific fields
       ...(isServiceType && {
         service_duration_minutes: formValue.service_duration_minutes
@@ -2111,5 +2123,38 @@ export class ProductCreatePageComponent {
 
   goToScheduleConfig(): void {
     this.router.navigate(['/admin/reservations/schedules']);
+  }
+
+  // Wizard handlers
+  onStepValidityChange(
+    stepIndex: number,
+    validity: { isValid: boolean; completionPercent: number; errors: string[] },
+  ): void {
+    this.wizardService.updateStepValidity(stepIndex, validity);
+  }
+
+  onWizardStepClick(stepIndex: number): void {
+    this.wizardService.goToStep(stepIndex);
+  }
+
+  onWizardReset(): void {
+    this.wizardService.resetWizard();
+  }
+
+  get wizardSubmitLabel(): string {
+    if (this.isEditMode()) return 'Guardar cambios';
+    return this.isService ? 'Crear servicio' : 'Crear producto';
+  }
+
+  get stepBasePrice(): number {
+    return Number(this.productForm.get('base_price')?.value || 0);
+  }
+
+  get stepBaseSku(): string {
+    return this.productForm.get('sku')?.value || '';
+  }
+
+  get stepTrackInventory(): boolean {
+    return !!this.productForm.get('track_inventory')?.value;
   }
 }

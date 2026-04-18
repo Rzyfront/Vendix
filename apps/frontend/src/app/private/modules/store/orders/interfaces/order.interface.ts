@@ -230,6 +230,8 @@ export interface OrderQuery {
   page?: number;
   limit?: number;
 
+  missing_shipping_method?: boolean;
+
   // Ordenamiento
   sort?: string; // Format: 'field:direction' e.g., 'created_at:desc'
   sort_by?: string;

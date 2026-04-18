@@ -1,12 +1,16 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron, CronExpression } from '@nestjs/schedule';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { GlobalPrismaService } from '../prisma/services/global-prisma.service';
 
 @Injectable()
 export class PaymentTimeoutCleanupJob {
   private readonly logger = new Logger(PaymentTimeoutCleanupJob.name);
 
-  constructor(private readonly prisma: GlobalPrismaService) {}
+  constructor(
+    private readonly prisma: GlobalPrismaService,
+    private readonly eventEmitter: EventEmitter2,
+  ) {}
 
   /**
    * Every 30 minutes: auto-cancel orders stuck in pending_payment for > 2 hours
@@ -60,10 +64,10 @@ export class PaymentTimeoutCleanupJob {
   }
 
   /**
-   * Every 6 hours: cleanup expired stock reservations that weren't released.
+   * Every hour: cleanup expired stock reservations that weren't released.
    * Enforces the expires_at TTL on stock_reservations.
    */
-  @Cron('0 */6 * * *')
+  @Cron(CronExpression.EVERY_HOUR)
   async handleExpiredReservations() {
     this.logger.log('Cleaning up expired stock reservations...');
 
@@ -101,6 +105,15 @@ export class PaymentTimeoutCleanupJob {
       }
 
       this.logger.log(`Expired ${expiredCount} reservations`);
+
+      // Emit event for expired reservations
+      if (expiredCount > 0) {
+        this.eventEmitter.emit('reservations.expired', {
+          count: expiredCount,
+          reservationIds: expiredReservations.map((r) => r.id),
+          timestamp: now,
+        });
+      }
     } catch (error) {
       this.logger.error(
         `Expired reservation cleanup failed: ${error.message}`,

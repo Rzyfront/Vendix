@@ -11,6 +11,8 @@ import { EventEmitter2 } from '@nestjs/event-emitter';
 import { SettingsService } from '../../store/settings/settings.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { StockLevelManager } from '../../store/inventory/shared/services/stock-level-manager.service';
+import { StockValidatorService } from '../../store/inventory/shared/services/stock-validator.service';
+import { PriceResolverService } from '../../store/products/services/price-resolver.service';
 import { Logger, BadRequestException } from '@nestjs/common';
 import { WompiClient } from '../../store/payments/processors/wompi/wompi.client';
 import { WompiEnvironment } from '../../store/payments/processors/wompi/wompi.types';
@@ -18,6 +20,7 @@ import { PaymentEncryptionService } from '../../store/payments/services/payment-
 import * as crypto from 'crypto';
 import { ReservationsService } from '../../store/reservations/reservations.service';
 import { order_channel_enum } from '@prisma/client';
+import { deriveDeliveryType } from '../../store/shipping/shipping-derivation.util';
 
 @Injectable()
 export class CheckoutService {
@@ -31,6 +34,8 @@ export class CheckoutService {
     private readonly eventEmitter: EventEmitter2,
     private readonly settingsService: SettingsService,
     private readonly stockLevelManager: StockLevelManager,
+    private readonly stockValidatorService: StockValidatorService,
+    private readonly priceResolverService: PriceResolverService,
     private readonly wompiClient: WompiClient,
     private readonly paymentEncryption: PaymentEncryptionService,
     private readonly reservationsService: ReservationsService,
@@ -153,7 +158,6 @@ export class CheckoutService {
     }
 
     for (const item of cart_items) {
-      // Validate: if product has variants, a variant must be selected
       const productVariantCount = await this.prisma.product_variants.count({
         where: { product_id: item.product_id },
       });
@@ -162,14 +166,39 @@ export class CheckoutService {
         throw new VendixHttpException(ErrorCodes.ECOM_CART_002);
       }
 
-      if (item.product.track_inventory) {
-        const available = item.product_variant
-          ? (item.product_variant.stock_quantity ?? 0)
-          : (item.product.stock_quantity ?? 0);
-        if (item.quantity > available) {
-          throw new VendixHttpException(ErrorCodes.ECOM_CART_003);
+      const shouldTrack = this.stockValidatorService.resolveEffectiveTracking(
+        item.product,
+        item.product_variant ?? undefined,
+      );
+
+      if (shouldTrack) {
+        const availability = await this.stockValidatorService.validateAvailability(
+          item.product_id,
+          item.product_variant_id ?? undefined,
+          item.quantity,
+        );
+
+        if (!availability.isAvailable) {
+          const productName = item.product.name;
+          const variantInfo = item.product_variant?.name ? ` (${item.product_variant.name})` : '';
+          throw new VendixHttpException(
+            ErrorCodes.ECOM_CART_003,
+            `Insufficient stock for ${productName}${variantInfo}: requested ${item.quantity}, available ${availability.available}`,
+          );
         }
       }
+    }
+
+    const hasPhysicalItems = cart_items.some((item: any) => {
+      const product = item.product;
+      if (!product) return true;
+      if (product.product_type === 'service') return false;
+      if (product.requires_shipping === false) return false;
+      return true;
+    });
+
+    if (hasPhysicalItems && !dto.shipping_method_id && !dto.shipping_rate_id) {
+      throw new VendixHttpException(ErrorCodes.ORD_SHIP_REQUIRED_001);
     }
 
     let shipping_address_id = dto.shipping_address_id;
@@ -288,24 +317,30 @@ export class CheckoutService {
           },
         });
 
-        // Variant-aware net price: use variant.price_override if present,
-        // then product sale_price if on sale, otherwise product base_price
-        let netPrice: number;
-        if (item.product_variant?.price_override) {
-          netPrice = Number(item.product_variant.price_override);
-        } else {
-          netPrice =
-            productWithTaxes.is_on_sale && productWithTaxes.sale_price
-              ? Number(productWithTaxes.sale_price)
-              : Number(productWithTaxes.base_price);
-        }
+        const priceResult = this.priceResolverService.resolvePrice({
+          product: {
+            base_price: Number(productWithTaxes.base_price),
+            is_on_sale: productWithTaxes.is_on_sale,
+            sale_price: productWithTaxes.sale_price != null ? Number(productWithTaxes.sale_price) : null,
+            track_inventory: productWithTaxes.track_inventory,
+          },
+          variant: item.product_variant
+            ? {
+                price_override: item.product_variant.price_override != null ? Number(item.product_variant.price_override) : null,
+                is_on_sale: item.product_variant.is_on_sale,
+                sale_price: item.product_variant.sale_price != null ? Number(item.product_variant.sale_price) : null,
+                track_inventory_override: item.product_variant.track_inventory_override,
+              }
+            : undefined,
+        });
+
+        const netPrice = priceResult.unitPrice;
 
         const taxInfo = await this.taxes_service.calculateProductTaxes(
           item.product_id,
           netPrice,
         );
 
-        // Resolve cost_price: variant takes priority over product
         const cost_price =
           item.product_variant?.cost_price != null
             ? Number(item.product_variant.cost_price)
@@ -600,12 +635,25 @@ export class CheckoutService {
         throw new VendixHttpException(ErrorCodes.ECOM_CART_002);
       }
 
-      if (item.product.track_inventory) {
-        const available = item.product_variant
-          ? (item.product_variant.stock_quantity ?? 0)
-          : (item.product.stock_quantity ?? 0);
-        if (item.quantity > available) {
-          throw new VendixHttpException(ErrorCodes.ECOM_CART_003);
+      const shouldTrack = this.stockValidatorService.resolveEffectiveTracking(
+        item.product,
+        item.product_variant ?? undefined,
+      );
+
+      if (shouldTrack) {
+        const availability = await this.stockValidatorService.validateAvailability(
+          item.product_id,
+          item.product_variant_id ?? undefined,
+          item.quantity,
+        );
+
+        if (!availability.isAvailable) {
+          const productName = item.product.name;
+          const variantInfo = item.product_variant?.name ? ` (${item.product_variant.name})` : '';
+          throw new VendixHttpException(
+            ErrorCodes.ECOM_CART_003,
+            `Insufficient stock for ${productName}${variantInfo}: requested ${item.quantity}, available ${availability.available}`,
+          );
         }
       }
     }
@@ -629,22 +677,30 @@ export class CheckoutService {
           },
         });
 
-        let netPrice: number;
-        if (item.product_variant?.price_override) {
-          netPrice = Number(item.product_variant.price_override);
-        } else {
-          netPrice =
-            productWithTaxes.is_on_sale && productWithTaxes.sale_price
-              ? Number(productWithTaxes.sale_price)
-              : Number(productWithTaxes.base_price);
-        }
+        const priceResult = this.priceResolverService.resolvePrice({
+          product: {
+            base_price: Number(productWithTaxes.base_price),
+            is_on_sale: productWithTaxes.is_on_sale,
+            sale_price: productWithTaxes.sale_price != null ? Number(productWithTaxes.sale_price) : null,
+            track_inventory: productWithTaxes.track_inventory,
+          },
+          variant: item.product_variant
+            ? {
+                price_override: item.product_variant.price_override != null ? Number(item.product_variant.price_override) : null,
+                is_on_sale: item.product_variant.is_on_sale,
+                sale_price: item.product_variant.sale_price != null ? Number(item.product_variant.sale_price) : null,
+                track_inventory_override: item.product_variant.track_inventory_override,
+              }
+            : undefined,
+        });
+
+        const netPrice = priceResult.unitPrice;
 
         const taxInfo = await this.taxes_service.calculateProductTaxes(
           item.product_id,
           netPrice,
         );
 
-        // Resolve cost_price: variant takes priority over product
         const cost_price =
           item.product_variant?.cost_price != null
             ? Number(item.product_variant.cost_price)
@@ -673,7 +729,40 @@ export class CheckoutService {
       (sum, item) => sum + item.total_tax,
       0,
     );
-    const grand_total = subtotal + total_tax;
+    // Resolve optional shipping method/rate from DTO (scoped by store)
+    const wa_store_id = RequestContextService.getStoreId();
+    let wa_shipping_method_id: number | null = null;
+    let wa_shipping_rate_id: number | null = null;
+    let wa_shipping_cost = 0;
+    let wa_delivery_type: 'pickup' | 'home_delivery' | 'direct_delivery' | 'other' = 'other';
+
+    if (dto.shipping_rate_id) {
+      const rate = await this.store_prisma.shipping_rates.findFirst({
+        where: { id: dto.shipping_rate_id, is_active: true },
+        include: { shipping_method: true, shipping_zone: true },
+      });
+      if (!rate || rate.shipping_zone.store_id !== wa_store_id) {
+        throw new VendixHttpException(ErrorCodes.ORD_SHIP_RATE_MISMATCH_001);
+      }
+      if (dto.shipping_method_id && rate.shipping_method_id !== dto.shipping_method_id) {
+        throw new VendixHttpException(ErrorCodes.ORD_SHIP_RATE_MISMATCH_001);
+      }
+      wa_shipping_method_id = rate.shipping_method_id;
+      wa_shipping_rate_id = rate.id;
+      wa_shipping_cost = Number(rate.base_cost);
+      wa_delivery_type = deriveDeliveryType(rate.shipping_method.type);
+    } else if (dto.shipping_method_id) {
+      const method = await this.store_prisma.shipping_methods.findFirst({
+        where: { id: dto.shipping_method_id, store_id: wa_store_id, is_active: true },
+      });
+      if (!method) {
+        throw new VendixHttpException(ErrorCodes.ORD_SHIP_INVALID_METHOD_001);
+      }
+      wa_shipping_method_id = method.id;
+      wa_delivery_type = deriveDeliveryType(method.type);
+    }
+
+    const grand_total = subtotal + total_tax + wa_shipping_cost;
 
     const order = await this.prisma.orders.create({
       data: {
@@ -682,8 +771,10 @@ export class CheckoutService {
         currency: cart_currency,
         subtotal_amount: subtotal,
         tax_amount: total_tax,
-        shipping_cost: 0,
-        delivery_type: 'other',
+        shipping_cost: wa_shipping_cost,
+        shipping_method_id: wa_shipping_method_id,
+        shipping_rate_id: wa_shipping_rate_id,
+        delivery_type: wa_delivery_type,
         grand_total: grand_total,
         shipping_address_id,
         shipping_address_snapshot,

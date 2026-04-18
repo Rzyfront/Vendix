@@ -7,6 +7,7 @@ export interface StoreSettings {
   pos: PosSettings;
   receipts: ReceiptsSettings;
   app: AppSettings;
+  operations?: OperationsSettings;
 }
 
 export interface AppSettings {
@@ -36,6 +37,10 @@ export interface InventorySettings {
   track_inventory: boolean;
   allow_negative_stock: boolean;
   costing_method: 'cpp' | 'fifo';
+}
+
+export interface OperationsSettings {
+  default_preparation_time_minutes: number;
 }
 
 export interface CheckoutSettings {

@@ -456,12 +456,23 @@ export class StoreOrdersService {
     );
   }
 
-  assignShippingMethod(orderId: string, dto: { shipping_method_id: number; shipping_cost?: number }): Observable<Order> {
-    const url = `${this.apiUrl}/store/orders/${orderId}`;
+  assignShippingMethod(orderId: string, dto: { shipping_method_id: number; shipping_rate_id?: number; shipping_cost?: number }): Observable<Order> {
+    const url = `${this.apiUrl}/store/orders/${orderId}/shipping`;
     return this.http.patch<Order>(url, dto).pipe(
       catchError((error) => {
         console.error('Error assigning shipping method:', error);
         return throwError(() => new Error(this.extractErrorMessage(error)));
+      }),
+    );
+  }
+
+  getAvailableActions(orderId: string): Observable<any[]> {
+    const url = `${this.apiUrl}/store/orders/${orderId}/flow/available-actions`;
+
+    return this.http.get<any[]>(url).pipe(
+      catchError((error) => {
+        console.error('Error fetching available actions:', error);
+        return throwError(() => new Error('Failed to fetch available actions'));
       }),
     );
   }

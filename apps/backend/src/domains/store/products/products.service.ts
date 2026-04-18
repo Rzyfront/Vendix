@@ -265,7 +265,14 @@ export class ProductsService {
           }
 
           // Crear variantes si se proporcionan
+          // BLOCK: SERVICE products cannot have variants
           if (variants && variants.length > 0) {
+            if (createProductDto.product_type === ProductType.SERVICE) {
+              throw new VendixHttpException(
+                ErrorCodes.PROD_SVC_VARIANTS_001,
+                'Los productos tipo SERVICIO no pueden tener variantes',
+              );
+            }
             for (const variantData of variants) {
               const { variant_image_url, ...variantFields } =
                 variantData as CreateVariantWithStockDto;
@@ -1125,6 +1132,21 @@ export class ProductsService {
         throw new VendixHttpException(ErrorCodes.PROD_FIND_001);
       }
 
+      // BLOCK: Check for active stock reservations on the product itself
+      const hasActiveReservations = await this.prisma.stock_reservations.findFirst({
+        where: {
+          product_id: id,
+          product_variant_id: null,
+          status: 'active',
+        },
+      });
+      if (hasActiveReservations) {
+        throw new VendixHttpException(
+          ErrorCodes.INV_STOCK_001,
+          'Cannot modify product with active stock reservations. Release reservations first.',
+        );
+      }
+
       // Si se actualiza el slug, verificar que sea único dentro de la tienda
       if (updateProductDto.slug) {
         const existingSlug = await this.prisma.products.findFirst({
@@ -1156,9 +1178,33 @@ export class ProductsService {
 
       // Validate: variants require product to have SKU
       if (updateProductDto.variants && updateProductDto.variants.length > 0) {
+        // BLOCK: SERVICE products cannot have variants
+        const effectiveProductType = updateProductDto.product_type ?? existingProduct.product_type;
+        if (effectiveProductType === ProductType.SERVICE) {
+          throw new VendixHttpException(
+            ErrorCodes.PROD_SVC_VARIANTS_001,
+            'Los productos tipo SERVICIO no pueden tener variantes',
+          );
+        }
         const productSku = updateProductDto.sku || existingProduct.sku;
         if (!productSku || productSku.trim() === '') {
           throw new VendixHttpException(ErrorCodes.PROD_VALIDATE_002);
+        }
+      }
+
+      // BLOCK: cannot change to SERVICE if existing variants present
+      if (
+        updateProductDto.product_type === ProductType.SERVICE &&
+        existingProduct.product_type !== ProductType.SERVICE
+      ) {
+        const existingVariantCount = await this.prisma.product_variants.count({
+          where: { product_id: id },
+        });
+        if (existingVariantCount > 0) {
+          throw new VendixHttpException(
+            ErrorCodes.PROD_SVC_HAS_VARIANTS_001,
+            'No se puede cambiar a SERVICE un producto con variantes existentes',
+          );
         }
       }
 
@@ -1354,6 +1400,16 @@ export class ProductsService {
             const isTransitionToVariants =
               allExistingVariants.length === 0 && variants.length > 0;
 
+            // BLOCK: Changing track_inventory when variants exist requires explicit stock_transfer_mode
+            if (updateProductDto.track_inventory !== undefined && allExistingVariants.length > 0) {
+              if (!updateProductDto.stock_transfer_mode) {
+                throw new VendixHttpException(
+                  ErrorCodes.PROD_VALIDATE_001,
+                  'Changing track_inventory with existing variants requires explicit stock_transfer_mode',
+                );
+              }
+            }
+
             // If transitioning, transfer/distribute base stock to variants
             let inheritedLocationIds: number[] = [];
             if (isTransitionToVariants) {
@@ -1498,11 +1554,35 @@ export class ProductsService {
               }
             }
 
-            // Before deleting variants: transfer their stock to base product
+            // Before deleting variants: check for active reservations and stock
             const variantsToDelete = allExistingVariants.filter(
               (ev) => !keptVariantIds.has(ev.id),
             );
             if (variantsToDelete.length > 0 && allExistingVariants.length > 0) {
+              // BLOCK: Deleting variants with stock requires explicit variant_removal_stock_mode
+              for (const vt of variantsToDelete) {
+                const variantStock = await prisma.stock_levels.aggregate({
+                  where: { product_variant_id: vt.id },
+                  _sum: { quantity_on_hand: true },
+                });
+                const hasStock = (variantStock._sum.quantity_on_hand ?? 0) > 0;
+                
+                // Check for active reservations
+                const hasActiveReservations = await prisma.stock_reservations.findFirst({
+                  where: {
+                    product_variant_id: vt.id,
+                    status: 'active',
+                  },
+                });
+
+                if ((hasStock || hasActiveReservations) && !updateProductDto.variant_removal_stock_mode) {
+                  throw new VendixHttpException(
+                    ErrorCodes.PROD_VALIDATE_001,
+                    'Deleting variants with stock or active reservations requires explicit variant_removal_stock_mode',
+                  );
+                }
+              }
+
               const allVariantsDeleting =
                 variantsToDelete.length === allExistingVariants.length;
               if (allVariantsDeleting) {

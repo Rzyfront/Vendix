@@ -5,6 +5,7 @@ import {
   UpdateOrderDto,
   OrderQueryDto,
   UpdateOrderItemsDto,
+  AssignShippingMethodDto,
 } from './dto';
 import {
   Prisma,
@@ -217,6 +218,11 @@ export class OrdersService {
       ...(status && { state: status }),
       ...(customer_id && { customer_id }),
       ...(channel && { channel }),
+      ...(query.missing_shipping_method && {
+        shipping_method_id: null,
+        delivery_type: { not: 'direct_delivery' },
+        state: { notIn: ['finished', 'cancelled', 'refunded'] },
+      }),
       ...(date_from &&
         date_to && {
           created_at: {
@@ -590,6 +596,132 @@ export class OrdersService {
         },
       });
     });
+  }
+
+  async assignShipping(orderId: number, dto: AssignShippingMethodDto) {
+    const context = RequestContextService.getContext();
+    const storeId = context?.store_id;
+    if (!storeId) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+
+    const order = await this.prisma.orders.findFirst({
+      where: { id: orderId, store_id: storeId },
+    });
+
+    if (!order) {
+      throw new VendixHttpException(ErrorCodes.ORD_FIND_001);
+    }
+
+    const lockedStates: string[] = ['shipped', 'delivered', 'finished', 'cancelled', 'refunded'];
+    if (lockedStates.includes(order.state)) {
+      throw new VendixHttpException(ErrorCodes.ORD_SHIP_LOCKED_001);
+    }
+
+    const method = await this.prisma.shipping_methods.findFirst({
+      where: { id: dto.shipping_method_id, store_id: storeId, is_active: true },
+    });
+
+    if (!method) {
+      throw new VendixHttpException(ErrorCodes.ORD_SHIP_INVALID_METHOD_001);
+    }
+
+    let shippingCost = dto.shipping_cost ?? 0;
+
+    if (dto.shipping_rate_id) {
+      const rate = await this.prisma.shipping_rates.findFirst({
+        where: { id: dto.shipping_rate_id, is_active: true },
+      });
+
+      if (!rate || rate.shipping_method_id !== method.id) {
+        throw new VendixHttpException(ErrorCodes.ORD_SHIP_RATE_MISMATCH_001);
+      }
+
+      if (dto.shipping_cost === undefined) {
+        shippingCost = Number(rate.base_cost);
+      }
+    }
+
+    const { deriveDeliveryType } = await import('../shipping/shipping-derivation.util');
+    const deliveryType = deriveDeliveryType(method.type);
+
+    const newGrandTotal =
+      Number(order.subtotal_amount) +
+      Number(order.tax_amount) -
+      Number(order.discount_amount) +
+      shippingCost;
+
+    const updated = await this.prisma.orders.update({
+      where: { id: orderId },
+      data: {
+        shipping_method_id: method.id,
+        shipping_rate_id: dto.shipping_rate_id ?? null,
+        delivery_type: deliveryType,
+        shipping_cost: shippingCost,
+        grand_total: newGrandTotal,
+        updated_at: new Date(),
+      },
+      include: {
+        stores: { select: { id: true, name: true, store_code: true } },
+        order_items: {
+          include: {
+            products: {
+              include: {
+                product_images: { where: { is_main: true }, take: 1 },
+              },
+            },
+            product_variants: true,
+          },
+        },
+        addresses_orders_billing_address_idToaddresses: true,
+        addresses_orders_shipping_address_idToaddresses: true,
+        payments: {
+          include: {
+            store_payment_method: {
+              include: { system_payment_method: true },
+            },
+          },
+          orderBy: { created_at: 'asc' },
+        },
+        shipping_method: {
+          select: {
+            id: true,
+            name: true,
+            type: true,
+            provider_name: true,
+            min_days: true,
+            max_days: true,
+            logo_url: true,
+          },
+        },
+        shipping_rate: {
+          include: {
+            shipping_zone: {
+              select: { id: true, name: true, display_name: true },
+            },
+          },
+        },
+        users: {
+          select: {
+            id: true,
+            first_name: true,
+            last_name: true,
+            email: true,
+            phone: true,
+            avatar_url: true,
+          },
+        },
+      },
+    });
+
+    this.eventEmitter.emit('order.shipping_assigned', {
+      store_id: order.store_id,
+      order_id: orderId,
+      shipping_method_id: method.id,
+      delivery_type: deliveryType,
+    });
+
+    return updated;
   }
 
   async remove(id: number) {

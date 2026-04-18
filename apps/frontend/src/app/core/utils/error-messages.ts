@@ -91,6 +91,19 @@ export const ERROR_MESSAGES: Record<string, string> = {
     'Debes configurar un SKU para el producto antes de activar las variantes.',
   PROD_VALIDATE_003: 'El SKU de la variante no puede estar vacío.',
 
+  // Product/Service & Variants Validation
+  PROD_SVC_VARIANTS_001: 'Los productos tipo SERVICIO no pueden tener variantes.',
+  PROD_SVC_HAS_VARIANTS_001: 'No se puede cambiar a SERVICE un producto con variantes existentes.',
+  PROD_TRACKING_CHANGE_001: 'Para cambiar el seguimiento de inventario con variantes activas, selecciona un modo de transferencia de stock.',
+  PROD_SALE_PRICE_001: 'El precio de oferta debe ser mayor que 0 y menor que el precio base.',
+  PROD_VAR_SALE_PRICE_001: 'El precio de oferta de la variante debe ser mayor que 0 y menor que su precio de referencia.',
+  PROD_VAR_PRICE_001: 'El precio personalizado de la variante debe ser nulo o mayor que 0.',
+  PROD_VAR_REMOVE_001: 'Para eliminar variantes con stock, selecciona un modo de eliminación de stock.',
+  PROD_HAS_RESERVATIONS_001: 'Esta operación está bloqueada porque existen reservas de stock activas.',
+  PROD_SKU_COLLISION_001: 'El SKU especificado ya existe en una variante de esta tienda.',
+  INV_VARIANT_TRACKING_001: 'El valor de override de seguimiento de inventario no es válido.',
+
+
   // Bulk Products
   BULK_PROD_FILE_INVALID: 'El archivo subido no es valido o esta corrupto.',
   BULK_PROD_EMPTY_FILE: 'El archivo no contiene filas de datos.',
@@ -108,6 +121,10 @@ export const ERROR_MESSAGES: Record<string, string> = {
   ORD_PERM_001: 'No tiene permisos para acceder a esta orden.',
   ORD_STATUS_001: 'Estado de orden invalido.',
   ORD_SHIP_001: 'Metodo de envio no encontrado.',
+  ORD_SHIP_REQUIRED_001: 'Debes asignar un método de envío antes de continuar.',
+  ORD_SHIP_INVALID_METHOD_001: 'El método de envío no pertenece a esta tienda.',
+  ORD_SHIP_RATE_MISMATCH_001: 'La tarifa seleccionada no corresponde al método de envío.',
+  ORD_SHIP_LOCKED_001: 'No es posible cambiar el método: la orden ya fue enviada.',
 
   // Inventory
   INV_FIND_001: 'Inventario no encontrado.',
