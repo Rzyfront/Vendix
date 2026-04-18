@@ -1438,6 +1438,29 @@ export class ProductsService {
                 }
               }
 
+              // BLOCK: Transitioning simple→variants with existing base stock requires
+              // explicit stock_transfer_mode. 'reset' is forbidden (would wipe stock);
+              // only 'first' or 'distribute' actually transfer the base stock to variants.
+              const baseStockSum = await prisma.stock_levels.aggregate({
+                where: { product_id: id, product_variant_id: null },
+                _sum: { quantity_on_hand: true },
+              });
+              const baseStockTotal = baseStockSum._sum.quantity_on_hand ?? 0;
+              if (baseStockTotal > 0) {
+                if (!updateProductDto.stock_transfer_mode) {
+                  throw new VendixHttpException(
+                    ErrorCodes.PROD_VALIDATE_001,
+                    'El producto tiene stock base. Elige cómo distribuirlo entre las variantes (first | distribute).',
+                  );
+                }
+                if (updateProductDto.stock_transfer_mode === 'reset') {
+                  throw new VendixHttpException(
+                    ErrorCodes.PROD_VALIDATE_001,
+                    "No puedes descartar stock al activar variantes. Usa 'first' o 'distribute' para transferirlo.",
+                  );
+                }
+              }
+
               const transferMode =
                 updateProductDto.stock_transfer_mode || 'reset';
               inheritedLocationIds =

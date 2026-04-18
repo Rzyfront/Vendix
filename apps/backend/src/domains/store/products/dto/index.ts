@@ -150,6 +150,11 @@ export class CreateVariantWithStockDto {
   @IsOptional()
   @IsString()
   variant_image_url?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  @Type(() => Boolean)
+  track_inventory_override?: boolean | null;
 }
 
 export class ProductImageDto {
