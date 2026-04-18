@@ -832,7 +832,7 @@ export class ProductsBulkService {
    * Crea las entidades si no existen.
    */
   private async preprocessProductData(product: any, storeId: number) {
-    // Procesar Marca (Brand)
+    // Procesar Marca (Brand) — tolerante: si falla resolver/crear, el producto sube sin marca
     if (product.brand_id !== undefined && product.brand_id !== null) {
       if (typeof product.brand_id === 'string') {
         const brandName = product.brand_id.trim();
@@ -841,8 +841,15 @@ export class ProductsBulkService {
         } else if (/^\d+$/.test(brandName)) {
           product.brand_id = parseInt(brandName, 10);
         } else {
-          const brandId = await this.findOrCreateBrand(brandName, storeId);
-          product.brand_id = brandId;
+          try {
+            const brandId = await this.findOrCreateBrand(brandName, storeId);
+            product.brand_id = brandId || undefined;
+          } catch (err) {
+            this.logger.warn(
+              `Bulk: no se pudo resolver/crear marca "${brandName}" para store ${storeId}: ${err?.message}. Subiendo producto sin marca.`,
+            );
+            product.brand_id = undefined;
+          }
         }
       }
     }
@@ -954,24 +961,24 @@ export class ProductsBulkService {
     name: string,
     storeId: number,
   ): Promise<number> {
-    // Normalize: trim + lowercase for search
     const normalizedName = name.trim().toLowerCase();
     if (!normalizedName) return 0;
 
-    // Search case-insensitive
     const existing = await this.prisma.brands.findFirst({
       where: {
+        store_id: storeId,
         name: { equals: normalizedName, mode: 'insensitive' },
       },
     });
 
     if (existing) return existing.id;
 
-    // Create brand with Title Case
     const titleCaseName = toTitleCase(name.trim());
     const created = await this.prisma.brands.create({
       data: {
+        store_id: storeId,
         name: titleCaseName,
+        slug: generateSlug(titleCaseName),
         description: 'Creada automáticamente por carga masiva',
         state: 'active',
       },
@@ -1091,14 +1098,18 @@ export class ProductsBulkService {
     if (product.base_price < 0)
       throw new BadRequestException('Precio base debe ser positivo');
 
-    // IDs de marca y categoría ya deberían ser numéricos aquí tras el pre-procesamiento
-    // Si llegaron como números directos, validamos existencia.
+    // IDs de marca y categoría ya deberían ser numéricos aquí tras el pre-procesamiento.
+    // Tolerante: si la marca no existe o no pertenece al store, se sube el producto sin marca.
     if (product.brand_id && typeof product.brand_id === 'number') {
-      const exists = await this.prisma.brands.findUnique({
-        where: { id: product.brand_id },
+      const exists = await this.prisma.brands.findFirst({
+        where: { id: product.brand_id, store_id: storeId },
       });
-      if (!exists)
-        throw new BadRequestException(`Marca ID ${product.brand_id} no existe`);
+      if (!exists) {
+        this.logger.warn(
+          `Bulk: marca id ${product.brand_id} no existe en store ${storeId}. Subiendo producto sin marca.`,
+        );
+        (product as any).brand_id = undefined;
+      }
     }
   }
 
