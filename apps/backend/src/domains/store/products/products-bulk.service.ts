@@ -3,6 +3,7 @@ import {
   NotFoundException,
   ConflictException,
   BadRequestException,
+  Logger,
 } from '@nestjs/common';
 import { v4 as uuidv4 } from 'uuid';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
@@ -31,6 +32,7 @@ import * as XLSX from 'xlsx';
 
 @Injectable()
 export class ProductsBulkService {
+  private readonly logger = new Logger(ProductsBulkService.name);
   private readonly MAX_BATCH_SIZE = 1000;
 
   // Mapa de encabezados en Español a claves del DTO
@@ -41,6 +43,7 @@ export class ProductsBulkService {
     'Precio Compra': 'cost_price',
     Margen: 'profit_margin',
     'Cantidad Inicial': 'stock_quantity',
+    'Controla Inventario': 'track_inventory',
     Descripción: 'description',
     Categorías: 'category_ids',
     Marca: 'brand_id',
@@ -63,6 +66,9 @@ export class ProductsBulkService {
     'precio compra': 'cost_price',
     margen: 'profit_margin',
     'cantidad inicial': 'stock_quantity',
+    'controla inventario': 'track_inventory',
+    'controla stock': 'track_inventory',
+    'track inventory': 'track_inventory',
     descripción: 'description',
     descripcion: 'description',
     categorías: 'category_ids',
@@ -258,6 +264,7 @@ export class ProductsBulkService {
         base_price: parseFloat(product.base_price) || 0,
         cost_price: parseFloat(product.cost_price) || 0,
         stock_quantity: parseFloat(product.stock_quantity) || 0,
+        track_inventory: undefined,
         brand_name: undefined,
         brand_will_create: false,
         category_names: [],
@@ -277,6 +284,30 @@ export class ProductsBulkService {
         if (t === 'servicio' || t === 'service') {
           item.product_type = 'service';
         }
+      }
+
+      // Resolve track_inventory: explicit > default-by-type
+      if (product.track_inventory !== undefined && product.track_inventory !== null && product.track_inventory !== '') {
+        if (typeof product.track_inventory === 'boolean') {
+          item.track_inventory = product.track_inventory;
+        } else {
+          const raw = product.track_inventory.toString().toLowerCase().trim();
+          item.track_inventory =
+            raw === 'si' ||
+            raw === 'sí' ||
+            raw === 'yes' ||
+            raw === 'true' ||
+            raw === 'verdadero' ||
+            raw === '1';
+        }
+      } else {
+        // Default: services=false, physical=true
+        item.track_inventory = item.product_type === 'service' ? false : true;
+      }
+
+      // Service always false
+      if (item.product_type === 'service') {
+        item.track_inventory = false;
       }
 
       // Validate required fields
@@ -517,6 +548,7 @@ export class ProductsBulkService {
         'Precio Compra',
         'Margen',
         'Cantidad Inicial',
+        'Controla Inventario',
         'Codigo Bodega',
         'Nombre Bodega',
         'Descripción',
@@ -529,16 +561,17 @@ export class ProductsBulkService {
         'Precio Oferta',
       ];
       exampleData = [
-        { Nombre: 'Zapatillas Running Pro', SKU: 'ZAP-RUN-PRO-42', Tipo: 'Producto', 'Precio Venta': 85000, 'Precio Compra': 45000, Margen: 45, 'Cantidad Inicial': 20, 'Codigo Bodega': 'BOD-001', 'Nombre Bodega': '', Descripción: 'Zapatillas ideales para correr largas distancias.', Marca: 'Nike', Categorías: 'Deportes, Calzado, Running', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 0.8, 'En Oferta': 'No', 'Precio Oferta': 0 },
-        { Nombre: 'Asesoría Tributaria', SKU: 'SVC-ASE-TRI-001', Tipo: 'Servicio', 'Precio Venta': 150000, 'Precio Compra': 60000, Margen: 60, 'Cantidad Inicial': 0, 'Codigo Bodega': '', 'Nombre Bodega': '', Descripción: 'Asesoría tributaria profesional por sesión.', Marca: '', Categorías: 'Servicios, Contabilidad', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 0, 'En Oferta': 'No', 'Precio Oferta': 0 },
-        { Nombre: 'Leche Entera 1L', SKU: 'LEC-ENT-1L-COL', Tipo: 'Producto', 'Precio Venta': 5200, 'Precio Compra': 3800, Margen: 37, 'Cantidad Inicial': 200, 'Codigo Bodega': 'BOD-001', 'Nombre Bodega': '', Descripción: 'Leche entera pasteurizada de origen colombiano.', Marca: 'Colanta', Categorías: 'Alimentos, Lácteos', Estado: 'activo', 'Disponible Ecommerce': 'No', Peso: 1.05, 'En Oferta': 'No', 'Precio Oferta': 0 },
-        { Nombre: 'Camiseta Dry-Fit Running', SKU: 'CAM-DRY-RUN-M01', Tipo: 'Producto', 'Precio Venta': 65000, 'Precio Compra': 32000, Margen: 50, 'Cantidad Inicial': 35, 'Codigo Bodega': '', 'Nombre Bodega': '', Descripción: 'Camiseta deportiva transpirable para hombre.', Marca: 'Adidas', Categorías: 'Deportes, Ropa Deportiva', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 0.15, 'En Oferta': 'No', 'Precio Oferta': 0 },
-        { Nombre: 'Escritorio Plegable Madera', SKU: 'ESC-PLE-MAD-120', Tipo: 'Producto', 'Precio Venta': 180000, 'Precio Compra': 95000, Margen: 47, 'Cantidad Inicial': 8, 'Codigo Bodega': 'BOD-002', 'Nombre Bodega': '', Descripción: 'Escritorio plegable de madera 120x60cm para home office.', Marca: 'Muebles Express', Categorías: 'Hogar, Muebles, Oficina', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 15, 'En Oferta': 'Si', 'Precio Oferta': 155000 },
-        { Nombre: 'Aceite de Oliva Extra Virgen 500ml', SKU: 'ACE-OLI-EXV-500', Tipo: 'Producto', 'Precio Venta': 38000, 'Precio Compra': 24000, Margen: 58, 'Cantidad Inicial': 60, 'Codigo Bodega': '', 'Nombre Bodega': 'Bodega Principal', Descripción: 'Aceite de oliva importado, primera prensada en frío.', Marca: 'Olivetto', Categorías: 'Alimentos, Aceites', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 0.55, 'En Oferta': 'No', 'Precio Oferta': 0 },
-        { Nombre: 'Teclado Mecánico RGB', SKU: 'TEC-MEC-RGB-K70', Tipo: 'Producto', 'Precio Venta': 320000, 'Precio Compra': 180000, Margen: 78, 'Cantidad Inicial': 12, 'Codigo Bodega': '', 'Nombre Bodega': '', Descripción: 'Teclado mecánico con switches Cherry MX e iluminación RGB.', Marca: 'Corsair', Categorías: 'Tecnología, Periféricos, Gaming', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 1.2, 'En Oferta': 'Si', 'Precio Oferta': 280000 },
-        { Nombre: 'Bloqueador Solar Facial SPF 60', SKU: 'BLO-SOL-FAC-060', Tipo: 'Producto', 'Precio Venta': 48000, 'Precio Compra': 28000, Margen: 71, 'Cantidad Inicial': 45, 'Codigo Bodega': 'BOD-001', 'Nombre Bodega': '', Descripción: 'Protector solar facial oil-free con SPF 60.', Marca: 'La Roche-Posay', Categorías: 'Belleza, Cuidado Personal', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 0.1, 'En Oferta': 'No', 'Precio Oferta': 0 },
-        { Nombre: 'Cuerda de Saltar Profesional', SKU: 'CUE-SAL-PRO-300', Tipo: 'Producto', 'Precio Venta': 22000, 'Precio Compra': 9000, Margen: 59, 'Cantidad Inicial': 0, 'Codigo Bodega': '', 'Nombre Bodega': '', Descripción: 'Cuerda de saltar con rodamientos y mangos antideslizantes.', Marca: 'Everlast', Categorías: 'Deportes, Fitness', Estado: 'inactivo', 'Disponible Ecommerce': 'No', Peso: 0.3, 'En Oferta': 'No', 'Precio Oferta': 0 },
-        { Nombre: 'Set Ollas Antiadherentes x5', SKU: 'SET-OLL-ANT-5PC', Tipo: 'Producto', 'Precio Venta': 145000, 'Precio Compra': 72000, Margen: 50, 'Cantidad Inicial': 18, 'Codigo Bodega': '', 'Nombre Bodega': 'Bodega Secundaria', Descripción: 'Juego de 5 ollas con recubrimiento antiadherente cerámico.', Marca: 'T-fal', Categorías: 'Hogar, Cocina', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 4.5, 'En Oferta': 'Si', 'Precio Oferta': 125000 },
+        { Nombre: 'Zapatillas Running Pro', SKU: 'ZAP-RUN-PRO-42', Tipo: 'Producto', 'Precio Venta': 85000, 'Precio Compra': 45000, Margen: 45, 'Cantidad Inicial': 20, 'Controla Inventario': 'Si', 'Codigo Bodega': 'BOD-001', 'Nombre Bodega': '', Descripción: 'Zapatillas ideales para correr largas distancias.', Marca: 'Nike', Categorías: 'Deportes, Calzado, Running', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 0.8, 'En Oferta': 'No', 'Precio Oferta': 0 },
+        { Nombre: 'Asesoría Tributaria', SKU: 'SVC-ASE-TRI-001', Tipo: 'Servicio', 'Precio Venta': 150000, 'Precio Compra': 60000, Margen: 60, 'Cantidad Inicial': 0, 'Controla Inventario': 'No', 'Codigo Bodega': '', 'Nombre Bodega': '', Descripción: 'Asesoría tributaria profesional por sesión.', Marca: '', Categorías: 'Servicios, Contabilidad', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 0, 'En Oferta': 'No', 'Precio Oferta': 0 },
+        { Nombre: 'Leche Entera 1L', SKU: 'LEC-ENT-1L-COL', Tipo: 'Producto', 'Precio Venta': 5200, 'Precio Compra': 3800, Margen: 37, 'Cantidad Inicial': 200, 'Controla Inventario': 'Si', 'Codigo Bodega': 'BOD-001', 'Nombre Bodega': '', Descripción: 'Leche entera pasteurizada de origen colombiano.', Marca: 'Colanta', Categorías: 'Alimentos, Lácteos', Estado: 'activo', 'Disponible Ecommerce': 'No', Peso: 1.05, 'En Oferta': 'No', 'Precio Oferta': 0 },
+        { Nombre: 'Camiseta Dry-Fit Running', SKU: 'CAM-DRY-RUN-M01', Tipo: 'Producto', 'Precio Venta': 65000, 'Precio Compra': 32000, Margen: 50, 'Cantidad Inicial': 35, 'Controla Inventario': 'Si', 'Codigo Bodega': '', 'Nombre Bodega': '', Descripción: 'Camiseta deportiva transpirable para hombre.', Marca: 'Adidas', Categorías: 'Deportes, Ropa Deportiva', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 0.15, 'En Oferta': 'No', 'Precio Oferta': 0 },
+        { Nombre: 'Consultoría On-Demand', SKU: 'PRO-CON-DEM-001', Tipo: 'Producto', 'Precio Venta': 250000, 'Precio Compra': 100000, Margen: 150, 'Cantidad Inicial': 0, 'Controla Inventario': 'No', 'Codigo Bodega': '', 'Nombre Bodega': '', Descripción: 'Producto físico entregado bajo disponibilidad (sin tracking de inventario).', Marca: '', Categorías: 'Servicios', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 0, 'En Oferta': 'No', 'Precio Oferta': 0 },
+        { Nombre: 'Escritorio Plegable Madera', SKU: 'ESC-PLE-MAD-120', Tipo: 'Producto', 'Precio Venta': 180000, 'Precio Compra': 95000, Margen: 47, 'Cantidad Inicial': 8, 'Controla Inventario': 'Si', 'Codigo Bodega': 'BOD-002', 'Nombre Bodega': '', Descripción: 'Escritorio plegable de madera 120x60cm para home office.', Marca: 'Muebles Express', Categorías: 'Hogar, Muebles, Oficina', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 15, 'En Oferta': 'Si', 'Precio Oferta': 155000 },
+        { Nombre: 'Aceite de Oliva Extra Virgen 500ml', SKU: 'ACE-OLI-EXV-500', Tipo: 'Producto', 'Precio Venta': 38000, 'Precio Compra': 24000, Margen: 58, 'Cantidad Inicial': 60, 'Controla Inventario': 'Si', 'Codigo Bodega': '', 'Nombre Bodega': 'Bodega Principal', Descripción: 'Aceite de oliva importado, primera prensada en frío.', Marca: 'Olivetto', Categorías: 'Alimentos, Aceites', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 0.55, 'En Oferta': 'No', 'Precio Oferta': 0 },
+        { Nombre: 'Teclado Mecánico RGB', SKU: 'TEC-MEC-RGB-K70', Tipo: 'Producto', 'Precio Venta': 320000, 'Precio Compra': 180000, Margen: 78, 'Cantidad Inicial': 12, 'Controla Inventario': 'Si', 'Codigo Bodega': '', 'Nombre Bodega': '', Descripción: 'Teclado mecánico con switches Cherry MX e iluminación RGB.', Marca: 'Corsair', Categorías: 'Tecnología, Periféricos, Gaming', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 1.2, 'En Oferta': 'Si', 'Precio Oferta': 280000 },
+        { Nombre: 'Bloqueador Solar Facial SPF 60', SKU: 'BLO-SOL-FAC-060', Tipo: 'Producto', 'Precio Venta': 48000, 'Precio Compra': 28000, Margen: 71, 'Cantidad Inicial': 45, 'Controla Inventario': 'Si', 'Codigo Bodega': 'BOD-001', 'Nombre Bodega': '', Descripción: 'Protector solar facial oil-free con SPF 60.', Marca: 'La Roche-Posay', Categorías: 'Belleza, Cuidado Personal', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 0.1, 'En Oferta': 'No', 'Precio Oferta': 0 },
+        { Nombre: 'Cuerda de Saltar Profesional', SKU: 'CUE-SAL-PRO-300', Tipo: 'Producto', 'Precio Venta': 22000, 'Precio Compra': 9000, Margen: 59, 'Cantidad Inicial': 0, 'Controla Inventario': 'Si', 'Codigo Bodega': '', 'Nombre Bodega': '', Descripción: 'Cuerda de saltar con rodamientos y mangos antideslizantes.', Marca: 'Everlast', Categorías: 'Deportes, Fitness', Estado: 'inactivo', 'Disponible Ecommerce': 'No', Peso: 0.3, 'En Oferta': 'No', 'Precio Oferta': 0 },
+        { Nombre: 'Set Ollas Antiadherentes x5', SKU: 'SET-OLL-ANT-5PC', Tipo: 'Producto', 'Precio Venta': 145000, 'Precio Compra': 72000, Margen: 50, 'Cantidad Inicial': 18, 'Controla Inventario': 'Si', 'Codigo Bodega': '', 'Nombre Bodega': 'Bodega Secundaria', Descripción: 'Juego de 5 ollas con recubrimiento antiadherente cerámico.', Marca: 'T-fal', Categorías: 'Hogar, Cocina', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 4.5, 'En Oferta': 'Si', 'Precio Oferta': 125000 },
       ];
     }
 
@@ -612,29 +645,81 @@ export class ProductsBulkService {
 
         let resultProduct;
 
-        await this.prisma.$transaction(async (tx) => {
-          if (existingProduct) {
-            // Actualizar producto existente
-            const updateProductDto = this.mapToUpdateProductDto(productData);
-            resultProduct = await this.productsService.update(
-              existingProduct.id,
-              updateProductDto,
-            );
+        if (existingProduct) {
+          // Actualizar producto existente
+          const updateProductDto = this.mapToUpdateProductDto(productData);
+          resultProduct = await this.productsService.update(
+            existingProduct.id,
+            updateProductDto,
+          );
 
-            // Asignar stock a bodega si hay cantidad y bodega resuelta
-            const isPhysical = (productData.product_type || 'physical') !== 'service';
+          // Asignar stock a bodega si hay cantidad, bodega resuelta y controla inventario
+          const isPhysical =
+            (productData.product_type || 'physical') !== 'service';
+          const stockQty = productData.stock_quantity || 0;
+          if (
+            isPhysical &&
+            (productData.track_inventory ?? true) &&
+            stockQty > 0
+          ) {
+            const targetLocation =
+              resolvedLocation ||
+              (await this.locationsService.getDefaultLocation(storeId));
+            if (targetLocation) {
+              await this.stockLevelManager.updateStock({
+                product_id: existingProduct.id,
+                location_id: targetLocation.id,
+                quantity_change: stockQty,
+                movement_type: 'adjustment',
+                reason: 'Carga masiva - actualización de stock',
+              });
+            }
+          }
+
+          results.push({
+            product: resultProduct,
+            status: 'success',
+            message: `Producto con SKU ${productData.sku} actualizado exitosamente`,
+          });
+        } else {
+          // Crear nuevo producto
+          const createProductDto = this.mapToCreateProductDto(
+            productData,
+            storeId,
+          );
+          let createdId: number | null = null;
+          try {
+            resultProduct =
+              await this.productsService.create(createProductDto);
+            createdId = (resultProduct as any).id;
+
+            // Variantes
+            if (productData.variants && productData.variants.length > 0) {
+              await this.processProductVariants(
+                createdId as unknown as number,
+                productData.variants,
+              );
+            }
+
+            // Asignar stock inicial a bodega
+            const isPhysical =
+              (productData.product_type || 'physical') !== 'service';
             const stockQty = productData.stock_quantity || 0;
-            if (isPhysical && stockQty > 0) {
+            if (
+              isPhysical &&
+              (productData.track_inventory ?? true) &&
+              stockQty > 0
+            ) {
               const targetLocation =
                 resolvedLocation ||
                 (await this.locationsService.getDefaultLocation(storeId));
               if (targetLocation) {
                 await this.stockLevelManager.updateStock({
-                  product_id: existingProduct.id,
+                  product_id: createdId!,
                   location_id: targetLocation.id,
                   quantity_change: stockQty,
-                  movement_type: 'adjustment',
-                  reason: 'Carga masiva - actualización de stock',
+                  movement_type: 'initial',
+                  reason: 'Carga masiva - stock inicial',
                 });
               }
             }
@@ -642,64 +727,31 @@ export class ProductsBulkService {
             results.push({
               product: resultProduct,
               status: 'success',
-              message: `Producto con SKU ${productData.sku} actualizado exitosamente`,
+              message: 'Producto creado exitosamente',
             });
-          } else {
-            // Crear nuevo producto
-            const createProductDto = this.mapToCreateProductDto(
-              productData,
-              storeId,
-            );
-            let createdId = null;
-            try {
-              resultProduct =
-                await this.productsService.create(createProductDto);
-              createdId = (resultProduct as any).id;
-
-              // Variantes
-              if (productData.variants && productData.variants.length > 0) {
-                await this.processProductVariants(
-                  createdId as unknown as number,
-                  productData.variants,
+          } catch (createErr) {
+            if (createdId) {
+              await this.prisma.products
+                .delete({ where: { id: createdId } })
+                .catch((e) =>
+                  this.logger.error(
+                    `Cleanup failed for product ${createdId}`,
+                    e?.stack || e,
+                  ),
                 );
-              }
-
-              // Asignar stock inicial a bodega
-              const isPhysical = (productData.product_type || 'physical') !== 'service';
-              const stockQty = productData.stock_quantity || 0;
-              if (isPhysical && stockQty > 0) {
-                const targetLocation =
-                  resolvedLocation ||
-                  (await this.locationsService.getDefaultLocation(storeId));
-                if (targetLocation) {
-                  await this.stockLevelManager.updateStock({
-                    product_id: createdId!,
-                    location_id: targetLocation.id,
-                    quantity_change: stockQty,
-                    movement_type: 'initial',
-                    reason: 'Carga masiva - stock inicial',
-                  });
-                }
-              }
-
-              results.push({
-                product: resultProduct,
-                status: 'success',
-                message: 'Producto creado exitosamente',
-              });
-            } catch (createErr) {
-              if (createdId) {
-                await this.prisma.products
-                  .delete({ where: { id: createdId } })
-                  .catch((e) => console.error('Cleanup failed', e));
-              }
-              throw createErr;
             }
+            throw createErr;
           }
-        });
+        }
 
         successful++;
       } catch (error) {
+        // Log con stack y contexto para diagnosticar errores silenciosos
+        this.logger.error(
+          `Bulk product row failed (row ${rowNumber}, sku=${productData?.sku || 'n/a'}): ${error?.message || error}`,
+          error?.stack,
+        );
+
         let userMessage = 'Error procesando el producto';
         let errorCode: string | undefined;
 
@@ -726,6 +778,15 @@ export class ProductsBulkService {
         } else if (error?.code === 'P2003') {
           userMessage = 'Referencia inválida (marca, categoría u otro campo relacionado)';
           errorCode = 'BULK_PROD_VALIDATE_001';
+        } else if (error?.code === 'P2025') {
+          userMessage = 'Registro referenciado no encontrado';
+          errorCode = 'BULK_PROD_REF_001';
+        } else if (error?.errorCode === 'INV_FIND_001') {
+          userMessage = 'No se encontró ubicación de inventario para asignar stock';
+          errorCode = 'INV_FIND_001';
+        } else if (error?.errorCode === 'INV_CONTEXT_001') {
+          userMessage = 'Contexto de tienda/organización inválido';
+          errorCode = 'INV_CONTEXT_001';
         } else if (error instanceof Prisma.PrismaClientValidationError) {
           userMessage = 'Uno de los valores proporcionados tiene un formato inválido. Verifique campos como marca, categoría o peso.';
           errorCode = 'BULK_PROD_VALIDATE_001';
@@ -735,6 +796,12 @@ export class ProductsBulkService {
         } else if (error?.message?.includes('Invalid value provided')) {
           userMessage = 'Uno de los valores proporcionados tiene un formato inválido';
           errorCode = 'BULK_PROD_VALIDATE_001';
+        } else if (error?.message && typeof error.message === 'string') {
+          // Fallback: mostrar el mensaje real (truncado) en vez del genérico
+          userMessage =
+            error.message.length > 200
+              ? error.message.slice(0, 200) + '...'
+              : error.message;
         }
 
         results.push({
@@ -855,6 +922,20 @@ export class ProductsBulkService {
       } else {
         product.product_type = 'physical';
       }
+    }
+
+    // Normalizar Controla Inventario (track_inventory)
+    if (product.track_inventory !== undefined && product.track_inventory !== null && product.track_inventory !== '') {
+      if (typeof product.track_inventory === 'string') {
+        product.track_inventory = normalizeBool(product.track_inventory);
+      } else {
+        product.track_inventory = !!product.track_inventory;
+      }
+    }
+
+    // Services never track inventory
+    if (product.product_type === 'service') {
+      product.track_inventory = false;
     }
 
     // Normalizar Estado
@@ -1034,7 +1115,8 @@ export class ProductsBulkService {
       store_id: storeId,
       brand_id: product.brand_id && typeof product.brand_id === 'number' ? product.brand_id : undefined,
       category_ids: product.category_ids,
-      stock_quantity: product.stock_quantity,
+      // stock_quantity se gestiona directamente vía StockLevelManager en uploadProducts
+      // para evitar doble asignación (productsService.create también procesa stock_quantity).
       cost_price: product.cost_price,
       profit_margin: product.profit_margin,
       weight: product.weight && typeof product.weight === 'number' ? product.weight : undefined,
@@ -1043,7 +1125,10 @@ export class ProductsBulkService {
       state: product.state,
       available_for_ecommerce: product.available_for_ecommerce,
       product_type: product.product_type || 'physical',
-      track_inventory: product.product_type === 'service' ? false : undefined,
+      track_inventory:
+        product.product_type === 'service'
+          ? false
+          : (product.track_inventory ?? true),
     };
   }
 

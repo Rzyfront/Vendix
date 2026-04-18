@@ -3,6 +3,8 @@ import {
   inject,
   input,
   output,
+  signal,
+  computed,
 } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
@@ -146,7 +148,9 @@ export class CustomerListComponent {
   private currencyService = inject(CurrencyFormatService);
 
   readonly customers = input<Customer[]>([]);
-  readonly loading = input(false);
+  readonly loadingInput = input(false, { alias: 'loading' });
+  private readonly internalLoading = signal(false);
+  readonly loading = computed(() => this.loadingInput() || this.internalLoading());
   readonly totalItems = input(0);
   readonly page = input(1);
   readonly limit = input(10);

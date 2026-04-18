@@ -1,10 +1,12 @@
 import {Component,
-  input,
+  model,
   output,
+  signal,
   OnInit,
   inject,
   DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { finalize } from 'rxjs/operators';
 
 import {
   ReactiveFormsModule,
@@ -31,7 +33,6 @@ import { CreateUserDto, UserState } from '../interfaces/user.interface';
   template: `
     <app-modal
       [isOpen]="isOpen()"
-      (isOpenChange)="isOpenChange.emit($event)"
       (cancel)="onCancel()"
       [size]="'lg'"
       title="Crear Nuevo Usuario"
@@ -44,7 +45,7 @@ import { CreateUserDto, UserState } from '../interfaces/user.interface';
             placeholder="Juan"
             [required]="true"
             [control]="userForm.get('first_name')"
-            [disabled]="isCreating"
+            [disabled]="isCreating()"
           ></app-input>
 
           <app-input
@@ -53,7 +54,7 @@ import { CreateUserDto, UserState } from '../interfaces/user.interface';
             placeholder="Pérez"
             [required]="true"
             [control]="userForm.get('last_name')"
-            [disabled]="isCreating"
+            [disabled]="isCreating()"
           ></app-input>
 
           <app-input
@@ -62,7 +63,7 @@ import { CreateUserDto, UserState } from '../interfaces/user.interface';
             placeholder="juanperez"
             [required]="true"
             [control]="userForm.get('username')"
-            [disabled]="isCreating"
+            [disabled]="isCreating()"
           ></app-input>
 
           <app-input
@@ -72,7 +73,7 @@ import { CreateUserDto, UserState } from '../interfaces/user.interface';
             placeholder="juan@ejemplo.com"
             [required]="true"
             [control]="userForm.get('email')"
-            [disabled]="isCreating"
+            [disabled]="isCreating()"
           ></app-input>
 
           <app-input
@@ -82,7 +83,7 @@ import { CreateUserDto, UserState } from '../interfaces/user.interface';
             placeholder="1"
             [required]="true"
             [control]="userForm.get('organization_id')"
-            [disabled]="isCreating"
+            [disabled]="isCreating()"
           ></app-input>
 
           <app-input
@@ -92,7 +93,7 @@ import { CreateUserDto, UserState } from '../interfaces/user.interface';
             placeholder="••••••••••"
             [required]="true"
             [control]="userForm.get('password')"
-            [disabled]="isCreating"
+            [disabled]="isCreating()"
           ></app-input>
 
           <div class="space-y-2">
@@ -104,7 +105,7 @@ import { CreateUserDto, UserState } from '../interfaces/user.interface';
             <select
               formControlName="app"
               class="w-full px-3 py-2 border border-[var(--color-border)] rounded-md bg-[var(--color-surface)] text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:border-[var(--color-primary)]"
-              [disabled]="isCreating"
+              [disabled]="isCreating()"
             >
               <option value="">Seleccionar aplicación</option>
               <option value="ORG_ADMIN">ORG_ADMIN</option>
@@ -123,7 +124,7 @@ import { CreateUserDto, UserState } from '../interfaces/user.interface';
             <select
               formControlName="state"
               class="w-full px-3 py-2 border border-[var(--color-border)] rounded-md bg-[var(--color-surface)] text-[var(--color-text-primary)] focus:outline-none focus:ring-2 focus:ring-[var(--color-primary)] focus:border-[var(--color-primary)]"
-              [disabled]="isCreating"
+              [disabled]="isCreating()"
             >
               <option value="">Seleccionar estado</option>
               <option [value]="UserState.ACTIVE">Activo</option>
@@ -140,15 +141,15 @@ import { CreateUserDto, UserState } from '../interfaces/user.interface';
         <app-button
           variant="outline"
           (clicked)="onCancel()"
-          [disabled]="isCreating"
+          [disabled]="isCreating()"
         >
           Cancelar
         </app-button>
         <app-button
           variant="primary"
           (clicked)="onSubmit()"
-          [disabled]="userForm.invalid || isCreating"
-          [loading]="isCreating"
+          [disabled]="userForm.invalid || isCreating()"
+          [loading]="isCreating()"
         >
           Crear Usuario
         </app-button>
@@ -164,8 +165,7 @@ import { CreateUserDto, UserState } from '../interfaces/user.interface';
   ]})
 export class UserCreateModalComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
-  isOpen = input<boolean>(false);
-  isOpenChange = output<boolean>();
+  readonly isOpen = model<boolean>(false);
   onUserCreated = output<void>();
 
   private fb = inject(FormBuilder);
@@ -191,34 +191,35 @@ export class UserCreateModalComponent implements OnInit {
     app: [''],
     state: [UserState.PENDING_VERIFICATION]});
 
-  isCreating: boolean = false;
+  readonly isCreating = signal(false);
   UserState = UserState;
 ngOnInit(): void { }
 onSubmit(): void {
-    if (this.userForm.invalid || this.isCreating) {
+    if (this.userForm.invalid || this.isCreating()) {
       return;
     }
 
-    this.isCreating = true;
+    this.isCreating.set(true);
     const userData: CreateUserDto = this.userForm.value;
 
     this.usersService
       .createUser(userData)
-      .pipe(takeUntilDestroyed(this.destroyRef))
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        finalize(() => this.isCreating.set(false))
+      )
       .subscribe({
         next: () => {
-          this.isCreating = false;
           this.onUserCreated.emit();
           this.onCancel();
         },
         error: (error: any) => {
-          this.isCreating = false;
           console.error('Error creating user:', error);
         }});
   }
 
   onCancel(): void {
-    this.isOpenChange.emit(false);
+    this.isOpen.set(false);
     this.resetForm();
   }
 

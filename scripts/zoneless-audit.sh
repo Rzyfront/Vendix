@@ -187,9 +187,30 @@ echo "Archivos con propiedades planas de UI state: $flat_ui"
 if [ "$flat_ui" -gt 0 ]; then
   echo -e "${YELLOW}⚠️  Run para ver detalles:${NC}"
   echo "   grep -rnE '^\s+(loading|isLoading|is_loading|isOpen|showModal|visible|saving|submitting|submitted|search_term|searchTerm|filterValues)\s*(:\s*\w+)?\s*=\s*(false|true|'\''|\"|\[|\{)' $FRONTEND --include='*.component.ts'"
-  warns=$((warns + 1))
+  errors=$((errors + 1))
 else
   echo -e "${GREEN}✅ No hay propiedades planas de UI state${NC}"
+fi
+
+echo ""
+echo "=== 8.1. toSignal SIN initialValue EN *.component.ts ==="
+
+check "toSignal sin initialValue en componentes" \
+  "grep -rnE 'toSignal\(\s*this\.\w+\$\s*[^,{]*\)\s*;' $FRONTEND --include='*.component.ts' | wc -l" \
+  0
+
+echo ""
+echo "=== 8.2. PLAIN BOOLEAN UI STATE EN *.component.ts (SKILL §9) ==="
+
+plain_bool=$(grep -rlnE '^\s+(loading|isLoading|isCreating|isSaving|isSubmitting)\s*(:\s*\w+)?\s*=\s*(false|true)\s*;' \
+  $FRONTEND --include='*.component.ts' | wc -l)
+echo "Archivos con propiedades booleanas planas de UI state: $plain_bool"
+if [ "$plain_bool" -gt 0 ]; then
+  echo -e "${RED}❌ Plain boolean UI state en componentes — deben ser signal()${NC}"
+  echo "   grep -rnE '^\s+(loading|isLoading|isCreating|isSaving|isSubmitting)\s*(:\s*\w+)?\s*=\s*(false|true)\s*;' $FRONTEND --include='*.component.ts'"
+  errors=$((errors + 1))
+else
+  echo -e "${GREEN}✅ No hay booleanos planos de UI state${NC}"
 fi
 
 echo ""

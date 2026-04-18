@@ -1485,6 +1485,16 @@ export const ErrorCodes = {
     httpStatus: 422,
     devMessage: 'Invalid field type in bulk product data',
   },
+  BULK_PROD_UPLOAD_FAILED: {
+    code: 'BULK_PROD_UPLOAD_FAILED',
+    httpStatus: 500,
+    devMessage: 'Bulk product upload failed unexpectedly',
+  },
+  BULK_PROD_REF_001: {
+    code: 'BULK_PROD_REF_001',
+    httpStatus: 404,
+    devMessage: 'Referenced record not found during bulk product operation',
+  },
   // Invoice Scanner
   INV_SCAN_AI_FAIL: {
     code: 'INV_SCAN_AI_FAIL',

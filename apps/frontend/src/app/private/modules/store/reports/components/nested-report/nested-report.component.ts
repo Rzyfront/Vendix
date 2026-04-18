@@ -20,7 +20,9 @@ interface GroupedSection {
 export class NestedReportComponent {
   data = input.required<any[]>();
   columns = input.required<ReportColumn[]>();
-  loading = input(false);
+  readonly loadingInput = input(false, { alias: 'loading' });
+  private readonly internalLoading = signal(false);
+  readonly loading = computed(() => this.loadingInput() || this.internalLoading());
 
   private currencyPipe = new CurrencyPipe('es-CO');
   private decimalPipe = new DecimalPipe('es-CO');

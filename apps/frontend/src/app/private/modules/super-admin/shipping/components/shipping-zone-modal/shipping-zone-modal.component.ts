@@ -1,4 +1,4 @@
-import {Component, OnInit, inject, input, output, DestroyRef} from '@angular/core';
+import {Component, OnInit, inject, input, output, signal, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom } from 'rxjs';
 
@@ -204,7 +204,7 @@ import {
                   </app-button>
                   <app-button
                     variant="primary"
-                    [loading]="isSubmitting"
+                    [loading]="isSubmitting()"
                     [disabled]="form.invalid"
                     (clicked)="onSubmit()"
                     >
@@ -226,7 +226,7 @@ export class ShippingZoneModalComponent implements OnInit {
   private countryService: CountryService = inject(CountryService);
 
   form: FormGroup;
-  isSubmitting = false;
+  readonly isSubmitting = signal(false);
 
   countries: Country[] = [];
   countryOptions: SelectorOption[] = [];
@@ -321,7 +321,7 @@ export class ShippingZoneModalComponent implements OnInit {
   async onSubmit() {
     if (this.form.invalid) return;
 
-    this.isSubmitting = true;
+    this.isSubmitting.set(true);
     const formValue = this.form.value;
 
     const payload: Partial<ShippingZone> = {
@@ -340,11 +340,11 @@ export class ShippingZoneModalComponent implements OnInit {
 
     try {
       await firstValueFrom(request$);
-      this.isSubmitting = false;
+      this.isSubmitting.set(false);
       this.saved.emit();
       this.close.emit();
     } catch (e) {
-      this.isSubmitting = false;
+      this.isSubmitting.set(false);
       alert('Error al guardar la zona.');
     }
   }

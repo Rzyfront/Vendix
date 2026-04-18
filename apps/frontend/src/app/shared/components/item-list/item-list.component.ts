@@ -1,4 +1,4 @@
-import { Component, input, output } from '@angular/core';
+import { Component, input, output, signal, computed } from '@angular/core';
 import { NgClass, NgStyle } from '@angular/common';
 import { IconComponent } from '../icon/icon.component';
 import {
@@ -18,7 +18,9 @@ export class ItemListComponent {
   readonly data = input<any[]>([]);
   readonly cardConfig = input.required<ItemListCardConfig>();
   readonly actions = input<TableAction[]>();
-  readonly loading = input(false);
+  readonly loadingInput = input(false, { alias: 'loading' });
+  private readonly internalLoading = signal(false);
+  readonly loading = computed(() => this.loadingInput() || this.internalLoading());
   readonly emptyMessage = input('No hay datos disponibles');
   readonly emptyIcon = input('inbox');
   readonly size = input<ItemListSize>('md');

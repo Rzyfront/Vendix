@@ -1,4 +1,4 @@
-import { Component, input, output } from '@angular/core';
+import { Component, input, output, model } from '@angular/core';
 
 import {
   ReactiveFormsModule,
@@ -24,8 +24,7 @@ import { CreateDomainDto, DomainType } from '../interfaces/domain.interface';
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen()"
-      (isOpenChange)="isOpenChange.emit($event)"
+      [(isOpen)]="isOpen"
       (cancel)="onCancel()"
       [size]="'lg'"
       title="Crear Nuevo Dominio"
@@ -125,9 +124,8 @@ import { CreateDomainDto, DomainType } from '../interfaces/domain.interface';
   `,
 })
 export class DomainCreateModalComponent {
-  readonly isOpen = input(false);
+  readonly isOpen = model<boolean>(false);
   readonly isLoading = input(false);
-  readonly isOpenChange = output<boolean>();
   readonly create = output<CreateDomainDto>();
   readonly cancel = output<void>();
   domainForm!: FormGroup;
@@ -148,7 +146,7 @@ export class DomainCreateModalComponent {
   }
 
   open(): void {
-    this.isOpenChange.emit(true);
+    this.isOpen.set(true);
     this.domainForm.reset({
       hostname: '',
       domain_type: DomainType.PRIMARY,
@@ -160,19 +158,12 @@ export class DomainCreateModalComponent {
   }
 
   close(): void {
-    this.isOpenChange.emit(false);
+    this.isOpen.set(false);
     this.domainForm.reset();
   }
 
-  onOpenChange(isOpen: boolean): void {
-    this.isOpenChange.emit(isOpen);
-    if (!isOpen) {
-      this.resetForm();
-    }
-  }
-
   onCancel(): void {
-    this.isOpenChange.emit(false);
+    this.isOpen.set(false);
     this.resetForm();
   }
 

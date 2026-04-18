@@ -1,4 +1,4 @@
-import { Component, input, computed } from '@angular/core';
+import { Component, input, computed, signal } from '@angular/core';
 import { CurrencyPipe, DecimalPipe, PercentPipe } from '@angular/common';
 import { SummaryLayoutConfig, SummaryField } from '../../interfaces/report.interface';
 
@@ -13,7 +13,9 @@ import { SummaryLayoutConfig, SummaryField } from '../../interfaces/report.inter
 export class SummaryReportComponent {
   summaryData = input.required<Record<string, any>>();
   layout = input.required<SummaryLayoutConfig>();
-  loading = input(false);
+  readonly loadingInput = input(false, { alias: 'loading' });
+  private readonly internalLoading = signal(false);
+  readonly loading = computed(() => this.loadingInput() || this.internalLoading());
 
   private currencyPipe = new CurrencyPipe('es-CO');
   private decimalPipe = new DecimalPipe('es-CO');

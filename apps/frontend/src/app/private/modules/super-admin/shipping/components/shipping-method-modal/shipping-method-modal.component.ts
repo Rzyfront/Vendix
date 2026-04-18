@@ -1,4 +1,4 @@
-import {Component, OnInit, inject, input, output, DestroyRef} from '@angular/core';
+import {Component, OnInit, inject, input, output, signal, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { firstValueFrom } from 'rxjs';
 
@@ -89,7 +89,7 @@ import { SelectorComponent, SelectorOption } from '../../../../../../shared/comp
         <app-button variant="ghost" (clicked)="close.emit()">
           Cancelar
         </app-button>
-        <app-button variant="primary" [loading]="isSubmitting" [disabled]="form.invalid" (clicked)="onSubmit()">
+        <app-button variant="primary" [loading]="isSubmitting()" [disabled]="form.invalid" (clicked)="onSubmit()">
           <app-icon name="save" size="18" slot="icon" class="mr-2"></app-icon>
           {{ method() ? 'Actualizar Método' : 'Crear Método' }}
         </app-button>
@@ -108,7 +108,7 @@ export class ShippingMethodModalComponent implements OnInit {
 
   ShippingMethodType = ShippingMethodType;
   form: FormGroup;
-  isSubmitting = false;
+  readonly isSubmitting = signal(false);
 
   typeOptions: SelectorOption[] = [
     { value: ShippingMethodType.PICKUP, label: 'Recogida en Tienda' },
@@ -144,7 +144,7 @@ export class ShippingMethodModalComponent implements OnInit {
   async onSubmit() {
     if (this.form.invalid) return;
 
-    this.isSubmitting = true;
+    this.isSubmitting.set(true);
     const value = this.form.value;
 
     const method = this.method();
@@ -154,11 +154,11 @@ export class ShippingMethodModalComponent implements OnInit {
 
     try {
       await firstValueFrom(request$);
-      this.isSubmitting = false;
+      this.isSubmitting.set(false);
       this.saved.emit();
       this.close.emit();
     } catch (e) {
-      this.isSubmitting = false;
+      this.isSubmitting.set(false);
       alert('Error al guardar el método de envío.');
     }
   }
