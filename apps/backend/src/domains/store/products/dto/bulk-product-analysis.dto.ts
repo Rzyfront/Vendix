@@ -6,6 +6,7 @@ export class BulkProductAnalysisItemDto {
   base_price: number;
   cost_price: number;
   stock_quantity: number;
+  track_inventory?: boolean;
   brand_name?: string;
   brand_will_create: boolean;
   category_names?: string[];

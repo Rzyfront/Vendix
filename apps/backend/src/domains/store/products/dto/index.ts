@@ -1176,6 +1176,10 @@ export class BulkProductItemDto {
   @IsOptional()
   @IsString()
   product_type?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  track_inventory?: boolean;
 }
 
 export class BulkProductUploadDto {
