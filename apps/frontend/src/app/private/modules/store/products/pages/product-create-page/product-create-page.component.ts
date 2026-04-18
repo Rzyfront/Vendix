@@ -328,6 +328,50 @@ export type { GeneratedVariant };
           background-position: 0% 50%;
         }
       }
+
+      /* ── Inline tooltip help icon (styled tooltip, not native [title]) ── */
+      .help-icon-inline {
+        position: relative;
+        display: inline-flex;
+        align-items: center;
+        cursor: help;
+        transition: color 0.2s ease;
+      }
+
+      .help-icon-inline[data-tooltip]:hover::after {
+        content: attr(data-tooltip);
+        position: absolute;
+        bottom: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        padding: 0.375rem 0.5rem;
+        background: var(--color-text-primary);
+        color: var(--color-surface);
+        font-size: var(--fs-xs);
+        border-radius: var(--radius-sm);
+        white-space: normal;
+        box-shadow: var(--shadow-md);
+        z-index: 50;
+        margin-bottom: 0.375rem;
+        pointer-events: none;
+        max-width: 280px;
+        width: max-content;
+        text-align: center;
+        line-height: 1.4;
+      }
+
+      .help-icon-inline[data-tooltip]:hover::before {
+        content: '';
+        position: absolute;
+        bottom: 100%;
+        left: 50%;
+        transform: translateX(-50%);
+        border: 4px solid transparent;
+        border-top-color: var(--color-text-primary);
+        margin-bottom: -0.125rem;
+        z-index: 50;
+        pointer-events: none;
+      }
     `,
   ],
 })
@@ -473,7 +517,9 @@ export class ProductCreatePageComponent {
   generatedVariants: GeneratedVariant[] = [];
   removedVariantKeys = new Set<string>();
   expandedVariantIndex = signal<number | null>(null);
-  stockTransferMode: 'first' | 'distribute' | 'reset' = 'reset';
+  stockTransferMode: 'first' | 'distribute' | 'reset' | null = null;
+  readonly originalBaseStock = signal(0);
+  readonly originalHadVariants = signal(false);
 
   // New Attribute Input
   newAttributeName = '';
@@ -824,6 +870,12 @@ export class ProductCreatePageComponent {
       this.imageIds = product.product_images.map((img: any) => img.id ?? null);
     }
 
+    // Capture original baseline for strict variant/stock transition guards
+    this.originalBaseStock.set(Number(product.stock_quantity ?? 0));
+    this.originalHadVariants.set(
+      !!(product.product_variants && product.product_variants.length > 0),
+    );
+
     // Load variants if present
     if (product.product_variants && product.product_variants.length > 0) {
       this.hasVariants = true;
@@ -943,7 +995,10 @@ export class ProductCreatePageComponent {
   }
 
   get totalVariantStock(): number {
-    return this.generatedVariants.reduce((sum, v) => sum + (v.stock || 0), 0);
+    return this.generatedVariants.reduce(
+      (sum, v) => sum + (Number(v.stock) || 0),
+      0,
+    );
   }
 
   toggleVariants(isChecked: boolean): void {
@@ -969,7 +1024,7 @@ export class ProductCreatePageComponent {
         return;
       }
 
-      this.stockTransferMode = 'reset';
+      this.stockTransferMode = null;
       this.applyVariantToggle(true);
     } else {
       if (this.isEditMode() && this.generatedVariants.length > 0) {
@@ -1142,7 +1197,8 @@ export class ProductCreatePageComponent {
         continue;
       }
 
-      // New variant
+      // New variant — defaults to track_inventory_override=true
+      // (la variante maneja su propio stock, no hereda del producto base).
       newVariants.push({
         name: `${this.productForm.get('name')?.value || 'Product'}${nameSuffix}`,
         sku: baseSku ? `${baseSku}${skuSuffix}` : '',
@@ -1153,6 +1209,7 @@ export class ProductCreatePageComponent {
         sale_price: 0,
         stock: 0,
         attributes,
+        track_inventory_override: true,
       });
     }
 
@@ -1714,6 +1771,47 @@ export class ProductCreatePageComponent {
         );
         return;
       }
+
+      // Strict guard: edit mode, transitioning simple→variants, base stock > 0.
+      // Force a non-reset mode AND ensure variant totals match the base stock
+      // (no stock can be "lost" in the transition).
+      const baseline = this.originalBaseStock();
+      const isTransitioning =
+        this.isEditMode() && !this.originalHadVariants() && baseline > 0;
+      if (isTransitioning) {
+        if (!this.stockTransferMode || this.stockTransferMode === 'reset') {
+          this.toastService.error(
+            "Debes redistribuir el stock base. Elige 'Asignar a una variante' o 'Distribuir'.",
+            'Redistribución requerida',
+          );
+          this.showStockTransferDialog(baseline);
+          return;
+        }
+        if (this.totalVariantStock !== baseline) {
+          this.toastService.error(
+            `La suma de stock de las variantes (${this.totalVariantStock}) debe igualar el stock base original (${baseline}).`,
+            'Totales desalineados',
+          );
+          return;
+        }
+      }
+
+      // Track-inventory products with variants must declare at least one unit of stock
+      // across the variants (otherwise the product becomes unsellable silently).
+      const trackInventoryEnabled = !!this.productForm.get('track_inventory')?.value;
+      if (trackInventoryEnabled) {
+        const allVariantsTrackInventory = this.generatedVariants.every((v) => {
+          if (v.track_inventory_override === false) return false;
+          return true;
+        });
+        if (allVariantsTrackInventory && this.totalVariantStock <= 0) {
+          this.toastService.error(
+            'Todas las variantes que manejan stock tienen 0 unidades. Asigna al menos 1 unidad antes de guardar.',
+            'Stock de variantes requerido',
+          );
+          return;
+        }
+      }
     }
 
     this.isSubmitting.set(true);
@@ -1834,8 +1932,15 @@ export class ProductCreatePageComponent {
       productData.variants = [];
     }
 
-    if (this.isEditMode()) {
+    if (this.isEditMode() && this.stockTransferMode) {
       productData.stock_transfer_mode = this.stockTransferMode;
+    }
+
+    // Reverse transfer: disabling variants on a product that previously had variants.
+    // Backend auto-sums all variant stock into base stock; flag is required as an
+    // explicit confirmation (any non-reset value works).
+    if (this.isEditMode() && !this.hasVariants && this.originalHadVariants()) {
+      productData.variant_removal_stock_mode = 'distribute';
     }
 
     const request$ =

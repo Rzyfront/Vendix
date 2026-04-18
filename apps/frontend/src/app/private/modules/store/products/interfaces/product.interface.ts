@@ -244,6 +244,7 @@ export interface CreateProductDto {
   variants?: CreateProductVariantDto[];
   stock_by_location?: StockByLocationDto[];
   stock_transfer_mode?: 'first' | 'distribute' | 'reset';
+  variant_removal_stock_mode?: 'first' | 'distribute' | 'reset';
 }
 
 export interface UpdateProductDto {
@@ -291,6 +292,7 @@ export interface UpdateProductDto {
   variants?: CreateProductVariantDto[];
   stock_by_location?: StockByLocationDto[];
   stock_transfer_mode?: 'first' | 'distribute' | 'reset';
+  variant_removal_stock_mode?: 'first' | 'distribute' | 'reset';
 }
 
 export interface CreateProductVariantDto {

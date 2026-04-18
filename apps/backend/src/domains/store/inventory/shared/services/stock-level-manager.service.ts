@@ -1249,9 +1249,38 @@ export class StockLevelManager {
       }
     }
 
-    await this.syncProductStock(prisma, product_id);
+    await this.enforceStockLevelsMode(prisma, product_id);
 
     return [...new Set(locationIds)];
+  }
+
+  /**
+   * Mantiene stock_levels coherente con el modo del producto.
+   * - Producto con variantes: elimina filas base (product_variant_id IS NULL).
+   * - Producto sin variantes: no-op (las filas de variantes se eliminan al borrar la variante).
+   *
+   * Invariante: un producto NUNCA coexiste con filas base y filas de variante simultáneamente.
+   * Esto evita doble conteo en findOne/findAll y stock fantasma heredado de transiciones previas.
+   */
+  async enforceStockLevelsMode(
+    prisma: any,
+    product_id: number,
+  ): Promise<void> {
+    const basePrisma = prisma._baseClient || prisma;
+    const variantCount = await basePrisma.product_variants.count({
+      where: { product_id },
+    });
+
+    if (variantCount > 0) {
+      await basePrisma.stock_levels.deleteMany({
+        where: {
+          product_id,
+          product_variant_id: null,
+        },
+      });
+    }
+
+    await this.syncProductStock(prisma, product_id);
   }
 
   async transferVariantStockToBase(

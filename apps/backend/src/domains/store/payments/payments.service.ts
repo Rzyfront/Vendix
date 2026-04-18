@@ -442,17 +442,19 @@ export class PaymentsService {
           if (!product?.track_inventory) continue;
 
           // Get actual available stock from stock_levels table (source of truth)
-          const stockLevel = await tx.stock_levels.findFirst({
+          // Aggregate across ALL locations — a product may have stock spread across
+          // multiple inventory_locations and findFirst would only return one row.
+          const stockAggregate = await tx.stock_levels.aggregate({
             where: {
               product_id: item.product_id,
-              product_variant_id: item.product_variant_id || null,
+              product_variant_id: item.product_variant_id ?? null,
             },
-            select: {
+            _sum: {
               quantity_available: true,
             },
           });
 
-          const available = stockLevel?.quantity_available ?? 0;
+          const available = stockAggregate._sum.quantity_available ?? 0;
 
           // BLOCK: If not allowing oversell and requested quantity exceeds available, throw immediately
           if (!allowOversell && item.quantity > available) {
