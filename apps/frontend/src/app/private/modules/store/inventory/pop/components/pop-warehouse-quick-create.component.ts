@@ -36,7 +36,9 @@ import { LocationType, CreateLocationDto, InventoryLocation } from '../../interf
       (cancel)="onClose()"
     >
       <form
-        (ngSubmit)="onSubmit()"
+        [formGroup]="form"
+        (ngSubmit)="onSubmit($event)"
+        (submit)="onRawSubmit($event)"
         class="h-full flex flex-col"
       >
         <div class="space-y-4 flex-1">
@@ -67,26 +69,27 @@ import { LocationType, CreateLocationDto, InventoryLocation } from '../../interf
             placeholder="Seleccionar tipo"
           ></app-selector>
         </div>
-
-        <!-- Footer Actions -->
-        <div slot="footer" class="flex justify-end gap-3 mt-4">
-          <app-button variant="outline" (clicked)="onClose()">
-            Cancelar
-          </app-button>
-          <app-button
-            variant="primary"
-            type="submit"
-            [disabled]="!isFormValid() || isLoading()"
-          >
-            @if (!isLoading()) {
-              <span>Crear Bodega</span>
-            }
-            @if (isLoading()) {
-              <span>Creando...</span>
-            }
-          </app-button>
-        </div>
       </form>
+
+      <!-- Footer Actions (projected outside form via content projection) -->
+      <div slot="footer" class="flex justify-end gap-3">
+        <app-button variant="outline" (clicked)="onClose()">
+          Cancelar
+        </app-button>
+        <app-button
+          variant="primary"
+          [disabled]="!isFormValid() || isLoading()"
+          [loading]="isLoading()"
+          (clicked)="onSubmit($event)"
+        >
+          @if (!isLoading()) {
+            <span>Crear Bodega</span>
+          }
+          @if (isLoading()) {
+            <span>Creando...</span>
+          }
+        </app-button>
+      </div>
     </app-modal>
   `,
   styles: [
@@ -129,8 +132,18 @@ export class PopWarehouseQuickCreateComponent {
   // Form Actions
   // ============================================================
 
-  onSubmit(): void {
-    if (!this.isFormValid()) {
+  onRawSubmit(event: Event): void {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  onSubmit(event?: Event): void {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+
+    if (!this.isFormValid() || this.isLoading()) {
       return;
     }
 

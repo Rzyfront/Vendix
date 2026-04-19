@@ -806,16 +806,11 @@ export class PopComponent implements OnInit, OnDestroy {
   productSelection!: PopProductSelectionComponent;
 
   onSupplierCreated(supplier: { id: number; name: string; code?: string }): void {
-    // Add in-memory to the selector options (no HTTP refetch), then select it.
-    // This avoids the race where a full `refreshSuppliers()` reload could
-    // interact with the cart state subscription and clear cart items.
     this.header.addSupplier(supplier);
     this.popCartService.setSupplier(supplier.id);
   }
 
   onWarehouseCreated(warehouse: { id: number; name: string; code?: string }): void {
-    // Add in-memory to the selector options (no HTTP refetch), then select it.
-    // Symmetric to onSupplierCreated.
     this.header.addLocation(warehouse);
     this.popCartService.setLocation(warehouse.id);
   }
