@@ -179,15 +179,19 @@ else
 fi
 
 echo ""
-echo "=== 8. VARIABLES PLANAS DE UI STATE (antipatron) ==="
+echo "=== 8. VARIABLES PLANAS DE UI STATE (heuristica, warn-only) ==="
 
-flat_ui=$(grep -rlnE '^\s+(loading|isLoading|is_loading|isOpen|showModal|visible|saving|submitting|submitted|search_term|searchTerm|filterValues|query_params|selectedItem|items)\s*(:\s*\w+)?\s*=\s*(false|true|'\''|""|\[|\{)' \
+# Heuristica amplia para detectar posibles UI state sin migrar a signal().
+# Falsos positivos comunes (inputs con default, arrays no-UI, props de config):
+# por eso esta seccion es WARN-only. La red estricta de errores esta en 8.2.
+# Removido `items` y `selectedItem` del regex — demasiado genericos.
+flat_ui=$(grep -rlnE '^\s+(loading|isLoading|is_loading|isOpen|showModal|saving|submitting|submitted|search_term|searchTerm|filterValues|query_params)\s*(:\s*\w+)?\s*=\s*(false|true|'\''|""|\[|\{)' \
   $FRONTEND --include='*.component.ts' | wc -l)
-echo "Archivos con propiedades planas de UI state: $flat_ui"
+echo "Archivos con propiedades planas de UI state (heuristica): $flat_ui"
 if [ "$flat_ui" -gt 0 ]; then
-  echo -e "${YELLOW}⚠️  Run para ver detalles:${NC}"
-  echo "   grep -rnE '^\s+(loading|isLoading|is_loading|isOpen|showModal|visible|saving|submitting|submitted|search_term|searchTerm|filterValues)\s*(:\s*\w+)?\s*=\s*(false|true|'\''|\"|\[|\{)' $FRONTEND --include='*.component.ts'"
-  errors=$((errors + 1))
+  echo -e "${YELLOW}⚠️  Posibles falsos positivos — revisar manualmente:${NC}"
+  echo "   grep -rnE '^\s+(loading|isLoading|is_loading|isOpen|showModal|saving|submitting|submitted|search_term|searchTerm|filterValues|query_params)\s*(:\s*\w+)?\s*=\s*(false|true|'\''|\"|\[|\{)' $FRONTEND --include='*.component.ts'"
+  warns=$((warns + 1))
 else
   echo -e "${GREEN}✅ No hay propiedades planas de UI state${NC}"
 fi
