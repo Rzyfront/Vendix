@@ -2,6 +2,7 @@ import { Injectable, ForbiddenException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '@common/context/request-context.service';
+import { UserRole } from '../../../auth/enums/user-role.enum';
 import {
   AnalyticsQueryDto,
   Granularity,
@@ -156,7 +157,7 @@ export class CustomersAnalyticsService {
       AND EXISTS (
         SELECT 1 FROM user_roles ur
         JOIN roles r ON r.id = ur.role_id
-        WHERE ur.user_id = u.id AND r.name = 'customer'
+        WHERE ur.user_id = u.id AND r.name = '${UserRole.CUSTOMER}'
       )
       AND u.created_at >= ${startDate}
       AND u.created_at <= ${endDate}
@@ -176,7 +177,7 @@ export class CustomersAnalyticsService {
       AND EXISTS (
         SELECT 1 FROM user_roles ur
         JOIN roles r ON r.id = ur.role_id
-        WHERE ur.user_id = u.id AND r.name = 'customer'
+        WHERE ur.user_id = u.id AND r.name = '${UserRole.CUSTOMER}'
       )
       AND u.created_at < ${startDate}
     `;
@@ -328,7 +329,7 @@ export class CustomersAnalyticsService {
     const storeCustomers = await this.prisma.users.findMany({
       where: {
         store_users: { some: { store_id: storeId } },
-        user_roles: { some: { roles: { name: 'customer' } } },
+        user_roles: { some: { roles: { name: UserRole.CUSTOMER } } },
       },
       select: {
         id: true,

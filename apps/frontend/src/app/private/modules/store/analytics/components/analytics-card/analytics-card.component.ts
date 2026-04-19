@@ -1,4 +1,4 @@
-import { Component, input, signal, computed } from '@angular/core';
+import { Component, input, signal, computed, inject } from '@angular/core';
 import { Router } from '@angular/router';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { AnalyticsView, getCategoryById } from '../../config/analytics-registry';
@@ -12,6 +12,7 @@ import { AnalyticsView, getCategoryById } from '../../config/analytics-registry'
 })
 export class AnalyticsCardComponent {
   readonly view = input.required<AnalyticsView>();
+  private readonly router = inject(Router);
 
   readonly showTooltip = signal(false);
 
@@ -24,8 +25,6 @@ export class AnalyticsCardComponent {
     const cat = getCategoryById(this.view().category);
     return cat?.color ?? 'var(--color-primary)';
   });
-
-  constructor(private router: Router) {}
 
   onClick(): void {
     this.router.navigateByUrl(this.view().route);
