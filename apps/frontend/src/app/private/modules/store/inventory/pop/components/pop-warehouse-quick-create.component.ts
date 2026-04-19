@@ -1,4 +1,4 @@
-import {Component, input, output, signal, DestroyRef, inject} from '@angular/core';
+import {Component, model, output, signal, DestroyRef, inject} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormBuilder, FormGroup, ReactiveFormsModule } from '@angular/forms';
@@ -11,7 +11,7 @@ import {
 } from '../../../../../../shared/components';
 
 import { InventoryService } from '../../services/inventory.service';
-import { LocationType, CreateLocationDto } from '../../interfaces';
+import { LocationType, CreateLocationDto, InventoryLocation } from '../../interfaces';
 
 /**
  * Quick-create modal for warehouses/locations in POP
@@ -29,14 +29,16 @@ import { LocationType, CreateLocationDto } from '../../interfaces';
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen()"
+      [(isOpen)]="isOpen"
       size="md"
       title="Crear Bodega Rápido"
       subtitle="Agrega una nueva bodega sin salir del punto de compra"
-      (close)="onClose()"
+      (cancel)="onClose()"
     >
       <form
-        (ngSubmit)="onSubmit()"
+        [formGroup]="form"
+        (ngSubmit)="onSubmit($event)"
+        (submit)="onRawSubmit($event)"
         class="h-full flex flex-col"
       >
         <div class="space-y-4 flex-1">
@@ -67,26 +69,27 @@ import { LocationType, CreateLocationDto } from '../../interfaces';
             placeholder="Seleccionar tipo"
           ></app-selector>
         </div>
-
-        <!-- Footer Actions -->
-        <div slot="footer" class="flex justify-end gap-3 mt-4">
-          <app-button variant="outline" (clicked)="onClose()">
-            Cancelar
-          </app-button>
-          <app-button
-            variant="primary"
-            type="submit"
-            [disabled]="!isFormValid() || isLoading()"
-          >
-            @if (!isLoading()) {
-              <span>Crear Bodega</span>
-            }
-            @if (isLoading()) {
-              <span>Creando...</span>
-            }
-          </app-button>
-        </div>
       </form>
+
+      <!-- Footer Actions (projected outside form via content projection) -->
+      <div slot="footer" class="flex justify-end gap-3">
+        <app-button variant="outline" (clicked)="onClose()">
+          Cancelar
+        </app-button>
+        <app-button
+          variant="primary"
+          [disabled]="!isFormValid() || isLoading()"
+          [loading]="isLoading()"
+          (clicked)="onSubmit($event)"
+        >
+          @if (!isLoading()) {
+            <span>Crear Bodega</span>
+          }
+          @if (isLoading()) {
+            <span>Creando...</span>
+          }
+        </app-button>
+      </div>
     </app-modal>
   `,
   styles: [
@@ -99,10 +102,9 @@ import { LocationType, CreateLocationDto } from '../../interfaces';
 })
 export class PopWarehouseQuickCreateComponent {
   private destroyRef = inject(DestroyRef);
-  readonly isOpen = input(false);
-  readonly isOpenChange = output<boolean>();
+  readonly isOpen = model<boolean>(false);
   readonly close = output<void>();
-  readonly warehouseCreated = output<number>();
+  readonly warehouseCreated = output<InventoryLocation>();
 
   isLoading = signal(false);
 
@@ -130,8 +132,18 @@ export class PopWarehouseQuickCreateComponent {
   // Form Actions
   // ============================================================
 
-  onSubmit(): void {
-    if (!this.isFormValid()) {
+  onRawSubmit(event: Event): void {
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  onSubmit(event?: Event): void {
+    if (event) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+
+    if (!this.isFormValid() || this.isLoading()) {
       return;
     }
 
@@ -148,9 +160,9 @@ export class PopWarehouseQuickCreateComponent {
     this.inventoryService.createLocation(createDto).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         if (response.success && response.data) {
-          this.warehouseCreated.emit(response.data.id);
+          this.warehouseCreated.emit(response.data);
           this.resetForm();
-          this.isOpenChange.emit(false);
+          this.isOpen.set(false);
           this.close.emit();
         }
         this.isLoading.set(false);
@@ -164,7 +176,7 @@ export class PopWarehouseQuickCreateComponent {
 
   onClose(): void {
     this.resetForm();
-    this.isOpenChange.emit(false);
+    this.isOpen.set(false);
     this.close.emit();
   }
 

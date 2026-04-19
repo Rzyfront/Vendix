@@ -77,21 +77,43 @@ import {
             class="group relative border-2 border-dashed rounded-xl p-8 flex flex-col items-center justify-center cursor-pointer transition-all min-h-[200px]"
             [class.border-primary]="isDragging()"
             [class.bg-primary/5]="isDragging()"
-            [class.border-border]="!isDragging()"
+            [class.border-border]="!isDragging() && !selectedFile()"
             [class.hover:border-primary/50]="!isDragging()"
             [class.hover:bg-muted/30]="!isDragging()"
+            [class.border-emerald-500]="selectedFile() && !isProcessingFile()"
+            [class.bg-emerald-50]="selectedFile() && !isProcessingFile()"
           >
-            @if (filePreviewUrl()) {
+            @if (filePreviewUrl() || selectedFile()) {
               <!-- File preview -->
-              <div class="flex flex-col items-center gap-3">
-                <img
-                  [src]="filePreviewUrl()"
-                  alt="Vista previa"
-                  class="max-h-40 rounded-lg border border-border object-contain"
-                />
+              <div class="flex flex-col items-center gap-3 w-full">
+                @if (isProcessingFile()) {
+                  <app-spinner size="md" text="Cargando archivo..."></app-spinner>
+                } @else if (isImageFile()) {
+                  <img
+                    [src]="filePreviewUrl()"
+                    alt="Vista previa"
+                    class="max-h-40 rounded-lg border border-border object-contain"
+                  />
+                } @else {
+                  <!-- PDF / non-image -->
+                  <div class="p-4 bg-primary/10 rounded-lg">
+                    <app-icon name="file-text" [size]="48" class="text-primary"></app-icon>
+                  </div>
+                }
                 <p class="text-sm font-medium text-text-primary">
                   {{ selectedFile()?.name }}
                 </p>
+                @if (selectedFile()?.size) {
+                  <p class="text-xs text-text-secondary">
+                    {{ formatFileSize(selectedFile()!.size) }}
+                  </p>
+                }
+                @if (!isProcessingFile()) {
+                  <div class="flex items-center gap-2 text-emerald-600">
+                    <app-icon name="check-circle" [size]="16"></app-icon>
+                    <span class="text-xs font-medium">Archivo listo</span>
+                  </div>
+                }
                 <button
                   type="button"
                   class="text-xs text-primary hover:underline font-medium"
@@ -141,13 +163,22 @@ import {
       @if (currentStep() === 2) {
         <div class="flex flex-col lg:flex-row gap-6 min-h-[300px]">
           <!-- Image preview -->
-          @if (filePreviewUrl()) {
+          @if (filePreviewUrl() && isImageFile()) {
             <div class="lg:w-1/3 flex-shrink-0">
               <img
                 [src]="filePreviewUrl()"
                 alt="Factura"
                 class="w-full max-h-64 lg:max-h-80 object-contain rounded-lg border border-border"
               />
+            </div>
+          } @else if (selectedFile()) {
+            <div class="lg:w-1/3 flex-shrink-0 flex items-center justify-center p-8 bg-muted/30 rounded-lg border border-border">
+              <div class="flex flex-col items-center gap-3">
+                <app-icon name="file-text" [size]="64" class="text-primary"></app-icon>
+                <p class="text-sm font-medium text-text-primary text-center">
+                  {{ selectedFile()!.name }}
+                </p>
+              </div>
             </div>
           }
 
@@ -453,6 +484,12 @@ export class InvoiceScannerModalComponent {
   fileError = signal<string | null>(null);
   isDragging = signal(false);
   isScanning = signal(false);
+  isProcessingFile = signal(false);
+
+  readonly isImageFile = computed(() => {
+    const file = this.selectedFile();
+    return file?.type?.startsWith('image/') ?? false;
+  });
   scanResult = signal<InvoiceScanResult | null>(null);
   matchResult = signal<InvoiceMatchResult | null>(null);
   // Editable items (mutable copy of match result items)
@@ -562,14 +599,20 @@ export class InvoiceScannerModalComponent {
 
     // Generate preview
     if (file.type.startsWith('image/')) {
+      this.isProcessingFile.set(true);
       const reader = new FileReader();
       reader.onload = () => {
         this.filePreviewUrl.set(reader.result as string);
+        this.isProcessingFile.set(false);
+      };
+      reader.onerror = () => {
+        this.isProcessingFile.set(false);
       };
       reader.readAsDataURL(file);
     } else {
       // PDF - no preview image
       this.filePreviewUrl.set(null);
+      this.isProcessingFile.set(false);
     }
   }
 
@@ -577,6 +620,13 @@ export class InvoiceScannerModalComponent {
     this.selectedFile.set(null);
     this.filePreviewUrl.set(null);
     this.fileError.set(null);
+    this.isProcessingFile.set(false);
+  }
+
+  formatFileSize(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / 1024 / 1024).toFixed(2)} MB`;
   }
 
   // ============================================================
@@ -707,6 +757,7 @@ export class InvoiceScannerModalComponent {
     this.selectedFile.set(null);
     this.filePreviewUrl.set(null);
     this.fileError.set(null);
+    this.isProcessingFile.set(false);
     this.isScanning.set(false);
     this.scanResult.set(null);
     this.matchResult.set(null);
