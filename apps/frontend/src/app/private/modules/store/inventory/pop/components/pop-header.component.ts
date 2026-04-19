@@ -6,6 +6,8 @@ import {
   DestroyRef,
 } from "@angular/core";
 import { takeUntilDestroyed } from "@angular/core/rxjs-interop";
+import { Observable, of } from "rxjs";
+import { catchError, map, tap } from "rxjs/operators";
 
 import { FormsModule } from "@angular/forms";
 
@@ -435,8 +437,8 @@ export class PopHeaderComponent {
   readonly openWarehouseModal = output<void>();
 
   constructor() {
-    this.loadSuppliers();
-    this.loadLocations();
+    this.loadSuppliers().subscribe();
+    this.loadLocations().subscribe();
     this.setupShippingMethods();
 
     this.popCartService.cartState$
@@ -488,20 +490,30 @@ export class PopHeaderComponent {
   // Data Loading
   // ============================================================
 
-  public refreshSuppliers(): void {
-    this.loadSuppliers();
+  /**
+   * Refresh suppliers list. Returns an Observable that emits once the options
+   * signal has been updated so callers can chain actions safely (e.g. selecting
+   * a newly created supplier without racing the HTTP response).
+   */
+  public refreshSuppliers(): Observable<void> {
+    return this.loadSuppliers();
   }
 
-  public refreshLocations(): void {
-    this.loadLocations();
+  /**
+   * Refresh locations list. Returns an Observable that emits once the options
+   * signal has been updated so callers can chain actions safely (e.g. selecting
+   * a newly created warehouse without racing the HTTP response).
+   */
+  public refreshLocations(): Observable<void> {
+    return this.loadLocations();
   }
 
-  private loadSuppliers(): void {
-    this.suppliersService
+  private loadSuppliers(): Observable<void> {
+    return this.suppliersService
       .getSuppliers({ is_active: true })
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (response) => {
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        tap((response) => {
           if (response.success && response.data) {
             this.suppliers.set(response.data);
             this.supplierOptions.set(this.suppliers().map((s) => ({
@@ -510,19 +522,21 @@ export class PopHeaderComponent {
               description: s.code,
             })));
           }
-        },
-        error: (error) => {
+        }),
+        map(() => void 0),
+        catchError((error) => {
           console.error("Error loading suppliers:", error);
-        },
-      });
+          return of(void 0);
+        }),
+      );
   }
 
-  private loadLocations(): void {
-    this.inventoryService
+  private loadLocations(): Observable<void> {
+    return this.inventoryService
       .getLocations({ is_active: true })
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: (response) => {
+      .pipe(
+        takeUntilDestroyed(this.destroyRef),
+        tap((response) => {
           if (response.success && response.data) {
             this.locations.set(response.data);
             this.locationOptions.set(this.locations().map((l) => ({
@@ -540,11 +554,13 @@ export class PopHeaderComponent {
               this.onLocationChange(this.selectedLocationId());
             }
           }
-        },
-        error: (error) => {
+        }),
+        map(() => void 0),
+        catchError((error) => {
           console.error("Error loading locations:", error);
-        },
-      });
+          return of(void 0);
+        }),
+      );
   }
 
   private setupShippingMethods(): void {

@@ -806,13 +806,32 @@ export class PopComponent implements OnInit, OnDestroy {
   productSelection!: PopProductSelectionComponent;
 
   onSupplierCreated(supplierId: number): void {
-    this.header.refreshSuppliers();
-    this.popCartService.setSupplier(supplierId);
+    // Refresh options first, then select the new supplier so the <select>
+    // never sees an ngModel value that is not present in its <option> list
+    // (which would otherwise cause the native select to desync/reset).
+    // The cart items and other state are untouched — setSupplier only writes
+    // supplierId in the cart state.
+    this.header
+      .refreshSuppliers()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => this.popCartService.setSupplier(supplierId),
+        error: () => this.popCartService.setSupplier(supplierId),
+      });
   }
 
   onWarehouseCreated(warehouseId: number): void {
-    this.header.refreshLocations();
-    this.popCartService.setLocation(warehouseId);
+    // Same pattern as onSupplierCreated: refresh options first to avoid the
+    // race where setLocation(newId) writes an id that is not yet in the
+    // selector's option list, which could cause the native <select> to reset
+    // its ngModel and trigger an unintended setLocation(null).
+    this.header
+      .refreshLocations()
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => this.popCartService.setLocation(warehouseId),
+        error: () => this.popCartService.setLocation(warehouseId),
+      });
   }
 
   onLotSave(lotInfo: any): void {

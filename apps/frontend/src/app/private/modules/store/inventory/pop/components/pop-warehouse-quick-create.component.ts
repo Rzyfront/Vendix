@@ -1,4 +1,4 @@
-import {Component, input, output, signal, DestroyRef, inject} from '@angular/core';
+import {Component, model, output, signal, DestroyRef, inject} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormBuilder, FormGroup, ReactiveFormsModule } from '@angular/forms';
@@ -29,11 +29,11 @@ import { LocationType, CreateLocationDto } from '../../interfaces';
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen()"
+      [(isOpen)]="isOpen"
       size="md"
       title="Crear Bodega Rápido"
       subtitle="Agrega una nueva bodega sin salir del punto de compra"
-      (close)="onClose()"
+      (cancel)="onClose()"
     >
       <form
         (ngSubmit)="onSubmit()"
@@ -99,8 +99,7 @@ import { LocationType, CreateLocationDto } from '../../interfaces';
 })
 export class PopWarehouseQuickCreateComponent {
   private destroyRef = inject(DestroyRef);
-  readonly isOpen = input(false);
-  readonly isOpenChange = output<boolean>();
+  readonly isOpen = model<boolean>(false);
   readonly close = output<void>();
   readonly warehouseCreated = output<number>();
 
@@ -150,7 +149,7 @@ export class PopWarehouseQuickCreateComponent {
         if (response.success && response.data) {
           this.warehouseCreated.emit(response.data.id);
           this.resetForm();
-          this.isOpenChange.emit(false);
+          this.isOpen.set(false);
           this.close.emit();
         }
         this.isLoading.set(false);
@@ -164,7 +163,7 @@ export class PopWarehouseQuickCreateComponent {
 
   onClose(): void {
     this.resetForm();
-    this.isOpenChange.emit(false);
+    this.isOpen.set(false);
     this.close.emit();
   }
 
