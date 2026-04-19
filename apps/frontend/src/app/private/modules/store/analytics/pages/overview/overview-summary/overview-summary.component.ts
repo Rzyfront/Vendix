@@ -158,7 +158,7 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
       placeholder: 'Seleccionar' },
   ];
 
-  filterValues: FilterValues = {};
+  filterValues = signal<FilterValues>({});
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
@@ -171,10 +171,10 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
     combineLatest([this.dateRange$, this.granularity$])
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(([dateRange, granularity]) => {
-        this.filterValues = {
+        this.filterValues.set({
           date_from: dateRange.start_date || null,
           date_to: dateRange.end_date || null,
-          granularity: granularity || 'day' };
+          granularity: granularity || 'day' });
       });
 
     // Cache summary for template helpers
@@ -203,7 +203,7 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
     const dateTo = values['date_to'] as string;
     const granularity = values['granularity'] as string;
 
-    const currentRange = this.filterValues;
+    const currentRange = this.filterValues();
     if (
       dateFrom !== currentRange['date_from'] ||
       dateTo !== currentRange['date_to']
