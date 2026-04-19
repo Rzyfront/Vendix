@@ -1,4 +1,4 @@
-import { Component, input, output, signal, computed } from '@angular/core';
+import { Component, input, signal, computed } from '@angular/core';
 import { Router } from '@angular/router';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { AnalyticsView, getCategoryById } from '../../config/analytics-registry';
@@ -12,8 +12,6 @@ import { AnalyticsView, getCategoryById } from '../../config/analytics-registry'
 })
 export class AnalyticsCardComponent {
   readonly view = input.required<AnalyticsView>();
-
-  readonly cardClick = output<AnalyticsView>();
 
   readonly showTooltip = signal(false);
 
@@ -30,7 +28,6 @@ export class AnalyticsCardComponent {
   constructor(private router: Router) {}
 
   onClick(): void {
-    this.cardClick.emit(this.view());
     this.router.navigateByUrl(this.view().route);
   }
 }

@@ -92,6 +92,10 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
 
   readonly categories = ANALYTICS_CATEGORIES;
 
+  private readonly categoryById = computed(() =>
+    new Map(ANALYTICS_CATEGORIES.map((c) => [c.id, c])),
+  );
+
   readonly filteredViews = computed(() => {
     const category = this.selectedCategory();
     const search = this.searchTerm().toLowerCase().trim();
@@ -243,17 +247,17 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
     this.searchTerm.set(term);
   }
 
-  getCategoryLabel(categoryId: AnalyticsCategoryId): string {
-    return ANALYTICS_CATEGORIES.find((c) => c.id === categoryId)?.label ?? categoryId;
-  }
+  getCategoryLabel = (categoryId: AnalyticsCategoryId): string => {
+    return this.categoryById().get(categoryId)?.label ?? categoryId;
+  };
 
-  getCategoryIcon(categoryId: AnalyticsCategoryId): string {
-    return ANALYTICS_CATEGORIES.find((c) => c.id === categoryId)?.icon ?? 'folder';
-  }
+  getCategoryIcon = (categoryId: AnalyticsCategoryId): string => {
+    return this.categoryById().get(categoryId)?.icon ?? 'folder';
+  };
 
-  getCategoryColor(categoryId: AnalyticsCategoryId): string {
-    return ANALYTICS_CATEGORIES.find((c) => c.id === categoryId)?.color ?? 'var(--color-primary)';
-  }
+  getCategoryColor = (categoryId: AnalyticsCategoryId): string => {
+    return this.categoryById().get(categoryId)?.color ?? 'var(--color-primary)';
+  };
 
   // Template helpers
   getGrowthText(growth?: number): string {

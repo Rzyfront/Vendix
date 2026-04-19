@@ -7,7 +7,6 @@ import {
   AnalyticsCategoryId,
   getCategoryById,
   getViewsByCategory,
-  getDefaultViewForCategory,
 } from '../../config/analytics-registry';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 
@@ -27,5 +26,4 @@ export class AnalyticsShellComponent {
 
   readonly category = computed(() => getCategoryById(this.categoryId()!));
   readonly tabs = computed(() => getViewsByCategory(this.categoryId()!));
-  readonly defaultView = computed(() => getDefaultViewForCategory(this.categoryId()!));
 }
