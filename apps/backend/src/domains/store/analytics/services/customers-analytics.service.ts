@@ -33,7 +33,7 @@ export class CustomersAnalyticsService {
     // Customer role filter (correct - counts users with 'customer' role in the store)
     const customerRoleFilter = {
       store_users: { some: { store_id: storeId } },
-      user_roles: { some: { roles: { name: 'customer' } } },
+      user_roles: { some: { roles: { name: UserRole.CUSTOMER } } },
     };
 
     // Total customers in the store (via users with customer role)
