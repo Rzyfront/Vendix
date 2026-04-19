@@ -755,7 +755,7 @@ export class CreateProductVariantDto {
   @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)
-  track_inventory_override?: boolean;
+  track_inventory_override?: boolean | null;
   @IsOptional()
   @IsString()
   @IsIn(['first', 'distribute', 'reset'])
@@ -829,7 +829,7 @@ export class UpdateProductVariantDto {
   @IsOptional()
   @IsBoolean()
   @Type(() => Boolean)
-  track_inventory_override?: boolean;
+  track_inventory_override?: boolean | null;
   @IsOptional()
   @IsString()
   @IsIn(['first', 'distribute', 'reset'])
