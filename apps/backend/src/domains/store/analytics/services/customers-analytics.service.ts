@@ -157,7 +157,7 @@ export class CustomersAnalyticsService {
       AND EXISTS (
         SELECT 1 FROM user_roles ur
         JOIN roles r ON r.id = ur.role_id
-        WHERE ur.user_id = u.id AND r.name = '${UserRole.CUSTOMER}'
+        WHERE ur.user_id = u.id AND r.name = ${UserRole.CUSTOMER}
       )
       AND u.created_at >= ${startDate}
       AND u.created_at <= ${endDate}
@@ -177,7 +177,7 @@ export class CustomersAnalyticsService {
       AND EXISTS (
         SELECT 1 FROM user_roles ur
         JOIN roles r ON r.id = ur.role_id
-        WHERE ur.user_id = u.id AND r.name = '${UserRole.CUSTOMER}'
+        WHERE ur.user_id = u.id AND r.name = ${UserRole.CUSTOMER}
       )
       AND u.created_at < ${startDate}
     `;
