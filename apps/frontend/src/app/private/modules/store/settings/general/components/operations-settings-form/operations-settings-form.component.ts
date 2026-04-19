@@ -1,4 +1,4 @@
-import { Component, OnInit, OnChanges, input, output } from '@angular/core';
+import { Component, effect, input, output } from '@angular/core';
 
 import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
@@ -13,7 +13,7 @@ export interface OperationsSettings {
   imports: [ReactiveFormsModule, InputComponent],
   templateUrl: './operations-settings-form.component.html',
 })
-export class OperationsSettingsForm implements OnInit, OnChanges {
+export class OperationsSettingsForm {
   readonly settings = input.required<OperationsSettings>();
   readonly settingsChange = output<OperationsSettings>();
 
@@ -27,19 +27,13 @@ export class OperationsSettingsForm implements OnInit, OnChanges {
     return this.form.get('default_preparation_time_minutes') as FormControl<number>;
   }
 
-  ngOnInit() {
-    this.patchForm();
-  }
-
-  ngOnChanges() {
-    this.patchForm();
-  }
-
-  patchForm() {
-    const currentSettings = this.settings();
-    if (currentSettings) {
-      this.form.patchValue(currentSettings);
-    }
+  constructor() {
+    effect(() => {
+      const current = this.settings();
+      if (current) {
+        this.form.patchValue(current, { emitEvent: false });
+      }
+    });
   }
 
   onFieldChange() {

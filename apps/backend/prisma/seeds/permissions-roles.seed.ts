@@ -2222,32 +2222,6 @@ export async function seedPermissionsAndRoles(
       method: 'POST',
     },
 
-    // ──── Habeas Data ────
-    {
-      name: 'habeas-data:read-consents',
-      description: 'Leer consentimientos y estadísticas de habeas data',
-      path: '/api/store/habeas-data/stats',
-      method: 'GET',
-    },
-    {
-      name: 'habeas-data:update-consents',
-      description: 'Actualizar consentimientos de habeas data',
-      path: '/api/store/habeas-data/users/:id/consents',
-      method: 'PATCH',
-    },
-    {
-      name: 'habeas-data:export-data',
-      description: 'Exportar datos de un usuario (habeas data)',
-      path: '/api/store/habeas-data/users/:id/data-export',
-      method: 'POST',
-    },
-    {
-      name: 'habeas-data:anonymize',
-      description: 'Anonimizar datos de un usuario (habeas data)',
-      path: '/api/store/habeas-data/users/:id/anonymize',
-      method: 'POST',
-    },
-
     // ──── Paystubs (Nómina) ────
     {
       name: 'payroll:read',
@@ -2588,7 +2562,6 @@ export async function seedPermissionsAndRoles(
         p.name.startsWith('email.') ||
         p.name.startsWith('domains.') ||
         p.name.startsWith('exogenous:') ||
-        p.name.startsWith('habeas-data:') ||
         p.name.startsWith('payroll:') ||
         p.name.startsWith('taxes:') ||
         p.name.startsWith('withholding:')) &&
@@ -2618,7 +2591,6 @@ export async function seedPermissionsAndRoles(
     (p) =>
       p.name.startsWith('store:') ||
       p.name.startsWith('exogenous:') ||
-      p.name.startsWith('habeas-data:') ||
       p.name.startsWith('payroll:') ||
       p.name.startsWith('taxes:') ||
       p.name.startsWith('withholding:') ||
@@ -2694,7 +2666,6 @@ export async function seedPermissionsAndRoles(
       p.name === 'store:payroll:advances:read' ||
       // Permisos de lectura para nuevos dominios
       p.name === 'exogenous:read' ||
-      p.name === 'habeas-data:read-consents' ||
       p.name === 'payroll:read' ||
       p.name === 'taxes:ica:read' ||
       p.name === 'withholding:read' ||

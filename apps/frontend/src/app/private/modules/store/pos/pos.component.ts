@@ -121,11 +121,11 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
       >
         <!-- Header -->
         <div
-          class="flex-none px-4 lg:px-6 py-3 lg:py-4 border-b border-border pos-header relative z-30"
+          class="flex-none px-4 lg:px-6 py-2 lg:py-2.5 border-b border-border pos-header relative z-30"
         >
-          <div class="flex justify-between items-center gap-3">
+          <div class="flex justify-between items-center" style="gap: 0.75rem;">
             <!-- Left: Logo + Title -->
-            <div class="flex items-center gap-2 lg:gap-3">
+            <div class="flex items-center" style="gap: 0.5rem;">
               <div
                 class="w-10 h-10 lg:w-12 lg:h-12 rounded-xl bg-primary/10 flex items-center justify-center"
               >
@@ -135,9 +135,10 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
                   class="text-primary"
                 ></app-icon>
               </div>
-              <div class="flex flex-col">
+              <div class="flex flex-col leading-none" style="gap: 0;">
                 <h1
-                  class="font-bold text-text-primary text-base lg:text-lg leading-none flex items-center gap-2"
+                  class="font-bold text-text-primary text-base lg:text-lg leading-none flex items-center mb-0"
+                  style="gap: 0.5rem;"
                 >
                   @if (isQuotationMode()) {
                     <span>Modo Cotización</span>
@@ -149,7 +150,7 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
                     <span class="hidden sm:inline">Vendix</span> POS
                   }
                 </h1>
-                <span class="hidden sm:inline">
+                <span class="hidden sm:block leading-none">
                   @if (isQuotationMode()) {
                     <app-badge variant="primary" size="xs"
                       >Crear cotización</app-badge

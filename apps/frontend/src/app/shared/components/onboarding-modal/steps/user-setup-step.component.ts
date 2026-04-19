@@ -212,40 +212,6 @@ import {
         color: var(--color-primary);
       }
 
-      .help-icon[data-tooltip]:hover::after {
-        content: attr(data-tooltip);
-        position: absolute;
-        bottom: 100%;
-        left: 50%;
-        transform: translateX(-50%);
-        padding: 0.375rem 0.5rem;
-        background: var(--color-text-primary);
-        color: var(--color-surface);
-        font-size: var(--fs-xs);
-        font-weight: var(--fw-regular);
-        border-radius: var(--radius-sm);
-        white-space: nowrap;
-        box-shadow: var(--shadow-md);
-        z-index: 50;
-        margin-bottom: 0.375rem;
-        pointer-events: none;
-        text-transform: none;
-        letter-spacing: normal;
-      }
-
-      .help-icon[data-tooltip]:hover::before {
-        content: '';
-        position: absolute;
-        bottom: 100%;
-        left: 50%;
-        transform: translateX(-50%);
-        border: 4px solid transparent;
-        border-top-color: var(--color-text-primary);
-        margin-bottom: -0.125rem;
-        z-index: 50;
-        pointer-events: none;
-      }
-
       .field-optional {
         color: var(--color-text-muted);
         font-size: 10px;

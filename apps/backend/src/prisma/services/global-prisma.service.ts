@@ -390,19 +390,6 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.layaway_payments;
   }
 
-  // Habeas Data models
-  get user_consents() {
-    return this.baseClient.user_consents;
-  }
-
-  get data_export_requests() {
-    return this.baseClient.data_export_requests;
-  }
-
-  get anonymization_requests() {
-    return this.baseClient.anonymization_requests;
-  }
-
   // Fixed Assets models
   get fixed_asset_categories() {
     return this.baseClient.fixed_asset_categories;

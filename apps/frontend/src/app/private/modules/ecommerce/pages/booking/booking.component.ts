@@ -18,6 +18,7 @@ import {
 } from '../../services/ecommerce-booking.service';
 import { CatalogService, ProductDetail } from '../../services/catalog.service';
 import { CartService } from '../../services/cart.service';
+import { StoreUiService } from '../../services/store-ui.service';
 import { AuthFacade } from '../../../../../core/store/auth/auth.facade';
 import { StepsLineComponent } from '../../../../../shared/components/steps-line/steps-line.component';
 import { ButtonComponent } from '../../../../../shared/components/button/button.component';
@@ -49,6 +50,7 @@ export class BookingComponent implements OnInit {
   private cartService = inject(CartService);
   private authFacade = inject(AuthFacade);
   private toast = inject(ToastService);
+  private storeUiService = inject(StoreUiService);
 
   private destroyRef = inject(DestroyRef);
 
@@ -413,9 +415,7 @@ export class BookingComponent implements OnInit {
   }
 
   goToLogin(): void {
-    this.router.navigate(['/auth/login'], {
-      queryParams: { returnUrl: `/book/${this.productId()}` },
-    });
+    this.storeUiService.openLoginModal();
   }
 
   // --- Helpers ---

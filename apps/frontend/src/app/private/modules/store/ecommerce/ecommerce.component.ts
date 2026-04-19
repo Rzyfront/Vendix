@@ -88,17 +88,23 @@ export class EcommerceComponent {
   isSaving = signal(false);
   hasShippingMethods = signal<boolean | null>(null);
 
-  // Trigger for computed units to react to non-signal form state changes
-  private formUpdateTrigger = signal(0);
+  private readonly formValueSignal = toSignal(
+    this.settingsForm.valueChanges.pipe(startWith(this.settingsForm.getRawValue())),
+    { initialValue: this.settingsForm.getRawValue() }
+  );
+
+  readonly primaryColor = computed(() => this.formValueSignal()?.inicio?.colores?.primary_color ?? '#3B82F6');
+  readonly secondaryColor = computed(() => this.formValueSignal()?.inicio?.colores?.secondary_color ?? '#10B981');
+  readonly accentColor = computed(() => this.formValueSignal()?.inicio?.colores?.accent_color ?? '#F59E0B');
 
   // Slider images
-  sliderImages: SliderImage[] = [];
-  activeImageIndex = 0;
-  isUploadingImage = false;
+  readonly sliderImages = signal<SliderImage[]>([]);
+  readonly activeImageIndex = signal(0);
+  readonly isUploadingImage = signal(false);
 
   // Logo state
-  isUploadingLogo = false;
-  logoPreview: string | null = null;
+  readonly isUploadingLogo = signal(false);
+  readonly logoPreview = signal<string | null>(null);
   logoKey: string | null = null;
 
   // File input reference
@@ -112,13 +118,13 @@ export class EcommerceComponent {
   ecommerceUrl: string | null = null;
 
   // Share modal state
-  isShareModalOpen = false;
+  readonly isShareModalOpen = signal(false);
 
   // Footer settings (managed separately from the main form)
   footerSettings: FooterSettings | undefined;
 
   readonly ecommerceHeaderActions = computed<StickyHeaderActionButton[]>(() => {
-    this.formUpdateTrigger(); // Dependency
+    this.formValueSignal();
     const actions: StickyHeaderActionButton[] = [];
     const isPristine = this.settingsForm.pristine;
     const isInvalid = this.settingsForm.invalid;
@@ -163,9 +169,6 @@ export class EcommerceComponent {
   });
 
   constructor() {
-    this.settingsForm.valueChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => this.formUpdateTrigger.update(v => v + 1));
-    this.settingsForm.statusChanges.pipe(takeUntilDestroyed(this.destroyRef)).subscribe(() => this.formUpdateTrigger.update(v => v + 1));
-
     this.checkAndStartEcommerceTour();
     this.setupWhatsappPrefixEnforcement();
     this.loadSettings();
@@ -332,19 +335,21 @@ export class EcommerceComponent {
 
             // Cargar logo si existe
             if (response.config.inicio?.logo_url) {
-              this.logoPreview = response.config.inicio.logo_url;
+              this.logoPreview.set(response.config.inicio.logo_url);
               this.logoKey = response.config.inicio.logo_url;
             }
 
             // Cargar imágenes del slider
             if (response.config.slider?.photos) {
-              this.sliderImages = response.config.slider.photos
-                .filter((photo) => photo.url !== null || photo.key !== null)
-                .map((photo) => ({
-                  url: photo.url || undefined,
-                  key: photo.key || undefined,
-                  title: photo.title,
-                  caption: photo.caption }));
+              this.sliderImages.set(
+                response.config.slider.photos
+                  .filter((photo) => photo.url !== null || photo.key !== null)
+                  .map((photo) => ({
+                    url: photo.url || undefined,
+                    key: photo.key || undefined,
+                    title: photo.title,
+                    caption: photo.caption }))
+              );
             }
 
             // Cargar configuración del footer
@@ -382,8 +387,8 @@ export class EcommerceComponent {
       .subscribe({
         next: (template: EcommerceSettings) => {
           this.settingsForm.patchValue(template);
-          this.sliderImages = [];
-          this.activeImageIndex = 0;
+          this.sliderImages.set([]);
+          this.activeImageIndex.set(0);
           // Cargar defaults del footer
           if (template.footer) {
             this.footerSettings = template.footer;
@@ -460,8 +465,8 @@ export class EcommerceComponent {
    * Trigger file input for slider image upload
    */
   triggerFileInput(): void {
-    if (this.isUploadingImage) return;
-    if (this.sliderImages.length >= 5) {
+    if (this.isUploadingImage()) return;
+    if (this.sliderImages().length >= 5) {
       this.toastService.warning('Máximo 5 imágenes permitidas');
       return;
     }
@@ -488,7 +493,7 @@ export class EcommerceComponent {
 
     if (!files || files.length === 0) return;
 
-    const available_slots = 5 - this.sliderImages.length;
+    const available_slots = 5 - this.sliderImages().length;
     if (available_slots <= 0) {
       this.toastService.warning('Máximo 5 imágenes permitidas');
       input.value = '';
@@ -514,29 +519,33 @@ export class EcommerceComponent {
       this.toastService.info(`Se subirán ${valid_files.length} de ${files.length} imágenes (máximo 5 en total)`);
     }
 
-    this.isUploadingImage = true;
+    this.isUploadingImage.set(true);
     let pending_uploads = valid_files.length;
 
     for (const file of valid_files) {
       // Create placeholder with uploading state
       const placeholder: SliderImage = { url: '', uploading: true };
-      this.sliderImages.push(placeholder);
-      const placeholder_index = this.sliderImages.length - 1;
+      this.sliderImages.update((arr) => [...arr, placeholder]);
+      const placeholder_index = this.sliderImages().length - 1;
 
       this.ecommerceService
         .uploadSliderImage(file)
         .pipe(takeUntilDestroyed(this.destroyRef))
         .subscribe({
           next: (result) => {
-            this.sliderImages[placeholder_index] = {
-              url: result.url || result.key,
-              key: result.key,
-              thumbnail: result.thumbKey,
-              title: '',
-              caption: '' };
+            this.sliderImages.update((arr) =>
+              arr.map((v, idx) => idx === placeholder_index
+                ? {
+                    url: result.url || result.key,
+                    key: result.key,
+                    thumbnail: result.thumbKey,
+                    title: '',
+                    caption: '' }
+                : v)
+            );
             pending_uploads--;
             if (pending_uploads === 0) {
-              this.isUploadingImage = false;
+              this.isUploadingImage.set(false);
               this.updateSliderPhotosForm();
               this.toastService.success(
                 valid_files.length === 1
@@ -546,11 +555,13 @@ export class EcommerceComponent {
             }
           },
           error: (error) => {
-            this.sliderImages[placeholder_index] = undefined as any;
+            this.sliderImages.update((arr) =>
+              arr.map((v, idx) => idx === placeholder_index ? (undefined as unknown as SliderImage) : v)
+            );
             pending_uploads--;
             if (pending_uploads === 0) {
-              this.sliderImages = this.sliderImages.filter(Boolean);
-              this.isUploadingImage = false;
+              this.sliderImages.update((arr) => arr.filter(Boolean));
+              this.isUploadingImage.set(false);
               this.updateSliderPhotosForm();
             }
             this.toastService.error('Error al subir imagen: ' + error.message);
@@ -564,9 +575,10 @@ export class EcommerceComponent {
    * Remove slider image at index
    */
   removeSliderImage(index: number): void {
-    this.sliderImages.splice(index, 1);
-    if (this.activeImageIndex >= this.sliderImages.length) {
-      this.activeImageIndex = Math.max(0, this.sliderImages.length - 1);
+    this.sliderImages.update((arr) => arr.filter((_, idx) => idx !== index));
+    const length = this.sliderImages().length;
+    if (this.activeImageIndex() >= length) {
+      this.activeImageIndex.set(Math.max(0, length - 1));
     }
     this.updateSliderPhotosForm();
   }
@@ -579,8 +591,11 @@ export class EcommerceComponent {
     field: 'title' | 'caption',
     value: string,
   ): void {
-    if (this.sliderImages[index]) {
-      this.sliderImages[index][field] = value;
+    const current = this.sliderImages();
+    if (current[index]) {
+      this.sliderImages.update((arr) =>
+        arr.map((v, idx) => idx === index ? { ...v, [field]: value } : v)
+      );
       this.updateSliderPhotosForm();
     }
   }
@@ -590,7 +605,7 @@ export class EcommerceComponent {
    */
   onTitleInputChange(event: Event | string): void {
     const value = typeof event === 'string' ? event : (event.target as HTMLInputElement).value;
-    this.updateImageMetadata(this.activeImageIndex, 'title', value);
+    this.updateImageMetadata(this.activeImageIndex(), 'title', value);
   }
 
   /**
@@ -598,21 +613,21 @@ export class EcommerceComponent {
    */
   onCaptionInputChange(event: Event | string): void {
     const value = typeof event === 'string' ? event : (event.target as HTMLInputElement).value;
-    this.updateImageMetadata(this.activeImageIndex, 'caption', value);
+    this.updateImageMetadata(this.activeImageIndex(), 'caption', value);
   }
 
   /**
    * Set the active image for preview
    */
   setActiveImage(index: number): void {
-    this.activeImageIndex = index;
+    this.activeImageIndex.set(index);
   }
 
   /**
    * Trigger file input for logo upload
    */
   triggerLogoInput(): void {
-    if (this.isUploadingLogo) return;
+    if (this.isUploadingLogo()) return;
 
     if (!this.logoInputRef) {
       this.logoInputRef = document.createElement('input');
@@ -643,28 +658,27 @@ export class EcommerceComponent {
       return;
     }
 
-    this.isUploadingLogo = true;
+    this.isUploadingLogo.set(true);
 
     this.ecommerceService
       .uploadSliderImage(file) // Reutilizamos el mismo servicio de subida
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (result) => {
-          this.logoPreview = result.url || result.key;
+          this.logoPreview.set(result.url || result.key);
           this.logoKey = result.key;
 
           const inicioGroup = this.settingsForm.get('inicio') as FormGroup;
           if (inicioGroup) {
             inicioGroup.patchValue({ logo_url: result.key });
             this.settingsForm.markAsDirty();
-            this.formUpdateTrigger.update(v => v + 1);
           }
 
-          this.isUploadingLogo = false;
+          this.isUploadingLogo.set(false);
           this.toastService.success('Logo subido exitosamente');
         },
         error: (error) => {
-          this.isUploadingLogo = false;
+          this.isUploadingLogo.set(false);
           this.toastService.error('Error al subir el logo: ' + error.message);
         } });
 
@@ -675,13 +689,12 @@ export class EcommerceComponent {
    * Remove logo
    */
   removeLogo(): void {
-    this.logoPreview = null;
+    this.logoPreview.set(null);
     this.logoKey = null;
     const inicioGroup = this.settingsForm.get('inicio') as FormGroup;
     if (inicioGroup) {
       inicioGroup.patchValue({ logo_url: '' });
       this.settingsForm.markAsDirty();
-      this.formUpdateTrigger.update(v => v + 1);
     }
   }
 
@@ -689,7 +702,7 @@ export class EcommerceComponent {
    * Update the form's slider photos array from sliderImages
    */
   private updateSliderPhotosForm(): void {
-    const photos: SliderPhoto[] = this.sliderImages.map((img) => ({
+    const photos: SliderPhoto[] = this.sliderImages().map((img) => ({
       url: img.url || null,
       key: img.key || null,
       title: img.title || '',
@@ -760,7 +773,7 @@ export class EcommerceComponent {
         logo_url: this.logoKey || this.settingsForm.value.inicio.logo_url },
       slider: {
         ...this.settingsForm.value.slider,
-        photos: this.sliderImages.map((img) => ({
+        photos: this.sliderImages().map((img) => ({
           url: img.key || img.url || null, // Preferir la KEY para persistencia
           key: img.key || null,
           title: img.title || '',
@@ -826,7 +839,7 @@ export class EcommerceComponent {
 
   onHeaderAction(actionId: string): void {
     if (actionId === 'reset') this.onReset();
-    else if (actionId === 'share') this.isShareModalOpen = true;
+    else if (actionId === 'share') this.isShareModalOpen.set(true);
     else if (actionId === 'open') this.openEcommerceStore();
     else if (actionId === 'save') this.onSubmit();
   }
@@ -837,7 +850,6 @@ export class EcommerceComponent {
   onFooterChange(footer: FooterSettings): void {
     this.footerSettings = footer;
     this.settingsForm.markAsDirty();
-    this.formUpdateTrigger.update((v) => v + 1);
   }
 
   /**
@@ -892,7 +904,6 @@ export class EcommerceComponent {
         secondary_color: branding.secondary_color || '#10B981',
         accent_color: branding.accent_color || '#F59E0B' });
       this.settingsForm.markAsDirty();
-      this.formUpdateTrigger.update(v => v + 1);
       this.toastService.success('Colores sincronizados desde el branding de la tienda');
     }
   }

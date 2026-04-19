@@ -146,10 +146,7 @@ export interface OrganizationCandidate {
             <div class="space-y-4">
               <!-- Vlink Field (only for Vendix context) -->
               @if (contextType() === 'vendix') {
-                <div
-                  class="vlink-field"
-                  [class.show-tooltip]="showVlinkTooltip()"
-                >
+                <div class="vlink-field">
                   <app-input
                     label="V-link"
                     formControlName="vlink"
@@ -158,6 +155,8 @@ export interface OrganizationCandidate {
                     size="md"
                     placeholder="Nombre o ID de tu organización"
                     tooltipText="Puedes usar el nombre de tu organización o su identificador único (V-link)"
+                    tooltipPosition="right"
+                    [tooltipVisible]="showVlinkTooltip() ? true : undefined"
                   >
                   </app-input>
                 </div>
@@ -403,69 +402,6 @@ export interface OrganizationCandidate {
   `,
   styles: [
     `
-      /* Common styles for right-aligned tooltip (Hover and Auto-show) */
-      .vlink-field ::ng-deep .help-icon[data-tooltip]:hover::after,
-      .vlink-field.show-tooltip ::ng-deep .help-icon[data-tooltip]::after {
-        content: attr(data-tooltip);
-        position: absolute;
-        left: 100%;
-        top: 50%;
-        bottom: auto;
-        right: auto;
-        transform: translateY(-50%);
-        padding: 0.5rem 0.75rem;
-        background: var(--color-text-primary);
-        color: var(--color-surface);
-        font-size: 0.75rem;
-        border-radius: 0.375rem;
-        white-space: normal;
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-        z-index: 100;
-        margin-left: 0.5rem;
-        margin-bottom: 0;
-        pointer-events: none;
-        max-width: 260px;
-        width: max-content;
-        text-align: left;
-        line-height: 1.4;
-        opacity: 1;
-        visibility: visible;
-        animation: tooltipFadeInRight 0.3s ease-out;
-      }
-
-      .vlink-field ::ng-deep .help-icon[data-tooltip]:hover::before,
-      .vlink-field.show-tooltip ::ng-deep .help-icon[data-tooltip]::before {
-        content: '';
-        position: absolute;
-        left: 100%;
-        top: 50%;
-        bottom: auto;
-        right: auto;
-        transform: translateY(-50%);
-        width: 0;
-        height: 0;
-        border-top: 5px solid transparent;
-        border-bottom: 5px solid transparent;
-        border-right: 5px solid var(--color-text-primary);
-        border-left: 0;
-        margin-left: 0.15rem;
-        z-index: 101;
-        opacity: 1;
-        visibility: visible;
-        pointer-events: none;
-        animation: tooltipFadeInRight 0.3s ease-out;
-      }
-
-      @keyframes tooltipFadeInRight {
-        from {
-          opacity: 0;
-          transform: translateY(-50%) translateX(-4px);
-        }
-        to {
-          opacity: 1;
-          transform: translateY(-50%) translateX(0);
-        }
-      }
     `,
   ]})
 export class ContextualLoginComponent implements OnInit {

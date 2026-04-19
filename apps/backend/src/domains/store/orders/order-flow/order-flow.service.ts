@@ -17,6 +17,7 @@ import {
   DeliverOrderDto,
   CancelOrderDto,
   CancelPaymentDto,
+  FastTrackOrderDto,
 } from './dto';
 import { SettingsService } from '../../settings/settings.service';
 import { SessionsService } from '../../cash-registers/sessions/sessions.service';
@@ -1168,6 +1169,160 @@ export class OrderFlowService {
   async getValidTransitions(orderId: number): Promise<OrderState[]> {
     const order = await this.getOrder(orderId);
     return VALID_TRANSITIONS[order.state as OrderState] || [];
+  }
+
+  /**
+   * Fast-track an order: run pay (if needed) → ship → deliver → finish in one call.
+   * Reuses the public flow methods so all side-effects (events, cash movements,
+   * accounting entries, stock consumption) fire exactly as in the regular flow.
+   *
+   * Note on atomicity: the regular flow methods emit side-effect events and
+   * trigger auto-accounting/stock mutations that are NOT idempotent and that
+   * cannot be safely deferred inside a single Prisma $transaction without a
+   * large refactor. We therefore chain them sequentially; if a later step
+   * fails, earlier steps remain persisted and the thrown error reports the
+   * last successful state. Callers should treat the exception as "partially
+   * applied — resume manually from the current state" and the order remains
+   * recoverable because every intermediate state is valid in the state machine.
+   */
+  async fastTrackOrder(orderId: number, dto: FastTrackOrderDto) {
+    const order = await this.getOrder(orderId);
+
+    const terminalStates: OrderState[] = ['finished', 'cancelled', 'refunded'];
+    if (terminalStates.includes(order.state as OrderState)) {
+      throw new VendixHttpException(ErrorCodes.ORD_FAST_TRACK_INVALID_STATE_001);
+    }
+
+    if (order.delivery_type !== 'direct_delivery' && !order.shipping_method_id) {
+      throw new VendixHttpException(ErrorCodes.ORD_SHIP_REQUIRED_FOR_FLOW_001);
+    }
+
+    const stepsExecuted: string[] = [];
+
+    const hasSuccessfulPayment = (order.payments || []).some(
+      (p) => p.state === 'succeeded',
+    );
+
+    // 1) Pay (only if not already paid)
+    if (!hasSuccessfulPayment) {
+      if (!dto.payment) {
+        throw new VendixHttpException(ErrorCodes.ORD_FAST_TRACK_PAYMENT_REQUIRED_001);
+      }
+      await this.payOrder(orderId, dto.payment);
+      stepsExecuted.push('pay');
+    }
+
+    // Reload to pick up state transitions performed by payOrder
+    let current = await this.getOrder(orderId);
+
+    // If payOrder already finished the order (direct_delivery path), we're done.
+    if (current.state === 'finished') {
+      this.eventEmitter.emit('order.fast_tracked', {
+        store_id: current.store_id,
+        order_id: orderId,
+        order_number: current.order_number,
+        steps_executed: stepsExecuted,
+        final_state: current.state,
+      });
+
+      return this.prisma.orders.findFirst({
+        where: { id: orderId },
+        include: this.fastTrackIncludes(),
+      });
+    }
+
+    // 2) Ship (processing → shipped)
+    if (current.state === 'processing') {
+      await this.shipOrder(orderId, dto.ship ?? {});
+      stepsExecuted.push('ship');
+      current = await this.getOrder(orderId);
+    }
+
+    // 3) Deliver (shipped → delivered)
+    if (current.state === 'shipped') {
+      await this.deliverOrder(orderId, dto.deliver ?? {});
+      stepsExecuted.push('deliver');
+      current = await this.getOrder(orderId);
+    }
+
+    // 4) Confirm delivery (delivered → finished)
+    if (current.state === 'delivered') {
+      await this.confirmDelivery(orderId);
+      stepsExecuted.push('finish');
+      current = await this.getOrder(orderId);
+    }
+
+    this.eventEmitter.emit('order.fast_tracked', {
+      store_id: current.store_id,
+      order_id: orderId,
+      order_number: current.order_number,
+      steps_executed: stepsExecuted,
+      final_state: current.state,
+    });
+
+    this.logger.log(
+      `Order #${orderId} fast-tracked: steps=[${stepsExecuted.join(',')}] final_state=${current.state}`,
+    );
+
+    return this.prisma.orders.findFirst({
+      where: { id: orderId },
+      include: this.fastTrackIncludes(),
+    });
+  }
+
+  private fastTrackIncludes() {
+    return {
+      stores: { select: { id: true, name: true, store_code: true } },
+      order_items: {
+        include: {
+          products: {
+            include: {
+              product_images: { where: { is_main: true }, take: 1 },
+            },
+          },
+          product_variants: true,
+        },
+      },
+      addresses_orders_billing_address_idToaddresses: true,
+      addresses_orders_shipping_address_idToaddresses: true,
+      payments: {
+        include: {
+          store_payment_method: { include: { system_payment_method: true } },
+        },
+        orderBy: { created_at: 'asc' as const },
+      },
+      shipping_method: {
+        select: {
+          id: true,
+          name: true,
+          type: true,
+          provider_name: true,
+          min_days: true,
+          max_days: true,
+          logo_url: true,
+        },
+      },
+      shipping_rate: {
+        include: {
+          shipping_zone: {
+            select: { id: true, name: true, display_name: true },
+          },
+        },
+      },
+      users: {
+        select: {
+          id: true,
+          first_name: true,
+          last_name: true,
+          email: true,
+          phone: true,
+          avatar_url: true,
+        },
+      },
+      order_installments: {
+        orderBy: { installment_number: 'asc' as const },
+      },
+    };
   }
 
   /**

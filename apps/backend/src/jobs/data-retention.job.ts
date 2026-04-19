@@ -39,24 +39,11 @@ export class DataRetentionJob {
       });
       this.logger.log(`Deleted ${old_audit_logs.count} audit logs older than 5 years`);
 
-      // 4. Delete completed data_export_requests older than 30 days
-      const thirty_days_ago = new Date();
-      thirty_days_ago.setDate(thirty_days_ago.getDate() - 30);
-
-      const old_exports = await this.prisma.data_export_requests.deleteMany({
-        where: {
-          status: 'completed',
-          completed_at: { lt: thirty_days_ago },
-        },
-      });
-      this.logger.log(`Deleted ${old_exports.count} completed export requests older than 30 days`);
-
-      // 5. Log summary
+      // Log summary
       this.logger.log(
         `Data retention job completed. Sessions: ${expired_sessions.count}, ` +
         `Login attempts: ${old_login_attempts.count}, ` +
-        `Audit logs: ${old_audit_logs.count}, ` +
-        `Export requests: ${old_exports.count}`,
+        `Audit logs: ${old_audit_logs.count}`,
       );
     } catch (error) {
       this.logger.error('Error in data retention job', error);

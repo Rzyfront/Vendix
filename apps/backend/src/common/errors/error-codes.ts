@@ -1266,38 +1266,6 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Employee is already terminated',
   },
-  // ===== HABEAS DATA =====
-  HABEAS_EXPORT_RATE_LIMIT: {
-    code: 'HABEAS_EXPORT_RATE_LIMIT',
-    httpStatus: 429,
-    devMessage: 'Data export rate limit exceeded (1 per 24h)',
-  },
-  HABEAS_ANON_SELF: {
-    code: 'HABEAS_ANON_SELF',
-    httpStatus: 400,
-    devMessage: 'Cannot anonymize own account',
-  },
-  HABEAS_ANON_ALREADY: {
-    code: 'HABEAS_ANON_ALREADY',
-    httpStatus: 409,
-    devMessage: 'User already anonymized',
-  },
-  HABEAS_EXPORT_PROCESSING: {
-    code: 'HABEAS_EXPORT_PROCESSING',
-    httpStatus: 409,
-    devMessage: 'Data export already in progress',
-  },
-  HABEAS_ANON_REQUEST_NOT_FOUND: {
-    code: 'HABEAS_ANON_REQUEST_NOT_FOUND',
-    httpStatus: 404,
-    devMessage: 'Anonymization request not found',
-  },
-  HABEAS_CONSENT_INVALID: {
-    code: 'HABEAS_CONSENT_INVALID',
-    httpStatus: 422,
-    devMessage: 'Invalid consent type',
-  },
-
   // ICA Municipal Tax
   ICA_RATE_NOT_FOUND: {
     code: 'ICA_RATE_NOT_FOUND',
@@ -1628,6 +1596,28 @@ export const ErrorCodes = {
 
   // Shipping Assignment
   ORD_SHIP_LOCKED_001: { code: 'ORD_SHIP_LOCKED_001', httpStatus: 409, devMessage: 'Cannot change shipping method after order has been shipped' },
+
+  // Order Fast-Track & Shipping Flow
+  ORD_SHIP_REQUIRED_FOR_FLOW_001: {
+    code: 'ORD_SHIP_REQUIRED_FOR_FLOW_001',
+    httpStatus: 400,
+    devMessage: 'Esta orden requiere un metodo de envio antes de continuar.',
+  },
+  ORD_SHIP_NO_RATE_FOR_ADDRESS_001: {
+    code: 'ORD_SHIP_NO_RATE_FOR_ADDRESS_001',
+    httpStatus: 422,
+    devMessage: 'No hay tarifas configuradas para la direccion del cliente en este metodo.',
+  },
+  ORD_FAST_TRACK_INVALID_STATE_001: {
+    code: 'ORD_FAST_TRACK_INVALID_STATE_001',
+    httpStatus: 400,
+    devMessage: 'La orden ya esta finalizada, cancelada o reembolsada.',
+  },
+  ORD_FAST_TRACK_PAYMENT_REQUIRED_001: {
+    code: 'ORD_FAST_TRACK_PAYMENT_REQUIRED_001',
+    httpStatus: 400,
+    devMessage: 'Se requiere informacion de pago para procesar la orden completa.',
+  },
 } as const satisfies Record<string, ErrorCodeEntry>;
 
 export type ErrorCodeKey = keyof typeof ErrorCodes;

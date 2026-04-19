@@ -22,6 +22,7 @@ import {
   RefundOrderDto,
   CancelPaymentDto,
   CreateRefundDto,
+  FastTrackOrderDto,
 } from './dto';
 import { ResponseService } from '@common/responses/response.service';
 import { RolesGuard } from '../../../auth/guards/roles.guard';
@@ -137,6 +138,17 @@ export class OrderFlowController {
   ) {
     const result = await this.orderFlowService.forgiveInstallment(orderId, installmentId);
     return this.responseService.success(result, 'Installment forgiven successfully');
+  }
+
+  @Post('fast-track')
+  @Permissions('store:orders:update')
+  @HttpCode(HttpStatus.OK)
+  async fastTrackOrder(
+    @Param('orderId', ParseIntPipe) orderId: number,
+    @Body() dto: FastTrackOrderDto,
+  ) {
+    const order = await this.orderFlowService.fastTrackOrder(orderId, dto);
+    return this.responseService.success(order, 'Order fast-tracked successfully');
   }
 
   @Post('cancel')

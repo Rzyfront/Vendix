@@ -429,11 +429,6 @@ export const APP_MODULES: { [key: string]: AppModule[]; ORG_ADMIN: AppModule[]; 
           label: 'Caja Registradora',
           description: 'Gesti\u00f3n de cajas, sesiones y movimientos',
         },
-        {
-          key: 'settings_habeas_data',
-          label: 'Datos Personales',
-          description: 'Pol\u00edtica de habeas data y consentimientos',
-        },
       ],
     },
     // Ayuda (padre con hijos)

@@ -350,8 +350,7 @@ loadConfiguration(): void {
         settings_domains: false,
         settings_users: true,
         settings_roles: true,
-        settings_cash_registers: false,
-        settings_habeas_data: true},
+        settings_cash_registers: false},
       STORE_ECOMMERCE: {
         profile: true,
         history: true,

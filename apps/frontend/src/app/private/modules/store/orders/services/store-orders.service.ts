@@ -26,6 +26,8 @@ import {
   CreateRefundRequest,
   RefundCalculationResult,
   RefundRecord,
+  FastTrackOrderDto,
+  AssignShippingMethodDto,
 } from '../interfaces/order.interface';
 
 // Caché estático global (persiste entre instancias del servicio)
@@ -456,11 +458,26 @@ export class StoreOrdersService {
     );
   }
 
-  assignShippingMethod(orderId: string, dto: { shipping_method_id: number; shipping_rate_id?: number; shipping_cost?: number }): Observable<Order> {
+  assignShippingMethod(orderId: string, dto: AssignShippingMethodDto): Observable<Order> {
     const url = `${this.apiUrl}/store/orders/${orderId}/shipping`;
     return this.http.patch<Order>(url, dto).pipe(
       catchError((error) => {
         console.error('Error assigning shipping method:', error);
+        return throwError(() => new Error(this.extractErrorMessage(error)));
+      }),
+    );
+  }
+
+  /**
+   * POST /store/orders/:id/flow/fast-track
+   * Executes pay (optional) + ship + deliver + finish in a single call.
+   */
+  flowFastTrack(orderId: string, dto: FastTrackOrderDto): Observable<Order> {
+    const url = `${this.apiUrl}/store/orders/${orderId}/flow/fast-track`;
+    return this.http.post<any>(url, dto).pipe(
+      map((r) => r.data || r),
+      catchError((error) => {
+        console.error('Error fast-tracking order:', error);
         return throwError(() => new Error(this.extractErrorMessage(error)));
       }),
     );

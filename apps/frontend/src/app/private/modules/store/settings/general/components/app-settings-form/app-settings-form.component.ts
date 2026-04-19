@@ -1,8 +1,7 @@
 import {
   Component,
-  OnInit,
-  OnChanges,
   OnDestroy,
+  effect,
   inject,
   input,
   output,
@@ -32,7 +31,7 @@ import { LucideAngularModule } from 'lucide-angular';
   templateUrl: './app-settings-form.component.html',
   styleUrls: ['./app-settings-form.component.scss'],
 })
-export class AppSettingsForm implements OnInit, OnChanges, OnDestroy {
+export class AppSettingsForm implements OnDestroy {
   readonly settings = input.required<AppSettings>();
   readonly settingsChange = output<AppSettings>();
   readonly pendingLogoUpload = output<{
@@ -100,26 +99,19 @@ export class AppSettingsForm implements OnInit, OnChanges, OnDestroy {
     return this.form.get('favicon_url') as FormControl<string | null>;
   }
 
-  ngOnInit() {
-    this.patchForm();
-  }
-
-  ngOnChanges() {
-    this.patchForm();
-  }
-
-  patchForm() {
-    const currentSettings = this.settings();
-    if (currentSettings) {
-      this.form.patchValue(currentSettings);
-      // Preserve local blob preview if user already selected a file
-      if (!this.logoBlobUrl) {
-        this.logoPreview = currentSettings.logo_url || null;
+  constructor() {
+    effect(() => {
+      const currentSettings = this.settings();
+      if (currentSettings) {
+        this.form.patchValue(currentSettings, { emitEvent: false });
+        if (!this.logoBlobUrl) {
+          this.logoPreview = currentSettings.logo_url || null;
+        }
+        if (!this.faviconBlobUrl) {
+          this.faviconPreview = currentSettings.favicon_url || null;
+        }
       }
-      if (!this.faviconBlobUrl) {
-        this.faviconPreview = currentSettings.favicon_url || null;
-      }
-    }
+    });
   }
 
   onFieldChange() {

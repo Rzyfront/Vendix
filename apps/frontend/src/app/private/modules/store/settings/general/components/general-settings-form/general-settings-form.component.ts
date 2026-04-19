@@ -1,7 +1,7 @@
 import {
   Component,
   OnInit,
-  OnChanges,
+  effect,
   inject,
   input,
   output,
@@ -42,12 +42,21 @@ export interface GeneralSettings {
   templateUrl: './general-settings-form.component.html',
   styleUrls: ['./general-settings-form.component.scss'],
 })
-export class GeneralSettingsForm implements OnInit, OnChanges {
+export class GeneralSettingsForm implements OnInit {
   readonly settings = input.required<GeneralSettings>();
   readonly settingsChange = output<GeneralSettings>();
 
   private currencyService = inject(CurrencyService);
   private currencyFormatService = inject(CurrencyFormatService);
+
+  constructor() {
+    effect(() => {
+      const current = this.settings();
+      if (current) {
+        this.form.patchValue(current, { emitEvent: false });
+      }
+    });
+  }
 
   form: FormGroup = new FormGroup({
     // Campos de stores
@@ -119,11 +128,6 @@ export class GeneralSettingsForm implements OnInit, OnChanges {
 
   async ngOnInit() {
     await this.loadCurrencies();
-    this.patchForm();
-  }
-
-  ngOnChanges() {
-    this.patchForm();
   }
 
   async loadCurrencies() {
@@ -154,13 +158,6 @@ export class GeneralSettingsForm implements OnInit, OnChanges {
       if (!this.currencyControl.value) {
         this.currencyControl.setValue(fallback[0].value as string);
       }
-    }
-  }
-
-  patchForm() {
-    const currentSettings = this.settings();
-    if (currentSettings) {
-      this.form.patchValue(currentSettings);
     }
   }
 

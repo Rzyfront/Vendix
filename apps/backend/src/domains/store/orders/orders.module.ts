@@ -9,6 +9,7 @@ import { ReturnOrdersModule } from './return-orders/return-orders.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { OrderFlowModule } from './order-flow/order-flow.module';
 import { SettingsModule } from '../settings/settings.module';
+import { ShippingModule } from '../shipping/shipping.module';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
 import { InventoryTransactionsService } from '../inventory/transactions/inventory-transactions.service';
 import { OrderEtaService } from './services/order-eta.service';
@@ -23,6 +24,7 @@ import { OrderEtaService } from './services/order-eta.service';
     forwardRef(() => PaymentsModule),
     OrderFlowModule,
     SettingsModule,
+    ShippingModule,
   ],
   controllers: [OrdersController],
   providers: [OrdersService, StockLevelManager, InventoryTransactionsService, OrderEtaService],

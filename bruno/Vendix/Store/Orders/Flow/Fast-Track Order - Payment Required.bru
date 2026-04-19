@@ -1,0 +1,39 @@
+meta {
+  name: Fast-Track Order - Payment Required
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{url}}/store/orders/{{unpaidOrderId}}/flow/fast-track
+  body: json
+  auth: inherit
+}
+
+headers {
+  Content-Type: application/json
+  x-store-id: {{storeId}}
+}
+
+body:json {
+  {
+    "ship": {
+      "tracking_number": "FT-TRACK-002"
+    },
+    "deliver": {
+      "delivered_to": "Test Recipient"
+    }
+  }
+}
+
+tests {
+  test("Returns 400 when payment is required but not provided", function() {
+    expect(res.getStatus()).to.equal(400);
+  });
+
+  test("Error code matches ORD_FAST_TRACK_PAYMENT_REQUIRED_001", function() {
+    const body = res.getBody();
+    expect(body).to.have.property('error_code');
+    expect(body.error_code).to.equal('ORD_FAST_TRACK_PAYMENT_REQUIRED_001');
+  });
+}

@@ -114,20 +114,15 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
             >
               <app-tooltip
                 position="top"
-                color="warning"
+                color="ai"
                 size="sm"
+                [content]="getDisabledActionsMessage(actionState.loading, actionState.isEmpty)"
                 [visible]="
                   disabledActionsTooltipVisible &&
                   (actionState.loading || actionState.isEmpty)
                 "
                 class="!absolute left-1/2 -translate-x-1/2 top-0 z-10"
-                >{{
-                  getDisabledActionsMessage(
-                    actionState.loading,
-                    actionState.isEmpty
-                  )
-                }}</app-tooltip
-              >
+              ></app-tooltip>
               <div class="grid grid-cols-2 gap-2">
                 <!-- Secondary CTAs (top row) -->
                 <app-button
@@ -252,11 +247,11 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
                         <app-tooltip
                           position="top"
                           size="sm"
+                          color="ai"
+                          content="Eliminar"
                           [visible]="hoveredRemoveTooltip === item.id"
                           class="!absolute left-1/2 -translate-x-1/2 bottom-full z-10"
-                        >
-                          Eliminar
-                        </app-tooltip>
+                        ></app-tooltip>
                       </div>
                     </div>
                     <!-- Variant & SKU -->

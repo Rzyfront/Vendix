@@ -21,6 +21,7 @@ import { SettingsService } from '../settings/settings.service';
 import { ScheduleValidationService } from '../settings/schedule-validation.service';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { StockLevelManager } from '../inventory/shared/services/stock-level-manager.service';
+import { ShippingCalculatorService } from '../shipping/shipping-calculator.service';
 
 @Injectable()
 export class OrdersService {
@@ -33,6 +34,7 @@ export class OrdersService {
     private settingsService: SettingsService,
     private scheduleValidationService: ScheduleValidationService,
     private stockLevelManager: StockLevelManager,
+    private shippingCalculatorService: ShippingCalculatorService,
   ) {}
 
   async create(createOrderDto: CreateOrderDto, creatingUser: any) {
@@ -627,8 +629,62 @@ export class OrdersService {
     }
 
     let shippingCost = dto.shipping_cost ?? 0;
+    let resolvedRateId: number | null = dto.shipping_rate_id ?? null;
 
-    if (dto.shipping_rate_id) {
+    // Auto-calculate: resolve rate + cost from customer's shipping address
+    if (dto.auto_calculate && !dto.shipping_rate_id) {
+      const orderForCalc = await this.prisma.orders.findFirst({
+        where: { id: orderId },
+        include: {
+          addresses_orders_shipping_address_idToaddresses: true,
+          order_items: {
+            include: {
+              products: {
+                select: { id: true, weight: true, product_type: true },
+              },
+            },
+          },
+        },
+      });
+
+      const address = orderForCalc?.addresses_orders_shipping_address_idToaddresses;
+      if (!address || !address.country_code) {
+        throw new VendixHttpException(ErrorCodes.ORD_SHIP_NO_RATE_FOR_ADDRESS_001);
+      }
+
+      const items = (orderForCalc?.order_items ?? []).map((it) => ({
+        product_id: it.product_id,
+        quantity: Number(it.quantity),
+        price: Number(it.total_price),
+        weight: it.weight
+          ? Number(it.weight)
+          : it.products?.weight
+            ? Number(it.products.weight) * Number(it.quantity)
+            : undefined,
+        product_type: it.products?.product_type || undefined,
+      }));
+
+      const options = await this.shippingCalculatorService.calculateRates(
+        storeId,
+        items,
+        {
+          country_code: address.country_code,
+          state_province: address.state_province || undefined,
+          city: address.city || undefined,
+          postal_code: address.postal_code || undefined,
+        },
+      );
+
+      const match = options.find((o) => o.method_id === method.id);
+      if (!match) {
+        throw new VendixHttpException(ErrorCodes.ORD_SHIP_NO_RATE_FOR_ADDRESS_001);
+      }
+
+      resolvedRateId = match.rate_id;
+      if (dto.shipping_cost === undefined) {
+        shippingCost = Number(match.cost);
+      }
+    } else if (dto.shipping_rate_id) {
       const rate = await this.prisma.shipping_rates.findFirst({
         where: { id: dto.shipping_rate_id, is_active: true },
       });
@@ -655,7 +711,7 @@ export class OrdersService {
       where: { id: orderId },
       data: {
         shipping_method_id: method.id,
-        shipping_rate_id: dto.shipping_rate_id ?? null,
+        shipping_rate_id: resolvedRateId,
         delivery_type: deliveryType,
         shipping_cost: shippingCost,
         grand_total: newGrandTotal,

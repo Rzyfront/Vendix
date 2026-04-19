@@ -1,5 +1,6 @@
 import { Injectable, inject } from '@angular/core';
 import { CurrencyFormatService } from '../../../../../shared/pipes/currency/currency.pipe';
+import { formatVariantAttributes } from '../../../../../shared/utils';
 import { Order } from '../interfaces/order.interface';
 
 @Injectable({ providedIn: 'root' })
@@ -99,7 +100,7 @@ export class OrderPrintService {
         <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; color: #374151;">
           ${item.product_name}
           ${item.variant_sku ? `<br><span style="font-size: 11px; color: #9ca3af;">SKU: ${item.variant_sku}</span>` : ''}
-          ${item.variant_attributes ? `<br><span style="font-size: 11px; color: #9ca3af;">${item.variant_attributes}</span>` : ''}
+          ${(() => { const v = formatVariantAttributes(item.variant_attributes, ', '); return v ? `<br><span style="font-size: 11px; color: #9ca3af;">${v}</span>` : ''; })()}
         </td>
         <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; color: #374151; text-align: center;">${item.quantity}</td>
         <td style="padding: 10px 12px; border-bottom: 1px solid #e5e7eb; font-size: 13px; color: #374151; text-align: right; font-family: 'Courier New', monospace;">${fmt(Number(item.unit_price))}</td>

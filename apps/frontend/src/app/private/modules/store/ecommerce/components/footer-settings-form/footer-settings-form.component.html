@@ -9,11 +9,11 @@
         </div>
         <span class="font-medium text-gray-900">Información de la Tienda</span>
       </div>
-      <app-icon [name]="expandedSections.store_info ? 'chevron-up' : 'chevron-down'" size="20"
+      <app-icon [name]="expandedSections().store_info ? 'chevron-up' : 'chevron-down'" size="20"
         class="text-gray-500"></app-icon>
     </button>
 
-    @if (expandedSections.store_info) {
+    @if (expandedSections().store_info) {
     <div class="p-4 space-y-4 animate-in fade-in slide-in-from-top-2 duration-200" formGroupName="store_info">
       <!-- Sobre Nosotros -->
       <app-textarea
@@ -51,11 +51,11 @@
         <span class="font-medium text-gray-900">Enlaces de Interés</span>
         <span class="text-xs text-gray-500">({{ linksArray.length }}/5)</span>
       </div>
-      <app-icon [name]="expandedSections.links ? 'chevron-up' : 'chevron-down'" size="20"
+      <app-icon [name]="expandedSections().links ? 'chevron-up' : 'chevron-down'" size="20"
         class="text-gray-500"></app-icon>
     </button>
 
-    @if (expandedSections.links) {
+    @if (expandedSections().links) {
     <div class="p-4 space-y-4 animate-in fade-in slide-in-from-top-2 duration-200">
       <p class="text-sm text-gray-500">
         Configura los enlaces que aparecerán en la sección "Enlaces" del footer. Máximo 5 enlaces.
@@ -107,11 +107,11 @@
         </div>
         <span class="font-medium text-gray-900">Ayuda al Cliente</span>
       </div>
-      <app-icon [name]="expandedSections.help ? 'chevron-up' : 'chevron-down'" size="20"
+      <app-icon [name]="expandedSections().help ? 'chevron-up' : 'chevron-down'" size="20"
         class="text-gray-500"></app-icon>
     </button>
 
-    @if (expandedSections.help) {
+    @if (expandedSections().help) {
     <div class="p-4 space-y-6 animate-in fade-in slide-in-from-top-2 duration-200" formGroupName="help">
       <!-- Preguntas Frecuentes -->
       <div class="space-y-3">
@@ -127,7 +127,7 @@
             <div class="flex items-center justify-between p-3 bg-gray-50 cursor-pointer hover:bg-gray-100 transition-colors"
               (click)="toggleFaqItem(i)">
               <div class="flex items-center gap-2 flex-1 min-w-0">
-                <app-icon [name]="expandedFaqIndex === i ? 'chevron-down' : 'chevron-right'" size="16"
+                <app-icon [name]="expandedFaqIndex() === i ? 'chevron-down' : 'chevron-right'" size="16"
                   class="text-gray-500 flex-shrink-0"></app-icon>
                 <span class="text-sm font-medium text-gray-700 truncate">
                   {{ faq.get('question')?.value || 'Nueva pregunta...' }}
@@ -140,7 +140,7 @@
             </div>
 
             <!-- FAQ Content -->
-            @if (expandedFaqIndex === i) {
+            @if (expandedFaqIndex() === i) {
             <div class="p-3 space-y-3 border-t border-gray-200 animate-in fade-in slide-in-from-top-1 duration-150">
               <app-input label="Pregunta" formControlName="question" placeholder="¿Cómo puedo realizar un pedido?"
                 customWrapperClass="!mt-0"></app-input>
@@ -198,11 +198,11 @@
         </div>
         <span class="font-medium text-gray-900">Redes Sociales</span>
       </div>
-      <app-icon [name]="expandedSections.social ? 'chevron-up' : 'chevron-down'" size="20"
+      <app-icon [name]="expandedSections().social ? 'chevron-up' : 'chevron-down'" size="20"
         class="text-gray-500"></app-icon>
     </button>
 
-    @if (expandedSections.social) {
+    @if (expandedSections().social) {
     <div class="p-4 space-y-4 animate-in fade-in slide-in-from-top-2 duration-200" formGroupName="social">
       <p class="text-sm text-gray-500">
         Configura tus redes sociales. Los iconos aparecerán en el footer solo si completas la URL.
