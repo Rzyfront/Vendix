@@ -805,33 +805,19 @@ export class PopComponent implements OnInit, OnDestroy {
   @ViewChild(PopProductSelectionComponent)
   productSelection!: PopProductSelectionComponent;
 
-  onSupplierCreated(supplierId: number): void {
-    // Refresh options first, then select the new supplier so the <select>
-    // never sees an ngModel value that is not present in its <option> list
-    // (which would otherwise cause the native select to desync/reset).
-    // The cart items and other state are untouched — setSupplier only writes
-    // supplierId in the cart state.
-    this.header
-      .refreshSuppliers()
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: () => this.popCartService.setSupplier(supplierId),
-        error: () => this.popCartService.setSupplier(supplierId),
-      });
+  onSupplierCreated(supplier: { id: number; name: string; code?: string }): void {
+    // Add in-memory to the selector options (no HTTP refetch), then select it.
+    // This avoids the race where a full `refreshSuppliers()` reload could
+    // interact with the cart state subscription and clear cart items.
+    this.header.addSupplier(supplier);
+    this.popCartService.setSupplier(supplier.id);
   }
 
-  onWarehouseCreated(warehouseId: number): void {
-    // Same pattern as onSupplierCreated: refresh options first to avoid the
-    // race where setLocation(newId) writes an id that is not yet in the
-    // selector's option list, which could cause the native <select> to reset
-    // its ngModel and trigger an unintended setLocation(null).
-    this.header
-      .refreshLocations()
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: () => this.popCartService.setLocation(warehouseId),
-        error: () => this.popCartService.setLocation(warehouseId),
-      });
+  onWarehouseCreated(warehouse: { id: number; name: string; code?: string }): void {
+    // Add in-memory to the selector options (no HTTP refetch), then select it.
+    // Symmetric to onSupplierCreated.
+    this.header.addLocation(warehouse);
+    this.popCartService.setLocation(warehouse.id);
   }
 
   onLotSave(lotInfo: any): void {

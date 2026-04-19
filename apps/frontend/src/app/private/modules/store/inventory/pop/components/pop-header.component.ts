@@ -508,6 +508,38 @@ export class PopHeaderComponent {
     return this.loadLocations();
   }
 
+  /**
+   * Add a newly created supplier in-memory to the selector options.
+   * Avoids re-fetching the whole list (which could trigger races with the cart state).
+   */
+  public addSupplier(supplier: { id: number; name: string; code?: string }): void {
+    const current = this.suppliers();
+    if (!current.some((s) => s.id === supplier.id)) {
+      this.suppliers.set([...current, supplier as PopSupplier]);
+      this.supplierOptions.set(this.suppliers().map((s) => ({
+        value: s.id,
+        label: s.name,
+        description: s.code,
+      })));
+    }
+  }
+
+  /**
+   * Add a newly created location in-memory to the selector options.
+   * Avoids re-fetching the whole list (which could trigger races with the cart state).
+   */
+  public addLocation(location: { id: number; name: string; code?: string }): void {
+    const current = this.locations();
+    if (!current.some((l) => l.id === location.id)) {
+      this.locations.set([...current, location as PopLocation]);
+      this.locationOptions.set(this.locations().map((l) => ({
+        value: l.id,
+        label: l.name,
+        description: l.code,
+      })));
+    }
+  }
+
   private loadSuppliers(): Observable<void> {
     return this.suppliersService
       .getSuppliers({ is_active: true })

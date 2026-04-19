@@ -11,7 +11,7 @@ import {
 } from '../../../../../../shared/components';
 
 import { InventoryService } from '../../services/inventory.service';
-import { LocationType, CreateLocationDto } from '../../interfaces';
+import { LocationType, CreateLocationDto, InventoryLocation } from '../../interfaces';
 
 /**
  * Quick-create modal for warehouses/locations in POP
@@ -101,7 +101,7 @@ export class PopWarehouseQuickCreateComponent {
   private destroyRef = inject(DestroyRef);
   readonly isOpen = model<boolean>(false);
   readonly close = output<void>();
-  readonly warehouseCreated = output<number>();
+  readonly warehouseCreated = output<InventoryLocation>();
 
   isLoading = signal(false);
 
@@ -147,7 +147,7 @@ export class PopWarehouseQuickCreateComponent {
     this.inventoryService.createLocation(createDto).pipe(takeUntilDestroyed(this.destroyRef)).subscribe({
       next: (response) => {
         if (response.success && response.data) {
-          this.warehouseCreated.emit(response.data.id);
+          this.warehouseCreated.emit(response.data);
           this.resetForm();
           this.isOpen.set(false);
           this.close.emit();

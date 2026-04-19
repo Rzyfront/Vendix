@@ -17,6 +17,7 @@ import {
 } from '../../../../../../shared/components';
 
 import { SuppliersService } from '../../services/suppliers.service';
+import { Supplier } from '../../interfaces';
 
 /**
  * Quick-create modal for suppliers in POP
@@ -133,7 +134,7 @@ export class PopSupplierQuickCreateComponent {
   private destroyRef = inject(DestroyRef);
   readonly isOpen = model<boolean>(false);
   readonly close = output<void>();
-  readonly supplierCreated = output<number>();
+  readonly supplierCreated = output<Supplier>();
 
   private fb = inject(FormBuilder);
   private suppliersService = inject(SuppliersService);
@@ -187,7 +188,7 @@ export class PopSupplierQuickCreateComponent {
       next: (response: any) => {
         if (response.success && response.data) {
           this.toastService.success('Proveedor creado correctamente');
-          this.supplierCreated.emit(response.data.id);
+          this.supplierCreated.emit(response.data);
           this.resetForm();
           this.isOpen.set(false);
           this.close.emit();
