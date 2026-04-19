@@ -242,6 +242,11 @@ export type TooltipColor =
       }
 
       .tooltip-container[data-color='ai'] .tooltip-content {
+        padding: 6px 12px;
+        font-size: 11px;
+        font-weight: 400;
+        line-height: normal;
+        max-width: none;
         background: linear-gradient(
           135deg,
           rgba(var(--color-primary-rgb), 0.85) 0%,
@@ -252,9 +257,16 @@ export type TooltipColor =
         animation: ai-tooltip-shimmer 3s ease-in-out infinite;
         color: white;
         border: 1px solid rgba(255, 255, 255, 0.2);
+        border-radius: 8px;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
         box-shadow:
           0 4px 12px rgba(0, 0, 0, 0.25),
           inset 0 1px 1px rgba(255, 255, 255, 0.15);
+      }
+
+      .tooltip-container[data-color='ai'] .tooltip-content::before {
+        display: none;
       }
 
       /* Arrow */
@@ -364,7 +376,7 @@ export class TooltipComponent {
   readonly content = input('');
   readonly size = input<TooltipSize>('md');
   readonly position = input<TooltipPosition>('top');
-  readonly color = input<TooltipColor>('default');
+  readonly color = input<TooltipColor>('ai');
   readonly delay = input(200);
   readonly visible = input<boolean | undefined>(undefined);
 

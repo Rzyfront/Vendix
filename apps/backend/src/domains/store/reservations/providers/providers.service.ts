@@ -107,13 +107,16 @@ export class ProvidersService {
   async assignService(providerId: number, productId: number) {
     await this.findOne(providerId);
 
-    // Verify product is a bookable service
+    // Verify product exists in the store.
+    // Intentionally do NOT require `requires_booking = true`: provider assignment is
+    // configuration and may happen before the flag is toggled (progressive setup).
     const product = await this.prisma.products.findFirst({
-      where: { id: productId, store_id: this.storeId, requires_booking: true },
+      where: { id: productId, store_id: this.storeId },
+      select: { id: true },
     });
 
     if (!product) {
-      throw new NotFoundException(`Servicio #${productId} no encontrado o no requiere reserva`);
+      throw new NotFoundException(`Servicio #${productId} no encontrado`);
     }
 
     const existing = await this.prisma.provider_services.findFirst({

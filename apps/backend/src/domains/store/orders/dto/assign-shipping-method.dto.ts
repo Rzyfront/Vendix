@@ -1,4 +1,4 @@
-import { IsInt, IsOptional, Min } from 'class-validator';
+import { IsBoolean, IsInt, IsOptional, Min } from 'class-validator';
 
 export class AssignShippingMethodDto {
   @IsInt()
@@ -12,4 +12,8 @@ export class AssignShippingMethodDto {
 
   @IsOptional()
   shipping_cost?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  auto_calculate?: boolean;
 }

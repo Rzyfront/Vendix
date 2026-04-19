@@ -14,6 +14,7 @@ import {
   ReactiveFormsModule,
 } from '@angular/forms';
 import { IconComponent } from '../icon/icon.component';
+import { TooltipComponent } from '../tooltip/tooltip.component';
 import { FormStyleVariant } from '../../types/form.types';
 
 export interface SelectorOption {
@@ -30,7 +31,7 @@ export type SelectorVariant = 'default' | 'outline' | 'filled';
 @Component({
   selector: 'app-selector',
   standalone: true,
-  imports: [FormsModule, ReactiveFormsModule, IconComponent],
+  imports: [FormsModule, ReactiveFormsModule, IconComponent, TooltipComponent],
   providers: [
     {
       provide: NG_VALUE_ACCESSOR,
@@ -48,12 +49,11 @@ export type SelectorVariant = 'default' | 'outline' | 'filled';
           >
           <span>{{ label() }}</span>
           @if (tooltipText()) {
-            <span
-              class="help-icon"
-              [attr.data-tooltip]="tooltipText()"
-              >
-              <app-icon name="help-circle" [size]="14"></app-icon>
-            </span>
+            <app-tooltip [content]="tooltipText()!" position="top">
+              <span class="help-icon">
+                <app-icon name="help-circle" [size]="14"></app-icon>
+              </span>
+            </app-tooltip>
           }
           @if (required()) {
             <span

@@ -418,11 +418,6 @@ export class StoreAdminLayoutComponent {
       ],
     },
     {
-      label: 'Datos Personales',
-      icon: 'shield-check',
-      route: '/admin/habeas-data',
-    },
-    {
       label: 'Nómina',
       icon: 'banknote',
       children: [

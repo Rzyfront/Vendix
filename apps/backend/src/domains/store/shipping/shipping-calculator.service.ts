@@ -21,6 +21,7 @@ export interface CartItemDTO {
 
 export interface ShippingOption {
   id: number; // Unique identifier (rate_id)
+  rate_id: number; // Explicit alias of `id` for consumers that prefer semantic naming
   method_id: number;
   method_name: string;
   method_type: string; // 'pickup' | 'own_fleet' | 'carrier' | etc.
@@ -139,6 +140,7 @@ export class ShippingCalculatorService {
       if (isApplicable) {
         options.push({
           id: rate.id,
+          rate_id: rate.id,
           method_id: rate.shipping_method_id,
           method_name: rate.name || rate.shipping_method.name,
           method_type: rate.shipping_method.type, // 'pickup' | 'own_fleet' | 'carrier' | etc.

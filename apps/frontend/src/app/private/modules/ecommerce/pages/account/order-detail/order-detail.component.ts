@@ -14,6 +14,7 @@ import { AccountService, OrderDetail } from '../../../services/account.service';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+import { parseVariantAttributes } from '../../../../../../shared/utils';
 
 @Component({
   selector: 'app-order-detail',
@@ -261,14 +262,11 @@ if (this.wompiPollTimer) {
   }
 
   getVariantLabel(item: any): string {
-    if (
-      item.variant_attributes &&
-      typeof item.variant_attributes === 'object'
-    ) {
-      const values = Object.values(item.variant_attributes);
-      if (values.length > 0) return values.join(' · ');
+    const attrs = parseVariantAttributes(item?.variant_attributes);
+    if (attrs.length) {
+      return attrs.map(a => (a.name ? `${a.name}: ${a.value}` : a.value)).join(' · ');
     }
-    return item.variant_sku || '';
+    return item?.variant_sku || '';
   }
 
   getStateLabel(state: string): string {

@@ -152,10 +152,10 @@ import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/c
                       >
                       <app-icon name="x" [size]="16"></app-icon>
                     </button>
-                    <app-tooltip position="top" size="sm" [visible]="hoveredRemoveTooltip === item.id"
-                      class="remove-tooltip">
-                      Eliminar
-                    </app-tooltip>
+                    <app-tooltip position="top" size="sm" color="ai" content="Eliminar"
+                      [visible]="hoveredRemoveTooltip === item.id"
+                      class="remove-tooltip"
+                    ></app-tooltip>
                   </div>
                   <!-- Actions Row: Quantity + Total -->
                   <div class="item-actions">

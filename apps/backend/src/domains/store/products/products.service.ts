@@ -734,10 +734,7 @@ export class ProductsService {
           // Map variant data for POS
           const product_variants =
             (product as any).product_variants?.map((variant: any) => {
-              const variantStock =
-                variant.stock_levels?.[0]?.quantity_available ??
-                variant.stock_quantity ??
-                0;
+              const variantStock = this.sumVariantStock(variant);
               const variantImageUrl = variant.product_images?.image_url || null;
 
               return {
@@ -857,10 +854,7 @@ export class ProductsService {
               cost_price: variant.cost_price
                 ? Number(variant.cost_price)
                 : null,
-              stock_quantity:
-                variant.stock_levels?.[0]?.quantity_available ??
-                variant.stock_quantity ??
-                0,
+              stock_quantity: this.sumVariantStock(variant),
               attributes: this.parseVariantAttributes(variant.attributes),
             })) || []
           : undefined;
@@ -2140,6 +2134,16 @@ export class ProductsService {
       attribute_name: key,
       attribute_value: String(value),
     }));
+  }
+
+  private sumVariantStock(variant: any): number {
+    if (Array.isArray(variant?.stock_levels) && variant.stock_levels.length > 0) {
+      return variant.stock_levels.reduce(
+        (sum: number, sl: any) => sum + (sl?.quantity_available ?? 0),
+        0,
+      );
+    }
+    return variant?.stock_quantity ?? 0;
   }
 
   private async signProductImage(

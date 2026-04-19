@@ -13,11 +13,12 @@ import {
 } from '@angular/forms';
 import { FormStyleVariant } from '../../types/form.types';
 import { IconComponent } from '../icon/icon.component';
+import { TooltipComponent } from '../tooltip/tooltip.component';
 
 @Component({
   selector: 'app-textarea',
   standalone: true,
-  imports: [IconComponent],
+  imports: [IconComponent, TooltipComponent],
   providers: [
     {
       provide: NG_VALUE_ACCESSOR,
@@ -36,9 +37,11 @@ import { IconComponent } from '../icon/icon.component';
           >
           <span>{{ label() }}</span>
           @if (tooltipText()) {
-            <span class="help-icon" [attr.data-tooltip]="tooltipText()">
-              <app-icon name="help-circle" [size]="14"></app-icon>
-            </span>
+            <app-tooltip [content]="tooltipText()" position="top">
+              <span class="help-icon">
+                <app-icon name="help-circle" [size]="14"></app-icon>
+              </span>
+            </app-tooltip>
           }
           @if (required()) {
             <span class="text-[var(--color-destructive)] ml-1"
@@ -109,42 +112,7 @@ import { IconComponent } from '../icon/icon.component';
     }
 
     .help-icon:hover {
-      color: var(--color-warning);
-    }
-
-    .help-icon[data-tooltip]:hover::after {
-      content: attr(data-tooltip);
-      position: absolute;
-      bottom: 100%;
-      left: 50%;
-      transform: translateX(-50%);
-      padding: 0.375rem 0.5rem;
-      background: var(--color-text-primary);
-      color: var(--color-surface);
-      font-size: var(--fs-xs);
-      border-radius: var(--radius-sm);
-      white-space: normal;
-      box-shadow: var(--shadow-md);
-      z-index: 50;
-      margin-bottom: 0.375rem;
-      pointer-events: none;
-      max-width: 300px;
-      width: max-content;
-      text-align: center;
-      line-height: 1.4;
-    }
-
-    .help-icon[data-tooltip]:hover::before {
-      content: '';
-      position: absolute;
-      bottom: 100%;
-      left: 50%;
-      transform: translateX(-50%);
-      border: 4px solid transparent;
-      border-top-color: var(--color-text-primary);
-      margin-bottom: -0.125rem;
-      z-index: 50;
-      pointer-events: none;
+      color: var(--color-primary);
     }
   `],
 })

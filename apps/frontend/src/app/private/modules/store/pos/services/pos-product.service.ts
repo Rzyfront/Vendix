@@ -310,11 +310,16 @@ export class PosProductService {
           price_override:
             v.price_override != null ? Number(v.price_override) : null,
           cost_price: v.cost_price != null ? Number(v.cost_price) : null,
-          stock:
-            v.stock ??
-            v.stock_levels?.[0]?.quantity_available ??
-            v.stock_quantity ??
-            0,
+          stock: (() => {
+            if (typeof v.stock === 'number') return v.stock;
+            if (Array.isArray(v.stock_levels) && v.stock_levels.length > 0) {
+              return v.stock_levels.reduce(
+                (sum: number, sl: any) => sum + (sl?.quantity_available ?? 0),
+                0,
+              );
+            }
+            return v.stock_quantity ?? 0;
+          })(),
           is_active: v.is_active ?? true,
           attributes: Array.isArray(v.attributes)
             ? v.attributes

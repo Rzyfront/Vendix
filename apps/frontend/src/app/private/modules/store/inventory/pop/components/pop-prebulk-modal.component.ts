@@ -1,4 +1,4 @@
-import { Component, input, output } from '@angular/core';
+import { Component, computed, model, output, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 
 import { ModalComponent } from '../../../../../../shared/components/modal/modal.component';
@@ -26,8 +26,7 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.p
   ],
   template: `
     <app-modal
-      [isOpen]="isOpen()"
-      (isOpenChange)="isOpenChange.emit($event)"
+      [(isOpen)]="isOpen"
       (cancel)="onCancel()"
       [size]="'lg'"
       title="Agregar Producto Pre-Bulk"
@@ -51,7 +50,8 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.p
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <app-input
             label="Nombre del Producto"
-            [(ngModel)]="form.name"
+            [ngModel]="name()"
+            (ngModelChange)="name.set($event)"
             name="name"
             [required]="true"
             placeholder="Ej: Material genérico"
@@ -59,7 +59,8 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.p
 
           <app-input
             label="SKU / Código"
-            [(ngModel)]="form.code"
+            [ngModel]="code()"
+            (ngModelChange)="code.set($event)"
             name="code"
             [required]="true"
             placeholder="Ej: MAN-001"
@@ -69,7 +70,8 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.p
         <!-- Description -->
         <app-textarea
           label="Descripción"
-          [(ngModel)]="form.description"
+          [ngModel]="description()"
+          (ngModelChange)="description.set($event)"
           name="description"
           placeholder="Descripción opcional del producto..."
           [rows]="3"
@@ -80,7 +82,8 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.p
           <app-input
             label="Cantidad"
             type="number"
-            [(ngModel)]="form.quantity"
+            [ngModel]="quantity()"
+            (ngModelChange)="quantity.set(+$event || 0)"
             name="quantity"
             [required]="true"
             placeholder="0"
@@ -89,7 +92,8 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.p
           <app-input
             label="Costo Unitario"
             type="number"
-            [(ngModel)]="form.unit_cost"
+            [ngModel]="unitCost()"
+            (ngModelChange)="unitCost.set(+$event || 0)"
             name="unit_cost"
             [required]="true"
             step="0.01"
@@ -101,7 +105,8 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.p
         <app-input
           label="Precio de Venta"
           type="number"
-          [(ngModel)]="form.base_price"
+          [ngModel]="basePrice()"
+          (ngModelChange)="basePrice.set(+$event || 0)"
           name="base_price"
           step="0.01"
           [min]="0"
@@ -113,7 +118,7 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.p
           <div class="flex justify-between items-center">
             <span class="text-sm text-[var(--color-text-secondary)]">Total estimado:</span>
             <span class="text-lg font-semibold text-[var(--color-text-primary)]">
-              {{ calculatedTotal | currency: 0 }}
+              {{ calculatedTotal() | currency: 0 }}
             </span>
           </div>
         </div>
@@ -121,7 +126,8 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.p
         <!-- Notes -->
         <app-textarea
           label="Notas"
-          [(ngModel)]="form.notes"
+          [ngModel]="notes()"
+          (ngModelChange)="notes.set($event)"
           name="notes"
           placeholder="Notas adicionales sobre este producto..."
           [rows]="2"
@@ -149,8 +155,7 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.p
   styleUrls: ['./pop-prebulk-modal.component.scss'],
 })
 export class PopPreBulkModalComponent {
-  readonly isOpen = input(false);
-  readonly isOpenChange = output<boolean>();
+  readonly isOpen = model<boolean>(false);
 
   readonly close = output<void>();
   readonly add = output<{
@@ -160,23 +165,32 @@ export class PopPreBulkModalComponent {
     notes?: string;
   }>();
 
-  form = {
-    name: '',
-    code: '',
-    description: '',
-    quantity: 1,
-    unit_cost: 0,
-    base_price: 0,
-    notes: '',
-  };
+  // Form signals
+  readonly name = signal('');
+  readonly code = signal('');
+  readonly description = signal('');
+  readonly quantity = signal(1);
+  readonly unitCost = signal(0);
+  readonly basePrice = signal(0);
+  readonly notes = signal('');
 
   // ============================================================
-  // Getters
+  // Computed
   // ============================================================
 
-  get calculatedTotal(): number {
-    return (this.form.quantity || 0) * (this.form.unit_cost || 0);
-  }
+  readonly calculatedTotal = computed(
+    () => (this.quantity() || 0) * (this.unitCost() || 0),
+  );
+
+  readonly isFormValid = computed(
+    () =>
+      !!(
+        this.name() &&
+        this.code() &&
+        this.quantity() > 0 &&
+        this.unitCost() >= 0
+      ),
+  );
 
   // ============================================================
   // Actions
@@ -189,18 +203,18 @@ export class PopPreBulkModalComponent {
 
     this.add.emit({
       prebulkData: {
-        name: this.form.name,
-        code: this.form.code,
-        description: this.form.description || undefined,
-        base_price: this.form.base_price || 0,
+        name: this.name(),
+        code: this.code(),
+        description: this.description() || undefined,
+        base_price: this.basePrice() || 0,
       },
-      quantity: this.form.quantity,
-      unit_cost: this.form.unit_cost,
-      notes: this.form.notes || undefined,
+      quantity: this.quantity(),
+      unit_cost: this.unitCost(),
+      notes: this.notes() || undefined,
     });
 
     this.resetForm();
-    this.isOpenChange.emit(false);
+    this.isOpen.set(false);
     this.close.emit();
   }
 
@@ -211,7 +225,7 @@ export class PopPreBulkModalComponent {
 
   onCancel(): void {
     this.resetForm();
-    this.isOpenChange.emit(false);
+    this.isOpen.set(false);
     this.close.emit();
   }
 
@@ -219,24 +233,13 @@ export class PopPreBulkModalComponent {
   // Helpers
   // ============================================================
 
-  public isFormValid(): boolean {
-    return !!(
-      this.form.name &&
-      this.form.code &&
-      this.form.quantity > 0 &&
-      this.form.unit_cost >= 0
-    );
-  }
-
   private resetForm(): void {
-    this.form = {
-      name: '',
-      code: '',
-      description: '',
-      quantity: 1,
-      unit_cost: 0,
-      base_price: 0,
-      notes: '',
-    };
+    this.name.set('');
+    this.code.set('');
+    this.description.set('');
+    this.quantity.set(1);
+    this.unitCost.set(0);
+    this.basePrice.set(0);
+    this.notes.set('');
   }
 }

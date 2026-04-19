@@ -1,4 +1,4 @@
-import { Component, OnInit, OnChanges, input, output } from '@angular/core';
+import { Component, effect, input, output } from '@angular/core';
 
 import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
 import { InputComponent } from '../../../../../../../shared/components/input/input.component';
@@ -26,7 +26,7 @@ import { LucideAngularModule } from 'lucide-angular';
   templateUrl: './inventory-settings-form.component.html',
   styleUrls: ['./inventory-settings-form.component.scss'],
 })
-export class InventorySettingsForm implements OnInit, OnChanges {
+export class InventorySettingsForm {
   readonly settings = input.required<InventorySettings>();
   readonly settingsChange = output<InventorySettings>();
 
@@ -71,19 +71,13 @@ export class InventorySettingsForm implements OnInit, OnChanges {
     return this.form.get('costing_method') as FormControl<string>;
   }
 
-  ngOnInit() {
-    this.patchForm();
-  }
-
-  ngOnChanges() {
-    this.patchForm();
-  }
-
-  patchForm() {
-    const currentSettings = this.settings();
-    if (currentSettings) {
-      this.form.patchValue(currentSettings);
-    }
+  constructor() {
+    effect(() => {
+      const current = this.settings();
+      if (current) {
+        this.form.patchValue(current, { emitEvent: false });
+      }
+    });
   }
 
   onSubmit() {

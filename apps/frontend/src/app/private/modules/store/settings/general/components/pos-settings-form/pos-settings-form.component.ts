@@ -1,4 +1,4 @@
-import { Component, OnInit, OnChanges, DestroyRef, inject, input, output } from '@angular/core';
+import { Component, OnInit, DestroyRef, effect, inject, input, output } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { ReactiveFormsModule, FormGroup, FormControl } from '@angular/forms';
@@ -20,7 +20,7 @@ import { ToastService } from '../../../../../../../shared/components/toast/toast
   templateUrl: './pos-settings-form.component.html',
   styleUrls: ['./pos-settings-form.component.scss'],
 })
-export class PosSettingsForm implements OnInit, OnChanges {
+export class PosSettingsForm implements OnInit {
   readonly settings = input.required<PosSettings>();
   readonly settingsChange = output<PosSettings>();
 
@@ -29,7 +29,21 @@ export class PosSettingsForm implements OnInit, OnChanges {
   constructor(
     private scaleService: PosScaleService,
     private toastService: ToastService,
-  ) {}
+  ) {
+    effect(() => {
+      const current = this.settings();
+      if (current) {
+        this.form.patchValue(
+          {
+            ...current,
+            business_hours: current.business_hours || this.getDefaultBusinessHours(),
+          },
+          { emitEvent: false },
+        );
+        this.syncDependentControlsState();
+      }
+    });
+  }
 
   form: FormGroup = new FormGroup({
     allow_anonymous_sales: new FormControl(false),
@@ -227,42 +241,44 @@ export class PosSettingsForm implements OnInit, OnChanges {
   }
 
   ngOnInit() {
-    this.patchForm();
     this.wireDependentControls();
   }
 
-  ngOnChanges() {
-    this.patchForm();
+  private readonly dependentLinks = (): Array<[FormControl<boolean>, FormControl[]]> => [
+    [this.allowAnonymousSalesControl, [this.anonymousSalesAsDefaultControl]],
+    [this.scaleEnabledControl, [this.allowManualWeightEntryControl]],
+    [
+      this.cashRegisterEnabledControl,
+      [
+        this.requireSessionForSalesControl,
+        this.requireClosingCountControl,
+        this.trackNonCashPaymentsControl,
+        this.allowMultipleSessionsControl,
+        this.autoCreateDefaultRegisterControl,
+      ],
+    ],
+    [this.customerQueueEnabledControl, [this.requireEmailControl]],
+  ];
+
+  private applyDependents(enabled: boolean | null, dependents: FormControl[]) {
+    for (const dep of dependents) {
+      if (enabled) dep.enable({ emitEvent: false });
+      else dep.disable({ emitEvent: false });
+    }
+  }
+
+  private syncDependentControlsState() {
+    for (const [master, dependents] of this.dependentLinks()) {
+      this.applyDependents(master.value, dependents);
+    }
   }
 
   private wireDependentControls() {
-    const links: Array<[FormControl<boolean>, FormControl[]]> = [
-      [this.allowAnonymousSalesControl, [this.anonymousSalesAsDefaultControl]],
-      [this.scaleEnabledControl, [this.allowManualWeightEntryControl]],
-      [
-        this.cashRegisterEnabledControl,
-        [
-          this.requireSessionForSalesControl,
-          this.requireClosingCountControl,
-          this.trackNonCashPaymentsControl,
-          this.allowMultipleSessionsControl,
-          this.autoCreateDefaultRegisterControl,
-        ],
-      ],
-      [this.customerQueueEnabledControl, [this.requireEmailControl]],
-    ];
-
-    for (const [master, dependents] of links) {
-      const apply = (enabled: boolean | null) => {
-        for (const dep of dependents) {
-          if (enabled) dep.enable({ emitEvent: false });
-          else dep.disable({ emitEvent: false });
-        }
-      };
-      apply(master.value);
+    for (const [master, dependents] of this.dependentLinks()) {
+      this.applyDependents(master.value, dependents);
       master.valueChanges
         .pipe(takeUntilDestroyed(this.destroyRef))
-        .subscribe(apply);
+        .subscribe((enabled) => this.applyDependents(enabled, dependents));
     }
   }
 
@@ -276,17 +292,6 @@ export class PosSettingsForm implements OnInit, OnChanges {
       saturday: { open: '09:00', close: '14:00' },
       sunday: { open: 'closed', close: 'closed' },
     };
-  }
-
-  patchForm() {
-    const currentSettings = this.settings();
-    if (currentSettings) {
-      this.form.patchValue({
-        ...currentSettings,
-        business_hours:
-          currentSettings.business_hours || this.getDefaultBusinessHours(),
-      });
-    }
   }
 
   onFieldChange() {

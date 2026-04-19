@@ -7,6 +7,7 @@ import {
   inject,
   effect,
   signal,
+  computed,
   DestroyRef } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
@@ -878,11 +879,11 @@ export class PosShippingModalComponent {
 
   // Shipping state
   readonly shippingMethods = signal<PosShippingMethod[]>([]);
-  selectedShippingMethod: PosShippingMethod | null = null;
-  shippingCost = 0;
-  calculatedShippingCost: number | null = null;
-  manualCostOverride = false;
-  isCalculatingShipping = false;
+  readonly selectedShippingMethod = signal<PosShippingMethod | null>(null);
+  readonly shippingCost = signal<number>(0);
+  readonly calculatedShippingCost = signal<number | null>(null);
+  readonly manualCostOverride = signal<boolean>(false);
+  readonly isCalculatingShipping = signal<boolean>(false);
 
   // Payment state
   paymentMode: PosShippingPaymentMode = 'on_delivery';
@@ -918,13 +919,13 @@ export class PosShippingModalComponent {
   isProcessing = false;
 
   // Address auto-fill state
-  selectedCustomerAddressId: number | null = null;
+  readonly selectedCustomerAddressId = signal<number | null>(null);
 
   // Location dropdowns (API Colombia)
-  departments: Department[] = [];
-  cities: City[] = [];
-  selectedDepartmentId: number | null = null;
-  selectedCityId: number | null = null;
+  readonly departments = signal<Department[]>([]);
+  readonly cities = signal<City[]>([]);
+  readonly selectedDepartmentId = signal<number | null>(null);
+  readonly selectedCityId = signal<number | null>(null);
 
   // Forms
   addressForm: FormGroup;
@@ -982,7 +983,7 @@ private customerSearchSubject = new Subject<string>(); // LEGÍTIMO — debounce
   }
 
   get totalWithShipping(): number {
-    return (this.cartState()?.summary?.total || 0) + this.shippingCost;
+    return (this.cartState()?.summary?.total || 0) + this.shippingCost();
   }
 
   get isCashInsufficient(): boolean {
@@ -990,13 +991,13 @@ private customerSearchSubject = new Subject<string>(); // LEGÍTIMO — debounce
     return this.cashReceived < this.totalWithShipping;
   }
 
-  get departmentOptions(): SelectorOption[] {
-    return this.departments.map(d => ({ value: d.id, label: d.name }));
-  }
+  readonly departmentOptions = computed<SelectorOption[]>(() =>
+    this.departments().map(d => ({ value: d.id, label: d.name })),
+  );
 
-  get cityOptions(): SelectorOption[] {
-    return this.cities.map(c => ({ value: c.id, label: c.name }));
-  }
+  readonly cityOptions = computed<SelectorOption[]>(() =>
+    this.cities().map(c => ({ value: c.id, label: c.name })),
+  );
 
   private fb = inject(FormBuilder);
   private http = inject(HttpClient);
@@ -1042,6 +1043,7 @@ private customerSearchSubject = new Subject<string>(); // LEGÍTIMO — debounce
     effect(() => {
       if (this.isOpen() === true) {
         this.resetState();
+        void this.loadAddressesForCartCustomer();
       }
     });
   }
@@ -1051,10 +1053,10 @@ private customerSearchSubject = new Subject<string>(); // LEGÍTIMO — debounce
     this.paymentFormCollapsed = false;
     this.paymentModeCollapsed = false;
     this.paymentMethodCollapsed = false;
-    this.selectedShippingMethod = null;
-    this.shippingCost = 0;
-    this.calculatedShippingCost = null;
-    this.manualCostOverride = false;
+    this.selectedShippingMethod.set(null);
+    this.shippingCost.set(0);
+    this.calculatedShippingCost.set(null);
+    this.manualCostOverride.set(false);
     this.paymentMode = 'on_delivery';
     this.selectedPaymentMethod = null;
     this.cashReceived = 0;
@@ -1063,10 +1065,10 @@ private customerSearchSubject = new Subject<string>(); // LEGÍTIMO — debounce
     this.showCustomerSelector = false;
     this.customerSearchResults = [];
     this.showCreateCustomerForm = false;
-    this.selectedCustomerAddressId = null;
-    this.cities = [];
-    this.selectedDepartmentId = null;
-    this.selectedCityId = null;
+    this.selectedCustomerAddressId.set(null);
+    this.cities.set([]);
+    this.selectedDepartmentId.set(null);
+    this.selectedCityId.set(null);
     this.validationWarningSection = null;
     this.validationWarningMessage = '';
     this.shippingPaymentForm = this.defaultPaymentForm;
@@ -1118,7 +1120,7 @@ private customerSearchSubject = new Subject<string>(); // LEGÍTIMO — debounce
     this.addressForm.valueChanges
       .pipe(takeUntilDestroyed(this.destroyRef), debounceTime(500))
       .subscribe(() => {
-        if (this.selectedShippingMethod && !this.manualCostOverride) {
+        if (this.selectedShippingMethod() && !this.manualCostOverride()) {
           this.calculateShippingCost();
         }
       });
@@ -1132,10 +1134,10 @@ private customerSearchSubject = new Subject<string>(); // LEGÍTIMO — debounce
   // --- Shipping Methods ---
 
   selectShippingMethod(method: PosShippingMethod): void {
-    this.selectedShippingMethod = method;
+    this.selectedShippingMethod.set(method);
     if (method.type === 'pickup') {
-      this.shippingCost = 0;
-      this.calculatedShippingCost = 0;
+      this.shippingCost.set(0);
+      this.calculatedShippingCost.set(0);
     } else {
       this.calculateShippingCost();
     }
@@ -1152,12 +1154,13 @@ private customerSearchSubject = new Subject<string>(); // LEGÍTIMO — debounce
   }
 
   private calculateShippingCost(): void {
-    if (!this.selectedShippingMethod || !this.cartState()?.items?.length) return;
+    const method = this.selectedShippingMethod();
+    if (!method || !this.cartState()?.items?.length) return;
 
     const address = this.addressForm.value;
-    if (this.selectedShippingMethod.type !== 'pickup' && !address.city) return;
+    if (method.type !== 'pickup' && !address.city) return;
 
-    this.isCalculatingShipping = true;
+    this.isCalculatingShipping.set(true);
 
     const items = this.cartState()!.items.map((item) => ({
       product_id: parseInt(item.product.id),
@@ -1166,46 +1169,47 @@ private customerSearchSubject = new Subject<string>(); // LEGÍTIMO — debounce
 
     this.shippingService
       .calculateShipping(items, {
-        country_code: 'CO', // Default for now
+        country_code: 'CO',
         city: address.city || undefined,
         state_province: address.state_province || undefined,
         address_line1: address.address_line1 || undefined })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (options) => {
-          this.isCalculatingShipping = false;
+          this.isCalculatingShipping.set(false);
           const matchingOption = options.find(
-            (o) => o.method_id === this.selectedShippingMethod!.id,
+            (o) => o.method_id === method.id,
           );
           if (matchingOption) {
-            this.calculatedShippingCost = matchingOption.cost;
-            if (!this.manualCostOverride) {
-              this.shippingCost = matchingOption.cost;
+            this.calculatedShippingCost.set(matchingOption.cost);
+            if (!this.manualCostOverride()) {
+              this.shippingCost.set(matchingOption.cost);
             }
           } else if (options.length > 0) {
-            this.calculatedShippingCost = options[0].cost;
-            if (!this.manualCostOverride) {
-              this.shippingCost = options[0].cost;
+            this.calculatedShippingCost.set(options[0].cost);
+            if (!this.manualCostOverride()) {
+              this.shippingCost.set(options[0].cost);
             }
           } else {
-            // No rates found, let user enter manually
-            this.calculatedShippingCost = null;
-            this.manualCostOverride = true;
-            this.shippingCost = 0;
+            this.calculatedShippingCost.set(null);
+            this.manualCostOverride.set(true);
+            this.shippingCost.set(0);
           }
         },
         error: () => {
-          this.isCalculatingShipping = false;
-          this.calculatedShippingCost = null;
-          this.manualCostOverride = true;
-          this.shippingCost = 0;
+          this.isCalculatingShipping.set(false);
+          this.calculatedShippingCost.set(null);
+          this.manualCostOverride.set(true);
+          this.shippingCost.set(0);
         } });
   }
 
   toggleManualCost(): void {
-    this.manualCostOverride = !this.manualCostOverride;
-    if (!this.manualCostOverride && this.calculatedShippingCost !== null) {
-      this.shippingCost = this.calculatedShippingCost;
+    const next = !this.manualCostOverride();
+    this.manualCostOverride.set(next);
+    const calc = this.calculatedShippingCost();
+    if (!next && calc !== null) {
+      this.shippingCost.set(calc);
     }
   }
 
@@ -1216,27 +1220,26 @@ private customerSearchSubject = new Subject<string>(); // LEGÍTIMO — debounce
   // --- Location Dropdowns (API Colombia) ---
 
   private async loadDepartments(): Promise<void> {
-    this.departments = await this.countryService.getDepartments();
+    this.departments.set(await this.countryService.getDepartments());
   }
 
   async onDepartmentChange(departmentId: number): Promise<void> {
-    this.selectedDepartmentId = departmentId || null;
-    const dept = this.departments.find(d => d.id === departmentId);
+    this.selectedDepartmentId.set(departmentId || null);
+    const dept = this.departments().find(d => d.id === departmentId);
     this.addressForm.patchValue({ state_province: dept?.name || '' });
 
-    // Reset city
-    this.cities = [];
-    this.selectedCityId = null;
+    this.cities.set([]);
+    this.selectedCityId.set(null);
     this.addressForm.patchValue({ city: '' });
 
     if (departmentId) {
-      this.cities = await this.countryService.getCitiesByDepartment(departmentId);
+      this.cities.set(await this.countryService.getCitiesByDepartment(departmentId));
     }
   }
 
   onCityChange(cityId: number): void {
-    this.selectedCityId = cityId || null;
-    const city = this.cities.find(c => c.id === cityId);
+    this.selectedCityId.set(cityId || null);
+    const city = this.cities().find(c => c.id === cityId);
     this.addressForm.patchValue({ city: city?.name || '' });
   }
 
@@ -1398,52 +1401,69 @@ private customerSearchSubject = new Subject<string>(); // LEGÍTIMO — debounce
   async selectCustomer(customer: PosCustomer): Promise<void> {
     this.customerSelected.emit(customer);
     this.closeCustomerSelector();
+    await this.applyCustomerAddress(customer);
+  }
 
-    // Auto-fill address if customer has a shipping address
+  private async applyCustomerAddress(customer: PosCustomer): Promise<void> {
     const shippingAddress = customer.addresses?.find(a => a.is_primary) || customer.addresses?.[0];
     if (shippingAddress) {
       this.addressForm.patchValue({
         address_line1: shippingAddress.address_line1 });
-      this.selectedCustomerAddressId = shippingAddress.id;
+      this.selectedCustomerAddressId.set(shippingAddress.id);
 
-      // Match department by name from API Colombia data
       if (shippingAddress.state_province) {
-        const dept = this.departments.find(d =>
+        const dept = this.departments().find(d =>
           d.name.toLowerCase() === shippingAddress.state_province!.toLowerCase(),
         );
         if (dept) {
-          this.selectedDepartmentId = dept.id;
+          this.selectedDepartmentId.set(dept.id);
           this.addressForm.patchValue({ state_province: dept.name });
-          this.cities = await this.countryService.getCitiesByDepartment(dept.id);
+          this.cities.set(await this.countryService.getCitiesByDepartment(dept.id));
 
           if (shippingAddress.city) {
-            const city = this.cities.find(c =>
+            const city = this.cities().find(c =>
               c.name.toLowerCase() === shippingAddress.city!.toLowerCase(),
             );
             if (city) {
-              this.selectedCityId = city.id;
+              this.selectedCityId.set(city.id);
               this.addressForm.patchValue({ city: city.name });
             }
           }
         } else {
-          // Fallback: set the raw text values if no API match
           this.addressForm.patchValue({
             state_province: shippingAddress.state_province || '',
             city: shippingAddress.city || '' });
         }
       }
 
-      // Trigger shipping calculation if method is selected
-      if (this.selectedShippingMethod && !this.manualCostOverride) {
+      if (this.selectedShippingMethod() && !this.manualCostOverride()) {
         this.calculateShippingCost();
       }
     } else {
       this.addressForm.reset();
-      this.selectedCustomerAddressId = null;
-      this.selectedDepartmentId = null;
-      this.selectedCityId = null;
-      this.cities = [];
+      this.selectedCustomerAddressId.set(null);
+      this.selectedDepartmentId.set(null);
+      this.selectedCityId.set(null);
+      this.cities.set([]);
     }
+  }
+
+  private async loadAddressesForCartCustomer(): Promise<void> {
+    const customer = this.cartState()?.customer;
+    if (!customer) return;
+    if (this.departments().length === 0) {
+      await this.loadDepartments();
+    }
+    if (customer.addresses && customer.addresses.length > 0) {
+      await this.applyCustomerAddress(customer);
+      return;
+    }
+    this.customerService
+      .fetchCustomerById(customer.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe((refreshed) => {
+        if (refreshed) void this.applyCustomerAddress(refreshed);
+      });
   }
 
   onCreateCustomer(): void {
@@ -1483,12 +1503,12 @@ private customerSearchSubject = new Subject<string>(); // LEGÍTIMO — debounce
   // --- Validation & Confirm ---
 
   canConfirm(): boolean {
-    if (!this.selectedShippingMethod) return false;
+    const method = this.selectedShippingMethod();
+    if (!method) return false;
     if (!this.cartState()?.customer) return false;
     if (!this.cartState()?.items?.length) return false;
 
-    // Address required for non-pickup
-    if (this.selectedShippingMethod.type !== 'pickup') {
+    if (method.type !== 'pickup') {
       const addr = this.addressForm.value;
       if (!addr.address_line1 || !addr.city) return false;
     }
@@ -1507,11 +1527,12 @@ private customerSearchSubject = new Subject<string>(); // LEGÍTIMO — debounce
   }
 
   private getFirstValidationError(): { section: 'shipping-method' | 'address' | 'customer' | 'payment'; message: string } | null {
-    if (!this.selectedShippingMethod) {
+    const method = this.selectedShippingMethod();
+    if (!method) {
       return { section: 'shipping-method', message: 'Selecciona un método de envío' };
     }
 
-    if (this.selectedShippingMethod.type !== 'pickup') {
+    if (method.type !== 'pickup') {
       const addr = this.addressForm.value;
       if (!addr.address_line1 || !addr.city) {
         return { section: 'address', message: 'Completa la dirección de envío' };
@@ -1590,12 +1611,13 @@ private customerSearchSubject = new Subject<string>(); // LEGÍTIMO — debounce
       return;
     }
 
-    if (!this.cartState() || !this.selectedShippingMethod) return;
+    const method = this.selectedShippingMethod();
+    if (!this.cartState() || !method) return;
 
     this.isProcessing = true;
 
     const deliveryType =
-      this.selectedShippingMethod.type === 'pickup' ? 'pickup' : 'home_delivery';
+      method.type === 'pickup' ? 'pickup' : 'home_delivery';
 
     const address = this.addressForm.value;
     const shippingAddress: PosShippingAddress = {
@@ -1627,11 +1649,11 @@ private customerSearchSubject = new Subject<string>(); // LEGÍTIMO — debounce
         ? parseInt(this.creditInitialPaymentMethod.id)
         : undefined } : undefined;
 
-    // If customer has no saved address and we have a new address, create it first
-    if (!this.selectedCustomerAddressId && address.address_line1 && address.city && this.cartState()!.customer) {
+    const customerAddressId = this.selectedCustomerAddressId();
+    if (!customerAddressId && address.address_line1 && address.city && this.cartState()!.customer) {
       this.createAddressThenProcessOrder(address, shippingAddress, deliveryType, paymentRequest, creditConfig);
     } else {
-      this.processOrder(shippingAddress, deliveryType, paymentRequest, this.selectedCustomerAddressId, creditConfig);
+      this.processOrder(shippingAddress, deliveryType, paymentRequest, customerAddressId, creditConfig);
     }
   }
 
@@ -1676,8 +1698,8 @@ private customerSearchSubject = new Subject<string>(); // LEGÍTIMO — debounce
       .processShippingSale(
         this.cartState()!,
         {
-          shippingMethodId: this.selectedShippingMethod!.id,
-          shippingCost: this.shippingCost,
+          shippingMethodId: this.selectedShippingMethod()!.id,
+          shippingCost: this.shippingCost(),
           deliveryType,
           shippingAddress,
           deliveryNotes: address.delivery_notes || undefined,

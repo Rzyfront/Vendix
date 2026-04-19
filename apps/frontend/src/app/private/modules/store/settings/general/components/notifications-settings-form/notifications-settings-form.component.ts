@@ -1,4 +1,4 @@
-import {Component, OnInit, OnChanges, inject, input, output, DestroyRef} from '@angular/core';
+import {Component, OnInit, effect, inject, input, output, DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
@@ -36,13 +36,22 @@ export interface NotificationsSettings {
   templateUrl: './notifications-settings-form.component.html',
   styleUrls: ['./notifications-settings-form.component.scss'],
 })
-export class NotificationsSettingsForm implements OnInit, OnChanges {
+export class NotificationsSettingsForm implements OnInit {
   private destroyRef = inject(DestroyRef);
   readonly settings = input.required<NotificationsSettings>();
   readonly settingsChange = output<NotificationsSettings>();
 
   private notificationsApi = inject(NotificationsApiService);
   pushService = inject(PushSubscriptionService);
+
+  constructor() {
+    effect(() => {
+      const current = this.settings();
+      if (current) {
+        this.form.patchValue(current, { emitEvent: false });
+      }
+    });
+  }
 
   devicePushEnabled = false;
 
@@ -119,7 +128,6 @@ export class NotificationsSettingsForm implements OnInit, OnChanges {
   }
 
   ngOnInit() {
-    this.patchForm();
     this.loadSubscriptions();
     this.initDevicePushState();
   }
@@ -130,17 +138,6 @@ export class NotificationsSettingsForm implements OnInit, OnChanges {
       const reg = await navigator.serviceWorker.getRegistration('/');
       const sub = await reg?.pushManager?.getSubscription();
       this.devicePushEnabled = !!sub;
-    }
-  }
-
-  ngOnChanges() {
-    this.patchForm();
-  }
-
-  patchForm() {
-    const currentSettings = this.settings();
-    if (currentSettings) {
-      this.form.patchValue(currentSettings);
     }
   }
 

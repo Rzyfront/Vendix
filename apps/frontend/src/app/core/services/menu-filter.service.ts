@@ -122,7 +122,6 @@ export class MenuFilterService {
     // Legal / Tax modules
     Retenciones: 'accounting_withholding_tax',
     'Info Exógena': 'accounting_exogenous',
-    'Datos Personales': 'settings_habeas_data',
     'ICA Municipal': 'taxes_ica',
 
     // Configuración (compartido por ORG_ADMIN y STORE_ADMIN)

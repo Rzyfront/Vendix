@@ -431,7 +431,7 @@
             <!-- Horizontal Thumbnails Carousel -->
             <div class="flex gap-2 overflow-x-auto pb-2 scrollbar-none">
               <!-- Upload Button -->
-              @if (imageUrls.length < 5 && !isLoadingImages) {
+              @if (imageUrls.length < 5 && !isLoadingImages()) {
                 <button
                   type="button"
                   (click)="triggerFileUpload()"
@@ -447,7 +447,7 @@
               }
 
               <!-- Loading Indicator Mobile -->
-              @if (isLoadingImages) {
+              @if (isLoadingImages()) {
                 <div
                   class="flex-shrink-0 w-16 h-16 bg-primary-50 rounded-xl border-2 border-dashed border-primary-300 flex flex-col items-center justify-center"
                 >
@@ -455,7 +455,7 @@
                     class="animate-spin rounded-full h-5 w-5 border-b-2 border-primary-600"
                   ></div>
                   <span class="text-[9px] text-primary-600 mt-1"
-                    >{{ loadingProgress }}%</span
+                    >{{ loadingProgress() }}%</span
                   >
                 </div>
               }
@@ -1020,7 +1020,7 @@
             @if (imageUrls.length < 5) {
               <div class="group mt-4 relative">
                 <!-- Loading Indicator -->
-                @if (isLoadingImages) {
+                @if (isLoadingImages()) {
                   <div
                     class="w-full py-4 border-2 border-dashed border-primary-300 rounded-xl bg-primary-50/50 flex flex-col items-center justify-center mb-2"
                   >
@@ -1031,15 +1031,15 @@
                       Cargando imágenes...
                     </p>
                     <p class="text-xs text-primary-600 mt-1">
-                      {{ loadingProgress }}%
+                      {{ loadingProgress() }}%
                     </p>
                   </div>
                 }
                 <div
                   (click)="triggerFileUpload()"
                   class="w-full py-4 border-2 border-dashed border-gray-200 rounded-xl bg-gray-50/50 flex flex-col items-center justify-center cursor-pointer transition-all hover:bg-white hover:border-primary-300 hover:shadow-md"
-                  [class.opacity-50]="isLoadingImages"
-                  [class.pointer-events-none]="isLoadingImages"
+                  [class.opacity-50]="isLoadingImages()"
+                  [class.pointer-events-none]="isLoadingImages()"
                 >
                   <div
                     class="p-2 bg-white rounded-full shadow-sm mb-2 group-hover:scale-110 transition-transform"
@@ -1418,11 +1418,7 @@
         </section>
 
         <!-- Proveedores del Servicio (Desktop sidebar) -->
-        @if (
-          productForm.get("requires_booking")?.value &&
-          isEditMode() &&
-          productId
-        ) {
+        @if (productForm.get("requires_booking")?.value) {
           <section
             class="bg-white rounded-2xl border border-gray-100 p-4 md:p-6 shadow-sm space-y-4"
           >
@@ -1437,58 +1433,42 @@
               </h2>
             </div>
 
-            <div class="flex flex-wrap items-center gap-2">
-              @for (provider of assignedProviders(); track provider.id) {
-                <div
-                  class="inline-flex items-center gap-2 pl-1 pr-2 py-1 bg-indigo-50 border border-indigo-200 rounded-full text-sm"
-                >
-                  <span
-                    class="w-6 h-6 rounded-full bg-indigo-500 text-white text-xs font-bold flex items-center justify-center"
-                  >
-                    {{ getProviderInitials(provider) }}
-                  </span>
-                  <span class="text-gray-700 font-medium">{{
-                    provider.display_name || provider.employee?.first_name
-                  }}</span>
-                  <button
-                    class="w-5 h-5 rounded-full flex items-center justify-center text-indigo-400 hover:text-red-500 hover:bg-red-50 transition-colors"
-                    (click)="removeProviderFromService(provider.id)"
-                  >
-                    <app-icon name="x" [size]="12"></app-icon>
-                  </button>
+            @if (!isEditMode() || !productId) {
+              <p class="text-sm text-gray-500 bg-indigo-50 border border-indigo-100 rounded-lg p-3">
+                Guarda el producto para asignar proveedores.
+              </p>
+            } @else {
+              @if (loadingProviders()) {
+                <p class="text-sm text-gray-400 italic">Cargando proveedores...</p>
+              }
+
+              <app-multi-selector
+                [options]="providerSelectorOptions()"
+                [ngModel]="assignedProviderIds()"
+                [ngModelOptions]="{ standalone: true }"
+                (valueChange)="onProvidersSelectionChange($event)"
+                placeholder="Selecciona proveedores"
+                helpText="Los proveedores asignados podrán recibir reservas de este servicio"
+              ></app-multi-selector>
+
+              @if (assignedProviders().length > 0) {
+                <div class="flex flex-wrap items-center gap-2 pt-2">
+                  @for (provider of assignedProviders(); track provider.id) {
+                    <div
+                      class="inline-flex items-center gap-2 pl-1 pr-2 py-1 bg-indigo-50 border border-indigo-200 rounded-full text-sm"
+                    >
+                      <span
+                        class="w-6 h-6 rounded-full bg-indigo-500 text-white text-xs font-bold flex items-center justify-center"
+                      >
+                        {{ getProviderInitials(provider) }}
+                      </span>
+                      <span class="text-gray-700 font-medium">{{
+                        provider.display_name || provider.employee?.first_name
+                      }}</span>
+                    </div>
+                  }
                 </div>
               }
-
-              @if (availableProvidersForProduct().length > 0) {
-                <select
-                  class="text-sm border border-dashed border-gray-300 rounded-full px-3 py-1.5 bg-white text-gray-500 hover:border-indigo-400 hover:text-indigo-500 cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-200"
-                  (change)="
-                    addProviderToService($any($event.target).value);
-                    $any($event.target).value = ''
-                  "
-                >
-                  <option value="">+ Agregar proveedor</option>
-                  @for (
-                    provider of availableProvidersForProduct();
-                    track provider.id
-                  ) {
-                    <option [value]="provider.id">
-                      {{
-                        provider.display_name ||
-                          provider.employee?.first_name +
-                            " " +
-                            provider.employee?.last_name
-                      }}
-                    </option>
-                  }
-                </select>
-              }
-            </div>
-
-            @if (assignedProviders().length === 0 && !loadingProviders()) {
-              <p class="text-sm text-gray-400 italic">
-                No hay proveedores asignados.
-              </p>
             }
 
             <button
@@ -1594,9 +1574,7 @@
     }
 
     <!-- MOBILE: Proveedores del Servicio (visible only on mobile) -->
-    @if (
-      productForm.get("requires_booking")?.value && isEditMode() && productId
-    ) {
+    @if (productForm.get("requires_booking")?.value) {
       <section
         class="lg:hidden bg-white rounded-2xl border border-gray-100 p-4 shadow-sm space-y-4"
       >
@@ -1607,58 +1585,41 @@
           </h2>
         </div>
 
-        <div class="flex flex-wrap items-center gap-2">
-          @for (provider of assignedProviders(); track provider.id) {
-            <div
-              class="inline-flex items-center gap-2 pl-1 pr-2 py-1 bg-indigo-50 border border-indigo-200 rounded-full text-sm"
-            >
-              <span
-                class="w-6 h-6 rounded-full bg-indigo-500 text-white text-xs font-bold flex items-center justify-center"
-              >
-                {{ getProviderInitials(provider) }}
-              </span>
-              <span class="text-gray-700 font-medium">{{
-                provider.display_name || provider.employee?.first_name
-              }}</span>
-              <button
-                class="w-5 h-5 rounded-full flex items-center justify-center text-indigo-400 hover:text-red-500 hover:bg-red-50 transition-colors"
-                (click)="removeProviderFromService(provider.id)"
-              >
-                <app-icon name="x" [size]="12"></app-icon>
-              </button>
+        @if (!isEditMode() || !productId) {
+          <p class="text-sm text-gray-500 bg-indigo-50 border border-indigo-100 rounded-lg p-3">
+            Guarda el producto para asignar proveedores.
+          </p>
+        } @else {
+          @if (loadingProviders()) {
+            <p class="text-sm text-gray-400 italic">Cargando proveedores...</p>
+          }
+
+          <app-multi-selector
+            [options]="providerSelectorOptions()"
+            [ngModel]="assignedProviderIds()"
+            [ngModelOptions]="{ standalone: true }"
+            (valueChange)="onProvidersSelectionChange($event)"
+            placeholder="Selecciona proveedores"
+          ></app-multi-selector>
+
+          @if (assignedProviders().length > 0) {
+            <div class="flex flex-wrap items-center gap-2 pt-2">
+              @for (provider of assignedProviders(); track provider.id) {
+                <div
+                  class="inline-flex items-center gap-2 pl-1 pr-2 py-1 bg-indigo-50 border border-indigo-200 rounded-full text-sm"
+                >
+                  <span
+                    class="w-6 h-6 rounded-full bg-indigo-500 text-white text-xs font-bold flex items-center justify-center"
+                  >
+                    {{ getProviderInitials(provider) }}
+                  </span>
+                  <span class="text-gray-700 font-medium">{{
+                    provider.display_name || provider.employee?.first_name
+                  }}</span>
+                </div>
+              }
             </div>
           }
-
-          @if (availableProvidersForProduct().length > 0) {
-            <select
-              class="text-sm border border-dashed border-gray-300 rounded-full px-3 py-1.5 bg-white text-gray-500 hover:border-indigo-400 hover:text-indigo-500 cursor-pointer transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-200"
-              (change)="
-                addProviderToService($any($event.target).value);
-                $any($event.target).value = ''
-              "
-            >
-              <option value="">+ Agregar proveedor</option>
-              @for (
-                provider of availableProvidersForProduct();
-                track provider.id
-              ) {
-                <option [value]="provider.id">
-                  {{
-                    provider.display_name ||
-                      provider.employee?.first_name +
-                        " " +
-                        provider.employee?.last_name
-                  }}
-                </option>
-              }
-            </select>
-          }
-        </div>
-
-        @if (assignedProviders().length === 0 && !loadingProviders()) {
-          <p class="text-sm text-gray-400 italic">
-            No hay proveedores asignados.
-          </p>
         }
 
         <button

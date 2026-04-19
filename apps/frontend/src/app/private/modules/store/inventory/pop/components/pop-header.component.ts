@@ -149,12 +149,13 @@ import { InventoryService } from "../../services/inventory.service";
             [class.config-flash-warning]="showConfigWarning()">
             <app-tooltip
               position="top"
-              color="warning"
+              color="ai"
               size="sm"
+              content="Selecciona proveedor y bodega"
               [visible]="showConfigWarning()"
               class="!absolute left-1/2 -translate-x-1/2 top-0 z-10"
-            >Selecciona proveedor y bodega</app-tooltip>
-    
+            ></app-tooltip>
+
             <!-- 1. Supplier Selector -->
             <div class="flex flex-col gap-1.5 min-w-0">
               <label
@@ -182,10 +183,10 @@ import { InventoryService } from "../../services/inventory.service";
                     >
                     <app-icon name="plus" [size]="18" slot="icon"></app-icon>
                   </app-button>
-                  <app-tooltip position="top" size="sm" [visible]="hoveredTooltip() === 'supplier'"
-                    class="!absolute left-1/2 -translate-x-1/2 bottom-full z-10">
-                    Nuevo Proveedor
-                  </app-tooltip>
+                  <app-tooltip position="top" size="sm" color="ai" content="Nuevo Proveedor"
+                    [visible]="hoveredTooltip() === 'supplier'"
+                    class="!absolute left-1/2 -translate-x-1/2 bottom-full z-10"
+                  ></app-tooltip>
                 </div>
               </div>
             </div>
@@ -217,10 +218,10 @@ import { InventoryService } from "../../services/inventory.service";
                     >
                     <app-icon name="plus" [size]="18" slot="icon"></app-icon>
                   </app-button>
-                  <app-tooltip position="top" size="sm" [visible]="hoveredTooltip() === 'warehouse'"
-                    class="!absolute left-1/2 -translate-x-1/2 bottom-full z-10">
-                    Nueva Bodega
-                  </app-tooltip>
+                  <app-tooltip position="top" size="sm" color="ai" content="Nueva Bodega"
+                    [visible]="hoveredTooltip() === 'warehouse'"
+                    class="!absolute left-1/2 -translate-x-1/2 bottom-full z-10"
+                  ></app-tooltip>
                 </div>
               </div>
             </div>
@@ -281,11 +282,12 @@ import { InventoryService } from "../../services/inventory.service";
                     [class.config-flash-warning]="showConfigWarning()">
                     <app-tooltip
                       position="top"
-                      color="warning"
+                      color="ai"
                       size="sm"
+                      content="Selecciona proveedor y bodega"
                       [visible]="showConfigWarning()"
                       class="!absolute left-1/2 -translate-x-1/2 top-0 z-10"
-                    >Selecciona proveedor y bodega</app-tooltip>
+                    ></app-tooltip>
                     <div class="flex flex-col gap-1.5 min-w-0">
                       <label class="text-xs font-semibold text-text-secondary pl-0.5 flex items-center gap-1">
                         Proveedor <span class="text-destructive">*</span>

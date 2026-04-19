@@ -564,13 +564,6 @@ export const storeAdminRoutes: Routes = [
           ),
       },
       {
-        path: 'habeas-data',
-        loadChildren: () =>
-          import('../../private/modules/store/habeas-data/habeas-data.routes').then(
-            (m) => m.habeasDataRoutes,
-          ),
-      },
-      {
         path: 'taxes/ica',
         loadChildren: () =>
           import('../../private/modules/store/taxes/ica/ica.routes').then(

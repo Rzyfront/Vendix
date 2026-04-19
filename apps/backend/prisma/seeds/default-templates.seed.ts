@@ -285,7 +285,6 @@ export async function seedDefaultTemplates(prisma?: PrismaClient) {
             settings_users: true,
             settings_roles: true,
             settings_cash_registers: true,
-            settings_habeas_data: true,
             accounting_withholding_tax: true,
             accounting_exogenous: true,
             taxes_ica: true,

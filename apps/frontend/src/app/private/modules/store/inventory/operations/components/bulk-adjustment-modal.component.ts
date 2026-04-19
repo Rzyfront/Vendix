@@ -1,4 +1,4 @@
-import { Component, signal, inject, input, output, DestroyRef } from '@angular/core';
+import { Component, signal, inject, input, output, DestroyRef, computed } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import { FormsModule } from '@angular/forms';
@@ -83,22 +83,23 @@ interface BulkUploadResult {
             <app-selector
               label="Ubicación / Bodega"
               [options]="locations()"
-              [ngModel]="selected_location_id"
-              (ngModelChange)="selected_location_id = $event"
+              [ngModel]="selectedLocationId()"
+              (ngModelChange)="selectedLocationId.set($event)"
               placeholder="Seleccione una ubicación"
               [required]="true"
             ></app-selector>
 
             <app-selector
               label="Tipo de ajuste (global)"
-              [options]="adjustment_type_options"
-              [ngModel]="selected_adjustment_type"
-              (ngModelChange)="selected_adjustment_type = $event"
+              [options]="adjustmentTypeOptions"
+              [ngModel]="selectedAdjustmentType()"
+              (ngModelChange)="selectedAdjustmentType.set($event)"
             ></app-selector>
 
             <app-textarea
               label="Descripción general (opcional)"
-              [(ngModel)]="description"
+              [ngModel]="description()"
+              (ngModelChange)="description.set($event)"
               placeholder="Ej: Conteo físico mensual de marzo"
               [rows]="2"
             ></app-textarea>
@@ -107,8 +108,8 @@ interface BulkUploadResult {
               <app-button
                 variant="outline"
                 size="sm"
-                [disabled]="!selected_location_id || is_downloading()"
-                [loading]="is_downloading()"
+                [disabled]="!selectedLocationId() || isDownloading()"
+                [loading]="isDownloading()"
                 (clicked)="downloadTemplate()"
               >
                 <div class="flex items-center gap-2">
@@ -131,9 +132,9 @@ interface BulkUploadResult {
             <!-- Drop zone -->
             <div
               class="border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer"
-              [class.border-gray-300]="!selected_file"
-              [class.border-primary]="selected_file"
-              [class.bg-primary-50]="selected_file"
+              [class.border-gray-300]="!selectedFile()"
+              [class.border-primary]="selectedFile()"
+              [class.bg-primary-50]="selectedFile()"
               (click)="fileInput.click()"
               (dragover)="onDragOver($event)"
               (drop)="onDrop($event)"
@@ -146,7 +147,7 @@ interface BulkUploadResult {
                 (change)="onFileSelected($event)"
               />
 
-              @if (!selected_file) {
+              @if (!selectedFile()) {
                 <app-icon name="upload-cloud" [size]="40" class="mx-auto mb-3 text-gray-400"></app-icon>
                 <p class="text-sm text-gray-600 font-medium">
                   Haga clic o arrastre un archivo aquí
@@ -156,9 +157,9 @@ interface BulkUploadResult {
                 </p>
               } @else {
                 <app-icon name="file-spreadsheet" [size]="40" class="mx-auto mb-3 text-primary"></app-icon>
-                <p class="text-sm font-medium text-gray-800">{{ selected_file.name }}</p>
+                <p class="text-sm font-medium text-gray-800">{{ selectedFile()!.name }}</p>
                 <p class="text-xs text-gray-500 mt-1">
-                  {{ formatFileSize(selected_file.size) }}
+                  {{ formatFileSize(selectedFile()!.size) }}
                 </p>
                 <button
                   class="text-xs text-red-500 hover:text-red-700 mt-2 underline"
@@ -176,26 +177,30 @@ interface BulkUploadResult {
           <div class="space-y-4">
             <h3 class="text-base font-semibold text-gray-800">Resultado</h3>
 
-            @if (is_uploading()) {
-              <div class="flex flex-col items-center justify-center py-8">
-                <div class="animate-spin rounded-full h-10 w-10 border-b-2 border-primary mb-4"></div>
-                <p class="text-sm text-gray-600">Procesando ajustes...</p>
+            @if (isUploading()) {
+              <div class="flex flex-col items-center justify-center py-8 gap-3">
+                <app-icon
+                  name="loader"
+                  [size]="36"
+                  class="text-primary animate-spin"
+                ></app-icon>
+                <p class="text-sm text-gray-900 font-medium">Procesando ajustes...</p>
               </div>
             }
 
-            @if (upload_result) {
+            @if (uploadResult()) {
               <!-- Summary -->
               <div class="grid grid-cols-3 gap-3">
                 <div class="bg-gray-50 rounded-lg p-3 text-center">
-                  <p class="text-2xl font-bold text-gray-800">{{ upload_result.total_processed }}</p>
+                  <p class="text-2xl font-bold text-gray-800">{{ uploadResult()!.total_processed }}</p>
                   <p class="text-xs text-gray-500">Total</p>
                 </div>
                 <div class="bg-green-50 rounded-lg p-3 text-center">
-                  <p class="text-2xl font-bold text-green-600">{{ upload_result.successful }}</p>
+                  <p class="text-2xl font-bold text-green-600">{{ uploadResult()!.successful }}</p>
                   <p class="text-xs text-gray-500">Exitosos</p>
                 </div>
                 <div class="bg-red-50 rounded-lg p-3 text-center">
-                  <p class="text-2xl font-bold text-red-600">{{ upload_result.failed }}</p>
+                  <p class="text-2xl font-bold text-red-600">{{ uploadResult()!.failed }}</p>
                   <p class="text-xs text-gray-500">Fallidos</p>
                 </div>
               </div>
@@ -213,7 +218,7 @@ interface BulkUploadResult {
                     </tr>
                   </thead>
                   <tbody>
-                    @for (item of upload_result.results; track item.row_number) {
+                    @for (item of uploadResult()!.results; track item.row_number) {
                       <tr
                         class="border-t"
                         [class.bg-red-50]="item.status === 'error'"
@@ -243,11 +248,11 @@ interface BulkUploadResult {
                 </table>
               </div>
 
-              @if (upload_result.failed > 0) {
+              @if (uploadResult()!.failed > 0) {
                 <!-- Error details -->
                 <div class="bg-red-50 border border-red-200 rounded-lg p-3">
                   <p class="text-sm font-medium text-red-800 mb-2">Errores encontrados:</p>
-                  @for (item of getFailedItems(); track item.row_number) {
+                  @for (item of failedItems(); track item.row_number) {
                     <p class="text-xs text-red-700">
                       Fila {{ item.row_number }} ({{ item.sku }}): {{ item.message }}
                     </p>
@@ -277,7 +282,7 @@ interface BulkUploadResult {
             @if (step() === 1) {
               <app-button
                 variant="primary"
-                [disabled]="!selected_location_id"
+                [disabled]="!selectedLocationId()"
                 (clicked)="nextStep()"
               >
                 Siguiente
@@ -287,8 +292,8 @@ interface BulkUploadResult {
             @if (step() === 2) {
               <app-button
                 variant="primary"
-                [disabled]="!selected_file || is_uploading()"
-                [loading]="is_uploading()"
+                [disabled]="!selectedFile() || isUploading()"
+                [loading]="isUploading()"
                 (clicked)="uploadFile()"
               >
                 Subir y Aplicar
@@ -310,17 +315,22 @@ export class BulkAdjustmentModalComponent {
   private toast_service = inject(ToastService);
   private destroyRef = inject(DestroyRef);
 
-  step = signal(1);
-  is_downloading = signal(false);
-  is_uploading = signal(false);
+  readonly step = signal(1);
+  readonly isDownloading = signal(false);
+  readonly isUploading = signal(false);
 
-  selected_location_id: any = null;
-  selected_adjustment_type: any = 'count_variance';
-  description = '';
-  selected_file: File | null = null;
-  upload_result: BulkUploadResult | null = null;
+  readonly selectedLocationId = signal<string | number | null>(null);
+  readonly selectedAdjustmentType = signal<string>('count_variance');
+  readonly description = signal<string>('');
+  readonly selectedFile = signal<File | null>(null);
+  readonly uploadResult = signal<BulkUploadResult | null>(null);
 
-  adjustment_type_options: SelectorOption[] = [
+  readonly failedItems = computed<BulkResultItem[]>(() => {
+    const r = this.uploadResult();
+    return r?.results.filter((x) => x.status === 'error') || [];
+  });
+
+  readonly adjustmentTypeOptions: SelectorOption[] = [
     { value: 'count_variance', label: 'Varianza de conteo' },
     { value: 'manual_correction', label: 'Corrección manual' },
     { value: 'damage', label: 'Daño' },
@@ -338,8 +348,9 @@ export class BulkAdjustmentModalComponent {
   }
 
   downloadTemplate(): void {
-    this.is_downloading.set(true);
-    const location_id = this.selected_location_id ? Number(this.selected_location_id) : undefined;
+    this.isDownloading.set(true);
+    const locId = this.selectedLocationId();
+    const location_id = locId !== null && locId !== '' ? Number(locId) : undefined;
 
     this.inventory_service.downloadAdjustmentTemplate(location_id)
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -351,12 +362,12 @@ export class BulkAdjustmentModalComponent {
           a.download = `plantilla_ajuste_inventario_${new Date().toISOString().split('T')[0]}.xlsx`;
           a.click();
           window.URL.revokeObjectURL(url);
-          this.is_downloading.set(false);
+          this.isDownloading.set(false);
           this.toast_service.success('Plantilla descargada');
         },
         error: (err) => {
           this.toast_service.error(err || 'Error al descargar plantilla');
-          this.is_downloading.set(false);
+          this.isDownloading.set(false);
         },
       });
   }
@@ -364,7 +375,7 @@ export class BulkAdjustmentModalComponent {
   onFileSelected(event: Event): void {
     const input = event.target as HTMLInputElement;
     if (input.files?.length) {
-      this.selected_file = input.files[0];
+      this.selectedFile.set(input.files[0]);
     }
   }
 
@@ -377,40 +388,43 @@ export class BulkAdjustmentModalComponent {
     event.preventDefault();
     event.stopPropagation();
     if (event.dataTransfer?.files.length) {
-      this.selected_file = event.dataTransfer.files[0];
+      this.selectedFile.set(event.dataTransfer.files[0]);
     }
   }
 
   removeFile(event: Event): void {
     event.stopPropagation();
-    this.selected_file = null;
+    this.selectedFile.set(null);
   }
 
   uploadFile(): void {
-    if (!this.selected_file || !this.selected_location_id) return;
+    const file = this.selectedFile();
+    const locId = this.selectedLocationId();
+    if (!file || !locId) return;
 
-    this.is_uploading.set(true);
+    this.isUploading.set(true);
     this.step.set(3);
 
     this.inventory_service.uploadBulkAdjustments(
-      this.selected_file,
-      Number(this.selected_location_id),
-      this.selected_adjustment_type || 'count_variance',
-      this.description || undefined,
+      file,
+      Number(locId),
+      this.selectedAdjustmentType() || 'count_variance',
+      this.description() || undefined,
     )
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (response) => {
-          this.upload_result = response.data;
-          this.is_uploading.set(false);
+          const result = response.data as BulkUploadResult;
+          this.uploadResult.set(result);
+          this.isUploading.set(false);
 
-          if (this.upload_result?.failed === 0) {
+          if (result?.failed === 0) {
             this.toast_service.success(
-              `${this.upload_result.successful} ajustes aplicados exitosamente`,
+              `${result.successful} ajustes aplicados exitosamente`,
             );
           } else {
             this.toast_service.warning(
-              `${this.upload_result?.successful} exitosos, ${this.upload_result?.failed} con errores`,
+              `${result?.successful} exitosos, ${result?.failed} con errores`,
             );
           }
 
@@ -418,14 +432,14 @@ export class BulkAdjustmentModalComponent {
         },
         error: (err) => {
           this.toast_service.error(err || 'Error al procesar el archivo');
-          this.is_uploading.set(false);
+          this.isUploading.set(false);
           this.step.set(2);
         },
       });
   }
 
   getFailedItems(): BulkResultItem[] {
-    return this.upload_result?.results.filter((r) => r.status === 'error') || [];
+    return this.failedItems();
   }
 
   formatFileSize(bytes: number): string {
@@ -441,11 +455,11 @@ export class BulkAdjustmentModalComponent {
 
   private resetState(): void {
     this.step.set(1);
-    this.selected_file = null;
-    this.upload_result = null;
-    this.is_uploading.set(false);
-    this.is_downloading.set(false);
-    this.description = '';
+    this.selectedFile.set(null);
+    this.uploadResult.set(null);
+    this.isUploading.set(false);
+    this.isDownloading.set(false);
+    this.description.set('');
   }
 
 }

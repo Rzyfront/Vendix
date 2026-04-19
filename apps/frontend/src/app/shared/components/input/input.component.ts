@@ -18,6 +18,7 @@ import {
 import { FormStyleVariant } from '../../types/form.types';
 import { CurrencyFormatService } from '../../pipes/currency/currency.pipe';
 import { IconComponent } from '../icon/icon.component';
+import { TooltipComponent } from '../tooltip/tooltip.component';
 
 export type InputType =
   | 'text'
@@ -35,7 +36,7 @@ export type InputSize = 'sm' | 'md' | 'lg';
 @Component({
   selector: 'app-input',
   standalone: true,
-  imports: [IconComponent],
+  imports: [IconComponent, TooltipComponent],
   providers: [
     {
       provide: NG_VALUE_ACCESSOR,
@@ -54,9 +55,15 @@ export type InputSize = 'sm' | 'md' | 'lg';
         >
           <span>{{ label() }}</span>
           @if (tooltipText()) {
-            <span class="help-icon" [attr.data-tooltip]="tooltipText()">
-              <app-icon name="help-circle" [size]="14"></app-icon>
-            </span>
+            <app-tooltip
+              [content]="tooltipText()"
+              [position]="tooltipPosition()"
+              [visible]="tooltipVisible()"
+            >
+              <span class="help-icon">
+                <app-icon name="help-circle" [size]="14"></app-icon>
+              </span>
+            </app-tooltip>
           }
           @if (required()) {
             <span class="text-[var(--color-destructive)] ml-1">*</span>
@@ -208,42 +215,7 @@ export type InputSize = 'sm' | 'md' | 'lg';
       }
 
       .help-icon:hover {
-        color: var(--color-warning);
-      }
-
-      .help-icon[data-tooltip]:hover::after {
-        content: attr(data-tooltip);
-        position: absolute;
-        bottom: 100%;
-        left: 50%;
-        transform: translateX(-50%);
-        padding: 0.375rem 0.5rem;
-        background: var(--color-text-primary);
-        color: var(--color-surface);
-        font-size: var(--fs-xs);
-        border-radius: var(--radius-sm);
-        white-space: normal;
-        box-shadow: var(--shadow-md);
-        z-index: 50;
-        margin-bottom: 0.375rem;
-        pointer-events: none;
-        max-width: 300px;
-        width: max-content;
-        text-align: center;
-        line-height: 1.4;
-      }
-
-      .help-icon[data-tooltip]:hover::before {
-        content: '';
-        position: absolute;
-        bottom: 100%;
-        left: 50%;
-        transform: translateX(-50%);
-        border: 4px solid transparent;
-        border-top-color: var(--color-text-primary);
-        margin-bottom: -0.125rem;
-        z-index: 50;
-        pointer-events: none;
+        color: var(--color-primary);
       }
     `,
   ],
@@ -275,6 +247,8 @@ export class InputComponent implements ControlValueAccessor {
   readonly customInputClass = input('');
   readonly customClasses = input('');
   readonly tooltipText = input<string>('');
+  readonly tooltipPosition = input<'top' | 'bottom' | 'left' | 'right'>('top');
+  readonly tooltipVisible = input<boolean | undefined>(undefined);
   readonly currency = input(false);
   readonly currencyDecimals = input<number>();
   readonly allowNegative = input(false);

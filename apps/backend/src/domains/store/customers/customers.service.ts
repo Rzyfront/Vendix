@@ -217,6 +217,12 @@ export class CustomersService {
           },
         },
       },
+      include: {
+        addresses: {
+          where: { type: 'shipping' },
+          orderBy: { is_primary: 'desc' },
+        },
+      },
     });
 
     if (!user) {

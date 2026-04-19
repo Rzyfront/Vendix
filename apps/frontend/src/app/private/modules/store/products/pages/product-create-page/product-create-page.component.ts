@@ -1,6 +1,7 @@
 import {
   Component,
   computed,
+  effect,
   signal,
   inject,
 } from '@angular/core';
@@ -410,13 +411,32 @@ export class ProductCreatePageComponent {
   allProviders = signal<ServiceProvider[]>([]);
   loadingProviders = signal(false);
 
+  readonly assignedProviderIds = computed<number[]>(() =>
+    this.assignedProviders().map((p) => p.id),
+  );
+
+  readonly providerSelectorOptions = computed<MultiSelectorOption[]>(() =>
+    this.allProviders().map((p) => {
+      const fullName =
+        `${p.employee?.first_name ?? ''} ${p.employee?.last_name ?? ''}`.trim();
+      return {
+        value: p.id,
+        label: p.display_name || fullName || `Proveedor #${p.id}`,
+        description: p.employee?.position || undefined,
+      };
+    }),
+  );
+
   // Promotions
   promotionOptions: MultiSelectorOption[] = [];
   productPromotionIds: number[] = [];
 
-  // Image loading state for feedback visual
-  isLoadingImages = false;
-  loadingProgress = 0;
+  // Image loading state for feedback visual (signals — reactive bajo Zoneless)
+  readonly isLoadingImages = signal(false);
+  readonly loadingProgress = signal(0);
+
+  // Reactividad: requires_booking como signal derivado del form para disparar effects
+  readonly requiresBookingSig = signal(false);
 
   productForm: FormGroup = this.createForm();
   isSubmitting = signal(false);
@@ -561,10 +581,29 @@ export class ProductCreatePageComponent {
     // Sincronizar trigger con cambios del formulario
     this.productForm.valueChanges
       .pipe(takeUntilDestroyed())
-      .subscribe(() => this.formUpdateTrigger.update((v) => v + 1));
+      .subscribe((value: any) => {
+        this.formUpdateTrigger.update((v) => v + 1);
+        // Espejar requires_booking en signal para effect reactivo
+        const next = !!value?.requires_booking;
+        if (next !== this.requiresBookingSig()) {
+          this.requiresBookingSig.set(next);
+        }
+      });
     this.productForm.statusChanges
       .pipe(takeUntilDestroyed())
       .subscribe(() => this.formUpdateTrigger.update((v) => v + 1));
+
+    // Auto-cargar proveedores cuando se activa requires_booking (o al entrar en edit con el flag ya activo)
+    effect(() => {
+      const enabled = this.requiresBookingSig();
+      const pid = this.productId;
+      if (enabled && pid) {
+        this.loadProviders(pid);
+        this.loadAllProviders();
+      } else if (!enabled) {
+        this.assignedProviders.set([]);
+      }
+    });
 
     // Asegurar que la moneda esté cargada
     this.currencyService.loadCurrency();
@@ -858,11 +897,8 @@ export class ProductCreatePageComponent {
       },
     });
 
-    // Load providers if this is a bookable service
-    if (product.requires_booking && product.id) {
-      this.loadProviders(product.id);
-      this.loadAllProviders();
-    }
+    // Providers se auto-cargan vía effect() que observa requiresBookingSig
+    // (el patchValue dispara valueChanges → espejea requires_booking en el signal)
 
     // Load images
     if (product.product_images && product.product_images.length > 0) {
@@ -1554,82 +1590,91 @@ export class ProductCreatePageComponent {
     fileInput?.click();
   }
 
-  onFileSelect(event: Event): void {
+  async onFileSelect(event: Event): Promise<void> {
     const input = event.target as HTMLInputElement;
     const files = input.files;
-    if (files) {
-      const filesArray = Array.from(files);
-      const remainingSlots = 5 - this.imageUrls.length;
+    if (!files) return;
 
-      if (remainingSlots <= 0) {
-        this.toastService.warning('Límite de 5 imágenes alcanzado');
-        input.value = '';
-        return;
-      }
+    const filesArray = Array.from(files);
+    const remainingSlots = 5 - this.imageUrls.length;
 
-      const filesToProcess = filesArray
-        .slice(0, remainingSlots)
-        .filter((file) => file.type.startsWith('image/'));
+    if (remainingSlots <= 0) {
+      this.toastService.warning('Límite de 5 imágenes alcanzado');
+      input.value = '';
+      return;
+    }
 
-      if (filesToProcess.length === 0) {
-        this.toastService.warning(
-          'Por favor selecciona archivos de imagen válidos',
-        );
-        input.value = '';
-        return;
-      }
+    const filesToProcess = filesArray
+      .slice(0, remainingSlots)
+      .filter((file) => file.type.startsWith('image/'));
 
-      // Show loading feedback
-      this.isLoadingImages = true;
-      this.loadingProgress = 0;
+    if (filesToProcess.length === 0) {
+      this.toastService.warning(
+        'Por favor selecciona archivos de imagen válidos',
+      );
+      input.value = '';
+      return;
+    }
 
-      // Process images sequentially to avoid race conditions
-      this.processImagesSequentially(filesToProcess, 0).then(() => {
-        this.isLoadingImages = false;
-        this.loadingProgress = 0;
-        if (this.imageUrls.length === 1) {
-          this.activeImageIndex = 0;
+    this.isLoadingImages.set(true);
+    this.loadingProgress.set(0);
+
+    let successCount = 0;
+    try {
+      for (let i = 0; i < filesToProcess.length; i++) {
+        const file = filesToProcess[i];
+        try {
+          const dataUrl = await this.readFileAsDataURL(file);
+          this.imageUrls.push(dataUrl);
+          this.imageIds.push(null);
+          successCount++;
+        } catch (err) {
+          this.toastService.error(`Error al cargar la imagen: ${file.name}`);
         }
-        this.toastService.success(
-          `${filesToProcess.length} imagen(es) cargada(s) correctamente`,
+        this.loadingProgress.set(
+          Math.round(((i + 1) / filesToProcess.length) * 100),
         );
-      });
-
+      }
+      if (this.imageUrls.length === 1) {
+        this.activeImageIndex = 0;
+      }
+      if (successCount > 0) {
+        this.toastService.success(
+          `${successCount} imagen(es) cargada(s) correctamente`,
+        );
+      }
+    } finally {
+      this.isLoadingImages.set(false);
+      this.loadingProgress.set(0);
       input.value = '';
     }
   }
 
-  private processImagesSequentially(
-    files: File[],
-    index: number,
-  ): Promise<void> {
-    return new Promise((resolve) => {
-      if (index >= files.length) {
-        resolve();
-        return;
-      }
-
-      const file = files[index];
+  private readFileAsDataURL(file: File, timeoutMs = 30_000): Promise<string> {
+    return new Promise((resolve, reject) => {
       const reader = new FileReader();
+      const timer = setTimeout(() => {
+        reader.abort();
+        reject(new Error(`Timeout leyendo ${file.name}`));
+      }, timeoutMs);
 
       reader.onload = (e) => {
-        const result = e.target?.result as string;
-        this.imageUrls.push(result);
-        this.imageIds.push(null);
-
-        // Update progress
-        this.loadingProgress = Math.round(((index + 1) / files.length) * 100);
-
-        // Process next image
-        this.processImagesSequentially(files, index + 1).then(resolve);
+        clearTimeout(timer);
+        const result = e.target?.result;
+        if (typeof result === 'string') {
+          resolve(result);
+        } else {
+          reject(new Error(`Resultado inválido leyendo ${file.name}`));
+        }
       };
-
       reader.onerror = () => {
-        this.toastService.error(`Error al cargar la imagen: ${file.name}`);
-        // Continue with next image even if this one failed
-        this.processImagesSequentially(files, index + 1).then(resolve);
+        clearTimeout(timer);
+        reject(reader.error ?? new Error(`Error leyendo ${file.name}`));
       };
-
+      reader.onabort = () => {
+        clearTimeout(timer);
+        reject(new Error(`Lectura abortada: ${file.name}`));
+      };
       reader.readAsDataURL(file);
     });
   }
@@ -2208,6 +2253,16 @@ export class ProductCreatePageComponent {
   availableProvidersForProduct(): ServiceProvider[] {
     const assignedIds = new Set(this.assignedProviders().map((p) => p.id));
     return this.allProviders().filter((p) => !assignedIds.has(p.id));
+  }
+
+  onProvidersSelectionChange(ids: (string | number)[]): void {
+    if (!this.productId) return;
+    const nextIds = new Set(ids.map(Number));
+    const currentIds = new Set(this.assignedProviderIds());
+    const toAdd = [...nextIds].filter((id) => !currentIds.has(id));
+    const toRemove = [...currentIds].filter((id) => !nextIds.has(id));
+    toAdd.forEach((id) => this.addProviderToService(id));
+    toRemove.forEach((id) => this.removeProviderFromService(id));
   }
 
   addProviderToService(providerIdStr: string | number): void {

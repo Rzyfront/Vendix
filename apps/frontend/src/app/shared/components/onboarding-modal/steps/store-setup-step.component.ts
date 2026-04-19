@@ -177,38 +177,7 @@ import { CurrencyService } from '../../../../services/currency.service';
       }
 
       .help-icon:hover {
-        color: var(--color-warning);
-      }
-
-      .help-icon[data-tooltip]:hover::after {
-        content: attr(data-tooltip);
-        position: absolute;
-        bottom: 100%;
-        left: 50%;
-        transform: translateX(-50%);
-        padding: 0.5rem 0.75rem;
-        background: var(--color-text-primary);
-        color: var(--color-surface);
-        font-size: var(--fs-xs);
-        border-radius: var(--radius-md);
-        white-space: nowrap;
-        box-shadow: var(--shadow-lg);
-        z-index: 50;
-        margin-bottom: 0.5rem;
-        pointer-events: none;
-      }
-
-      .help-icon[data-tooltip]:hover::before {
-        content: '';
-        position: absolute;
-        bottom: 100%;
-        left: 50%;
-        transform: translateX(-50%);
-        border: 5px solid transparent;
-        border-top-color: var(--color-text-primary);
-        margin-bottom: -0.25rem;
-        z-index: 50;
-        pointer-events: none;
+        color: var(--color-primary);
       }
 
       .field-required {

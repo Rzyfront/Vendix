@@ -159,6 +159,17 @@ export class PosCustomerService {
     return of(customer || null);
   }
 
+  fetchCustomerById(id: number): Observable<PosCustomer | null> {
+    return this.http.get<any>(`${this.apiUrl}/${id}`).pipe(
+      map((response) => {
+        const data = response?.data ?? response;
+        if (!data) return null;
+        return this.mapApiCustomerToPosCustomer(data);
+      }),
+      catchError(() => of(null)),
+    );
+  }
+
   /**
    * Update customer information
    */

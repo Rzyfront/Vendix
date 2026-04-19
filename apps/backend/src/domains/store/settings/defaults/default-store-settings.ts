@@ -214,7 +214,6 @@ export function getDefaultStoreSettings(): StoreSettings {
         settings_users: true,
         settings_roles: true,
         settings_cash_registers: true,
-        settings_habeas_data: true,
 
         // Ayuda
         help: true,

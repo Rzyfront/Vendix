@@ -129,12 +129,6 @@ model users {
   terms_accepted_at      DateTime? @db.Timestamp(6)
   requires_terms_update  Boolean   @default(false)
 
-  // Habeas Data
-  user_consents                    user_consents[]
-  data_export_requests             data_export_requests[]
-  anonymization_requests_target    anonymization_requests[] @relation("anonymization_target")
-  anonymization_requests_requester anonymization_requests[] @relation("anonymization_requester")
-
   // Bookings
   bookings_as_customer bookings[] @relation("bookings_customer")
   bookings_created     bookings[] @relation("bookings_created_by")
@@ -4097,27 +4091,6 @@ enum exogenous_report_status_enum {
   rejected
 }
 
-enum consent_type_enum {
-  marketing
-  analytics
-  third_party
-  profiling
-}
-
-enum data_export_status_enum {
-  pending
-  processing
-  completed
-  failed
-}
-
-enum anonymization_status_enum {
-  pending
-  approved
-  executed
-  rejected
-}
-
 enum booking_status_enum {
   pending
   confirmed
@@ -4709,60 +4682,6 @@ model exogenous_report_lines {
 
   @@index([report_id])
   @@index([report_id, third_party_nit])
-}
-
-// ── HABEAS DATA (Protección de Datos) ─────────────────────
-
-model user_consents {
-  id           Int               @id @default(autoincrement())
-  user_id      Int
-  consent_type consent_type_enum
-  granted      Boolean           @default(false)
-  granted_at   DateTime?         @db.Timestamp(6)
-  revoked_at   DateTime?         @db.Timestamp(6)
-  ip_address   String?           @db.VarChar(45)
-  user_agent   String?           @db.Text
-  created_at   DateTime?         @default(now()) @db.Timestamp(6)
-  updated_at   DateTime?         @default(now()) @db.Timestamp(6)
-
-  user users @relation(fields: [user_id], references: [id], onDelete: Cascade)
-
-  @@unique([user_id, consent_type])
-  @@index([user_id])
-  @@index([consent_type, granted])
-}
-
-model data_export_requests {
-  id              Int                     @id @default(autoincrement())
-  user_id         Int
-  status          data_export_status_enum @default(pending)
-  file_key        String?                 @db.Text
-  file_expires_at DateTime?               @db.Timestamp(6)
-  requested_at    DateTime                @default(now()) @db.Timestamp(6)
-  completed_at    DateTime?               @db.Timestamp(6)
-  error_message   String?                 @db.Text
-  created_at      DateTime?               @default(now()) @db.Timestamp(6)
-
-  user users @relation(fields: [user_id], references: [id], onDelete: Cascade)
-
-  @@index([user_id, requested_at])
-}
-
-model anonymization_requests {
-  id                   Int                       @id @default(autoincrement())
-  user_id              Int
-  requested_by_user_id Int
-  reason               String                    @db.Text
-  status               anonymization_status_enum @default(pending)
-  anonymized_at        DateTime?                 @db.Timestamp(6)
-  original_data_hash   String?                   @db.VarChar(64)
-  created_at           DateTime?                 @default(now()) @db.Timestamp(6)
-
-  user         users @relation("anonymization_target", fields: [user_id], references: [id], onDelete: Cascade)
-  requested_by users @relation("anonymization_requester", fields: [requested_by_user_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
-
-  @@index([user_id])
-  @@index([status])
 }
 
 // ── ICA por Municipio ─────────────────────────────────────

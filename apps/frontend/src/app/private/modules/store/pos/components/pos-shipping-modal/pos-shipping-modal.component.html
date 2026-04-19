@@ -49,7 +49,7 @@
         }
         <div class="summary-row">
           <span>Envío</span>
-          <span class="summary-value" [class.shipping-cost-highlight]="shippingCost > 0">{{ shippingCost | currency }}</span>
+          <span class="summary-value" [class.shipping-cost-highlight]="shippingCost() > 0">{{ shippingCost() | currency }}</span>
         </div>
       </div>
 
@@ -479,7 +479,7 @@
                 type="button"
                 (click)="selectShippingMethod(method)"
                 class="payment-method-btn"
-                [class.selected]="selectedShippingMethod?.id === method.id"
+                [class.selected]="selectedShippingMethod()?.id === method.id"
                 >
                 <app-icon [name]="getShippingIcon(method.type)" [size]="24"></app-icon>
                 <span class="method-name">{{ method.name }}</span>
@@ -502,7 +502,7 @@
       </div>
 
       <!-- Address Form (hidden for pickup) -->
-      @if (selectedShippingMethod && selectedShippingMethod.type !== 'pickup') {
+      @if (selectedShippingMethod() && selectedShippingMethod()!.type !== 'pickup') {
         <div class="address-form"
           #addressSection
           style="position: relative;"
@@ -519,14 +519,14 @@
             <h2 class="section-title">Dirección de envío</h2>
           </div>
           <!-- Auto-fill badge -->
-          @if (selectedCustomerAddressId) {
+          @if (selectedCustomerAddressId()) {
             <div style="display: flex; align-items: center; gap: 6px; padding: 8px 12px; background: rgba(var(--color-success-rgb), 0.1); border: 1px solid rgba(var(--color-success-rgb), 0.3); border-radius: 8px; margin-bottom: 8px;">
               <app-icon name="map-pin" [size]="14" style="color: var(--color-success);"></app-icon>
               <span style="font-size: 12px; font-weight: 500; color: var(--color-success);">Dirección del cliente (editable)</span>
             </div>
           }
           <!-- New address hint -->
-          @if (!selectedCustomerAddressId && cartState()?.customer) {
+          @if (!selectedCustomerAddressId() && cartState()?.customer) {
             <div style="display: flex; align-items: center; gap: 6px; padding: 8px 12px; background: rgba(var(--color-primary-rgb), 0.05); border: 1px solid rgba(var(--color-primary-rgb), 0.2); border-radius: 8px; margin-bottom: 8px;">
               <app-icon name="plus-circle" [size]="14" style="color: var(--color-primary);"></app-icon>
               <span style="font-size: 12px; font-weight: 500; color: var(--color-text-secondary);">Nueva dirección (se guardará al cliente)</span>
@@ -542,20 +542,20 @@
             <app-selector
               label="Departamento"
               placeholder="Seleccionar..."
-              [options]="departmentOptions"
+              [options]="departmentOptions()"
               [required]="true"
               [size]="'sm'"
-              [ngModel]="selectedDepartmentId"
+              [ngModel]="selectedDepartmentId()"
               (valueChange)="onDepartmentChange(+($event || 0))"
             ></app-selector>
             <app-selector
               label="Ciudad"
               placeholder="Seleccionar..."
-              [options]="cityOptions"
+              [options]="cityOptions()"
               [required]="true"
-              [disabled]="!cities.length"
+              [disabled]="!cities().length"
               [size]="'sm'"
-              [ngModel]="selectedCityId"
+              [ngModel]="selectedCityId()"
               (valueChange)="onCityChange(+($event || 0))"
             ></app-selector>
           </div>
@@ -563,46 +563,46 @@
       }
 
       <!-- Shipping Cost -->
-      @if (selectedShippingMethod) {
+      @if (selectedShippingMethod()) {
         <div class="shipping-cost-section">
           <div class="section-header">
             <app-icon name="calculator" [size]="16" class="section-icon"></app-icon>
             <h2 class="section-title">Costo de envío</h2>
           </div>
-          @if (isCalculatingShipping) {
+          @if (isCalculatingShipping()) {
             <div class="calculating-indicator">
               <span class="spinner-sm"></span>
               <span>Calculando...</span>
             </div>
           }
-          @if (!isCalculatingShipping) {
+          @if (!isCalculatingShipping()) {
             <div class="cost-display">
-              @if (!manualCostOverride && calculatedShippingCost !== null) {
+              @if (!manualCostOverride() && calculatedShippingCost() !== null) {
                 <div class="calculated-cost">
                   <span class="cost-label">Calculado:</span>
-                  <span class="cost-value">{{ calculatedShippingCost | currency }}</span>
+                  <span class="cost-value">{{ calculatedShippingCost() | currency }}</span>
                 </div>
               }
-              @if (calculatedShippingCost !== null) {
+              @if (calculatedShippingCost() !== null) {
                 <div class="manual-toggle">
                   <label class="toggle-label">
                     <input
                       type="checkbox"
-                      [checked]="manualCostOverride"
+                      [checked]="manualCostOverride()"
                       (change)="toggleManualCost()"
                       />
                     <span>Editar costo manualmente</span>
                   </label>
                 </div>
               }
-              @if (manualCostOverride || calculatedShippingCost === null) {
+              @if (manualCostOverride() || calculatedShippingCost() === null) {
                 <div class="manual-cost-input">
                   <div class="cash-input">
                     <span class="currency">{{ currencySymbol() }}</span>
                     <input
                       appCurrencyInput
-                      [(ngModel)]="shippingCost"
-                      (ngModelChange)="onShippingCostChange()"
+                      [ngModel]="shippingCost()"
+                      (ngModelChange)="shippingCost.set($event); onShippingCostChange()"
                       placeholder="0.00"
                       />
                   </div>
@@ -614,7 +614,7 @@
       }
 
       <!-- Delivery Notes -->
-      @if (selectedShippingMethod) {
+      @if (selectedShippingMethod()) {
         <div class="delivery-notes">
           <app-input
             [formControl]="deliveryNotesControl"

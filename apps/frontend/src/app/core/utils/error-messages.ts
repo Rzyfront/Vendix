@@ -256,16 +256,6 @@ export const ERROR_MESSAGES: Record<string, string> = {
   EXO_GENERATION_FAILED: 'Error al generar el reporte exogeno.',
   EXO_VALIDATION_ERRORS: 'Se encontraron errores de completitud en los datos.',
 
-  // Habeas Data (Proteccion de Datos)
-  HABEAS_EXPORT_RATE_LIMIT:
-    'Solo se permite una exportacion de datos cada 24 horas.',
-  HABEAS_ANON_SELF: 'No puede anonimizar su propia cuenta.',
-  HABEAS_ANON_ALREADY: 'El usuario ya fue anonimizado.',
-  HABEAS_EXPORT_PROCESSING: 'Ya hay una exportacion en proceso.',
-  HABEAS_ANON_REQUEST_NOT_FOUND:
-    'No se encontro la solicitud de anonimizacion.',
-  HABEAS_CONSENT_INVALID: 'Tipo de consentimiento invalido.',
-
   // AI MCP
   AI_MCP_001: 'La autenticacion fallo. Verifique sus credenciales.',
   AI_MCP_002: 'No tiene permisos para realizar esta accion.',
