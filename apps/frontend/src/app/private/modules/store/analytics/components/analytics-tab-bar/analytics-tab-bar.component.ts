@@ -5,9 +5,11 @@ import {
   ElementRef,
   inject,
   afterNextRender,
-  effect,
+  computed,
 } from '@angular/core';
-import { Router, RouterLink, RouterLinkActive } from '@angular/router';
+import { Router, RouterLink, RouterLinkActive, NavigationEnd } from '@angular/router';
+import { toSignal } from '@angular/core/rxjs-interop';
+import { filter, map } from 'rxjs';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { AnalyticsView } from '../../config/analytics-registry';
 
@@ -27,6 +29,14 @@ export class AnalyticsTabBarComponent {
   readonly showFadeRight = signal(false);
 
   private hasInitialized = false;
+
+  private readonly currentUrl = toSignal(
+    this.router.events.pipe(
+      filter((e): e is NavigationEnd => e instanceof NavigationEnd),
+      map((e) => e.urlAfterRedirects),
+    ),
+    { initialValue: this.router.url },
+  );
 
   constructor() {
     afterNextRender(() => {
@@ -61,7 +71,8 @@ export class AnalyticsTabBarComponent {
     return tab.key;
   }
 
-  isActive(route: string): boolean {
-    return this.router.url.includes(route);
-  }
+  isActive = (route: string): boolean => {
+    const url = this.currentUrl();
+    return url === route || url.startsWith(route + '/') || url.startsWith(route + '?');
+  };
 }

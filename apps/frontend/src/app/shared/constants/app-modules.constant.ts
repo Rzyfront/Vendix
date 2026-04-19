@@ -226,11 +226,6 @@ export const APP_MODULES: { [key: string]: AppModule[]; ORG_ADMIN: AppModule[]; 
           description: 'Opiniones y valoraciones de clientes',
         },
         {
-          key: 'analytics_performance',
-          label: 'Rendimiento',
-          description: 'KPIs de rendimiento',
-        },
-        {
           key: 'analytics_inventory',
           label: 'Anal\u00edticas de Inventario',
           description: 'An\u00e1lisis de inventario y rotaci\u00f3n',
