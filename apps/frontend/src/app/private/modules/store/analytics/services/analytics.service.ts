@@ -88,6 +88,28 @@ export interface ReviewsSummary {
   total_helpful_votes: number;
 }
 
+// Financial interfaces
+export interface ProfitLossSummary {
+  period: { start_date: string; end_date: string };
+  revenue: number;
+  net_revenue: number;
+  cost_of_goods_sold: number;
+  gross_profit: number;
+  gross_margin: number;
+  total_refunds: number;
+  net_profit: number;
+  net_margin: number;
+  orders_count: number;
+}
+
+export interface TaxSummary {
+  period: { start_date: string; end_date: string };
+  tax_collected: number;
+  tax_refunded: number;
+  net_tax: number;
+  effective_rate: number;
+}
+
 // Cache entry interface
 interface CacheEntry<T> {
   observable: T;
@@ -467,6 +489,30 @@ export class AnalyticsService {
     const cacheKey = `reviews-summary-${JSON.stringify(query)}`;
     return this.withCache(cacheKey, () =>
       this.http.get<ApiResponse<ReviewsSummary>>(this.getApiUrl('reviews/summary'), {
+        params: this.buildParams(query),
+      }),
+    );
+  }
+
+  // ==================== FINANCIAL ANALYTICS ====================
+
+  getProfitLossSummary(
+    query: any = {},
+  ): Observable<ApiResponse<ProfitLossSummary>> {
+    const cacheKey = `profit-loss-summary-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<ProfitLossSummary>>(this.getApiUrl('financial/profit-loss'), {
+        params: this.buildParams(query),
+      }),
+    );
+  }
+
+  getTaxSummary(
+    query: any = {},
+  ): Observable<ApiResponse<TaxSummary>> {
+    const cacheKey = `tax-summary-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<TaxSummary>>(this.getApiUrl('financial/tax-summary'), {
         params: this.buildParams(query),
       }),
     );
