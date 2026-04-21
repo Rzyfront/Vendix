@@ -49,6 +49,45 @@ import {
 } from '../interfaces/customers-analytics.interface';
 import { PaginatedResponse } from '../interfaces/analytics.interface';
 
+// Purchases interfaces
+export interface PurchasesSummary {
+  total_orders: number;
+  total_spent: number;
+  pending_orders: number;
+  completed_orders: number;
+  total_items_ordered: number;
+  total_items_received: number;
+  total_tax_amount: number;
+  average_order_value: number;
+}
+
+export interface PurchasesBySupplier {
+  supplier_id: number;
+  supplier_name: string;
+  order_count: number;
+  total_spent: number;
+  pending_orders: number;
+  last_order_date: string | null;
+}
+
+// Reviews interfaces
+export interface ReviewsSummary {
+  total_reviews: number;
+  average_rating: number;
+  verified_purchases: number;
+  pending_reviews: number;
+  approved_reviews: number;
+  rejected_reviews: number;
+  rating_distribution: {
+    1: number;
+    2: number;
+    3: number;
+    4: number;
+    5: number;
+  };
+  total_helpful_votes: number;
+}
+
 // Cache entry interface
 interface CacheEntry<T> {
   observable: T;
@@ -396,6 +435,41 @@ export class AnalyticsService {
       params: this.buildParams(query),
       responseType: 'blob',
     });
+  }
+
+  // ==================== PURCHASES ANALYTICS ====================
+
+  getPurchasesSummary(
+    query: any = {},
+  ): Observable<ApiResponse<PurchasesSummary>> {
+    const cacheKey = `purchases-summary-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<PurchasesSummary>>(this.getApiUrl('purchases/summary'), {
+        params: this.buildParams(query),
+      }),
+    );
+  }
+
+  getPurchasesBySupplier(
+    query: any = {},
+  ): Observable<PaginatedResponse<PurchasesBySupplier>> {
+    return this.http.get<PaginatedResponse<PurchasesBySupplier>>(
+      this.getApiUrl('purchases/by-supplier'),
+      { params: this.buildParams(query) },
+    );
+  }
+
+  // ==================== REVIEWS ANALYTICS ====================
+
+  getReviewsSummary(
+    query: any = {},
+  ): Observable<ApiResponse<ReviewsSummary>> {
+    const cacheKey = `reviews-summary-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<ReviewsSummary>>(this.getApiUrl('reviews/summary'), {
+        params: this.buildParams(query),
+      }),
+    );
   }
 
   // ==================== CACHE MANAGEMENT ====================
