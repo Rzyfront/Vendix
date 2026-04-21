@@ -26,30 +26,30 @@ import { toSignal } from '@angular/core/rxjs-interop';
           <app-icon name="loader-2" [size]="32" class="animate-spin text-text-tertiary mx-auto"></app-icon>
           <span class="text-sm text-text-secondary mt-2 block">Cargando...</span>
         </app-card>
-      } @else if (data()) {
+      } @else if (data()?.data) {
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <app-card shadow="none" [responsivePadding]="true">
             <app-icon name="plus-circle" [size]="24" class="text-green-500 mb-2"></app-icon>
             <div class="text-xs text-text-secondary uppercase tracking-wide">Impuestos Cobrados</div>
-            <div class="text-2xl font-bold text-text-primary">{{ data()?.tax_collected | currency }}</div>
+            <div class="text-2xl font-bold text-text-primary">{{ data()?.data?.tax_collected | currency }}</div>
           </app-card>
 
           <app-card shadow="none" [responsivePadding]="true">
             <app-icon name="minus-circle" [size]="24" class="text-red-500 mb-2"></app-icon>
             <div class="text-xs text-text-secondary uppercase tracking-wide">Impuestos Devueltos</div>
-            <div class="text-2xl font-bold text-text-primary">{{ data()?.tax_refunded | currency }}</div>
+            <div class="text-2xl font-bold text-text-primary">{{ data()?.data?.tax_refunded | currency }}</div>
           </app-card>
 
           <app-card shadow="none" [responsivePadding]="true">
             <app-icon name="calculator" [size]="24" class="text-primary mb-2"></app-icon>
             <div class="text-xs text-text-secondary uppercase tracking-wide">Impuesto Neto</div>
-            <div class="text-2xl font-bold text-text-primary">{{ data()?.net_tax | currency }}</div>
+            <div class="text-2xl font-bold text-text-primary">{{ data()?.data?.net_tax | currency }}</div>
           </app-card>
 
           <app-card shadow="none" [responsivePadding]="true">
             <app-icon name="percent" [size]="24" class="text-purple-500 mb-2"></app-icon>
             <div class="text-xs text-text-secondary uppercase tracking-wide">Tasa Efectiva</div>
-            <div class="text-2xl font-bold text-text-primary">{{ data()?.effective_rate | number:'1.2-2' }}%</div>
+            <div class="text-2xl font-bold text-text-primary">{{ data()?.data?.effective_rate | number:'1.2-2' }}%</div>
           </app-card>
         </div>
       } @else {

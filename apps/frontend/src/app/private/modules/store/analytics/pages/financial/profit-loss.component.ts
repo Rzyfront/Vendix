@@ -27,36 +27,36 @@ import { toSignal } from '@angular/core/rxjs-interop';
           <app-icon name="loader-2" [size]="32" class="animate-spin text-text-tertiary mx-auto"></app-icon>
           <span class="text-sm text-text-secondary mt-2 block">Cargando...</span>
         </app-card>
-      } @else if (data()) {
+      } @else if (data()?.data) {
         <div class="space-y-6">
           <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <app-card shadow="none" [responsivePadding]="true">
               <app-icon name="trending-up" [size]="24" class="text-green-500 mb-2"></app-icon>
               <div class="text-xs text-text-secondary uppercase tracking-wide">Ingresos Netos</div>
-              <div class="text-2xl font-bold text-text-primary">{{ data()?.net_revenue | currency }}</div>
+              <div class="text-2xl font-bold text-text-primary">{{ data()?.data?.net_revenue | currency }}</div>
             </app-card>
 
             <app-card shadow="none" [responsivePadding]="true">
               <app-icon name="percent" [size]="24" class="text-primary mb-2"></app-icon>
               <div class="text-xs text-text-secondary uppercase tracking-wide">Ganancia Bruta</div>
-              <div class="text-2xl font-bold text-text-primary">{{ data()?.gross_profit | currency }}</div>
-              <div class="text-xs" [class.text-green-600]="data()?.gross_margin >= 0" [class.text-red-600]="data()?.gross_margin < 0">
-                {{ data()?.gross_margin | number:'1.1-1' }}% margen
+              <div class="text-2xl font-bold text-text-primary">{{ data()?.data?.gross_profit | currency }}</div>
+              <div class="text-xs" [class.text-green-600]="data()?.data?.gross_margin >= 0" [class.text-red-600]="data()?.data?.gross_margin < 0">
+                {{ data()?.data?.gross_margin | number:'1.1-1' }}% margen
               </div>
             </app-card>
 
             <app-card shadow="none" [responsivePadding]="true">
               <app-icon name="arrow-down-circle" [size]="24" class="text-red-500 mb-2"></app-icon>
               <div class="text-xs text-text-secondary uppercase tracking-wide">Reembolsos</div>
-              <div class="text-2xl font-bold text-text-primary">{{ data()?.total_refunds | currency }}</div>
+              <div class="text-2xl font-bold text-text-primary">{{ data()?.data?.total_refunds | currency }}</div>
             </app-card>
 
             <app-card shadow="none" [responsivePadding]="true" [customClasses]="getNetProfitClass()">
-              <app-icon name="landmark" [size]="24" class="mb-2" [class.text-green-600]="data()?.net_profit >= 0" [class.text-red-600]="data()?.net_profit < 0"></app-icon>
+              <app-icon name="landmark" [size]="24" class="mb-2" [class.text-green-600]="data()?.data?.net_profit >= 0" [class.text-red-600]="data()?.data?.net_profit < 0"></app-icon>
               <div class="text-xs text-text-secondary uppercase tracking-wide">Ganancia Neta</div>
-              <div class="text-2xl font-bold">{{ data()?.net_profit | currency }}</div>
-              <div class="text-xs" [class.text-green-600]="data()?.net_margin >= 0" [class.text-red-600]="data()?.net_margin < 0">
-                {{ data()?.net_margin | number:'1.1-1' }}% margen
+              <div class="text-2xl font-bold">{{ data()?.data?.net_profit | currency }}</div>
+              <div class="text-xs" [class.text-green-600]="data()?.data?.net_margin >= 0" [class.text-red-600]="data()?.data?.net_margin < 0">
+                {{ data()?.data?.net_margin | number:'1.1-1' }}% margen
               </div>
             </app-card>
           </div>
@@ -66,15 +66,15 @@ import { toSignal } from '@angular/core/rxjs-interop';
             <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
               <div>
                 <span class="text-text-secondary">Ingresos:</span>
-                <span class="ml-2 font-medium">{{ data()?.revenue | currency }}</span>
+                <span class="ml-2 font-medium">{{ data()?.data?.revenue | currency }}</span>
               </div>
               <div>
                 <span class="text-text-secondary">COGS:</span>
-                <span class="ml-2 font-medium text-red-600">-{{ data()?.cost_of_goods_sold | currency }}</span>
+                <span class="ml-2 font-medium text-red-600">-{{ data()?.data?.cost_of_goods_sold | currency }}</span>
               </div>
               <div>
                 <span class="text-text-secondary">Órdenes:</span>
-                <span class="ml-2 font-medium">{{ data()?.orders_count | number }}</span>
+                <span class="ml-2 font-medium">{{ data()?.data?.orders_count | number }}</span>
               </div>
               <div>
                 <span class="text-text-secondary">Período:</span>
@@ -119,10 +119,10 @@ export class ProfitLossComponent implements OnInit {
   }
 
   getPeriodLabel(): string {
-    const data = this.data();
-    if (!data?.period) return '';
-    const start = new Date(data.period.start_date).toLocaleDateString('es');
-    const end = new Date(data.period.end_date).toLocaleDateString('es');
+    const dataObj = this.data()?.data;
+    if (!dataObj?.period) return '';
+    const start = new Date(dataObj.period.start_date).toLocaleDateString('es');
+    const end = new Date(dataObj.period.end_date).toLocaleDateString('es');
     return `${start} - ${end}`;
   }
 }

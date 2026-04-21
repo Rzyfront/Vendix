@@ -6,6 +6,7 @@ import {
   inject,
   afterNextRender,
   computed,
+  NgZone,
 } from '@angular/core';
 import { Router, RouterLink, RouterLinkActive, NavigationEnd } from '@angular/router';
 import { toSignal } from '@angular/core/rxjs-interop';
@@ -23,6 +24,7 @@ import { AnalyticsView } from '../../config/analytics-registry';
 export class AnalyticsTabBarComponent {
   private elementRef = inject(ElementRef);
   private router = inject(Router);
+  private ngZone = inject(NgZone);
 
   readonly tabs = input.required<AnalyticsView[]>();
   readonly showFadeLeft = signal(false);
@@ -40,15 +42,22 @@ export class AnalyticsTabBarComponent {
 
   constructor() {
     afterNextRender(() => {
+      this.setupScrollListener();
       this.checkScroll();
       this.hasInitialized = true;
       this.scrollToActive();
     });
   }
 
-  onScroll(event: Event): void {
-    if (!this.hasInitialized) return;
-    this.checkScroll();
+  private setupScrollListener(): void {
+    const el = this.elementRef.nativeElement.querySelector('.tabs-container');
+    if (!el) return;
+
+    el.addEventListener('scroll', () => {
+      this.ngZone.run(() => {
+        this.checkScroll();
+      });
+    }, { passive: true });
   }
 
   private checkScroll(): void {

@@ -27,54 +27,54 @@ import { toSignal } from '@angular/core/rxjs-interop';
           <app-icon name="loader-2" [size]="32" class="animate-spin text-text-tertiary mx-auto"></app-icon>
           <span class="text-sm text-text-secondary mt-2 block">Cargando...</span>
         </app-card>
-      } @else if (summary()) {
+      } @else if (summary()?.data) {
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <app-card shadow="none" [responsivePadding]="true">
             <app-icon name="shopping-cart" [size]="24" class="text-primary mb-2"></app-icon>
             <div class="text-xs text-text-secondary uppercase tracking-wide">Total Órdenes</div>
-            <div class="text-2xl font-bold text-text-primary">{{ summary()?.total_orders | number }}</div>
+            <div class="text-2xl font-bold text-text-primary">{{ summary()?.data?.total_orders | number }}</div>
           </app-card>
 
           <app-card shadow="none" [responsivePadding]="true">
             <app-icon name="dollar-sign" [size]="24" class="text-green-500 mb-2"></app-icon>
             <div class="text-xs text-text-secondary uppercase tracking-wide">Total Gastado</div>
-            <div class="text-2xl font-bold text-text-primary">{{ summary()?.total_spent | currency }}</div>
+            <div class="text-2xl font-bold text-text-primary">{{ summary()?.data?.total_spent | currency }}</div>
           </app-card>
 
           <app-card shadow="none" [responsivePadding]="true">
             <app-icon name="clock" [size]="24" class="text-yellow-500 mb-2"></app-icon>
             <div class="text-xs text-text-secondary uppercase tracking-wide">Pendientes</div>
-            <div class="text-2xl font-bold text-text-primary">{{ summary()?.pending_orders | number }}</div>
+            <div class="text-2xl font-bold text-text-primary">{{ summary()?.data?.pending_orders | number }}</div>
           </app-card>
 
           <app-card shadow="none" [responsivePadding]="true">
             <app-icon name="check-circle" [size]="24" class="text-green-600 mb-2"></app-icon>
             <div class="text-xs text-text-secondary uppercase tracking-wide">Completadas</div>
-            <div class="text-2xl font-bold text-text-primary">{{ summary()?.completed_orders | number }}</div>
+            <div class="text-2xl font-bold text-text-primary">{{ summary()?.data?.completed_orders | number }}</div>
           </app-card>
 
           <app-card shadow="none" [responsivePadding]="true">
             <app-icon name="package" [size]="24" class="text-blue-500 mb-2"></app-icon>
             <div class="text-xs text-text-secondary uppercase tracking-wide">Items Ordenados</div>
-            <div class="text-2xl font-bold text-text-primary">{{ summary()?.total_items_ordered | number }}</div>
+            <div class="text-2xl font-bold text-text-primary">{{ summary()?.data?.total_items_ordered | number }}</div>
           </app-card>
 
           <app-card shadow="none" [responsivePadding]="true">
             <app-icon name="package-check" [size]="24" class="text-emerald-500 mb-2"></app-icon>
             <div class="text-xs text-text-secondary uppercase tracking-wide">Items Recibidos</div>
-            <div class="text-2xl font-bold text-text-primary">{{ summary()?.total_items_received | number }}</div>
+            <div class="text-2xl font-bold text-text-primary">{{ summary()?.data?.total_items_received | number }}</div>
           </app-card>
 
           <app-card shadow="none" [responsivePadding]="true">
             <app-icon name="percent" [size]="24" class="text-purple-500 mb-2"></app-icon>
             <div class="text-xs text-text-secondary uppercase tracking-wide">Impuestos</div>
-            <div class="text-2xl font-bold text-text-primary">{{ summary()?.total_tax_amount | currency }}</div>
+            <div class="text-2xl font-bold text-text-primary">{{ summary()?.data?.total_tax_amount | currency }}</div>
           </app-card>
 
           <app-card shadow="none" [responsivePadding]="true">
             <app-icon name="calculator" [size]="24" class="text-indigo-500 mb-2"></app-icon>
             <div class="text-xs text-text-secondary uppercase tracking-wide">Valor Promedio</div>
-            <div class="text-2xl font-bold text-text-primary">{{ summary()?.average_order_value | currency }}</div>
+            <div class="text-2xl font-bold text-text-primary">{{ summary()?.data?.average_order_value | currency }}</div>
           </app-card>
         </div>
       } @else {
@@ -95,10 +95,10 @@ export class PurchaseSummaryComponent implements OnInit {
   summary = toSignal(this.analyticsService.getPurchasesSummary({}), { initialValue: null });
 
   ngOnInit(): void {
-    const unsubscribe = this.analyticsService.getPurchasesSummary({}).subscribe({
+    this.analyticsService.getPurchasesSummary({}).subscribe({
       next: (response) => {
         if (response?.data) {
-          this.summarySignal.set(response.data);
+          this.summarySignal.set(response);
         }
         this.loading.set(false);
       },

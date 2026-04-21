@@ -26,19 +26,19 @@ import { toSignal } from '@angular/core/rxjs-interop';
           <app-icon name="loader-2" [size]="32" class="animate-spin text-text-tertiary mx-auto"></app-icon>
           <span class="text-sm text-text-secondary mt-2 block">Cargando...</span>
         </app-card>
-      } @else if (summary()) {
+      } @else if (summary()?.data) {
         <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <app-card shadow="none" [responsivePadding]="true">
             <app-icon name="message-square" [size]="24" class="text-primary mb-2"></app-icon>
             <div class="text-xs text-text-secondary uppercase tracking-wide">Total Reseñas</div>
-            <div class="text-2xl font-bold text-text-primary">{{ summary()?.total_reviews | number }}</div>
+            <div class="text-2xl font-bold text-text-primary">{{ summary()?.data?.total_reviews | number }}</div>
           </app-card>
 
           <app-card shadow="none" [responsivePadding]="true">
             <app-icon name="star" [size]="24" class="text-yellow-500 mb-2"></app-icon>
             <div class="text-xs text-text-secondary uppercase tracking-wide">Rating Promedio</div>
             <div class="text-2xl font-bold text-text-primary flex items-center gap-1">
-              {{ summary()?.average_rating | number:'1.1-1' }}
+              {{ summary()?.data?.average_rating | number:'1.1-1' }}
               <app-icon name="star" [size]="16" class="text-yellow-400"></app-icon>
             </div>
           </app-card>
@@ -46,31 +46,31 @@ import { toSignal } from '@angular/core/rxjs-interop';
           <app-card shadow="none" [responsivePadding]="true">
             <app-icon name="badge-check" [size]="24" class="text-green-500 mb-2"></app-icon>
             <div class="text-xs text-text-secondary uppercase tracking-wide">Compras Verificadas</div>
-            <div class="text-2xl font-bold text-text-primary">{{ summary()?.verified_purchases | number }}</div>
+            <div class="text-2xl font-bold text-text-primary">{{ summary()?.data?.verified_purchases | number }}</div>
           </app-card>
 
           <app-card shadow="none" [responsivePadding]="true">
             <app-icon name="thumbs-up" [size]="24" class="text-blue-500 mb-2"></app-icon>
             <div class="text-xs text-text-secondary uppercase tracking-wide">Votos Útiles</div>
-            <div class="text-2xl font-bold text-text-primary">{{ summary()?.total_helpful_votes | number }}</div>
+            <div class="text-2xl font-bold text-text-primary">{{ summary()?.data?.total_helpful_votes | number }}</div>
           </app-card>
 
           <app-card shadow="none" [responsivePadding]="true">
             <app-icon name="clock" [size]="24" class="text-yellow-500 mb-2"></app-icon>
             <div class="text-xs text-text-secondary uppercase tracking-wide">Pendientes</div>
-            <div class="text-2xl font-bold text-text-primary">{{ summary()?.pending_reviews | number }}</div>
+            <div class="text-2xl font-bold text-text-primary">{{ summary()?.data?.pending_reviews | number }}</div>
           </app-card>
 
           <app-card shadow="none" [responsivePadding]="true">
             <app-icon name="check-circle" [size]="24" class="text-green-600 mb-2"></app-icon>
             <div class="text-xs text-text-secondary uppercase tracking-wide">Aprobadas</div>
-            <div class="text-2xl font-bold text-text-primary">{{ summary()?.approved_reviews | number }}</div>
+            <div class="text-2xl font-bold text-text-primary">{{ summary()?.data?.approved_reviews | number }}</div>
           </app-card>
 
           <app-card shadow="none" [responsivePadding]="true">
             <app-icon name="x-circle" [size]="24" class="text-red-500 mb-2"></app-icon>
             <div class="text-xs text-text-secondary uppercase tracking-wide">Rechazadas</div>
-            <div class="text-2xl font-bold text-text-primary">{{ summary()?.rejected_reviews | number }}</div>
+            <div class="text-2xl font-bold text-text-primary">{{ summary()?.data?.rejected_reviews | number }}</div>
           </app-card>
         </div>
 
@@ -87,7 +87,7 @@ import { toSignal } from '@angular/core/rxjs-interop';
                   ></div>
                 </div>
                 <span class="text-sm text-text-secondary w-12 text-right">
-                  {{ summary()?.rating_distribution?.[star] || 0 }}
+                  {{ summary()?.data?.rating_distribution?.[star] || 0 }}
                 </span>
               </div>
             }
@@ -113,7 +113,7 @@ export class ReviewSummaryComponent implements OnInit {
     this.analyticsService.getReviewsSummary({}).subscribe({
       next: (response) => {
         if (response?.data) {
-          this.summary.set(response.data);
+          this.summary.set(response);
         }
         this.loading.set(false);
       },
@@ -124,9 +124,9 @@ export class ReviewSummaryComponent implements OnInit {
   }
 
   getRatingPercent(star: number): number {
-    const summary = this.summary();
-    if (!summary?.total_reviews) return 0;
-    const count = summary.rating_distribution?.[star] || 0;
-    return (count / summary.total_reviews) * 100;
+    const summaryData = this.summary()?.data;
+    if (!summaryData?.total_reviews) return 0;
+    const count = summaryData.rating_distribution?.[star] || 0;
+    return (count / summaryData.total_reviews) * 100;
   }
 }
