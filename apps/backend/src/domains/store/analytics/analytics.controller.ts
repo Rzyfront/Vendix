@@ -15,6 +15,8 @@ import { ProductsAnalyticsService } from './services/products-analytics.service'
 import { OverviewAnalyticsService } from './services/overview-analytics.service';
 import { CustomersAnalyticsService } from './services/customers-analytics.service';
 import { FinancialAnalyticsService } from './services/financial-analytics.service';
+import { PurchasesAnalyticsService } from './services/purchases-analytics.service';
+import { ReviewsAnalyticsService } from './services/reviews-analytics.service';
 import { AnalyticsQueryDto, SalesAnalyticsQueryDto, InventoryAnalyticsQueryDto, ProductsAnalyticsQueryDto } from './dto/analytics-query.dto';
 import { ResponseService } from '../../../common/responses/response.service';
 
@@ -28,6 +30,8 @@ export class AnalyticsController {
     private readonly overview_analytics_service: OverviewAnalyticsService,
     private readonly customers_analytics_service: CustomersAnalyticsService,
     private readonly financial_analytics_service: FinancialAnalyticsService,
+    private readonly purchases_analytics_service: PurchasesAnalyticsService,
+    private readonly reviews_analytics_service: ReviewsAnalyticsService,
     private readonly response_service: ResponseService,
   ) {}
 
@@ -508,6 +512,39 @@ export class AnalyticsController {
     });
 
     return new StreamableFile(buffer);
+  }
+
+  // ==================== PURCHASES ANALYTICS ====================
+
+  @Get('purchases/summary')
+  @Permissions('store:analytics:read')
+  async getPurchasesSummary(@Query() query: AnalyticsQueryDto) {
+    const result = await this.purchases_analytics_service.getPurchasesSummary(query);
+    return this.response_service.success(result);
+  }
+
+  @Get('purchases/by-supplier')
+  @Permissions('store:analytics:read')
+  async getPurchasesBySupplier(@Query() query: AnalyticsQueryDto) {
+    const result = await this.purchases_analytics_service.getPurchasesBySupplier(query);
+    if (Array.isArray(result)) {
+      return this.response_service.success(result);
+    }
+    return this.response_service.paginated(
+      result.data,
+      result.meta.pagination.total,
+      result.meta.pagination.page,
+      result.meta.pagination.limit,
+    );
+  }
+
+  // ==================== REVIEWS ANALYTICS ====================
+
+  @Get('reviews/summary')
+  @Permissions('store:analytics:read')
+  async getReviewsSummary(@Query() query: AnalyticsQueryDto) {
+    const result = await this.reviews_analytics_service.getReviewsSummary(query);
+    return this.response_service.success(result);
   }
 
   // ==================== FINANCIAL ANALYTICS ====================

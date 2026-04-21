@@ -5,6 +5,9 @@
 set -eu
 cd "$(dirname "$0")/../src/app"
 
+# Only check UI state in files that were modified in this PR/branch
+CHANGED_FILES=$(git diff --name-only origin/main...HEAD 2>/dev/null | grep '\.component\.ts$' | tr '\n' ' ' || true)
+
 FAILED=0
 fail() { echo "❌ $1"; FAILED=1; }
 ok() { echo "✅ $1"; }
@@ -89,6 +92,15 @@ if [ "$takes" = "0" ]; then
 else
   warn "take(1) en $takes archivos (informativo — revisar; exentos: auth.interceptor, account-mappings)"
 fi
+
+# ─── UI STATE (solo archivos cambiados en este PR) ─────────────────────
+# Solo falla si los archivos MODIFICADOS tienen estado plano de UI
+if [ -n "$CHANGED_FILES" ]; then
+  hits=$(grep -rnE 'loading|isOpen|showModal|visible|searchTerm|filterValues' $CHANGED_FILES 2>/dev/null | wc -l | tr -d ' ')
+else
+  hits=0
+fi
+[ "$hits" = "0" ] && ok "UI state plano en archivos cambiados: 0" || fail "UI state plano en $hits archivos cambiados"
 
 echo ""
 if [ "$FAILED" = "0" ]; then

@@ -777,18 +777,6 @@ export class BreadcrumbService {
       parent: 'Ventas',
       icon: 'bar-chart',
     },
-    {
-      path: '/admin/analytics/traffic',
-      title: 'Tráfico',
-      parent: 'Analíticas',
-      icon: 'globe',
-    },
-    {
-      path: '/admin/analytics/performance',
-      title: 'Rendimiento',
-      parent: 'Analíticas',
-      icon: 'trending-up',
-    },
 
     // E-commerce
     {
@@ -1030,6 +1018,18 @@ export class BreadcrumbService {
       title: 'Clientes',
       parent: 'Analíticas',
       icon: 'users',
+    },
+    {
+      path: '/admin/analytics/purchases',
+      title: 'Compras',
+      parent: 'Analíticas',
+      icon: 'shopping-cart',
+    },
+    {
+      path: '/admin/analytics/reviews',
+      title: 'Reseñas',
+      parent: 'Analíticas',
+      icon: 'message-square',
     },
     {
       path: '/admin/analytics/financial/profit-loss',

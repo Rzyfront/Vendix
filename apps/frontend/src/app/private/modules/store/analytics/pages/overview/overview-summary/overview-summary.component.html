@@ -75,7 +75,7 @@
         <app-options-dropdown
           class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
           [filters]="filterConfigs"
-          [filterValues]="filterValues"
+          [filterValues]="filterValues()"
           title="Filtros"
           triggerLabel="Filtros"
           (filterChange)="onFilterChange($event)"
@@ -206,56 +206,73 @@
     </app-card>
   </div>
 
-  <!-- Quick Links -->
+  <!-- Analytics Catalog -->
   <app-card shadow="none" [responsivePadding]="true" class="md:mt-4">
-    <span class="text-sm font-bold text-[var(--color-text-primary)]"
-      >Reportes Relacionados</span
-    >
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-      <a
-        routerLink="/admin/analytics/sales/summary"
-        class="flex items-center gap-2 p-3 rounded-lg hover:bg-background transition-colors text-sm"
-      >
-        <app-icon
-          name="shopping-cart"
-          [size]="18"
-          class="text-text-secondary"
-        ></app-icon>
-        <span class="text-text-primary">Ventas</span>
-      </a>
-      <a
-        routerLink="/admin/analytics/expenses/summary"
-        class="flex items-center gap-2 p-3 rounded-lg hover:bg-background transition-colors text-sm"
-      >
-        <app-icon
-          name="receipt"
-          [size]="18"
-          class="text-text-secondary"
-        ></app-icon>
-        <span class="text-text-primary">Gastos</span>
-      </a>
-      <a
-        routerLink="/admin/analytics/financial/profit-loss"
-        class="flex items-center gap-2 p-3 rounded-lg hover:bg-background transition-colors text-sm"
-      >
-        <app-icon
-          name="bar-chart-3"
-          [size]="18"
-          class="text-text-secondary"
-        ></app-icon>
-        <span class="text-text-primary">Financiero</span>
-      </a>
-      <a
-        routerLink="/admin/analytics/products/performance"
-        class="flex items-center gap-2 p-3 rounded-lg hover:bg-background transition-colors text-sm"
-      >
-        <app-icon
-          name="package"
-          [size]="18"
-          class="text-text-secondary"
-        ></app-icon>
-        <span class="text-text-primary">Productos</span>
-      </a>
+    <div class="catalog-section">
+      <div class="catalog-header">
+        <div class="catalog-title">
+          <h2 class="text-sm font-bold text-[var(--color-text-primary)]">
+            Catalogo de Analiticas
+          </h2>
+          <p class="text-xs text-[var(--color-text-secondary)] mt-0.5">
+            Explora todas las vistas disponibles por categoria
+          </p>
+        </div>
+      </div>
+
+      <app-analytics-category-chips
+        [categories]="categories"
+        [selectedCategory]="selectedCategory()"
+        (categoryChange)="onCategoryChange($event)"
+      ></app-analytics-category-chips>
+
+      <div class="search-wrapper">
+        <app-icon name="search" [size]="16" class="search-icon"></app-icon>
+        <input
+          type="text"
+          class="search-input"
+          placeholder="Buscar analiticas..."
+          [ngModel]="searchTerm()"
+          (ngModelChange)="onSearchChange($event)"
+        />
+        @if (searchTerm()) {
+          <button
+            type="button"
+            class="search-clear"
+            (click)="onSearchChange('')"
+            aria-label="Limpiar busqueda"
+          >
+            <app-icon name="x" [size]="14"></app-icon>
+          </button>
+        }
+      </div>
+
+      @if (filteredViews().length === 0) {
+        <div class="empty-state">
+          <app-icon name="search-x" [size]="32" class="empty-icon"></app-icon>
+          <p class="empty-text">No se encontraron analiticas</p>
+          <p class="empty-hint">Prueba con otro termino o categoria</p>
+        </div>
+      } @else {
+        @for (category of viewsByCategory() | keyvalue; track category.key) {
+          <section class="category-group">
+            <div class="category-header" [style.--cat-color]="getCategoryColor(category.key)">
+              <div class="category-line"></div>
+              <div class="category-label">
+                <app-icon [name]="getCategoryIcon(category.key)" [size]="16"></app-icon>
+                <span>{{ getCategoryLabel(category.key) }}</span>
+                <span class="category-count">{{ category.value.length }}</span>
+              </div>
+              <div class="category-line"></div>
+            </div>
+            <div class="cards-grid">
+              @for (view of category.value; track view.key) {
+                <app-analytics-card [view]="view"></app-analytics-card>
+              }
+            </div>
+          </section>
+        }
+      }
     </div>
   </app-card>
 </div>

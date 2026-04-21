@@ -324,6 +324,16 @@ export class StoreAdminLayoutComponent {
           route: '/admin/analytics/customers/summary',
         },
         {
+          label: 'Compras',
+          icon: 'circle',
+          route: '/admin/analytics/purchases/summary',
+        },
+        {
+          label: 'Reseñas',
+          icon: 'circle',
+          route: '/admin/analytics/reviews/summary',
+        },
+        {
           label: 'Financiero',
           icon: 'circle',
           route: '/admin/analytics/financial/profit-loss',

@@ -161,8 +161,8 @@ export function getDefaultStoreSettings(): StoreSettings {
         // Analíticas
         analytics: true,
         analytics_sales: true,
-        analytics_traffic: true,
-        analytics_performance: true,
+        analytics_purchases: true,
+        analytics_reviews: true,
         analytics_overview: true,
         analytics_inventory: true,
         analytics_products: true,

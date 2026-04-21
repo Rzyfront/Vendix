@@ -1,7 +1,7 @@
 import {Component, OnInit, OnDestroy, inject,
-  DestroyRef} from '@angular/core';
+  DestroyRef, signal, computed} from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterLink } from '@angular/router';
+import { FormsModule } from '@angular/forms';
 import { Store } from '@ngrx/store';
 import { Observable, combineLatest } from 'rxjs';
 import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
@@ -22,6 +22,18 @@ import { DateRangeFilter } from '../../../interfaces/analytics.interface';
 import {
   OverviewSummary,
   OverviewTrend } from '../../../interfaces/overview-analytics.interface';
+import {
+  AnalyticsCardComponent
+} from '../../../components/analytics-card/analytics-card.component';
+import {
+  AnalyticsCategoryChipsComponent
+} from '../../../components/analytics-category-chips/analytics-category-chips.component';
+import {
+  ANALYTICS_CATEGORIES,
+  ANALYTICS_VIEWS,
+  AnalyticsCategoryId,
+  AnalyticsView,
+} from '../../../config/analytics-registry';
 
 import * as OverviewActions from '../state/overview-summary.actions';
 import * as OverviewSelectors from '../state/overview-summary.selectors';
@@ -30,17 +42,19 @@ import { EChartsOption } from 'echarts';
 import { getDefaultStartDate, getDefaultEndDate, formatChartPeriod } from '../../../../../../../shared/utils/date.util';
 
 @Component({
-  selector: 'vendix-overview-summary',
+  selector: 'app-overview-summary',
   standalone: true,
   imports: [
     CommonModule,
-    RouterLink,
+    FormsModule,
     CardComponent,
     StatsComponent,
     ChartComponent,
     IconComponent,
     OptionsDropdownComponent,
     CurrencyPipe,
+    AnalyticsCardComponent,
+    AnalyticsCategoryChipsComponent,
   ],
   templateUrl: './overview-summary.component.html',
   styleUrls: ['./overview-summary.component.scss'] })
@@ -71,6 +85,51 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
   readonly summary = toSignal(this.summary$, { initialValue: null });
   readonly loading = toSignal(this.loading$, { initialValue: false });
   readonly loadingTrends = toSignal(this.loadingTrends$, { initialValue: false });
+
+  // Analytics Catalog signals
+  readonly selectedCategory = signal<AnalyticsCategoryId | null>(null);
+  readonly searchTerm = signal<string>('');
+
+  readonly categories = ANALYTICS_CATEGORIES;
+
+  private readonly categoryById = computed(() =>
+    new Map(ANALYTICS_CATEGORIES.map((c) => [c.id, c])),
+  );
+
+  readonly filteredViews = computed(() => {
+    const category = this.selectedCategory();
+    const search = this.searchTerm().toLowerCase().trim();
+
+    let views = ANALYTICS_VIEWS.filter((v) => v.category !== 'overview');
+
+    if (category) {
+      views = views.filter((v) => v.category === category);
+    }
+
+    if (search) {
+      views = views.filter(
+        (v) =>
+          v.title.toLowerCase().includes(search) ||
+          v.description.toLowerCase().includes(search),
+      );
+    }
+
+    return views;
+  });
+
+  readonly viewsByCategory = computed(() => {
+    const views = this.filteredViews();
+    const grouped = new Map<AnalyticsCategoryId, AnalyticsView[]>();
+
+    for (const view of views) {
+      if (!grouped.has(view.category)) {
+        grouped.set(view.category, []);
+      }
+      grouped.get(view.category)!.push(view);
+    }
+
+    return grouped;
+  });
 
   // Chart options
   gaugeChartOptions: EChartsOption = {};
@@ -103,7 +162,7 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
       placeholder: 'Seleccionar' },
   ];
 
-  filterValues: FilterValues = {};
+  filterValues = signal<FilterValues>({});
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
@@ -116,10 +175,10 @@ export class OverviewSummaryComponent implements OnInit, OnDestroy {
     combineLatest([this.dateRange$, this.granularity$])
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe(([dateRange, granularity]) => {
-        this.filterValues = {
+        this.filterValues.set({
           date_from: dateRange.start_date || null,
           date_to: dateRange.end_date || null,
-          granularity: granularity || 'day' };
+          granularity: granularity || 'day' });
       });
 
     // Cache summary for template helpers
@@ -148,7 +207,7 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
     const dateTo = values['date_to'] as string;
     const granularity = values['granularity'] as string;
 
-    const currentRange = this.filterValues;
+    const currentRange = this.filterValues();
     if (
       dateFrom !== currentRange['date_from'] ||
       dateTo !== currentRange['date_to']
@@ -179,6 +238,26 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
     );
     this.store.dispatch(OverviewActions.setGranularity({ granularity: 'day' }));
   }
+
+  onCategoryChange(categoryId: AnalyticsCategoryId | null): void {
+    this.selectedCategory.set(categoryId);
+  }
+
+  onSearchChange(term: string): void {
+    this.searchTerm.set(term);
+  }
+
+  getCategoryLabel = (categoryId: AnalyticsCategoryId): string => {
+    return this.categoryById().get(categoryId)?.label ?? categoryId;
+  };
+
+  getCategoryIcon = (categoryId: AnalyticsCategoryId): string => {
+    return this.categoryById().get(categoryId)?.icon ?? 'folder';
+  };
+
+  getCategoryColor = (categoryId: AnalyticsCategoryId): string => {
+    return this.categoryById().get(categoryId)?.color ?? 'var(--color-primary)';
+  };
 
   // Template helpers
   getGrowthText(growth?: number): string {
