@@ -2,156 +2,134 @@
 
 ## Overview
 
-Módulo de analíticas con patrón **Shell + Tabs** que expone 8 categorías y 26 vistas de forma organizada y accesible.
+The Analytics module provides a centralized catalog of analytics views organized by category with a shell+tabs pattern for navigation.
 
 ## Architecture
 
+### Shell + Tabs Pattern
+
 ```
-┌─────────────────────────────────────────────────────┐
-│ AnalyticsShellComponent                             │
-│ ┌─────────────────────────────────────────────────┐ │
-│ │ Header (icon + title + description) - sticky    │ │
-│ ├─────────────────────────────────────────────────┤ │
-│ │ TabBar (scroll horizontal mobile, centered desk)│ │
-│ ├─────────────────────────────────────────────────┤ │
-│ │ <router-outlet> (child view)                   │ │
-│ └─────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────┘
+┌─ Sidebar entry (ej. "Ventas") ──► /admin/analytics/sales
+│
+└─ AnalyticsShellComponent (wrapper reutilizable)
+   ├─ Header: título + descripción del módulo
+   ├─ TabBar: tabs horizontales scrollables (mobile-first)
+   └─ <router-outlet>  ◄── hija activa según tab seleccionada
 ```
 
-- **Shell**: Wrapper común con header y tab bar. Lee `categoryId` desde `route.data`
-- **TabBar**: Navegación horizontal con scroll suave y scroll-to-active
-- **Overview**:standalone (sin shell) - catálogo completo de todas las vistas
+### Key Files
 
-## Categories
+| File | Purpose |
+|------|---------|
+| `config/analytics-registry.ts` | Central registry with all views and categories |
+| `components/analytics-shell/` | Wrapper component with tabs layout |
+| `components/analytics-tab-bar/` | Horizontal scrollable tab bar |
+| `components/analytics-card/` | Card component for view catalog |
+| `pages/*/` | Individual view components |
 
-| ID | Label | panel_ui Key | Views |
-|----|-------|--------------|-------|
-| overview | Resumen | analytics_overview | 1 |
-| sales | Ventas | analytics_sales | 6 |
-| inventory | Inventario | analytics_inventory | 5 |
-| products | Productos | analytics_products | 3 |
-| purchases | Compras | analytics_purchases | 2 |
-| customers | Clientes | analytics_customers | 3 |
-| reviews | Reseñas | analytics_reviews | 1 |
-| financial | Financiero | analytics_financial | 3 |
+## Categories and Views
 
-**Total: 26 vistas**
+| Category | Route | Views |
+|----------|-------|-------|
+| **overview** | `/admin/analytics/overview` | Resumen General |
+| **sales** | `/admin/analytics/sales` | Resumen, Por Producto, Por Categoría, Tendencias, Por Cliente, Por Método de Pago |
+| **inventory** | `/admin/analytics/inventory` | Resumen, Info Stock, Movimientos, Valoración, Análisis |
+| **products** | `/admin/analytics/products` | Rendimiento, Top Sellers, Rentabilidad |
+| **purchases** | `/admin/analytics/purchases` | Resumen, Por Proveedor |
+| **customers** | `/admin/analytics/customers` | Resumen, Adquisición, Carritos Abandonados |
+| **reviews** | `/admin/analytics/reviews` | Resumen |
+| **financial** | `/admin/analytics/financial` | Estado de Resultados, Impuestos, Reembolsos |
+
+## Registry Structure
+
+```typescript
+// config/analytics-registry.ts
+export interface AnalyticsView {
+  key: string;           // "sales_by_product"
+  title: string;         // "Por Producto"
+  description: string;
+  detailedDescription?: string;
+  route: string;         // "/admin/analytics/sales/by-product"
+  category: AnalyticsCategoryId;
+  icon: string;          // lucide icon name
+  comingSoon?: boolean;
+}
+
+export interface AnalyticsCategory {
+  id: AnalyticsCategoryId;
+  label: string;
+  description: string;
+  icon: string;
+  color: string;
+}
+```
 
 ## Adding a New View
 
 1. **Add to registry** (`config/analytics-registry.ts`):
-   ```ts
-   export const ANALYTICS_VIEWS: AnalyticsView[] = [
-     // ... existing views
-     {
-       key: 'category_viewname',
-       title: 'Display Title',
-       description: 'What this view shows',
-       route: '/admin/analytics/{category}/view-slug',
-       category: '{categoryId}',
-       icon: 'lucide-icon-name',
-     },
-   ];
-   ```
 
-2. **Add route** (`analytics.routes.ts`):
-   ```ts
-   {
-     path: '{category}',
-     loadComponent: () => import('./components/analytics-shell/...'),
-     data: { categoryId: '{categoryId}' as AnalyticsCategoryId },
-     children: [
-       { path: 'view-slug', loadComponent: () => import('./pages/...') },
-     ],
-   },
-   ```
-
-3. **Add breadcrumbs** (optional, `breadcrumb.service.ts`):
-   ```ts
-   {
-     path: '/admin/analytics/{category}/view-slug',
-     title: 'Display Title',
-     parent: '{Category}',
-     icon: 'icon-name',
-   },
-   ```
-
-**No other files needed** - sidebar, chips, and catalog auto-update from registry.
-
-## Routing
-
-- `/admin/analytics/overview` - Standalone, catálogo de todas las vistas
-- `/admin/analytics/{category}` - Shell con tabs, redirect a primera vista
-- `/admin/analytics/{category}/{view}` - Vista individual
-
-## panel_ui Keys
-
-Keys que controlan visibilidad en sidebar:
-
-| Key | Descripción |
-|-----|-------------|
-| analytics | Padre - sección completa |
-| analytics_overview | Resumen |
-| analytics_sales | Ventas |
-| analytics_inventory | Inventario |
-| analytics_products | Productos |
-| analytics_purchases | Compras |
-| analytics_customers | Clientes |
-| analytics_reviews | Reseñas |
-| analytics_financial | Financiero |
-
-## File Structure
-
-```
-analytics/
-├── config/
-│   └── analytics-registry.ts     # Central registry (categories, views, helpers)
-├── components/
-│   ├── analytics-shell/         # Shell wrapper (header + tabs + outlet)
-│   ├── analytics-tab-bar/       # Horizontal tab navigation
-│   ├── analytics-card/          # View card for catalog
-│   └── analytics-category-chips/ # Category filter chips
-├── pages/
-│   ├── overview/                # Standalone overview with full catalog
-│   ├── sales/                    # 6 views
-│   ├── inventory/               # 5 views
-│   ├── products/                # 3 views
-│   ├── purchases/               # 2 views
-│   ├── customers/              # 3 views
-│   ├── reviews/                # 1 view
-│   ├── expenses/              # Standalone (no shell)
-│   └── financial/             # 3 views
-├── interfaces/
-│   └── analytics.interface.ts
-├── services/
-├── analytics.routes.ts
-└── index.ts
+```typescript
+{
+  key: 'new_view',
+  title: 'Nueva Vista',
+  description: 'Descripción',
+  route: '/admin/analytics/category/new-view',
+  category: 'categoryId',
+  icon: 'chart-bar',
+}
 ```
 
-## Components
+2. **Add route** in `analytics.routes.ts`:
 
-### AnalyticsShellComponent
+```typescript
+{
+  path: 'new-view',
+  loadComponent: () => import('./pages/category/new-view.component')
+    .then(m => m.NewViewComponent),
+}
+```
 
-- **Selector**: `app-analytics-shell`
-- **Inputs**: none (reads from route data)
-- **Responsibilities**: Header con categoría, tab bar, router-outlet
+3. **Create component** in `pages/category/`:
 
-### AnalyticsTabBarComponent
+```typescript
+// Use AnalyticsService for data fetching
+// Follow the same pattern as other summary components
+```
 
-- **Selector**: `app-analytics-tab-bar`
-- **Inputs**: `tabs: AnalyticsView[]`
-- **Responsibilities**: Scroll horizontal, fade gradients, scroll-to-active
+## Backend Endpoints
 
-### AnalyticsCardComponent
+All analytics endpoints use the base path `/store/analytics`:
 
-- **Selector**: `app-analytics-card`
-- **Inputs**: `view: AnalyticsView`, `color: string`
-- **Responsibilities**: Display card con icono, título, descripción, link
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | `/overview/summary` | Overview KPIs |
+| GET | `/overview/trends` | Overview trends |
+| GET | `/sales/summary` | Sales KPIs |
+| GET | `/sales/by-product` | Sales by product |
+| GET | `/inventory/summary` | Inventory KPIs |
+| GET | `/customers/summary` | Customer KPIs |
+| GET | `/purchases/summary` | Purchases KPIs |
+| GET | `/reviews/summary` | Reviews KPIs |
+| GET | `/financial/profit-loss` | P&L report |
+| GET | `/financial/tax-summary` | Tax summary |
 
-### AnalyticsCategoryChipsComponent
+## State Management
 
-- **Selector**: `app-analytics-category-chips`
-- **Inputs**: `categories: AnalyticsCategory[]`, `selected: string`
-- **Outputs**: `categoryChange: EventEmitter<string>`
-- **Responsibilities**: Single-select chips con "Todas" reset option
+Some categories use NgRx for state management:
+
+| Category | State | Effects |
+|----------|-------|---------|
+| overview | `overviewSummary` | OverviewSummaryEffects |
+| sales | `salesSummary` | SalesSummaryEffects |
+| products | `productsAnalytics` | ProductsAnalyticsEffects |
+| inventory | `inventoryOverview` | InventoryOverviewEffects |
+| customers | `customersAnalytics` | CustomersAnalyticsEffects |
+
+Other categories use direct service calls via `AnalyticsService`.
+
+## Mobile UX
+
+- Tab bar is sticky on mobile
+- Horizontal scroll with scroll-snap
+- Fade indicators on edges when scrollable
+- Active tab auto-centers on navigation

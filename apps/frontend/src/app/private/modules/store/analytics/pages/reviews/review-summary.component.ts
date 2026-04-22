@@ -1,105 +1,180 @@
 import { Component, OnInit, inject, signal } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterModule } from '@angular/router';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
-import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
-import { AnalyticsService, ReviewsSummary } from '../../services/analytics.service';
-import { toSignal } from '@angular/core/rxjs-interop';
+import { OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
+import { FilterConfig, FilterValues } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
+import { ExportButtonComponent } from '../../components/export-button/export-button.component';
+import { DateRangeFilter } from '../../interfaces/analytics.interface';
+import { ReviewsSummary, AnalyticsService } from '../../services/analytics.service';
+import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
+import { EChartsOption } from 'echarts';
+import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
+import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
 
 @Component({
   selector: 'vendix-review-summary',
   standalone: true,
-  imports: [CommonModule, RouterModule, CardComponent, IconComponent, StatsComponent, ChartComponent],
+  imports: [
+    CommonModule,
+    CardComponent,
+    StatsComponent,
+    ChartComponent,
+    OptionsDropdownComponent,
+    ExportButtonComponent,
+    AnalyticsCardComponent,
+  ],
   template: `
-    <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
-      <div class="flex items-center gap-2 text-sm text-text-secondary mb-1">
-        <a routerLink="/admin/analytics" class="hover:text-primary">Analíticas</a>
-        <app-icon name="chevron-right" [size]="14"></app-icon>
-        <span>Reseñas</span>
-      </div>
-      <h1 class="text-2xl font-bold text-text-primary">Resumen de Reseñas</h1>
-
+    <div class="pb-6">
+      <!-- Stats Cards -->
       @if (loading()) {
-        <app-card shadow="none" [responsivePadding]="true" customClasses="text-center py-8">
-          <app-icon name="loader-2" [size]="32" class="animate-spin text-text-tertiary mx-auto"></app-icon>
-          <span class="text-sm text-text-secondary mt-2 block">Cargando...</span>
-        </app-card>
-      } @else if (summary()?.data) {
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          <app-card shadow="none" [responsivePadding]="true">
-            <app-icon name="message-square" [size]="24" class="text-primary mb-2"></app-icon>
-            <div class="text-xs text-text-secondary uppercase tracking-wide">Total Reseñas</div>
-            <div class="text-2xl font-bold text-text-primary">{{ summary()?.data?.total_reviews | number }}</div>
-          </app-card>
-
-          <app-card shadow="none" [responsivePadding]="true">
-            <app-icon name="star" [size]="24" class="text-yellow-500 mb-2"></app-icon>
-            <div class="text-xs text-text-secondary uppercase tracking-wide">Rating Promedio</div>
-            <div class="text-2xl font-bold text-text-primary flex items-center gap-1">
-              {{ summary()?.data?.average_rating | number:'1.1-1' }}
-              <app-icon name="star" [size]="16" class="text-yellow-400"></app-icon>
+        <div class="stats-container">
+          @for (i of [1, 2, 3, 4]; track i) {
+            <div class="bg-surface border border-border rounded-xl p-4 animate-pulse">
+              <div class="h-4 bg-gray-200 rounded w-1/2 mb-2"></div>
+              <div class="h-8 bg-gray-200 rounded w-3/4"></div>
             </div>
-          </app-card>
-
-          <app-card shadow="none" [responsivePadding]="true">
-            <app-icon name="badge-check" [size]="24" class="text-green-500 mb-2"></app-icon>
-            <div class="text-xs text-text-secondary uppercase tracking-wide">Compras Verificadas</div>
-            <div class="text-2xl font-bold text-text-primary">{{ summary()?.data?.verified_purchases | number }}</div>
-          </app-card>
-
-          <app-card shadow="none" [responsivePadding]="true">
-            <app-icon name="thumbs-up" [size]="24" class="text-blue-500 mb-2"></app-icon>
-            <div class="text-xs text-text-secondary uppercase tracking-wide">Votos Útiles</div>
-            <div class="text-2xl font-bold text-text-primary">{{ summary()?.data?.total_helpful_votes | number }}</div>
-          </app-card>
-
-          <app-card shadow="none" [responsivePadding]="true">
-            <app-icon name="clock" [size]="24" class="text-yellow-500 mb-2"></app-icon>
-            <div class="text-xs text-text-secondary uppercase tracking-wide">Pendientes</div>
-            <div class="text-2xl font-bold text-text-primary">{{ summary()?.data?.pending_reviews | number }}</div>
-          </app-card>
-
-          <app-card shadow="none" [responsivePadding]="true">
-            <app-icon name="check-circle" [size]="24" class="text-green-600 mb-2"></app-icon>
-            <div class="text-xs text-text-secondary uppercase tracking-wide">Aprobadas</div>
-            <div class="text-2xl font-bold text-text-primary">{{ summary()?.data?.approved_reviews | number }}</div>
-          </app-card>
-
-          <app-card shadow="none" [responsivePadding]="true">
-            <app-icon name="x-circle" [size]="24" class="text-red-500 mb-2"></app-icon>
-            <div class="text-xs text-text-secondary uppercase tracking-wide">Rechazadas</div>
-            <div class="text-2xl font-bold text-text-primary">{{ summary()?.data?.rejected_reviews | number }}</div>
-          </app-card>
+          }
         </div>
+      } @else {
+        <div class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent">
+          <app-stats
+            title="Total Reseñas"
+            [value]="summary()?.total_reviews || 0"
+            smallText="Reseñas recibidas"
+            iconName="message-square"
+            iconBgColor="bg-blue-100"
+            iconColor="text-blue-600"
+          ></app-stats>
 
-        <app-card shadow="none" [responsivePadding]="true">
-          <h3 class="text-sm font-semibold text-text-primary mb-4">Distribución de Ratings</h3>
-          <div class="space-y-3">
-            @for (star of [5,4,3,2,1]; track star) {
-              <div class="flex items-center gap-3">
-                <span class="text-sm text-text-secondary w-8">{{ star }} ★</span>
-                <div class="flex-1 h-4 bg-gray-100 rounded-full overflow-hidden">
-                  <div 
-                    class="h-full bg-yellow-400 rounded-full transition-all"
-                    [style.width.%]="getRatingPercent(star)"
-                  ></div>
-                </div>
-                <span class="text-sm text-text-secondary w-12 text-right">
-                  {{ summary()?.data?.rating_distribution?.[star] || 0 }}
-                </span>
+          <app-stats
+            title="Rating Promedio"
+            [value]="summary()?.average_rating || 0"
+            smallText="Sobre 5 estrellas"
+            iconName="star"
+            iconBgColor="bg-yellow-100"
+            iconColor="text-yellow-600"
+          ></app-stats>
+
+          <app-stats
+            title="Pendientes"
+            [value]="summary()?.pending_reviews || 0"
+            smallText="Por aprobar"
+            iconName="clock"
+            iconBgColor="bg-orange-100"
+            iconColor="text-orange-600"
+          ></app-stats>
+
+          <app-stats
+            title="Aprobadas"
+            [value]="summary()?.approved_reviews || 0"
+            smallText="Publicadas"
+            iconName="check-circle"
+            iconBgColor="bg-emerald-100"
+            iconColor="text-emerald-600"
+          ></app-stats>
+        </div>
+      }
+
+      <!-- Filter Bar -->
+      <div
+        class="sticky top-[99px] z-10 bg-background px-2 py-0.5 md:static md:bg-transparent md:px-6 md:py-1.5 md:border-b md:border-border"
+      >
+        <div class="flex items-center justify-between gap-2">
+          <div class="min-w-0">
+            <h2 class="text-[13px] font-bold text-gray-600 tracking-wide md:text-base md:font-semibold md:text-text-primary truncate">
+              Analíticas de Reseñas
+            </h2>
+            <p class="text-[11px] text-gray-400 md:text-xs md:text-text-secondary truncate">
+              Opiniones, valoraciones y satisfacción del cliente
+            </p>
+          </div>
+
+          <div class="flex items-center gap-2 flex-shrink-0">
+            <vendix-export-button
+              class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+              [loading]="exporting()"
+              (export)="exportReport()"
+            ></vendix-export-button>
+
+            <app-options-dropdown
+              class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+              [filters]="filterConfigs"
+              [filterValues]="filterValues"
+              title="Filtros"
+              triggerLabel="Filtros"
+              (filterChange)="onFilterChange($event)"
+              (clearAllFilters)="onClearAllFilters()"
+            ></app-options-dropdown>
+          </div>
+        </div>
+      </div>
+
+      <!-- Charts Row -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 md:mt-4">
+        <!-- Rating Distribution Chart -->
+        <app-card
+          shadow="none"
+          [padding]="false"
+          overflow="hidden"
+          [showHeader]="true"
+        >
+          <div slot="header" class="flex flex-col">
+            <span class="text-sm font-bold text-[var(--color-text-primary)]">Distribución de Ratings</span>
+            <span class="text-xs text-[var(--color-text-secondary)]">Conteo por estrellas</span>
+          </div>
+          <div class="p-4">
+            @if (loading()) {
+              <div class="h-64 flex items-center justify-center">
+                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
               </div>
+            } @else {
+              @defer (on viewport) {
+                <app-chart [options]="ratingDistributionChartOptions" size="large" [showLegend]="false"></app-chart>
+              } @placeholder {
+                <div class="h-64 bg-surface-secondary animate-pulse rounded-xl"></div>
+              }
             }
           </div>
         </app-card>
-      } @else {
-        <app-card shadow="none" [responsivePadding]="true" customClasses="text-center py-8">
-          <app-icon name="message-square" [size]="48" class="text-text-tertiary mx-auto mb-4"></app-icon>
-          <span class="text-sm font-bold text-[var(--color-text-primary)]">No hay datos</span>
-          <span class="text-xs text-[var(--color-text-secondary)] block mt-1">No hay reseñas en el período seleccionado.</span>
+
+        <!-- Reviews Status Chart -->
+        <app-card
+          shadow="none"
+          [padding]="false"
+          overflow="hidden"
+          [showHeader]="true"
+        >
+          <div slot="header" class="flex flex-col">
+            <span class="text-sm font-bold text-[var(--color-text-primary)]">Estado de Reseñas</span>
+            <span class="text-xs text-[var(--color-text-secondary)]">Aprobadas, pendientes y rechazadas</span>
+          </div>
+          <div class="p-4">
+            @if (loading()) {
+              <div class="h-64 flex items-center justify-center">
+                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+              </div>
+            } @else {
+              @defer (on viewport) {
+                <app-chart [options]="reviewsStatusChartOptions" size="large" [showLegend]="false"></app-chart>
+              } @placeholder {
+                <div class="h-64 bg-surface-secondary animate-pulse rounded-xl"></div>
+              }
+            }
+          </div>
         </app-card>
-      }
+      </div>
+
+      <!-- Quick Links -->
+      <app-card shadow="none" [responsivePadding]="true" class="md:mt-4">
+        <span class="text-sm font-bold text-[var(--color-text-primary)]">Vistas de Reseñas</span>
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+          @for (view of reviewsViews; track view.key) {
+            <app-analytics-card [view]="view"></app-analytics-card>
+          }
+        </div>
+      </app-card>
     </div>
   `,
 })
@@ -107,26 +182,168 @@ export class ReviewSummaryComponent implements OnInit {
   private analyticsService = inject(AnalyticsService);
 
   loading = signal(true);
-  summary = toSignal(this.analyticsService.getReviewsSummary({}), { initialValue: null });
+  exporting = signal(false);
+  summary = signal<ReviewsSummary | null>(null);
+
+  ratingDistributionChartOptions: EChartsOption = {};
+  reviewsStatusChartOptions: EChartsOption = {};
+
+  filterConfigs: FilterConfig[] = [
+    {
+      key: 'date_from',
+      label: 'Desde',
+      type: 'date',
+      defaultValue: getDefaultStartDate(),
+    },
+    {
+      key: 'date_to',
+      label: 'Hasta',
+      type: 'date',
+      defaultValue: getDefaultEndDate(),
+    },
+  ];
+
+  filterValues: FilterValues = {};
+
+  readonly reviewsViews: AnalyticsView[] = getViewsByCategory('reviews');
 
   ngOnInit(): void {
+    this.loadData();
+  }
+
+  loadData(): void {
+    this.loading.set(true);
+
     this.analyticsService.getReviewsSummary({}).subscribe({
       next: (response) => {
         if (response?.data) {
-          this.summary.set(response);
+          this.summary.set(response.data);
+          this.updateCharts();
         }
         this.loading.set(false);
       },
       error: () => {
         this.loading.set(false);
-      }
+      },
     });
   }
 
-  getRatingPercent(star: number): number {
-    const summaryData = this.summary()?.data;
-    if (!summaryData?.total_reviews) return 0;
-    const count = summaryData.rating_distribution?.[star] || 0;
-    return (count / summaryData.total_reviews) * 100;
+  onFilterChange(values: FilterValues): void {
+    this.filterValues = values;
+    this.loadData();
+  }
+
+  onClearAllFilters(): void {
+    this.filterValues = {};
+    this.loadData();
+  }
+
+  exportReport(): void {
+    this.exporting.set(true);
+    this.analyticsService.exportReviewsAnalytics({}).subscribe({
+      next: (blob) => {
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `resenas_${new Date().toISOString().split('T')[0]}.csv`;
+        a.click();
+        window.URL.revokeObjectURL(url);
+        this.exporting.set(false);
+      },
+      error: () => {
+        this.exporting.set(false);
+      },
+    });
+  }
+
+  private updateCharts(): void {
+    const style = getComputedStyle(document.documentElement);
+    const textSecondary = style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
+
+    const data = this.summary();
+    if (!data) return;
+
+    const ratingDistribution = data.rating_distribution || {};
+
+    // Rating Distribution Bar Chart
+    const stars = [5, 4, 3, 2, 1];
+    const counts = stars.map((star) => (ratingDistribution as any)[star] || 0);
+
+    this.ratingDistributionChartOptions = {
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
+        formatter: (params: any) => {
+          const star = params[0];
+          return `${star.name} estrellas: <b>${star.value}</b>`;
+        },
+      },
+      grid: {
+        left: '3%',
+        right: '6%',
+        bottom: '3%',
+        top: '3%',
+        containLabel: true,
+      },
+      xAxis: {
+        type: 'category',
+        data: stars.map((s) => `${s} ★`),
+        axisLine: { lineStyle: { color: '#e5e7eb' } },
+        axisLabel: { color: textSecondary },
+      },
+      yAxis: {
+        type: 'value',
+        axisLine: { show: false },
+        axisLabel: { color: textSecondary },
+        splitLine: { lineStyle: { color: '#e5e7eb' } },
+      },
+      series: [
+        {
+          type: 'bar',
+          data: counts,
+          itemStyle: {
+            color: (params: any) => {
+              const colors = ['#f59e0b', '#f59e0b', '#f59e0b', '#f59e0b', '#f59e0b'];
+              return colors[params.dataIndex];
+            },
+            borderRadius: [4, 4, 0, 0],
+          },
+          barMaxWidth: 40,
+        },
+      ],
+    };
+
+    // Reviews Status Pie
+    this.reviewsStatusChartOptions = {
+      tooltip: {
+        trigger: 'item',
+        formatter: (params: any) => `${params.name}: <b>${params.value}</b>`,
+      },
+      legend: {
+        bottom: 0,
+        textStyle: { color: textSecondary },
+      },
+      series: [
+        {
+          type: 'pie',
+          radius: ['40%', '70%'],
+          avoidLabelOverlap: false,
+          itemStyle: {
+            borderRadius: 4,
+            borderColor: '#fff',
+            borderWidth: 2,
+          },
+          label: { show: false },
+          emphasis: {
+            label: { show: true, fontSize: 14, fontWeight: 'bold' },
+          },
+          data: [
+            { value: data.pending_reviews || 0, name: 'Pendientes', itemStyle: { color: '#f59e0b' } },
+            { value: data.approved_reviews || 0, name: 'Aprobadas', itemStyle: { color: '#22c55e' } },
+            { value: data.rejected_reviews || 0, name: 'Rechazadas', itemStyle: { color: '#ef4444' } },
+          ],
+        },
+      ],
+    };
   }
 }

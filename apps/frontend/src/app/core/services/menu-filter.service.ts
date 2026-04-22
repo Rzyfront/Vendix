@@ -80,16 +80,11 @@ export class MenuFilterService {
     Promociones: 'marketing_promotions',
     Cupones: 'marketing_coupons',
 
-    // STORE_ADMIN - Analíticas (padre + submódulos)
+// STORE_ADMIN - Analíticas (padre + submódulos)
+    // Solo mapear los que NO conflictuan con otros módulos
     Analíticas: 'analytics',
-    Resumen: 'analytics_overview',
-    Ventas: 'analytics_sales',
-    Compras: 'analytics_purchases',
-    'Reseñas Analytics': 'analytics_reviews',
-    'Analíticas de Inventario': 'analytics_inventory',
-    'Analíticas de Productos': 'analytics_products',
-    'Analíticas de Clientes': 'analytics_customers',
-    Financiero: 'analytics_financial',
+    'Resumen': 'analytics_overview',
+    'Ventas': 'analytics_sales',
 
     // STORE_ADMIN - Reportes
     Reportes: ['reports', 'accounting_reports'],

@@ -30,6 +30,8 @@ import * as ProductsSelectors from './state/products-analytics.selectors';
 
 import { EChartsOption } from 'echarts';
 import { getDefaultStartDate, getDefaultEndDate, formatChartPeriod } from '../../../../../../shared/utils/date.util';
+import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
+import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
 
 @Component({
   selector: 'vendix-product-performance',
@@ -40,10 +42,10 @@ import { getDefaultStartDate, getDefaultEndDate, formatChartPeriod } from '../..
     CardComponent,
     StatsComponent,
     ChartComponent,
-    IconComponent,
     OptionsDropdownComponent,
     CurrencyPipe,
     ExportButtonComponent,
+    AnalyticsCardComponent,
   ],
   templateUrl: './product-performance.component.html',
   styleUrls: ['./product-performance.component.scss'] })
@@ -118,6 +120,8 @@ export class ProductPerformanceComponent implements OnInit, OnDestroy {
   ];
 
   filterValues: FilterValues = {};
+
+  readonly productsViews: AnalyticsView[] = getViewsByCategory('products');
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();

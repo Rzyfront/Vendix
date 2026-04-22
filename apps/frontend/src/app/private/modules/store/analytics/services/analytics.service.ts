@@ -91,15 +91,37 @@ export interface ReviewsSummary {
 // Financial interfaces
 export interface ProfitLossSummary {
   period: { start_date: string; end_date: string };
-  revenue: number;
-  net_revenue: number;
-  cost_of_goods_sold: number;
-  gross_profit: number;
-  gross_margin: number;
+  revenue: {
+    gross_revenue: number;
+    discounts: number;
+    net_revenue: number;
+    shipping_revenue: number;
+    tax_collected: number;
+  };
+  costs: {
+    cost_of_goods_sold: number;
+    gross_profit: number;
+    gross_margin: number;
+  };
+  refunds: {
+    total_refunds: number;
+    subtotal_refunds: number;
+    tax_refunds: number;
+    shipping_refunds: number;
+  };
+  operating_expenses: number;
+  bottom_line: {
+    net_profit: number;
+    net_margin: number;
+    order_count: number;
+  };
+}
+
+export interface RefundsSummary {
   total_refunds: number;
-  net_profit: number;
-  net_margin: number;
-  orders_count: number;
+  subtotal_refunds: number;
+  tax_refunds: number;
+  shipping_refunds: number;
 }
 
 export interface TaxSummary {
@@ -516,6 +538,40 @@ export class AnalyticsService {
         params: this.buildParams(query),
       }),
     );
+  }
+
+  getRefundsSummary(
+    query: any = {},
+  ): Observable<ApiResponse<RefundsSummary>> {
+    const cacheKey = `refunds-summary-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<RefundsSummary>>(this.getApiUrl('financial/refunds'), {
+        params: this.buildParams(query),
+      }),
+    );
+  }
+
+  // ==================== EXPORTS ====================
+
+  exportPurchasesAnalytics(query: any = {}): Observable<Blob> {
+    return this.http.get(this.getApiUrl('purchases/export'), {
+      params: this.buildParams(query),
+      responseType: 'blob',
+    });
+  }
+
+  exportReviewsAnalytics(query: any = {}): Observable<Blob> {
+    return this.http.get(this.getApiUrl('reviews/export'), {
+      params: this.buildParams(query),
+      responseType: 'blob',
+    });
+  }
+
+  exportFinancialAnalytics(query: any = {}): Observable<Blob> {
+    return this.http.get(this.getApiUrl('financial/export'), {
+      params: this.buildParams(query),
+      responseType: 'blob',
+    });
   }
 
   // ==================== CACHE MANAGEMENT ====================

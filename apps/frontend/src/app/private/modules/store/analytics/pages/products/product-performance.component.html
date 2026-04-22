@@ -182,42 +182,12 @@
   <!-- Quick Links -->
   <app-card shadow="none" [responsivePadding]="true" class="md:mt-4">
     <span class="text-sm font-bold text-[var(--color-text-primary)]"
-      >Reportes Relacionados</span
+      >Vistas de Productos</span
     >
-    <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
-      <a
-        routerLink="../top-sellers"
-        class="flex items-center gap-2 p-3 rounded-lg hover:bg-background transition-colors text-sm"
-      >
-        <app-icon
-          name="trophy"
-          [size]="18"
-          class="text-text-secondary"
-        ></app-icon>
-        <span class="text-text-primary">Top Vendidos</span>
-      </a>
-      <a
-        routerLink="../profitability"
-        class="flex items-center gap-2 p-3 rounded-lg hover:bg-background transition-colors text-sm"
-      >
-        <app-icon
-          name="percent"
-          [size]="18"
-          class="text-text-secondary"
-        ></app-icon>
-        <span class="text-text-primary">Rentabilidad</span>
-      </a>
-      <a
-        routerLink="../../sales/by-product"
-        class="flex items-center gap-2 p-3 rounded-lg hover:bg-background transition-colors text-sm"
-      >
-        <app-icon
-          name="trending-up"
-          [size]="18"
-          class="text-text-secondary"
-        ></app-icon>
-        <span class="text-text-primary">Ventas por Producto</span>
-      </a>
+    <div class="grid grid-cols-2 md:grid-cols-3 gap-3 mt-3">
+      @for (view of productsViews; track view.key) {
+        <app-analytics-card [view]="view"></app-analytics-card>
+      }
     </div>
   </app-card>
 </div>

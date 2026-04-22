@@ -135,53 +135,12 @@
   <!-- Quick Links -->
   <app-card shadow="none" [responsivePadding]="true" class="md:mt-4">
     <span class="text-sm font-bold text-[var(--color-text-primary)]"
-      >Reportes Relacionados</span
+      >Vistas de Ventas</span
     >
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-      <a
-        routerLink="../by-product"
-        class="flex items-center gap-2 p-3 rounded-lg hover:bg-background transition-colors text-sm"
-      >
-        <app-icon
-          name="package"
-          [size]="18"
-          class="text-text-secondary"
-        ></app-icon>
-        <span class="text-text-primary">Ventas por Producto</span>
-      </a>
-      <a
-        routerLink="../by-category"
-        class="flex items-center gap-2 p-3 rounded-lg hover:bg-background transition-colors text-sm"
-      >
-        <app-icon
-          name="folder"
-          [size]="18"
-          class="text-text-secondary"
-        ></app-icon>
-        <span class="text-text-primary">Ventas por Categoría</span>
-      </a>
-      <a
-        routerLink="../trends"
-        class="flex items-center gap-2 p-3 rounded-lg hover:bg-background transition-colors text-sm"
-      >
-        <app-icon
-          name="trending-up"
-          [size]="18"
-          class="text-text-secondary"
-        ></app-icon>
-        <span class="text-text-primary">Tendencias</span>
-      </a>
-      <a
-        routerLink="../by-customer"
-        class="flex items-center gap-2 p-3 rounded-lg hover:bg-background transition-colors text-sm"
-      >
-        <app-icon
-          name="users"
-          [size]="18"
-          class="text-text-secondary"
-        ></app-icon>
-        <span class="text-text-primary">Ventas por Cliente</span>
-      </a>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+      @for (view of salesViews; track view.key) {
+        <app-analytics-card [view]="view"></app-analytics-card>
+      }
     </div>
   </app-card>
 </div>

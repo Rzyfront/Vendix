@@ -1,7 +1,6 @@
 import {Component, OnInit, OnDestroy, inject,
   DestroyRef} from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { RouterLink } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { Observable, combineLatest } from 'rxjs';
 import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
@@ -9,7 +8,6 @@ import { toSignal , takeUntilDestroyed} from '@angular/core/rxjs-interop';
 import { CardComponent } from '../../../../../../../shared/components/card/card.component';
 import { StatsComponent } from '../../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../../shared/components/chart/chart.component';
-import { IconComponent } from '../../../../../../../shared/components/icon/icon.component';
 import { OptionsDropdownComponent } from '../../../../../../../shared/components/options-dropdown/options-dropdown.component';
 import {
   FilterConfig,
@@ -29,20 +27,21 @@ import * as SalesSelectors from '../state/sales-summary.selectors';
 
 import { EChartsOption } from 'echarts';
 import { getDefaultStartDate, getDefaultEndDate, formatChartPeriod } from '../../../../../../../shared/utils/date.util';
+import { AnalyticsCardComponent } from '../../../components/analytics-card/analytics-card.component';
+import { getViewsByCategory, AnalyticsView } from '../../../config/analytics-registry';
 
 @Component({
   selector: 'vendix-sales-summary',
   standalone: true,
   imports: [
     CommonModule,
-    RouterLink,
     CardComponent,
     StatsComponent,
     ChartComponent,
-    IconComponent,
     OptionsDropdownComponent,
     ExportButtonComponent,
     CurrencyPipe,
+    AnalyticsCardComponent,
   ],
   templateUrl: './sales-summary.component.html',
   styleUrls: ['./sales-summary.component.scss'] })
@@ -125,6 +124,8 @@ export class SalesSummaryComponent implements OnInit, OnDestroy {
   ];
 
   filterValues: FilterValues = {};
+
+  readonly salesViews: AnalyticsView[] = getViewsByCategory('sales');
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
