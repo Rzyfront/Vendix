@@ -1,0 +1,178 @@
+<div class="pb-6">
+  <!-- Stats Cards -->
+  @if (loading()) {
+    <div class="stats-container">
+      @for (i of [1, 2, 3, 4]; track i) {
+        <div
+          class="bg-surface border border-border rounded-xl p-4 animate-pulse"
+        >
+          <div class="h-4 bg-gray-200 rounded w-1/2 mb-2"></div>
+          <div class="h-8 bg-gray-200 rounded w-3/4"></div>
+        </div>
+      }
+    </div>
+  } @else {
+    <div
+      class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+    >
+      <app-stats
+        title="Nuevos Clientes"
+        [value]="newCustomers()"
+        smallText="En el período seleccionado"
+        iconName="user-plus"
+        iconBgColor="bg-purple-100"
+        iconColor="text-purple-600"
+      ></app-stats>
+
+      <app-stats
+        title="Tasa de Conversión"
+        [value]="(conversionRate() | number:'1.1-1') + '%'"
+        smallText="Visitantes que se registran"
+        iconName="percent"
+        iconBgColor="bg-emerald-100"
+        iconColor="text-emerald-600"
+      ></app-stats>
+
+      <app-stats
+        title="Costo de Adquisición"
+        [value]="acquisitionCost() | currency"
+        smallText="Promedio por cliente nuevo"
+        iconName="dollar-sign"
+        iconBgColor="bg-amber-100"
+        iconColor="text-amber-600"
+      ></app-stats>
+
+      <app-stats
+        title="Mejor Canal"
+        [value]="bestChannel()"
+        smallText="Mayor tasa de conversión"
+        iconName="trending-up"
+        iconBgColor="bg-blue-100"
+        iconColor="text-blue-600"
+      ></app-stats>
+    </div>
+  }
+
+  <!-- Filter Bar -->
+  <div
+    class="sticky top-[99px] z-10 bg-background px-2 py-0.5 md:static md:bg-transparent md:px-6 md:py-1.5 md:border-b md:border-border"
+  >
+    <div class="flex items-center justify-between gap-2">
+      <div class="min-w-0">
+        <h2
+          class="text-[13px] font-bold text-gray-600 tracking-wide md:text-base md:font-semibold md:text-text-primary truncate"
+        >
+          Adquisición de Clientes
+        </h2>
+        <p
+          class="text-[11px] text-gray-400 md:text-xs md:text-text-secondary truncate"
+        >
+          Análisis de nuevos clientes y canales de adquisición
+        </p>
+      </div>
+
+      <div class="flex items-center gap-2 flex-shrink-0">
+        <app-options-dropdown
+          class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+          [filters]="filterConfigs"
+          [filterValues]="filterValues"
+          title="Filtros"
+          triggerLabel="Filtros"
+          (filterChange)="onFilterChange($event)"
+          (clearAllFilters)="onClearAllFilters()"
+        ></app-options-dropdown>
+      </div>
+    </div>
+  </div>
+
+  <!-- Charts -->
+  <div class="grid grid-cols-1 gap-6 md:mt-4">
+    <!-- New Acquisitions Trend Chart -->
+    <app-card
+      shadow="none"
+      [padding]="false"
+      overflow="hidden"
+      [showHeader]="true"
+    >
+      <div slot="header" class="flex flex-col">
+        <span class="text-sm font-bold text-[var(--color-text-primary)]"
+          >Tendencia de Nuevas Adquisiciones</span
+        >
+        <span class="text-xs text-[var(--color-text-secondary)]"
+          >Nuevos clientes registrados por período</span
+        >
+      </div>
+      <div class="p-4">
+        @if (loadingTrends()) {
+          <div class="h-64 flex items-center justify-center">
+            <div
+              class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            ></div>
+          </div>
+        } @else {
+          @defer (on viewport) {
+            <app-chart
+              [options]="trendsChartOptions"
+              size="large"
+              [showLegend]="false"
+            ></app-chart>
+          } @placeholder {
+            <div
+              class="h-64 bg-surface-secondary animate-pulse rounded-xl"
+            ></div>
+          }
+        }
+      </div>
+    </app-card>
+
+    <!-- Conversion Funnel Chart -->
+    <app-card
+      shadow="none"
+      [padding]="false"
+      overflow="hidden"
+      [showHeader]="true"
+    >
+      <div slot="header" class="flex flex-col">
+        <span class="text-sm font-bold text-[var(--color-text-primary)]"
+          >Canales de Adquisición</span
+        >
+        <span class="text-xs text-[var(--color-text-secondary)]"
+          >Distribución de nuevos clientes por canal</span
+        >
+      </div>
+      <div class="p-4">
+        @if (loadingChannels()) {
+          <div class="h-64 flex items-center justify-center">
+            <div
+              class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            ></div>
+          </div>
+        } @else {
+          @defer (on viewport) {
+            <app-chart
+              [options]="channelsChartOptions"
+              size="large"
+              [showLegend]="true"
+            ></app-chart>
+          } @placeholder {
+            <div
+              class="h-64 bg-surface-secondary animate-pulse rounded-xl"
+            ></div>
+          }
+        }
+      </div>
+    </app-card>
+  </div>
+
+  <!-- Quick Links -->
+  <app-card shadow="none" [responsivePadding]="true" class="md:mt-4">
+    <span class="text-sm font-bold text-[var(--color-text-primary)]"
+      >Vistas de Clientes</span
+    >
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+      @for (view of customersViews; track view.key) {
+        <app-analytics-card [view]="view"></app-analytics-card>
+      }
+    </div>
+  </app-card>
+</div>

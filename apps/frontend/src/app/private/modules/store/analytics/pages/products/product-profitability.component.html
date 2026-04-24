@@ -1,0 +1,225 @@
+<div>
+  <!-- Stats Cards -->
+  @if (loading()) {
+    <div class="stats-container">
+      @for (i of [1, 2, 3, 4]; track i) {
+        <div class="bg-surface border border-border rounded-xl p-4 animate-pulse">
+          <div class="h-4 bg-gray-200 rounded w-1/2 mb-2"></div>
+          <div class="h-8 bg-gray-200 rounded w-3/4"></div>
+        </div>
+      }
+    </div>
+  } @else {
+    <div
+      class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+    >
+      <app-stats
+        title="Margen Promedio"
+        [value]="((summary()?.overall_margin || 0) | number:'1.1-1') + '%'"
+        iconName="percent"
+        iconBgColor="bg-green-100"
+        iconColor="text-green-600"
+      ></app-stats>
+
+      <app-stats
+        title="Productos Rentables"
+        [value]="getProfitableCount()"
+        [smallText]="'de ' + products().length + ' totales'"
+        iconName="trending-up"
+        iconBgColor="bg-emerald-100"
+        iconColor="text-emerald-600"
+      ></app-stats>
+
+      <app-stats
+        title="Productos No Rentables"
+        [value]="getUnprofitableCount()"
+        iconName="trending-down"
+        iconBgColor="bg-red-100"
+        iconColor="text-red-600"
+      ></app-stats>
+
+      <app-stats
+        title="Producto Más Rentable"
+        [value]="getMostProfitableName()"
+        iconName="trophy"
+        iconBgColor="bg-amber-100"
+        iconColor="text-amber-600"
+      ></app-stats>
+    </div>
+  }
+
+  <!-- Filter Bar -->
+  <div
+    class="sticky top-[99px] z-10 bg-background px-2 py-0.5 md:static md:bg-transparent md:px-6 md:py-1.5 md:border-b md:border-border"
+  >
+    <div class="flex items-center justify-between gap-2">
+      <div class="min-w-0">
+        <h2
+          class="text-[13px] font-bold text-gray-600 tracking-wide md:text-base md:font-semibold md:text-text-primary truncate"
+        >
+          Rentabilidad de Productos
+        </h2>
+        <p
+          class="text-[11px] text-gray-400 md:text-xs md:text-text-secondary truncate"
+        >
+          Analiza márgenes de ganancia y rentabilidad por producto
+        </p>
+      </div>
+
+      <div class="flex items-center gap-2 flex-shrink-0">
+        <vendix-export-button
+          class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+          [loading]="exporting()"
+          (export)="exportReport()"
+        ></vendix-export-button>
+
+        <app-options-dropdown
+          class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+          [filters]="filterConfigs"
+          [filterValues]="filterValues"
+          title="Filtros"
+          triggerLabel="Filtros"
+          (filterChange)="onFilterChange($event)"
+          (clearAllFilters)="onClearAllFilters()"
+        ></app-options-dropdown>
+      </div>
+    </div>
+  </div>
+
+  <!-- Charts Grid -->
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 md:mt-4">
+    <!-- Margin Distribution Chart -->
+    <app-card
+      shadow="none"
+      [padding]="false"
+      overflow="hidden"
+      [showHeader]="true"
+    >
+      <div slot="header" class="flex flex-col">
+        <span class="text-sm font-bold text-[var(--color-text-primary)]"
+          >Distribución por Rentabilidad</span
+        >
+        <span class="text-xs text-[var(--color-text-secondary)]"
+          >Productos rentables vs no rentables</span
+        >
+      </div>
+      <div class="p-4">
+        @if (loading()) {
+          <div class="h-64 flex items-center justify-center">
+            <div
+              class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            ></div>
+          </div>
+        } @else {
+          @defer (on viewport) {
+            <app-chart
+              [options]="marginDistributionChartOptions"
+              size="large"
+              [showLegend]="true"
+            ></app-chart>
+          } @placeholder {
+            <div
+              class="h-64 bg-surface-secondary animate-pulse rounded-xl"
+            ></div>
+          }
+        }
+      </div>
+    </app-card>
+
+    <!-- Top Profit Chart -->
+    <app-card
+      shadow="none"
+      [padding]="false"
+      overflow="hidden"
+      [showHeader]="true"
+    >
+      <div slot="header" class="flex items-center justify-between">
+        <div class="flex flex-col">
+          <span class="text-sm font-bold text-[var(--color-text-primary)]"
+            >Top 5 por Ganancia</span
+          >
+          <span class="text-xs text-[var(--color-text-secondary)]"
+            >Productos con mayor ganancia</span
+          >
+        </div>
+        <a
+          routerLink="../performance"
+          class="text-sm text-primary hover:underline"
+          >Ver detalle</a
+        >
+      </div>
+      <div class="p-4">
+        @if (loading()) {
+          <div class="h-64 flex items-center justify-center">
+            <div
+              class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            ></div>
+          </div>
+        } @else {
+          @defer (on viewport) {
+            <app-chart
+              [options]="topProfitChartOptions"
+              size="large"
+              [showLegend]="false"
+            ></app-chart>
+          } @placeholder {
+            <div
+              class="h-64 bg-surface-secondary animate-pulse rounded-xl"
+            ></div>
+          }
+        }
+      </div>
+    </app-card>
+
+    <!-- Comparative Chart -->
+    <app-card
+      shadow="none"
+      [padding]="false"
+      overflow="hidden"
+      [showHeader]="true"
+      class="lg:col-span-2"
+    >
+      <div slot="header" class="flex flex-col">
+        <span class="text-sm font-bold text-[var(--color-text-primary)]"
+          >Comparativa: Ingresos, Costos y Ganancia</span
+        >
+        <span class="text-xs text-[var(--color-text-secondary)]"
+          >Análisis detallado de los 5 productos más rentables</span
+        >
+      </div>
+      <div class="p-4">
+        @if (loading()) {
+          <div class="h-64 flex items-center justify-center">
+            <div
+              class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            ></div>
+          </div>
+        } @else {
+          @defer (on viewport) {
+            <app-chart
+              [options]="comparativeChartOptions"
+              size="large"
+              [showLegend]="true"
+            ></app-chart>
+          } @placeholder {
+            <div
+              class="h-64 bg-surface-secondary animate-pulse rounded-xl"
+            ></div>
+          }
+        }
+      </div>
+    </app-card>
+  </div>
+
+  <!-- Quick Links -->
+  <app-card shadow="none" [responsivePadding]="true" class="md:mt-4">
+    <span class="text-sm font-bold text-[var(--color-text-primary)]"
+      >Vistas de Productos</span
+    >
+    <div class="grid grid-cols-2 md:grid-cols-3 gap-3 mt-3">
+      @for (view of productsViews; track view.key) {
+        <app-analytics-card [view]="view"></app-analytics-card>
+      }
+    </div>
+  </app-card>
+</div>

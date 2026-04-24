@@ -7,10 +7,16 @@ import { salesSummaryReducer } from './pages/sales/state/sales-summary.reducer';
 import { SalesSummaryEffects } from './pages/sales/state/sales-summary.effects';
 import { productsAnalyticsReducer } from './pages/products/state/products-analytics.reducer';
 import { ProductsAnalyticsEffects } from './pages/products/state/products-analytics.effects';
+import { profitabilityAnalyticsReducer } from './pages/products/state/profitability-analytics.reducer';
+import { ProfitabilityAnalyticsEffects } from './pages/products/state/profitability-analytics.effects';
 import { inventoryOverviewReducer } from './pages/inventory/overview/state/inventory-overview.reducer';
 import { InventoryOverviewEffects } from './pages/inventory/overview/state/inventory-overview.effects';
 import { customersAnalyticsReducer } from './pages/customers/state/customers-analytics.reducer';
 import { CustomersAnalyticsEffects } from './pages/customers/state/customers-analytics.effects';
+import { abandonedCartsAnalyticsReducer } from './pages/customers/state/abandoned-carts-analytics.reducer';
+import { AbandonedCartsAnalyticsEffects } from './pages/customers/state/abandoned-carts-analytics.effects';
+import { customerAcquisitionReducer } from './pages/customers/state/customer-acquisition.reducer';
+import { CustomerAcquisitionEffects } from './pages/customers/state/customer-acquisition.effects';
 import { AnalyticsCategoryId } from './config/analytics-registry';
 
 export const analyticsRoutes: Routes = [
@@ -161,6 +167,8 @@ export const analyticsRoutes: Routes = [
         providers: [
           provideState({ name: 'productsAnalytics', reducer: productsAnalyticsReducer }),
           provideEffects(ProductsAnalyticsEffects),
+          provideState({ name: 'profitabilityAnalytics', reducer: profitabilityAnalyticsReducer }),
+          provideEffects(ProfitabilityAnalyticsEffects),
         ],
         data: { categoryId: 'products' as AnalyticsCategoryId },
         children: [
@@ -232,6 +240,8 @@ export const analyticsRoutes: Routes = [
         providers: [
           provideState({ name: 'customersAnalytics', reducer: customersAnalyticsReducer }),
           provideEffects(CustomersAnalyticsEffects),
+          provideState({ name: 'abandonedCartsAnalytics', reducer: abandonedCartsAnalyticsReducer }),
+          provideEffects(AbandonedCartsAnalyticsEffects),
         ],
         data: { categoryId: 'customers' as AnalyticsCategoryId },
         children: [

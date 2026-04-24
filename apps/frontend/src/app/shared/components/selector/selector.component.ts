@@ -238,14 +238,16 @@ export class SelectorComponent implements ControlValueAccessor {
     let stateClasses: string[];
     if (this.errorText()) {
       stateClasses = [
+        'border-[3px]',
         'border-[var(--color-destructive)]',
         'focus:border-[var(--color-destructive)]',
         'bg-[rgba(239,68,68,0.1)]',
       ];
     } else {
       stateClasses = [
-        'border-border',
-        'hover:border-border',
+        'border-[3px]',
+        'border-black',
+        'hover:border-black',
         'focus:border-primary',
       ];
     }

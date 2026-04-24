@@ -19,14 +19,14 @@ type DatePreset =
 @Component({
   selector: 'vendix-date-range-filter',
   standalone: true,
-  imports: [
+imports: [
     FormsModule,
-    SelectorComponent
-],
+    SelectorComponent,
+  ],
   template: `
-    <div class="flex flex-col gap-2">
-      <!-- Row 1: Preset Selector -->
-      <div class="w-full sm:w-44">
+    <div class="flex flex-col sm:flex-row items-stretch sm:items-center gap-2 sm:gap-3">
+      <!-- Preset Selector -->
+      <div class="w-full sm:w-40 flex-shrink-0">
         <app-selector
           [options]="presetOptions"
           [ngModel]="selectedPreset()"
@@ -36,22 +36,31 @@ type DatePreset =
         ></app-selector>
       </div>
 
-      <!-- Row 2: Date Range Inputs (always visible) -->
-      <div class="flex items-center gap-2">
-        <input
-          type="date"
-          [ngModel]="customStartDate()"
-          (ngModelChange)="onStartDateChange($event)"
-          class="px-3 py-1.5 text-sm border border-border rounded-lg bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-        />
-        <span class="text-text-secondary">-</span>
-        <input
-          type="date"
-          [ngModel]="customEndDate()"
-          (ngModelChange)="onEndDateChange($event)"
-          class="px-3 py-1.5 text-sm border border-border rounded-lg bg-surface text-text-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
-        />
-      </div>
+      <!-- Date Range Inputs (only when custom is selected) -->
+      @if (selectedPreset() === 'custom') {
+        <div class="flex items-center gap-2 w-full sm:w-auto">
+          <input
+            type="date"
+            [ngModel]="customStartDate()"
+            (ngModelChange)="onStartDateChange($event)"
+            class="flex-1 sm:flex-none px-3 py-2 text-sm border-[3px] border-black rounded-2xl bg-background text-text-primary focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-colors w-full sm:w-32"
+          />
+          <span class="text-text-secondary text-sm">-</span>
+          <input
+            type="date"
+            [ngModel]="customEndDate()"
+            (ngModelChange)="onEndDateChange($event)"
+            class="flex-1 sm:flex-none px-3 py-2 text-sm border-[3px] border-black rounded-2xl bg-background text-text-primary focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20 transition-colors w-full sm:w-32"
+          />
+        </div>
+      } @else {
+        <!-- Compact date range display pill -->
+        <div class="hidden sm:flex items-center gap-2 text-sm">
+          <span class="px-3 py-1.5 bg-background text-text-primary rounded-2xl border-[3px] border-black font-medium">
+            {{ dateRangeLabel() }}
+          </span>
+        </div>
+      }
     </div>
   `,
 })
@@ -92,7 +101,6 @@ export class DateRangeFilterComponent {
   });
 
   constructor() {
-    // Initialize with default value
     const initialValue = this.value();
     if (initialValue?.preset) {
       this.selectedPreset.set(initialValue.preset);
@@ -104,7 +112,6 @@ export class DateRangeFilterComponent {
       this.customEndDate.set(initialValue.end_date);
     }
 
-    // Pre-fill date inputs from the default preset if no custom dates were provided
     if (!this.customStartDate() || !this.customEndDate()) {
       const defaultRange = this.getDateRange(this.selectedPreset());
       if (defaultRange) {

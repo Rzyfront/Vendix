@@ -35,6 +35,9 @@ import {
   ProductAnalyticsRow,
   ProductTrend,
   ProductsAnalyticsQueryDto,
+  ProductProfitability,
+  ProfitabilitySummary,
+  ProfitabilityResponse,
 } from '../interfaces/products-analytics.interface';
 import {
   OverviewSummary,
@@ -47,6 +50,12 @@ import {
   TopCustomer,
   CustomersAnalyticsQueryDto,
 } from '../interfaces/customers-analytics.interface';
+import {
+  AbandonedCartsSummary,
+  AbandonedCartTrend,
+  AbandonedCartByReason,
+  AbandonedCartsAnalyticsQueryDto,
+} from '../interfaces/abandoned-carts-analytics.interface';
 import { PaginatedResponse } from '../interfaces/analytics.interface';
 
 // Purchases interfaces
@@ -343,6 +352,27 @@ export class AnalyticsService {
     });
   }
 
+  getProductProfitability(
+    query: ProductsAnalyticsQueryDto = {},
+  ): Observable<ApiResponse<ProfitabilityResponse>> {
+    const cacheKey = `product-profitability-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<ProfitabilityResponse>>(
+        this.getApiUrl('products/profitability'),
+        { params: this.buildParams(query) },
+      ),
+    );
+  }
+
+  exportProductProfitability(
+    query: ProductsAnalyticsQueryDto = {},
+  ): Observable<Blob> {
+    return this.http.get(this.getApiUrl('products/profitability/export'), {
+      params: this.buildParams(query),
+      responseType: 'blob',
+    });
+  }
+
   // ==================== INVENTORY ANALYTICS ====================
 
   getInventorySummary(
@@ -476,6 +506,45 @@ export class AnalyticsService {
 
   exportCustomersAnalytics(query: CustomersAnalyticsQueryDto = {}): Observable<Blob> {
     return this.http.get(this.getApiUrl('customers/export'), {
+      params: this.buildParams(query),
+      responseType: 'blob',
+    });
+  }
+
+  // ==================== ABANDONED CARTS ANALYTICS ====================
+
+  getAbandonedCartsSummary(
+    query: AbandonedCartsAnalyticsQueryDto = {},
+  ): Observable<ApiResponse<AbandonedCartsSummary>> {
+    const cacheKey = `abandoned-carts-summary-${JSON.stringify(query)}`;
+    return this.withCache(cacheKey, () =>
+      this.http.get<ApiResponse<AbandonedCartsSummary>>(
+        this.getApiUrl('customers/abandoned-carts/summary'),
+        { params: this.buildParams(query) },
+      ),
+    );
+  }
+
+  getAbandonedCartsTrends(
+    query: AbandonedCartsAnalyticsQueryDto = {},
+  ): Observable<ApiResponse<AbandonedCartTrend[]>> {
+    return this.http.get<ApiResponse<AbandonedCartTrend[]>>(
+      this.getApiUrl('customers/abandoned-carts/trends'),
+      { params: this.buildParams(query) },
+    );
+  }
+
+  getAbandonedCartsByReason(
+    query: AbandonedCartsAnalyticsQueryDto = {},
+  ): Observable<ApiResponse<AbandonedCartByReason[]>> {
+    return this.http.get<ApiResponse<AbandonedCartByReason[]>>(
+      this.getApiUrl('customers/abandoned-carts/by-reason'),
+      { params: this.buildParams(query) },
+    );
+  }
+
+  exportAbandonedCartsAnalytics(query: AbandonedCartsAnalyticsQueryDto = {}): Observable<Blob> {
+    return this.http.get(this.getApiUrl('customers/abandoned-carts/export'), {
       params: this.buildParams(query),
       responseType: 'blob',
     });

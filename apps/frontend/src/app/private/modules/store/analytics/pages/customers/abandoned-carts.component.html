@@ -1,0 +1,222 @@
+<div class="pb-6">
+  <!-- Stats Cards -->
+  @if (loading()) {
+    <div class="stats-container">
+      @for (i of [1, 2, 3, 4]; track i) {
+        <div
+          class="bg-surface border border-border rounded-xl p-4 animate-pulse"
+        >
+          <div class="h-4 bg-gray-200 rounded w-1/2 mb-2"></div>
+          <div class="h-8 bg-gray-200 rounded w-3/4"></div>
+        </div>
+      }
+    </div>
+  } @else {
+    <div
+      class="stats-container sticky top-0 z-20 bg-background md:static md:bg-transparent"
+    >
+      <app-stats
+        title="Carritos Abandonados"
+        [value]="summary()?.total_abandoned_carts || 0"
+        smallText="Total en el período"
+        iconName="shopping-cart"
+        iconBgColor="bg-red-100"
+        iconColor="text-red-600"
+      ></app-stats>
+
+      <app-stats
+        title="Valor Abandonado"
+        [value]="summary()?.total_abandoned_value | currency"
+        smallText="Potencial perdido"
+        iconName="dollar-sign"
+        iconBgColor="bg-amber-100"
+        iconColor="text-amber-600"
+      ></app-stats>
+
+      <app-stats
+        title="Tasa de Abandono"
+        [value]="getAbandonmentRate()"
+        [smallText]="getGrowthText(summary()?.abandonment_rate_growth)"
+        iconName="alert-triangle"
+        iconBgColor="bg-orange-100"
+        iconColor="text-orange-600"
+      ></app-stats>
+
+      <app-stats
+        title="Tasa de Recuperación"
+        [value]="getRecoveryRate()"
+        [smallText]="getGrowthText(summary()?.recovery_rate_growth)"
+        iconName="refresh-cw"
+        iconBgColor="bg-emerald-100"
+        iconColor="text-emerald-600"
+      ></app-stats>
+    </div>
+  }
+
+  <!-- Filter Bar -->
+  <div
+    class="sticky top-[99px] z-10 bg-background px-2 py-0.5 md:static md:bg-transparent md:px-6 md:py-1.5 md:border-b md:border-border"
+  >
+    <div class="flex items-center justify-between gap-2">
+      <div class="min-w-0">
+        <h2
+          class="text-[13px] font-bold text-gray-600 tracking-wide md:text-base md:font-semibold md:text-text-primary truncate"
+        >
+          Carritos Abandonados
+        </h2>
+        <p
+          class="text-[11px] text-gray-400 md:text-xs md:text-text-secondary truncate"
+        >
+          Análisis de abandono y recuperación de carritos
+        </p>
+      </div>
+
+      <div class="flex items-center gap-2 flex-shrink-0">
+        <vendix-export-button
+          class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+          [loading]="exporting()"
+          (export)="exportReport()"
+        ></vendix-export-button>
+
+        <app-options-dropdown
+          class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
+          [filters]="filterConfigs"
+          [filterValues]="filterValues"
+          title="Filtros"
+          triggerLabel="Filtros"
+          (filterChange)="onFilterChange($event)"
+          (clearAllFilters)="onClearAllFilters()"
+        ></app-options-dropdown>
+      </div>
+    </div>
+  </div>
+
+  <!-- Charts -->
+  <div class="grid grid-cols-1 gap-6 md:mt-4">
+    <!-- Abandoned vs Recovered Carts Trend -->
+    <app-card
+      shadow="none"
+      [padding]="false"
+      overflow="hidden"
+      [showHeader]="true"
+    >
+      <div slot="header" class="flex flex-col">
+        <span class="text-sm font-bold text-[var(--color-text-primary)]"
+          >Tendencia de Carritos</span
+        >
+        <span class="text-xs text-[var(--color-text-secondary)]"
+          >Carritos abandonados vs recuperados por período</span
+        >
+      </div>
+      <div class="p-4">
+        @if (loadingTrends()) {
+          <div class="h-64 flex items-center justify-center">
+            <div
+              class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            ></div>
+          </div>
+        } @else {
+          @defer (on viewport) {
+            <app-chart
+              [options]="trendsChartOptions"
+              size="large"
+              [showLegend]="true"
+            ></app-chart>
+          } @placeholder {
+            <div
+              class="h-64 bg-surface-secondary animate-pulse rounded-xl"
+            ></div>
+          }
+        }
+      </div>
+    </app-card>
+
+    <!-- Recovery Rate Trend -->
+    <app-card
+      shadow="none"
+      [padding]="false"
+      overflow="hidden"
+      [showHeader]="true"
+    >
+      <div slot="header" class="flex flex-col">
+        <span class="text-sm font-bold text-[var(--color-text-primary)]"
+          >Tasa de Recuperación</span
+        >
+        <span class="text-xs text-[var(--color-text-secondary)]"
+          >Porcentaje de carritos abandonados que fueron recuperados</span
+        >
+      </div>
+      <div class="p-4">
+        @if (loadingTrends()) {
+          <div class="h-64 flex items-center justify-center">
+            <div
+              class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            ></div>
+          </div>
+        } @else {
+          @defer (on viewport) {
+            <app-chart
+              [options]="recoveryRateChartOptions"
+              size="large"
+              [showLegend]="false"
+            ></app-chart>
+          } @placeholder {
+            <div
+              class="h-64 bg-surface-secondary animate-pulse rounded-xl"
+            ></div>
+          }
+        }
+      </div>
+    </app-card>
+
+    <!-- Abandoned Carts by Reason -->
+    <app-card
+      shadow="none"
+      [padding]="false"
+      overflow="hidden"
+      [showHeader]="true"
+    >
+      <div slot="header" class="flex flex-col">
+        <span class="text-sm font-bold text-[var(--color-text-primary)]"
+          >Razones de Abandono</span
+        >
+        <span class="text-xs text-[var(--color-text-secondary)]"
+          >Distribución por motivo de abandono</span
+        >
+      </div>
+      <div class="p-4">
+        @if (loadingTrends()) {
+          <div class="h-64 flex items-center justify-center">
+            <div
+              class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+            ></div>
+          </div>
+        } @else {
+          @defer (on viewport) {
+            <app-chart
+              [options]="byReasonChartOptions"
+              size="large"
+              [showLegend]="false"
+            ></app-chart>
+          } @placeholder {
+            <div
+              class="h-64 bg-surface-secondary animate-pulse rounded-xl"
+            ></div>
+          }
+        }
+      </div>
+    </app-card>
+  </div>
+
+  <!-- Quick Links -->
+  <app-card shadow="none" [responsivePadding]="true" class="md:mt-4">
+    <span class="text-sm font-bold text-[var(--color-text-primary)]"
+      >Vistas de Clientes</span
+    >
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+      @for (view of customersViews; track view.key) {
+        <app-analytics-card [view]="view"></app-analytics-card>
+      }
+    </div>
+  </app-card>
+</div>
