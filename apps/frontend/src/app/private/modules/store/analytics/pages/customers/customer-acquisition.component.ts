@@ -1,6 +1,5 @@
-import { Component, OnInit, OnDestroy, inject, signal, DestroyRef } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, DestroyRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ActivatedRoute } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { Observable, combineLatest } from 'rxjs';
 import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -8,13 +7,15 @@ import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
-import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
+import {
+  FilterConfig,
+  FilterValues } from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import {
   CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
-import { ExportButtonComponent } from '../../components/export-button/export-button.component';
-import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
 import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
 
+import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import {
   CustomerTrend } from '../../interfaces/customers-analytics.interface';
 
@@ -24,9 +25,6 @@ import * as AcquisitionSelectors from './state/customer-acquisition.selectors';
 import { EChartsOption } from 'echarts';
 import { getDefaultStartDate, getDefaultEndDate, formatChartPeriod } from '../../../../../../shared/utils/date.util';
 import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
-import { DateRangeFilter } from '../../interfaces/analytics.interface';
-import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
-import { truncateLabel, compactCountAxis } from '../../../../../../shared/utils/chart-labels.util';
 
 @Component({
   selector: 'vendix-customer-acquisition',
@@ -36,10 +34,8 @@ import { truncateLabel, compactCountAxis } from '../../../../../../shared/utils/
     CardComponent,
     StatsComponent,
     ChartComponent,
-    IconComponent,
+    OptionsDropdownComponent,
     CurrencyPipe,
-    ExportButtonComponent,
-    DateRangeFilterComponent,
     AnalyticsCardComponent,
   ],
   templateUrl: './customer-acquisition.component.html',
@@ -48,7 +44,6 @@ import { truncateLabel, compactCountAxis } from '../../../../../../shared/utils/
 export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
   private destroyRef = inject(DestroyRef);
   private store = inject(Store);
-  private readonly route = inject(ActivatedRoute);
 
   newCustomers$: Observable<number> = this.store.select(
     AcquisitionSelectors.selectNewCustomers,
@@ -92,26 +87,52 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
   readonly loadingTrends = toSignal(this.loadingTrends$, { initialValue: false });
   readonly loadingChannels = toSignal(this.loadingChannels$, { initialValue: false });
 
-  trendsChartOptions= signal<EChartsOption>({});
-  channelsChartOptions= signal<EChartsOption>({});
-  dateRange = signal<DateRangeFilter>({
-    start_date: getDefaultStartDate(),
-    end_date: getDefaultEndDate(),
-    preset: 'thisMonth'});
-  exporting = signal(false);
+  trendsChartOptions: EChartsOption = {};
+  channelsChartOptions: EChartsOption = {};
+
+  filterConfigs: FilterConfig[] = [
+    {
+      key: 'date_from',
+      label: 'Desde',
+      type: 'date',
+      defaultValue: getDefaultStartDate() },
+    {
+      key: 'date_to',
+      label: 'Hasta',
+      type: 'date',
+      defaultValue: getDefaultEndDate() },
+    {
+      key: 'granularity',
+      label: 'Granularidad',
+      type: 'select',
+      options: [
+        { value: 'hour', label: 'Por Hora' },
+        { value: 'day', label: 'Por Día' },
+        { value: 'week', label: 'Por Semana' },
+        { value: 'month', label: 'Por Mes' },
+        { value: 'year', label: 'Por Año' },
+      ],
+      placeholder: 'Seleccionar',
+      defaultValue: 'day' },
+  ];
+
+  filterValues: FilterValues = {};
 
   readonly customersViews: AnalyticsView[] = getViewsByCategory('customers');
 
   ngOnInit(): void {
-    const urlRange = queryParamsToDateRange(this.route.snapshot.queryParamMap);
-    if (urlRange) {
-      this.dateRange.set(urlRange);
-      this.store.dispatch(AcquisitionActions.setDateRange({ dateRange: urlRange }));
-    }
-
     this.store.dispatch(AcquisitionActions.loadAcquisitionSummary());
     this.store.dispatch(AcquisitionActions.loadAcquisitionTrends());
     this.store.dispatch(AcquisitionActions.loadAcquisitionChannels());
+
+    combineLatest([this.dateRange$, this.granularity$])
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(([dateRange, granularity]) => {
+        this.filterValues = {
+          date_from: dateRange.start_date || null,
+          date_to: dateRange.end_date || null,
+          granularity: granularity || 'day' };
+      });
 
     combineLatest([this.trends$, this.granularity$])
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -130,19 +151,50 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
     this.store.dispatch(AcquisitionActions.clearCustomerAcquisitionState());
   }
 
-  onDateRangeChange(range: DateRangeFilter): void {
-    this.dateRange.set(range);
-    this.store.dispatch(AcquisitionActions.setDateRange({ dateRange: range }));
+  onFilterChange(values: FilterValues): void {
+    const dateFrom = values['date_from'] as string;
+    const dateTo = values['date_to'] as string;
+    const granularity = values['granularity'] as string;
+
+    const currentRange = this.filterValues;
+    if (
+      dateFrom !== currentRange['date_from'] ||
+      dateTo !== currentRange['date_to']
+    ) {
+      this.store.dispatch(
+        AcquisitionActions.setDateRange({
+          dateRange: {
+            start_date: dateFrom || '',
+            end_date: dateTo || '',
+            preset: 'custom' } }),
+      );
+    }
+
+    if (granularity !== currentRange['granularity']) {
+      this.store.dispatch(
+        AcquisitionActions.setGranularity({ granularity: granularity || 'day' }),
+      );
+    }
   }
 
-  exportReport(): void {
-    this.store.dispatch(AcquisitionActions.loadAcquisitionSummary());
+  onClearAllFilters(): void {
+    this.store.dispatch(
+      AcquisitionActions.setDateRange({
+        dateRange: {
+          start_date: getDefaultStartDate(),
+          end_date: getDefaultEndDate(),
+          preset: 'thisMonth' } }),
+    );
+    this.store.dispatch(
+      AcquisitionActions.setGranularity({ granularity: 'day' }),
+    );
   }
 
   private updateTrendsChart(
     trends: CustomerTrend[],
     granularity: string,
   ): void {
+    if (!trends.length) return;
 
     const style = getComputedStyle(document.documentElement);
     const primaryColor = '#8b5cf6';
@@ -156,7 +208,7 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
     );
     const newCustomers = trends.map((t) => t.new_customers);
 
-    this.trendsChartOptions.set({
+    this.trendsChartOptions = {
       tooltip: {
         trigger: 'axis',
         confine: true,
@@ -179,18 +231,19 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
             </div>
           `;
         } },
-      legend: {
-        data: ['Nuevos Clientes'],
-        selectedMode: true,
-        bottom: 30,
-        left: 'center',
-        itemWidth: 14,
-        textStyle: { color: textSecondary },
-      },
+      dataZoom: [
+        {
+          type: 'inside',
+          start: 0,
+          end: 100,
+          zoomOnMouseWheel: true,
+          moveOnMouseMove: true,
+        },
+      ],
       grid: {
         left: '3%',
         right: '4%',
-        bottom: '15%',
+        bottom: '18%',
         containLabel: true },
       xAxis: {
         type: 'category',
@@ -200,16 +253,18 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
       yAxis: {
         type: 'value',
         axisLine: { show: false },
-        axisLabel: { color: textSecondary, fontSize: 11, formatter: (v: number) => compactCountAxis(v) },
+        axisLabel: { color: textSecondary, fontSize: 11 },
         splitLine: { lineStyle: { color: borderColor, type: 'dashed' } } },
       series: [
         {
           name: 'Nuevos Clientes',
           type: 'line',
-          smooth: true,
-          symbol: 'circle',
+          smooth: 0.4,
           data: newCustomers,
-          itemStyle: { color: primaryColor },
+          symbol: 'circle',
+          symbolSize: 6,
+          showSymbol: false,
+          emphasis: { scale: true },
           areaStyle: {
             color: {
               type: 'linear',
@@ -218,33 +273,31 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
               x2: 0,
               y2: 1,
               colorStops: [
-                { offset: 0, color: primaryColor + '40' },
-                { offset: 1, color: primaryColor + '05' },
-              ],
-            },
-          },
+                { offset: 0, color: `${primaryColor}60` },
+                { offset: 0.5, color: `${primaryColor}30` },
+                { offset: 1, color: `${primaryColor}05` },
+              ] } },
+          lineStyle: { color: primaryColor, width: 3 },
+          itemStyle: { color: primaryColor },
         },
-      ] });
+      ] };
   }
 
   private updateChannelsChart(channels: any[]): void {
+    if (!channels.length) return;
+
     const style = getComputedStyle(document.documentElement);
     const borderColor =
       style.getPropertyValue('--color-border').trim() || '#e5e7eb';
     const textSecondary =
       style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
 
-    if (!channels.length) {
-      this.channelsChartOptions.set({ series: [] });
-      return;
-    }
-
     const channelColors = ['#8b5cf6', '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#6366f1'];
 
-    const labels = channels.map((c) => c.display_name || c.channel);
+    const labels = channels.map((c) => c.channel);
     const values = channels.map((c) => c.new_customers);
 
-    this.channelsChartOptions.set({
+    this.channelsChartOptions = {
       tooltip: {
         trigger: 'axis',
         axisPointer: { type: 'shadow' },
@@ -280,18 +333,10 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
             </div>
           `;
         } },
-      legend: {
-        data: ['Canales'],
-        selectedMode: true,
-        bottom: 30,
-        left: 'center',
-        itemWidth: 14,
-        textStyle: { color: textSecondary },
-      },
       grid: {
         left: '3%',
         right: '4%',
-        bottom: '20%',
+        bottom: '15%',
         containLabel: true },
       xAxis: {
         type: 'category',
@@ -300,38 +345,24 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
         axisLabel: {
           color: textSecondary,
           fontSize: 11,
-          rotate: 0,
-          formatter: (val: string) => truncateLabel(val, 14) },
+          rotate: 0 },
       },
       yAxis: {
         type: 'value',
         axisLine: { show: false },
-        axisLabel: { color: textSecondary, fontSize: 11, formatter: (v: number) => compactCountAxis(v) },
+        axisLabel: { color: textSecondary, fontSize: 11 },
         splitLine: { lineStyle: { color: borderColor, type: 'dashed' } } },
       series: [
         {
-          name: 'Canales',
-          type: 'line',
-          smooth: true,
-          symbol: 'circle',
+          name: 'Nuevos Clientes',
+          type: 'bar',
           data: values,
           itemStyle: {
             color: (params: any) => channelColors[params.dataIndex % channelColors.length],
+            borderRadius: [6, 6, 0, 0],
           },
-          areaStyle: {
-            color: {
-              type: 'linear',
-              x: 0,
-              y: 0,
-              x2: 0,
-              y2: 1,
-              colorStops: [
-                { offset: 0, color: `${channelColors[0]}40` },
-                { offset: 1, color: `${channelColors[0]}05` },
-              ],
-            },
-          },
+          barMaxWidth: 48,
         },
-      ] });
+      ] };
   }
 }

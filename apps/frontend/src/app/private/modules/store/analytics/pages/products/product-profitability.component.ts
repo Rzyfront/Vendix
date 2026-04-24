@@ -1,6 +1,6 @@
-import { Component, OnInit, OnDestroy, inject, signal, DestroyRef } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, DestroyRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ActivatedRoute, RouterLink } from '@angular/router';
+import { RouterLink } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { Observable, combineLatest } from 'rxjs';
 import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
@@ -9,9 +9,14 @@ import { CardComponent } from '../../../../../../shared/components/card/card.com
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
+import {
+  FilterConfig,
+  FilterValues,
+} from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
-import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
+
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import {
   ProductProfitability,
@@ -25,8 +30,6 @@ import { EChartsOption } from 'echarts';
 import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
 import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
 import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
-import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
-import { truncateLabel, compactCountAxis } from '../../../../../../shared/utils/chart-labels.util';
 
 @Component({
   selector: 'vendix-product-profitability',
@@ -37,9 +40,8 @@ import { truncateLabel, compactCountAxis } from '../../../../../../shared/utils/
     CardComponent,
     StatsComponent,
     ChartComponent,
-    IconComponent,
+    OptionsDropdownComponent,
     ExportButtonComponent,
-    DateRangeFilterComponent,
     AnalyticsCardComponent,
   ],
   templateUrl: './product-profitability.component.html',
@@ -49,7 +51,6 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
   private destroyRef = inject(DestroyRef);
   private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
-  private readonly route = inject(ActivatedRoute);
 
   summary$: Observable<ProfitabilitySummary | null> = this.store.select(
     ProfitabilitySelectors.selectProfitabilitySummary,
@@ -91,26 +92,57 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
   readonly topProfitable = toSignal(this.topProfitable$, { initialValue: [] });
   readonly mostProfitable = toSignal(this.mostProfitable$, { initialValue: null });
 
-  marginDistributionChartOptions= signal<EChartsOption>({});
-  topProfitChartOptions= signal<EChartsOption>({});
-  comparativeChartOptions= signal<EChartsOption>({});
-  dateRange = signal<DateRangeFilter>({
-    start_date: getDefaultStartDate(),
-    end_date: getDefaultEndDate(),
-    preset: 'thisMonth'});
+  marginDistributionChartOptions: EChartsOption = {};
+  topProfitChartOptions: EChartsOption = {};
+  comparativeChartOptions: EChartsOption = {};
+
+  filterConfigs: FilterConfig[] = [
+    {
+      key: 'date_from',
+      label: 'Desde',
+      type: 'date',
+      defaultValue: getDefaultStartDate(),
+    },
+    {
+      key: 'date_to',
+      label: 'Hasta',
+      type: 'date',
+      defaultValue: getDefaultEndDate(),
+    },
+    {
+      key: 'granularity',
+      label: 'Granularidad',
+      type: 'select',
+      options: [
+        { value: 'hour', label: 'Por Hora' },
+        { value: 'day', label: 'Por Día' },
+        { value: 'week', label: 'Por Semana' },
+        { value: 'month', label: 'Por Mes' },
+        { value: 'year', label: 'Por Año' },
+      ],
+      placeholder: 'Seleccionar',
+      defaultValue: 'day',
+    },
+  ];
+
+  filterValues: FilterValues = {};
 
   readonly productsViews: AnalyticsView[] = getViewsByCategory('products');
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
 
-    const urlRange = queryParamsToDateRange(this.route.snapshot.queryParamMap);
-    if (urlRange) {
-      this.dateRange.set(urlRange);
-      this.store.dispatch(ProfitabilityActions.setProfitabilityDateRange({ dateRange: urlRange }));
-    }
-
     this.store.dispatch(ProfitabilityActions.loadProfitability());
+
+    combineLatest([this.dateRange$, this.granularity$])
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(([dateRange, granularity]) => {
+        this.filterValues = {
+          date_from: dateRange.start_date || null,
+          date_to: dateRange.end_date || null,
+          granularity: granularity || 'day',
+        };
+      });
 
     combineLatest([this.products$, this.summary$])
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -123,13 +155,53 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
     this.store.dispatch(ProfitabilityActions.clearProfitabilityAnalyticsState());
   }
 
-  exportReport(): void {
-    this.store.dispatch(ProfitabilityActions.exportProfitabilityReport());
+  onFilterChange(values: FilterValues): void {
+    const dateFrom = values['date_from'] as string;
+    const dateTo = values['date_to'] as string;
+    const granularity = values['granularity'] as string;
+
+    const currentRange = this.filterValues;
+    if (
+      dateFrom !== currentRange['date_from'] ||
+      dateTo !== currentRange['date_to']
+    ) {
+      this.store.dispatch(
+        ProfitabilityActions.setProfitabilityDateRange({
+          dateRange: {
+            start_date: dateFrom || '',
+            end_date: dateTo || '',
+            preset: 'custom',
+          },
+        }),
+      );
+    }
+
+    if (granularity !== currentRange['granularity']) {
+      this.store.dispatch(
+        ProfitabilityActions.setProfitabilityGranularity({
+          granularity: granularity || 'day',
+        }),
+      );
+    }
   }
 
-  onDateRangeChange(range: DateRangeFilter): void {
-    this.dateRange.set(range);
-    this.store.dispatch(ProfitabilityActions.setProfitabilityDateRange({ dateRange: range }));
+  onClearAllFilters(): void {
+    this.store.dispatch(
+      ProfitabilityActions.setProfitabilityDateRange({
+        dateRange: {
+          start_date: getDefaultStartDate(),
+          end_date: getDefaultEndDate(),
+          preset: 'thisMonth',
+        },
+      }),
+    );
+    this.store.dispatch(
+      ProfitabilityActions.setProfitabilityGranularity({ granularity: 'day' }),
+    );
+  }
+
+  exportReport(): void {
+    this.store.dispatch(ProfitabilityActions.exportProfitabilityReport());
   }
 
   getProfitableCount(): number {
@@ -164,55 +236,40 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
     const profitable = products.filter((p) => p.margin > 0).length;
     const unprofitable = products.filter((p) => p.margin <= 0).length;
     const zeroMargin = products.filter((p) => p.margin === 0).length;
-    const colors = ['#22c55e', '#ef4444', '#f59e0b'];
 
-    this.marginDistributionChartOptions.set({
+    this.marginDistributionChartOptions = {
       tooltip: {
-        trigger: 'axis',
-        formatter: (params: any) => {
-          const data = params[0];
-          return `${data.name}: <b>${data.value}</b> productos`;
-        },
+        trigger: 'item',
+        formatter: '{b}: {c} ({d}%)',
       },
       legend: {
-        data: ['Margen'],
-        selectedMode: true,
-        bottom: 30,
-        left: 'center',
-        itemWidth: 14,
+        orient: 'horizontal',
+        bottom: 0,
         textStyle: { color: textSecondary },
       },
-      grid: {
-        left: '3%',
-        right: '4%',
-        bottom: '20%',
-        containLabel: true,
-      },
-      xAxis: {
-        type: 'category',
-        data: ['Rentables', 'No Rentables', 'Sin Margen'],
-        axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary },
-        axisTick: { show: false },
-      },
-      yAxis: {
-        type: 'value',
-        min: 0,
-        axisLine: { show: false },
-        axisLabel: { color: textSecondary, formatter: (v: number) => compactCountAxis(v) },
-        splitLine: { lineStyle: { color: borderColor } },
-      },
-      series: [{
-        name: 'Margen',
-        type: 'bar',
-        data: [
-          { value: profitable, itemStyle: { color: colors[0] } },
-          { value: unprofitable, itemStyle: { color: colors[1] } },
-          { value: zeroMargin, itemStyle: { color: colors[2] } },
-        ],
-        barMaxWidth: 60,
-      }],
-    });
+      series: [
+        {
+          type: 'pie',
+          radius: ['40%', '70%'],
+          avoidLabelOverlap: false,
+          itemStyle: {
+            borderRadius: 8,
+            borderColor,
+            borderWidth: 2,
+          },
+          label: {
+            show: true,
+            formatter: '{b}\n{d}%',
+            color: textSecondary,
+          },
+          data: [
+            { value: profitable, name: 'Rentables', itemStyle: { color: '#22c55e' } },
+            { value: unprofitable, name: 'No Rentables', itemStyle: { color: '#ef4444' } },
+            { value: zeroMargin, name: 'Sin Margen', itemStyle: { color: '#f59e0b' } },
+          ],
+        },
+      ],
+    };
   }
 
   private buildTopProfitChart(products: ProductProfitability[]): void {
@@ -226,12 +283,15 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
       .slice(0, 5)
       .reverse();
 
-    const names = top5.map((p) => p.product_name);
+    const names = top5.map((p) =>
+      p.product_name.length > 20 ? p.product_name.substring(0, 20) + '...' : p.product_name,
+    );
     const profits = top5.map((p) => p.profit);
 
-    this.topProfitChartOptions.set({
+    this.topProfitChartOptions = {
       tooltip: {
         trigger: 'axis',
+        axisPointer: { type: 'shadow' },
         confine: true,
         backgroundColor: 'rgba(255,255,255,0.98)',
         borderColor,
@@ -261,43 +321,51 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
           `;
         },
       },
-      legend: {
-        data: ['Top 5 Productos'],
-        selectedMode: true,
-        bottom: 30,
-        left: 'center',
-        itemWidth: 14,
-        itemHeight: 14,
-        textStyle: { color: textSecondary },
-      },
       grid: {
         left: '3%',
-        right: '4%',
-        bottom: '20%',
+        right: '8%',
+        bottom: '3%',
         top: '3%',
         containLabel: true,
       },
       xAxis: {
+        type: 'value',
+        axisLine: { show: false },
+        axisLabel: { color: textSecondary, fontSize: 11, formatter: (value: number) => this.currencyService.format(value, 0) },
+        splitLine: { lineStyle: { color: borderColor, type: 'dashed' } },
+      },
+      yAxis: {
         type: 'category',
         data: names,
         axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary, fontSize: 11, formatter: (val: string) => truncateLabel(val, 14) },
-        axisTick: { show: false },
+        axisLabel: { color: textSecondary, fontSize: 11 },
       },
-      yAxis: {
-        type: 'value',
-        min: 0,
-        axisLine: { show: false },
-        axisLabel: { color: textSecondary, fontSize: 11, formatter: (value: number) => this.currencyService.formatChartAxis(value) },
-        splitLine: { lineStyle: { color: borderColor, type: 'dashed' } },
-      },
-      series: [{
-        name: 'Top 5 Productos',
-        type: 'bar' as const,
-        data: profits.map((p, i) => ({ value: p, itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] } })),
-        barMaxWidth: 40,
-      }],
-    });
+      series: [
+        {
+          name: 'Ganancia',
+          type: 'bar',
+          data: profits,
+          itemStyle: {
+            color: {
+              type: 'linear',
+              x: 0, y: 0, x2: 1, y2: 0,
+              colorStops: [
+                { offset: 0, color: `${primaryColor}99` },
+                { offset: 1, color: primaryColor },
+              ],
+            },
+            borderRadius: [0, 6, 6, 0],
+          },
+          barMaxWidth: 32,
+          emphasis: {
+            itemStyle: {
+              shadowBlur: 10,
+              shadowColor: `${primaryColor}40`,
+            },
+          },
+        },
+      ],
+    };
   }
 
   private buildComparativeChart(
@@ -305,17 +373,20 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
     summary: ProfitabilitySummary,
   ): void {
     const style = getComputedStyle(document.documentElement);
+    const greenColor = '#22c55e';
+    const redColor = '#ef4444';
     const borderColor = style.getPropertyValue('--color-border').trim() || '#e5e7eb';
     const textSecondary = style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
 
     const top5 = [...products].sort((a, b) => b.profit - a.profit).slice(0, 5);
-    const productNames = top5.map((p) => p.product_name);
+    const productNames = top5.map((p) =>
+      p.product_name.length > 15 ? p.product_name.substring(0, 15) + '...' : p.product_name,
+    );
     const revenues = top5.map((p) => p.revenue);
-    const costs = top5.map((p) => p.total_cost);
     const profits = top5.map((p) => p.profit);
-    const colors = ['#3b82f6', '#22c55e', '#f59e0b'];
+    const costs = top5.map((p) => p.total_cost);
 
-    this.comparativeChartOptions.set({
+    this.comparativeChartOptions = {
       tooltip: {
         trigger: 'axis',
         axisPointer: { type: 'shadow' },
@@ -325,35 +396,45 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
         borderWidth: 1,
         textStyle: { color: textSecondary, fontSize: 12 },
         formatter: (params: any) => {
-          let html = `<div style="padding:8px">
+          const product = top5.find((p) => p.product_name.substring(0, 15) === params[0].name || p.product_name === params[0].name);
+          return `
+            <div style="padding:8px">
               <strong style="font-size:13px">${params[0].name}</strong>
-              <div style="margin-top:8px;display:flex;flex-direction:column;gap:4px">`;
-          for (const p of params) {
-            html += `<div style="display:flex;justify-content:space-between;gap:16px;align-items:center">
-                <span style="display:flex;align-items:center;gap:6px">
-                  <span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${p.color}"></span>
-                  ${p.seriesName}:
-                </span>
-                <strong style="font-size:12px">${this.currencyService.format(p.value)}</strong>
-              </div>`;
-          }
-          html += `</div></div>`;
-          return html;
+              <div style="margin-top:8px;display:flex;flex-direction:column;gap:4px">
+                ${params.map((p: any) => `
+                  <div style="display:flex;justify-content:space-between;gap:16px;align-items:center">
+                    <span style="display:flex;align-items:center;gap:6px">
+                      <span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:${p.color}"></span>
+                      ${p.seriesName}:
+                    </span>
+                    <strong style="font-size:12px">${this.currencyService.format(p.value)}</strong>
+                  </div>
+                `).join('')}
+                ${product ? `
+                  <div style="border-top:1px solid ${borderColor};margin-top:4px;padding-top:6px">
+                    <div style="display:flex;justify-content:space-between;gap:16px">
+                      <span style="color:#6b7280">Margen:</span>
+                      <strong style="color:${product.margin > 0 ? greenColor : redColor}">${product.margin}%</strong>
+                    </div>
+                  </div>
+                ` : ''}
+              </div>
+            </div>
+          `;
         },
       },
       legend: {
-        data: ['Ingresos', 'Costos', 'Ganancia'],
-        selectedMode: true,
-        bottom: 30,
-        left: 'center',
+        data: ['Ingresos', 'Costo', 'Ganancia'],
+        bottom: 0,
+        textStyle: { color: textSecondary, fontSize: 11 },
+        icon: 'roundRect',
         itemWidth: 14,
-        itemHeight: 14,
-        textStyle: { color: textSecondary },
+        itemHeight: 8,
       },
       grid: {
         left: '3%',
         right: '4%',
-        bottom: '20%',
+        bottom: '15%',
         top: '3%',
         containLabel: true,
       },
@@ -361,14 +442,12 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
         type: 'category',
         data: productNames,
         axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary, fontSize: 10, formatter: (val: string) => truncateLabel(val, 14) },
-        axisTick: { show: false },
+        axisLabel: { color: textSecondary, fontSize: 10 },
       },
       yAxis: {
         type: 'value',
-        min: 0,
         axisLine: { show: false },
-        axisLabel: { color: textSecondary, fontSize: 11, formatter: (value: number) => this.currencyService.formatChartAxis(value) },
+        axisLabel: { color: textSecondary, fontSize: 11, formatter: (value: number) => this.currencyService.format(value, 0) },
         splitLine: { lineStyle: { color: borderColor, type: 'dashed' } },
       },
       series: [
@@ -376,27 +455,34 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
           name: 'Ingresos',
           type: 'bar',
           data: revenues,
-          itemStyle: { color: colors[0] },
-          barMaxWidth: 40,
-          barGap: '20%',
+          itemStyle: { color: '#3b82f6', borderRadius: [4, 4, 0, 0] },
+          barMaxWidth: 28,
         },
         {
-          name: 'Costos',
+          name: 'Costo',
           type: 'bar',
           data: costs,
-          itemStyle: { color: colors[1] },
-          barMaxWidth: 40,
-          barGap: '20%',
+          itemStyle: { color: redColor, borderRadius: [4, 4, 0, 0] },
+          barMaxWidth: 28,
         },
         {
           name: 'Ganancia',
           type: 'bar',
           data: profits,
-          itemStyle: { color: colors[2] },
-          barMaxWidth: 40,
-          barGap: '20%',
+          itemStyle: {
+            color: {
+              type: 'linear',
+              x: 0, y: 0, x2: 0, y2: 1,
+              colorStops: [
+                { offset: 0, color: greenColor },
+                { offset: 1, color: `${greenColor}80` },
+              ],
+            },
+            borderRadius: [4, 4, 0, 0],
+          },
+          barMaxWidth: 28,
         },
       ],
-    });
+    };
   }
 }

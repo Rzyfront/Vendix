@@ -1,6 +1,5 @@
-import { Component, OnInit, OnDestroy, inject, signal, DestroyRef } from '@angular/core';
+import { Component, OnInit, OnDestroy, inject, DestroyRef } from '@angular/core';
 import { CommonModule } from '@angular/common';
-import { ActivatedRoute } from '@angular/router';
 import { Store } from '@ngrx/store';
 import { Observable, combineLatest } from 'rxjs';
 import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -8,18 +7,18 @@ import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
-import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
+import { OptionsDropdownComponent } from '../../../../../../shared/components/options-dropdown/options-dropdown.component';
+import {
+  FilterConfig,
+  FilterValues,
+} from '../../../../../../shared/components/options-dropdown/options-dropdown.interfaces';
 import {
   CurrencyPipe,
   CurrencyFormatService,
 } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
-import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
-import {
-  comparisonLabelFor,
-  DatePresetLike,
-} from '../../utils/comparison-label.util';
 
+import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import {
   AbandonedCartsSummary,
   AbandonedCartTrend,
@@ -30,13 +29,13 @@ import * as AbandonedCartsActions from './state/abandoned-carts-analytics.action
 import * as AbandonedCartsSelectors from './state/abandoned-carts-analytics.selectors';
 
 import { EChartsOption } from 'echarts';
-import { getDefaultStartDate, getDefaultEndDate, formatChartPeriod } from '../../../../../../shared/utils/date.util';
+import {
+  getDefaultStartDate,
+  getDefaultEndDate,
+  formatChartPeriod,
+} from '../../../../../../shared/utils/date.util';
 import { AnalyticsCardComponent } from '../../components/analytics-card/analytics-card.component';
 import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
-import { DateRangeFilter } from '../../interfaces/analytics.interface';
-import { queryParamsToDateRange } from '../../../shared/utils/date-range-params.util';
-import { truncateLabel, compactCountAxis } from '../../../../../../shared/utils/chart-labels.util';
-import { comparisonLabelFor, DatePresetLike } from '../../utils/comparison-label.util';
 
 @Component({
   selector: 'vendix-abandoned-carts',
@@ -46,9 +45,8 @@ import { comparisonLabelFor, DatePresetLike } from '../../utils/comparison-label
     CardComponent,
     StatsComponent,
     ChartComponent,
-    IconComponent,
+    OptionsDropdownComponent,
     ExportButtonComponent,
-    DateRangeFilterComponent,
     CurrencyPipe,
     AnalyticsCardComponent,
   ],
@@ -59,7 +57,6 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
   private destroyRef = inject(DestroyRef);
   private store = inject(Store);
   private currencyService = inject(CurrencyFormatService);
-  private readonly route = inject(ActivatedRoute);
 
   summary$: Observable<AbandonedCartsSummary | null> = this.store.select(
     AbandonedCartsSelectors.selectSummary,
@@ -91,28 +88,59 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
   readonly loadingTrends = toSignal(this.loadingTrends$, { initialValue: false });
   readonly exporting = toSignal(this.exporting$, { initialValue: false });
 
-  trendsChartOptions= signal<EChartsOption>({});
-  byReasonChartOptions= signal<EChartsOption>({});
-  recoveryRateChartOptions= signal<EChartsOption>({});
-  dateRange = signal<DateRangeFilter>({
-    start_date: getDefaultStartDate(),
-    end_date: getDefaultEndDate(),
-    preset: 'thisMonth'});
+  trendsChartOptions: EChartsOption = {};
+  byReasonChartOptions: EChartsOption = {};
+  recoveryRateChartOptions: EChartsOption = {};
+
+  filterConfigs: FilterConfig[] = [
+    {
+      key: 'date_from',
+      label: 'Desde',
+      type: 'date',
+      defaultValue: getDefaultStartDate(),
+    },
+    {
+      key: 'date_to',
+      label: 'Hasta',
+      type: 'date',
+      defaultValue: getDefaultEndDate(),
+    },
+    {
+      key: 'granularity',
+      label: 'Granularidad',
+      type: 'select',
+      options: [
+        { value: 'hour', label: 'Por Hora' },
+        { value: 'day', label: 'Por Día' },
+        { value: 'week', label: 'Por Semana' },
+        { value: 'month', label: 'Por Mes' },
+        { value: 'year', label: 'Por Año' },
+      ],
+      placeholder: 'Seleccionar',
+      defaultValue: 'day',
+    },
+  ];
+
+  filterValues: FilterValues = {};
 
   readonly customersViews: AnalyticsView[] = getViewsByCategory('customers');
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
 
-    const urlRange = queryParamsToDateRange(this.route.snapshot.queryParamMap);
-    if (urlRange) {
-      this.dateRange.set(urlRange);
-      this.store.dispatch(AbandonedCartsActions.setDateRange({ dateRange: urlRange }));
-    }
-
     this.store.dispatch(AbandonedCartsActions.loadAbandonedCartsSummary());
     this.store.dispatch(AbandonedCartsActions.loadAbandonedCartsTrends());
     this.store.dispatch(AbandonedCartsActions.loadAbandonedCartsByReason());
+
+    combineLatest([this.dateRange$, this.granularity$])
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe(([dateRange, granularity]) => {
+        this.filterValues = {
+          date_from: dateRange.start_date || null,
+          date_to: dateRange.end_date || null,
+          granularity: granularity || 'day',
+        };
+      });
 
     combineLatest([this.trends$, this.granularity$])
       .pipe(takeUntilDestroyed(this.destroyRef))
@@ -132,21 +160,57 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
     this.store.dispatch(AbandonedCartsActions.clearAbandonedCartsAnalyticsState());
   }
 
+  onFilterChange(values: FilterValues): void {
+    const dateFrom = values['date_from'] as string;
+    const dateTo = values['date_to'] as string;
+    const granularity = values['granularity'] as string;
+
+    const currentRange = this.filterValues;
+    if (
+      dateFrom !== currentRange['date_from'] ||
+      dateTo !== currentRange['date_to']
+    ) {
+      this.store.dispatch(
+        AbandonedCartsActions.setDateRange({
+          dateRange: {
+            start_date: dateFrom || '',
+            end_date: dateTo || '',
+            preset: 'custom',
+          },
+        }),
+      );
+    }
+
+    if (granularity !== currentRange['granularity']) {
+      this.store.dispatch(
+        AbandonedCartsActions.setGranularity({ granularity: granularity || 'day' }),
+      );
+    }
+  }
+
+  onClearAllFilters(): void {
+    this.store.dispatch(
+      AbandonedCartsActions.setDateRange({
+        dateRange: {
+          start_date: getDefaultStartDate(),
+          end_date: getDefaultEndDate(),
+          preset: 'thisMonth',
+        },
+      }),
+    );
+    this.store.dispatch(
+      AbandonedCartsActions.setGranularity({ granularity: 'day' }),
+    );
+  }
+
   exportReport(): void {
     this.store.dispatch(AbandonedCartsActions.exportAbandonedCartsReport());
   }
 
-  onDateRangeChange(range: DateRangeFilter): void {
-    this.dateRange.set(range);
-    this.store.dispatch(AbandonedCartsActions.setDateRange({ dateRange: range }));
-  }
-
-  getGrowthText(growth?: number | null): string {
+  getGrowthText(growth?: number): string {
     if (growth === undefined || growth === null) return '';
     const sign = growth >= 0 ? '+' : '';
-    // QUI-628: derive the comparison label from the active preset (was the
-    // hardcoded "vs período anterior" — defect C9 in the ticket catalog).
-    return `${sign}${growth.toFixed(1)}% vs ${comparisonLabelFor(this.dateRange().preset as DatePresetLike)}`;
+    return `${sign}${growth.toFixed(1)}% vs período anterior`;
   }
 
   getAbandonmentRate(): string {
@@ -160,6 +224,7 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
   }
 
   private updateTrendsChart(trends: AbandonedCartTrend[], granularity: string): void {
+    if (!trends.length) return;
 
     const style = getComputedStyle(document.documentElement);
     const primaryColor = '#ef4444';
@@ -171,13 +236,7 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
     const abandonedCarts = trends.map((t) => t.abandoned_carts);
     const recoveredCarts = trends.map((t) => t.recovered_carts);
 
-    if (!trends.length) {
-      this.trendsChartOptions.set({});
-      this.recoveryRateChartOptions.set({});
-      return;
-    }
-
-    this.trendsChartOptions.set({
+    this.trendsChartOptions = {
       tooltip: {
         trigger: 'axis',
         confine: true,
@@ -215,19 +274,29 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
       },
       legend: {
         data: ['Abandonados', 'Recuperados'],
-        selectedMode: true,
-        bottom: 30,
-        left: 'center',
-        itemWidth: 14,
-        itemHeight: 8,
+        bottom: 0,
         textStyle: { color: textSecondary, fontSize: 11 },
         icon: 'roundRect',
+        itemWidth: 14,
+        itemHeight: 8,
       },
+      dataZoom: [
+        { type: 'inside', start: 0, end: 100, zoomOnMouseWheel: true, moveOnMouseMove: true },
+        {
+          type: 'slider',
+          show: true,
+          bottom: 32,
+          height: 25,
+          borderColor: 'transparent',
+          backgroundColor: 'rgba(0,0,0,0.03)',
+          handleStyle: { color: primaryColor, borderColor: primaryColor },
+          textStyle: { color: textSecondary, fontSize: 10 },
+        },
+      ],
       grid: {
         left: '3%',
         right: '4%',
-        bottom: '15%',
-        top: '3%',
+        bottom: '18%',
         containLabel: true,
       },
       xAxis: {
@@ -239,64 +308,70 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
       yAxis: {
         type: 'value',
         axisLine: { show: false },
-        axisLabel: { color: textSecondary, fontSize: 11, formatter: (v: number) => compactCountAxis(v) },
+        axisLabel: { color: textSecondary, fontSize: 11 },
         splitLine: { lineStyle: { color: borderColor, type: 'dashed' } },
       },
       series: [
         {
           name: 'Abandonados',
-          type: 'bar',
+          type: 'line',
+          smooth: 0.4,
           data: abandonedCarts,
-          itemStyle: {
+          symbol: 'circle',
+          symbolSize: 5,
+          showSymbol: false,
+          emphasis: { scale: true },
+          areaStyle: {
             color: {
               type: 'linear',
               x: 0, y: 0, x2: 0, y2: 1,
               colorStops: [
-                { offset: 0, color: primaryColor },
-                { offset: 1, color: primaryColor + '80' },
+                { offset: 0, color: `${primaryColor}50` },
+                { offset: 1, color: `${primaryColor}05` },
               ],
             },
-            borderRadius: [4, 4, 0, 0],
           },
-          barMaxWidth: 40,
+          lineStyle: { color: primaryColor, width: 2.5 },
+          itemStyle: { color: primaryColor },
         },
         {
           name: 'Recuperados',
-          type: 'bar',
+          type: 'line',
+          smooth: 0.4,
           data: recoveredCarts,
-          itemStyle: {
+          symbol: 'circle',
+          symbolSize: 5,
+          showSymbol: false,
+          emphasis: { scale: true },
+          areaStyle: {
             color: {
               type: 'linear',
               x: 0, y: 0, x2: 0, y2: 1,
               colorStops: [
-                { offset: 0, color: secondaryColor },
-                { offset: 1, color: secondaryColor + '80' },
+                { offset: 0, color: `${secondaryColor}50` },
+                { offset: 1, color: `${secondaryColor}05` },
               ],
             },
-            borderRadius: [4, 4, 0, 0],
           },
-          barMaxWidth: 40,
+          lineStyle: { color: secondaryColor, width: 2.5 },
+          itemStyle: { color: secondaryColor },
         },
       ],
-    });
+    };
   }
 
   private updateByReasonChart(byReason: AbandonedCartByReason[]): void {
+    if (!byReason.length) return;
 
     const style = getComputedStyle(document.documentElement);
     const borderColor = style.getPropertyValue('--color-border').trim() || '#e5e7eb';
     const textSecondary = style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
     const primaryColor = '#f59e0b';
 
-    if (!byReason.length) {
-      this.byReasonChartOptions.set({});
-      return;
-    }
-
     const reasons = byReason.map((r) => r.reason);
     const counts = byReason.map((r) => r.count);
 
-    this.byReasonChartOptions.set({
+    this.byReasonChartOptions = {
       tooltip: {
         trigger: 'axis',
         axisPointer: { type: 'shadow' },
@@ -329,19 +404,10 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
           `;
         },
       },
-      legend: {
-        data: ['Por Razón'],
-        selectedMode: true,
-        bottom: 30,
-        left: 'center',
-        itemWidth: 14,
-        textStyle: { color: textSecondary },
-      },
       grid: {
         left: '3%',
-        right: '4%',
-        bottom: '20%',
-        top: '3%',
+        right: '6%',
+        bottom: '15%',
         containLabel: true,
       },
       xAxis: {
@@ -353,31 +419,47 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
           fontSize: 11,
           rotate: 0,
           interval: 0,
-          formatter: (val: string) => truncateLabel(val, 14),
         },
       },
       yAxis: {
         type: 'value',
-        min: 0,
         axisLine: { show: false },
-        axisLabel: { color: textSecondary, fontSize: 11, formatter: (v: number) => compactCountAxis(v) },
+        axisLabel: { color: textSecondary, fontSize: 11 },
         splitLine: { lineStyle: { color: borderColor, type: 'dashed' } },
       },
       series: [
         {
-          name: 'Por Razón',
+          name: 'Cantidad',
           type: 'bar',
-          data: counts.map((c, i) => ({
-            value: c,
-            itemStyle: { color: ['#f59e0b', '#3b82f6', '#22c55e', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] }
-          })),
+          data: counts,
+          itemStyle: {
+            color: {
+              type: 'linear',
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
+              colorStops: [
+                { offset: 0, color: primaryColor },
+                { offset: 1, color: `${primaryColor}60` },
+              ],
+            },
+            borderRadius: [4, 4, 0, 0],
+          },
           barMaxWidth: 50,
+          emphasis: {
+            itemStyle: {
+              shadowBlur: 8,
+              shadowColor: `${primaryColor}40`,
+            },
+          },
         },
       ],
-    });
+    };
   }
 
   private updateRecoveryRateChart(trends: AbandonedCartTrend[], granularity: string): void {
+    if (!trends.length) return;
 
     const style = getComputedStyle(document.documentElement);
     const primaryColor = '#22c55e';
@@ -387,12 +469,7 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
     const labels = trends.map((t) => formatChartPeriod(t.period, granularity));
     const recoveryRates = trends.map((t) => t.recovery_rate);
 
-    if (!trends.length) {
-      this.recoveryRateChartOptions.set({});
-      return;
-    }
-
-    this.recoveryRateChartOptions.set({
+    this.recoveryRateChartOptions = {
       tooltip: {
         trigger: 'axis',
         confine: true,
@@ -414,19 +491,13 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
           `;
         },
       },
-      legend: {
-        data: ['Tasa Recuperación'],
-        selectedMode: true,
-        bottom: 30,
-        left: 'center',
-        itemWidth: 14,
-        textStyle: { color: textSecondary },
-      },
+      dataZoom: [
+        { type: 'inside', start: 0, end: 100, zoomOnMouseWheel: true, moveOnMouseMove: true },
+      ],
       grid: {
         left: '3%',
         right: '4%',
-        bottom: '20%',
-        top: '3%',
+        bottom: '18%',
         containLabel: true,
       },
       xAxis: {
@@ -449,22 +520,30 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
       series: [
         {
           name: 'Tasa Recuperación',
-          type: 'bar',
+          type: 'line',
+          smooth: 0.4,
           data: recoveryRates,
-          itemStyle: {
+          symbol: 'circle',
+          symbolSize: 5,
+          showSymbol: false,
+          emphasis: { scale: true },
+          areaStyle: {
             color: {
               type: 'linear',
-              x: 0, y: 0, x2: 0, y2: 1,
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
               colorStops: [
-                { offset: 0, color: primaryColor },
-                { offset: 1, color: primaryColor + '80' },
+                { offset: 0, color: `${primaryColor}50` },
+                { offset: 1, color: `${primaryColor}05` },
               ],
             },
-            borderRadius: [4, 4, 0, 0],
           },
-          barMaxWidth: 40,
+          lineStyle: { color: primaryColor, width: 2.5 },
+          itemStyle: { color: primaryColor },
         },
       ],
-    });
+    };
   }
 }
