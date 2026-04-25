@@ -1,7 +1,7 @@
 import { Injectable, inject, signal } from '@angular/core';
 import { HttpClient } from '@angular/common/http';
 import { Observable, tap, map, catchError, of, throwError } from 'rxjs';
-import { environment } from '../../../../../../environments/environment';
+import { environment } from '../../../../../../../environments/environment';
 
 export interface StorePaymentMethod {
   id: number;

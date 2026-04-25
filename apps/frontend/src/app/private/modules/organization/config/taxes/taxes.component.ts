@@ -6,15 +6,23 @@ import {
 } from '@angular/forms';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import {
-    ButtonComponent,
-    SelectorComponent,
+  ButtonComponent,
+  SelectorComponent,
+  SelectorOption,
   StickyHeaderComponent,
   TableComponent,
   TableColumn,
   TableAction,
   ScrollableTabsComponent,
+  CardComponent,
+  ToggleComponent,
+  SpinnerComponent,
+  AlertBannerComponent,
+  IconComponent,
 } from '../../../../../shared/components';
 import { OrganizationSettingsService } from '../services/organization-settings.service';
+
+type TaxesTabId = 'iva' | 'retenciones' | 'resoluciones' | 'config';
 
 interface DianResolution {
   id: number;
@@ -75,7 +83,7 @@ interface RetentionType {
           </app-alert-banner>
         } @else {
           <app-card [responsivePadding]="true">
-            <app-scrollable-tabs [tabs]="tabs" [activeTab]="activeTab()" (tabChange)="activeTab.set($event as 'config' | 'iva' | 'retenciones' | 'resoluciones')"></app-scrollable-tabs>
+            <app-scrollable-tabs [tabs]="tabs" [activeTab]="activeTab()" (tabChange)="setActiveTab($event)"></app-scrollable-tabs>
 
             <div class="mt-6">
               @switch (activeTab()) {
@@ -219,7 +227,11 @@ export class TaxesComponent {
   readonly saving = signal(false);
   readonly error = signal<string | null>(null);
 
-  readonly activeTab = signal<'iva' | 'retenciones' | 'resoluciones' | 'config'>('iva');
+  readonly activeTab = signal<TaxesTabId>('iva');
+
+  setActiveTab(id: string): void {
+    this.activeTab.set(id as TaxesTabId);
+  }
 
   readonly tabs = [
     { id: 'iva', label: 'IVA' },
