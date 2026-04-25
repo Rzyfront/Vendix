@@ -292,6 +292,27 @@ export class OnboardingWizardService {
   }
 
   /**
+   * Save wizard draft data for a specific step
+   */
+  saveWizardDraft(step: string, data: any): Observable<any> {
+    return this.http.post(`${this.apiUrl}/save-draft`, { step, data });
+  }
+
+  /**
+   * Get wizard draft data for a specific step
+   */
+  getWizardDraft(step: string): Observable<any> {
+    return this.http.get(`${this.apiUrl}/get-draft/${step}`);
+  }
+
+  /**
+   * Update current wizard step
+   */
+  updateWizardStep(step: number): Observable<any> {
+    return this.http.post(`${this.apiUrl}/update-step`, { step });
+  }
+
+  /**
    * Navigate to specific step
    */
   goToStep(step: number): void {

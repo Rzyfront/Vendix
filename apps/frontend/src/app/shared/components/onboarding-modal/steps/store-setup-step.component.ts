@@ -587,7 +587,7 @@ import { CurrencyService } from '../../../../services/currency.service';
                   [options]="countryOptions"
                 ></app-selector>
               </div>
-    
+
               <div class="form-field">
                 <app-selector
                   formControlName="state_province"
@@ -597,7 +597,7 @@ import { CurrencyService } from '../../../../services/currency.service';
                   [options]="departmentOptions"
                 ></app-selector>
               </div>
-    
+
               <div class="form-field">
                 <app-selector
                   formControlName="city"
@@ -607,7 +607,7 @@ import { CurrencyService } from '../../../../services/currency.service';
                   [options]="cityOptions"
                 ></app-selector>
               </div>
-    
+
               <div class="form-field">
                 <app-input
                   formControlName="postal_code"
@@ -617,6 +617,22 @@ import { CurrencyService } from '../../../../services/currency.service';
                 ></app-input>
               </div>
             </div>
+
+            <!-- Inventory Location Selection (Optional - for ORG_ADMIN) -->
+            @if (locationOptions.length > 0) {
+              <div class="form-grid" style="margin-top: 1rem;">
+                <div class="form-field full-width">
+                  <app-selector
+                    formControlName="default_location_id"
+                    [label]="'Ubicación de inventario default'"
+                    styleVariant="modern"
+                    placeholder="Selecciona una ubicación (opcional)"
+                    [options]="locationOptions"
+                    [required]="false"
+                  ></app-selector>
+                </div>
+              </div>
+            }
           </div>
         </form>
       </div>
@@ -638,6 +654,7 @@ export class StoreSetupStepComponent implements OnInit {
   departments: Department[] = [];
   cities: City[] = [];
   currencies: { value: string; label: string }[] = [];
+  locationOptions: { value: number; label: string }[] = [];
 
   ngOnInit(): void {
     this.countries = this.countryService.getCountries();

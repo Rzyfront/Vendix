@@ -23,6 +23,9 @@ import { TourModalComponent } from '../../../shared/components/tour/tour-modal/t
 import { TourService } from '../../../shared/components/tour/services/tour.service';
 import { POS_TOUR_CONFIG } from '../../../shared/components/tour/configs/pos-tour.config';
 import { MenuFilterService } from '../../../core/services/menu-filter.service';
+import { SubscriptionBannerComponent } from '../../../shared/components/subscription-banner/subscription-banner.component';
+import { PaywallOutletComponent } from '../../../shared/components/ai-paywall-modal/paywall-outlet.component';
+import { SubscriptionFacade } from '../../../core/store/subscription/subscription.facade';
 import { combineLatest } from 'rxjs';
 import { map, distinctUntilChanged, skip } from 'rxjs/operators';
 
@@ -36,6 +39,8 @@ import { map, distinctUntilChanged, skip } from 'rxjs/operators';
     IconComponent,
     OnboardingModalComponent,
     TourModalComponent,
+    SubscriptionBannerComponent,
+    PaywallOutletComponent,
   ],
   template: `
     <div class="flex">
@@ -56,31 +61,24 @@ import { map, distinctUntilChanged, skip } from 'rxjs/operators';
       >
         <!-- Footer Content -->
         <div slot="footer" class="sidebar-footer-content">
-          <div class="footer-info-item">
+          <a
+            class="footer-info-item footer-info-item--clickable"
+            routerLink="/admin/subscription"
+            role="button"
+            [attr.aria-label]="'Ir al módulo de suscripción · ' + planDisplayName()"
+          >
             <div class="footer-info-row">
-              <div class="footer-info-block footer-block-gradient-primary">
-                <div class="footer-info-content">
-                  <div class="footer-info-header">
-                    <app-icon name="store" [size]="9"></app-icon>
-                    <span class="footer-info-label">Type</span>
-                  </div>
-                  <span class="footer-info-value">{{
-                    formatStoreType(storeType())
-                  }}</span>
-                </div>
-              </div>
-              <div class="footer-divider"></div>
               <div class="footer-info-block footer-block-gradient-secondary">
                 <div class="footer-info-content">
                   <div class="footer-info-header">
                     <app-icon name="tag" [size]="9"></app-icon>
                     <span class="footer-info-label">Plan</span>
                   </div>
-                  <span class="footer-info-value">Early Access Free Plan</span>
+                  <span class="footer-info-value">{{ planDisplayName() }}</span>
                 </div>
               </div>
             </div>
-          </div>
+          </a>
         </div>
       </app-sidebar>
 
@@ -98,6 +96,8 @@ import { map, distinctUntilChanged, skip } from 'rxjs/operators';
           (toggleSidebar)="toggleSidebar()"
         >
         </app-header>
+
+        <app-subscription-banner />
 
         <!-- Page Content -->
         <main
@@ -120,6 +120,9 @@ import { map, distinctUntilChanged, skip } from 'rxjs/operators';
     <!-- Tour Modal -->
     <app-tour-modal [(isOpen)]="showTourModal" [tourConfig]="posTourConfig">
     </app-tour-modal>
+
+    <!-- Subscription paywall (driven by interceptor + access service) -->
+    <app-paywall-outlet />
   `,
   styleUrls: ['./store-admin-layout.component.scss'],
 })
@@ -131,6 +134,7 @@ export class StoreAdminLayoutComponent {
   private onboardingWizardService = inject(OnboardingWizardService);
   private tourService = inject(TourService);
   private menuFilterService = inject(MenuFilterService);
+  private subscriptionFacade = inject(SubscriptionFacade);
   private destroyRef = inject(DestroyRef);
 
   // --- UI state signals ---
@@ -144,7 +148,6 @@ export class StoreAdminLayoutComponent {
   // --- Facade data as signals ---
   readonly storeName = toSignal(this.authFacade.userStoreName$, { initialValue: null });
   readonly storeSlug = toSignal(this.authFacade.userStoreSlug$, { initialValue: null });
-  readonly storeType = toSignal(this.authFacade.userStoreType$, { initialValue: null });
   readonly storeDomainHostname = toSignal(this.authFacade.userDomainHostname$, { initialValue: null });
 
   // --- isVendixDomain: resolved once from config ---
@@ -160,6 +163,11 @@ export class StoreAdminLayoutComponent {
     const domainConfig = this.configFacade.getCurrentConfig()?.domainConfig;
     if (domainConfig?.isMainVendixDomain) return 'vlogo.png';
     return store?.logo_url || null;
+  });
+
+  readonly planDisplayName = computed(() => {
+    const sub = this.subscriptionFacade.current();
+    return sub?.plan?.name ?? 'Sin plan activo';
   });
 
   // --- Panel UI menu items ---
@@ -343,7 +351,23 @@ export class StoreAdminLayoutComponent {
     {
       label: 'Facturación',
       icon: 'file-text',
-      route: '/admin/invoicing',
+      children: [
+        {
+          label: 'Facturas',
+          icon: 'receipt',
+          route: '/admin/invoicing/invoices',
+        },
+        {
+          label: 'Resoluciones',
+          icon: 'file-check',
+          route: '/admin/invoicing/resolutions',
+        },
+        {
+          label: 'Configuración DIAN',
+          icon: 'shield',
+          route: '/admin/invoicing/dian-config',
+        },
+      ],
     },
     {
       label: 'Contabilidad',
@@ -571,6 +595,10 @@ export class StoreAdminLayoutComponent {
 
     this.checkOnboardingWithRoleValidation();
     this.checkAndStartPosTour();
+
+    if (!this.subscriptionFacade.isLoaded() && !this.subscriptionFacade.isLoading()) {
+      this.subscriptionFacade.loadCurrent();
+    }
   }
 
   /**
@@ -610,18 +638,6 @@ export class StoreAdminLayoutComponent {
     const actuallyNeedsOnboarding = !storeOnboarding;
 
     this.showOnboardingModal.set(actuallyNeedsOnboarding && this.needsOnboarding());
-  }
-
-  formatStoreType(type: string | null): string {
-    if (!type) return 'N/A';
-
-    const typeMap: Record<string, string> = {
-      physical: 'Física',
-      online: 'Online',
-      hybrid: 'Híbrida',
-    };
-
-    return typeMap[type] || type;
   }
 
   toggleSidebar() {

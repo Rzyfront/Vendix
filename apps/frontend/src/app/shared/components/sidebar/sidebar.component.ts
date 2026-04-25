@@ -23,7 +23,8 @@ export interface MenuItem {
   children?: MenuItem[];
   badge?: string;
   action?: (item: MenuItem) => void;
-  alwaysVisible?: boolean; // If true, skip panel_ui filtering (for dynamic data like stores)
+  alwaysVisible?: boolean;
+  requiresFeature?: string;
 }
 
 @Component({

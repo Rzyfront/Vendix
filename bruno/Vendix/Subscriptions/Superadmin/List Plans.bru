@@ -1,0 +1,22 @@
+meta {
+  name: List Plans
+  type: http
+  seq: 1
+}
+
+get {
+  url: http://{{url}}/superadmin/subscriptions/plans
+  body: none
+  auth: bearer
+}
+
+auth:bearer {
+  token: {{token}}
+}
+
+tests {
+  test("List plans successful", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.be.true;
+  });
+}

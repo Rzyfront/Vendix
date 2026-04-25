@@ -1,5 +1,14 @@
 import { createFeatureSelector, createSelector } from '@ngrx/store';
 import { InvoicingState } from '../invoicing.state';
+import { DianConfig } from '../../interfaces/invoice.interface';
+
+export type DianGateReason = 'missing' | 'not_enabled' | 'expired_cert';
+
+export interface DianConfigGateStatus {
+  configured: boolean;
+  reason: DianGateReason | null;
+  default: DianConfig | null;
+}
 
 export const selectInvoicingState =
   createFeatureSelector<InvoicingState>('invoicing');
@@ -107,4 +116,58 @@ export const selectResolutionsLoading = createSelector(
 export const selectActiveResolutions = createSelector(
   selectResolutions,
   (resolutions) => resolutions.filter((r) => r.is_active),
+);
+
+// ── DIAN Configs (gate pre-factura) ─────────────────────────
+
+export const selectDianConfigs = createSelector(
+  selectInvoicingState,
+  (state) => state.dianConfigs,
+);
+
+export const selectDianConfigsLoading = createSelector(
+  selectInvoicingState,
+  (state) => state.dianConfigsLoading,
+);
+
+export const selectDianConfigsError = createSelector(
+  selectInvoicingState,
+  (state) => state.dianConfigsError,
+);
+
+export const selectDefaultDianConfig = createSelector(
+  selectDianConfigs,
+  (configs) => configs.find((c) => c.is_default) ?? null,
+);
+
+export const selectDefaultDianConfigEnabled = createSelector(
+  selectDefaultDianConfig,
+  (def) => {
+    if (!def) return false;
+    if (def.enablement_status !== 'enabled') return false;
+    if (def.certificate_expiry) {
+      const expiry = new Date(def.certificate_expiry);
+      if (!isNaN(expiry.getTime()) && expiry <= new Date()) return false;
+    }
+    return true;
+  },
+);
+
+export const selectDianConfigStatus = createSelector(
+  selectDefaultDianConfig,
+  (def): DianConfigGateStatus => {
+    if (!def) {
+      return { configured: false, reason: 'missing', default: null };
+    }
+    if (def.enablement_status !== 'enabled') {
+      return { configured: false, reason: 'not_enabled', default: def };
+    }
+    if (def.certificate_expiry) {
+      const expiry = new Date(def.certificate_expiry);
+      if (!isNaN(expiry.getTime()) && expiry <= new Date()) {
+        return { configured: false, reason: 'expired_cert', default: def };
+      }
+    }
+    return { configured: true, reason: null, default: def };
+  },
 );

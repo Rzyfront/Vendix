@@ -4,8 +4,9 @@ import {
   output,
   inject,
   effect,
+  signal,
   DestroyRef } from '@angular/core';
-import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { takeUntilDestroyed, toSignal } from '@angular/core/rxjs-interop';
 import { firstValueFrom } from 'rxjs';
 
 
@@ -21,6 +22,13 @@ import { CurrencyFormatService } from '../../../../../shared/pipes/currency';
 import { Store } from '@ngrx/store';
 import { Actions, ofType } from '@ngrx/effects';
 import * as InvoicingActions from '../../invoicing/state/actions/invoicing.actions';
+import {
+  selectDianConfigStatus,
+  selectDianConfigsLoading,
+  DianConfigGateStatus,
+  DianGateReason,
+} from '../../invoicing/state/selectors/invoicing.selectors';
+import { InvoicingNotConfiguredComponent } from '../../invoicing/components/invoicing-not-configured/invoicing-not-configured.component';
 
 @Component({
   selector: 'app-pos-order-confirmation',
@@ -28,7 +36,8 @@ import * as InvoicingActions from '../../invoicing/state/actions/invoicing.actio
   imports: [
     ButtonComponent,
     ModalComponent,
-    IconComponent
+    IconComponent,
+    InvoicingNotConfiguredComponent
 ],
   template: `
     <app-modal
@@ -168,7 +177,7 @@ import * as InvoicingActions from '../../invoicing/state/actions/invoicing.actio
             <span class="hidden sm:inline">Email</span>
           </app-button>
     
-          <app-button variant="ghost" size="sm" (clicked)="createInvoice()" [disabled]="!orderId" [loading]="creatingInvoice" title="Crear Factura">
+          <app-button variant="ghost" size="sm" (clicked)="createInvoice()" [disabled]="!orderId || dianConfigsLoading()" [loading]="creatingInvoice" title="Crear Factura">
             <app-icon name="file-text" [size]="16" slot="icon"></app-icon>
             <span class="hidden sm:inline">Factura</span>
           </app-button>
@@ -183,6 +192,13 @@ import * as InvoicingActions from '../../invoicing/state/actions/invoicing.actio
         </div>
       </div>
     </app-modal>
+
+    @defer (when isNotConfiguredModalOpen()) {
+      <app-invoicing-not-configured
+        [(isOpen)]="isNotConfiguredModalOpen"
+        [reason]="notConfiguredReason()"
+      ></app-invoicing-not-configured>
+    }
     `,
   styles: [
     `
@@ -292,10 +308,26 @@ private authFacade = inject(AuthFacade);
   private store = inject(Store);
   private actions$ = inject(Actions);
 
+  // DIAN config gate (pre-invoice)
+  readonly dianStatus = toSignal(this.store.select(selectDianConfigStatus), {
+    initialValue: {
+      configured: false,
+      reason: null,
+      default: null,
+    } as DianConfigGateStatus,
+  });
+  readonly dianConfigsLoading = toSignal(
+    this.store.select(selectDianConfigsLoading),
+    { initialValue: false },
+  );
+  readonly isNotConfiguredModalOpen = signal(false);
+  readonly notConfiguredReason = signal<DianGateReason>('missing');
+
   constructor() {
     const user = this.authFacade.getCurrentUser();
     this.cashierName = user ? `${user.first_name} ${user.last_name}` : 'Cajero';
     this.currencyService.loadCurrency();
+    this.store.dispatch(InvoicingActions.loadDianConfigs());
 effect(() => {
       if (this.orderData()) {
         this.loadOrderData();
@@ -444,6 +476,17 @@ effect(() => {
 
   async createInvoice(): Promise<void> {
     if (!this.orderId) return;
+
+    // Gate: block the dispatch if DIAN config isn't ready.
+    // If configs are still loading, refuse to avoid a flashed "missing" modal.
+    if (this.dianConfigsLoading()) return;
+    const dian = this.dianStatus();
+    if (!dian.configured) {
+      this.notConfiguredReason.set(dian.reason ?? 'missing');
+      this.isNotConfiguredModalOpen.set(true);
+      return;
+    }
+
     this.creatingInvoice = true;
 
     // Listen for the result before dispatching

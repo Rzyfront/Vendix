@@ -620,4 +620,86 @@ export class DomainsService implements OnModuleInit {
       timestamp: new Date().toISOString(),
     };
   }
+
+  async renewSsl(domainId: number): Promise<{ renewed: boolean; ssl_status: string; message: string }> {
+    const domain = await this.prisma.domain_settings.findUnique({
+      where: { id: domainId },
+    });
+
+    if (!domain) {
+      throw new VendixHttpException(ErrorCodes.ORG_DOMAIN_001);
+    }
+
+    const renewabelTypes = ['custom_domain', 'custom_subdomain', 'third_party_subdomain'];
+    if (!renewabelTypes.includes(domain.ownership)) {
+      return {
+        renewed: false,
+        ssl_status: domain.ssl_status,
+        message: 'SSL renewal is only available for custom domains',
+      };
+    }
+
+    await this.prisma.domain_settings.update({
+      where: { id: domainId },
+      data: {
+        ssl_status: 'pending',
+        updated_at: new Date(),
+      },
+    });
+
+    return {
+      renewed: true,
+      ssl_status: 'pending',
+      message: 'SSL certificate renewal has been initiated',
+    };
+  }
+
+  async getDnsInstructions(hostname: string): Promise<{
+    hostname: string;
+    ownership: string;
+    dns_type: 'CNAME' | 'A';
+    target: string;
+    instructions: {
+      record_type: string;
+      name: string;
+      value: string;
+      ttl: number;
+    }[];
+  }> {
+    const domain = await this.getDomainSettingByHostname(hostname);
+
+    const edgeHost = process.env.EDGE_HOST || `edge.${process.env.BASE_DOMAIN || 'vendix.com'}`;
+
+    const isSubdomain = domain.ownership === 'custom_subdomain' ||
+                        domain.ownership === 'third_party_subdomain' ||
+                        domain.ownership === 'vendix_subdomain';
+
+    const dnsType: 'CNAME' | 'A' = isSubdomain ? 'CNAME' : 'A';
+    const target = dnsType === 'CNAME' ? edgeHost : '76.76.21.21';
+
+    const instructions: { record_type: string; name: string; value: string; ttl: number }[] = [];
+    if (dnsType === 'CNAME') {
+      instructions.push({
+        record_type: 'CNAME',
+        name: hostname.split('.')[0],
+        value: target,
+        ttl: 300,
+      });
+    } else {
+      instructions.push({
+        record_type: 'A',
+        name: '@',
+        value: target,
+        ttl: 300,
+      });
+    }
+
+    return {
+      hostname,
+      ownership: domain.ownership,
+      dns_type: dnsType,
+      target,
+      instructions,
+    };
+  }
 }

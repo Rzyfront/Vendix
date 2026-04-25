@@ -19,12 +19,14 @@ import slugify from 'slugify';
 import { RequestContextService } from '@common/context/request-context.service';
 import { S3Service } from '@common/services/s3.service';
 import { getDefaultStoreSettings } from '../settings/defaults/default-store-settings';
+import { SubscriptionTrialService } from '../subscriptions/services/subscription-trial.service';
 
 @Injectable()
 export class StoresService {
   constructor(
     private prisma: StorePrismaService,
     private s3Service: S3Service,
+    private subscriptionTrialService: SubscriptionTrialService,
   ) {}
 
   async create(createStoreDto: CreateStoreDto) {
@@ -96,6 +98,9 @@ export class StoresService {
 
     // Create default location automatically
     await this.createDefaultLocationForStore(refetched, organization_id);
+
+    // Create trial subscription for the store
+    await this.subscriptionTrialService.createTrialForStore(store.id);
 
     return {
       ...refetched,

@@ -28,10 +28,16 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | -- | `vendix-monorepo-workspaces` |
 | -- | `vendix-panel-ui` |
 | -- | `vendix-prisma-scopes` |
+| -- | `vendix-redis-quota` |
+| -- | `vendix-saas-billing` |
+| -- | `vendix-subscription-gate` |
 | -- | `vendix-zoneless-signals` |
+| Accruing partner commissions or running partner payout batches | `vendix-saas-billing` |
 | Adding MCP resources or tools | `vendix-mcp-server` |
+| Adding a monthly or daily Redis quota counter | `vendix-redis-quota` |
 | Adding a new AI provider | `vendix-ai-platform-core` |
 | Adding chat features | `vendix-ai-chat` |
+| Adding feature gates or paywalls backed by subscription state | `vendix-subscription-gate` |
 | Adding modules or submodules to the sidebar | `vendix-panel-ui` |
 | Adding money inputs to forms | `vendix-currency-formatting` |
 | Adding new AI applications | `vendix-ai-engine` |
@@ -44,7 +50,11 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Adding tool-use to AI features | `vendix-ai-agent-tools` |
 | Adding/removing workspaces | `vendix-monorepo-workspaces` |
 | After creating/modifying a skill | `skill-sync` |
+| Allocating invoice numbers with advisory locks | `vendix-saas-billing` |
+| Applying @RequireAIFeature decorator + AiAccessGuard to controllers | `vendix-subscription-gate` |
+| Applying @SkipSubscriptionGate to bypass StoreOperationsGuard on a handler/controller | `vendix-subscription-gate` |
 | Auditing Zoneless compliance (zoneless-audit.sh) or enforcing CI grep rules | `vendix-zoneless-signals` |
+| Computing partner margin, fixed surcharge, or effective price | `vendix-saas-billing` |
 | Configuring AI providers or applications | `vendix-ai-engine` |
 | Configuring AI rate limiting | `vendix-ai-platform-core` |
 | Configuring CI/CD | `vendix-monorepo-workspaces` |
@@ -58,6 +68,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Creating Angular components | `vendix-frontend-component` |
 | Creating Dockerfiles | `vendix-monorepo-workspaces` |
 | Creating Frontend Modules | `vendix-frontend-module` |
+| Creating SaaS subscription invoices or rev-share splits | `vendix-saas-billing` |
 | Creating Seeds | `vendix-prisma-seed` |
 | Creating date inputs in forms | `vendix-date-timezone` |
 | Creating migrations, editing migration SQL, deploying migrations to production, recovering from P3009, failed migration recovery, ALTER TYPE ADD VALUE, checksum mismatch, modified migration after apply | `vendix-prisma-migrations` |
@@ -70,7 +81,9 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Debugging Forbidden errors in Prisma queries | `vendix-prisma-scopes` |
 | Debugging agent loop issues | `vendix-ai-agent-tools` |
 | Debugging embedding generation | `vendix-ai-embeddings-rag` |
+| Debugging free-plan invoices, pending credits, or proration flows | `vendix-saas-billing` |
 | Debugging missing accounting entries | `vendix-auto-entries` |
+| Debugging over-quota bypass or double-count on provider retries | `vendix-redis-quota` |
 | Debugging stale templates, missing re-renders, or change detection issues | `vendix-zoneless-signals` |
 | Designing UI screens, mobile-first layouts, accessibility review, landing pages, UX patterns | `vendix-ui-ux` |
 | Displaying or formatting dates in frontend | `vendix-date-timezone` |
@@ -89,24 +102,32 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Implementing AI streaming | `vendix-ai-streaming` |
 | Implementing ControlValueAccessor (CVA) in custom form components | `vendix-zoneless-signals` |
 | Implementing authentication | `vendix-backend-auth` |
+| Implementing feature caps with auto-reset at period rollover | `vendix-redis-quota` |
 | Implementing multi-tenant logic | `vendix-multi-tenant-context` |
 | Implementing semantic search | `vendix-ai-embeddings-rag` |
 | Implementing stats cards or dashboard metrics with mobile scroll | `vendix-frontend-stats-cards` |
 | Installing dependencies | `vendix-monorepo-workspaces` |
 | Integrating AI Engine into a domain | `vendix-ai-engine` |
+| Invalidating the sub:features:{storeId} Redis cache | `vendix-subscription-gate` |
 | Managing Routes | `vendix-frontend-routing` |
 | Managing State | `vendix-frontend-state` |
+| Mapping store_subscription_state_enum to allow/warn/block | `vendix-subscription-gate` |
 | Migrating legacy Angular patterns (BehaviorSubject, take(1).subscribe) to Signals | `vendix-zoneless-signals` |
 | Modifying StockLevelManager service | `vendix-inventory-stock` |
 | Modifying auto-entry event handlers | `vendix-auto-entries` |
 | Modifying package.json | `vendix-monorepo-workspaces` |
 | Modifying the AI chat widget | `vendix-ai-chat` |
 | Parsing date strings from query parameters | `vendix-date-timezone` |
+| Period-keyed counters YYYYMM / YYYYMMDD | `vendix-redis-quota` |
 | Printing documents with date fields | `vendix-date-timezone` |
+| Protecting store write operations behind a subscription | `vendix-subscription-gate` |
 | Querying by date ranges in backend | `vendix-date-timezone` |
+| Rate-limiting by calendar period (not sliding window) | `vendix-redis-quota` |
 | Regenerate AGENTS.md Auto-invoke tables (sync.sh) | `skill-sync` |
 | Reserving or releasing stock | `vendix-inventory-stock` |
+| Reusing INCR+EXPIRE pattern outside AI (uploads, emails, exports) | `vendix-redis-quota` |
 | Reviewing or replacing NgZone, markForCheck, detectChanges, @Input, @Output, EventEmitter | `vendix-zoneless-signals` |
+| Rolling out a new enforce path with log-only -> enforce flag | `vendix-subscription-gate` |
 | Styling AI interaction buttons or loading states | `vendix-ai-engine` |
 | Styling and Theming | `vendix-frontend-theme` |
 | Transitioning products between simple and variant modes | `vendix-inventory-stock` |
@@ -117,6 +138,7 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Using input(), output(), model(), signal(), computed(), effect(), or toSignal() | `vendix-zoneless-signals` |
 | Using toSignal() in facades — validating initialValue presence | `vendix-zoneless-signals` |
 | Verifying Build | `buildcheck-dev` |
+| Wiring the subscription-paywall HTTP interceptor on the frontend | `vendix-subscription-gate` |
 | Working on backend domains | `vendix-backend-domain` |
 | Working on frontend domains | `vendix-frontend-domain` |
 | Working with @defer, @if, @for control flow blocks in templates | `vendix-zoneless-signals` |
@@ -144,6 +166,8 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | Working with Prisma scoped services | `vendix-prisma-scopes` |
 | Working with RAG pipeline | `vendix-ai-embeddings-rag` |
 | Working with SSE endpoints for AI | `vendix-ai-streaming` |
+| Working with SubscriptionAccessService or SubscriptionResolverService | `vendix-subscription-gate` |
+| Working with SubscriptionBillingService or SubscriptionPaymentService | `vendix-saas-billing` |
 | Working with ai_engine service or AIEngineService | `vendix-ai-engine` |
 | Working with date.util.ts utilities | `vendix-date-timezone` |
 | Working with embeddings or pgvector | `vendix-ai-embeddings-rag` |
@@ -208,6 +232,9 @@ When performing these actions, ALWAYS invoke the corresponding skill FIRST:
 | `Vendix-core`            | Core patterns and conventions                           | [skills/Vendix-core/SKILL.md](skills/Vendix-core/SKILL.md)                       |
 | `vendix-product-pricing` | Advanced product pricing logic and rentability patterns | [skills/vendix-product-pricing/SKILL.md](skills/vendix-product-pricing/SKILL.md) |
 | `agent-teams`            | Agent team orchestration for complex composite tasks    | [skills/agent-teams/SKILL.md](skills/agent-teams/SKILL.md)                       |
+| `vendix-saas-billing`    | SaaS platform billing with partner rev-share split      | [skills/vendix-saas-billing/SKILL.md](skills/vendix-saas-billing/SKILL.md)       |
+| `vendix-subscription-gate` | Feature gating by store subscription state (AI + modules) | [skills/vendix-subscription-gate/SKILL.md](skills/vendix-subscription-gate/SKILL.md) |
+| `vendix-redis-quota`     | Periodic quota counter with Redis INCR + EXPIRE         | [skills/vendix-redis-quota/SKILL.md](skills/vendix-redis-quota/SKILL.md)         |
 
 ## ⚙️ Configuration & Sync
 

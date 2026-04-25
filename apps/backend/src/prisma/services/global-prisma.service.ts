@@ -499,4 +499,43 @@ export class GlobalPrismaService extends BasePrismaService {
   get messaging_channels() {
     return this.baseClient.messaging_channels;
   }
+
+  // SaaS Subscriptions (platform-level — this service IS the scope boundary
+  // for subscription reads; the SubscriptionResolverService enforces
+  // per-store filtering in application code).
+  get subscription_plans() {
+    return this.baseClient.subscription_plans;
+  }
+
+  get store_subscriptions() {
+    return this.baseClient.store_subscriptions;
+  }
+
+  get partner_plan_overrides() {
+    return this.baseClient.partner_plan_overrides;
+  }
+
+  get subscription_invoices() {
+    return this.baseClient.subscription_invoices;
+  }
+
+  get subscription_payments() {
+    return this.baseClient.subscription_payments;
+  }
+
+  get subscription_events() {
+    return this.baseClient.subscription_events;
+  }
+
+  get partner_commissions() {
+    return this.baseClient.partner_commissions;
+  }
+
+  get partner_payout_batches() {
+    return this.baseClient.partner_payout_batches;
+  }
+
+  get platform_settings() {
+    return this.baseClient.platform_settings;
+  }
 }

@@ -102,8 +102,14 @@ export class OrganizationDashboardService {
     const now = Date.now();
     const cached = dashboardCache.get(cacheKey);
 
+    // Check if cache is valid
     if (cached && (now - cached.lastFetch) < this.CACHE_TTL) {
       return cached.observable;
+    }
+
+    // Invalidate stale cache before fetching new data
+    if (cached) {
+      dashboardCache.delete(cacheKey);
     }
 
     const params = period ? `?period=${period}` : '';

@@ -34,6 +34,9 @@ export class OrganizationPrismaService extends BasePrismaService {
     'accounting_entries',
     'employees',
     'payroll_runs',
+    'partner_plan_overrides',
+    'partner_commissions',
+    'partner_payout_batches',
   ];
 
   constructor() {
@@ -207,6 +210,10 @@ export class OrganizationPrismaService extends BasePrismaService {
     return this.scoped_client.inventory_locations;
   }
 
+  get stock_transfers() {
+    return this.scoped_client.stock_transfers;
+  }
+
   // Non-scoped models (no organization filtering applied)
   get store_settings() {
     return this.baseClient.store_settings;
@@ -278,5 +285,22 @@ export class OrganizationPrismaService extends BasePrismaService {
 
   get payroll_runs() {
     return this.scoped_client.payroll_runs;
+  }
+
+  get partner_plan_overrides() {
+    return this.scoped_client.partner_plan_overrides;
+  }
+
+  get partner_commissions() {
+    return this.scoped_client.partner_commissions;
+  }
+
+  get partner_payout_batches() {
+    return this.scoped_client.partner_payout_batches;
+  }
+
+  // Onboarding state (no scoping - has its own FK to organization)
+  get organization_onboarding_state() {
+    return this.baseClient.organization_onboarding_state;
   }
 }

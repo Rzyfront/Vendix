@@ -13,6 +13,8 @@ import { SessionsModule } from './sessions/sessions.module';
 import { LoginAttemptsModule } from './login-attempts/login-attempts.module';
 import { PaymentPoliciesModule } from './payment-policies/payment-policies.module';
 import { AuditModule } from './audit/audit.module';
+import { ResellerModule } from './reseller/reseller.module';
+import { OrganizationOrdersModule } from './orders/organization-orders.module';
 
 @Module({
   imports: [
@@ -28,6 +30,8 @@ import { AuditModule } from './audit/audit.module';
     LoginAttemptsModule,
     PaymentPoliciesModule,
     AuditModule,
+    ResellerModule,
+    OrganizationOrdersModule,
   ],
   providers: [OrganizationPrismaService],
   exports: [OrganizationPrismaService],

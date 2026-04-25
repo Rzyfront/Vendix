@@ -192,4 +192,25 @@ export class ResendProvider implements EmailProvider {
     const template = EmailTemplates.getOnboardingTemplate(templateData);
     return this.sendEmail(to, template.subject, template.html, template.text);
   }
+
+  async sendInvitationEmail(
+    to: string,
+    token: string,
+    username: string,
+    organizationSlug?: string,
+    app?: string,
+  ): Promise<EmailResult> {
+    const templateData: EmailTemplateData = {
+      username,
+      email: to,
+      token,
+      vlink: organizationSlug,
+      companyName: 'Vendix',
+      supportEmail: this.config.fromEmail,
+      year: new Date().getFullYear(),
+    };
+
+    const template = EmailTemplates.getInvitationTemplate(templateData);
+    return this.sendEmail(to, template.subject, template.html, template.text);
+  }
 }

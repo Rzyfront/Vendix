@@ -259,6 +259,12 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
           </div>
         </div>
 
+        @if (activeSession()?.register?.location) {
+          <div class="flex-none px-4 lg:px-6 py-1 bg-blue-50 border-b border-blue-100 text-xs text-blue-600">
+            Descontando de: {{ activeSession()!.register!.location!.name }}
+          </div>
+        }
+
         <!-- Main Content Grid -->
         <div
           class="flex-1 flex flex-col p-3 lg:p-6 min-h-0 overflow-hidden pos-main-content relative"

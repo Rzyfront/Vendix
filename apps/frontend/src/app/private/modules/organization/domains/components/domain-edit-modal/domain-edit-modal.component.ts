@@ -1,4 +1,5 @@
-import {Component,
+import {
+  Component,
   OnInit,
   OnChanges,
   SimpleChanges,
@@ -6,7 +7,10 @@ import {Component,
   input,
   output,
   DestroyRef,
-  inject} from '@angular/core';
+  inject,
+  signal,
+  computed,
+} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CommonModule } from '@angular/common';
 import {
@@ -15,14 +19,24 @@ import {
   FormBuilder,
   FormGroup,
   Validators,
-  AbstractControl} from '@angular/forms';
-
+  AbstractControl,
+} from '@angular/forms';
 
 import {
   Domain,
   UpdateDomainDto,
   DomainOwnership,
-  AppType} from '../../interfaces/domain.interface';
+  AppType,
+  DomainConfig,
+  BrandingConfig,
+  SeoConfig,
+  FeaturesConfig,
+  ThemeConfig,
+  EcommerceConfig,
+  IntegrationsConfig,
+  SecurityConfig,
+  PerformanceConfig,
+} from '../../interfaces/domain.interface';
 import { OrganizationDomainsService } from '../../services/organization-domains.service';
 
 import {
@@ -31,7 +45,23 @@ import {
   IconComponent,
   SelectorComponent,
   ToggleComponent,
-  SelectorOption} from '../../../../../../shared/components/index';
+  InputComponent,
+  TextareaComponent,
+  ScrollableTabsComponent,
+  ScrollableTab,
+  SpinnerComponent,
+  SelectorOption,
+} from '../../../../../../shared/components/index';
+import { StoreBindingPickerComponent } from '../store-binding-picker/store-binding-picker.component';
+import { DnsInstructionsComponent } from '../dns-instructions/dns-instructions.component';
+
+type ConfigTabId = 'branding' | 'seo' | 'features' | 'theme' | 'ecommerce' | 'integrations' | 'security' | 'performance';
+
+interface TabConfig {
+  id: ConfigTabId;
+  label: string;
+  icon: string;
+}
 
 @Component({
   selector: 'app-domain-edit-modal',
@@ -46,232 +76,470 @@ import {
     IconComponent,
     SelectorComponent,
     ToggleComponent,
+    InputComponent,
+    TextareaComponent,
+    ScrollableTabsComponent,
+    SpinnerComponent,
+    StoreBindingPickerComponent,
+    DnsInstructionsComponent,
   ],
   template: `
     <app-modal
       [isOpen]="isOpen()"
       (isOpenChange)="onModalChange($event)"
       (cancel)="onCancel()"
-      [size]="'md'"
+      [size]="'lg'"
       title="Editar Dominio"
       [subtitle]="domain()?.hostname || ''"
       >
-      <!-- Vendix Subdomain Warning - Read Only -->
-      @if (isVendixSubdomain) {
-        <div class="space-y-4">
-          <div
-            class="bg-amber-50 dark:bg-amber-900/20 rounded-lg p-4 border border-amber-200 dark:border-amber-800"
-            >
-            <div class="flex items-start gap-3">
-              <app-icon
-                name="alert-triangle"
-                [size]="20"
-                class="text-amber-600 dark:text-amber-400 mt-0.5"
+      @if (domain()) {
+        <!-- Tabs Navigation -->
+        <div class="mb-4">
+          <app-scrollable-tabs
+            [tabs]="tabs"
+            [activeTab]="activeTab()"
+            size="sm"
+            (tabChange)="onTabChange($event)"
+          />
+        </div>
+
+        <!-- Tab Content -->
+        <div class="min-h-[400px]">
+          <!-- Branding Tab -->
+          @if (activeTab() === 'branding') {
+            <div [formGroup]="brandingForm" class="space-y-4">
+              <h4 class="text-sm font-semibold text-[var(--color-text-primary)] flex items-center gap-2">
+                <app-icon name="palette" [size]="16" />
+                Configuración de Branding
+              </h4>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <app-input
+                  formControlName="company_name"
+                  label="Nombre de la empresa"
+                  placeholder="Mi Empresa"
                 />
-              <div>
-                <h4 class="font-medium text-amber-800 dark:text-amber-200">
-                  Subdominio de Vendix
-                </h4>
-                <p class="text-sm text-amber-700 dark:text-amber-300 mt-1">
-                  Los subdominios de Vendix son gestionados automáticamente por el
-                  sistema y no pueden ser editados. Si necesitas cambiar la
-                  configuración, contacta al soporte técnico.
-                </p>
+                <app-input
+                  formControlName="store_name"
+                  label="Nombre de la tienda"
+                  placeholder="Mi Tienda"
+                />
+                <app-input
+                  formControlName="logo_url"
+                  label="URL del Logo"
+                  placeholder="https://ejemplo.com/logo.png"
+                />
+                <app-input
+                  formControlName="favicon"
+                  label="URL del Favicon"
+                  placeholder="https://ejemplo.com/favicon.ico"
+                />
+              </div>
+              <div class="grid grid-cols-3 gap-4">
+                <app-input
+                  formControlName="primary_color"
+                  label="Color primario"
+                  type="color"
+                />
+                <app-input
+                  formControlName="secondary_color"
+                  label="Color secundario"
+                  type="color"
+                />
+                <app-input
+                  formControlName="accent_color"
+                  label="Color de acento"
+                  type="color"
+                />
               </div>
             </div>
-          </div>
-          <!-- Domain Info (Read Only) -->
-          <div
-            class="bg-[var(--color-muted)]/50 rounded-lg p-4 border border-[var(--color-border)]"
-            >
-            <h3
-              class="text-sm font-semibold text-[var(--color-text-primary)] mb-3 flex items-center gap-2"
-              >
-              <app-icon name="globe" [size]="16" />
-              Información del Dominio
-            </h3>
-            <div class="grid grid-cols-2 gap-4">
-              <div>
-                <label class="block text-xs text-[var(--color-text-secondary)] mb-1">
-                  Hostname
-                </label>
-                <div class="text-sm font-medium text-[var(--color-text-primary)]">
-                  {{ domain()?.hostname }}
-                </div>
+          }
+
+          <!-- SEO Tab -->
+          @if (activeTab() === 'seo') {
+            <div [formGroup]="seoForm" class="space-y-4">
+              <h4 class="text-sm font-semibold text-[var(--color-text-primary)] flex items-center gap-2">
+                <app-icon name="search" [size]="16" />
+                Configuración SEO
+              </h4>
+              <app-input
+                formControlName="title"
+                label="Título"
+                placeholder="Mi Tienda - Los mejores productos"
+              />
+              <app-textarea
+                formControlName="description"
+                label="Descripción"
+                placeholder="Descripción de la tienda para motores de búsqueda..."
+                [rows]="3"
+              />
+              <app-input
+                formControlName="keywords"
+                label="Palabras clave"
+                placeholder="tienda, productos, compras (separadas por coma)"
+              />
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <app-input
+                  formControlName="og_image"
+                  label="URL imagen OG"
+                  placeholder="https://ejemplo.com/og-image.png"
+                />
+                <app-input
+                  formControlName="og_type"
+                  label="Tipo OG"
+                  placeholder="website"
+                />
               </div>
-              <div>
-                <label class="block text-xs text-[var(--color-text-secondary)] mb-1">
-                  Estado
-                </label>
-                <div class="text-sm font-medium text-green-600">
-                  {{ formatStatus(domain()?.status) }}
-                </div>
-              </div>
-              <div>
-                <label class="block text-xs text-[var(--color-text-secondary)] mb-1">
-                  Tipo de Aplicación
-                </label>
-                <div class="text-sm text-[var(--color-text-primary)]">
-                  {{ formatAppType(domain()?.app_type) }}
-                </div>
-              </div>
-              <div>
-                <label class="block text-xs text-[var(--color-text-secondary)] mb-1">
-                  Creado
-                </label>
-                <div class="text-sm text-[var(--color-text-primary)]">
-                  {{ domain()?.created_at | date : 'dd/MM/yyyy HH:mm' }}
-                </div>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <app-input
+                  formControlName="robots"
+                  label="Robots"
+                  placeholder="index,follow"
+                />
+                <app-input
+                  formControlName="canonical_url"
+                  label="Canonical URL"
+                  placeholder="https://ejemplo.com"
+                />
               </div>
             </div>
+          }
+
+          <!-- Features Tab -->
+          @if (activeTab() === 'features') {
+            <div [formGroup]="featuresForm" class="space-y-4">
+              <h4 class="text-sm font-semibold text-[var(--color-text-primary)] flex items-center gap-2">
+                <app-icon name="toggle-left" [size]="16" />
+                Características del Dominio
+              </h4>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <app-toggle
+                  formControlName="multi_store"
+                  label="Multi-tienda"
+                />
+                <app-toggle
+                  formControlName="user_management"
+                  label="Gestión de usuarios"
+                />
+                <app-toggle
+                  formControlName="analytics"
+                  label="Analíticas"
+                />
+                <app-toggle
+                  formControlName="inventory"
+                  label="Inventario"
+                />
+                <app-toggle
+                  formControlName="pos"
+                  label="Punto de venta (POS)"
+                />
+                <app-toggle
+                  formControlName="orders"
+                  label="Pedidos"
+                />
+                <app-toggle
+                  formControlName="customers"
+                  label="Clientes"
+                />
+                <app-toggle
+                  formControlName="guest_checkout"
+                  label="Compras como invitado"
+                />
+                <app-toggle
+                  formControlName="wishlist"
+                  label="Lista de deseos"
+                />
+                <app-toggle
+                  formControlName="reviews"
+                  label="Reseñas"
+                />
+                <app-toggle
+                  formControlName="coupons"
+                  label="Cupones"
+                />
+                <app-toggle
+                  formControlName="shipping"
+                  label="Envíos"
+                />
+                <app-toggle
+                  formControlName="payments"
+                  label="Pagos"
+                />
+                <app-toggle
+                  formControlName="api_access"
+                  label="Acceso API"
+                />
+                <app-toggle
+                  formControlName="webhooks"
+                  label="Webhooks"
+                />
+                <app-toggle
+                  formControlName="custom_themes"
+                  label="Temas personalizados"
+                />
+                <app-toggle
+                  formControlName="advanced_analytics"
+                  label="Analíticas avanzadas"
+                />
+              </div>
+            </div>
+          }
+
+          <!-- Theme Tab -->
+          @if (activeTab() === 'theme') {
+            <div [formGroup]="themeForm" class="space-y-4">
+              <h4 class="text-sm font-semibold text-[var(--color-text-primary)] flex items-center gap-2">
+                <app-icon name="layout" [size]="16" />
+                Configuración de Tema
+              </h4>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <app-selector
+                  formControlName="layout"
+                  [options]="layoutOptions"
+                  label="Diseño"
+                  placeholder="Seleccionar diseño"
+                  size="md"
+                />
+                <app-selector
+                  formControlName="sidebar_mode"
+                  [options]="sidebarModeOptions"
+                  label="Modo sidebar"
+                  placeholder="Seleccionar modo"
+                  size="md"
+                />
+                <app-selector
+                  formControlName="color_scheme"
+                  [options]="colorSchemeOptions"
+                  label="Esquema de color"
+                  placeholder="Seleccionar esquema"
+                  size="md"
+                />
+                <app-input
+                  formControlName="font_family"
+                  label="Familia de fuente"
+                  placeholder="Inter, sans-serif"
+                />
+              </div>
+              <app-input
+                formControlName="border_radius"
+                label="Border radius"
+                placeholder="8px"
+              />
+              <app-textarea
+                formControlName="custom_css"
+                label="CSS personalizado"
+                placeholder=".custom { color: red; }"
+                [rows]="4"
+              />
+            </div>
+          }
+
+          <!-- Ecommerce Tab -->
+          @if (activeTab() === 'ecommerce') {
+            <div [formGroup]="ecommerceForm" class="space-y-4">
+              <h4 class="text-sm font-semibold text-[var(--color-text-primary)] flex items-center gap-2">
+                <app-icon name="shopping-cart" [size]="16" />
+                Configuración de E-commerce
+              </h4>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <app-input
+                  formControlName="currency"
+                  label="Moneda"
+                  placeholder="COP"
+                />
+                <app-input
+                  formControlName="locale"
+                  label="Locale"
+                  placeholder="es-CO"
+                />
+                <app-input
+                  formControlName="timezone"
+                  label="Zona horaria"
+                  placeholder="America/Bogota"
+                />
+                <app-selector
+                  formControlName="tax_calculation"
+                  [options]="taxCalculationOptions"
+                  label="Cálculo de impuestos"
+                  placeholder="Seleccionar"
+                  size="md"
+                />
+              </div>
+              <div class="space-y-3">
+                <app-toggle
+                  formControlName="shipping_enabled"
+                  label="Envíos habilitados"
+                />
+                <app-toggle
+                  formControlName="digital_products_enabled"
+                  label="Productos digitales"
+                />
+                <app-toggle
+                  formControlName="subscriptions_enabled"
+                  label="Suscripciones"
+                />
+              </div>
+            </div>
+          }
+
+          <!-- Integrations Tab -->
+          @if (activeTab() === 'integrations') {
+            <div [formGroup]="integrationsForm" class="space-y-4">
+              <h4 class="text-sm font-semibold text-[var(--color-text-primary)] flex items-center gap-2">
+                <app-icon name="plug" [size]="16" />
+                Integraciones
+              </h4>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <app-input
+                  formControlName="google_analytics"
+                  label="Google Analytics ID"
+                  placeholder="UA-XXXXX-X"
+                />
+                <app-input
+                  formControlName="google_tag_manager"
+                  label="Google Tag Manager ID"
+                  placeholder="GTM-XXXXX"
+                />
+                <app-input
+                  formControlName="facebook_pixel"
+                  label="Facebook Pixel ID"
+                  placeholder="XXXXXXXXXX"
+                />
+                <app-input
+                  formControlName="hotjar"
+                  label="Hotjar ID"
+                  placeholder="XXXXXXX"
+                />
+                <app-input
+                  formControlName="intercom"
+                  label="Intercom ID"
+                  placeholder="abc123"
+                />
+                <app-input
+                  formControlName="crisp"
+                  label="Crisp ID"
+                  placeholder="crisp-123"
+                />
+              </div>
+            </div>
+          }
+
+          <!-- Security Tab -->
+          @if (activeTab() === 'security') {
+            <div [formGroup]="securityForm" class="space-y-4">
+              <h4 class="text-sm font-semibold text-[var(--color-text-primary)] flex items-center gap-2">
+                <app-icon name="shield" [size]="16" />
+                Configuración de Seguridad
+              </h4>
+              <div class="space-y-3">
+                <app-toggle
+                  formControlName="force_https"
+                  label="Forzar HTTPS"
+                />
+                <app-toggle
+                  formControlName="hsts"
+                  label="HSTS (HTTP Strict Transport Security)"
+                />
+              </div>
+              <app-textarea
+                formControlName="content_security_policy"
+                label="Content Security Policy"
+                placeholder="default-src https:; script-src https: 'self'"
+                [rows]="3"
+              />
+            </div>
+          }
+
+          <!-- Performance Tab -->
+          @if (activeTab() === 'performance') {
+            <div [formGroup]="performanceForm" class="space-y-4">
+              <h4 class="text-sm font-semibold text-[var(--color-text-primary)] flex items-center gap-2">
+                <app-icon name="zap" [size]="16" />
+                Configuración de Rendimiento
+              </h4>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <app-input
+                  formControlName="cache_ttl"
+                  label="TTL de caché (segundos)"
+                  type="number"
+                  placeholder="3600"
+                />
+              </div>
+              <div class="space-y-3">
+                <app-toggle
+                  formControlName="cdn_enabled"
+                  label="CDN habilitado"
+                />
+                <app-toggle
+                  formControlName="compression_enabled"
+                  label="Compresión habilitada"
+                />
+                <app-toggle
+                  formControlName="image_lazy_loading"
+                  label="Carga perezosa de imágenes"
+                />
+              </div>
+            </div>
+          }
+        </div>
+
+        <!-- DNS Instructions Section (for custom domains) -->
+        @if (showDnsSection()) {
+          <div class="mt-6 pt-6 border-t border-[var(--color-border)]">
+            <app-dns-instructions [hostname]="domain()?.hostname || null" />
           </div>
+        }
+      } @else {
+        <div class="flex items-center justify-center py-12">
+          <app-spinner [size]="'lg'" />
         </div>
       }
-    
-      <!-- Editable Form (Non-Vendix Domains) -->
-      @if (!isVendixSubdomain) {
-        <form [formGroup]="domainForm" class="space-y-4">
-          <!-- Hostname Display (readonly) -->
-          <div
-            class="bg-[var(--color-muted)]/50 rounded-lg p-4 border border-[var(--color-border)]"
+
+      <div slot="footer" class="flex justify-between items-center">
+        <div class="flex items-center gap-3">
+          @if (showSslRenew()) {
+            <app-button
+              variant="outline"
+              size="sm"
+              [loading]="isRenewingSsl()"
+              (clicked)="onRenewSsl()"
             >
-            <h3
-              class="text-sm font-semibold text-[var(--color-text-primary)] mb-3 flex items-center gap-2"
-              >
-              <app-icon name="globe" [size]="16" />
-              Información del Dominio
-            </h3>
-            <div class="space-y-3">
-              <div>
-                <label
-                  class="block text-sm font-medium text-[var(--color-text-secondary)] mb-1"
-                  >
-                  Hostname
-                </label>
-                <div
-                  class="px-3 py-2 bg-[var(--color-muted)] rounded-lg border border-[var(--color-border)] text-[var(--color-text-primary)]"
-                  >
-                  {{ domain()?.hostname }}
-                </div>
-              </div>
-              <div class="grid grid-cols-2 gap-3">
-                <div>
-                  <label
-                    class="block text-sm font-medium text-[var(--color-text-secondary)] mb-1"
-                    >
-                    Estado
-                  </label>
-                  <div class="text-sm text-[var(--color-text-primary)] flex items-center gap-2">
-                    <span
-                      class="w-2 h-2 rounded-full"
-                    [ngClass]="{
-                      'bg-green-500': domain()?.status === 'active',
-                      'bg-yellow-500': domain()?.status === 'pending_dns' || domain()?.status === 'pending_ssl',
-                      'bg-red-500': domain()?.status === 'disabled'
-                    }"
-                    ></span>
-                    {{ formatStatus(domain()?.status) }}
-                    <span class="text-xs text-[var(--color-text-secondary)]">
-                      (gestionado automáticamente)
-                    </span>
-                  </div>
-                </div>
-                <div>
-                  <label
-                    class="block text-sm font-medium text-[var(--color-text-secondary)] mb-1"
-                    >
-                    Última verificación
-                  </label>
-                  <div class="text-sm text-[var(--color-text-primary)]">
-                    {{
-                    domain()?.last_verified_at
-                    ? (domain()?.last_verified_at | date : 'dd/MM/yyyy HH:mm')
-                    : 'Nunca'
-                    }}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-          <!-- Configuration Section -->
-          <div
-            class="bg-[var(--color-muted)]/50 rounded-lg p-4 border border-[var(--color-border)]"
+              <app-icon name="refresh-cw" [size]="14" slot="icon" />
+              Renovar SSL
+            </app-button>
+          }
+        </div>
+        <div class="flex gap-3">
+          <app-button
+            variant="outline"
+            (clicked)="onCancel()"
+            [disabled]="isSubmitting()"
             >
-            <h3
-              class="text-sm font-semibold text-[var(--color-text-primary)] mb-3 flex items-center gap-2"
-              >
-              <app-icon name="settings" [size]="16" />
-              Configuración
-            </h3>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <!-- Ownership -->
-              <app-selector
-                formControlName="ownership"
-                label="Tipo de Dominio"
-                [options]="ownershipOptions"
-                size="md"
-                />
-              <!-- App Type -->
-              <app-selector
-                formControlName="app_type"
-                label="Tipo de Aplicación"
-                [options]="appTypeOptions"
-                placeholder="Seleccionar aplicación"
-                size="md"
-                />
-            </div>
-          </div>
-          <!-- Options Section -->
-          <div
-            class="bg-[var(--color-muted)]/50 rounded-lg p-4 border border-[var(--color-border)]"
-            >
-            <h3
-              class="text-sm font-semibold text-[var(--color-text-primary)] mb-3 flex items-center gap-2"
-              >
-              <app-icon name="sliders" [size]="16" />
-              Opciones
-            </h3>
-            <div class="flex items-center gap-4">
-              <app-toggle formControlName="is_primary" label="Dominio primario" />
-              <span class="text-sm text-[var(--color-text-secondary)]">
-                El dominio primario será el principal para la tienda u organización
-              </span>
-            </div>
-          </div>
-        </form>
-      }
-    
-      <div slot="footer" class="flex justify-end gap-3">
-        <app-button
-          variant="outline"
-          (clicked)="onCancel()"
-          [disabled]="isSubmitting()"
-          >
-          {{ isVendixSubdomain ? 'Cerrar' : 'Cancelar' }}
-        </app-button>
-        @if (!isVendixSubdomain) {
+            Cancelar
+          </app-button>
           <app-button
             variant="primary"
             (clicked)="onSubmit()"
-            [disabled]="domainForm.invalid || isSubmitting()"
+            [disabled]="isSubmitting()"
             [loading]="isSubmitting()"
             >
-            <app-icon name="save" [size]="16" slot="icon"></app-icon>
+            <app-icon name="save" [size]="16" slot="icon" />
             Guardar Cambios
           </app-button>
-        }
+        </div>
       </div>
     </app-modal>
-    `,
-  styles: [
-    `
-      :host {
-        display: block;
-      }
-    `,
-  ]})
+  `,
+  styles: [`
+    :host {
+      display: block;
+    }
+  `],
+})
 export class DomainEditModalComponent implements OnInit, OnChanges {
   private destroyRef = inject(DestroyRef);
+  private fb = inject(FormBuilder);
+  private domainsService = inject(OrganizationDomainsService);
+
   readonly isOpen = input(false);
   readonly isSubmitting = input(false);
   readonly domain = input<Domain | null>(null);
@@ -280,17 +548,61 @@ export class DomainEditModalComponent implements OnInit, OnChanges {
   readonly submit = output<{
     hostname: string;
     data: UpdateDomainDto;
-}>();
+  }>();
   readonly cancel = output<void>();
 
-  domainForm!: FormGroup;
+  readonly activeTab = signal<ConfigTabId>('branding');
+  readonly isRenewingSsl = signal(false);
+
+  readonly tabs: ScrollableTab[] = [
+    { id: 'branding', label: 'Branding', icon: 'palette' },
+    { id: 'seo', label: 'SEO', icon: 'search' },
+    { id: 'features', label: 'Features', icon: 'toggle-left' },
+    { id: 'theme', label: 'Tema', icon: 'layout' },
+    { id: 'ecommerce', label: 'E-commerce', icon: 'shopping-cart' },
+    { id: 'integrations', label: 'Integraciones', icon: 'plug' },
+    { id: 'security', label: 'Seguridad', icon: 'shield' },
+    { id: 'performance', label: 'Rendimiento', icon: 'zap' },
+  ];
+
+  readonly layoutOptions: SelectorOption[] = [
+    { value: 'sidebar', label: 'Sidebar' },
+    { value: 'topbar', label: 'Topbar' },
+    { value: 'minimal', label: 'Minimal' },
+  ];
+
+  readonly sidebarModeOptions: SelectorOption[] = [
+    { value: 'expanded', label: 'Expandido' },
+    { value: 'collapsed', label: 'Colapsado' },
+    { value: 'overlay', label: 'Superpuesto' },
+  ];
+
+  readonly colorSchemeOptions: SelectorOption[] = [
+    { value: 'light', label: 'Claro' },
+    { value: 'dark', label: 'Oscuro' },
+    { value: 'auto', label: 'Automático' },
+  ];
+
+  readonly taxCalculationOptions: SelectorOption[] = [
+    { value: 'manual', label: 'Manual' },
+    { value: 'automatic', label: 'Automático' },
+    { value: 'disabled', label: 'Deshabilitado' },
+  ];
+
+  brandingForm!: FormGroup;
+  seoForm!: FormGroup;
+  featuresForm!: FormGroup;
+  themeForm!: FormGroup;
+  ecommerceForm!: FormGroup;
+  integrationsForm!: FormGroup;
+  securityForm!: FormGroup;
+  performanceForm!: FormGroup;
+
   ownershipOptions: SelectorOption[] = [];
   appTypeOptions: SelectorOption[] = [];
-constructor(
-    private fb: FormBuilder,
-    private domainsService: OrganizationDomainsService,
-  ) {
-    this.initializeForm();
+
+  constructor() {
+    this.initializeForms();
   }
 
   ngOnInit(): void {
@@ -299,21 +611,109 @@ constructor(
 
   ngOnChanges(changes: SimpleChanges): void {
     if (changes['domain'] && this.domain()) {
-      this.populateForm();
+      this.populateForms();
     }
   }
-/**
-   * Check if domain is a Vendix subdomain (read-only)
-   */
-  get isVendixSubdomain(): boolean {
-    return this.domain()?.ownership === DomainOwnership.VENDIX_SUBDOMAIN;
+
+  get showDnsSection(): () => boolean {
+    return () => {
+      const d = this.domain();
+      if (!d) return false;
+      return d.ownership !== 'vendix_subdomain' && d.ownership !== 'vendix_core';
+    };
   }
 
-  private initializeForm(): void {
-    this.domainForm = this.fb.group({
-      ownership: [DomainOwnership.VENDIX_SUBDOMAIN],
-      app_type: [null],
-      is_primary: [false]});
+  get showSslRenew(): () => boolean {
+    return () => {
+      const d = this.domain();
+      if (!d) return false;
+      return ['custom_domain', 'custom_subdomain', 'third_party_subdomain'].includes(d.ownership);
+    };
+  }
+
+  private initializeForms(): void {
+    this.brandingForm = this.fb.group({
+      company_name: [''],
+      store_name: [''],
+      logo_url: [''],
+      favicon: [''],
+      primary_color: ['#007bff'],
+      secondary_color: ['#6c757d'],
+      accent_color: ['#28a745'],
+    });
+
+    this.seoForm = this.fb.group({
+      title: [''],
+      description: [''],
+      keywords: [''],
+      og_image: [''],
+      og_type: ['website'],
+      robots: ['index,follow'],
+      canonical_url: [''],
+    });
+
+    this.featuresForm = this.fb.group({
+      multi_store: [true],
+      user_management: [true],
+      analytics: [true],
+      custom_domain: [true],
+      inventory: [true],
+      pos: [true],
+      orders: [true],
+      customers: [true],
+      guest_checkout: [true],
+      wishlist: [true],
+      reviews: [true],
+      coupons: [true],
+      shipping: [true],
+      payments: [true],
+      api_access: [false],
+      webhooks: [false],
+      custom_themes: [false],
+      advanced_analytics: [false],
+    });
+
+    this.themeForm = this.fb.group({
+      layout: ['sidebar'],
+      sidebar_mode: ['expanded'],
+      color_scheme: ['auto'],
+      border_radius: ['8px'],
+      font_family: ['Inter, sans-serif'],
+      custom_css: [''],
+    });
+
+    this.ecommerceForm = this.fb.group({
+      currency: ['COP'],
+      locale: ['es-CO'],
+      timezone: ['America/Bogota'],
+      tax_calculation: ['automatic'],
+      shipping_enabled: [true],
+      digital_products_enabled: [false],
+      subscriptions_enabled: [false],
+    });
+
+    this.integrationsForm = this.fb.group({
+      google_analytics: [''],
+      google_tag_manager: [''],
+      facebook_pixel: [''],
+      hotjar: [''],
+      intercom: [''],
+      crisp: [''],
+    });
+
+    this.securityForm = this.fb.group({
+      force_https: [true],
+      hsts: [false],
+      content_security_policy: [''],
+      allowed_origins: [[] as string[]],
+    });
+
+    this.performanceForm = this.fb.group({
+      cache_ttl: [3600],
+      cdn_enabled: [true],
+      compression_enabled: [true],
+      image_lazy_loading: [true],
+    });
   }
 
   private loadOptions(): void {
@@ -325,35 +725,98 @@ constructor(
       .map((opt) => ({ value: opt.value, label: opt.label }));
   }
 
-  private populateForm(): void {
+  private populateForms(): void {
     const domain = this.domain();
     if (!domain) return;
 
-    this.domainForm.patchValue({
-      ownership: domain.ownership,
-      app_type: domain.app_type,
-      is_primary: domain.is_primary});
+    const config = domain.config || {};
+
+    this.brandingForm.patchValue({
+      company_name: config.branding?.company_name || '',
+      store_name: config.branding?.store_name || '',
+      logo_url: config.branding?.logo_url || '',
+      favicon: config.branding?.favicon || '',
+      primary_color: config.branding?.primary_color || '#007bff',
+      secondary_color: config.branding?.secondary_color || '#6c757d',
+      accent_color: config.branding?.accent_color || '#28a745',
+    });
+
+    this.seoForm.patchValue({
+      title: config.seo?.title || '',
+      description: config.seo?.description || '',
+      keywords: config.seo?.keywords?.join(', ') || '',
+      og_image: config.seo?.og_image || '',
+      og_type: config.seo?.og_type || 'website',
+      robots: config.seo?.robots || 'index,follow',
+      canonical_url: config.seo?.canonical_url || '',
+    });
+
+    this.featuresForm.patchValue({
+      multi_store: config.features?.multi_store ?? true,
+      user_management: config.features?.user_management ?? true,
+      analytics: config.features?.analytics ?? true,
+      custom_domain: config.features?.custom_domain ?? true,
+      inventory: config.features?.inventory ?? true,
+      pos: config.features?.pos ?? true,
+      orders: config.features?.orders ?? true,
+      customers: config.features?.customers ?? true,
+      guest_checkout: config.features?.guest_checkout ?? true,
+      wishlist: config.features?.wishlist ?? true,
+      reviews: config.features?.reviews ?? true,
+      coupons: config.features?.coupons ?? true,
+      shipping: config.features?.shipping ?? true,
+      payments: config.features?.payments ?? true,
+      api_access: config.features?.api_access ?? false,
+      webhooks: config.features?.webhooks ?? false,
+      custom_themes: config.features?.custom_themes ?? false,
+      advanced_analytics: config.features?.advanced_analytics ?? false,
+    });
+
+    this.themeForm.patchValue({
+      layout: config.theme?.layout || 'sidebar',
+      sidebar_mode: config.theme?.sidebar_mode || 'expanded',
+      color_scheme: config.theme?.color_scheme || 'auto',
+      border_radius: config.theme?.border_radius || '8px',
+      font_family: config.theme?.font_family || 'Inter, sans-serif',
+      custom_css: config.theme?.custom_css || '',
+    });
+
+    this.ecommerceForm.patchValue({
+      currency: config.ecommerce?.currency || 'COP',
+      locale: config.ecommerce?.locale || 'es-CO',
+      timezone: config.ecommerce?.timezone || 'America/Bogota',
+      tax_calculation: config.ecommerce?.tax_calculation || 'automatic',
+      shipping_enabled: config.ecommerce?.shipping_enabled ?? true,
+      digital_products_enabled: config.ecommerce?.digital_products_enabled ?? false,
+      subscriptions_enabled: config.ecommerce?.subscriptions_enabled ?? false,
+    });
+
+    this.integrationsForm.patchValue({
+      google_analytics: config.integrations?.google_analytics || '',
+      google_tag_manager: config.integrations?.google_tag_manager || '',
+      facebook_pixel: config.integrations?.facebook_pixel || '',
+      hotjar: config.integrations?.hotjar || '',
+      intercom: config.integrations?.intercom || '',
+      crisp: config.integrations?.crisp || '',
+    });
+
+    this.securityForm.patchValue({
+      force_https: config.security?.force_https ?? true,
+      hsts: config.security?.hsts ?? false,
+      content_security_policy: config.security?.content_security_policy || '',
+      allowed_origins: config.security?.allowed_origins || [],
+    });
+
+    this.performanceForm.patchValue({
+      cache_ttl: config.performance?.cache_ttl || 3600,
+      cdn_enabled: config.performance?.cdn_enabled ?? true,
+      compression_enabled: config.performance?.compression_enabled ?? true,
+      image_lazy_loading: config.performance?.image_lazy_loading ?? true,
+    });
   }
 
-  formatStatus(status: string | undefined): string {
-    const statusMap: Record<string, string> = {
-      active: 'Activo',
-      pending_dns: 'Pendiente DNS',
-      pending_ssl: 'Pendiente SSL',
-      disabled: 'Deshabilitado'};
-    return statusMap[status || ''] || status || 'Desconocido';
-  }
-
-  formatAppType(appType: string | undefined | null): string {
-    const appTypeMap: Record<string, string> = {
-      STORE_ECOMMERCE: 'E-commerce',
-      STORE_ADMIN: 'Admin Tienda',
-      STORE_LANDING: 'Landing Tienda',
-      ORG_ADMIN: 'Admin Organización',
-      ORG_LANDING: 'Landing Organización',
-      VENDIX_LANDING: 'Vendix Landing',
-      VENDIX_ADMIN: 'Vendix Admin'};
-    return appTypeMap[appType || ''] || appType || 'No definido';
+  onTabChange(tabId: string): void {
+    this.activeTab.set(tabId as ConfigTabId);
   }
 
   onModalChange(isOpen: boolean): void {
@@ -362,36 +825,114 @@ constructor(
 
   onCancel(): void {
     this.isOpenChange.emit(false);
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
     this.cancel.emit();
   }
 
-  onSubmit(): void {
-    // Don't allow editing Vendix subdomains
-    if (this.isVendixSubdomain) {
-      return;
-    }
-
+  onRenewSsl(): void {
     const domain = this.domain();
-    if (this.domainForm.invalid || !domain) {
-      this.domainForm.markAllAsTouched();
-      return;
-    }
+    if (!domain) return;
 
-    const formValue = this.domainForm.value;
+    this.isRenewingSsl.set(true);
+    this.domainsService.renewSsl(domain.id).subscribe({
+      next: () => {
+        this.isRenewingSsl.set(false);
+      },
+      error: () => {
+        this.isRenewingSsl.set(false);
+      },
+    });
+  }
 
-    // Status is not editable - it's managed by internal validation flows
+  onSubmit(): void {
+    const domain = this.domain();
+    if (!domain) return;
+
+    const config: DomainConfig = {
+      branding: {
+        company_name: this.brandingForm.get('company_name')?.value || undefined,
+        store_name: this.brandingForm.get('store_name')?.value || undefined,
+        logo_url: this.brandingForm.get('logo_url')?.value || undefined,
+        favicon: this.brandingForm.get('favicon')?.value || undefined,
+        primary_color: this.brandingForm.get('primary_color')?.value || undefined,
+        secondary_color: this.brandingForm.get('secondary_color')?.value || undefined,
+        accent_color: this.brandingForm.get('accent_color')?.value || undefined,
+      },
+      seo: {
+        title: this.seoForm.get('title')?.value || undefined,
+        description: this.seoForm.get('description')?.value || undefined,
+        keywords: this.seoForm.get('keywords')?.value?.split(',').map((k: string) => k.trim()).filter(Boolean) || undefined,
+        og_image: this.seoForm.get('og_image')?.value || undefined,
+        og_type: this.seoForm.get('og_type')?.value || undefined,
+        robots: this.seoForm.get('robots')?.value || undefined,
+        canonical_url: this.seoForm.get('canonical_url')?.value || undefined,
+      },
+      features: {
+        multi_store: this.featuresForm.get('multi_store')?.value ?? undefined,
+        user_management: this.featuresForm.get('user_management')?.value ?? undefined,
+        analytics: this.featuresForm.get('analytics')?.value ?? undefined,
+        custom_domain: this.featuresForm.get('custom_domain')?.value ?? undefined,
+        inventory: this.featuresForm.get('inventory')?.value ?? undefined,
+        pos: this.featuresForm.get('pos')?.value ?? undefined,
+        orders: this.featuresForm.get('orders')?.value ?? undefined,
+        customers: this.featuresForm.get('customers')?.value ?? undefined,
+        guest_checkout: this.featuresForm.get('guest_checkout')?.value ?? undefined,
+        wishlist: this.featuresForm.get('wishlist')?.value ?? undefined,
+        reviews: this.featuresForm.get('reviews')?.value ?? undefined,
+        coupons: this.featuresForm.get('coupons')?.value ?? undefined,
+        shipping: this.featuresForm.get('shipping')?.value ?? undefined,
+        payments: this.featuresForm.get('payments')?.value ?? undefined,
+        api_access: this.featuresForm.get('api_access')?.value ?? undefined,
+        webhooks: this.featuresForm.get('webhooks')?.value ?? undefined,
+        custom_themes: this.featuresForm.get('custom_themes')?.value ?? undefined,
+        advanced_analytics: this.featuresForm.get('advanced_analytics')?.value ?? undefined,
+      },
+      theme: {
+        layout: this.themeForm.get('layout')?.value || undefined,
+        sidebar_mode: this.themeForm.get('sidebar_mode')?.value || undefined,
+        color_scheme: this.themeForm.get('color_scheme')?.value || undefined,
+        border_radius: this.themeForm.get('border_radius')?.value || undefined,
+        font_family: this.themeForm.get('font_family')?.value || undefined,
+        custom_css: this.themeForm.get('custom_css')?.value || undefined,
+      },
+      ecommerce: {
+        currency: this.ecommerceForm.get('currency')?.value || undefined,
+        locale: this.ecommerceForm.get('locale')?.value || undefined,
+        timezone: this.ecommerceForm.get('timezone')?.value || undefined,
+        tax_calculation: this.ecommerceForm.get('tax_calculation')?.value || undefined,
+        shipping_enabled: this.ecommerceForm.get('shipping_enabled')?.value ?? undefined,
+        digital_products_enabled: this.ecommerceForm.get('digital_products_enabled')?.value ?? undefined,
+        subscriptions_enabled: this.ecommerceForm.get('subscriptions_enabled')?.value ?? undefined,
+      },
+      integrations: {
+        google_analytics: this.integrationsForm.get('google_analytics')?.value || undefined,
+        google_tag_manager: this.integrationsForm.get('google_tag_manager')?.value || undefined,
+        facebook_pixel: this.integrationsForm.get('facebook_pixel')?.value || undefined,
+        hotjar: this.integrationsForm.get('hotjar')?.value || undefined,
+        intercom: this.integrationsForm.get('intercom')?.value || undefined,
+        crisp: this.integrationsForm.get('crisp')?.value || undefined,
+      },
+      security: {
+        force_https: this.securityForm.get('force_https')?.value ?? undefined,
+        hsts: this.securityForm.get('hsts')?.value ?? undefined,
+        content_security_policy: this.securityForm.get('content_security_policy')?.value || undefined,
+        allowed_origins: this.securityForm.get('allowed_origins')?.value || undefined,
+      },
+      performance: {
+        cache_ttl: this.performanceForm.get('cache_ttl')?.value || undefined,
+        cdn_enabled: this.performanceForm.get('cdn_enabled')?.value ?? undefined,
+        compression_enabled: this.performanceForm.get('compression_enabled')?.value ?? undefined,
+        image_lazy_loading: this.performanceForm.get('image_lazy_loading')?.value ?? undefined,
+      },
+    };
+
     const updateData: UpdateDomainDto = {
-      ownership: formValue.ownership,
-      app_type: formValue.app_type || undefined,
-      is_primary: formValue.is_primary};
+      config,
+    };
 
     this.submit.emit({
       hostname: domain.hostname,
-      data: updateData});
+      data: updateData,
+    });
   }
 
   getErrorMessage(control: AbstractControl | null): string {

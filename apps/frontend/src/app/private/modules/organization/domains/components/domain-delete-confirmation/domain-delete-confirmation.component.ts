@@ -181,10 +181,6 @@ export class DomainDeleteConfirmationComponent {
 
   onCancel(): void {
     this.isOpenChange.emit(false);
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
-    // TODO: The 'emit' function requires a mandatory void argument
     this.cancel.emit();
     this.hostnameInput.reset();
     this.showError = false;

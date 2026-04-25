@@ -21,12 +21,6 @@
             size="sm" placeholder="Buscar facturas..." [debounceTime]="300" [ngModel]="searchTerm()"
           (ngModelChange)="onSearchChange($event)"></app-inputsearch>
 
-          <app-button variant="outline" size="md"
-            customClasses="w-10 sm:w-11 !px-0 bg-surface shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none !rounded-[10px] shrink-0"
-            (clicked)="create.emit()" title="Nueva Factura">
-            <app-icon slot="icon" name="plus" [size]="18"></app-icon>
-          </app-button>
-
           <app-options-dropdown class="shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
             [filters]="filterConfigs" [filterValues]="filterValues()" [actions]="dropdownActions" [isLoading]="loading()"
             (filterChange)="onFilterChange($event)" (clearAllFilters)="onClearFilters()"

@@ -26,19 +26,17 @@ import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
 @Component({
   selector: 'app-reservation-list',
   standalone: true,
-  imports: [
+imports: [
     FormsModule,
     CardComponent,
     ResponsiveDataViewComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
-    IconComponent,
-    ButtonComponent,
     PaginationComponent,
     EmptyStateComponent,
     BadgeComponent,
     TooltipComponent
-],
+  ],
   templateUrl: './reservation-list.component.html',
   styleUrls: ['./reservation-list.component.scss'],
 })
@@ -101,7 +99,14 @@ export class ReservationListComponent {
 
   filterValues: FilterValues = {};
 
-  dropdownActions: DropdownAction[] = [];
+  dropdownActions: DropdownAction[] = [
+    {
+      label: 'Nueva Reserva',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+    },
+  ];
 
   columns: TableColumn[] = [
     { key: 'booking_number', label: 'N. Reserva', sortable: true, priority: 1 },

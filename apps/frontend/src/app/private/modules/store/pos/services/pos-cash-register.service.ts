@@ -20,6 +20,12 @@ export interface CashRegister {
   description?: string;
   is_active: boolean;
   default_opening_amount?: number;
+  /**
+   * Override opcional de bodega. Si es null, la caja hereda
+   * stores.default_location_id al momento de descontar stock.
+   */
+  location_id?: number | null;
+  location?: { id: number; name: string } | null;
   sessions?: CashRegisterSession[];
 }
 

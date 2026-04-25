@@ -39,6 +39,27 @@ const routes: Routes = [
           import('./domains/domains.component').then((m) => m.DomainsComponent),
       },
       {
+        path: 'inventory',
+        loadComponent: () =>
+          import('./inventory/inventory.component').then(
+            (m) => m.InventoryComponent,
+          ),
+      },
+      {
+        path: 'payment-methods',
+        loadComponent: () =>
+          import('./payment-methods/payment-methods.component').then(
+            (m) => m.PaymentMethodsComponent,
+          ),
+      },
+      {
+        path: 'orphan-settings',
+        loadComponent: () =>
+          import('./orphan-settings/orphan-settings.component').then(
+            (m) => m.OrphanSettingsComponent,
+          ),
+      },
+      {
         path: '',
         redirectTo: 'application',
         pathMatch: 'full',

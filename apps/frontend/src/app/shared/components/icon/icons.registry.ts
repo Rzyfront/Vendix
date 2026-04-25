@@ -242,6 +242,13 @@ import {
   Settings2,
   // Data collection interaction icons
   MousePointerClick,
+  // Invoicing / DIAN icons
+  FileSignature,
+  ListChecks,
+  LifeBuoy,
+  // Subscription module icons
+  AlertOctagon,
+  PauseCircle,
 } from 'lucide-angular';
 
 /**
@@ -559,6 +566,14 @@ export const ICON_REGISTRY: Record<string, LucideIconData> = {
 
   // Data collection interaction icons
   'mouse-pointer-click': MousePointerClick,
+
+  // Invoicing / DIAN icons
+  'file-signature': FileSignature,
+  'list-checks': ListChecks,
+  'life-buoy': LifeBuoy,
+
+  'alert-octagon': AlertOctagon,
+  'pause-circle': PauseCircle,
 } as const;
 
 export type IconName = keyof typeof ICON_REGISTRY;

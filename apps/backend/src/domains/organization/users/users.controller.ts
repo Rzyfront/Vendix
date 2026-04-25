@@ -22,6 +22,7 @@ import {
   UsersDashboardDto,
   AdminResetPasswordDto,
   UserConfigDto,
+  InviteUserDto,
 } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
@@ -48,6 +49,21 @@ export class UsersController {
     } catch (error) {
       return this.responseService.error(
         error.message || 'Error al crear el usuario',
+        error.response?.message || error.message,
+        error.status || 400,
+      );
+    }
+  }
+
+  @Post('invite')
+  @Permissions('organization:users:create')
+  async invite(@Body() inviteDto: InviteUserDto) {
+    try {
+      const result = await this.usersService.invite(inviteDto);
+      return this.responseService.created(result, 'Invitación enviada exitosamente');
+    } catch (error) {
+      return this.responseService.error(
+        error.message || 'Error al enviar la invitación',
         error.response?.message || error.message,
         error.status || 400,
       );

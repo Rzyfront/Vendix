@@ -177,6 +177,9 @@ export function getDefaultStoreSettings(): StoreSettings {
 
         // Facturación
         invoicing: true,
+        invoicing_invoices: true,
+        invoicing_resolutions: true,
+        invoicing_dian_config: true,
 
         // Contabilidad
         accounting: true,

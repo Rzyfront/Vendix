@@ -2,6 +2,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable, combineLatest } from 'rxjs';
 import { map } from 'rxjs/operators';
 import { AuthFacade } from '../store/auth/auth.facade';
+import { SubscriptionAccessService } from './subscription-access.service';
 import { MenuItem } from '../../shared/components/sidebar/sidebar.component';
 
 /**
@@ -13,6 +14,7 @@ import { MenuItem } from '../../shared/components/sidebar/sidebar.component';
 })
 export class MenuFilterService {
   private authFacade = inject(AuthFacade);
+  private subscriptionAccess = inject(SubscriptionAccessService);
 
   /**
    * Modules hidden per store type.
@@ -102,6 +104,9 @@ export class MenuFilterService {
 
     // ERP Modules
     Facturación: 'invoicing',
+    Facturas: 'invoicing_invoices',
+    Resoluciones: 'invoicing_resolutions',
+    'Configuración DIAN': 'invoicing_dian_config',
     Contabilidad: 'accounting',
     'Plan de Cuentas': 'accounting_chart_of_accounts',
     'Asientos Contables': 'accounting_journal_entries',
@@ -204,6 +209,9 @@ export class MenuFilterService {
       // Case 1: Item marked as alwaysVisible (skip panel_ui filtering)
       // Used for dynamic data like stores that should always show if parent is visible
       if (item.alwaysVisible) {
+        if (item.requiresFeature && !this.subscriptionAccess.canUseAI(item.requiresFeature)()) {
+          return filtered;
+        }
         const alwaysVisibleItem = { ...item };
 
         // If it has children, recursively filter them (children can also be alwaysVisible)
@@ -223,6 +231,9 @@ export class MenuFilterService {
       if (moduleKey) {
         // Only include if this specific module (or any key in array) is visible
         if (this.isModuleKeyVisible(moduleKey, visibleModules)) {
+          if (item.requiresFeature && !this.subscriptionAccess.canUseAI(item.requiresFeature)()) {
+            return filtered;
+          }
           const filteredItem = { ...item };
 
           // Recursively filter children if present
@@ -247,6 +258,9 @@ export class MenuFilterService {
 
         if (filteredChildren.length > 0) {
           const filteredItem = { ...item, children: filteredChildren };
+          if (item.requiresFeature && !this.subscriptionAccess.canUseAI(item.requiresFeature)()) {
+            return filtered;
+          }
           filtered.push(filteredItem);
         }
       }
@@ -264,13 +278,19 @@ export class MenuFilterService {
    */
   isMenuItemVisible(menuItem: MenuItem): boolean {
     const moduleKey = this.moduleKeyMap[menuItem.label];
-    if (!moduleKey) return true; // Default to visible if no mapping
-
-    // Handle array of keys (check if ANY is visible)
-    if (Array.isArray(moduleKey)) {
-      return moduleKey.some((key) => this.authFacade.isModuleVisible(key));
+    let isVisible = true;
+    if (!moduleKey) {
+      isVisible = true;
+    } else if (Array.isArray(moduleKey)) {
+      isVisible = moduleKey.some((key) => this.authFacade.isModuleVisible(key));
+    } else {
+      isVisible = this.authFacade.isModuleVisible(moduleKey);
     }
 
-    return this.authFacade.isModuleVisible(moduleKey);
+    if (isVisible && menuItem.requiresFeature) {
+      isVisible = this.subscriptionAccess.canUseAI(menuItem.requiresFeature)();
+    }
+
+    return isVisible;
   }
 }

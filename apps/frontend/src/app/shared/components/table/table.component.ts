@@ -31,6 +31,7 @@ export interface TableColumn {
   };
   priority?: number; // Priority for responsiveness: 0 (high) to infinite (low). Default logic applies if not set.
   type?: 'text' | 'image'; // Type of content to display
+  badgeTransform?: (value: any) => string; // Transform value for badge display
 }
 
 export interface TableAction {

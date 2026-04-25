@@ -64,6 +64,8 @@ export const ERROR_MESSAGES: Record<string, string> = {
   ORG_PERM_001: 'No tiene permisos para acceder a esta organizacion.',
   ORG_CONTEXT_001: 'Debe seleccionar una organizacion.',
   ORG_USER_001: 'Usuario de la organizacion no encontrado.',
+  ORG_USER_002: 'Ya existe un usuario con este email en la organizacion.',
+  ORG_USER_003: 'Estado de usuario no válido para esta operación.',
   ORG_STORE_001: 'Tienda no encontrada.',
   ORG_ROLE_001: 'Rol no encontrado.',
   ORG_DOMAIN_001: 'Dominio no encontrado.',
@@ -305,6 +307,62 @@ export const ERROR_MESSAGES: Record<string, string> = {
 
   // Email Templates
   EMAIL_TPL_001: 'Plantilla de email no encontrada.',
+
+  // SaaS Subscriptions
+  SUBSCRIPTION_001: 'Esta tienda no tiene una suscripcion activa.',
+  SUBSCRIPTION_002: 'La suscripcion esta en borrador; debe activarse.',
+  SUBSCRIPTION_003: 'La suscripcion fue cancelada o expiro.',
+  SUBSCRIPTION_004: 'La tienda no tiene una suscripcion activa para funciones de IA.',
+  SUBSCRIPTION_005: 'Esta funcion no esta incluida en tu plan actual.',
+  SUBSCRIPTION_006: 'Se agoto la cuota de IA para este periodo de facturacion.',
+  SUBSCRIPTION_007: 'Tu suscripcion esta vencida; algunas funciones de IA estan limitadas.',
+  SUBSCRIPTION_008: 'Suscripcion suspendida por falta de pago.',
+  SUBSCRIPTION_009: 'Suscripcion bloqueada. Regulariza tu pago para continuar.',
+  SUBSCRIPTION_010: 'El plan seleccionado no es valido.',
+  SUBSCRIPTION_INTERNAL_ERROR: 'Ocurrio un error al procesar tu suscripcion. Intenta de nuevo.',
+  SUBSCRIPTION_PAY_001: 'No se pudo procesar el pago de la suscripcion. Verifica tu metodo de pago.',
+  SUBSCRIPTION_PRORATION_001: 'No se pudo calcular el ajuste prorrateado del cambio de plan.',
+  SUBSCRIPTION_PROMO_002: 'Este plan promocional ya no es elegible para tu tienda.',
+
+  // Partner / Reseller
+  PARTNER_001: 'Esta organizacion no es un partner revendedor.',
+  PARTNER_002: 'El margen supera el maximo permitido por el plan base.',
+  PARTNER_003: 'No puedes habilitar funciones que no estan incluidas en el plan base.',
+  PARTNER_004: 'Este pago de comisiones ya fue procesado.',
+
+  // Promotional plans
+  PROMO_001: 'El plan promocional ya no es elegible.',
+
+  // Plans (catalog)
+  PLAN_001: 'Este plan esta archivado y no acepta nuevas suscripciones.',
+  PLAN_002: 'Este plan no esta disponible para reventa.',
+
+  // Trial
+  TRIAL_001: 'Tu periodo de prueba termino. Elige un plan para continuar.',
+
+  // DIAN Electronic Invoicing
+  DIAN_CONFIG_001: 'No se encontro la configuracion DIAN para esta tienda.',
+  DIAN_CONFIG_002: 'Ya existe una configuracion DIAN para esta tienda.',
+  DIAN_CERT_001: 'El archivo de certificado es invalido.',
+  DIAN_CERT_002: 'La contrasena del certificado es incorrecta.',
+  DIAN_CERT_003: 'El certificado digital esta vencido. Debes renovarlo.',
+  DIAN_CONN_001: 'No se pudo conectar con la DIAN. Intenta de nuevo.',
+  DIAN_SEND_001: 'La DIAN rechazo el documento.',
+  DIAN_SEND_002: 'La solicitud a la DIAN agoto el tiempo de espera.',
+
+  // Invoicing
+  INVOICING_FIND_001: 'No se encontro la factura.',
+  INVOICING_FIND_002: 'No se encontro la resolucion de facturacion.',
+  INVOICING_FIND_003: 'No se encontro la orden asociada.',
+  INVOICING_FIND_004: 'No se encontro la orden de venta asociada.',
+  INVOICING_CREATE_001: 'No se pudo crear la factura. Revisa los datos e intenta de nuevo.',
+  INVOICING_VALIDATE_001: 'La factura no cumple las validaciones. Revisa los datos.',
+  INVOICING_STATUS_001: 'No puedes pasar la factura a ese estado desde el actual.',
+  INVOICING_STATUS_002: 'No puedes modificar la factura en su estado actual.',
+  INVOICING_RESOLUTION_001: 'No hay una resolucion activa para numerar facturas. Configura una en Resoluciones.',
+  INVOICING_RESOLUTION_002: 'La resolucion se agoto. Crea una nueva resolucion para seguir facturando.',
+  INVOICING_DUP_001: 'Ya existe una factura con ese numero.',
+  INVOICING_PROVIDER_001: 'Fallo la comunicacion con el proveedor de facturacion electronica.',
 };
 
 export const DEFAULT_ERROR_MESSAGE = 'Ocurrio un error. Intente de nuevo.';

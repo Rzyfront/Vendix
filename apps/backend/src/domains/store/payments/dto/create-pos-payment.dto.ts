@@ -155,6 +155,18 @@ export class CreatePosPaymentDto {
   @Type(() => Number)
   store_id: number;
 
+  /**
+   * ID de la sesión de caja abierta bajo la cual se procesa esta venta POS.
+   * Si se proporciona, `StockLevelManager.resolveSaleLocation` usa la location
+   * de la caja para descontar stock. Si se omite, se usa `store.default_location_id`.
+   * Controlado por el setting `pos.cash_register.require_session_for_sales`.
+   */
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Type(() => Number)
+  cash_register_session_id?: number;
+
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => PosOrderItemDto)

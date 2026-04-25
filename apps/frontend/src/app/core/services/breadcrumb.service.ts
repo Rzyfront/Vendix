@@ -123,6 +123,18 @@ export class BreadcrumbService {
       parent: 'Organizaciones',
     },
     {
+      path: '/organization/config',
+      title: 'Configuración',
+      icon: 'settings',
+      parent: 'Organizaciones',
+    },
+    {
+      path: '/organization/config/inventory',
+      title: 'Inventario',
+      icon: 'warehouse',
+      parent: 'Configuración',
+    },
+    {
       path: '/organization/settings',
       title: 'Configuración',
       icon: 'settings',
@@ -684,6 +696,12 @@ export class BreadcrumbService {
       title: 'Proveedores',
       parent: 'Inventario',
       icon: 'truck',
+    },
+    {
+      path: '/admin/inventory/stock/:productId',
+      title: 'Stock por Bodega',
+      parent: 'Inventario',
+      icon: 'warehouse',
     },
 
     // Orders

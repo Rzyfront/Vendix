@@ -17,7 +17,13 @@ import { NotificationsSseService } from './notifications-sse.service';
 import { NotificationsPushService } from './notifications-push.service';
 import { ResponseService } from '../../../common/responses/response.service';
 import { RequestContextService } from '@common/context/request-context.service';
-import { NotificationQueryDto, UpdateSubscriptionDto, PushSubscriptionDto, PushUnsubscribeDto } from './dto';
+import {
+  NotificationQueryDto,
+  UpdateSubscriptionDto,
+  PushSubscriptionDto,
+  PushUnsubscribeDto,
+} from './dto';
+import { SkipSubscriptionGate } from '../subscriptions/decorators/skip-subscription-gate.decorator';
 
 @Controller('store/notifications')
 export class NotificationsController {
@@ -31,10 +37,14 @@ export class NotificationsController {
   @Get()
   async findAll(@Query() query_dto: NotificationQueryDto) {
     const result = await this.notifications_service.findAll(query_dto);
-    return this.response_service.success(result.data, 'Notifications retrieved', {
-      ...result.meta,
-      unread_count: result.unread_count,
-    });
+    return this.response_service.success(
+      result.data,
+      'Notifications retrieved',
+      {
+        ...result.meta,
+        unread_count: result.unread_count,
+      },
+    );
   }
 
   @Get('unread-count')
@@ -71,18 +81,20 @@ export class NotificationsController {
   }
 
   @Patch(':id/read')
+  @SkipSubscriptionGate()
   async markRead(@Param('id') id: string) {
     const result = await this.notifications_service.markRead(+id);
-    return this.response_service.success(
-      result,
-      'Notification marked as read',
-    );
+    return this.response_service.success(result, 'Notification marked as read');
   }
 
   @Patch('read-all')
+  @SkipSubscriptionGate()
   async markAllRead() {
     const result = await this.notifications_service.markAllRead();
-    return this.response_service.success(result, 'All notifications marked as read');
+    return this.response_service.success(
+      result,
+      'All notifications marked as read',
+    );
   }
 
   @Get('push/vapid-key')
@@ -97,7 +109,8 @@ export class NotificationsController {
     const context = RequestContextService.getContext();
     const user_id = context?.user_id;
     const store_id = context?.store_id;
-    if (!user_id || !store_id) throw new ForbiddenException('User and store context required');
+    if (!user_id || !store_id)
+      throw new ForbiddenException('User and store context required');
 
     const result = await this.push_service.saveSubscription(
       store_id,
@@ -113,7 +126,8 @@ export class NotificationsController {
     const context = RequestContextService.getContext();
     const user_id = context?.user_id;
     const store_id = context?.store_id;
-    if (!user_id || !store_id) throw new ForbiddenException('User and store context required');
+    if (!user_id || !store_id)
+      throw new ForbiddenException('User and store context required');
 
     await this.push_service.removeSubscription(store_id, user_id, dto.endpoint);
     return this.response_service.success(null, 'Push subscription removed');

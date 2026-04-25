@@ -570,6 +570,14 @@ export const storeAdminRoutes: Routes = [
             (m) => m.icaRoutes,
           ),
       },
+      // Subscription Routes
+      {
+        path: 'subscription',
+        loadChildren: () =>
+          import('../../private/modules/store/subscription/subscription.routes').then(
+            (m) => m.default,
+          ),
+      },
     ],
   },
 ];

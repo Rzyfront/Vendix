@@ -26,32 +26,42 @@
         Registros de Auditoría
       </h2>
 
-      <div class="flex gap-2 w-full md:w-auto" [formGroup]="filterForm">
+      <div class="flex gap-2 items-center flex-wrap" [formGroup]="filterForm">
+        <!-- Date Range Picker -->
+        <app-date-range-picker
+          (dateRangeChange)="onDateRangeChange($event)"
+        ></app-date-range-picker>
+
         <!-- Resource Filter -->
-        <div class="w-full md:w-48">
-          <select
-            formControlName="resource"
-            class="w-full px-3 py-2 border border-border rounded-button bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary text-sm transition-shadow"
-          >
-            <option value="">Todos los recursos</option>
-            @for (res of resources; track res) {
-              <option [value]="res.value">{{ res.label }}</option>
-            }
-          </select>
-        </div>
+        <select
+          formControlName="resource"
+          class="w-full md:w-48 px-3 py-2 border border-border rounded-button bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary text-sm transition-shadow"
+        >
+          <option value="">Todos los recursos</option>
+          @for (res of resources; track res) {
+            <option [value]="res.value">{{ res.label }}</option>
+          }
+        </select>
 
         <!-- Action Filter -->
-        <div class="w-full md:w-48">
-          <select
-            formControlName="action"
-            class="w-full px-3 py-2 border border-border rounded-button bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary text-sm transition-shadow"
-          >
-            <option value="">Todas las acciones</option>
-            @for (act of actions; track act) {
-              <option [value]="act.value">{{ act.label }}</option>
-            }
-          </select>
-        </div>
+        <select
+          formControlName="action"
+          class="w-full md:w-48 px-3 py-2 border border-border rounded-button bg-surface text-text focus:outline-none focus:ring-2 focus:ring-primary focus:border-primary text-sm transition-shadow"
+        >
+          <option value="">Todas las acciones</option>
+          @for (act of actions; track act) {
+            <option [value]="act.value">{{ act.label }}</option>
+          }
+        </select>
+
+        <!-- Export Button -->
+        <app-button
+          variant="secondary"
+          iconName="download"
+          (clicked)="exportLogs()"
+        >
+          Exportar
+        </app-button>
       </div>
     </div>
 
@@ -63,6 +73,8 @@
         [actions]="tableActions"
         [cardConfig]="cardConfig"
         [loading]="isLoading()"
+        [emptyMessage]="'No hay registros de auditoría'"
+        [emptyIcon]="'shield'"
       >
       </app-responsive-data-view>
     </div>
@@ -74,6 +86,7 @@
       >
         <span class="text-sm text-gray-500">
           Página {{ pagination.page }} de {{ pagination.totalPages }}
+          ({{ pagination.total }} registros)
         </span>
         <div class="flex gap-2">
           <button
@@ -111,7 +124,7 @@
         <div>
           <span class="block text-gray-500">Fecha</span>
           <span class="font-medium text-gray-900">{{
-            selectedLog()?.created_at | date: "medium"
+            formatDateOnlyUTC(selectedLog()?.created_at || '')
           }}</span>
         </div>
         <div>
@@ -146,33 +159,15 @@
         </div>
       </div>
       <hr class="border-gray-100" />
-      <!-- Diff View if changes -->
+
+      <!-- Diff Viewer for old/new values -->
       @if (selectedLog() && hasChanges(selectedLog()!)) {
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-2 md:p-4">
-          @if (selectedLog()?.old_values) {
-            <div class="bg-red-50 p-4 rounded-lg border border-red-100">
-              <h4 class="text-xs font-semibold text-red-700 uppercase mb-2">
-                Valor Anterior
-              </h4>
-              <pre
-                class="text-xs text-red-800 whitespace-pre-wrap overflow-auto max-h-60"
-                >{{ formatJson(selectedLog()?.old_values) }}</pre
-              >
-            </div>
-          }
-          @if (selectedLog()?.new_values) {
-            <div class="bg-green-50 p-4 rounded-lg border border-green-100">
-              <h4 class="text-xs font-semibold text-green-700 uppercase mb-2">
-                Nuevo Valor
-              </h4>
-              <pre
-                class="text-xs text-green-800 whitespace-pre-wrap overflow-auto max-h-60"
-                >{{ formatJson(selectedLog()?.new_values) }}</pre
-              >
-            </div>
-          }
-        </div>
+        <app-diff-viewer
+          [oldValue]="selectedLog()?.old_values"
+          [newValue]="selectedLog()?.new_values"
+        ></app-diff-viewer>
       }
+
       <!-- Metadata if no direct changes but metadata exists -->
       @if (
         selectedLog() && !hasChanges(selectedLog()!) && selectedLog()?.metadata
@@ -183,8 +178,7 @@
           </h4>
           <pre
             class="text-xs text-gray-800 whitespace-pre-wrap overflow-auto max-h-60"
-            >{{ formatJson(selectedLog()?.metadata) }}</pre
-          >
+          >{{ selectedLog()?.metadata | json }}</pre>
         </div>
       }
     </div>

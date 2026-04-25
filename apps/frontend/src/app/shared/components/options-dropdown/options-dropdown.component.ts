@@ -59,7 +59,7 @@ export class OptionsDropdownComponent {
   readonly triggerLabel = input<string>('Opciones');
 
   /** Icon for the trigger button */
-  readonly triggerIcon = input<IconName>('sliders-horizontal');
+  readonly triggerIcon = input<IconName>('plus');
 
   /** Debounce time in milliseconds for filter changes */
   readonly debounceMs = input<number>(350);

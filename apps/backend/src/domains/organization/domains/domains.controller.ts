@@ -328,4 +328,45 @@ export class DomainsController {
     const result = await this.domainsService.verifyDomain(hostname, body);
     return this.responseService.success(result, 'Domain verified successfully');
   }
+
+  /**
+   * Renovar certificado SSL
+   */
+  @Post(':id/ssl-renew')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
+  @Permissions('organization:domains:update')
+  async renewSsl(
+    @Param('id') id: string,
+  ): Promise<SuccessResponse<{ renewed: boolean; ssl_status: string; message: string }>> {
+    const domainId = parseInt(id, 10);
+    if (isNaN(domainId)) {
+      throw new BadRequestException('Invalid domain ID');
+    }
+    const result = await this.domainsService.renewSsl(domainId);
+    return this.responseService.success(result, 'SSL certificate renewed successfully');
+  }
+
+  /**
+   * Obtener instrucciones DNS para un dominio
+   */
+  @Get('dns-instructions/:hostname')
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
+  @Permissions('organization:domains:read')
+  async getDnsInstructions(
+    @Param('hostname') hostname: string,
+  ): Promise<SuccessResponse<{
+    hostname: string;
+    ownership: string;
+    dns_type: 'CNAME' | 'A';
+    target: string;
+    instructions: {
+      record_type: string;
+      name: string;
+      value: string;
+      ttl: number;
+    }[];
+  }>> {
+    const result = await this.domainsService.getDnsInstructions(hostname);
+    return this.responseService.success(result, 'DNS instructions retrieved successfully');
+  }
 }

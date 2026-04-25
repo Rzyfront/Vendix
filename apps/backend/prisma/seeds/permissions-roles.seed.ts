@@ -172,14 +172,8 @@ export async function seedPermissionsAndRoles(
     },
     {
       name: 'organization:users:read',
-      description: 'Leer usuarios',
+      description: 'Leer usuarios (listado y detalle)',
       path: '/api/organization/users',
-      method: 'GET',
-    },
-    {
-      name: 'organization:users:read',
-      description: 'Leer usuario específico',
-      path: '/api/organization/users/:id',
       method: 'GET',
     },
     {
@@ -765,18 +759,12 @@ export async function seedPermissionsAndRoles(
       method: 'DELETE',
     },
 
-    // Proveedores
+    // Proveedores (legacy domain: store/suppliers)
     {
       name: 'store:suppliers:create',
       description: 'Crear proveedor',
-      path: '/api/store/inventory/suppliers/unique-create',
+      path: '/api/store/inventory/suppliers/unique-create/legacy',
       method: 'POST',
-    },
-    {
-      name: 'store:suppliers:read',
-      description: 'Leer proveedores',
-      path: '/api/store/inventory/suppliers/unique-read',
-      method: 'GET',
     },
     {
       name: 'store:suppliers:update',
@@ -853,7 +841,7 @@ export async function seedPermissionsAndRoles(
     {
       name: 'store:settings:write',
       description: 'Escribir configuración de tienda (metadata, templates, email)',
-      path: '/api/store/metadata-fields',
+      path: '/api/store/settings',
       method: 'POST',
     },
     {
@@ -1304,6 +1292,13 @@ export async function seedPermissionsAndRoles(
       method: 'POST',
     },
     {
+      name: 'store:stock-transfers:cross-store',
+      description:
+        'Policy: crear/aprobar transferencias cross-store entre bodegas de distintas tiendas (solo modo organizational). Se evalúa dentro del mismo endpoint POST /api/store/stock-transfers.',
+      path: '/policy/stock-transfers/cross-store',
+      method: 'POST',
+    },
+    {
       name: 'store:stock-transfers:read',
       description: 'Leer transferencias de inventario',
       path: '/api/store/stock-transfers',
@@ -1408,6 +1403,13 @@ export async function seedPermissionsAndRoles(
       description: 'Actualizar configuración de organización',
       path: '/organization/settings',
       method: 'PUT',
+    },
+    {
+      name: 'organization:inventory:set-mode',
+      description:
+        'Cambiar el modo de inventario de la organización (organizational/independent)',
+      path: '/organization/settings/inventory/mode',
+      method: 'PATCH',
     },
 
     // Notificaciones (Tienda)
@@ -1692,6 +1694,12 @@ export async function seedPermissionsAndRoles(
       name: 'store:inventory:locations:update',
       description: 'Update inventory locations',
       path: '/api/store/inventory/locations',
+      method: 'PATCH',
+    },
+    {
+      name: 'store:inventory:set-default-location',
+      description: 'Set a specific inventory location as the store default',
+      path: '/api/store/inventory/locations/:id/set-default',
       method: 'PATCH',
     },
     {
@@ -2047,13 +2055,13 @@ export async function seedPermissionsAndRoles(
     {
       name: 'store:payroll:advances:approve',
       description: 'Aprobar/rechazar adelantos',
-      path: '/api/store/payroll/advances',
+      path: '/api/store/payroll/advances/:id/approve',
       method: 'PATCH',
     },
     {
       name: 'store:payroll:advances:manage',
       description: 'Gestionar adelantos (cancelar, pagos manuales)',
-      path: '/api/store/payroll/advances',
+      path: '/api/store/payroll/advances/:id/cancel',
       method: 'PATCH',
     },
     // Nómina - Liquidaciones de empleado (prestaciones sociales)
@@ -2356,6 +2364,145 @@ export async function seedPermissionsAndRoles(
       path: '/api/store/accounting/fixed-assets/:id',
       method: 'DELETE',
     },
+
+    // ===== SaaS Subscriptions =====
+    // Store-level: tienda ve/gestiona su propia suscripción
+    {
+      name: 'subscriptions:read',
+      description: 'Ver la suscripción de la tienda',
+      path: '/api/store/subscriptions/*',
+      method: 'GET',
+    },
+    {
+      name: 'subscriptions:write',
+      description: 'Suscribir, cambiar o cancelar plan de la tienda',
+      path: '/api/store/subscriptions/*',
+      method: 'POST',
+    },
+
+    // Reseller (organización partner)
+    {
+      name: 'reseller:plans:read',
+      description: 'Ver overrides de planes del partner',
+      path: '/api/organization/reseller/plans',
+      method: 'GET',
+    },
+    {
+      name: 'reseller:plans:write',
+      description: 'Crear/actualizar/eliminar overrides de planes del partner',
+      path: '/api/organization/reseller/plans',
+      method: 'POST',
+    },
+    {
+      name: 'reseller:commissions:read',
+      description: 'Ver comisiones y payouts del partner',
+      path: '/api/organization/reseller/commissions/*',
+      method: 'GET',
+    },
+    {
+      name: 'reseller:branding:read',
+      description: 'Ver configuración de branding del partner',
+      path: '/api/organization/reseller/branding',
+      method: 'GET',
+    },
+    {
+      name: 'reseller:branding:write',
+      description: 'Actualizar configuración de branding del partner',
+      path: '/api/organization/reseller/branding',
+      method: 'PUT',
+    },
+
+    // Superadmin: gestión global de SaaS
+    {
+      name: 'superadmin:subscriptions:read',
+      description: 'Ver suscripciones activas y dunning',
+      path: '/api/superadmin/subscriptions/*',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:subscriptions:update',
+      description: 'Acciones de gestión sobre suscripciones (remind, force cancel)',
+      path: '/api/superadmin/subscriptions/dunning/:id/*',
+      method: 'POST',
+    },
+    {
+      name: 'superadmin:subscriptions:plans:read',
+      description: 'Ver planes SaaS',
+      path: '/api/superadmin/subscriptions/plans',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:subscriptions:plans:create',
+      description: 'Crear planes SaaS',
+      path: '/api/superadmin/subscriptions/plans',
+      method: 'POST',
+    },
+    {
+      name: 'superadmin:subscriptions:plans:update',
+      description: 'Actualizar planes SaaS',
+      path: '/api/superadmin/subscriptions/plans/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'superadmin:subscriptions:plans:delete',
+      description: 'Archivar/eliminar planes SaaS',
+      path: '/api/superadmin/subscriptions/plans/:id',
+      method: 'DELETE',
+    },
+    {
+      name: 'superadmin:subscriptions:partners:read',
+      description: 'Ver partners y overrides',
+      path: '/api/superadmin/subscriptions/partners',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:subscriptions:partners:update',
+      description: 'Toggle partner, margin cap y overrides',
+      path: '/api/superadmin/subscriptions/partners/*',
+      method: 'PATCH',
+    },
+    {
+      name: 'superadmin:subscriptions:promotional:read',
+      description: 'Ver planes promocionales',
+      path: '/api/superadmin/subscriptions/promotional',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:subscriptions:promotional:create',
+      description: 'Crear planes promocionales',
+      path: '/api/superadmin/subscriptions/promotional',
+      method: 'POST',
+    },
+    {
+      name: 'superadmin:subscriptions:promotional:update',
+      description: 'Actualizar planes promocionales',
+      path: '/api/superadmin/subscriptions/promotional/:id',
+      method: 'PATCH',
+    },
+    {
+      name: 'superadmin:subscriptions:promotional:delete',
+      description: 'Eliminar planes promocionales',
+      path: '/api/superadmin/subscriptions/promotional/:id',
+      method: 'DELETE',
+    },
+    {
+      name: 'superadmin:subscriptions:payouts:read',
+      description: 'Ver batches de payouts a partners',
+      path: '/api/superadmin/subscriptions/payouts',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:subscriptions:payouts:update',
+      description: 'Aprobar/marcar como pagados los batches',
+      path: '/api/superadmin/subscriptions/payouts/:id/*',
+      method: 'PATCH',
+    },
+    {
+      name: 'superadmin:subscriptions:events:read',
+      description: 'Auditar eventos de suscripciones',
+      path: '/api/superadmin/subscriptions/events',
+      method: 'GET',
+    },
   ];
 
   // Get valid permission names from our list
@@ -2372,6 +2519,27 @@ export async function seedPermissionsAndRoles(
 
   if (deletedCount.count > 0) {
     console.log(`   🧹 Cleaned up ${deletedCount.count} old permissions`);
+  }
+
+  const canonicalByPathMethod = new Map<string, string>();
+  for (const p of permissions) {
+    canonicalByPathMethod.set(`${p.path}::${p.method}`, p.name);
+  }
+  const existingRows = await client.permissions.findMany({
+    select: { id: true, name: true, path: true, method: true },
+  });
+  const staleIds: number[] = [];
+  for (const row of existingRows) {
+    const canonical = canonicalByPathMethod.get(`${row.path}::${row.method}`);
+    if (canonical && canonical !== row.name) staleIds.push(row.id);
+  }
+  if (staleIds.length) {
+    const r = await client.permissions.deleteMany({
+      where: { id: { in: staleIds } },
+    });
+    console.log(
+      `   🧹 Removed ${r.count} stale permissions with conflicting (path, method)`,
+    );
   }
 
   // Create permissions
@@ -2564,7 +2732,10 @@ export async function seedPermissionsAndRoles(
         p.name.startsWith('exogenous:') ||
         p.name.startsWith('payroll:') ||
         p.name.startsWith('taxes:') ||
-        p.name.startsWith('withholding:')) &&
+        p.name.startsWith('withholding:') ||
+        p.name === 'subscriptions:read' ||
+        p.name === 'subscriptions:write' ||
+        p.name.startsWith('reseller:')) &&
       !p.name.includes('super_admin') &&
       !p.name.startsWith('system.') &&
       !p.name.startsWith('security.') &&
@@ -2611,6 +2782,7 @@ export async function seedPermissionsAndRoles(
         !p.name.includes('organization:permissions:') &&
         !p.name.includes('organization:organizations:') &&
         !p.name.includes('organization:domains:') &&
+        !p.name.includes('organization:inventory:set-mode') &&
         !p.name.includes('security.') &&
         !p.name.includes('rate.limiting.')),
   );

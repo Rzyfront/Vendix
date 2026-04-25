@@ -38,29 +38,80 @@ export class OrganizationAuditService {
             if (filters.to_date) where.created_at.lte = filters.to_date;
         }
 
+        const [data, total] = await Promise.all([
+            this.prismaService.audit_logs.findMany({
+                where,
+                include: {
+                    users: {
+                        select: {
+                            id: true,
+                            email: true,
+                            first_name: true,
+                            last_name: true,
+                        },
+                    },
+                    stores: {
+                        select: {
+                            id: true,
+                            name: true,
+                            slug: true,
+                        },
+                    },
+                },
+                orderBy: { created_at: 'desc' },
+                take: filters?.limit || 50,
+                skip: filters?.offset || 0,
+            }),
+            this.prismaService.audit_logs.count({ where }),
+        ]);
+
+        return { data, total };
+    }
+
+    /**
+     * Obtiene todos los logs para exportar (sin paginación)
+     */
+    async getAuditLogsForExport(filters?: {
+        user_id?: number;
+        store_id?: number;
+        action?: AuditAction;
+        resource?: AuditResource;
+        resource_id?: number;
+        from_date?: Date;
+        to_date?: Date;
+    }) {
+        const where: any = {};
+
+        if (filters?.user_id) where.user_id = filters.user_id;
+        if (filters?.store_id) where.store_id = filters.store_id;
+        if (filters?.action) where.action = filters.action;
+        if (filters?.resource) where.resource = filters.resource;
+        if (filters?.resource_id) where.resource_id = filters.resource_id;
+
+        if (filters?.from_date || filters?.to_date) {
+            where.created_at = {};
+            if (filters.from_date) where.created_at.gte = filters.from_date;
+            if (filters.to_date) where.created_at.lte = filters.to_date;
+        }
+
         return await this.prismaService.audit_logs.findMany({
             where,
             include: {
                 users: {
                     select: {
-                        id: true,
-                        email: true,
                         first_name: true,
                         last_name: true,
+                        email: true,
                     },
                 },
                 stores: {
                     select: {
-                        id: true,
                         name: true,
                         slug: true,
                     },
                 },
-                // Remove organizations inclusion as we know the organization (it's the current one)
             },
             orderBy: { created_at: 'desc' },
-            take: filters?.limit || 50,
-            skip: filters?.offset || 0,
         });
     }
 

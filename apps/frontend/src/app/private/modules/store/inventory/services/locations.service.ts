@@ -52,6 +52,21 @@ export class LocationsService {
             .pipe(catchError(this.handleError));
     }
 
+    /**
+     * Marca una ubicación como la bodega principal (default) del store.
+     * El backend desmarcará automáticamente la ubicación previa.
+     *
+     * Requiere permiso: `store:inventory:set-default-location`.
+     */
+    setAsDefault(id: number): Observable<ApiResponse<InventoryLocation>> {
+        return this.http
+            .patch<ApiResponse<InventoryLocation>>(
+                `${this.api_url}/${id}/set-default`,
+                {},
+            )
+            .pipe(catchError(this.handleError));
+    }
+
     // ============================================================
     // Utilities
     // ============================================================

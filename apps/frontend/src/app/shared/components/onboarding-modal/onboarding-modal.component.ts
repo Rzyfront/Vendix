@@ -831,6 +831,9 @@ export class OnboardingModalComponent {
   nextStep(): void {
     if (!this.canGoNext() || this.isProcessing()) return;
 
+    // Save current step draft before moving
+    this.saveCurrentStepDraft();
+
     // Handle form submission based on current step
     switch (this.currentStep()) {
       case 1: { // Welcome - Business Type Selection
@@ -887,6 +890,56 @@ export class OnboardingModalComponent {
         this.isProcessing.set(true);
         this.wizardService.nextStep();
         this.isProcessing.set(false);
+    }
+  }
+
+  /**
+   * Save current step draft to backend
+   */
+  private saveCurrentStepDraft(): void {
+    const step = this.currentStep();
+    const businessType = this.businessType();
+
+    let stepName: string | null = null;
+    let stepData: any = null;
+
+    // Determine which step data to save based on current step
+    if (step === 3) {
+      stepName = 'user';
+      stepData = this.userForm.value;
+    } else if (step === 4) {
+      if (businessType === 'ORGANIZATION') {
+        stepName = 'organization';
+        stepData = this.organizationForm.value;
+      } else {
+        stepName = 'store';
+        stepData = this.storeForm.value;
+      }
+    } else if (step === 5) {
+      if (businessType === 'ORGANIZATION') {
+        stepName = 'store';
+        stepData = this.storeForm.value;
+      } else {
+        stepName = 'app_config';
+        stepData = this.appConfigForm.value;
+      }
+    } else if (step === 6) {
+      if (businessType === 'ORGANIZATION') {
+        stepName = 'app_config';
+        stepData = this.appConfigForm.value;
+      }
+    }
+
+    if (stepName && stepData) {
+      // Fire and forget - don't wait for response
+      this.wizardService.saveWizardDraft(stepName, stepData).subscribe({
+        error: (err) => console.error('Error saving wizard draft:', err),
+      });
+
+      // Also update the step in backend
+      this.wizardService.updateWizardStep(step).subscribe({
+        error: (err) => console.error('Error updating wizard step:', err),
+      });
     }
   }
 

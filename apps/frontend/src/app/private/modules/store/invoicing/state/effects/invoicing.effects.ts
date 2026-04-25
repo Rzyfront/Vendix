@@ -6,12 +6,15 @@ import { map, switchMap, exhaustMap, catchError, withLatestFrom } from 'rxjs/ope
 import { InvoicingService } from '../../services/invoicing.service';
 import * as InvoicingActions from '../actions/invoicing.actions';
 import { selectInvoicingState } from '../selectors/invoicing.selectors';
+import { ToastService } from '../../../../../../shared/components/toast/toast.service';
+import { extractApiErrorMessage } from '../../../../../../core/utils/api-error-handler';
 
 @Injectable()
 export class InvoicingEffects {
   private actions$ = inject(Actions);
   private store = inject(Store);
   private invoicingService = inject(InvoicingService);
+  private toastService = inject(ToastService);
 
   // Load invoices using filter-as-state from store
   loadInvoices$ = createEffect(() =>
@@ -407,6 +410,27 @@ export class InvoicingEffects {
               error: error.error?.message || error.message || 'Error updating resolution'
             }))
           )
+        )
+      )
+    )
+  );
+
+  // Load DIAN configs (gate pre-factura)
+  loadDianConfigs$ = createEffect(() =>
+    this.actions$.pipe(
+      ofType(InvoicingActions.loadDianConfigs),
+      switchMap(() =>
+        this.invoicingService.getDianConfigs().pipe(
+          map((response: any) =>
+            InvoicingActions.loadDianConfigsSuccess({
+              configs: response?.data ?? [],
+            })
+          ),
+          catchError((error) => {
+            const msg = extractApiErrorMessage(error);
+            this.toastService.error(msg);
+            return of(InvoicingActions.loadDianConfigsFailure({ error: msg }));
+          })
         )
       )
     )

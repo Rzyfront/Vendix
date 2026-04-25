@@ -13,11 +13,51 @@ export interface Organization {
   updatedAt: Date;
 }
 
+export interface OrganizationInventorySettings {
+  mode: 'organizational' | 'independent';
+  low_stock_alerts_scope: 'location' | 'store' | 'org';
+  fallback_on_stockout: 'reject' | 'ask_user' | 'auto_next_available';
+}
+
+export interface OrganizationBrandingSettings {
+  name?: string;
+  primary_color: string;
+  secondary_color: string;
+  accent_color: string;
+  background_color: string;
+  surface_color: string;
+  text_color: string;
+  text_secondary_color: string;
+  text_muted_color: string;
+  logo_url?: string;
+  favicon_url?: string;
+}
+
+export interface OrganizationFonts {
+  primary: string;
+  secondary: string;
+  headings: string;
+}
+
+export interface OrganizationPanelUISettings {
+  ORG_ADMIN?: Record<string, boolean>;
+}
+
+export interface OrganizationInventorySettings {
+  mode: 'organizational' | 'independent';
+  low_stock_alerts_scope: 'location' | 'store' | 'org';
+  fallback_on_stockout: 'reject' | 'ask_user' | 'auto_next_available';
+}
+
 export interface OrganizationSettings {
   allowPublicStore: boolean;
   allowMultipleStores: boolean;
   maxStores: number;
   maxUsers: number;
+  inventory?: OrganizationInventorySettings;
+  branding?: OrganizationBrandingSettings;
+  fonts?: OrganizationFonts;
+  panel_ui?: OrganizationPanelUISettings;
   features: {
     ecommerce: boolean;
     inventory: boolean;
@@ -28,14 +68,7 @@ export interface OrganizationSettings {
   };
 }
 
-export interface OrganizationBranding {
-  logo?: string;
-  primaryColor: string;
-  secondaryColor: string;
-  accentColor: string;
-  fontFamily: string;
-  customCss?: string;
-}
+export type OrganizationBranding = OrganizationBrandingSettings;
 
 export interface OrganizationContact {
   email: string;

@@ -1,5 +1,5 @@
 import {Component, OnInit, inject, signal,
-  DestroyRef} from '@angular/core';
+  DestroyRef, effect} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 
 import {
@@ -43,6 +43,23 @@ readonly isLoading = signal(false);
   // Revenue Chart Data - Stacked Line Chart
   readonly revenueChartData = signal<EChartsOption>({});
   readonly storeDistributionData = signal<EChartsOption>({});
+
+  // Force chart update counter for ECharts reactivity
+  readonly chartUpdateTrigger = signal<number>(0);
+
+  constructor() {
+    // Effect to force chart re-render when data changes (ECharts needs explicit update)
+    effect(() => {
+      const trigger = this.chartUpdateTrigger();
+      if (trigger > 0) {
+        const revenueData = this.revenueChartData();
+        const storeData = this.storeDistributionData();
+        // Re-set signals to trigger change detection
+        this.revenueChartData.set({ ...revenueData });
+        this.storeDistributionData.set({ ...storeData });
+      }
+    });
+  }
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();
@@ -103,6 +120,8 @@ private loadDashboardData(): void {
           this.dashboardStats.set(data);
           this.updateRevenueChart(data);
           this.updateStoreDistributionChart(data);
+          // Trigger chart re-render for ECharts reactivity
+          this.chartUpdateTrigger.update(v => v + 1);
           this.isLoading.set(false);
         },
         error: (error) => {

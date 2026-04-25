@@ -60,6 +60,10 @@ export class StorePrismaService extends BasePrismaService {
     'email_templates',
     'messaging_channels',
     'brands',
+    'store_subscriptions',
+    'subscription_invoices',
+    'subscription_payments',
+    'subscription_events',
   ];
 
   constructor() {
@@ -179,6 +183,9 @@ export class StorePrismaService extends BasePrismaService {
       'data_collection_items', // Relational
       'data_collection_template_products', // Relational
       'booking_reminder_logs', // Relational
+      'subscription_invoices', // Store scoped
+      'subscription_payments', // Relational
+      'subscription_events', // Relational
     ];
 
     for (const model of all_scoped_models) {
@@ -321,6 +328,8 @@ export class StorePrismaService extends BasePrismaService {
       data_collection_items: { section: { template: { store_id: context.store_id } } },
       data_collection_template_products: { template: { store_id: context.store_id } },
       booking_reminder_logs: { booking: { store_id: context.store_id } },
+      subscription_payments: { invoice: { store_id: context.store_id } },
+      subscription_events: { store_subscription: { store_id: context.store_id } },
     };
 
     const security_filter: Record<string, any> = {};
@@ -1041,6 +1050,23 @@ export class StorePrismaService extends BasePrismaService {
   // Messaging Channels
   get messaging_channels() {
     return this.scoped_client.messaging_channels;
+  }
+
+  // Subscription models
+  get store_subscriptions() {
+    return this.scoped_client.store_subscriptions;
+  }
+
+  get subscription_invoices() {
+    return this.scoped_client.subscription_invoices;
+  }
+
+  get subscription_payments() {
+    return this.scoped_client.subscription_payments;
+  }
+
+  get subscription_events() {
+    return this.scoped_client.subscription_events;
   }
 
   // Global tables (no store scoping)

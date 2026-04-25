@@ -19,6 +19,7 @@ import { JobsModule } from './jobs/jobs.module';
 
 import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 import { JwtAuthGuard } from './domains/auth/guards/jwt-auth.guard';
+import { StoreOperationsGuard } from './domains/store/subscriptions/guards/store-operations.guard';
 import { RequestContextService } from '@common/context/request-context.service';
 import { RequestContextInterceptor } from '@common/interceptors/request-context.interceptor';
 
@@ -79,6 +80,11 @@ import { MessagingModule } from './messaging/messaging.module';
     {
       provide: APP_INTERCEPTOR,
       useClass: RequestContextInterceptor,
+    },
+    // Subscription gate runs AFTER auth+context so it can read storeId.
+    {
+      provide: APP_GUARD,
+      useClass: StoreOperationsGuard,
     },
     {
       provide: APP_INTERCEPTOR,

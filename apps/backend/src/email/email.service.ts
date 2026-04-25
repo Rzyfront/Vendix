@@ -308,6 +308,23 @@ export class EmailService implements OnModuleInit {
     return this.provider.sendOnboardingEmail(to, username, step);
   }
 
+  async sendInvitationEmail(
+    to: string,
+    token: string,
+    username: string,
+    organizationSlug?: string,
+    app?: string,
+  ): Promise<EmailResult> {
+    this.logger.log(`Sending invitation email to ${to}`);
+    return this.provider.sendInvitationEmail(
+      to,
+      token,
+      username,
+      organizationSlug,
+      app,
+    );
+  }
+
   // Métodos de utilidad
   getConfig(): EmailConfig {
     // Retornar config sin exponer el API key

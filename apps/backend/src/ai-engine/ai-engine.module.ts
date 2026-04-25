@@ -18,10 +18,11 @@ import { InventoryIntegrationService } from '../domains/store/inventory/shared/s
 import { InventoryAdjustmentsService } from '../domains/store/inventory/adjustments/inventory-adjustments.service';
 import { MovementsService } from '../domains/store/inventory/movements/movements.service';
 import { LocationsService } from '../domains/store/inventory/locations/locations.service';
+import { SubscriptionsModule } from '../domains/store/subscriptions/subscriptions.module';
 
 @Global()
 @Module({
-  imports: [PrismaModule, AIQueueModule, EmbeddingModule, InventoryModule],
+  imports: [PrismaModule, AIQueueModule, EmbeddingModule, InventoryModule, SubscriptionsModule],
   controllers: [AIStreamController],
   providers: [AIEngineService, AILoggingService, AIAgentService, AIToolRegistry],
   exports: [AIEngineService, AILoggingService, AIAgentService, AIToolRegistry, AIQueueModule, EmbeddingModule],

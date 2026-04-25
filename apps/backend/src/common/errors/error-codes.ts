@@ -256,10 +256,26 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Organization context required',
   },
+  ORG_CONTEXT_002: {
+    code: 'ORG_CONTEXT_002',
+    httpStatus: 500,
+    devMessage:
+      'Failed to resolve inventory_mode from organization_settings. Check DB connectivity and that the organization row exists.',
+  },
   ORG_USER_001: {
     code: 'ORG_USER_001',
     httpStatus: 404,
     devMessage: 'Organization user not found',
+  },
+  ORG_USER_002: {
+    code: 'ORG_USER_002',
+    httpStatus: 409,
+    devMessage: 'User with this email already exists',
+  },
+  ORG_USER_003: {
+    code: 'ORG_USER_003',
+    httpStatus: 400,
+    devMessage: 'Invalid user state for this operation',
   },
   ORG_STORE_001: {
     code: 'ORG_STORE_001',
@@ -518,6 +534,97 @@ export const ErrorCodes = {
     code: 'INV_BULK_002',
     httpStatus: 400,
     devMessage: 'Bulk upload batch size exceeded (max 1000)',
+  },
+  INV_LOCATION_NOT_IN_STORE: {
+    code: 'INV_LOCATION_NOT_IN_STORE',
+    httpStatus: 403,
+    devMessage:
+      'Inventory location does not belong to the current store (independent inventory_mode)',
+  },
+  INV_LOCATION_NOT_IN_ORG: {
+    code: 'INV_LOCATION_NOT_IN_ORG',
+    httpStatus: 403,
+    devMessage:
+      'Inventory location does not belong to the current organization',
+  },
+  INV_DEFAULT_LOCATION_DELETE_BLOCKED: {
+    code: 'INV_DEFAULT_LOCATION_DELETE_BLOCKED',
+    httpStatus: 409,
+    devMessage: 'Cannot delete a location that is set as store default',
+  },
+  INV_NO_DEFAULT_LOCATION: {
+    code: 'INV_NO_DEFAULT_LOCATION',
+    httpStatus: 409,
+    devMessage:
+      'Store has no default inventory location configured; cannot infer location_id',
+  },
+  INV_SESSION_CLOSED: {
+    code: 'INV_SESSION_CLOSED',
+    httpStatus: 409,
+    devMessage:
+      'Cash register session is not open; cannot resolve sale location from it',
+  },
+  INV_SESSION_STORE_MISMATCH: {
+    code: 'INV_SESSION_STORE_MISMATCH',
+    httpStatus: 403,
+    devMessage:
+      'Cash register session does not belong to the current store',
+  },
+  INV_CROSS_STORE_TRANSFER_FORBIDDEN: {
+    code: 'INV_CROSS_STORE_TRANSFER_FORBIDDEN',
+    httpStatus: 403,
+    devMessage:
+      'Cross-store transfers are not allowed in independent inventory mode',
+  },
+  INV_CROSS_STORE_TRANSFER_PERMISSION: {
+    code: 'INV_CROSS_STORE_TRANSFER_PERMISSION',
+    httpStatus: 403,
+    devMessage:
+      'User lacks permission to create/approve cross-store inventory transfers',
+  },
+  INV_MODE_CHANGE_BLOCKED_BY_TRANSFERS: {
+    code: 'INV_MODE_CHANGE_BLOCKED_BY_TRANSFERS',
+    httpStatus: 409,
+    devMessage:
+      'No se puede cambiar a modo independent con transferencias cross-store abiertas',
+  },
+  INV_MODE_CHANGE_BLOCKED_BY_ORPHAN_LOCATIONS: {
+    code: 'INV_MODE_CHANGE_BLOCKED_BY_ORPHAN_LOCATIONS',
+    httpStatus: 409,
+    devMessage:
+      'No se puede cambiar a modo independent con bodegas org-wide (store_id=null) sin asignar a tienda',
+  },
+  INV_TRANSFER_VALIDATE_001: {
+    code: 'INV_TRANSFER_VALIDATE_001',
+    httpStatus: 400,
+    devMessage: 'Source and destination locations must be different',
+  },
+  INV_TRANSFER_STOCK_001: {
+    code: 'INV_TRANSFER_STOCK_001',
+    httpStatus: 400,
+    devMessage: 'Insufficient stock at source location for one or more items',
+  },
+  INV_TRANSFER_STATUS_001: {
+    code: 'INV_TRANSFER_STATUS_001',
+    httpStatus: 400,
+    devMessage: 'Invalid transfer state transition',
+  },
+  INV_TRANSFER_FIND_001: {
+    code: 'INV_TRANSFER_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Stock transfer not found',
+  },
+
+  // Cash Registers
+  CR_FIND_001: {
+    code: 'CR_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Cash register not found',
+  },
+  CR_DUP_001: {
+    code: 'CR_DUP_001',
+    httpStatus: 409,
+    devMessage: 'A cash register with this code already exists',
   },
 
   // Customers
@@ -1617,6 +1724,126 @@ export const ErrorCodes = {
     code: 'ORD_FAST_TRACK_PAYMENT_REQUIRED_001',
     httpStatus: 400,
     devMessage: 'Se requiere informacion de pago para procesar la orden completa.',
+  },
+
+  // ===== SaaS Subscriptions =====
+  SUBSCRIPTION_001: {
+    code: 'SUBSCRIPTION_001',
+    httpStatus: 404,
+    devMessage: 'No subscription found for this store',
+  },
+  SUBSCRIPTION_002: {
+    code: 'SUBSCRIPTION_002',
+    httpStatus: 409,
+    devMessage: 'Subscription is in draft state; activation required',
+  },
+  SUBSCRIPTION_003: {
+    code: 'SUBSCRIPTION_003',
+    httpStatus: 403,
+    devMessage: 'Subscription is cancelled/expired',
+  },
+  SUBSCRIPTION_004: {
+    code: 'SUBSCRIPTION_004',
+    httpStatus: 403,
+    devMessage: 'Store has no active subscription for AI features',
+  },
+  SUBSCRIPTION_005: {
+    code: 'SUBSCRIPTION_005',
+    httpStatus: 403,
+    devMessage: 'Feature not included in your current plan',
+  },
+  SUBSCRIPTION_006: {
+    code: 'SUBSCRIPTION_006',
+    httpStatus: 429,
+    devMessage: 'AI quota exceeded for this billing period',
+  },
+  SUBSCRIPTION_007: {
+    code: 'SUBSCRIPTION_007',
+    httpStatus: 200,
+    devMessage: 'Subscription past due — degraded mode',
+  },
+  SUBSCRIPTION_008: {
+    code: 'SUBSCRIPTION_008',
+    httpStatus: 402,
+    devMessage: 'Subscription suspended due to unpaid balance',
+  },
+  SUBSCRIPTION_009: {
+    code: 'SUBSCRIPTION_009',
+    httpStatus: 402,
+    devMessage: 'Subscription blocked — resolve billing to continue',
+  },
+  SUBSCRIPTION_010: {
+    code: 'SUBSCRIPTION_010',
+    httpStatus: 409,
+    devMessage: 'Invalid subscription state transition',
+  },
+  SUBSCRIPTION_INTERNAL_ERROR: {
+    code: 'SUBSCRIPTION_INTERNAL_ERROR',
+    httpStatus: 500,
+    devMessage: 'Internal error while resolving subscription access',
+  },
+  SUBSCRIPTION_PAY_001: {
+    code: 'SUBSCRIPTION_PAY_001',
+    httpStatus: 400,
+    devMessage: 'Subscription payment method missing or disabled',
+  },
+  SUBSCRIPTION_PRORATION_001: {
+    code: 'SUBSCRIPTION_PRORATION_001',
+    httpStatus: 400,
+    devMessage: 'Invalid proration parameters',
+  },
+  SUBSCRIPTION_PROMO_002: {
+    code: 'SUBSCRIPTION_PROMO_002',
+    httpStatus: 409,
+    devMessage: 'Store does not meet promotional plan eligibility rules',
+  },
+
+  // Partner / reseller
+  PARTNER_001: {
+    code: 'PARTNER_001',
+    httpStatus: 403,
+    devMessage: 'Organization is not a partner reseller',
+  },
+  PARTNER_002: {
+    code: 'PARTNER_002',
+    httpStatus: 422,
+    devMessage: 'Margin exceeds base plan maximum',
+  },
+  PARTNER_003: {
+    code: 'PARTNER_003',
+    httpStatus: 422,
+    devMessage: 'Partner cannot enable features beyond base plan',
+  },
+  PARTNER_004: {
+    code: 'PARTNER_004',
+    httpStatus: 409,
+    devMessage: 'Commission payout already processed',
+  },
+
+  // Promotional plans
+  PROMO_001: {
+    code: 'PROMO_001',
+    httpStatus: 409,
+    devMessage: 'Promotional plan no longer eligible',
+  },
+
+  // Plans
+  PLAN_001: {
+    code: 'PLAN_001',
+    httpStatus: 409,
+    devMessage: 'Plan is archived and cannot be subscribed to',
+  },
+  PLAN_002: {
+    code: 'PLAN_002',
+    httpStatus: 403,
+    devMessage: 'Plan is not marked resellable',
+  },
+
+  // Trial
+  TRIAL_001: {
+    code: 'TRIAL_001',
+    httpStatus: 402,
+    devMessage: 'Trial ended; choose a plan to continue',
   },
 } as const satisfies Record<string, ErrorCodeEntry>;
 

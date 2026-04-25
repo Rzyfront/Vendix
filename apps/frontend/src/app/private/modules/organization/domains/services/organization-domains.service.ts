@@ -191,4 +191,43 @@ export class OrganizationDomainsService {
       { value: AppType.ORG_LANDING, label: 'Landing de Organización' },
     ];
   }
+
+  /**
+   * Renew SSL certificate for a domain
+   */
+  renewSsl(domainId: number): Observable<ApiResponse<{ renewed: boolean; ssl_status: string; message: string }>> {
+    return this.http.post<ApiResponse<{ renewed: boolean; ssl_status: string; message: string }>>(
+      `${this.apiUrl}/organization/domains/${domainId}/ssl-renew`,
+      {},
+    );
+  }
+
+  /**
+   * Get DNS instructions for a domain
+   */
+  getDnsInstructions(hostname: string): Observable<ApiResponse<{
+    hostname: string;
+    ownership: string;
+    dns_type: 'CNAME' | 'A';
+    target: string;
+    instructions: {
+      record_type: string;
+      name: string;
+      value: string;
+      ttl: number;
+    }[];
+  }>> {
+    return this.http.get<ApiResponse<{
+      hostname: string;
+      ownership: string;
+      dns_type: 'CNAME' | 'A';
+      target: string;
+      instructions: {
+        record_type: string;
+        name: string;
+        value: string;
+        ttl: number;
+      }[];
+    }>>(`${this.apiUrl}/organization/domains/dns-instructions/${hostname}`);
+  }
 }

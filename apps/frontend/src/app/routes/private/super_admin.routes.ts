@@ -134,14 +134,10 @@ export const superAdminRoutes: Routes = [
             '../../private/modules/super-admin/monitoring/monitoring.routes'
           ).then((m) => m.MONITORING_ROUTES),
       },
-      // Placeholder routes - modules under construction
       {
         path: 'billing',
-        loadComponent: () =>
-          import(
-            '../../shared/components/under-construction/under-construction.component'
-          ).then((c) => c.UnderConstructionComponent),
-        data: { title: 'Facturación', description: 'El módulo de facturación está siendo desarrollado.' },
+        redirectTo: 'subscriptions',
+        pathMatch: 'full',
       },
       {
         path: 'support',
@@ -203,6 +199,13 @@ export const superAdminRoutes: Routes = [
           import(
             '../../private/modules/super-admin/payroll-defaults/payroll-defaults.component'
           ).then((c) => c.PayrollDefaultsComponent),
+      },
+      {
+        path: 'subscriptions',
+        loadChildren: () =>
+          import(
+            '../../private/modules/super-admin/subscriptions/subscriptions.routes'
+          ).then((m) => m.SUBSCRIPTIONS_ROUTES),
       },
     ],
   },

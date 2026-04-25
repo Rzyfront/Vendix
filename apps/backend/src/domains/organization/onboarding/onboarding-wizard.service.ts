@@ -1149,6 +1149,13 @@ export class OnboardingWizardService {
       select: { organization_id: true },
     });
 
+    // Get app type to determine if we need to create ORG_ADMIN role
+    const userSettings = await this.prismaService.user_settings.findUnique({
+      where: { user_id: userId },
+    });
+    const config = (userSettings?.config as any) || {};
+    const selectedAppType = config.selected_app_type;
+
     // Mark organization as onboarded and activate it
     if (user?.organization_id) {
       await this.prismaService.organizations.update({
@@ -1159,6 +1166,11 @@ export class OnboardingWizardService {
           updated_at: new Date(),
         },
       });
+
+      // Create default ORG_ADMIN role for the creator if this is ORG_ADMIN flow
+      if (selectedAppType === 'ORG_ADMIN') {
+        await this.createDefaultOrgAdminRole(user.organization_id, userId);
+      }
 
       // Mark first store as onboarded
       const store = await this.prismaService.stores.findFirst({
@@ -1574,10 +1586,12 @@ export class OnboardingWizardService {
   /**
    * Resend verification email for authenticated user
    * This method uses the authenticated user's ID instead of requiring email in body
+   * Implements 60-second cooldown to prevent spam
    */
   async resendVerificationEmail(userId: number): Promise<{
     message: string;
     alreadyVerified?: boolean;
+    cooldownRemaining?: number;
   }> {
     const user = await this.prismaService.users.findUnique({
       where: { id: userId },
@@ -1592,6 +1606,27 @@ export class OnboardingWizardService {
         message: 'Este email ya ha sido verificado anteriormente.',
         alreadyVerified: true,
       };
+    }
+
+    // Check cooldown using onboarding state table
+    const COOLDOWN_SECONDS = 60;
+    if (user.organization_id) {
+      const onboardingState = await this.prismaService.organization_onboarding_state.findUnique({
+        where: { organization_id: user.organization_id },
+      });
+
+      if (onboardingState?.last_resend_at) {
+        const lastResend = new Date(onboardingState.last_resend_at).getTime();
+        const now = Date.now();
+        const elapsed = Math.floor((now - lastResend) / 1000);
+
+        if (elapsed < COOLDOWN_SECONDS) {
+          return {
+            message: `Por favor espera ${COOLDOWN_SECONDS - elapsed} segundos antes de reenviar`,
+            cooldownRemaining: COOLDOWN_SECONDS - elapsed,
+          };
+        }
+      }
     }
 
     // Invalidar tokens anteriores
@@ -1621,6 +1656,20 @@ export class OnboardingWizardService {
         select: { slug: true },
       });
       organizationSlug = organization?.slug;
+
+      // Update last_resend_at in onboarding state
+      await this.prismaService.organization_onboarding_state.upsert({
+        where: { organization_id: user.organization_id },
+        create: {
+          organization_id: user.organization_id,
+          last_resend_at: new Date(),
+          email_verification_sent_at: new Date(),
+        },
+        update: {
+          last_resend_at: new Date(),
+          email_verification_sent_at: new Date(),
+        },
+      });
     }
 
     // Enviar email usando EmailService
@@ -1642,5 +1691,180 @@ export class OnboardingWizardService {
    */
   private generateRandomToken(): string {
     return require('crypto').randomBytes(32).toString('hex');
+  }
+
+  /**
+   * Save wizard draft data for a specific step
+   * Called on each step navigation to persist state
+   */
+  async saveWizardDraft(userId: number, step: string, data: any): Promise<void> {
+    const user = await this.prismaService.users.findUnique({
+      where: { id: userId },
+      select: { organization_id: true },
+    });
+
+    if (!user?.organization_id) {
+      throw new BadRequestException('User has no organization');
+    }
+
+    const updateData: any = {
+      updated_at: new Date(),
+    };
+
+    switch (step) {
+      case 'user':
+        updateData.user_data_draft = data;
+        break;
+      case 'organization':
+        updateData.organization_data_draft = data;
+        break;
+      case 'store':
+        updateData.store_data_draft = data;
+        break;
+      case 'app_config':
+        updateData.app_config_draft = data;
+        break;
+    }
+
+    await this.prismaService.organization_onboarding_state.upsert({
+      where: { organization_id: user.organization_id },
+      create: {
+        organization_id: user.organization_id,
+        current_step: 1,
+        ...updateData,
+      },
+      update: updateData,
+    });
+  }
+
+  /**
+   * Get wizard draft data for a specific step
+   */
+  async getWizardDraft(userId: number, step: string): Promise<any> {
+    const user = await this.prismaService.users.findUnique({
+      where: { id: userId },
+      select: { organization_id: true },
+    });
+
+    if (!user?.organization_id) {
+      return null;
+    }
+
+    const state = await this.prismaService.organization_onboarding_state.findUnique({
+      where: { organization_id: user.organization_id },
+    });
+
+    if (!state) return null;
+
+    switch (step) {
+      case 'user':
+        return state.user_data_draft;
+      case 'organization':
+        return state.organization_data_draft;
+      case 'store':
+        return state.store_data_draft;
+      case 'app_config':
+        return state.app_config_draft;
+      default:
+        return null;
+    }
+  }
+
+  /**
+   * Update current step in wizard state
+   */
+  async updateWizardStep(userId: number, step: number): Promise<void> {
+    const user = await this.prismaService.users.findUnique({
+      where: { id: userId },
+      select: { organization_id: true },
+    });
+
+    if (!user?.organization_id) {
+      return;
+    }
+
+    await this.prismaService.organization_onboarding_state.upsert({
+      where: { organization_id: user.organization_id },
+      create: {
+        organization_id: user.organization_id,
+        current_step: step,
+      },
+      update: {
+        current_step: step,
+        updated_at: new Date(),
+      },
+    });
+  }
+
+  /**
+   * Create default ORG_ADMIN role for the organization creator
+   * Assigns full org-level permissions
+   */
+  async createDefaultOrgAdminRole(organizationId: number, creatorUserId: number): Promise<void> {
+    // Check if role already exists
+    const existingRole = await this.prismaService.roles.findFirst({
+      where: {
+        name: 'ORG_ADMIN',
+        organization_id: organizationId,
+      },
+    });
+
+    if (existingRole) {
+      // Role already exists, just assign it to the user
+      await this.assignRoleToUser(creatorUserId, existingRole.id);
+      return;
+    }
+
+    // Get all system permissions for org-level access
+    const allPermissions = await this.prismaService.permissions.findMany({
+      where: { is_system_permission: true },
+    });
+
+    // Create the ORG_ADMIN role
+    const orgAdminRole = await this.prismaService.roles.create({
+      data: {
+        name: 'ORG_ADMIN',
+        description: 'Administrador de Organización con permisos completos',
+        is_system_role: false,
+        organization_id: organizationId,
+      },
+    });
+
+    // Create role permissions for all system permissions
+    if (allPermissions.length > 0) {
+      await this.prismaService.role_permissions.createMany({
+        data: allPermissions.map((perm) => ({
+          role_id: orgAdminRole.id,
+          permission_id: perm.id,
+          granted: true,
+        })),
+      });
+    }
+
+    // Assign the role to the creator user
+    await this.assignRoleToUser(creatorUserId, orgAdminRole.id);
+  }
+
+  /**
+   * Assign a role to a user
+   */
+  private async assignRoleToUser(userId: number, roleId: number): Promise<void> {
+    const existingAssignment = await this.prismaService.user_roles.findUnique({
+      where: {
+        user_id_role_id: {
+          user_id: userId,
+          role_id: roleId,
+        },
+      },
+    });
+
+    if (!existingAssignment) {
+      await this.prismaService.user_roles.create({
+        data: {
+          user_id: userId,
+          role_id: roleId,
+        },
+      });
+    }
   }
 }

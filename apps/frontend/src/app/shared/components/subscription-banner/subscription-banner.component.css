@@ -1,0 +1,87 @@
+.subscription-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.625rem 1rem;
+  border-bottom: 1px solid transparent;
+  gap: 0.75rem;
+}
+
+.subscription-banner--info {
+  background-color: var(--color-blue-50, #eff6ff);
+  border-color: var(--color-blue-200, #bfdbfe);
+  color: var(--color-blue-800, #1e40af);
+}
+
+.subscription-banner--warning {
+  background-color: var(--color-yellow-50, #fefce8);
+  border-color: var(--color-yellow-200, #fef08a);
+  color: var(--color-yellow-800, #854d0e);
+}
+
+.subscription-banner--danger {
+  background-color: var(--color-red-50, #fef2f2);
+  border-color: var(--color-red-200, #fecaca);
+  color: var(--color-red-800, #991b1b);
+}
+
+.subscription-banner__content {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.subscription-banner__text {
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.subscription-banner__action {
+  flex-shrink: 0;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  padding: 0.25rem 0.75rem;
+  border-radius: var(--radius-md, 6px);
+  border: 1px solid currentColor;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  transition: opacity 150ms ease;
+  min-height: 32px;
+}
+
+.subscription-banner__action:hover {
+  opacity: 0.8;
+}
+
+.subscription-banner__action:focus-visible {
+  outline: 2px solid var(--color-ring, #3b82f6);
+  outline-offset: 2px;
+}
+
+.subscription-banner__dismiss {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  border-radius: var(--radius-md, 6px);
+  transition: opacity 150ms ease;
+}
+
+.subscription-banner__dismiss:hover {
+  opacity: 0.7;
+}
+
+.subscription-banner__dismiss:focus-visible {
+  outline: 2px solid var(--color-ring, #3b82f6);
+  outline-offset: 2px;
+}

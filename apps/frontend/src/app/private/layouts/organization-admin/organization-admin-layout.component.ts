@@ -15,6 +15,8 @@ import { HeaderComponent } from '../../../shared/components/header/header.compon
 import { AuthFacade } from '../../../core/store/auth/auth.facade';
 import { OnboardingWizardService } from '../../../core/services/onboarding-wizard.service';
 import { OnboardingModalComponent } from '../../../shared/components/onboarding-modal';
+import { SubscriptionBannerComponent } from '../../../shared/components/subscription-banner/subscription-banner.component';
+import { PaywallOutletComponent } from '../../../shared/components/ai-paywall-modal/paywall-outlet.component';
 import { MenuFilterService } from '../../../core/services/menu-filter.service';
 
 import { map } from 'rxjs/operators';
@@ -40,6 +42,8 @@ import { ToastService } from '../../../shared/components/toast/toast.service';
     SidebarComponent,
     HeaderComponent,
     OnboardingModalComponent,
+    SubscriptionBannerComponent,
+    PaywallOutletComponent,
   ],
   template: `
     <div class="flex">
@@ -71,6 +75,8 @@ import { ToastService } from '../../../shared/components/toast/toast.service';
         >
         </app-header>
 
+        <app-subscription-banner />
+
         <!-- Page Content (Scrollable) -->
         <main
           class="flex-1 overflow-y-auto overflow-x-hidden px-1 md:px-4 transition-all duration-300 ease-in-out"
@@ -91,6 +97,9 @@ import { ToastService } from '../../../shared/components/toast/toast.service';
         (completed)="onOnboardingCompleted($event)"
       ></app-onboarding-modal>
     }
+
+    <!-- Subscription paywall (driven by interceptor + access service) -->
+    <app-paywall-outlet />
   `,
   styleUrls: ['./organization-admin-layout.component.scss'],
 })
@@ -168,6 +177,11 @@ export class OrganizationAdminLayoutComponent {
       label: 'Dominios',
       icon: 'globe',
       route: '/admin/domains',
+    },
+    {
+      label: 'Roles',
+      icon: 'shield',
+      route: '/admin/roles',
     },
     {
       label: 'Auditoría y Cumplimiento',

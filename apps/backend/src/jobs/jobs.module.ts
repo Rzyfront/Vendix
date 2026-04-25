@@ -16,14 +16,25 @@ import { ArAgingUpdateJob } from './ar-aging-update.job';
 import { ApAgingUpdateJob } from './ap-aging-update.job';
 import { PaymentTimeoutCleanupJob } from './payment-timeout-cleanup.job';
 import { QueueExpiryCleanupJob } from './queue-expiry-cleanup.job';
+import { SubscriptionStateEngineJob } from './subscription-state-engine.job';
+import { SubscriptionRenewalBillingJob } from './subscription-renewal-billing.job';
+import { SubscriptionReminderDispatchJob } from './subscription-reminder-dispatch.job';
+import { SubscriptionPaymentRetryJob } from './subscription-payment-retry.job';
+import { PromotionalActivationJob } from './promotional-activation.job';
+import { PartnerPayoutBatchJob } from './partner-payout-batch.job';
 import { PrismaModule } from '../prisma/prisma.module';
+import { SubscriptionsModule } from '../domains/store/subscriptions/subscriptions.module';
 
 @Module({
   imports: [
     ScheduleModule.forRoot(),
     OrderFlowModule,
     PrismaModule,
-    BullModule.registerQueue({ name: 'ai-embedding' }),
+    SubscriptionsModule,
+    BullModule.registerQueue(
+      { name: 'ai-embedding' },
+      { name: 'subscription-payment-retry' },
+    ),
   ],
   providers: [
     OrderAutoFinishJob,
@@ -40,6 +51,12 @@ import { PrismaModule } from '../prisma/prisma.module';
     ApAgingUpdateJob,
     PaymentTimeoutCleanupJob,
     QueueExpiryCleanupJob,
+    SubscriptionStateEngineJob,
+    SubscriptionRenewalBillingJob,
+    SubscriptionReminderDispatchJob,
+    SubscriptionPaymentRetryJob,
+    PromotionalActivationJob,
+    PartnerPayoutBatchJob,
   ],
 })
 export class JobsModule {}

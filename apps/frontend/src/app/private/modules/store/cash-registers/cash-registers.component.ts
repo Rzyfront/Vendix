@@ -2,6 +2,7 @@ import { Component, signal, computed, inject, DestroyRef } from '@angular/core';
 import {
   FormsModule,
   FormBuilder,
+  FormControl,
   FormGroup,
   Validators,
   ReactiveFormsModule,
@@ -21,6 +22,8 @@ import {
   ItemListCardConfig,
   ModalComponent,
   InputComponent,
+  SelectorComponent,
+  SelectorOption,
 } from '../../../../shared/components/index';
 import {
   ScrollableTabsComponent,
@@ -33,6 +36,8 @@ import {
 } from '../pos/services/pos-cash-register.service';
 import { PosSessionDetailModalComponent } from '../pos/components/pos-session-detail-modal.component';
 import { CurrencyFormatService } from '../../../../shared/pipes/currency';
+import { LocationsService } from '../inventory/services/locations.service';
+import { InventoryLocation } from '../inventory/interfaces';
 
 @Component({
   selector: 'app-cash-registers',
@@ -49,6 +54,7 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
     ScrollableTabsComponent,
     ModalComponent,
     InputComponent,
+    SelectorComponent,
     PosSessionDetailModalComponent,
   ],
   template: `
@@ -333,6 +339,22 @@ import { CurrencyFormatService } from '../../../../shared/pipes/currency';
             [size]="'md'"
             helperText="Monto sugerido al abrir esta caja"
           ></app-input>
+
+          <!-- Bodega (override opcional) -->
+          <div class="space-y-1">
+            <app-selector
+              formControlName="location_id"
+              label="Bodega (override opcional)"
+              [options]="location_options()"
+              [placeholder]="location_placeholder()"
+              size="md"
+              helpText="Deja vacío para usar la bodega principal de la tienda."
+            />
+            <p class="text-xs text-text-secondary">
+              Útil si esta caja descuenta stock de una bodega distinta a la
+              principal de la tienda.
+            </p>
+          </div>
         </form>
 
         <div slot="footer" class="flex justify-end gap-3">
@@ -376,6 +398,7 @@ export class CashRegistersComponent {
   private readonly destroyRef = inject(DestroyRef);
   private readonly currencyService = inject(CurrencyFormatService);
   private readonly cash_register_service = inject(PosCashRegisterService);
+  private readonly locations_service = inject(LocationsService);
   private readonly toast_service = inject(ToastService);
   private readonly dialog_service = inject(DialogService);
 
@@ -456,6 +479,29 @@ export class CashRegistersComponent {
   readonly show_detail_modal = signal(false);
   readonly editing_register = signal<CashRegister | null>(null);
   readonly is_saving_register = signal(false);
+
+  // Locations (bodegas) for the override selector
+  readonly locations = signal<InventoryLocation[]>([]);
+
+  readonly default_location = computed(
+    () => this.locations().find((l) => l.is_default) ?? null,
+  );
+
+  readonly location_options = computed<SelectorOption[]>(() =>
+    this.locations()
+      .filter((l) => l.is_active)
+      .map((l) => ({
+        value: l.id,
+        label: l.is_default ? `${l.name} (principal)` : l.name,
+      })),
+  );
+
+  readonly location_placeholder = computed(() => {
+    const def = this.default_location();
+    return def
+      ? `Hereda de: ${def.name}`
+      : 'Seleccionar bodega...';
+  });
 
   // Session detail
   selected_session: CashRegisterSession | null = null;
@@ -707,9 +753,27 @@ export class CashRegistersComponent {
       code: ['', [Validators.required, Validators.maxLength(50)]],
       description: [''],
       default_opening_amount: [0, [Validators.min(0)]],
+      location_id: new FormControl<number | null>(null),
     });
     this.loadRegisters();
     this.loadSessions();
+    this.loadLocations();
+  }
+
+  private loadLocations(): void {
+    this.locations_service
+      .getLocations({ is_active: true })
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (res) => {
+          const data = Array.isArray(res?.data) ? res.data : [];
+          this.locations.set(data);
+        },
+        error: () => {
+          // Silent: el selector queda vacío y el placeholder sigue funcionando.
+          this.locations.set([]);
+        },
+      });
   }
 
   // Tab change handler
@@ -775,6 +839,7 @@ export class CashRegistersComponent {
       code: '',
       description: '',
       default_opening_amount: 0,
+      location_id: null,
     });
     this.show_register_modal.set(true);
   }
@@ -786,6 +851,7 @@ export class CashRegistersComponent {
       code: register.code,
       description: register.description || '',
       default_opening_amount: register.default_opening_amount || 0,
+      location_id: register.location_id ?? null,
     });
     this.show_register_modal.set(true);
   }
@@ -799,7 +865,21 @@ export class CashRegistersComponent {
     if (!this.register_form.valid) return;
     this.is_saving_register.set(true);
 
-    const data = this.register_form.value;
+    const raw = this.register_form.value as {
+      name: string;
+      code: string;
+      description?: string;
+      default_opening_amount?: number;
+      location_id?: number | null;
+    };
+
+    // Envía location_id solo si el usuario seleccionó explícitamente.
+    // undefined/null -> backend lo interpreta como "heredar default_location_id".
+    const { location_id, ...rest } = raw;
+    const data: Partial<CashRegister> & { location_id?: number } = {
+      ...rest,
+      ...(location_id != null ? { location_id: Number(location_id) } : {}),
+    };
     const editing = this.editing_register();
 
     const obs$ = editing

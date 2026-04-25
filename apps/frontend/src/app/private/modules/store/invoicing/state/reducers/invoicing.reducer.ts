@@ -275,6 +275,24 @@ export const invoicingReducer = createReducer(
     resolutions: state.resolutions.filter((r) => r.id !== id),
   })),
 
+  // ── DIAN Configs ────────────────────────────────────────
+  on(InvoicingActions.loadDianConfigs, (state) => ({
+    ...state,
+    dianConfigsLoading: true,
+    dianConfigsError: null,
+  })),
+  on(InvoicingActions.loadDianConfigsSuccess, (state, { configs }) => ({
+    ...state,
+    dianConfigs: configs,
+    dianConfigsLoading: false,
+    dianConfigsError: null,
+  })),
+  on(InvoicingActions.loadDianConfigsFailure, (state, { error }) => ({
+    ...state,
+    dianConfigsLoading: false,
+    dianConfigsError: error,
+  })),
+
   // ── Filter setters ─────────────────────────────────────
   on(InvoicingActions.setSearch, (state, { search }) => ({
     ...state,

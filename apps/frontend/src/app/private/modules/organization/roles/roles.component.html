@@ -1,0 +1,127 @@
+<div class="space-y-2 md:space-y-2 md:space-y-4">
+  <!-- Stats Cards -->
+  <div class="stats-container">
+    @for (item of statsItems(); track item) {
+      <app-stats
+        [title]="item.title"
+        [value]="item.value"
+        [smallText]="item.smallText"
+        [iconName]="item.iconName"
+        [iconBgColor]="item.iconBgColor"
+        [iconColor]="item.iconColor"
+      ></app-stats>
+    }
+  </div>
+
+  <!-- Roles Table Header -->
+  <div
+    class="p-2 md:px-6 md:py-4 border-b border-border sticky top-0 bg-surface z-10"
+  >
+    <div
+      class="flex flex-col md:flex-row justify-between items-start md:items-center gap-2 md:gap-4"
+    >
+      <!-- Título y contador -->
+      <div class="flex-1 min-w-0">
+        <h2 class="text-lg font-semibold text-text-primary">
+          Roles ({{ roles().length }})
+        </h2>
+      </div>
+
+      <!-- Controles compactos -->
+      <div class="flex flex-wrap items-center gap-3 w-full md:w-auto">
+        <!-- Búsqueda -->
+        <app-inputsearch
+          class="min-w-[200px] flex-1 md:flex-none"
+          size="sm"
+          placeholder="Buscar roles..."
+          [debounceTime]="500"
+          (searchChange)="onSearchChange($event)"
+        ></app-inputsearch>
+
+        <!-- Botones de acción -->
+        <div class="flex gap-2 items-center">
+          <app-button
+            variant="outline"
+            size="sm"
+            (clicked)="refreshRoles()"
+            [disabled]="isLoading()"
+            title="Actualizar"
+          >
+            <app-icon name="refresh" [size]="16" slot="icon"></app-icon>
+          </app-button>
+          <app-button
+            variant="primary"
+            size="sm"
+            (clicked)="createRole()"
+            title="Nuevo Rol"
+          >
+            <app-icon name="plus" [size]="16" slot="icon"></app-icon>
+            <span class="hidden md:inline ml-2">Nuevo</span>
+          </app-button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Loading State -->
+    @if (isLoading()) {
+      <div class="p-2 md:p-6 text-center">
+        <div
+          class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"
+        ></div>
+        <p class="mt-2 text-text-secondary">Cargando roles...</p>
+      </div>
+    }
+
+    <!-- Empty State -->
+    @if (!isLoading() && roles().length === 0) {
+      <app-empty-state
+        icon="shield"
+        [title]="getEmptyStateTitle()"
+        [description]="getEmptyStateDescription()"
+        actionButtonText="Crear Primer Rol"
+        (actionClick)="createRole()"
+      >
+      </app-empty-state>
+    }
+
+    <!-- Responsive Data View -->
+    @if (roles().length > 0) {
+      <app-responsive-data-view
+        [data]="roles()"
+        [columns]="tableColumns"
+        [actions]="tableActions"
+        [cardConfig]="cardConfig"
+        [loading]="isLoading()"
+      >
+      </app-responsive-data-view>
+    }
+  </div>
+
+  @defer (when showCreateModal()) {
+    <app-role-create-modal
+      [(isOpen)]="showCreateModal"
+      (roleCreated)="onRoleCreated($event)"
+      (cancel)="showCreateModal.set(false)"
+    ></app-role-create-modal>
+  }
+
+  @defer (when showEditModal() && currentRole()) {
+    <app-role-edit-modal
+      [role]="currentRole()"
+      [(isOpen)]="showEditModal"
+      (roleUpdated)="onRoleUpdated($event)"
+      (cancel)="showEditModal.set(false); currentRole.set(null)"
+    ></app-role-edit-modal>
+  }
+
+  @defer (when showPermissionsModal() && currentRole()) {
+    <app-permission-tree-selector
+      [roleId]="currentRole()!.id"
+      [roleName]="currentRole()!.name"
+      [(isOpen)]="showPermissionsModal"
+      [isSubmitting]="isSubmitting()"
+      (permissionsChange)="onPermissionsUpdated($event)"
+      (cancel)="showPermissionsModal.set(false); currentRole.set(null)"
+    ></app-permission-tree-selector>
+  }
+</div>

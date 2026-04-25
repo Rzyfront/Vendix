@@ -343,6 +343,9 @@ model organizations {
   updated_at                    DateTime?                      @default(now()) @db.Timestamp(6)
   onboarding                    Boolean                        @default(false)
   mode                          organization_mode_enum         @default(production)
+  is_partner                    Boolean                        @default(false)
+  partner_settings              Json?
+  partner_since                 DateTime?                      @db.Timestamp(6)
   addresses                     addresses[]
   audit_logs                    audit_logs[]
   domain_settings               domain_settings[]
@@ -402,9 +405,37 @@ model organizations {
   // Accounts Payable
   accounts_payable accounts_payable[] @relation("org_accounts_payable")
 
+  // SaaS Subscriptions (Partner program)
+  partner_overrides   partner_plan_overrides[]
+  partner_commissions partner_commissions[]    @relation("partner_commissions")
+  partner_payouts     partner_payout_batches[] @relation("partner_payouts")
+
+  // Onboarding State
+  onboarding_state    organization_onboarding_state?
+
   @@index([onboarding])
   @@index([account_type])
   @@index([mode])
+  @@index([is_partner])
+}
+
+model organization_onboarding_state {
+  id                           Int       @id @default(autoincrement())
+  organization_id              Int       @unique
+  current_step                 Int       @default(1)
+  selected_app_type            String?   @db.VarChar(50)
+  step_data                    Json?     @default("{}")
+  user_data_draft              Json?     @default("{}")
+  organization_data_draft      Json?     @default("{}")
+  store_data_draft             Json?     @default("{}")
+  app_config_draft             Json?     @default("{}")
+  email_verification_sent_at   DateTime? @db.Timestamp(6)
+  last_resend_at               DateTime? @db.Timestamp(6)
+  created_at                   DateTime? @default(now()) @db.Timestamp(6)
+  updated_at                   DateTime? @default(now()) @db.Timestamp(6)
+  organization                 organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+
+  @@index([organization_id])
 }
 
 model organization_settings {
@@ -470,6 +501,7 @@ model stores {
   store_code                  String?                       @unique @db.VarChar(20)
   store_type                  store_type_enum               @default(physical)
   timezone                    String?                       @db.VarChar(50)
+  operating_hours             Json?
   onboarding                  Boolean                       @default(false)
   addresses                   addresses[]
   audit_logs                  audit_logs[]
@@ -571,6 +603,9 @@ model stores {
   booking_confirmation_tokens booking_confirmation_tokens[]
   email_templates             email_templates[]
   messaging_channels          messaging_channels[]
+
+  // SaaS Subscription (one per store)
+  subscription store_subscriptions?
 
   @@unique([organization_id, slug])
   @@index([onboarding])
@@ -2059,23 +2094,33 @@ enum notification_type_enum {
   data_collection_created
   data_collection_submitted
   data_collection_prediagnosis_ready
+  subscription_payment_reminder_soft
+  subscription_payment_reminder_hard
+  subscription_suspended
+  subscription_blocked
+  subscription_reactivated
+  subscription_promo_applied
+  subscription_renewal_upcoming
+  partner_commission_available
 }
 
 model notifications {
-  id         Int                    @id @default(autoincrement())
+  id         Int                        @id @default(autoincrement())
   store_id   Int
   type       notification_type_enum
-  title      String                 @db.VarChar(255)
-  body       String                 @db.Text
+  severity   notification_severity_enum @default(info)
+  title      String                     @db.VarChar(255)
+  body       String                     @db.Text
   data       Json?
-  is_read    Boolean                @default(false)
-  created_at DateTime               @default(now()) @db.Timestamp(6)
-  updated_at DateTime               @default(now()) @db.Timestamp(6)
-  stores     stores                 @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  is_read    Boolean                    @default(false)
+  created_at DateTime                   @default(now()) @db.Timestamp(6)
+  updated_at DateTime                   @default(now()) @db.Timestamp(6)
+  stores     stores                     @relation(fields: [store_id], references: [id], onDelete: Cascade)
 
   @@index([store_id])
   @@index([store_id, is_read])
   @@index([store_id, created_at(sort: Desc)])
+  @@index([store_id, severity, is_read])
 }
 
 model notification_subscriptions {
@@ -3035,26 +3080,28 @@ model ai_engine_configs {
 }
 
 model ai_engine_applications {
-  id              Int       @id @default(autoincrement())
-  key             String    @unique @db.VarChar(100)
-  name            String    @db.VarChar(255)
-  description     String?   @db.Text
-  config_id       Int?
-  system_prompt   String?   @db.Text
-  prompt_template String?   @db.Text
-  temperature     Decimal?  @db.Decimal(3, 2)
-  max_tokens      Int?
-  output_format   String    @default("text") @db.VarChar(50)
-  rate_limit      Json?
-  retry_config    Json?
-  is_active       Boolean   @default(true)
-  metadata        Json?
-  created_at      DateTime? @default(now()) @db.Timestamp(6)
-  updated_at      DateTime? @default(now()) @db.Timestamp(6)
+  id                  Int       @id @default(autoincrement())
+  key                 String    @unique @db.VarChar(100)
+  name                String    @db.VarChar(255)
+  description         String?   @db.Text
+  config_id           Int?
+  system_prompt       String?   @db.Text
+  prompt_template     String?   @db.Text
+  temperature         Decimal?  @db.Decimal(3, 2)
+  max_tokens          Int?
+  output_format       String    @default("text") @db.VarChar(50)
+  rate_limit          Json?
+  retry_config        Json?
+  is_active           Boolean   @default(true)
+  metadata            Json?
+  ai_feature_category String?   @db.VarChar(32)
+  created_at          DateTime? @default(now()) @db.Timestamp(6)
+  updated_at          DateTime? @default(now()) @db.Timestamp(6)
 
   config ai_engine_configs? @relation(fields: [config_id], references: [id], onDelete: SetNull)
 
   @@index([config_id])
+  @@index([ai_feature_category])
 }
 
 model ai_engine_logs {
@@ -5583,4 +5630,309 @@ model messaging_channels {
   store stores @relation(fields: [store_id], references: [id], onDelete: Cascade)
 
   @@unique([store_id, channel_type])
+}
+
+// ============================================
+// SAAS SUBSCRIPTIONS (Phase A - schema + migration + seeds + backfill)
+// ============================================
+
+enum subscription_plan_type_enum {
+  base
+  partner_custom
+  promotional
+}
+
+enum subscription_plan_state_enum {
+  draft
+  active
+  archived
+}
+
+enum subscription_billing_cycle_enum {
+  monthly
+  quarterly
+  semiannual
+  annual
+  lifetime
+}
+
+enum store_subscription_state_enum {
+  draft
+  trial
+  active
+  grace_soft
+  grace_hard
+  suspended
+  blocked
+  cancelled
+  expired
+}
+
+enum subscription_invoice_state_enum {
+  draft
+  issued
+  paid
+  partially_paid
+  overdue
+  void
+  refunded
+}
+
+enum subscription_payment_state_enum {
+  pending
+  succeeded
+  failed
+  refunded
+  partial_refund
+}
+
+enum subscription_event_type_enum {
+  created
+  activated
+  renewed
+  trial_started
+  trial_ended
+  payment_succeeded
+  payment_failed
+  state_transition
+  plan_changed
+  cancelled
+  reactivated
+  promotional_applied
+  partner_override_applied
+  partner_commission_accrued
+  partner_commission_paid
+}
+
+enum partner_commission_state_enum {
+  accrued
+  pending_payout
+  paid
+  reversed
+}
+
+enum notification_severity_enum {
+  info
+  warning
+  critical
+  blocker
+}
+
+model subscription_plans {
+  id                     Int                             @id @default(autoincrement())
+  code                   String                          @unique @db.VarChar(64)
+  name                   String                          @db.VarChar(128)
+  description            String?                         @db.Text
+  plan_type              subscription_plan_type_enum     @default(base)
+  state                  subscription_plan_state_enum    @default(draft)
+  billing_cycle          subscription_billing_cycle_enum @default(monthly)
+  base_price             Decimal                         @db.Decimal(12, 2)
+  currency               String                          @default("COP") @db.VarChar(3)
+  setup_fee              Decimal?                        @db.Decimal(12, 2)
+  trial_days             Int                             @default(0)
+  grace_period_soft_days Int                             @default(5)
+  grace_period_hard_days Int                             @default(10)
+  suspension_day         Int                             @default(14)
+  cancellation_day       Int                             @default(45)
+  feature_matrix         Json
+  ai_feature_flags       Json
+  resellable             Boolean                         @default(false)
+  max_partner_margin_pct Decimal?                        @db.Decimal(5, 2)
+  is_promotional         Boolean                         @default(false)
+  promo_rules            Json?
+  promo_priority         Int                             @default(0)
+  parent_plan_id         Int?
+  parent_plan            subscription_plans?             @relation("plan_lineage", fields: [parent_plan_id], references: [id])
+  child_plans            subscription_plans[]            @relation("plan_lineage")
+  partner_overrides      partner_plan_overrides[]
+  store_subscriptions    store_subscriptions[]           @relation("store_sub_base_plan")
+  promotional_store_subs store_subscriptions[]           @relation("store_sub_promo_plan")
+  created_at             DateTime                        @default(now()) @db.Timestamp(6)
+  updated_at             DateTime                        @default(now()) @db.Timestamp(6)
+  created_by             Int?
+  archived_at            DateTime?                       @db.Timestamp(6)
+
+  @@index([plan_type, state])
+  @@index([is_promotional, promo_priority])
+}
+
+model partner_plan_overrides {
+  id                  Int                   @id @default(autoincrement())
+  organization_id     Int
+  base_plan_id        Int
+  custom_code         String?               @db.VarChar(64)
+  custom_name         String?               @db.VarChar(128)
+  custom_description  String?               @db.Text
+  margin_pct          Decimal               @db.Decimal(5, 2)
+  fixed_surcharge     Decimal?              @db.Decimal(12, 2)
+  is_active           Boolean               @default(true)
+  feature_overrides   Json?
+  created_at          DateTime              @default(now()) @db.Timestamp(6)
+  updated_at          DateTime              @default(now()) @db.Timestamp(6)
+  organization        organizations         @relation(fields: [organization_id], references: [id])
+  base_plan           subscription_plans    @relation(fields: [base_plan_id], references: [id])
+  store_subscriptions store_subscriptions[]
+
+  @@unique([organization_id, base_plan_id])
+  @@index([organization_id])
+}
+
+model store_subscriptions {
+  id                     Int                           @id @default(autoincrement())
+  store_id               Int                           @unique
+  plan_id                Int
+  partner_override_id    Int?
+  state                  store_subscription_state_enum @default(draft)
+  started_at             DateTime?                     @db.Timestamp(6)
+  trial_ends_at          DateTime?                     @db.Timestamp(6)
+  current_period_start   DateTime?                     @db.Timestamp(6)
+  current_period_end     DateTime?                     @db.Timestamp(6)
+  next_billing_at        DateTime?                     @db.Timestamp(6)
+  grace_soft_until       DateTime?                     @db.Timestamp(6)
+  grace_hard_until       DateTime?                     @db.Timestamp(6)
+  suspend_at             DateTime?                     @db.Timestamp(6)
+  cancel_at              DateTime?                     @db.Timestamp(6)
+  cancelled_at           DateTime?                     @db.Timestamp(6)
+  effective_price        Decimal                       @db.Decimal(12, 2)
+  vendix_base_price      Decimal                       @db.Decimal(12, 2)
+  partner_margin_amount  Decimal                       @default(0) @db.Decimal(12, 2)
+  currency               String                        @default("COP") @db.VarChar(3)
+  auto_renew             Boolean                       @default(true)
+  promotional_plan_id    Int?
+  promotional_applied_at DateTime?                     @db.Timestamp(6)
+  resolved_features      Json
+  resolved_at            DateTime                      @default(now()) @db.Timestamp(6)
+  replaced_by_id         Int?
+  metadata               Json?
+  created_at             DateTime                      @default(now()) @db.Timestamp(6)
+  updated_at             DateTime                      @default(now()) @db.Timestamp(6)
+
+  store            stores                  @relation(fields: [store_id], references: [id])
+  plan             subscription_plans      @relation("store_sub_base_plan", fields: [plan_id], references: [id])
+  promotional_plan subscription_plans?     @relation("store_sub_promo_plan", fields: [promotional_plan_id], references: [id])
+  partner_override partner_plan_overrides? @relation(fields: [partner_override_id], references: [id])
+  replaced_by      store_subscriptions?    @relation("store_sub_lineage", fields: [replaced_by_id], references: [id])
+  replaces         store_subscriptions[]   @relation("store_sub_lineage")
+  invoices         subscription_invoices[]
+  events           subscription_events[]
+
+  @@index([state, current_period_end])
+  @@index([plan_id])
+  @@index([next_billing_at])
+  @@index([promotional_plan_id])
+}
+
+model subscription_invoices {
+  id                      Int                             @id @default(autoincrement())
+  store_subscription_id   Int
+  store_id                Int
+  partner_organization_id Int?
+  invoice_number          String                          @unique @db.VarChar(64)
+  state                   subscription_invoice_state_enum @default(draft)
+  issued_at               DateTime?                       @db.Timestamp(6)
+  due_at                  DateTime                        @db.Timestamp(6)
+  period_start            DateTime                        @db.Timestamp(6)
+  period_end              DateTime                        @db.Timestamp(6)
+  subtotal                Decimal                         @db.Decimal(12, 2)
+  tax_amount              Decimal                         @default(0) @db.Decimal(12, 2)
+  total                   Decimal                         @db.Decimal(12, 2)
+  amount_paid             Decimal                         @default(0) @db.Decimal(12, 2)
+  currency                String                          @default("COP") @db.VarChar(3)
+  line_items              Json
+  split_breakdown         Json
+  metadata                Json?
+  created_at              DateTime                        @default(now()) @db.Timestamp(6)
+  updated_at              DateTime                        @default(now()) @db.Timestamp(6)
+
+  store_subscription store_subscriptions     @relation(fields: [store_subscription_id], references: [id])
+  payments           subscription_payments[]
+  commission         partner_commissions?
+
+  @@index([state, due_at])
+  @@index([store_id])
+  @@index([partner_organization_id, state])
+}
+
+model subscription_payments {
+  id                Int                             @id @default(autoincrement())
+  invoice_id        Int
+  state             subscription_payment_state_enum @default(pending)
+  amount            Decimal                         @db.Decimal(12, 2)
+  currency          String                          @default("COP") @db.VarChar(3)
+  payment_method    String?                         @db.VarChar(64)
+  gateway_reference String?                         @db.VarChar(255)
+  paid_at           DateTime?                       @db.Timestamp(6)
+  failure_reason    String?                         @db.Text
+  metadata          Json?
+  created_at        DateTime                        @default(now()) @db.Timestamp(6)
+  updated_at        DateTime                        @default(now()) @db.Timestamp(6)
+
+  invoice subscription_invoices @relation(fields: [invoice_id], references: [id])
+
+  @@index([invoice_id, state])
+}
+
+model partner_commissions {
+  id                      Int                           @id @default(autoincrement())
+  partner_organization_id Int
+  invoice_id              Int                           @unique
+  amount                  Decimal                       @db.Decimal(12, 2)
+  currency                String                        @default("COP") @db.VarChar(3)
+  state                   partner_commission_state_enum @default(accrued)
+  accrued_at              DateTime                      @default(now()) @db.Timestamp(6)
+  paid_at                 DateTime?                     @db.Timestamp(6)
+  payout_reference        String?                       @db.VarChar(255)
+  payout_batch_id         Int?
+
+  invoice      subscription_invoices   @relation(fields: [invoice_id], references: [id])
+  organization organizations           @relation("partner_commissions", fields: [partner_organization_id], references: [id])
+  payout_batch partner_payout_batches? @relation(fields: [payout_batch_id], references: [id])
+
+  @@index([partner_organization_id, state])
+}
+
+model partner_payout_batches {
+  id                      Int                   @id @default(autoincrement())
+  partner_organization_id Int
+  period_start            DateTime              @db.Timestamp(6)
+  period_end              DateTime              @db.Timestamp(6)
+  total_amount            Decimal               @db.Decimal(12, 2)
+  currency                String                @default("COP") @db.VarChar(3)
+  state                   String                @db.VarChar(32)
+  sent_at                 DateTime?             @db.Timestamp(6)
+  paid_at                 DateTime?             @db.Timestamp(6)
+  payout_method           String                @db.VarChar(64)
+  reference               String?               @db.VarChar(255)
+  metadata                Json?
+  commissions             partner_commissions[]
+  organization            organizations         @relation("partner_payouts", fields: [partner_organization_id], references: [id])
+  created_at              DateTime              @default(now()) @db.Timestamp(6)
+  updated_at              DateTime              @default(now()) @db.Timestamp(6)
+
+  @@index([partner_organization_id, state])
+}
+
+model subscription_events {
+  id                    Int                            @id @default(autoincrement())
+  store_subscription_id Int
+  type                  subscription_event_type_enum
+  from_state            store_subscription_state_enum?
+  to_state              store_subscription_state_enum?
+  payload               Json?
+  triggered_by_user_id  Int?
+  triggered_by_job      String?                        @db.VarChar(64)
+  created_at            DateTime                       @default(now()) @db.Timestamp(6)
+  store_subscription    store_subscriptions            @relation(fields: [store_subscription_id], references: [id])
+
+  @@index([store_subscription_id, created_at(sort: Desc)])
+}
+
+model platform_settings {
+  id                 Int      @id @default(autoincrement())
+  key                String   @unique @db.VarChar(64)
+  value              Json
+  default_trial_days Int      @default(14)
+  description        String?  @db.Text
+  created_at         DateTime @default(now()) @db.Timestamp(6)
+  updated_at         DateTime @default(now()) @db.Timestamp(6)
 }

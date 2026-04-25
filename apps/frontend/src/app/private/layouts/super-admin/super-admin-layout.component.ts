@@ -12,6 +12,8 @@ import {
   MenuItem,
 } from '../../../shared/components/sidebar/sidebar.component';
 import { HeaderComponent } from '../../../shared/components/header/header.component';
+import { SubscriptionBannerComponent } from '../../../shared/components/subscription-banner/subscription-banner.component';
+import { PaywallOutletComponent } from '../../../shared/components/ai-paywall-modal/paywall-outlet.component';
 import { AuthFacade } from '../../../core/store/auth/auth.facade';
 import { SupportService } from '../../modules/super-admin/support/services/support.service';
 import { timer } from 'rxjs';
@@ -21,7 +23,13 @@ import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
 @Component({
   selector: 'app-super-admin-layout',
   standalone: true,
-  imports: [RouterModule, SidebarComponent, HeaderComponent],
+  imports: [
+    RouterModule,
+    SidebarComponent,
+    HeaderComponent,
+    SubscriptionBannerComponent,
+    PaywallOutletComponent,
+  ],
   template: `
     <div class="flex">
       <!-- Sidebar -->
@@ -50,6 +58,8 @@ import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
         >
         </app-header>
 
+        <app-subscription-banner />
+
         <!-- Page Content (Scrollable) -->
         <main
           class="flex-1 overflow-y-auto overflow-x-hidden px-1 md:px-4 transition-all duration-300 ease-in-out"
@@ -61,6 +71,9 @@ import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
         </main>
       </div>
     </div>
+
+    <!-- Subscription paywall (driven by interceptor + access service) -->
+    <app-paywall-outlet />
   `,
   styleUrls: ['./super-admin-layout.component.scss'],
 })
@@ -159,6 +172,7 @@ export class SuperAdminLayoutComponent {
         label: 'AI Engine',
         icon: 'cpu',
         route: '/super-admin/system/ai-engine',
+        requiresFeature: 'ai_engine',
       },
       {
         label: 'Organizaciones',

@@ -48,8 +48,6 @@ import { formatDateOnlyUTC } from '../../../../../../shared/utils/date.util';
     ResponsiveDataViewComponent,
     InputsearchComponent,
     OptionsDropdownComponent,
-    ButtonComponent,
-    IconComponent,
     PaginationComponent,
     EmptyStateComponent,
     CardComponent,
@@ -100,7 +98,14 @@ export class DispatchNoteListComponent {
 
   readonly filter_values = signal<FilterValues>({});
 
-  dropdown_actions: DropdownAction[] = [];
+  dropdown_actions: DropdownAction[] = [
+    {
+      label: 'Nueva Remisión',
+      icon: 'plus',
+      action: 'create',
+      variant: 'primary',
+    },
+  ];
 
   // Table configuration
   table_columns: TableColumn[] = [

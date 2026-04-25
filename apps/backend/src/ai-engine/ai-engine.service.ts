@@ -17,6 +17,11 @@ import { REDIS_CLIENT } from '../common/redis/redis.module';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { AILoggingService } from './ai-logging.service';
 import { RequestContextService } from '../common/context/request-context.service';
+import { SubscriptionAccessService } from '../domains/store/subscriptions/services/subscription-access.service';
+import {
+  AIFeatureKey,
+  isAIFeatureKey,
+} from '../domains/store/subscriptions/types/access.types';
 
 @Injectable()
 export class AIEngineService implements OnModuleInit {
@@ -31,6 +36,7 @@ export class AIEngineService implements OnModuleInit {
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
     private readonly aiLoggingService: AILoggingService,
     private readonly eventEmitter: EventEmitter2,
+    private readonly subscriptionAccess: SubscriptionAccessService,
   ) {}
 
   async onModuleInit() {
@@ -233,6 +239,9 @@ export class AIEngineService implements OnModuleInit {
         throw new VendixHttpException(ErrorCodes.AI_APP_003);
       }
 
+      // Subscription gate (log-only by default; enforces when AI_GATE_ENFORCE=true).
+      await this.runSubscriptionGate(appKey, app.ai_feature_category);
+
       // Rate limit check
       await this.checkRateLimit(app);
 
@@ -301,6 +310,14 @@ export class AIEngineService implements OnModuleInit {
           lastResponse.content = this.formatOutput(
             lastResponse.content || '',
             app.output_format,
+          );
+
+          // Subscription quota consumption (best-effort; never throws).
+          await this.consumeSubscriptionQuota(
+            app.ai_feature_category,
+            lastResponse.usage?.totalTokens ??
+              (lastResponse.usage?.promptTokens ?? 0) +
+                (lastResponse.usage?.completionTokens ?? 0),
           );
 
           logStatus = 'success';
@@ -390,6 +407,18 @@ export class AIEngineService implements OnModuleInit {
         return;
       }
 
+      // Subscription gate (log-only by default; throws in enforce mode).
+      try {
+        await this.runSubscriptionGate(appKey, app.ai_feature_category);
+      } catch (err: any) {
+        lastChunk = {
+          type: 'error',
+          error: err?.message ?? 'Subscription gate denied',
+        };
+        yield lastChunk;
+        return;
+      }
+
       await this.checkRateLimit(app);
 
       resolvedConfigId = app.config_id || this.defaultConfigId;
@@ -446,6 +475,15 @@ export class AIEngineService implements OnModuleInit {
       } catch (error: any) {
         lastChunk = { type: 'error', error: error.message };
         yield lastChunk;
+      }
+
+      // Consume quota on successful completion.
+      if (lastChunk?.type === 'done') {
+        const usage = lastChunk.usage;
+        const tokens =
+          usage?.totalTokens ??
+          (usage?.promptTokens ?? 0) + (usage?.completionTokens ?? 0);
+        await this.consumeSubscriptionQuota(app.ai_feature_category, tokens);
       }
     } finally {
       // Log after stream completes — always runs regardless of early returns
@@ -543,6 +581,111 @@ export class AIEngineService implements OnModuleInit {
         .trim();
     }
     return response;
+  }
+
+  /**
+   * Invoke SubscriptionAccessService gate for the current request's store.
+   * - No storeId in context → skip (treated as internal caller).
+   * - featureCategory not a valid AIFeatureKey → skip (legacy app not
+   *   categorized yet).
+   * - ENFORCE by default; log-only only if AI_GATE_ENFORCE=false.
+   */
+  private async runSubscriptionGate(
+    appKey: string,
+    featureCategory: string | null,
+  ): Promise<void> {
+    const storeId = RequestContextService.getStoreId();
+    if (!storeId) return; // internal caller
+    if (!featureCategory || !isAIFeatureKey(featureCategory)) {
+      // Unmapped application — record for observability but never block.
+      this.logger.debug(
+        `AI_GATE_SKIP appKey=${appKey} reason=unmapped_feature_category`,
+      );
+      return;
+    }
+    const feature = featureCategory as AIFeatureKey;
+
+    let result: Awaited<
+      ReturnType<SubscriptionAccessService['canUseAIFeature']>
+    >;
+    try {
+      result = await this.subscriptionAccess.canUseAIFeature(storeId, feature);
+    } catch (err) {
+      this.logger.error(
+        `AI_GATE_ERROR appKey=${appKey} feature=${feature} err=${(err as Error).message}`,
+      );
+      if (process.env.AI_GATE_ENFORCE !== 'false') {
+        throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_INTERNAL_ERROR);
+      }
+      return;
+    }
+
+    this.logger.log(
+      JSON.stringify({
+        event: 'AI_GATE_CHECK',
+        appKey,
+        storeId,
+        feature,
+        allowed: result.allowed,
+        mode: result.mode,
+        reason: result.reason,
+        state: result.subscription_state,
+        enforce: process.env.AI_GATE_ENFORCE !== 'false',
+      }),
+    );
+
+    if (result.mode === 'block' && process.env.AI_GATE_ENFORCE !== 'false') {
+      const key = (result.reason as keyof typeof ErrorCodes) ?? 'SUBSCRIPTION_005';
+      const entry = ErrorCodes[key] ?? ErrorCodes.SUBSCRIPTION_005;
+      throw new VendixHttpException(entry);
+    }
+  }
+
+  /**
+   * Consume subscription quota after a successful provider call.
+   * Best-effort: never throws, any Redis failure is logged by the service.
+   */
+  private async consumeSubscriptionQuota(
+    featureCategory: string | null,
+    units: number,
+  ): Promise<void> {
+    const storeId = RequestContextService.getStoreId();
+    if (!storeId) return;
+    if (!featureCategory || !isAIFeatureKey(featureCategory)) return;
+    const feature = featureCategory as AIFeatureKey;
+
+    // Quota unit policy per feature:
+    //   text_generation → token count (units arg)
+    //   streaming_chat  → 1 message
+    //   async_queue     → 1 job
+    //   rag_embeddings  → document count (caller should pass; fallback=1)
+    //   tool_agents / conversations → no numeric quota
+    let effectiveUnits: number;
+    switch (feature) {
+      case 'text_generation':
+        effectiveUnits = Math.max(0, Math.floor(units));
+        break;
+      case 'streaming_chat':
+      case 'async_queue':
+        effectiveUnits = 1;
+        break;
+      case 'rag_embeddings':
+        effectiveUnits = Math.max(1, Math.floor(units || 1));
+        break;
+      default:
+        return;
+    }
+    if (effectiveUnits <= 0) return;
+
+    try {
+      await this.subscriptionAccess.consumeAIQuota(
+        storeId,
+        feature,
+        effectiveUnits,
+      );
+    } catch {
+      // Already logged inside the service. Never bubble.
+    }
   }
 
   private formatOutput(content: string, format: string): string {
