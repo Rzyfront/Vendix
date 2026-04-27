@@ -31,6 +31,10 @@ import { SessionsService } from '../cash-registers/sessions/sessions.service';
 import { MovementsService } from '../cash-registers/movements/movements.service';
 import { PaymentEncryptionService } from './services/payment-encryption.service';
 import { InvoiceDataRequestsService } from '../invoicing/invoice-data-requests/invoice-data-requests.service';
+import { WompiClient } from './processors/wompi/wompi.client';
+import { WompiProcessor } from './processors/wompi/wompi.processor';
+import { WompiEnvironment } from './processors/wompi/wompi.types';
+import { WebhookHandlerService } from './services/webhook-handler.service';
 
 @Injectable()
 export class PaymentsService {
@@ -48,6 +52,9 @@ export class PaymentsService {
     private readonly movementsService: MovementsService,
     private readonly paymentEncryption: PaymentEncryptionService,
     private readonly invoiceDataRequestsService: InvoiceDataRequestsService,
+    private readonly wompiClient: WompiClient,
+    private readonly wompiProcessor: WompiProcessor,
+    private readonly webhookHandler: WebhookHandlerService,
   ) {}
 
   async processPayment(createPaymentDto: CreatePaymentDto, user: any) {
@@ -197,6 +204,166 @@ export class PaymentsService {
       }
       throw error;
     }
+  }
+
+  /**
+   * Force-confirm a POS Wompi payment by polling Wompi for the canonical
+   * transaction state and applying it through the shared webhook-handler
+   * code path. Used by the POS frontend when:
+   *  - The user returns from a redirect/3DS flow.
+   *  - The cashier hits "Verify now" while waiting for an async method
+   *    (PSE / NEQUI / BANCOLOMBIA_TRANSFER).
+   *  - The webhook hasn't arrived yet but the transaction has finalized.
+   *
+   * Mirrors `CheckoutService.confirmWompiPayment` (ecommerce) but keyed by
+   * `payments.id` (DB primary key) instead of `order_id` — POS callers
+   * already know the payment id from the create response.
+   *
+   * Idempotent: returns immediately if the payment is in a terminal state.
+   * Reuses `WebhookHandlerService.applyWompiTransaction` so state mapping,
+   * CAS guards, and order-side effects are identical across webhook /
+   * reconciliation cron / ecommerce confirm / POS confirm paths.
+   */
+  async confirmPosWompiPayment(
+    paymentId: number,
+    user: any,
+  ): Promise<{
+    state: string;
+    transactionId: string | null;
+    alreadyConfirmed: boolean;
+    message?: string;
+  }> {
+    const payment = await this.prisma.payments.findUnique({
+      where: { id: paymentId },
+      include: {
+        store_payment_method: { include: { system_payment_method: true } },
+        orders: { include: { stores: true } },
+      },
+    });
+
+    if (!payment) {
+      throw new VendixHttpException(ErrorCodes.PAY_FIND_001);
+    }
+
+    if (payment.store_payment_method?.system_payment_method?.type !== 'wompi') {
+      throw new BadRequestException('Payment is not a Wompi transaction');
+    }
+
+    // Tenant guard — POS controller is JWT-protected so user is the cashier
+    if (payment.orders?.stores?.id) {
+      await this.validateUserAccess(user, payment.orders.stores.id);
+    }
+
+    // Idempotency: terminal-state payments don't need a Wompi roundtrip
+    const terminal = ['succeeded', 'captured', 'failed', 'cancelled', 'refunded'];
+    if (terminal.includes(payment.state)) {
+      return {
+        state: payment.state,
+        transactionId: payment.transaction_id,
+        alreadyConfirmed: true,
+      };
+    }
+
+    // Resolve per-tenant Wompi credentials from the store_payment_method row
+    const customConfig = payment.store_payment_method?.custom_config;
+    if (!customConfig) {
+      throw new BadRequestException('Wompi no está configurado para esta tienda');
+    }
+
+    const config = this.paymentEncryption.decryptConfig(
+      customConfig as Record<string, any>,
+      'wompi',
+    );
+
+    if (!config.public_key || !config.private_key) {
+      throw new BadRequestException('Credenciales Wompi incompletas');
+    }
+
+    // TODO(concurrency): WompiClient is a DI singleton — `configure()`
+    // mutates shared state. Currently safe here because every read
+    // (`request()`) snapshots config synchronously before any await,
+    // and there are no sync config reads between this configure() and
+    // the subsequent processor calls. Migrate to `withConfig()` per-call
+    // pattern (see iter 7) when refactoring `WompiProcessor` for full
+    // statelessness.
+    this.wompiClient.configure({
+      public_key: config.public_key,
+      private_key: config.private_key,
+      events_secret: config.events_secret || '',
+      integrity_secret: config.integrity_secret || '',
+      environment:
+        (config.environment as WompiEnvironment) || WompiEnvironment.SANDBOX,
+    });
+
+    // Lookup priority — match WompiReconciliationService.reconcileOne and
+    // CheckoutService.confirmWompiPayment to keep behavior consistent:
+    //  1. transaction_id (if it looks like a real Wompi id, not the
+    //     placeholder format `wompi_<ts>_<rand>` or `vendix_*`)
+    //  2. gateway_reference -> /v1/transactions/?reference=
+    let txn: any = null;
+    const placeholderRe = /^[a-z_]+_\d{10,}_[a-z0-9]+$/i;
+
+    if (
+      payment.transaction_id &&
+      !placeholderRe.test(payment.transaction_id) &&
+      !payment.transaction_id.startsWith('wompi_') &&
+      payment.transaction_id.length > 0
+    ) {
+      try {
+        const status = await this.wompiProcessor.getPaymentStatus(
+          payment.transaction_id,
+        );
+        if (status?.gatewayResponse && (status.gatewayResponse as any)?.id) {
+          txn = status.gatewayResponse;
+        }
+      } catch (err) {
+        this.logger.warn(
+          `confirmPosWompiPayment getPaymentStatus failed: ${(err as Error).message}`,
+        );
+      }
+    }
+
+    if (!txn) {
+      const reference = payment.gateway_reference || payment.transaction_id;
+      if (!reference) {
+        return {
+          state: payment.state,
+          transactionId: payment.transaction_id,
+          alreadyConfirmed: false,
+          message: 'No reference available to confirm payment',
+        };
+      }
+      txn = await this.wompiProcessor.getTransactionByReference(reference);
+    }
+
+    if (!txn) {
+      // Wompi has no record of the transaction yet — caller should retry.
+      this.logger.log(
+        `confirmPosWompiPayment: no Wompi transaction found for paymentId=${paymentId} ref=${payment.gateway_reference}`,
+      );
+      return {
+        state: payment.state,
+        transactionId: payment.transaction_id,
+        alreadyConfirmed: false,
+        message: 'No transaction recorded at gateway yet',
+      };
+    }
+
+    // Apply via shared atomic state machine. Same path used by webhook
+    // arrivals and the reconciliation cron — guarantees identical idempotency
+    // semantics and side effects.
+    const mappedState = await this.webhookHandler.applyWompiTransaction(txn);
+
+    const updated = await this.prisma.payments.findUnique({
+      where: { id: payment.id },
+      select: { state: true, transaction_id: true },
+    });
+
+    return {
+      state: updated?.state ?? mappedState ?? payment.state,
+      transactionId: updated?.transaction_id ?? payment.transaction_id,
+      alreadyConfirmed: false,
+    };
   }
 
   async findAll(query: PaymentQueryDto, user: any) {

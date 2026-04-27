@@ -461,7 +461,7 @@ export class SubscriptionPaymentService {
     transactionId?: string,
     gatewayResponse?: any,
   ): Promise<subscription_payments> {
-    return this.prisma.$transaction(async (tx: any) => {
+    const result = await this.prisma.$transaction(async (tx: any) => {
       const now = new Date();
 
       const updatedPayment = await tx.subscription_payments.update({
@@ -487,17 +487,27 @@ export class SubscriptionPaymentService {
       });
 
       // Transition commission from accrued -> pending_payout, or create it
-      // if the billing service hasn't already.
+      // directly in pending_payout if the billing service hasn't accrued
+      // it yet.
       //
-      // Race-safe pattern:
-      //  1. updateMany with state='accrued' filter acts as a state-machine
-      //     guard — idempotent: if already pending_payout/paid, the WHERE
-      //     filter excludes the row and the update is a no-op.
-      //  2. If updateMany affected 0 rows, the row may not exist yet
-      //     (billing service hasn't accrued). Use upsert keyed on the
-      //     unique invoice_id to create it directly in pending_payout, or
-      //     no-op if a concurrent writer just inserted in another state.
-      //  3. Catch P2002 as defense in depth against unique-violation races.
+      // Idempotency guarantee (single-op upsert + state-guarded promote):
+      //  1. partner_commissions.invoice_id is `@unique` (schema). Upsert
+      //     keyed on it is atomic at the DB level — concurrent writers
+      //     race on the unique index and exactly one wins; the others
+      //     find the row and execute the (empty) update branch.
+      //  2. After the upsert guarantees the row exists, a single
+      //     `updateMany(where: { invoice_id, state: 'accrued' })`
+      //     promotes it ONLY if still in `accrued`. If it's already in
+      //     `pending_payout`, `paid`, or any later state, the WHERE filter
+      //     excludes it and the call is a no-op — no double-promotion,
+      //     no overwrite of payout state.
+      //  3. The whole block runs inside the parent `$transaction`, so a
+      //     failure rolls back both invoice update and commission row.
+      //  4. P2002 is still caught as defense in depth against the very
+      //     small window between the unique-constraint check and the
+      //     insert in the upsert (Prisma normally handles this, but two
+      //     simultaneous webhook deliveries hitting the same invoice_id
+      //     have been observed in prod).
       if (invoice.partner_organization_id) {
         const splitBreakdown = invoice.split_breakdown as Record<string, unknown> | null;
         const partnerShare = splitBreakdown?.partner_share
@@ -505,39 +515,67 @@ export class SubscriptionPaymentService {
           : DECIMAL_ZERO;
 
         if (partnerShare.greaterThan(DECIMAL_ZERO)) {
-          const transitioned = await tx.partner_commissions.updateMany({
-            where: { invoice_id: invoiceId, state: 'accrued' },
-            data: { state: 'pending_payout' },
-          });
+          try {
+            // Step 1: ensure the commission row exists (atomic on
+            // unique invoice_id). If a concurrent writer already created
+            // it in any state, `update: {}` is a no-op.
+            await tx.partner_commissions.upsert({
+              where: { invoice_id: invoiceId },
+              create: {
+                partner_organization_id: invoice.partner_organization_id,
+                invoice_id: invoiceId,
+                amount: partnerShare,
+                currency: invoice.currency,
+                state: 'pending_payout',
+                accrued_at: now,
+              },
+              update: {}, // no-op: preserve existing state
+            });
 
-          if (transitioned.count === 0) {
-            try {
-              await tx.partner_commissions.upsert({
-                where: { invoice_id: invoiceId },
-                create: {
-                  partner_organization_id: invoice.partner_organization_id,
-                  invoice_id: invoiceId,
-                  amount: partnerShare,
-                  currency: invoice.currency,
-                  state: 'pending_payout',
-                  accrued_at: now,
-                },
-                update: {}, // no-op: preserve existing row & state
-              });
-            } catch (e: any) {
-              if (e?.code !== 'P2002') {
-                throw e;
-              }
-              this.logger.warn(
-                `Commission upsert hit P2002 for invoice ${invoiceId}; skipped`,
-              );
+            // Step 2: promote accrued -> pending_payout, but only if
+            // still in `accrued`. Idempotent for already-promoted rows.
+            await tx.partner_commissions.updateMany({
+              where: { invoice_id: invoiceId, state: 'accrued' },
+              data: { state: 'pending_payout' },
+            });
+          } catch (e: any) {
+            if (e?.code !== 'P2002') {
+              throw e;
             }
+            this.logger.warn(
+              `Commission upsert hit P2002 for invoice ${invoiceId}; skipped`,
+            );
           }
         }
       }
 
       return updatedPayment;
     });
+
+    // Post-commit: emit `subscription.payment.succeeded` so the
+    // SubscriptionStateListener can auto-promote the subscription from
+    // `pending_payment` (or `grace_*`/`blocked`) to `active` immediately —
+    // without waiting for the daily 03:00 dunning cron.
+    //
+    // Wrapped because emit() is sync but listener errors must NOT break
+    // the caller (charge() returning to checkout commit, or webhook handler
+    // returning 200 to Wompi). Listener also wraps in try/catch defense in
+    // depth.
+    try {
+      this.eventEmitter.emit('subscription.payment.succeeded', {
+        invoiceId,
+        paymentId,
+        subscriptionId: invoice.store_subscription_id,
+        storeId: invoice.store_id,
+        source: 'charge_success',
+      });
+    } catch (e: any) {
+      this.logger.warn(
+        `subscription.payment.succeeded emit failed for invoice ${invoiceId}: ${e?.message ?? e}`,
+      );
+    }
+
+    return result;
   }
 
   private async handleChargeFailure(

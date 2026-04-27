@@ -48,18 +48,81 @@ export class SubscriptionWebhookService {
       return;
     }
 
-    // Find the most recent payment row for this invoice. Multiple attempts
-    // can exist (cron retries, manual recharges); the latest is the one the
-    // current Wompi reference belongs to.
+    // Resolve the payment row this webhook refers to. `orderBy: id desc`
+    // alone is wrong on retries: a second attempt creates a newer row, and
+    // the original Wompi APPROVED redelivery would be applied to the wrong
+    // payment, double-promoting the partner_commission and corrupting the
+    // payout batch.
     //
-    // We could also resolve via `subscription_payments.metadata->>idempotency_key`
-    // for stricter mapping (the migration in this PR adds the GIN-friendly
-    // expression index), but the latest-attempt approach is correct for the
-    // common case and avoids JSON-path queries on every webhook.
-    const payment = await this.prisma.subscription_payments.findFirst({
-      where: { invoice_id: invoiceId },
-      orderBy: { id: 'desc' },
-    });
+    // Lookup priority (most specific -> fallback):
+    //  1. `gateway_reference` matches `txn.reference` (set by Wompi on the
+    //     return from processPayment; uniquely identifies this attempt).
+    //  2. `gateway_reference` matches `txn.id` (Wompi transaction id, used
+    //     when the reference field wasn't populated yet — race with webhook
+    //     arriving before processPayment returned).
+    //  3. `metadata->>'reference'` matches `txn.reference` (the SaaS
+    //     reference computed in prepareWidgetCharge / charge BEFORE the
+    //     transaction id is assigned).
+    //  4. Last resort: latest pending row for this invoice.
+    const txnReference: string | undefined = txn?.reference;
+    const txnId: string | undefined = txn?.id ? String(txn.id) : undefined;
+
+    let payment = null as Awaited<
+      ReturnType<typeof this.prisma.subscription_payments.findFirst>
+    >;
+
+    if (txnReference) {
+      payment = await this.prisma.subscription_payments.findFirst({
+        where: {
+          invoice_id: invoiceId,
+          gateway_reference: txnReference,
+        },
+        orderBy: { id: 'desc' },
+      });
+    }
+
+    if (!payment && txnId) {
+      payment = await this.prisma.subscription_payments.findFirst({
+        where: {
+          invoice_id: invoiceId,
+          gateway_reference: txnId,
+        },
+        orderBy: { id: 'desc' },
+      });
+    }
+
+    if (!payment && txnReference) {
+      // Match by reference stored in metadata at attempt-creation time
+      // (before the transaction has a gateway_reference).
+      payment = await this.prisma.subscription_payments.findFirst({
+        where: {
+          invoice_id: invoiceId,
+          metadata: {
+            path: ['reference'],
+            equals: txnReference,
+          },
+        },
+        orderBy: { id: 'desc' },
+      });
+    }
+
+    if (!payment) {
+      // Fallback: latest pending payment for this invoice. Preserves the
+      // pre-fix behaviour for legacy/edge cases where neither reference nor
+      // id is matchable.
+      payment = await this.prisma.subscription_payments.findFirst({
+        where: { invoice_id: invoiceId, state: 'pending' },
+        orderBy: { id: 'desc' },
+      });
+    }
+
+    if (!payment) {
+      // Absolute last resort — any payment row for this invoice.
+      payment = await this.prisma.subscription_payments.findFirst({
+        where: { invoice_id: invoiceId },
+        orderBy: { id: 'desc' },
+      });
+    }
 
     if (!payment) {
       this.logger.warn(

@@ -19,8 +19,33 @@ export class WompiClient {
 
   // ── Configuración ───────────────────────────
 
+  /**
+   * Mutates the shared singleton's credentials. Kept for back-compat with
+   * legacy callers, but PREFER `withConfig()` — `configure()` is unsafe
+   * across concurrent requests because two callers can race between
+   * `configure()` and a subsequent `generateIntegritySignature()` /
+   * other sync method, with the second overwriting credentials before
+   * the first reads them.
+   *
+   * @deprecated Use `withConfig(creds)` to get a fresh per-call instance.
+   */
   configure(config: WompiConfig): void {
     this.config = config;
+  }
+
+  /**
+   * Return a fresh, fully-isolated `WompiClient` instance pre-configured
+   * with the given credentials. Use this from request-scoped code paths
+   * (HTTP handlers, cron iterations) so concurrent calls don't race on
+   * the shared singleton's mutable `config`.
+   *
+   * The returned instance is plain `new WompiClient()` — no DI side
+   * effects — and shares no state with the caller.
+   */
+  withConfig(config: WompiConfig): WompiClient {
+    const fresh = new WompiClient();
+    fresh.config = config;
+    return fresh;
   }
 
   private get baseUrl(): string {
@@ -101,6 +126,23 @@ export class WompiClient {
       'GET',
       `/transactions/${transactionId}`,
     );
+  }
+
+  /**
+   * List Wompi transactions filtered by `reference`. Wompi exposes the
+   * collection endpoint `GET /v1/transactions/?reference=<ref>` which returns
+   * `{ data: WompiTransactionData[] }` (paginated). Callers typically pick the
+   * most recent matching transaction (Wompi appends new attempts under the
+   * same reference if the merchant reuses it, but Vendix generates a unique
+   * `vendix_<storeId>_<orderId>_<ts>` reference per attempt).
+   */
+  async getTransactionsByReference(
+    reference: string,
+  ): Promise<{ data: import('./wompi.types').WompiTransactionData[] }> {
+    const encoded = encodeURIComponent(reference);
+    return this.request<{
+      data: import('./wompi.types').WompiTransactionData[];
+    }>('GET', `/transactions/?reference=${encoded}`);
   }
 
   async voidTransaction(

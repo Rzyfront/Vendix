@@ -4,6 +4,7 @@ import {
   Post,
   Body,
   Param,
+  ParseIntPipe,
   Query,
   UseGuards,
   Request,
@@ -96,6 +97,25 @@ export class PaymentsController {
   ) {
     const result = await this.paymentsService.getPaymentStatus(paymentId, req.user);
     return this.responseService.success(result, 'Payment status retrieved');
+  }
+
+  @Post('pos/confirm-wompi-payment/:paymentId')
+  @ApiOperation({
+    summary:
+      'Force-confirm a POS Wompi payment by polling Wompi and applying the canonical state',
+  })
+  @ApiResponse({ status: 200, description: 'Payment state synced from Wompi' })
+  @ApiResponse({ status: 400, description: 'Not a Wompi payment / config missing' })
+  @ApiResponse({ status: 404, description: 'Payment not found' })
+  async confirmPosWompiPayment(
+    @Param('paymentId', ParseIntPipe) paymentId: number,
+    @Request() req,
+  ) {
+    const result = await this.paymentsService.confirmPosWompiPayment(
+      paymentId,
+      req.user,
+    );
+    return this.responseService.success(result, 'Wompi payment status synced');
   }
 
   @Get()

@@ -54,8 +54,21 @@ export class PlatformWebhookController {
     @Headers() _headers: Record<string, string>,
   ): Promise<{ received: boolean }> {
     if (!this.isEnabled()) {
+      // Log enough context to reconstruct the discarded event later
+      // (event type, Wompi reference, amount, transaction id). Wompi
+      // does NOT replay events on demand, so when SAAS_WEBHOOK_ENABLED
+      // is flipped back on we want to know what we missed and decide
+      // if a manual reconciliation is needed.
+      const event = body?.event ?? 'unknown';
+      const txn = body?.data?.transaction ?? {};
+      const reference = txn?.reference ?? null;
+      const amountInCents = txn?.amount_in_cents ?? null;
+      const transactionId = txn?.id ?? null;
+      const status = txn?.status ?? null;
       this.logger.warn(
-        'SAAS_WEBHOOK_ENABLED=false — acknowledging Wompi platform webhook without processing',
+        `SAAS_WEBHOOK_ENABLED=false — discarded Wompi platform webhook ` +
+          `[event=${event} reference=${reference} txn=${transactionId} ` +
+          `status=${status} amount_cents=${amountInCents}]`,
       );
       return { received: true };
     }

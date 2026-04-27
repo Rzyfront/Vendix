@@ -313,6 +313,13 @@ export class PaymentGatewayService {
       updateData.transaction_id = result.transactionId;
     }
 
+    // Persist the Vendix-generated reference (e.g. Wompi `vendix_<storeId>_<orderId>_<ts>`)
+    // so that webhook arrivals carrying `txn.reference` can find the payment row
+    // BEFORE we know the real gateway transaction id. Critical for the Wompi flow.
+    if (result.gatewayReference) {
+      updateData.gateway_reference = result.gatewayReference;
+    }
+
     await this.prisma.payments.update({
       where: { id: paymentId },
       data: updateData,

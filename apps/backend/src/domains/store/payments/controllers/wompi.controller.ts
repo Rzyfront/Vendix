@@ -9,9 +9,13 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../../../auth/guards/jwt-auth.guard';
+import { RolesGuard } from '../../../auth/guards/roles.guard';
+import { Roles } from '../../../auth/decorators/roles.decorator';
+import { UserRole } from '../../../auth/enums/user-role.enum';
 import { WompiClient } from '../processors/wompi/wompi.client';
 import { WompiEnvironment } from '../processors/wompi/wompi.types';
 import { StorePaymentMethodsService } from '../services/store-payment-methods.service';
+import { WompiReconciliationService } from '../services/wompi-reconciliation.service';
 import { RequestContextService } from '@common/context/request-context.service';
 
 @ApiTags('Wompi')
@@ -23,6 +27,7 @@ export class WompiController {
   constructor(
     private readonly wompiClient: WompiClient,
     private readonly storePaymentMethods: StorePaymentMethodsService,
+    private readonly wompiReconciliation: WompiReconciliationService,
   ) {}
 
   /**
@@ -138,5 +143,29 @@ export class WompiController {
         message: `Error de conexión: ${error.message}`,
       };
     }
+  }
+
+  /**
+   * Superadmin-only manual trigger for the Wompi pending-payment
+   * reconciliation cron. Useful when:
+   *  - A Wompi outage delayed webhook delivery and we want to flush
+   *    the backlog without waiting 15min for the next scheduled run.
+   *  - Investigating a specific stuck payment in production and want
+   *    to re-pull the canonical Wompi state on demand.
+   *
+   * Reuses the same code path as the cron — idempotent + circuit
+   * breaker aware.
+   */
+  @Post('admin/reconcile')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.SUPER_ADMIN)
+  @ApiOperation({
+    summary: 'Manually trigger the Wompi pending-payment reconciliation batch',
+  })
+  @ApiResponse({ status: 200, description: 'Reconciliation triggered' })
+  async triggerReconciliation() {
+    this.logger.log('Manual Wompi reconciliation triggered by superadmin');
+    await this.wompiReconciliation.reconcilePendingWompiPayments();
+    return { success: true, message: 'Wompi reconciliation batch executed' };
   }
 }

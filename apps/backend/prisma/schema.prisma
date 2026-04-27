@@ -932,6 +932,7 @@ model payments {
   currency                String?                   @db.VarChar(10)
   state                   payments_state_enum
   transaction_id          String?                   @unique @db.VarChar(255)
+  gateway_reference       String?                   @db.VarChar(255)
   gateway_response        Json?
   paid_at                 DateTime?                 @db.Timestamp(6)
   created_at              DateTime?                 @default(now()) @db.Timestamp(6)
@@ -941,6 +942,8 @@ model payments {
   store_payment_method    store_payment_methods?    @relation(fields: [store_payment_method_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   refunds                 refunds[]
   cash_register_movements cash_register_movements[]
+
+  @@index([gateway_reference])
 }
 
 model product_categories {
@@ -5675,6 +5678,7 @@ enum store_subscription_state_enum {
   blocked
   cancelled
   expired
+  pending_payment
 }
 
 enum subscription_invoice_state_enum {

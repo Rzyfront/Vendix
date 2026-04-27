@@ -16,6 +16,7 @@ import { PromotionalApplyService } from './services/promotional-apply.service';
 import { PromotionalRulesEvaluator } from './evaluators/promotional-rules.evaluator';
 import { PartnerCommissionsService } from './services/partner-commissions.service';
 import { SubscriptionTrialService } from './services/subscription-trial.service';
+import { SubscriptionStateListener } from './listeners/subscription-state.listener';
 import { PaymentsModule } from '../payments/payments.module';
 import { WompiModule } from '../payments/processors/wompi/wompi.module';
 import { PlatformGatewayModule } from '../../superadmin/subscriptions/gateway/gateway.module';
@@ -46,6 +47,11 @@ import { PlatformGatewayModule } from '../../superadmin/subscriptions/gateway/ga
     PromotionalRulesEvaluator,
     PartnerCommissionsService,
     SubscriptionTrialService,
+    // Listener: auto-promotes pending_payment / grace_* / blocked subs to
+    // `active` on `subscription.payment.succeeded`. Registered as a provider
+    // so NestJS instantiates it; the @OnEvent decorator wires the
+    // EventEmitterModule subscription.
+    SubscriptionStateListener,
   ],
   exports: [
     SubscriptionResolverService,

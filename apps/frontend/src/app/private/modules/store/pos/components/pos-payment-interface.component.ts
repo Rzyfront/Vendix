@@ -16,7 +16,7 @@ import {
   ReactiveFormsModule,
   FormsModule,
 } from '@angular/forms';
-import { Subscription, debounceTime } from 'rxjs';
+import { Subscription, debounceTime, firstValueFrom } from 'rxjs';
 import { Router } from '@angular/router';
 import { Store } from '@ngrx/store';
 
@@ -1382,8 +1382,17 @@ interface PaymentState {
         margin: 0;
       }
 
+      .awaiting-attempts {
+        font-size: 12px;
+        color: var(--color-text-secondary);
+        max-width: 320px;
+        margin: 0;
+      }
+
       .awaiting-actions {
         display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
         gap: 12px;
         margin-top: 8px;
       }
@@ -1427,6 +1436,17 @@ export class PosPaymentInterfaceComponent {
   wompiAwaitingMessage = signal('');
   wompiPollingSubscription: Subscription | null = null;
   wompiPaymentId: string | null = null;
+  // DB primary key of the local `payments` row (NOT the Wompi transaction id).
+  // Captured from the POS payment-creation response and used by the
+  // confirm-wompi-payment polling endpoint.
+  wompiPaymentDbId: number | null = null;
+  wompiPollingState = signal<{
+    active: boolean;
+    attempts: number;
+    maxAttempts: number;
+  }>({ active: false, attempts: 0, maxAttempts: 60 });
+  // setInterval handle for the active confirm-wompi-payment poll loop
+  private wompiConfirmIntervalId: ReturnType<typeof setInterval> | null = null;
 
   // Nequi form
   nequiPhoneControl = new FormControl('', [
@@ -1571,6 +1591,7 @@ export class PosPaymentInterfaceComponent {
 
     inject(DestroyRef).onDestroy(() => {
       this.wompiPollingSubscription?.unsubscribe();
+      this.stopWompiConfirmPolling();
     });
 
     this.loadPaymentMethods();
@@ -2690,6 +2711,9 @@ export class PosPaymentInterfaceComponent {
     this.wompiPollingSubscription?.unsubscribe();
     this.wompiPollingSubscription = null;
     this.wompiPaymentId = null;
+    this.stopWompiConfirmPolling();
+    this.wompiPaymentDbId = null;
+    this.wompiPollingState.set({ active: false, attempts: 0, maxAttempts: 60 });
   }
 
   handleWompiNextAction(response: any): void {
@@ -2701,6 +2725,14 @@ export class PosPaymentInterfaceComponent {
       response?.transactionId ||
       response?.data?.payment?.transaction_id ||
       response?.data?.transactionId;
+
+    // Capture the local DB payment id for the confirm-wompi-payment poll loop.
+    // POS payment-creation always returns response.payment.id (numeric DB pk).
+    const dbId =
+      response?.payment?.id ??
+      response?.data?.payment?.id ??
+      null;
+    this.wompiPaymentDbId = typeof dbId === 'number' ? dbId : null;
 
     switch (nextAction.type) {
       case 'redirect':
@@ -2742,42 +2774,208 @@ export class PosPaymentInterfaceComponent {
     }
   }
 
+  /**
+   * Start polling the backend confirm-wompi-payment endpoint to drive the
+   * POS UI to a terminal state. Interval = 5s, max 60 attempts (~5 min).
+   *
+   * The endpoint does the actual Wompi roundtrip on the backend and applies
+   * the canonical state through the shared webhook handler — frontend just
+   * needs to ask "what's the state now?" until it leaves `pending`.
+   *
+   * Idempotent: safe to call again from `manualVerifyPayment` while the
+   * interval is running. Stops automatically on terminal state, error,
+   * or after maxAttempts.
+   */
   startWompiPolling(): void {
-    if (!this.wompiPaymentId) return;
+    if (!this.wompiPaymentDbId) {
+      // Fallback: legacy gateway-id polling for old code paths that didn't
+      // capture response.payment.id (defensive — should not happen for POS).
+      if (this.wompiPaymentId) {
+        this.legacyStartWompiPolling();
+      }
+      return;
+    }
 
+    // Reset counter and start interval
+    this.stopWompiConfirmPolling();
+    this.wompiPollingState.set({ active: true, attempts: 0, maxAttempts: 60 });
+
+    // First poll immediately so we don't wait 5s on an already-final txn
+    void this.runWompiConfirmPoll();
+
+    this.wompiConfirmIntervalId = setInterval(() => {
+      const current = this.wompiPollingState();
+      if (!current.active) {
+        this.stopWompiConfirmPolling();
+        return;
+      }
+      if (current.attempts >= current.maxAttempts) {
+        // Out of attempts — stop the loop but leave the awaiting UI up so
+        // the cashier can still hit "Verificar pago ahora" or cancel.
+        this.stopWompiConfirmPolling();
+        this.toastService.show({
+          variant: 'warning',
+          title: 'Pago aún pendiente',
+          description:
+            'No recibimos confirmación del pago. Verifica manualmente o cancela la espera.',
+        });
+        return;
+      }
+      void this.runWompiConfirmPoll();
+    }, 5000);
+  }
+
+  /**
+   * Single poll iteration: calls the backend confirm endpoint and updates
+   * UI state accordingly. Bumps the attempts counter on every call (success
+   * or transient error) so the loop can self-terminate.
+   */
+  private async runWompiConfirmPoll(): Promise<void> {
+    if (!this.wompiPaymentDbId) return;
+    try {
+      const result = await firstValueFrom(
+        this.paymentService.confirmWompiPayment(this.wompiPaymentDbId),
+      );
+
+      this.wompiPollingState.update((s) => ({
+        ...s,
+        attempts: s.attempts + 1,
+      }));
+
+      const state = result?.state;
+      if (state === 'succeeded' || state === 'captured') {
+        this.stopWompiConfirmPolling();
+        this.onWompiPaymentConfirmed(result);
+      } else if (
+        state === 'failed' ||
+        state === 'cancelled' ||
+        state === 'refunded'
+      ) {
+        this.stopWompiConfirmPolling();
+        this.onWompiPaymentFailed(result);
+      }
+      // else: still pending — keep polling
+    } catch (err) {
+      // Network or backend error — count toward maxAttempts but don't bail
+      // immediately. The user can still cancel manually.
+      this.wompiPollingState.update((s) => ({
+        ...s,
+        attempts: s.attempts + 1,
+      }));
+      console.warn('Wompi confirm poll error', err);
+    }
+  }
+
+  /**
+   * Cashier-triggered immediate verification. Forces a single confirm call
+   * outside the interval so the user doesn't have to wait up to 5s.
+   */
+  async manualVerifyPayment(): Promise<void> {
+    if (!this.wompiPaymentDbId) {
+      this.toastService.show({
+        variant: 'warning',
+        title: 'Sin información de pago',
+        description: 'No hay un pago Wompi en curso para verificar.',
+      });
+      return;
+    }
+    try {
+      const result = await firstValueFrom(
+        this.paymentService.confirmWompiPayment(this.wompiPaymentDbId),
+      );
+      const state = result?.state;
+      if (state === 'succeeded' || state === 'captured') {
+        this.stopWompiConfirmPolling();
+        this.onWompiPaymentConfirmed(result);
+      } else if (
+        state === 'failed' ||
+        state === 'cancelled' ||
+        state === 'refunded'
+      ) {
+        this.stopWompiConfirmPolling();
+        this.onWompiPaymentFailed(result);
+      } else {
+        this.toastService.show({
+          variant: 'info',
+          title: 'Pago aún pendiente',
+          description:
+            result?.message ??
+            'Wompi todavía no reporta confirmación. Intenta de nuevo en unos segundos.',
+        });
+      }
+    } catch (err: any) {
+      console.warn('Manual Wompi verify failed', err);
+      this.toastService.show({
+        variant: 'error',
+        title: 'Error de verificación',
+        description: 'No se pudo verificar el estado del pago.',
+      });
+    }
+  }
+
+  private onWompiPaymentConfirmed(result: { transactionId?: string | null }): void {
+    this.wompiAwaitingPayment.set(false);
+    this.wompiAwaitingMessage.set('');
+    this.paymentState.update((s) => ({ ...s, isProcessing: false }));
+    this.paymentCompleted.emit({
+      success: true,
+      message: 'Pago con Wompi procesado correctamente',
+      transactionId: result?.transactionId,
+      isAnonymousSale: this.paymentState().isAnonymousSale,
+    });
+    this.onModalClosed();
+  }
+
+  private onWompiPaymentFailed(result: { state: string; message?: string }): void {
+    this.wompiAwaitingPayment.set(false);
+    this.wompiAwaitingMessage.set(result?.message || 'El pago fue rechazado.');
+    this.paymentState.update((s) => ({ ...s, isProcessing: false }));
+    this.toastService.show({
+      variant: 'error',
+      title: 'Pago rechazado',
+      description: result?.message || `El pago fue ${result?.state}.`,
+    });
+  }
+
+  private stopWompiConfirmPolling(): void {
+    if (this.wompiConfirmIntervalId !== null) {
+      clearInterval(this.wompiConfirmIntervalId);
+      this.wompiConfirmIntervalId = null;
+    }
+    this.wompiPollingState.update((s) => ({ ...s, active: false }));
+  }
+
+  /**
+   * Legacy poll path — kept as a fallback for the unlikely case where the
+   * POS payment-create response doesn't carry `payment.id`. Polls Wompi via
+   * gateway transaction id (does NOT hit the confirm endpoint, so will not
+   * apply state on the backend).
+   */
+  private legacyStartWompiPolling(): void {
+    if (!this.wompiPaymentId) return;
     this.wompiPollingSubscription?.unsubscribe();
     this.wompiPollingSubscription = this.wompiService
       .pollPaymentStatus(this.wompiPaymentId)
       .subscribe({
         next: (update: WompiPaymentStatusUpdate) => {
           if (update.status === 'succeeded') {
-            this.wompiAwaitingPayment.set(false);
-            this.wompiAwaitingMessage.set('');
-            this.paymentState.update(s => ({ ...s, isProcessing: false }));
-            this.paymentCompleted.emit({
-              success: true,
-              message: 'Pago con Wompi procesado correctamente',
-              isAnonymousSale: this.paymentState().isAnonymousSale,
+            this.onWompiPaymentConfirmed({
+              transactionId: update.transactionId,
             });
-            this.onModalClosed();
           } else if (
             update.status === 'failed' ||
             update.status === 'cancelled'
           ) {
-            this.wompiAwaitingPayment.set(false);
-            this.wompiAwaitingMessage.set(update.message || 'El pago fue rechazado.');
-            this.paymentState.update(s => ({ ...s, isProcessing: false }));
-            this.toastService.show({
-              variant: 'error',
-              title: 'Pago rechazado',
-              description: update.message || 'El pago fue rechazado.',
+            this.onWompiPaymentFailed({
+              state: update.status,
+              message: update.message,
             });
           }
         },
         error: () => {
           this.wompiAwaitingPayment.set(false);
           this.wompiAwaitingMessage.set('');
-          this.paymentState.update(s => ({ ...s, isProcessing: false }));
+          this.paymentState.update((s) => ({ ...s, isProcessing: false }));
           this.toastService.show({
             variant: 'error',
             title: 'Error de verificación',
@@ -2791,6 +2989,7 @@ export class PosPaymentInterfaceComponent {
   cancelWompiAwait(): void {
     this.wompiPollingSubscription?.unsubscribe();
     this.wompiPollingSubscription = null;
+    this.stopWompiConfirmPolling();
     this.wompiAwaitingPayment.set(false);
     this.wompiAwaitingMessage.set('');
     this.paymentState.update(s => ({ ...s, isProcessing: false }));

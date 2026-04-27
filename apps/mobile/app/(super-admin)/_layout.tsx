@@ -1,13 +1,46 @@
-import { Stack } from 'expo-router';
+import { useEffect } from 'react';
+import { Slot, useRouter, usePathname } from 'expo-router';
+import { View } from 'react-native';
+import { AdminShell } from '@/shared/layouts/admin-shell';
+import { useAuthStore } from '@/core/store/auth.store';
+
+const routeTitles: Record<string, string> = {
+  dashboard: 'Dashboard',
+  organizations: 'Organizaciones',
+  stores: 'Tiendas',
+  users: 'Usuarios',
+  subscriptions: 'Suscripciones',
+  'ai-engine': 'AI Engine',
+  monitoring: 'Monitoreo',
+  settings: 'Configuración',
+};
 
 export default function SuperAdminLayout() {
+  const router = useRouter();
+  const pathname = usePathname();
+  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const isLoading = useAuthStore((s) => s.isLoading);
+
+  useEffect(() => {
+    if (!isLoading && !isAuthenticated) {
+      router.replace('/(auth)/login');
+    }
+  }, [isAuthenticated, isLoading]);
+
+  if (isLoading) {
+    return <View className="flex-1 bg-white" />;
+  }
+
+  if (!isAuthenticated) {
+    return null;
+  }
+
+  const currentSegment = pathname.split('/').pop() || 'dashboard';
+  const title = routeTitles[currentSegment] || 'Vendix';
+
   return (
-    <Stack
-      screenOptions={{
-        headerShown: true,
-        headerStyle: { backgroundColor: '#ffffff' },
-        headerTitleStyle: { color: '#0f172a' },
-      }}
-    />
+    <AdminShell title={title} variant="super">
+      <Slot />
+    </AdminShell>
   );
 }

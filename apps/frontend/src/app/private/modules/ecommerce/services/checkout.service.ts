@@ -88,6 +88,14 @@ export interface WompiWidgetConfig {
     customer_email: string;
 }
 
+export interface ConfirmWompiPaymentResponse {
+    state: string;
+    orderState: string;
+    transactionId: string | null;
+    alreadyConfirmed: boolean;
+    message?: string;
+}
+
 @Injectable({
     providedIn: 'root',
 })
@@ -140,6 +148,22 @@ export class CheckoutService {
                 customer_email: customerEmail || '',
                 redirect_url: redirectUrl || `${window.location.origin}/account/orders`,
             },
+            { headers: this.getHeaders() },
+        );
+    }
+
+    /**
+     * Force-confirm a Wompi payment by polling the gateway. Called from the
+     * Wompi widget callback so the user sees the right order state on return
+     * instead of waiting for the webhook to land. Failure here MUST NOT block
+     * the navigation flow — the webhook is the canonical fallback.
+     */
+    confirmWompiPayment(
+        orderId: number,
+    ): Observable<{ success: boolean; data: ConfirmWompiPaymentResponse }> {
+        return this.http.post<{ success: boolean; data: ConfirmWompiPaymentResponse }>(
+            `${this.api_url}/confirm-wompi-payment/${orderId}`,
+            {},
             { headers: this.getHeaders() },
         );
     }

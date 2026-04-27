@@ -12,14 +12,12 @@ import {
 } from 'react-native';
 import { useRouter, Link } from 'expo-router';
 import { AuthService } from '@/core/auth/auth.service';
-import { useAuthStore } from '@/core/store/auth.store';
 import { isValidEmail } from '@/core/utils/validators';
 import { colors, authStyles as s } from '@/shared/styles/auth.styles';
 import { Icon } from '@/shared/components/icon/icon';
 
 export default function RegisterScreen() {
   const router = useRouter();
-  const { setUser, setToken, setRefreshToken } = useAuthStore();
   const [orgName, setOrgName] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -58,22 +56,18 @@ export default function RegisterScreen() {
         phone: phone || undefined,
         password,
       });
-      setUser(response.user);
-      setToken(response.token);
-      setRefreshToken(response.refreshToken);
-      const roles = response.user.roles || [];
-      if (roles.includes('super_admin')) {
+      const appType = response.user_settings?.app_type;
+      if (appType === 'VENDIX_ADMIN') {
         router.replace('/(super-admin)/dashboard');
-      } else if (roles.includes('organization_admin')) {
+      } else if (appType === 'ORG_ADMIN') {
         router.replace('/(org-admin)/dashboard');
       } else {
         router.replace('/(store-admin)/dashboard');
       }
     } catch (err: unknown) {
-      const message =
-        (err as any)?.response?.data?.message ||
-        (err as any)?.message ||
-        'Error al crear la cuenta. Intenta de nuevo.';
+      const resp = (err as any)?.response?.data;
+      const raw = resp?.message || (err as any)?.message || 'Error al crear la cuenta. Intenta de nuevo.';
+      const message = typeof raw === 'string' ? raw : Array.isArray(raw) ? raw.join(', ') : JSON.stringify(raw);
       setError(message);
     } finally {
       setIsLoading(false);

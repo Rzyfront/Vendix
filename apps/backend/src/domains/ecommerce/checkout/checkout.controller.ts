@@ -3,6 +3,8 @@ import {
     Get,
     Post,
     Body,
+    Param,
+    ParseIntPipe,
     Query,
     UseGuards,
 } from '@nestjs/common';
@@ -39,6 +41,24 @@ export class CheckoutController {
         @Body() dto: { order_id: number; amount: number; currency?: string; customer_email?: string; redirect_url?: string },
     ) {
         const data = await this.checkout_service.prepareWompiPayment(dto);
+        return { success: true, data };
+    }
+
+    /**
+     * Force-confirm a Wompi payment for an order by polling the Wompi API
+     * directly. Called by the frontend widget callback so the user sees the
+     * correct order/payment state immediately on return — does not replace
+     * the canonical webhook flow, only complements it.
+     *
+     * Auth: customer JWT (same JwtAuthGuard as the rest of /ecommerce/checkout).
+     * Tenant: store context resolved from x-store-id header (CheckoutService
+     * uses StorePrismaService which scopes by store).
+     */
+    @Post('confirm-wompi-payment/:orderId')
+    async confirmWompiPayment(
+        @Param('orderId', ParseIntPipe) orderId: number,
+    ) {
+        const data = await this.checkout_service.confirmWompiPayment(orderId);
         return { success: true, data };
     }
 

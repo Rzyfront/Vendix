@@ -8,6 +8,7 @@ import {
   inject,
 } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { firstValueFrom } from 'rxjs';
 import { CommonModule } from '@angular/common';
 import { RouterModule, Router } from '@angular/router';
 import {
@@ -884,9 +885,26 @@ export class CheckoutComponent implements OnInit {
         },
       });
 
-      checkout.open((result: any) => {
+      checkout.open(async (result: any) => {
         const transaction = result?.transaction;
         if (transaction) {
+          // Force-confirm against Wompi via backend so the order/payment
+          // state is correct on return — the webhook is still the canonical
+          // path; this is a UX fallback. NEVER block the redirect on failure.
+          if (
+            transaction.status === 'APPROVED' ||
+            transaction.status === 'DECLINED' ||
+            transaction.status === 'ERROR'
+          ) {
+            try {
+              await firstValueFrom(
+                this.checkout_service.confirmWompiPayment(orderId),
+              );
+            } catch (err) {
+              console.warn('confirm-wompi-payment failed', err);
+            }
+          }
+
           if (transaction.status === 'APPROVED') {
             this.router.navigate(['/account/orders', orderId], {
               queryParams: { success: true },

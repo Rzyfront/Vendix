@@ -269,6 +269,16 @@ export class SubscriptionCheckoutController {
     const cycleMs = this.billingCycleMs(plan.billing_cycle);
     const periodEnd = new Date(now.getTime() + cycleMs);
 
+    // Paid plans MUST land in `pending_payment` until the Wompi webhook (or
+    // POS confirm) reports the charge as APPROVED. Only the SubscriptionState
+    // Listener (subscription.payment.succeeded) is allowed to promote them
+    // to `active`. Free plans (effective_price <= 0 and no partner margin)
+    // skip the invoice/charge cycle and go straight to `active`.
+    const isFreePlan =
+      pricing.effective_price.lessThanOrEqualTo(DECIMAL_ZERO) &&
+      pricing.margin_amount.lessThanOrEqualTo(DECIMAL_ZERO);
+    const initialState = isFreePlan ? 'active' : 'pending_payment';
+
     return this.prisma.$transaction(async (tx) => {
       const dup = await tx.store_subscriptions.findUnique({
         where: { store_id: storeId },
@@ -285,7 +295,7 @@ export class SubscriptionCheckoutController {
           store_id: storeId,
           plan_id: plan.id,
           partner_override_id: null,
-          state: 'active',
+          state: initialState,
           effective_price: pricing.effective_price,
           vendix_base_price: pricing.base_price,
           partner_margin_amount: pricing.margin_amount,
@@ -304,9 +314,11 @@ export class SubscriptionCheckoutController {
           store_subscription_id: created.id,
           type: 'state_transition',
           from_state: 'draft',
-          to_state: 'active',
+          to_state: initialState,
           payload: {
-            reason: 'checkout_fresh_purchase',
+            reason: isFreePlan
+              ? 'checkout_fresh_purchase_free_plan'
+              : 'checkout_fresh_purchase_awaiting_payment',
             plan_id: plan.id,
             plan_code: plan.code,
           } as Prisma.InputJsonValue,

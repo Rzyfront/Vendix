@@ -1,12 +1,5 @@
-import { useEffect } from 'react';
-import { View, type ViewProps } from 'react-native';
-import Animated, {
-  useAnimatedStyle,
-  withRepeat,
-  withTiming,
-  useSharedValue,
-  withSequence,
-} from 'react-native-reanimated';
+import { useEffect, useRef } from 'react';
+import { View, Animated, type ViewProps } from 'react-native';
 
 type SkeletonVariant = 'text' | 'circle' | 'rect';
 
@@ -24,24 +17,18 @@ export function Skeleton({
   className = '',
   ...props
 }: SkeletonProps) {
-  const opacity = useSharedValue(0.3);
+  const opacity = useRef(new Animated.Value(0.3)).current;
 
   useEffect(() => {
-    opacity.value = withRepeat(
-      withSequence(
-        withTiming(1, { duration: 800 }),
-        withTiming(0.3, { duration: 800 })
-      ),
-      -1,
-      false
+    const anim = Animated.loop(
+      Animated.sequence([
+        Animated.timing(opacity, { toValue: 1, duration: 800, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 0.3, duration: 800, useNativeDriver: true }),
+      ])
     );
+    anim.start();
+    return () => anim.stop();
   }, [opacity]);
-
-  const animatedStyle = useAnimatedStyle(() => {
-    return {
-      opacity: opacity.value,
-    };
-  });
 
   const variantStyles: Record<SkeletonVariant, string> = {
     text: 'rounded',
@@ -49,22 +36,16 @@ export function Skeleton({
     rect: 'rounded-lg',
   };
 
-  const defaultDimensions: Record<SkeletonVariant, { width: number | string; height: number | string }> = {
-    text: { width: '100%', height: 16 },
-    circle: { width: 48, height: 48 },
-    rect: { width: '100%', height: 100 },
+  const defaultDimensions: Record<SkeletonVariant, { w: number | string; h: number | string }> = {
+    text: { w: '100%', h: 16 },
+    circle: { w: 48, h: 48 },
+    rect: { w: '100%', h: 100 },
   };
 
   return (
     <Animated.View
       className={`bg-gray-200 ${variantStyles[variant]} ${className}`}
-      style={[
-        animatedStyle,
-        {
-          width: width ?? defaultDimensions[variant].width,
-          height: height ?? defaultDimensions[variant].height,
-        },
-      ]}
+      style={[{ opacity, width: width ?? defaultDimensions[variant].w, height: height ?? defaultDimensions[variant].h } as any]}
       {...props}
     />
   );

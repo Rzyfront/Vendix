@@ -32,9 +32,20 @@ interface PaymentFailedEventPayload {
 /**
  * Allowed transitions between subscription states. Terminal states
  * (`cancelled`, `expired`) have no outgoing edges.
+ *
+ * `pending_payment` is the parking state for a paid plan whose first invoice
+ * has been issued but not yet confirmed by the Wompi webhook. The
+ * SubscriptionStateListener auto-promotes it to `active` on
+ * `subscription.payment.succeeded`. If the user abandons checkout or the
+ * payment is declined, the subscription moves to `cancelled` or `blocked`.
+ *
+ * `draft → active` is preserved for FREE plans only (effective_price = 0)
+ * which skip the invoice/charge cycle entirely. Paid plans MUST flow through
+ * `draft → pending_payment → active`.
  */
 const TRANSITIONS: Record<State, readonly State[]> = {
-  draft: ['trial', 'active'],
+  draft: ['pending_payment', 'trial', 'active'],
+  pending_payment: ['active', 'blocked', 'cancelled', 'expired'],
   trial: ['active', 'blocked', 'cancelled', 'expired'],
   active: ['grace_soft', 'cancelled', 'expired'],
   grace_soft: ['active', 'grace_hard', 'cancelled'],

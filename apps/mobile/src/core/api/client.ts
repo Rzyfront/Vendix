@@ -3,7 +3,7 @@ import Constants from 'expo-constants';
 import { getToken, setToken, clearToken } from '../auth/token.storage';
 import { useAuthStore } from '../store/auth.store';
 
-const API_BASE_URL = Constants.expoConfig?.extra?.apiUrl || 'http://localhost:3000';
+const API_BASE_URL = Constants.expoConfig?.extra?.apiUrl || 'http://10.163.174.41:3000/api';
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,
@@ -29,9 +29,10 @@ apiClient.interceptors.response.use(
         const { refreshToken } = useAuthStore.getState();
         if (refreshToken) {
           const response = await axios.post(`${API_BASE_URL}/auth/refresh`, {
-            refreshToken,
+            refresh_token: refreshToken,
           });
-          const { token: newToken } = response.data;
+          const d = response.data;
+          const newToken = d?.data?.access_token || d?.access_token || d?.token;
           await setToken(newToken);
           useAuthStore.getState().setToken(newToken);
           originalRequest.headers.Authorization = `Bearer ${newToken}`;

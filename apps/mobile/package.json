@@ -17,6 +17,7 @@
     "@react-navigation/native": "^7.0.0",
     "@react-navigation/native-stack": "^7.0.0",
     "@tanstack/react-query": "^5.0.0",
+    "@vendix/shared-types": "file:../../libs/shared-types",
     "axios": "^1.15.2",
     "expo": "~54.0.33",
     "expo-constants": "~17.1.6",
@@ -34,7 +35,9 @@
     "react-native-safe-area-context": "5.4.0",
     "react-native-screens": "~4.10.0",
     "react-native-svg": "~15.11.2",
+    "react-native-worklets": "0.5.1",
     "tailwindcss": "^3.4.0",
+    "victory-native": "^41.20.2",
     "zustand": "^5.0.0"
   },
   "devDependencies": {

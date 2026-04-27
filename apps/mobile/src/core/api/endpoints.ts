@@ -1,4 +1,4 @@
-export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000';
+export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://10.163.174.41:3000/api';
 
 export const Endpoints = {
   AUTH: {

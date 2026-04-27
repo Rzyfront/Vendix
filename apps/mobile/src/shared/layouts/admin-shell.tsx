@@ -1,17 +1,17 @@
-import { useState, useCallback } from 'react';
-import { Drawer } from '@react-navigation/drawer';
-import { View } from 'react-native';
+import { useState, useCallback, type ReactNode } from 'react';
+import { View, Pressable, Dimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { usePathname } from 'expo-router';
 import { Header } from './header';
 import { DrawerMenu } from './drawer-menu';
 
 interface AdminShellProps {
-  children: React.ReactNode;
+  children: ReactNode;
   title?: string;
+  variant?: 'store' | 'org' | 'super';
 }
 
-export function AdminShell({ children, title = 'Vendix' }: AdminShellProps) {
+export function AdminShell({ children, title = 'Vendix', variant = 'store' }: AdminShellProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const insets = useSafeAreaInsets();
   const pathname = usePathname();
@@ -20,25 +20,35 @@ export function AdminShell({ children, title = 'Vendix' }: AdminShellProps) {
   const closeDrawer = useCallback(() => setDrawerOpen(false), []);
 
   return (
-    <Drawer
-      open={drawerOpen}
-      onOpen={openDrawer}
-      onClose={closeDrawer}
-      drawerContent={() => <DrawerMenu currentRoute={pathname} onClose={closeDrawer} />}
-      screenOptions={{
-        headerShown: false,
-        drawerType: 'slide',
-        overlayModifiesStatusBar: true,
-        swipeEnabled: true,
-        swipeEdgeWidth: 50,
-      }}
-    >
-      <View className="flex-1 bg-gray-50">
-        <Header title={title} onMenuPress={openDrawer} />
-        <View className="flex-1" style={{ paddingTop: insets.top }}>
-          {children}
-        </View>
+    <View className="flex-1 bg-gray-50">
+      <Header title={title} onMenuPress={openDrawer} />
+
+      <View className="flex-1">
+        {children}
       </View>
-    </Drawer>
+
+      {drawerOpen && (
+        <Pressable
+          className="absolute inset-0 bg-black/40"
+          style={{ zIndex: 40 }}
+          onPress={closeDrawer}
+        >
+          <View className="flex-1" />
+        </Pressable>
+      )}
+
+      {drawerOpen && (
+        <View
+          className="absolute top-0 left-0 bottom-0"
+          style={{
+            width: Dimensions.get('window').width * 0.8,
+            paddingTop: insets.top,
+            zIndex: 50,
+          }}
+        >
+          <DrawerMenu currentRoute={pathname} onClose={closeDrawer} variant={variant} />
+        </View>
+      )}
+    </View>
   );
 }

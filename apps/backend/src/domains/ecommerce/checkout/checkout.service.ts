@@ -13,10 +13,12 @@ import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { StockLevelManager } from '../../store/inventory/shared/services/stock-level-manager.service';
 import { StockValidatorService } from '../../store/inventory/shared/services/stock-validator.service';
 import { PriceResolverService } from '../../store/products/services/price-resolver.service';
-import { Logger, BadRequestException } from '@nestjs/common';
+import { Logger, BadRequestException, NotFoundException } from '@nestjs/common';
 import { WompiClient } from '../../store/payments/processors/wompi/wompi.client';
 import { WompiEnvironment } from '../../store/payments/processors/wompi/wompi.types';
+import { WompiProcessor } from '../../store/payments/processors/wompi/wompi.processor';
 import { PaymentEncryptionService } from '../../store/payments/services/payment-encryption.service';
+import { WebhookHandlerService } from '../../store/payments/services/webhook-handler.service';
 import * as crypto from 'crypto';
 import { ReservationsService } from '../../store/reservations/reservations.service';
 import { order_channel_enum } from '@prisma/client';
@@ -37,8 +39,10 @@ export class CheckoutService {
     private readonly stockValidatorService: StockValidatorService,
     private readonly priceResolverService: PriceResolverService,
     private readonly wompiClient: WompiClient,
+    private readonly wompiProcessor: WompiProcessor,
     private readonly paymentEncryption: PaymentEncryptionService,
     private readonly reservationsService: ReservationsService,
+    private readonly webhookHandler: WebhookHandlerService,
   ) {}
 
   async getPaymentMethods(shippingMethodType?: string) {
@@ -935,7 +939,12 @@ export class CheckoutService {
       'wompi',
     );
 
-    this.wompiClient.configure({
+    // Use a per-call isolated client to avoid concurrent calls racing
+    // on the singleton's mutable `config` (the singleton's
+    // `generateIntegritySignature()` reads `this.config.integrity_secret`
+    // synchronously after an `await getAcceptanceTokens()`, leaving a
+    // window where another concurrent `configure()` could swap creds).
+    const client = this.wompiClient.withConfig({
       public_key: config.public_key,
       private_key: config.private_key,
       events_secret: config.events_secret || '',
@@ -944,30 +953,57 @@ export class CheckoutService {
     });
 
     const storeId = RequestContextService.getStoreId();
-    const reference = `vendix_${storeId}_${dto.order_id}_${Date.now()}`;
 
-    // Guardar la referencia en el pago pendiente para que el webhook lo encuentre
-    await this.store_prisma.payments.updateMany({
-      where: {
-        order_id: dto.order_id,
-        state: 'pending',
-      },
-      data: {
-        transaction_id: reference,
-        updated_at: new Date(),
-      },
+    // Resolve the most-recent payment row for this order so we can REUSE its
+    // gateway_reference if one was already issued (e.g. user refreshed the
+    // checkout page mid-flow). Reusing the reference means the Wompi widget
+    // shows the SAME pending transaction instead of creating a parallel one,
+    // which would orphan the original reference and confuse webhook lookup.
+    const existingPayment = await this.store_prisma.payments.findFirst({
+      where: { order_id: dto.order_id },
+      orderBy: { created_at: 'desc' },
     });
+
+    let reference: string;
+    if (existingPayment?.gateway_reference) {
+      // Reuse — don't overwrite. The widget + webhook + force-confirm will
+      // all key off this same reference.
+      reference = existingPayment.gateway_reference;
+    } else {
+      reference = `vendix_${storeId}_${dto.order_id}_${Date.now()}`;
+      // Persist on the existing pending payment row (don't overwrite
+      // transaction_id — that's the placeholder/real-Wompi-id field).
+      if (existingPayment) {
+        await this.store_prisma.payments.update({
+          where: { id: existingPayment.id },
+          data: {
+            gateway_reference: reference,
+            updated_at: new Date(),
+          },
+        });
+      }
+    }
 
     const amountInCents = Math.round(dto.amount * 100);
     const currency = dto.currency || 'COP';
 
-    const integritySignature = this.wompiClient.generateIntegritySignature(
+    const integritySignature = client.generateIntegritySignature(
       reference,
       amountInCents,
       currency,
     );
 
-    const tokens = await this.wompiClient.getAcceptanceTokens();
+    // Validate redirect_url against the store's registered domains to
+    // prevent open-redirect / phishing — the user lands wherever the
+    // attacker's frontend tells Wompi to send them otherwise. We accept
+    // ONLY the store's own domain_settings hostnames (custom domain or
+    // Vendix subdomain) as valid parents.
+    const safeRedirectUrl = await this.validateRedirectUrl(
+      dto.redirect_url,
+      storeId ?? null,
+    );
+
+    const tokens = await client.getAcceptanceTokens();
 
     return {
       public_key: config.public_key,
@@ -975,10 +1011,248 @@ export class CheckoutService {
       amount_in_cents: amountInCents,
       reference,
       signature_integrity: integritySignature,
-      redirect_url: dto.redirect_url || '',
+      redirect_url: safeRedirectUrl,
       acceptance_token: tokens.acceptance_token,
       accept_personal_auth: tokens.personal_auth_token,
       customer_email: dto.customer_email || '',
+    };
+  }
+
+  /**
+   * Validate the customer-supplied redirect URL.
+   *
+   *  - Empty / undefined: allowed (Wompi falls back to its own success page).
+   *  - In production: MUST be HTTPS.
+   *  - Host MUST belong to the store's `domain_settings` (or be a
+   *    subdomain of one of them). This blocks open-redirect /
+   *    phishing — an attacker can't trick the widget into sending the
+   *    user to `https://attacker.com/?paid=true`.
+   *
+   * Throws BadRequestException (Spanish message — user-visible via the
+   * widget callback chain) on any violation.
+   */
+  private async validateRedirectUrl(
+    rawUrl: string | undefined,
+    storeId: number | null,
+  ): Promise<string> {
+    if (!rawUrl) return '';
+
+    let parsed: URL;
+    try {
+      parsed = new URL(rawUrl);
+    } catch {
+      throw new BadRequestException(
+        'La URL de redirección no es válida',
+      );
+    }
+
+    const isProd = process.env.NODE_ENV === 'production';
+    if (isProd && parsed.protocol !== 'https:') {
+      throw new BadRequestException(
+        'La URL de redirección debe usar HTTPS en producción',
+      );
+    }
+
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      throw new BadRequestException(
+        'La URL de redirección debe usar http o https',
+      );
+    }
+
+    if (!storeId) {
+      // No store context — reject conservatively in prod, allow in dev.
+      if (isProd) {
+        throw new BadRequestException(
+          'No se puede validar la URL de redirección sin contexto de tienda',
+        );
+      }
+      return rawUrl;
+    }
+
+    // Allowed hosts: every domain registered to this store.
+    // Note: `domain_settings` is global; we use the unscoped client
+    // through `store_prisma` is fine because we always filter by
+    // store_id below.
+    const domains = await this.store_prisma.domain_settings.findMany({
+      where: { store_id: storeId },
+      select: { hostname: true },
+    });
+    const allowed = domains
+      .map((d) => (d.hostname ?? '').toLowerCase())
+      .filter((h) => h.length > 0);
+
+    // Always allow the platform's own root domain in dev (so the dev
+    // ecommerce served from localhost / vendix.app works).
+    const host = parsed.hostname.toLowerCase();
+    const isAllowed = allowed.some(
+      (h) => host === h || host.endsWith(`.${h}`),
+    );
+
+    if (!isAllowed) {
+      // In dev, log + allow; in prod, hard reject.
+      if (!isProd) {
+        this.logger.warn(
+          `redirect_url host '${host}' is not registered for store ${storeId}; allowed=[${allowed.join(',')}] (dev mode — permitted)`,
+        );
+        return rawUrl;
+      }
+      throw new BadRequestException(
+        'La URL de redirección no pertenece a un dominio autorizado de la tienda',
+      );
+    }
+
+    return rawUrl;
+  }
+
+  /**
+   * Force-confirm a Wompi payment for an order by polling the Wompi API
+   * directly. Used when the customer returns from the Wompi widget — the
+   * frontend calls this so the order/payment state reflects reality even if
+   * the webhook hasn't arrived yet (it's a fallback for the canonical
+   * webhook flow, not a replacement).
+   *
+   * Lookup priority for the Wompi transaction:
+   *   1. payments.transaction_id (real Wompi id, set if any prior webhook landed)
+   *   2. payments.gateway_reference (Vendix reference) -> GET /transactions/?reference=
+   *
+   * Returns the canonical payment state plus a flag indicating whether the
+   * payment was already in a terminal state.
+   */
+  async confirmWompiPayment(orderId: number): Promise<{
+    state: string;
+    orderState: string;
+    transactionId: string | null;
+    alreadyConfirmed: boolean;
+    message?: string;
+  }> {
+    // Use store-scoped client: customer-auth requests carry the resolved
+    // store context, and we want defense in depth — the order MUST belong
+    // to the store the customer is browsing.
+    const payment = await this.store_prisma.payments.findFirst({
+      where: { order_id: orderId },
+      orderBy: { created_at: 'desc' },
+    });
+
+    if (!payment) {
+      throw new NotFoundException('No payment record found for this order');
+    }
+
+    // Idempotency: if payment is already in a terminal state, skip the
+    // Wompi roundtrip and return current state.
+    const terminal = ['succeeded', 'captured', 'failed', 'cancelled', 'refunded'];
+    if (terminal.includes(payment.state)) {
+      const order = await this.store_prisma.orders.findUnique({
+        where: { id: orderId },
+        select: { state: true },
+      });
+      return {
+        state: payment.state,
+        orderState: order?.state ?? 'unknown',
+        transactionId: payment.transaction_id,
+        alreadyConfirmed: true,
+      };
+    }
+
+    // Resolve Wompi credentials for this store. We use the store's enabled
+    // Wompi method (same lookup as `prepareWompiPayment`).
+    const wompiMethod = await this.store_prisma.store_payment_methods.findFirst({
+      where: {
+        state: 'enabled',
+        system_payment_method: { type: 'wompi' },
+      },
+      include: { system_payment_method: true },
+    });
+
+    if (!wompiMethod?.custom_config) {
+      throw new BadRequestException('Wompi no está configurado para esta tienda');
+    }
+
+    const config = this.paymentEncryption.decryptConfig(
+      wompiMethod.custom_config as Record<string, any>,
+      'wompi',
+    );
+
+    // Configure the shared client with the store's credentials before polling.
+    this.wompiClient.configure({
+      public_key: config.public_key,
+      private_key: config.private_key,
+      events_secret: config.events_secret || '',
+      integrity_secret: config.integrity_secret || '',
+      environment: (config.environment as WompiEnvironment) || WompiEnvironment.SANDBOX,
+    });
+
+    // Try to fetch the Wompi transaction:
+    //   1. By real transaction id if we already have it
+    //   2. By Vendix reference (the canonical case for early-state payments)
+    let txn: any = null;
+    const placeholderRe = /^[a-z_]+_\d{10,}_[a-z0-9]+$/i;
+
+    if (
+      payment.transaction_id &&
+      !placeholderRe.test(payment.transaction_id) &&
+      // Wompi ids are typically `<digits>-<digits>-<digits>`; the placeholder
+      // shape `wompi_<ts>_<rand>` is excluded by the regex above.
+      payment.transaction_id.length > 0
+    ) {
+      try {
+        const status = await this.wompiProcessor.getPaymentStatus(payment.transaction_id);
+        // `getPaymentStatus` swallows errors and returns 'failed' with no
+        // gatewayResponse, so verify we got a real txn back.
+        if (status?.gatewayResponse?.id) {
+          txn = status.gatewayResponse;
+        }
+      } catch (err) {
+        this.logger.warn(`Wompi getPaymentStatus failed: ${(err as Error).message}`);
+      }
+    }
+
+    if (!txn) {
+      const reference = payment.gateway_reference || payment.transaction_id;
+      if (!reference) {
+        throw new BadRequestException(
+          'No Wompi reference or transaction id available to confirm this payment',
+        );
+      }
+      txn = await this.wompiProcessor.getTransactionByReference(reference);
+    }
+
+    if (!txn) {
+      // Wompi doesn't know this reference yet (e.g. user closed widget before
+      // submitting). Don't error — the payment row stays pending and the
+      // webhook (if any) will still arrive.
+      this.logger.log(
+        `confirmWompiPayment: no Wompi transaction found for order=${orderId} ref=${payment.gateway_reference}`,
+      );
+      return {
+        state: payment.state,
+        orderState: 'pending_payment',
+        transactionId: payment.transaction_id,
+        alreadyConfirmed: false,
+        message: 'No transaction recorded at gateway yet',
+      };
+    }
+
+    // Apply the txn through the shared webhook-handler logic so we don't
+    // duplicate state mapping, idempotency checks, or order-cancel side effects.
+    const mappedState = await this.webhookHandler.applyWompiTransaction(txn);
+
+    // Reload payment + order to return the canonical post-apply state.
+    const finalPayment = await this.store_prisma.payments.findUnique({
+      where: { id: payment.id },
+      select: { state: true, transaction_id: true, order_id: true },
+    });
+    const order = finalPayment
+      ? await this.store_prisma.orders.findUnique({
+          where: { id: finalPayment.order_id },
+          select: { state: true },
+        })
+      : null;
+
+    return {
+      state: finalPayment?.state ?? mappedState ?? payment.state,
+      orderState: order?.state ?? 'unknown',
+      transactionId: finalPayment?.transaction_id ?? payment.transaction_id,
+      alreadyConfirmed: false,
     };
   }
 }

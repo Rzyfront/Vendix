@@ -504,15 +504,35 @@
             <div class="wompi-awaiting">
               <app-spinner></app-spinner>
               <p class="awaiting-message">{{ wompiAwaitingMessage() }}</p>
+              @if (wompiPollingState().active) {
+                <p class="awaiting-attempts">
+                  Verificando con Wompi… intento
+                  {{ wompiPollingState().attempts }} /
+                  {{ wompiPollingState().maxAttempts }}
+                </p>
+              } @else if (wompiPaymentDbId) {
+                <p class="awaiting-attempts">
+                  Wompi todavía no confirma el pago. Verifica manualmente o
+                  cancela la espera.
+                </p>
+              }
               <div class="awaiting-actions">
                 <app-button
-                  label="Verificar Estado"
+                  label="Verificar pago ahora"
                   variant="outline"
                   size="sm"
-                  (clicked)="startWompiPolling()">
+                  (clicked)="manualVerifyPayment()">
                 </app-button>
+                @if (!wompiPollingState().active && wompiPaymentDbId) {
+                  <app-button
+                    label="Continuar esperando"
+                    variant="ghost"
+                    size="sm"
+                    (clicked)="startWompiPolling()">
+                  </app-button>
+                }
                 <app-button
-                  label="Cancelar Espera"
+                  label="Cancelar espera"
                   variant="ghost"
                   size="sm"
                   (clicked)="cancelWompiAwait()">

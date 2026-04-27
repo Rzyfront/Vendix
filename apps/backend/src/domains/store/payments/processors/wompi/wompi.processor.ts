@@ -32,12 +32,17 @@ export class WompiProcessor extends BasePaymentProcessor {
     try {
       this.logTransaction('PROCESS_WOMPI_PAYMENT', paymentData);
 
-      // Configurar client con credenciales del metadata del store
+      // Use a per-call isolated client to avoid concurrent processPayment
+      // calls racing on the shared singleton's mutable `config`. The
+      // race window is between `getAcceptanceTokens()` (await) and
+      // `generateIntegritySignature()` (sync read of integrity_secret) —
+      // a parallel `processPayment` for a different store could
+      // overwrite credentials in between.
       const wompiConfig = this.resolveConfig(paymentData);
-      this.client.configure(wompiConfig);
+      const client = this.client.withConfig(wompiConfig);
 
       // Obtener acceptance tokens
-      const { acceptance_token: acceptanceToken, personal_auth_token } = await this.client.getAcceptanceTokens();
+      const { acceptance_token: acceptanceToken, personal_auth_token } = await client.getAcceptanceTokens();
 
       // Construir payment method data desde metadata
       const paymentMethodData = paymentData.metadata?.paymentMethod as WompiPaymentMethodData;
@@ -59,7 +64,7 @@ export class WompiProcessor extends BasePaymentProcessor {
           ? paymentData.metadata.reference
           : `vendix_${paymentData.storeId}_${paymentData.orderId}_${Date.now()}`;
 
-      const integritySignature = this.client.generateIntegritySignature(
+      const integritySignature = client.generateIntegritySignature(
         reference,
         this.formatAmount(paymentData.amount),
         paymentData.currency || 'COP',
@@ -84,12 +89,13 @@ export class WompiProcessor extends BasePaymentProcessor {
           ? paymentData.idempotencyKey
           : crypto.randomUUID();
 
-      const response = await this.client.createTransaction(request, idempotencyKey);
+      const response = await client.createTransaction(request, idempotencyKey);
       const txn = response.data;
 
       return {
         success: txn.status !== WompiTransactionStatus.ERROR && txn.status !== WompiTransactionStatus.DECLINED,
         transactionId: txn.id,
+        gatewayReference: reference,
         status: this.mapWompiStatus(txn.status),
         message: txn.status_message || `Wompi transaction ${txn.status}`,
         gatewayResponse: txn,
@@ -174,6 +180,47 @@ export class WompiProcessor extends BasePaymentProcessor {
         transactionId,
       };
     }
+  }
+
+  /**
+   * Fetch the latest Wompi transaction by Vendix-generated reference
+   * (`vendix_<storeId>_<orderId>_<ts>`). Used by the force-confirm flow when
+   * the frontend returns from the widget but no transaction id is known
+   * locally yet (the row only has `gateway_reference`).
+   *
+   * Returns the most recent (by created_at desc) txn or `null` if Wompi has
+   * no record of any transaction under that reference.
+   *
+   * Caller MUST configure the client with the store's credentials first
+   * (see `getClient()`).
+   */
+  async getTransactionByReference(
+    reference: string,
+  ): Promise<WompiTransactionData | null> {
+    try {
+      const response = await this.client.getTransactionsByReference(reference);
+      const txns = response?.data ?? [];
+      if (txns.length === 0) return null;
+
+      // Pick the most recent by created_at — Wompi may return multiple
+      // attempts under the same reference if the merchant retried.
+      return txns.reduce((latest, candidate) => {
+        if (!latest) return candidate;
+        return new Date(candidate.created_at) > new Date(latest.created_at)
+          ? candidate
+          : latest;
+      }, txns[0]);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Expose the underlying client so the orchestrating service can configure
+   * it with the store's per-tenant credentials before polling.
+   */
+  getClient(): WompiClient {
+    return this.client;
   }
 
   // ── Webhook ─────────────────────────────────

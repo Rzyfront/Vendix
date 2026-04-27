@@ -20,6 +20,7 @@ import {
   WebhookHandlerService,
   WompiWebhookValidatorService,
 } from './services';
+import { WompiReconciliationService } from './services/wompi-reconciliation.service';
 import { SystemPaymentMethodsService } from './services/system-payment-methods.service';
 import { StorePaymentMethodsService } from './services/store-payment-methods.service';
 import { OrganizationPaymentPoliciesService } from './services/organization-payment-policies.service';
@@ -83,6 +84,7 @@ import { InvoiceDataRequestsModule } from '../invoicing/invoice-data-requests/in
     OrganizationPaymentPoliciesService,
     PaymentEncryptionService,
     WompiWebhookValidatorService,
+    WompiReconciliationService,
   ],
   exports: [
     PaymentsService,
@@ -94,6 +96,7 @@ import { InvoiceDataRequestsModule } from '../invoicing/invoice-data-requests/in
     StorePaymentMethodsService,
     OrganizationPaymentPoliciesService,
     PaymentEncryptionService,
+    WompiReconciliationService,
   ],
 })
 export class PaymentsModule implements OnModuleInit {
