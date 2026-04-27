@@ -1,4 +1,4 @@
-import { Component, input, output, signal } from '@angular/core';
+import { Component, effect, input, output, signal, untracked } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { PlanPricing } from '../interfaces/subscription-admin.interface';
 import { InputComponent, SelectorComponent, ButtonComponent, IconComponent } from '../../../../../shared/components';
@@ -71,26 +71,39 @@ export class PricingCycleEditorComponent {
 
   readonly initialValue = input<PlanPricing[] | undefined>(undefined);
 
+  private readonly userTouched = signal(false);
+
   constructor() {
-    const initial = this.initialValue();
-    if (initial && initial.length > 0) {
-      this.pricing.set(initial);
-    } else {
-      this.pricing.set([
-        { id: crypto.randomUUID(), billing_cycle: 'monthly', price: 0, currency_code: 'USD', is_default: true },
-      ]);
-    }
+    effect(() => {
+      const v = this.initialValue();
+      const touched = untracked(() => this.userTouched());
+      if (touched) return;
+
+      if (v && v.length > 0) {
+        this.pricing.set(v);
+      } else if (untracked(() => this.pricing().length) === 0) {
+        this.pricing.set([
+          { id: crypto.randomUUID(), billing_cycle: 'monthly', price: 0, currency_code: 'COP', is_default: true },
+        ]);
+      }
+    });
+  }
+
+  private markTouched(): void {
+    this.userTouched.set(true);
   }
 
   addItem(): void {
+    this.markTouched();
     this.pricing.update((list) => [
       ...list,
-      { id: crypto.randomUUID(), billing_cycle: 'monthly', price: 0, currency_code: 'USD', is_default: list.length === 0 },
+      { id: crypto.randomUUID(), billing_cycle: 'monthly', price: 0, currency_code: 'COP', is_default: list.length === 0 },
     ]);
     this.emitChange();
   }
 
   removeItem(index: number): void {
+    this.markTouched();
     this.pricing.update((list) => {
       const next = list.filter((_, i) => i !== index);
       if (next.length > 0 && !next.some((p) => p.is_default)) {
@@ -102,6 +115,7 @@ export class PricingCycleEditorComponent {
   }
 
   setDefault(index: number): void {
+    this.markTouched();
     this.pricing.update((list) =>
       list.map((p, i) => ({ ...p, is_default: i === index })),
     );
@@ -109,6 +123,7 @@ export class PricingCycleEditorComponent {
   }
 
   updateItem(index: number, key: keyof PlanPricing, value: any): void {
+    this.markTouched();
     this.pricing.update((list) => {
       const next = [...list];
       next[index] = { ...next[index], [key]: value };

@@ -5,6 +5,7 @@ import {
   CardComponent,
   ButtonComponent,
   IconComponent,
+  EmptyStateComponent,
   ToastService,
 } from '../../../../../../shared/components/index';
 import { SubscriptionFacade } from '../../../../../../core/store/subscription/subscription.facade';
@@ -12,93 +13,164 @@ import { SubscriptionFacade } from '../../../../../../core/store/subscription/su
 @Component({
   selector: 'app-my-subscription',
   standalone: true,
-  imports: [CardComponent, ButtonComponent, IconComponent, DatePipe, CurrencyPipe],
+  imports: [CardComponent, ButtonComponent, IconComponent, EmptyStateComponent, DatePipe, CurrencyPipe],
   template: `
-    <div class="w-full space-y-6">
+    <div class="w-full max-w-6xl mx-auto px-4 py-6 lg:py-8 space-y-6">
+      <!-- Loading -->
       @if (loading()) {
-        <div class="p-8 text-center">
-          <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-          <p class="mt-2 text-text-secondary">Cargando suscripción...</p>
+        <div class="space-y-4 animate-pulse" aria-busy="true">
+          <div class="h-40 bg-gray-200 rounded-2xl"></div>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div class="h-32 bg-gray-200 rounded-xl"></div>
+            <div class="h-32 bg-gray-200 rounded-xl"></div>
+          </div>
         </div>
       }
 
+      <!-- Active subscription -->
       @if (!loading() && current()) {
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <app-card>
-            <div class="p-4 space-y-3">
-              <div class="flex items-center justify-between">
-                <h3 class="text-sm font-semibold text-text-secondary uppercase tracking-wide">Mi Plan</h3>
-                <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold {{ getStatusBadgeClass() }}">
-                  {{ getStatusLabel() }}
-                </span>
+        <!-- Hero Card -->
+        <div
+          class="relative overflow-hidden rounded-2xl shadow-xl text-white p-6 md:p-8"
+          [style.background]="isTrial() ? trialGradient : activeGradient"
+        >
+          <app-icon
+            name="crown"
+            [size]="120"
+            class="absolute -top-4 -right-4 text-white opacity-15 pointer-events-none"
+          ></app-icon>
+
+          <div class="relative space-y-4">
+            <div class="flex items-start justify-between gap-4 flex-wrap">
+              <div>
+                <p class="text-xs uppercase tracking-wide text-white/80 font-semibold mb-1">Mi plan actual</p>
+                <h2 class="text-3xl md:text-4xl font-extrabold leading-tight">
+                  {{ planName() }}
+                </h2>
               </div>
-              <div class="flex items-center gap-3">
-                <div class="p-4 bg-primary/10 rounded-xl">
-                  <app-icon name="crown" [size]="32" class="text-primary"></app-icon>
+              <span class="inline-flex items-center bg-white/20 backdrop-blur border border-white/30 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wide">
+                {{ getStatusLabel() }}
+              </span>
+            </div>
+
+            <div class="flex items-baseline gap-2">
+              <span class="text-2xl md:text-3xl font-bold">
+                {{ (current()?.effective_price || 0) | currency }}
+              </span>
+              <span class="text-sm text-white/80">/{{ cycleSuffix() }}</span>
+            </div>
+
+            @if (current()?.next_billing_at; as next) {
+              <div class="flex items-center gap-2 pt-2 border-t border-white/20">
+                <app-icon name="calendar" [size]="16" class="text-white/90"></app-icon>
+                <p class="text-sm text-white/90">
+                  Próximo cobro: <span class="font-semibold">{{ next | date:'mediumDate' }}</span>
+                </p>
+              </div>
+            }
+          </div>
+        </div>
+
+        <!-- Secondary cards grid -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <!-- Trial card -->
+          @if (isTrial() && current()?.trial_ends_at) {
+            <app-card customClasses="border-l-4 border-amber-500">
+              <div class="p-5 space-y-4">
+                <div class="flex items-center gap-2">
+                  <app-icon name="hourglass" [size]="20" class="text-amber-600"></app-icon>
+                  <h3 class="text-sm font-semibold text-text-secondary uppercase tracking-wide">Período de Prueba</h3>
                 </div>
                 <div>
-                  <p class="text-2xl font-extrabold text-text-primary">{{ current()?.plan_name || 'Sin Plan' }}</p>
-                  <p class="text-lg font-bold text-primary">
-                    {{ (current()?.effective_price || 0) | currency }}
-                    <span class="text-sm font-normal text-text-secondary">/{{ current()?.billing_cycle === 'yearly' ? 'año' : 'mes' }}</span>
-                  </p>
+                  <p class="text-4xl font-extrabold text-amber-600">{{ daysRemaining() }}</p>
+                  <p class="text-sm text-text-secondary">días restantes</p>
                 </div>
-              </div>
-              @if (current()?.next_billing_at) {
-                <p class="text-xs text-text-secondary mt-2">
-                  Próximo cobro: {{ current()?.next_billing_at | date:'mediumDate' }}
-                </p>
-              }
-            </div>
-          </app-card>
-
-          @if (status() === 'trial' && current()?.trial_ends_at) {
-            <app-card>
-              <div class="p-4 space-y-3">
-                <h3 class="text-sm font-semibold text-text-secondary uppercase tracking-wide">Período de Prueba</h3>
-                <div class="flex items-center gap-3">
-                  <div class="p-4 bg-amber-100 rounded-xl">
-                    <app-icon name="hourglass" [size]="32" class="text-amber-600"></app-icon>
-                  </div>
-                  <div>
-                    <p class="text-2xl font-extrabold text-amber-600">{{ daysRemaining() }} días</p>
-                    <p class="text-sm text-text-secondary">restantes de prueba</p>
-                  </div>
+                <div class="w-full bg-gray-200 rounded-full h-3 overflow-hidden">
+                  <div
+                    class="h-3 rounded-full transition-all bg-gradient-to-r from-amber-400 to-amber-600"
+                    [style.width.%]="trialProgress()"
+                  ></div>
                 </div>
-                <div class="w-full bg-gray-200 rounded-full h-2 mt-2">
-                  <div class="bg-amber-500 h-2 rounded-full transition-all" [style.width.%]="trialProgress()"></div>
-                </div>
+                <app-button variant="primary" size="sm" (clicked)="goToPlans()">
+                  <app-icon name="arrow-up-circle" [size]="16" slot="icon"></app-icon>
+                  Convertir a plan pago
+                </app-button>
               </div>
             </app-card>
           }
-        </div>
 
-        <div class="grid grid-cols-1 gap-4">
+          <!-- Feature summary -->
           <app-card>
-            <div class="p-4">
-              <h3 class="text-sm font-semibold text-text-secondary uppercase tracking-wide mb-4">Uso de Funciones IA</h3>
-              <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                @for (feature of featuresList(); track feature.key) {
-                  <div class="flex items-center justify-between p-3 rounded-lg border border-border {{ feature.enabled ? 'bg-green-50 border-green-200' : 'bg-gray-50' }}">
-                    <div class="flex items-center gap-2">
-                      <app-icon
-                        name="{{ feature.enabled ? 'check-circle' : 'x-circle' }}"
-                        [size]="18"
-                        class="{{ feature.enabled ? 'text-green-600' : 'text-gray-400' }}"
-                      ></app-icon>
-                      <span class="text-sm font-medium {{ feature.enabled ? 'text-text-primary' : 'text-text-secondary' }}">{{ feature.label }}</span>
-                    </div>
-                    @if (feature.enabled && feature.limit !== null) {
-                      <span class="text-xs text-text-secondary">{{ feature.used }}/{{ feature.limit }}</span>
-                    }
-                  </div>
-                }
+            <div class="p-5 space-y-3">
+              <div class="flex items-center gap-2">
+                <app-icon name="sparkles" [size]="20" class="text-primary-600"></app-icon>
+                <h3 class="text-sm font-semibold text-text-secondary uppercase tracking-wide">Funciones IA</h3>
               </div>
+              <div class="flex items-baseline gap-2">
+                <p class="text-4xl font-extrabold text-primary-600">{{ enabledCount() }}</p>
+                <p class="text-sm text-text-secondary">de {{ featuresList().length }} activas</p>
+              </div>
+              <p class="text-xs text-text-secondary">
+                Detalle por función debajo.
+              </p>
             </div>
           </app-card>
         </div>
 
-        <div class="flex flex-wrap gap-3">
+        <!-- Feature usage detail -->
+        <app-card>
+          <div class="p-5 md:p-6 space-y-4">
+            <h3 class="text-sm font-semibold text-text-secondary uppercase tracking-wide">Uso de funciones IA</h3>
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              @for (feature of featuresList(); track feature.key) {
+                <div
+                  class="p-3 rounded-lg border space-y-2"
+                  [class.bg-green-50]="feature.enabled"
+                  [class.border-green-200]="feature.enabled"
+                  [class.bg-gray-50]="!feature.enabled"
+                  [class.border-border]="!feature.enabled"
+                >
+                  <div class="flex items-center justify-between gap-2">
+                    <div class="flex items-center gap-2 min-w-0">
+                      <app-icon
+                        [name]="feature.enabled ? 'check-circle' : 'x-circle'"
+                        [size]="18"
+                        [class.text-green-600]="feature.enabled"
+                        [class.text-gray-400]="!feature.enabled"
+                      ></app-icon>
+                      <span
+                        class="text-sm font-medium truncate"
+                        [class.text-text-primary]="feature.enabled"
+                        [class.text-text-secondary]="!feature.enabled"
+                      >
+                        {{ feature.label }}
+                      </span>
+                    </div>
+                    @if (feature.enabled && feature.limit !== null) {
+                      <span class="text-xs text-text-secondary whitespace-nowrap">
+                        {{ feature.used }}/{{ feature.limit }}
+                      </span>
+                    }
+                  </div>
+                  @if (feature.enabled && feature.limit !== null && feature.limit > 0) {
+                    <div class="w-full bg-white rounded-full h-1.5 overflow-hidden border border-gray-200">
+                      <div
+                        class="h-1.5 rounded-full transition-all"
+                        [class.bg-green-500]="usagePercent(feature) < 70"
+                        [class.bg-amber-500]="usagePercent(feature) >= 70 && usagePercent(feature) < 90"
+                        [class.bg-red-500]="usagePercent(feature) >= 90"
+                        [style.width.%]="usagePercent(feature)"
+                      ></div>
+                    </div>
+                  }
+                </div>
+              }
+            </div>
+          </div>
+        </app-card>
+
+        <!-- Action bar -->
+        <div class="flex flex-wrap gap-3 pt-2">
           <app-button variant="primary" (clicked)="goToPlans()">
             <app-icon name="refresh-cw" [size]="16" slot="icon"></app-icon>
             Cambiar Plan
@@ -116,16 +188,17 @@ import { SubscriptionFacade } from '../../../../../../core/store/subscription/su
         </div>
       }
 
+      <!-- Empty state -->
       @if (!loading() && !current()) {
-        <div class="text-center p-8 space-y-4">
-          <app-icon name="credit-card" [size]="64" class="text-text-secondary"></app-icon>
-          <h2 class="text-xl font-bold text-text-primary">Sin suscripción activa</h2>
-          <p class="text-text-secondary">Selecciona un plan para comenzar</p>
-          <app-button variant="primary" (clicked)="goToPlans()">
-            <app-icon name="arrow-right" [size]="16" slot="icon"></app-icon>
-            Ver Planes
-          </app-button>
-        </div>
+        <app-empty-state
+          icon="sparkles"
+          iconColor="primary"
+          title="Activa tu suscripción"
+          description="Desbloquea funciones de IA, automatización y más eligiendo el plan ideal para tu negocio."
+          actionButtonText="Ver Planes"
+          actionButtonIcon="arrow-right"
+          (actionClick)="goToPlans()"
+        ></app-empty-state>
       }
     </div>
   `,
@@ -140,6 +213,22 @@ export class MySubscriptionComponent implements OnInit {
   readonly status = this.facade.status;
   readonly featureMatrix = this.facade.featureMatrix;
   readonly isActive = this.facade.isActive;
+  readonly isTrial = this.facade.isTrial;
+
+  readonly activeGradient =
+    'linear-gradient(135deg, #7ED7A5 0%, #2F6F4E 60%, #1f4f37 100%)';
+  readonly trialGradient =
+    'linear-gradient(135deg, #fbbf24 0%, #d97706 60%, #92400e 100%)';
+
+  readonly planName = computed(() => {
+    const sub: any = this.current();
+    return sub?.plan_name ?? sub?.plan?.name ?? 'Sin Plan';
+  });
+
+  readonly cycleSuffix = computed(() => {
+    const cycle = this.current()?.billing_cycle;
+    return cycle === 'yearly' ? 'año' : 'mes';
+  });
 
   readonly daysRemaining = computed(() => {
     const trialEnd = this.current()?.trial_ends_at;
@@ -159,19 +248,40 @@ export class MySubscriptionComponent implements OnInit {
 
   readonly featuresList = computed(() => {
     const matrix = this.featureMatrix();
+    if (!matrix || typeof matrix !== 'object') return [];
+    const featureLabels: Record<string, string> = {
+      text_generation: 'Generación de Texto',
+      streaming_chat: 'Chat en Streaming',
+      conversations: 'Conversaciones',
+      tool_agents: 'Agentes con Herramientas',
+      rag_embeddings: 'RAG / Embeddings',
+      async_queue: 'Procesamiento Asíncrono',
+    };
     return Object.entries(matrix).map(([key, feature]: [string, any]) => ({
       key,
-      label: feature.label || key,
-      enabled: feature.enabled || false,
-      used: feature.used || 0,
-      limit: feature.limit || null,
-      unit: feature.unit || null,
+      label: featureLabels[key] || key,
+      enabled: feature.enabled === true,
+      used: feature.used ?? 0,
+      limit:
+        feature.monthly_tokens_cap ??
+        feature.daily_messages_cap ??
+        feature.indexed_docs_cap ??
+        feature.monthly_jobs_cap ??
+        null,
+      unit: feature.monthly_tokens_cap ? 'tokens' : feature.daily_messages_cap ? 'msgs' : null,
     }));
   });
+
+  readonly enabledCount = computed(() => this.featuresList().filter((f) => f.enabled).length);
 
   ngOnInit(): void {
     this.facade.loadCurrent();
     this.facade.loadAccess();
+  }
+
+  usagePercent(feature: { used: number; limit: number | null }): number {
+    if (!feature.limit || feature.limit <= 0) return 0;
+    return Math.min(100, Math.max(0, (feature.used / feature.limit) * 100));
   }
 
   goToPlans(): void {
@@ -201,19 +311,5 @@ export class MySubscriptionComponent implements OnInit {
       trial: 'En Prueba',
     };
     return labels[this.status()] || this.status();
-  }
-
-  getStatusBadgeClass(): string {
-    const classes: Record<string, string> = {
-      active: 'bg-green-100 text-green-700',
-      trialing: 'bg-blue-100 text-blue-700',
-      past_due: 'bg-red-100 text-red-700',
-      cancelled: 'bg-gray-100 text-gray-700',
-      blocked: 'bg-red-100 text-red-700',
-      grace_soft: 'bg-yellow-100 text-yellow-700',
-      none: 'bg-gray-100 text-gray-700',
-      trial: 'bg-blue-100 text-blue-700',
-    };
-    return classes[this.status()] || 'bg-gray-100 text-gray-700';
   }
 }

@@ -41,28 +41,28 @@ import {
       <!-- Stats -->
       <div class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent">
         <app-stats
-          title="Total Promos"
+          title="Total promos"
           [value]="pagination().total"
           iconName="tag"
           iconBgColor="bg-blue-100"
           iconColor="text-blue-600"
         ></app-stats>
         <app-stats
-          title="Active"
+          title="Activas"
           [value]="activeCount()"
           iconName="check"
           iconBgColor="bg-green-100"
           iconColor="text-green-600"
         ></app-stats>
         <app-stats
-          title="Expired"
+          title="Expiradas"
           [value]="expiredCount()"
           iconName="clock"
           iconBgColor="bg-red-100"
           iconColor="text-red-600"
         ></app-stats>
         <app-stats
-          title="Total Uses"
+          title="Usos totales"
           [value]="totalUses()"
           iconName="users"
           iconBgColor="bg-purple-100"
@@ -76,13 +76,13 @@ import {
           <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
             <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
               <h2 class="text-[13px] font-semibold text-text-secondary tracking-wide md:text-lg md:font-semibold md:text-text-primary md:tracking-normal">
-                Promotional Plans <span class="font-normal text-text-secondary/50 md:font-semibold md:text-text-primary">({{ pagination().total }})</span>
+                Planes promocionales <span class="font-normal text-text-secondary/50 md:font-semibold md:text-text-primary">({{ pagination().total }})</span>
               </h2>
               <div class="flex items-center gap-2 w-full md:w-auto">
                 <app-inputsearch
                   class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
                   size="sm"
-                  placeholder="Search promos..."
+                  placeholder="Buscar promos..."
                   [debounceTime]="500"
                   (searchChange)="onSearch($event)"
                 />
@@ -91,7 +91,7 @@ import {
                   size="md"
                   customClasses="w-10 sm:w-11 !px-0 bg-surface shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none !rounded-[10px] shrink-0"
                   (clicked)="showCreateModal.set(true)"
-                  title="New Promo"
+                  title="Nueva promo"
                 >
                   <app-icon slot="icon" name="plus" [size]="18"></app-icon>
                 </app-button>
@@ -103,7 +103,7 @@ import {
           @if (loading()) {
             <div class="p-4 md:p-6 text-center">
               <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-              <p class="mt-2 text-text-secondary">Loading...</p>
+              <p class="mt-2 text-text-secondary">Cargando...</p>
             </div>
           }
 
@@ -111,8 +111,8 @@ import {
           @if (!loading() && promos().length === 0) {
             <app-empty-state
               icon="gift"
-              title="No promotional plans found"
-              description="No promotional plans found."
+              title="No hay promos"
+              description="No hay planes promocionales que coincidan con los filtros."
               [showActionButton]="false"
             ></app-empty-state>
           }
@@ -145,20 +145,20 @@ import {
       </div>
 
       @defer (when showCreateModal()) {
-        <app-modal [(isOpen)]="showCreateModal" title="New Promotional Plan" size="md">
+        <app-modal [(isOpen)]="showCreateModal" title="Nuevo plan promocional" size="md">
           <div class="p-4 space-y-4">
             <form [formGroup]="form">
-              <app-input label="Name" formControlName="name" [control]="form.get('name')" [required]="true"></app-input>
-              <app-input label="Code" formControlName="code" [control]="form.get('code')" [required]="true"></app-input>
-              <app-input label="Discount %" type="number" formControlName="discount_percent" [control]="form.get('discount_percent')" [required]="true"></app-input>
-              <app-input label="Max Uses" type="number" formControlName="max_uses" [control]="form.get('max_uses')"></app-input>
-              <app-input label="Valid From" type="date" formControlName="valid_from" [control]="form.get('valid_from')" [required]="true"></app-input>
-              <app-input label="Valid Until" type="date" formControlName="valid_until" [control]="form.get('valid_until')"></app-input>
+              <app-input label="Nombre" formControlName="name" [control]="form.get('name')" [required]="true"></app-input>
+              <app-input label="Código" formControlName="code" [control]="form.get('code')" [required]="true"></app-input>
+              <app-input label="Descuento %" type="number" formControlName="discount_percent" [control]="form.get('discount_percent')" [required]="true"></app-input>
+              <app-input label="Máx. usos" type="number" formControlName="max_uses" [control]="form.get('max_uses')"></app-input>
+              <app-input label="Válido desde" type="date" formControlName="valid_from" [control]="form.get('valid_from')" [required]="true"></app-input>
+              <app-input label="Válido hasta" type="date" formControlName="valid_until" [control]="form.get('valid_until')"></app-input>
             </form>
           </div>
           <div slot="footer" class="flex gap-3 justify-end w-full">
-            <app-button variant="ghost" (clicked)="showCreateModal.set(false)">Cancel</app-button>
-            <app-button variant="primary" [loading]="submitting()" (clicked)="onCreate()">Create</app-button>
+            <app-button variant="ghost" (clicked)="showCreateModal.set(false)">Cancelar</app-button>
+            <app-button variant="primary" [loading]="submitting()" (clicked)="onCreate()">Crear</app-button>
           </div>
         </app-modal>
       }
@@ -197,27 +197,34 @@ export class PromotionalComponent {
   });
 
   columns: TableColumn[] = [
-    { key: 'name', label: 'Name', sortable: true, width: '200px', priority: 1 },
-    { key: 'code', label: 'Code', sortable: true, width: '150px', priority: 1 },
-    { key: 'discount_percent', label: 'Discount', sortable: true, width: '100px', align: 'right', priority: 2 },
-    { key: 'used_count', label: 'Used', sortable: true, width: '80px', align: 'center', priority: 2 },
-    { key: 'max_uses', label: 'Max Uses', sortable: true, width: '100px', align: 'center', priority: 3 },
+    { key: 'name', label: 'Nombre', sortable: true, width: '200px', priority: 1 },
+    { key: 'code', label: 'Código', sortable: true, width: '150px', priority: 1 },
+    { key: 'discount_percent', label: 'Descuento %', sortable: true, width: '100px', align: 'right', priority: 2 },
+    { key: 'used_count', label: 'Usados', sortable: true, width: '80px', align: 'center', priority: 2 },
+    { key: 'max_uses', label: 'Máx. usos', sortable: true, width: '100px', align: 'center', priority: 3 },
     {
       key: 'is_active',
-      label: 'Status',
+      label: 'Estado',
       sortable: true,
       width: '100px',
       align: 'center',
       badge: true,
       priority: 1,
       badgeConfig: { type: 'status', size: 'sm' },
-      transform: (v: boolean) => (v ? 'Active' : 'Inactive'),
+      transform: (v: boolean) => (v ? 'Activa' : 'Inactiva'),
     },
   ];
 
   actions: TableAction[] = [
     {
-      label: 'Delete',
+      label: 'Detalle',
+      icon: 'eye',
+      variant: 'primary',
+      action: (item: PromotionalPlan) =>
+        this.router.navigate(['/super-admin/subscriptions/promotional', item.id]),
+    },
+    {
+      label: 'Eliminar',
       icon: 'trash-2',
       variant: 'danger',
       action: (item: PromotionalPlan) => this.deletePromo(item),
@@ -229,11 +236,11 @@ export class PromotionalComponent {
     subtitleKey: 'code',
     badgeKey: 'is_active',
     badgeConfig: { type: 'status', size: 'sm' },
-    badgeTransform: (v: boolean) => (v ? 'Active' : 'Inactive'),
+    badgeTransform: (v: boolean) => (v ? 'Activa' : 'Inactiva'),
     detailKeys: [
-      { key: 'discount_percent', label: 'Discount %' },
-      { key: 'used_count', label: 'Used' },
-      { key: 'max_uses', label: 'Max' },
+      { key: 'discount_percent', label: 'Descuento %' },
+      { key: 'used_count', label: 'Usados' },
+      { key: 'max_uses', label: 'Máx.' },
     ],
   };
 

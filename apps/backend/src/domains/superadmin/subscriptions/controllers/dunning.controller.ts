@@ -60,4 +60,13 @@ export class DunningController {
     const result = await this.dunningService.forceCancel(id, userId);
     return this.responseService.success(result, 'Subscription cancelled');
   }
+
+  @Permissions('superadmin:subscriptions:update')
+  @Post(':id/retry-payment')
+  @ApiOperation({ summary: 'Manually enqueue a payment retry for a subscription in dunning' })
+  async retryPayment(@Param('id', ParseIntPipe) id: number) {
+    const userId = RequestContextService.getContext()?.user_id ?? null;
+    const result = await this.dunningService.enqueueRetryPayment(id, userId);
+    return this.responseService.success(result, 'Payment retry enqueued');
+  }
 }

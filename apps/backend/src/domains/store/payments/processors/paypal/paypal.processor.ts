@@ -1,3 +1,4 @@
+import * as crypto from 'crypto';
 import { BasePaymentProcessor } from '../../interfaces/base-processor.interface';
 import {
   PaymentData,
@@ -13,10 +14,21 @@ export class PaypalProcessor extends BasePaymentProcessor {
 
       const transactionId = this.generateTransactionId();
 
+      // PayPal accepts HTTP header `PayPal-Request-Id` on POST endpoints
+      // (Orders API v2, Payments API v2). A retried request with the same
+      // value returns the cached prior response instead of creating a new order.
+      // Fall back to a fresh UUID for back-compat with legacy callers.
+      const idempotencyKey =
+        paymentData.idempotencyKey && paymentData.idempotencyKey.length > 0
+          ? paymentData.idempotencyKey
+          : crypto.randomUUID();
+
       if (this.isTestMode()) {
-        return this.simulateTestPayment(paymentData, transactionId);
+        return this.simulateTestPayment(paymentData, transactionId, idempotencyKey);
       }
 
+      // NOTE: When the real PayPal SDK/HTTP client is wired up, send the key as
+      // header: { 'PayPal-Request-Id': idempotencyKey }
       return {
         success: true,
         transactionId,
@@ -34,6 +46,7 @@ export class PaypalProcessor extends BasePaymentProcessor {
               },
             },
           ],
+          paypal_request_id: idempotencyKey,
         },
       };
     } catch (error) {
@@ -116,6 +129,7 @@ export class PaypalProcessor extends BasePaymentProcessor {
   private simulateTestPayment(
     paymentData: PaymentData,
     transactionId: string,
+    idempotencyKey: string,
   ): PaymentResult {
     const shouldFail = Math.random() < 0.1;
 
@@ -129,6 +143,7 @@ export class PaypalProcessor extends BasePaymentProcessor {
             message: 'Payment was declined',
             details: 'Insufficient funds',
           },
+          paypal_request_id: idempotencyKey,
         },
       };
     }
@@ -158,6 +173,7 @@ export class PaypalProcessor extends BasePaymentProcessor {
               method: 'GET',
             },
           ],
+          paypal_request_id: idempotencyKey,
         },
       };
     }
@@ -178,6 +194,7 @@ export class PaypalProcessor extends BasePaymentProcessor {
             },
           },
         ],
+        paypal_request_id: idempotencyKey,
       },
     };
   }

@@ -1,87 +1,63 @@
 import { Component, OnInit, inject, signal, DestroyRef } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { Router } from '@angular/router';
-import { CurrencyPipe } from '@angular/common';
 import {
-  CardComponent,
-  ButtonComponent,
-  IconComponent,
+  EmptyStateComponent,
+  PricingCardComponent,
   ToastService,
 } from '../../../../../../shared/components/index';
+import { SubscriptionFacade } from '../../../../../../core/store/subscription/subscription.facade';
 import { StoreSubscriptionService } from '../../services/store-subscription.service';
 import { SubscriptionPlan } from '../../interfaces/store-subscription.interface';
 
 @Component({
   selector: 'app-plan-catalog',
   standalone: true,
-  imports: [CardComponent, ButtonComponent, IconComponent, CurrencyPipe],
+  imports: [EmptyStateComponent, PricingCardComponent],
   template: `
-    <div class="w-full space-y-6">
-      <div class="text-center">
-        <h1 class="text-2xl font-bold text-text-primary">Planes Disponibles</h1>
-        <p class="text-text-secondary mt-1">Elige el plan que mejor se adapte a tu negocio</p>
-      </div>
+    <div class="w-full max-w-7xl mx-auto px-4 py-6 lg:py-10 space-y-8">
+      <!-- Hero header -->
+      <header class="text-center space-y-3 max-w-2xl mx-auto">
+        <span class="inline-block bg-primary-100 text-primary-700 text-xs font-bold uppercase tracking-wide px-3 py-1 rounded-full">
+          Planes y precios
+        </span>
+        <h1 class="text-3xl md:text-4xl font-extrabold text-text-primary leading-tight">
+          Elige el plan ideal para tu negocio
+        </h1>
+        <p class="text-base text-text-secondary">
+          Escala con confianza. Cambia o cancela cuando quieras.
+        </p>
+      </header>
 
+      <!-- Loading: skeletons -->
       @if (loading()) {
-        <div class="p-8 text-center">
-          <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8 items-stretch pt-4">
+          @for (i of [0, 1, 2]; track i) {
+            <app-pricing-card [plan]="skeletonPlan" [loading]="true"></app-pricing-card>
+          }
         </div>
       }
 
-      @if (!loading()) {
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <!-- Empty -->
+      @if (!loading() && plans().length === 0) {
+        <app-empty-state
+          icon="package"
+          iconColor="primary"
+          title="No hay planes disponibles"
+          description="Contacta a tu partner o al equipo de Vendix para activar planes en tu cuenta."
+          [showActionButton]="false"
+        ></app-empty-state>
+      }
+
+      <!-- Catalog -->
+      @if (!loading() && plans().length > 0) {
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 lg:gap-8 items-stretch pt-4">
           @for (plan of plans(); track plan.id) {
-            <div class="relative">
-              @if (plan.is_popular) {
-                <div class="absolute -top-3 left-1/2 -translate-x-1/2 z-10">
-                  <span class="bg-primary text-white text-xs font-bold px-3 py-1 rounded-full">Popular</span>
-                </div>
-              }
-              <app-card customClasses="{{ plan.is_current ? 'ring-2 ring-primary' : '' }} h-full">
-                <div class="p-6 flex flex-col h-full">
-                  <div class="space-y-2 flex-1">
-                    <h3 class="text-xl font-bold text-text-primary">{{ plan.name }}</h3>
-                    <p class="text-sm text-text-secondary">{{ plan.description }}</p>
-                    <div class="mt-4">
-                      <span class="text-3xl font-extrabold text-text-primary">{{ plan.base_price | currency }}</span>
-                      <span class="text-sm text-text-secondary">/{{ plan.billing_cycle === 'yearly' ? 'año' : 'mes' }}</span>
-                    </div>
-                    <div class="mt-4 space-y-2">
-                      @for (feature of plan.features; track feature.key) {
-                        <div class="flex items-center gap-2">
-                          <app-icon
-                            name="{{ feature.enabled ? 'check' : 'minus' }}"
-                            [size]="16"
-                            class="{{ feature.enabled ? 'text-green-600' : 'text-gray-400' }}"
-                          ></app-icon>
-                          <span class="text-sm {{ feature.enabled ? 'text-text-primary' : 'text-text-secondary' }}">
-                            {{ feature.label }}
-                          </span>
-                          @if (feature.enabled && feature.limit !== null) {
-                            <span class="text-xs text-text-secondary">({{ feature.limit }}{{ feature.unit ? ' ' + feature.unit : '' }})</span>
-                          }
-                        </div>
-                      }
-                    </div>
-                  </div>
-                  <div class="mt-6">
-                    @if (plan.is_current) {
-                      <app-button variant="outline" [disabled]="true" customClasses="w-full">
-                        Plan Actual
-                      </app-button>
-                    } @else {
-                      <app-button
-                        [variant]="plan.is_popular ? 'primary' : 'outline'"
-                        customClasses="w-full"
-                        (clicked)="selectPlan(plan)"
-                      >
-                        Seleccionar
-                      </app-button>
-                    }
-                  </div>
-                </div>
-              </app-card>
-            </div>
+            <app-pricing-card
+              [plan]="plan"
+              ctaLabel="Seleccionar plan"
+              (select)="selectPlan($event)"
+            ></app-pricing-card>
           }
         </div>
       }
@@ -91,13 +67,31 @@ import { SubscriptionPlan } from '../../interfaces/store-subscription.interface'
 export class PlanCatalogComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
   private router = inject(Router);
+  private facade = inject(SubscriptionFacade);
   private subscriptionService = inject(StoreSubscriptionService);
   private toastService = inject(ToastService);
 
   readonly plans = signal<SubscriptionPlan[]>([]);
   readonly loading = signal(false);
 
+  readonly skeletonPlan = {
+    id: 0,
+    name: '',
+    code: '',
+    description: '',
+    base_price: 0,
+    currency: 'COP',
+    billing_cycle: 'monthly' as const,
+    features: [],
+    is_current: false,
+    is_popular: false,
+    sort_order: 0,
+  };
+
   ngOnInit(): void {
+    if (!this.facade.isLoaded() && !this.facade.isLoading()) {
+      this.facade.loadCurrent();
+    }
     this.loadPlans();
   }
 
@@ -107,7 +101,17 @@ export class PlanCatalogComponent implements OnInit {
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
-          if (res.success && res.data) this.plans.set(res.data);
+          if (res.success && res.data) {
+            const currentSub = this.facade.current();
+            const plans = res.data.map((p: any) => ({
+              ...p,
+              is_current:
+                p.is_current === true ||
+                currentSub?.plan_id === p.id ||
+                currentSub?.plan_id === String(p.id),
+            }));
+            this.plans.set(plans);
+          }
           this.loading.set(false);
         },
         error: () => {
@@ -117,7 +121,7 @@ export class PlanCatalogComponent implements OnInit {
       });
   }
 
-  selectPlan(plan: SubscriptionPlan): void {
+  selectPlan(plan: { id: number | string }): void {
     this.router.navigate(['/admin/subscription/checkout', plan.id]);
   }
 }

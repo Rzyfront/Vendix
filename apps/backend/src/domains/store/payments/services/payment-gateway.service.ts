@@ -1,4 +1,5 @@
 import { Injectable } from '@nestjs/common';
+import * as crypto from 'crypto';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import {
   PaymentData,
@@ -25,6 +26,18 @@ export class PaymentGatewayService {
 
   async processPayment(paymentData: PaymentData): Promise<PaymentResult> {
     try {
+      // The store/POS/eCommerce path through this service requires a
+      // resolved store_payment_methods.id. SaaS subscription billing has
+      // its own gateway path that resolves the method itself; the typed
+      // optionality on PaymentData accommodates both shapes, but here we
+      // hard-require it.
+      if (!paymentData.storePaymentMethodId) {
+        throw new PaymentError(
+          PaymentErrorCodes.PAYMENT_METHOD_DISABLED,
+          'storePaymentMethodId is required for store/POS/eCommerce payments',
+        );
+      }
+
       await this.validatePaymentData(paymentData);
 
       const paymentMethod = await this.getPaymentMethod(
@@ -44,8 +57,18 @@ export class PaymentGatewayService {
         paymentMethod.system_payment_method?.type || 'unknown',
       );
 
+      // Back-compat: legacy callers (existing eCommerce/POS DTOs) may not pass
+      // an idempotency key yet. Initialize a fresh UUID so the processor's
+      // provider call is still safe within this single attempt. Callers that
+      // need cross-attempt safety on retries MUST pass a stable key.
+      const idempotencyKey =
+        paymentData.idempotencyKey && paymentData.idempotencyKey.length > 0
+          ? paymentData.idempotencyKey
+          : crypto.randomUUID();
+
       const result = await processor.processPayment({
         ...paymentData,
+        idempotencyKey,
         metadata: {
           ...paymentData.metadata,
           paymentId: payment.id,
@@ -178,7 +201,7 @@ export class PaymentGatewayService {
             paymentData.storeId,
           ),
       this.validatorService.validatePaymentMethod(
-        paymentData.storePaymentMethodId,
+        paymentData.storePaymentMethodId as number,
         paymentData.storeId,
       ),
       skipOrderValidation

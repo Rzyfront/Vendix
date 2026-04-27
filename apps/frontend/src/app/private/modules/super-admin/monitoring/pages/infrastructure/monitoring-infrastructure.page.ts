@@ -1,4 +1,4 @@
-import { Component, inject, DestroyRef } from '@angular/core';
+import { Component, inject, DestroyRef, signal } from '@angular/core';
 
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { timer } from 'rxjs';
@@ -49,43 +49,43 @@ import {
             </h3>
           </div>
           <app-time-range-selector
-            [selected]="ec2TimeRange"
+            [selected]="ec2TimeRange()"
             (rangeChange)="onEc2TimeRangeChange($event)"
           ></app-time-range-selector>
         </div>
         <div class="p-6 grid grid-cols-1 lg:grid-cols-2 gap-8">
           <app-metric-chart
             label="CPU Utilization"
-            [datapoints]="ec2Metrics?.cpu?.utilization?.datapoints ?? null"
+            [datapoints]="ec2Metrics()?.cpu?.utilization?.datapoints ?? null"
             unit="%"
             color="#f97316"
-            [loading]="loadingEc2"
+            [loading]="loadingEc2()"
           ></app-metric-chart>
           <app-metric-chart
             label="Network I/O"
-            [datapoints]="ec2Metrics?.network?.bytesIn?.datapoints ?? null"
+            [datapoints]="ec2Metrics()?.network?.bytesIn?.datapoints ?? null"
             unit="bytes"
             color="#3b82f6"
             [secondaryDatapoints]="
-              ec2Metrics?.network?.bytesOut?.datapoints ?? null
+              ec2Metrics()?.network?.bytesOut?.datapoints ?? null
             "
             secondaryLabel="Out"
             secondaryColor="#ef4444"
-            [loading]="loadingEc2"
+            [loading]="loadingEc2()"
           ></app-metric-chart>
           <app-metric-chart
             label="Disk Read"
-            [datapoints]="ec2Metrics?.disk?.readBytes?.datapoints ?? null"
+            [datapoints]="ec2Metrics()?.disk?.readBytes?.datapoints ?? null"
             unit="bytes"
             color="#8b5cf6"
-            [loading]="loadingEc2"
+            [loading]="loadingEc2()"
           ></app-metric-chart>
           <app-metric-chart
             label="Disk Write"
-            [datapoints]="ec2Metrics?.disk?.writeBytes?.datapoints ?? null"
+            [datapoints]="ec2Metrics()?.disk?.writeBytes?.datapoints ?? null"
             unit="bytes"
             color="#ec4899"
-            [loading]="loadingEc2"
+            [loading]="loadingEc2()"
           ></app-metric-chart>
         </div>
       </div>
@@ -117,46 +117,46 @@ import {
             </h3>
           </div>
           <app-time-range-selector
-            [selected]="rdsTimeRange"
+            [selected]="rdsTimeRange()"
             (rangeChange)="onRdsTimeRangeChange($event)"
           ></app-time-range-selector>
         </div>
         <div class="p-6 grid grid-cols-1 lg:grid-cols-2 gap-8">
           <app-metric-chart
             label="CPU Utilization"
-            [datapoints]="rdsMetrics?.cpu?.utilization?.datapoints ?? null"
+            [datapoints]="rdsMetrics()?.cpu?.utilization?.datapoints ?? null"
             unit="%"
             color="#10b981"
-            [loading]="loadingRds"
+            [loading]="loadingRds()"
           ></app-metric-chart>
           <app-metric-chart
             label="Conexiones Activas"
-            [datapoints]="rdsMetrics?.connections?.active?.datapoints ?? null"
+            [datapoints]="rdsMetrics()?.connections?.active?.datapoints ?? null"
             unit=""
             color="#6366f1"
-            [loading]="loadingRds"
+            [loading]="loadingRds()"
           ></app-metric-chart>
           <app-metric-chart
             label="IOPS (Read/Write)"
-            [datapoints]="rdsMetrics?.iops?.read?.datapoints ?? null"
+            [datapoints]="rdsMetrics()?.iops?.read?.datapoints ?? null"
             unit="ops"
             color="#3b82f6"
-            [secondaryDatapoints]="rdsMetrics?.iops?.write?.datapoints ?? null"
+            [secondaryDatapoints]="rdsMetrics()?.iops?.write?.datapoints ?? null"
             secondaryLabel="Write"
             secondaryColor="#f97316"
-            [loading]="loadingRds"
+            [loading]="loadingRds()"
           ></app-metric-chart>
           <app-metric-chart
             label="Latencia (Read/Write)"
-            [datapoints]="rdsMetrics?.latency?.read?.datapoints ?? null"
+            [datapoints]="rdsMetrics()?.latency?.read?.datapoints ?? null"
             unit="ms"
             color="#14b8a6"
             [secondaryDatapoints]="
-              rdsMetrics?.latency?.write?.datapoints ?? null
+              rdsMetrics()?.latency?.write?.datapoints ?? null
             "
             secondaryLabel="Write"
             secondaryColor="#f43f5e"
-            [loading]="loadingRds"
+            [loading]="loadingRds()"
           ></app-metric-chart>
         </div>
       </div>
@@ -167,12 +167,12 @@ export class MonitoringInfrastructurePage {
   private readonly monitoringService = inject(MonitoringService);
   private readonly destroyRef = inject(DestroyRef);
 
-  ec2Metrics: Ec2MetricsResponse | null = null;
-  rdsMetrics: RdsMetricsResponse | null = null;
-  loadingEc2 = true;
-  loadingRds = true;
-  ec2TimeRange: TimeRange = '1h';
-  rdsTimeRange: TimeRange = '1h';
+  readonly ec2Metrics = signal<Ec2MetricsResponse | null>(null);
+  readonly rdsMetrics = signal<RdsMetricsResponse | null>(null);
+  readonly loadingEc2 = signal(true);
+  readonly loadingRds = signal(true);
+  readonly ec2TimeRange = signal<TimeRange>('1h');
+  readonly rdsTimeRange = signal<TimeRange>('1h');
 
   private paused = false;
   private visibilityHandler = () => {
@@ -199,42 +199,42 @@ export class MonitoringInfrastructurePage {
   }
 
   onEc2TimeRangeChange(range: TimeRange): void {
-    this.ec2TimeRange = range;
+    this.ec2TimeRange.set(range);
     this.fetchEc2Metrics();
   }
 
   onRdsTimeRangeChange(range: TimeRange): void {
-    this.rdsTimeRange = range;
+    this.rdsTimeRange.set(range);
     this.fetchRdsMetrics();
   }
 
   private fetchEc2Metrics(): void {
-    this.loadingEc2 = true;
+    this.loadingEc2.set(true);
     this.monitoringService
-      .getEc2Metrics(this.ec2TimeRange)
+      .getEc2Metrics(this.ec2TimeRange())
       .pipe(
         map((res) => res.data),
         catchError(() => of(null)),
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((data) => {
-        this.ec2Metrics = data;
-        this.loadingEc2 = false;
+        this.ec2Metrics.set(data);
+        this.loadingEc2.set(false);
       });
   }
 
   private fetchRdsMetrics(): void {
-    this.loadingRds = true;
+    this.loadingRds.set(true);
     this.monitoringService
-      .getRdsMetrics(this.rdsTimeRange)
+      .getRdsMetrics(this.rdsTimeRange())
       .pipe(
         map((res) => res.data),
         catchError(() => of(null)),
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((data) => {
-        this.rdsMetrics = data;
-        this.loadingRds = false;
+        this.rdsMetrics.set(data);
+        this.loadingRds.set(false);
       });
   }
 }

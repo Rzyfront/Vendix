@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   BadRequestException,
   ConflictException,
 } from '@nestjs/common';
@@ -20,6 +21,8 @@ import {
 } from '../../../common/helpers/domain-generator.helper';
 import { BrandingGeneratorHelper } from '../../../common/helpers/branding-generator.helper';
 import { getDefaultStoreSettings } from '../../store/settings/defaults/default-store-settings';
+import { StoreBootstrapHelper } from '../../shared/helpers/store-bootstrap.helper';
+import { SubscriptionTrialService } from '../../store/subscriptions/services/subscription-trial.service';
 
 interface WizardValidation {
   isValid: boolean;
@@ -28,6 +31,8 @@ interface WizardValidation {
 
 @Injectable()
 export class OnboardingWizardService {
+  private readonly logger = new Logger(OnboardingWizardService.name);
+
   constructor(
     private readonly prismaService: OrganizationPrismaService,
     private readonly globalPrisma: GlobalPrismaService,
@@ -35,6 +40,8 @@ export class OnboardingWizardService {
     private readonly defaultPanelUIService: DefaultPanelUIService,
     private readonly domainGeneratorHelper: DomainGeneratorHelper,
     private readonly brandingGeneratorHelper: BrandingGeneratorHelper,
+    private readonly storeBootstrapHelper: StoreBootstrapHelper,
+    private readonly subscriptionTrialService: SubscriptionTrialService,
   ) { }
 
   /**
@@ -472,6 +479,17 @@ export class OnboardingWizardService {
 
   /**
    * Setup store with address
+   *
+   * Atomic flow for the FIRST store of an organization (onboarding wizard):
+   *   1. stores + optional addresses + inventory_locations (via StoreBootstrapHelper)
+   *   2. store_settings with wizard-provided currency/timezone
+   *   3. auto-trial bootstrap (one-shot per organization)
+   *
+   * If any step fails the whole transaction rolls back — no orphan stores,
+   * no stores with default_location_id = NULL, no half-consumed trials.
+   *
+   * NOTE: Store domain is NOT created here because we need branding info
+   * (colors, app_type) which is provided later in setupAppConfig.
    */
   async setupStore(userId: number, setupStoreDto: SetupStoreWizardDto) {
     const user = await this.prismaService.users.findUnique({
@@ -483,9 +501,11 @@ export class OnboardingWizardService {
       throw new BadRequestException('User has no organization');
     }
 
+    const organization_id = user.organization_id;
+
     // Check if store already exists for this organization
     const existingStore = await this.prismaService.stores.findFirst({
-      where: { organization_id: user.organization_id },
+      where: { organization_id },
       include: { addresses: { where: { type: 'store_physical' } } },
     });
 
@@ -494,10 +514,15 @@ export class OnboardingWizardService {
       // You might want more strict check here, but name is the main one in DTO
 
       if (isSameStoreData) {
+        // Store already created in a previous wizard step — do NOT re-trigger
+        // trial bootstrap (it was already attempted when this store was first
+        // created, and trial is one-shot per organization anyway).
         return { ...existingStore, already_completed: true };
       }
 
-      // If name changed, update it
+      // If name changed, update it. Trial is NOT re-triggered: the store
+      // already existed, so any trial that was going to be created has
+      // already been handled in the first creation path.
       const updatedStore = await this.prismaService.stores.update({
         where: { id: existingStore.id },
         data: {
@@ -526,29 +551,16 @@ export class OnboardingWizardService {
       return { ...updatedStore, updated: true };
     }
 
-    // Generate unique slug from name
+    // Generate unique slug from name (resolved BEFORE the transaction so a
+    // slug collision pre-empts opening tx work — the helper still validates
+    // uniqueness via P2002 inside the tx as a safety net).
     const slug = await this.generateUniqueStoreSlug(
       setupStoreDto.name,
-      user.organization_id,
+      organization_id,
     );
 
-    // Create store
-    const store = await this.prismaService.stores.create({
-      data: {
-        name: setupStoreDto.name,
-        slug: slug,
-        store_type: setupStoreDto.store_type || 'physical',
-        timezone: setupStoreDto.timezone || 'America/Mexico_City',
-        organization_id: user.organization_id,
-        created_at: new Date(),
-        updated_at: new Date(),
-      },
-    });
-
-    // NOTE: Store domain is NOT created here because we need branding info (colors, app_type)
-    // which is provided later in setupAppConfig. The domain will be created there.
-
-    // Create initial store_settings with currency and timezone from wizard
+    // Compose default store_settings with wizard-provided currency/timezone
+    // up-front so the JSON value is ready to insert inside the transaction.
     const defaultSettings = getDefaultStoreSettings();
     if (setupStoreDto.currency) {
       defaultSettings.general.currency = setupStoreDto.currency;
@@ -556,62 +568,80 @@ export class OnboardingWizardService {
     if (setupStoreDto.timezone) {
       defaultSettings.general.timezone = setupStoreDto.timezone;
     }
-    await this.prismaService.store_settings.upsert({
-      where: { store_id: store.id },
-      create: { store_id: store.id, settings: defaultSettings as any },
-      update: { settings: defaultSettings as any, updated_at: new Date() },
-    });
 
-    // Create store address if provided
-    let address = null;
-    if (setupStoreDto.address_line1) {
-      address = await this.prismaService.addresses.create({
-        data: {
-          store_id: store.id,
-          address_line1: setupStoreDto.address_line1,
-          address_line2: setupStoreDto.address_line2,
-          city: setupStoreDto.city,
-          state_province: setupStoreDto.state_province,
-          postal_code: setupStoreDto.postal_code,
-          country_code: setupStoreDto.country_code || 'MX',
-          type: 'store_physical',
-          is_primary: true,
-        },
-      });
-    }
+    // Atomic store bootstrap (matches the pattern used by StoresService.create
+    // in the organization domain). All writes commit together or roll back
+    // together — including the trial subscription and has_consumed_trial flip.
+    const storeId: number = await (this.prismaService as any).$transaction(
+      async (tx: Prisma.TransactionClient) => {
+        // 1) store + optional addresses + inventory_locations (atomic).
+        //    The helper guarantees default_location_id is wired on the store.
+        const { store } =
+          await this.storeBootstrapHelper.createStoreWithDefaultLocation(
+            {
+              organization_id,
+              store_data: {
+                name: setupStoreDto.name,
+                slug,
+                store_type: (setupStoreDto.store_type as any) || 'physical',
+                timezone:
+                  setupStoreDto.timezone || 'America/Mexico_City',
+              },
+              address_data: setupStoreDto.address_line1
+                ? {
+                    address_line1: setupStoreDto.address_line1,
+                    address_line2: setupStoreDto.address_line2 ?? null,
+                    city: setupStoreDto.city,
+                    state_province: setupStoreDto.state_province ?? null,
+                    postal_code: setupStoreDto.postal_code ?? null,
+                    country_code: setupStoreDto.country_code || 'MX',
+                    type: 'store_physical',
+                    is_primary: true,
+                  }
+                : undefined,
+            },
+            tx,
+          );
 
-    // Create default location automatically
-    await this.createDefaultLocationForStore(store, user.organization_id, address);
+        // 2) store_settings — currency/timezone come from wizard input.
+        //    Use upsert in case a previous partial run left a row behind.
+        await tx.store_settings.upsert({
+          where: { store_id: store.id },
+          create: { store_id: store.id, settings: defaultSettings as any },
+          update: {
+            settings: defaultSettings as any,
+            updated_at: new Date(),
+          },
+        });
 
-    // Associate user with store - Note: store_users association may not be needed for owners during onboarding
-
-    return store;
-  }
-
-  /**
-   * Create a default location for a store automatically
-   */
-  private async createDefaultLocationForStore(
-    store: any,
-    organization_id: number,
-    address: any = null,
-  ) {
-    try {
-      await this.prismaService.inventory_locations.create({
-        data: {
-          name: store.name,
-          code: `STORE-${store.slug}`,
-          type: 'store',
-          is_active: true,
+        // 3) auto-trial bootstrap (one-shot per organization). Runs INSIDE
+        //    this tx so the FOR UPDATE lock on organizations and the
+        //    has_consumed_trial flip commit atomically with the store.
+        //    Returns null silently if the org already consumed its trial
+        //    or no default plan is configured — store creation continues.
+        await this.subscriptionTrialService.createTrialForStore(
+          store.id,
           organization_id,
-          store_id: store.id,
-          address_id: address?.id || null,
-        },
-      });
-    } catch (error) {
-      console.error('Failed to create default location for store during onboarding:', error);
-      // Fallback: don't fail store creation if location creation fails
-    }
+          tx,
+        );
+
+        this.logger.log(
+          `onboarding setupStore: created store ${store.id} (slug=${store.slug}) for org ${organization_id}`,
+        );
+
+        return store.id;
+      },
+    );
+
+    // Final fetch AFTER the transaction so the response reflects all
+    // committed side-effects (default_location_id, address, settings).
+    return this.prismaService.stores.findUnique({
+      where: { id: storeId },
+      include: {
+        addresses: { where: { type: 'store_physical' } },
+        store_settings: true,
+      },
+    });
   }
 
   /**

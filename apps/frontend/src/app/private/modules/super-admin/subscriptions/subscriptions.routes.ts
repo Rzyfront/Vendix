@@ -92,6 +92,13 @@ export const SUBSCRIPTIONS_ROUTES: Routes = [
             (c) => c.SubscriptionEventsComponent,
           ),
       },
+      {
+        path: 'gateway',
+        loadComponent: () =>
+          import('./pages/gateway/gateway.component').then(
+            (c) => c.GatewayComponent,
+          ),
+      },
     ],
   },
 ];

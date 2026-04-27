@@ -4,6 +4,7 @@ import {
   ConflictException,
   Logger,
 } from '@nestjs/common';
+import * as crypto from 'crypto';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 import { Prisma } from '@prisma/client';
 import { PaymentGatewayService } from './services/payment-gateway.service';
@@ -60,6 +61,11 @@ export class PaymentsService {
         currency: createPaymentDto.currency,
         storePaymentMethodId: createPaymentDto.storePaymentMethodId,
         storeId: createPaymentDto.storeId,
+        // Back-compat: legacy eCommerce DTO does not yet carry an idempotency
+        // key. Initialize a fresh UUID per attempt so each call still maps
+        // to a unique provider-side idempotency key. Cross-attempt retry
+        // safety requires the caller to start passing a stable key.
+        idempotencyKey: crypto.randomUUID(),
         metadata: createPaymentDto.metadata,
         returnUrl: createPaymentDto.returnUrl,
         cancelUrl: createPaymentDto.cancelUrl,
@@ -93,6 +99,8 @@ export class PaymentsService {
         currency: createOrderPaymentDto.currency,
         storePaymentMethodId: createOrderPaymentDto.storePaymentMethodId,
         storeId: createOrderPaymentDto.storeId,
+        // Back-compat: see comment in processPayment above.
+        idempotencyKey: crypto.randomUUID(),
         metadata: createOrderPaymentDto.metadata,
         returnUrl: createOrderPaymentDto.returnUrl,
         cancelUrl: createOrderPaymentDto.cancelUrl,
@@ -1122,6 +1130,11 @@ export class PaymentsService {
         currency: dto.currency || 'COP',
         storePaymentMethodId: dto.store_payment_method_id,
         storeId: dto.store_id,
+        // Back-compat: POS does not yet expose an idempotency key on the DTO.
+        // Initialize a fresh UUID per attempt; if the operator retries the
+        // POS action the system creates a NEW order anyway (different orderId),
+        // so duplicate-charge risk is bounded.
+        idempotencyKey: crypto.randomUUID(),
         metadata: {
           paymentMethod: dto.wompi_payment_method,
           wompiConfig: decryptedConfig,

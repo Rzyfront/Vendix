@@ -1,6 +1,7 @@
 import { Component, DestroyRef, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { HttpClient } from '@angular/common/http';
 import { SubscriptionAdminService } from '../../services/subscription-admin.service';
 import { DunningSubscription } from '../../interfaces/subscription-admin.interface';
 import {
@@ -14,8 +15,11 @@ import {
   PaginationComponent,
   CardComponent,
   EmptyStateComponent,
+  ToastService,
+  DialogService,
 } from '../../../../../../shared/components';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
+import { environment } from '../../../../../../../environments/environment';
 
 @Component({
   selector: 'app-dunning-board',
@@ -35,28 +39,28 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
       <!-- Stats -->
       <div class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent">
         <app-stats
-          title="In Grace"
+          title="En gracia"
           [value]="graceCount()"
           iconName="clock"
           iconBgColor="bg-amber-100"
           iconColor="text-amber-600"
         ></app-stats>
         <app-stats
-          title="Suspended"
+          title="Suspendidas"
           [value]="suspendedCount()"
           iconName="alert-triangle"
           iconBgColor="bg-red-100"
           iconColor="text-red-600"
         ></app-stats>
         <app-stats
-          title="Total Overdue"
+          title="Total en mora"
           [value]="totalOverdue() | currency"
           iconName="banknote"
           iconBgColor="bg-orange-100"
           iconColor="text-orange-600"
         ></app-stats>
         <app-stats
-          title="Avg Days Overdue"
+          title="Promedio días en mora"
           [value]="avgDaysOverdue()"
           iconName="calendar"
           iconBgColor="bg-blue-100"
@@ -78,7 +82,7 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
                   size="md"
                   customClasses="w-10 sm:w-11 !px-0 bg-surface shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none !rounded-[10px] shrink-0"
                   (clicked)="loadDunning()"
-                  title="Refresh"
+                  title="Refrescar"
                 >
                   <app-icon slot="icon" name="refresh" [size]="18"></app-icon>
                 </app-button>
@@ -90,7 +94,7 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
           @if (loading()) {
             <div class="p-4 md:p-6 text-center">
               <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-              <p class="mt-2 text-text-secondary">Loading...</p>
+              <p class="mt-2 text-text-secondary">Cargando...</p>
             </div>
           }
 
@@ -98,7 +102,7 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
           @if (!loading() && dunning().length === 0) {
             <app-empty-state
               icon="alert-circle"
-              title="No dunning found"
+              title="No hay suscripciones en cobranza"
               description="No subscriptions in dunning right now."
               [showActionButton]="false"
             ></app-empty-state>
@@ -137,6 +141,9 @@ export class DunningBoardComponent {
   private service = inject(SubscriptionAdminService);
   private destroyRef = inject(DestroyRef);
   readonly router = inject(Router);
+  private http = inject(HttpClient);
+  private toast = inject(ToastService);
+  private dialog = inject(DialogService);
 
   readonly dunning = signal<DunningSubscription[]>([]);
   readonly loading = signal(false);
@@ -153,13 +160,13 @@ export class DunningBoardComponent {
   });
 
   columns: TableColumn[] = [
-    { key: 'store_name', label: 'Store', sortable: true, width: '200px', priority: 1 },
-    { key: 'organization_name', label: 'Organization', sortable: true, width: '200px', priority: 2 },
+    { key: 'store_name', label: 'Tienda', sortable: true, width: '200px', priority: 1 },
+    { key: 'organization_name', label: 'Organización', sortable: true, width: '200px', priority: 2 },
     { key: 'plan_name', label: 'Plan', sortable: true, width: '150px', priority: 2 },
-    { key: 'price', label: 'Amount', sortable: true, width: '120px', align: 'right', priority: 2 },
+    { key: 'price', label: 'Monto', sortable: true, width: '120px', align: 'right', priority: 2 },
     {
       key: 'status',
-      label: 'Status',
+      label: 'Estado',
       sortable: true,
       width: '110px',
       align: 'center',
@@ -171,16 +178,28 @@ export class DunningBoardComponent {
         colorMap: { grace: '#f59e0b', suspended: '#ef4444' },
       },
     },
-    { key: 'days_overdue', label: 'Days Overdue', sortable: true, width: '120px', align: 'center', priority: 1 },
-    { key: 'payment_attempts', label: 'Attempts', sortable: true, width: '100px', align: 'center', priority: 3 },
+    { key: 'days_overdue', label: 'Días en mora', sortable: true, width: '120px', align: 'center', priority: 1 },
+    { key: 'payment_attempts', label: 'Intentos', sortable: true, width: '100px', align: 'center', priority: 3 },
   ];
 
   actions: TableAction[] = [
     {
-      label: 'Retry',
-      icon: 'refresh',
+      label: 'Recordar',
+      icon: 'bell',
+      variant: 'info',
+      action: (item: DunningSubscription) => this.sendReminder(item.id),
+    },
+    {
+      label: 'Reintentar pago',
+      icon: 'refresh-cw',
       variant: 'primary',
-      action: (item: DunningSubscription) => this.onRetry(item),
+      action: (item: DunningSubscription) => this.retryPayment(item.id),
+    },
+    {
+      label: 'Cancelar',
+      icon: 'x-circle',
+      variant: 'danger',
+      action: (item: DunningSubscription) => this.cancelSubscription(item.id),
     },
   ];
 
@@ -195,8 +214,8 @@ export class DunningBoardComponent {
     },
     detailKeys: [
       { key: 'plan_name', label: 'Plan' },
-      { key: 'days_overdue', label: 'Days Overdue' },
-      { key: 'payment_attempts', label: 'Attempts' },
+      { key: 'days_overdue', label: 'Días en mora' },
+      { key: 'payment_attempts', label: 'Intentos' },
     ],
   };
 
@@ -240,12 +259,51 @@ export class DunningBoardComponent {
     this.loadDunning();
   }
 
-  onRetry(item: DunningSubscription): void {
-    // TODO: implement retry payment
-    console.log('Retry payment for', item.id);
-  }
-
   onViewDetails(item: DunningSubscription): void {
     this.router.navigate(['/super-admin/subscriptions/events'], { queryParams: { subscriptionId: item.id } });
+  }
+
+  sendReminder(id: string): void {
+    this.http
+      .post(`${environment.apiUrl}/superadmin/subscriptions/dunning/${id}/remind`, {})
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => this.toast.success('Recordatorio enviado'),
+        error: () => this.toast.error('Error al enviar recordatorio'),
+      });
+  }
+
+  retryPayment(id: string): void {
+    this.http
+      .post(`${environment.apiUrl}/superadmin/subscriptions/dunning/${id}/retry-payment`, {})
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toast.success('Reintento de pago en cola');
+          this.loadDunning();
+        },
+        error: () => this.toast.error('Error al encolar reintento'),
+      });
+  }
+
+  async cancelSubscription(id: string): Promise<void> {
+    const confirmed = await this.dialog.confirm({
+      title: 'Cancelar suscripción',
+      message: '¿Estás seguro de cancelar esta suscripción? Esta acción es irreversible.',
+      confirmText: 'Cancelar suscripción',
+      cancelText: 'Volver',
+      confirmVariant: 'danger',
+    });
+    if (!confirmed) return;
+    this.http
+      .post(`${environment.apiUrl}/superadmin/subscriptions/dunning/${id}/cancel`, {})
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toast.success('Suscripción cancelada');
+          this.loadDunning();
+        },
+        error: () => this.toast.error('Error al cancelar'),
+      });
   }
 }

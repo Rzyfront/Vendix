@@ -61,8 +61,8 @@ export const selectBannerLevel = createSelector(
     status: string,
     daysUntilDue: number,
   ): 'none' | 'info' | 'warning' | 'danger' => {
-    if (status === 'canceled' || status === 'expired') return 'danger';
-    if (status === 'past_due') return 'danger';
+    if (status === 'cancelled' || status === 'expired') return 'danger';
+    if (status === 'grace_hard' || status === 'grace_soft' || status === 'suspended') return 'danger';
     if (status === 'trialing' && daysUntilDue <= 3) return 'warning';
     if (status === 'trialing') return 'info';
     if (status === 'active' && daysUntilDue <= 7 && daysUntilDue > 0)

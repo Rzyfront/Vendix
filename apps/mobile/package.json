@@ -1,0 +1,46 @@
+{
+  "name": "@vendix/mobile",
+  "version": "0.0.1",
+  "main": "expo-router/entry",
+  "scripts": {
+    "start": "expo start",
+    "android": "expo start --android",
+    "ios": "expo start --ios",
+    "web": "expo start --web",
+    "prebuild": "expo prebuild",
+    "build:preview": "expo export",
+    "lint": "expo lint"
+  },
+  "dependencies": {
+    "@react-native-async-storage/async-storage": "^3.0.2",
+    "@react-navigation/drawer": "^7.0.0",
+    "@react-navigation/native": "^7.0.0",
+    "@react-navigation/native-stack": "^7.0.0",
+    "@tanstack/react-query": "^5.0.0",
+    "axios": "^1.15.2",
+    "expo": "~54.0.33",
+    "expo-constants": "~17.1.6",
+    "expo-linking": "~7.0.5",
+    "expo-router": "~5.0.0",
+    "expo-secure-store": "~14.0.1",
+    "expo-status-bar": "~3.0.9",
+    "lucide-react-native": "^1.11.0",
+    "nativewind": "^5.0.0-preview.3",
+    "react": "19.1.0",
+    "react-native": "0.81.5",
+    "react-native-css": "^3.0.7",
+    "react-native-gesture-handler": "~2.24.0",
+    "react-native-reanimated": "~3.17.4",
+    "react-native-safe-area-context": "5.4.0",
+    "react-native-screens": "~4.10.0",
+    "react-native-svg": "~15.11.2",
+    "tailwindcss": "^3.4.0",
+    "zustand": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "~19.1.0",
+    "eslint-config-expo": "~10.0.0",
+    "typescript": "~5.9.2"
+  },
+  "private": true
+}

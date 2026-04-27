@@ -296,7 +296,8 @@ export class SubscriptionEffects {
           };
 
           eventSource.onerror = () => {
-            // EventSource auto-reconnects — we don't complete the observable
+            eventSource.close();
+            observer.complete();
           };
 
           return () => {

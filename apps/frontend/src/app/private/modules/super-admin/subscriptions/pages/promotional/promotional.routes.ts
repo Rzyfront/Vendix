@@ -6,4 +6,9 @@ export const PROMOTIONAL_ROUTES: Routes = [
     loadComponent: () =>
       import('./promotional.component').then((m) => m.PromotionalComponent),
   },
+  {
+    path: ':id',
+    loadComponent: () =>
+      import('./promotional-detail.component').then((m) => m.PromotionalDetailComponent),
+  },
 ];

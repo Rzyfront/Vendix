@@ -13,7 +13,10 @@ import {
   PaginationComponent,
   CardComponent,
   EmptyStateComponent,
+  ButtonComponent,
+  IconComponent,
 } from '../../../../../../shared/components';
+import { PartnerToggleModalComponent } from '../../components/partner-toggle-modal.component';
 
 @Component({
   selector: 'app-partners',
@@ -26,34 +29,37 @@ import {
     PaginationComponent,
     CardComponent,
     EmptyStateComponent,
+    ButtonComponent,
+    IconComponent,
+    PartnerToggleModalComponent,
   ],
   template: `
     <div class="w-full">
       <!-- Stats -->
       <div class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent">
         <app-stats
-          title="Total Partners"
+          title="Total partners"
           [value]="totalPartners()"
           iconName="handshake"
           iconBgColor="bg-blue-100"
           iconColor="text-blue-600"
         ></app-stats>
         <app-stats
-          title="Active Partners"
+          title="Partners activos"
           [value]="activePartners()"
           iconName="check"
           iconBgColor="bg-green-100"
           iconColor="text-green-600"
         ></app-stats>
         <app-stats
-          title="Pending Payout"
+          title="Pagos pendientes"
           [value]="pendingPayout()"
           iconName="banknote"
           iconBgColor="bg-amber-100"
           iconColor="text-amber-600"
         ></app-stats>
         <app-stats
-          title="Referred Stores"
+          title="Tiendas referidas"
           [value]="totalReferredStores()"
           iconName="store"
           iconBgColor="bg-purple-100"
@@ -73,10 +79,18 @@ import {
                 <app-inputsearch
                   class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
                   size="sm"
-                  placeholder="Search partners..."
+                  placeholder="Buscar partners..."
                   [debounceTime]="500"
                   (searchChange)="onSearch($event)"
                 />
+                <app-button
+                  variant="primary"
+                  size="sm"
+                  (clicked)="openConvertModal()"
+                >
+                  <app-icon slot="icon" name="user-plus" [size]="16"></app-icon>
+                  <span>Convertir en partner</span>
+                </app-button>
               </div>
             </div>
           </div>
@@ -85,7 +99,7 @@ import {
           @if (loading()) {
             <div class="p-4 md:p-6 text-center">
               <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-              <p class="mt-2 text-text-secondary">Loading...</p>
+              <p class="mt-2 text-text-secondary">Cargando...</p>
             </div>
           }
 
@@ -93,8 +107,8 @@ import {
           @if (!loading() && partners().length === 0) {
             <app-empty-state
               icon="users"
-              title="No partners found"
-              description="No partner organizations match your filters."
+              title="No hay partners"
+              description="No hay organizaciones partner que coincidan con los filtros."
               [showActionButton]="false"
             ></app-empty-state>
           }
@@ -125,6 +139,12 @@ import {
           }
         </app-card>
       </div>
+
+      <app-partner-toggle-modal
+        [isOpen]="convertModalOpen()"
+        (closed)="convertModalOpen.set(false)"
+        (toggled)="onPartnerToggled($event)"
+      />
     </div>
   `,
 })
@@ -140,6 +160,7 @@ export class PartnersComponent {
   readonly activePartners = signal(0);
   readonly pendingPayout = signal(0);
   readonly totalReferredStores = signal(0);
+  readonly convertModalOpen = signal(false);
 
   readonly pagination = signal({
     page: 1,
@@ -149,9 +170,9 @@ export class PartnersComponent {
   });
 
   columns: TableColumn[] = [
-    { key: 'name', label: 'Name', sortable: true, width: '200px', priority: 1 },
+    { key: 'name', label: 'Nombre', sortable: true, width: '200px', priority: 1 },
     { key: 'slug', label: 'Slug', sortable: true, width: '150px', priority: 3 },
-    { key: 'email', label: 'Email', sortable: true, width: '250px', priority: 2 },
+    { key: 'email', label: 'Correo', sortable: true, width: '250px', priority: 2 },
     {
       key: 'is_partner',
       label: 'Partner',
@@ -161,16 +182,16 @@ export class PartnersComponent {
       badge: true,
       priority: 1,
       badgeConfig: { type: 'status', size: 'sm' },
-      transform: (v: boolean) => (v ? 'Yes' : 'No'),
+      transform: (v: boolean) => (v ? 'Sí' : 'No'),
     },
-    { key: 'partner_margin_percent', label: 'Margin %', sortable: true, width: '100px', align: 'right', priority: 2 },
-    { key: 'total_referred_stores', label: 'Stores', sortable: true, width: '100px', align: 'center', priority: 2 },
-    { key: 'total_earnings', label: 'Earnings', sortable: true, width: '120px', align: 'right', priority: 3 },
+    { key: 'partner_margin_percent', label: 'Margen %', sortable: true, width: '100px', align: 'right', priority: 2 },
+    { key: 'total_referred_stores', label: 'Tiendas', sortable: true, width: '100px', align: 'center', priority: 2 },
+    { key: 'total_earnings', label: 'Ganancias', sortable: true, width: '120px', align: 'right', priority: 3 },
   ];
 
   actions: TableAction[] = [
     {
-      label: 'Edit',
+      label: 'Editar',
       icon: 'edit',
       variant: 'primary',
       action: (item: PartnerOrganization) => this.router.navigate(['/super-admin/subscriptions/partners', item.id]),
@@ -184,9 +205,9 @@ export class PartnersComponent {
     badgeConfig: { type: 'status', size: 'sm' },
     badgeTransform: (v: boolean) => (v ? 'Partner' : 'Regular'),
     detailKeys: [
-      { key: 'partner_margin_percent', label: 'Margin %' },
-      { key: 'total_referred_stores', label: 'Stores' },
-      { key: 'total_earnings', label: 'Earnings' },
+      { key: 'partner_margin_percent', label: 'Margen %' },
+      { key: 'total_referred_stores', label: 'Tiendas' },
+      { key: 'total_earnings', label: 'Ganancias' },
     ],
   };
 
@@ -236,6 +257,15 @@ export class PartnersComponent {
 
   changePage(page: number): void {
     this.pagination.update((p) => ({ ...p, page }));
+    this.loadPartners();
+  }
+
+  openConvertModal(): void {
+    this.convertModalOpen.set(true);
+  }
+
+  onPartnerToggled(_org: any): void {
+    this.convertModalOpen.set(false);
     this.loadPartners();
   }
 }

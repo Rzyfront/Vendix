@@ -6,4 +6,9 @@ export const PAYOUTS_ROUTES: Routes = [
     loadComponent: () =>
       import('./partner-payouts.component').then((m) => m.PartnerPayoutsComponent),
   },
+  {
+    path: ':id',
+    loadComponent: () =>
+      import('./payout-detail.component').then((m) => m.PayoutDetailComponent),
+  },
 ];

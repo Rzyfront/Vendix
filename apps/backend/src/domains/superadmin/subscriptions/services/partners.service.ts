@@ -2,7 +2,32 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
-import { TogglePartnerDto, SetMarginCapDto, CreatePartnerOverrideDto, UpdatePartnerOverrideDto, PartnerQueryDto } from '../dto';
+import {
+  TogglePartnerDto,
+  SetMarginCapDto,
+  CreatePartnerOverrideDto,
+  UpdatePartnerOverrideDto,
+  PartnerQueryDto,
+  UpdatePartnerOrganizationDto,
+} from '../dto';
+
+interface PartnerSettings {
+  max_partner_margin_pct?: number;
+  partner_margin_percent?: number;
+  partner_margin_cap?: number | null;
+  partner_override_pricing?: Record<string, number>;
+}
+
+function projectPartner(org: any) {
+  const settings: PartnerSettings = (org.partner_settings as PartnerSettings) || {};
+  return {
+    ...org,
+    partner_margin_percent: Number(settings.partner_margin_percent ?? 0),
+    partner_margin_cap:
+      settings.partner_margin_cap === undefined ? null : settings.partner_margin_cap,
+    partner_override_pricing: settings.partner_override_pricing ?? {},
+  };
+}
 
 @Injectable()
 export class PartnersService {
@@ -36,7 +61,7 @@ export class PartnersService {
     ]);
 
     return {
-      data,
+      data: data.map(projectPartner),
       meta: {
         total,
         page: Number(page),
@@ -60,7 +85,59 @@ export class PartnersService {
       throw new VendixHttpException(ErrorCodes.ORG_FIND_001);
     }
 
-    return org;
+    return projectPartner(org);
+  }
+
+  async updatePartnerOrganization(
+    organizationId: number,
+    dto: UpdatePartnerOrganizationDto,
+  ) {
+    const org = await this.prisma.organizations.findUnique({
+      where: { id: organizationId },
+      include: {
+        partner_overrides: {
+          include: { base_plan: { select: { id: true, code: true, name: true } } },
+        },
+      },
+    });
+
+    if (!org) {
+      throw new VendixHttpException(ErrorCodes.ORG_FIND_001);
+    }
+
+    const currentSettings: PartnerSettings =
+      (org.partner_settings as PartnerSettings) || {};
+
+    const nextSettings: PartnerSettings = { ...currentSettings };
+    if (dto.partner_margin_percent !== undefined) {
+      nextSettings.partner_margin_percent = dto.partner_margin_percent;
+    }
+    if (dto.partner_margin_cap !== undefined) {
+      nextSettings.partner_margin_cap = dto.partner_margin_cap;
+    }
+    if (dto.partner_override_pricing !== undefined) {
+      nextSettings.partner_override_pricing = dto.partner_override_pricing;
+    }
+
+    const wasPartner = org.is_partner;
+    const willBePartner = dto.is_partner ?? wasPartner;
+
+    const updated = await this.prisma.organizations.update({
+      where: { id: organizationId },
+      data: {
+        ...(dto.is_partner !== undefined && { is_partner: dto.is_partner }),
+        ...(dto.is_partner === true && !wasPartner && { partner_since: new Date() }),
+        partner_settings: nextSettings as any,
+        updated_at: new Date(),
+      },
+      include: {
+        partner_overrides: {
+          include: { base_plan: { select: { id: true, code: true, name: true } } },
+        },
+      },
+    });
+
+    return projectPartner(updated);
   }
 
   async togglePartner(dto: TogglePartnerDto) {

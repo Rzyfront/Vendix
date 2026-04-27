@@ -12,7 +12,6 @@ import {
   IsIn,
   IsDecimal,
   IsArray,
-  IsJSON,
 } from 'class-validator';
 import { Transform, Type } from 'class-transformer';
 
@@ -67,7 +66,7 @@ export class CreateStoreDto {
   timezone?: string;
 
   @IsOptional()
-  @IsJSON()
+  @IsObject()
   operating_hours?: any;
 
   @IsOptional()
@@ -140,7 +139,7 @@ export class UpdateStoreDto {
   timezone?: string;
 
   @IsOptional()
-  @IsJSON()
+  @IsObject()
   operating_hours?: any;
 
   @IsOptional()

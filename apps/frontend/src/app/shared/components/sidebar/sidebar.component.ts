@@ -138,6 +138,9 @@ export interface MenuItem {
                     class="flex-shrink-0"
                   ></app-icon>
                   <span class="menu-text">{{ item.label }}</span>
+                  @if (item.badge) {
+                    <span class="badge">{{ item.badge }}</span>
+                  }
                   <app-icon
                     name="chevron-right"
                     [size]="14"
@@ -154,6 +157,9 @@ export interface MenuItem {
                           class="submenu-item-button"
                         >
                           <span>{{ child.label }}</span>
+                          @if (child.badge) {
+                            <span class="badge">{{ child.badge }}</span>
+                          }
                         </button>
                       } @else {
                         <a
@@ -165,6 +171,9 @@ export interface MenuItem {
                           (click)="onMenuItemClick()"
                         >
                           <span>{{ child.label }}</span>
+                          @if (child.badge) {
+                            <span class="badge">{{ child.badge }}</span>
+                          }
                         </a>
                       }
                     </li>

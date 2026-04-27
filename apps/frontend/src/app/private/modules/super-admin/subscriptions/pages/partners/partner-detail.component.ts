@@ -31,7 +31,7 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
       @if (loading()) {
         <div class="p-8 text-center">
           <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-          <p class="mt-2 text-text-secondary">Loading partner...</p>
+          <p class="mt-2 text-text-secondary">Cargando...</p>
         </div>
       } @else if (partner()) {
         <div class="flex items-center gap-3 mb-6">
@@ -51,7 +51,7 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
         <div class="bg-surface rounded-card border border-border p-4 md:p-6 space-y-6">
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <span class="text-sm text-text-secondary">Email</span>
+              <span class="text-sm text-text-secondary">Correo</span>
               <p class="text-text-primary">{{ partner()!.email }}</p>
             </div>
             <div>
@@ -62,26 +62,26 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
 
           <div class="grid grid-cols-1 sm:grid-cols-3 gap-4">
             <div class="p-4 bg-background rounded-lg border border-border">
-              <span class="text-sm text-text-secondary">Total Earnings</span>
+              <span class="text-sm text-text-secondary">Ganancias totales</span>
               <p class="text-lg font-semibold text-text-primary">{{ partner()!.total_earnings | currency }}</p>
             </div>
             <div class="p-4 bg-background rounded-lg border border-border">
-              <span class="text-sm text-text-secondary">Pending Payout</span>
+              <span class="text-sm text-text-secondary">Pagos pendientes</span>
               <p class="text-lg font-semibold text-text-primary">{{ partner()!.pending_payout | currency }}</p>
             </div>
             <div class="p-4 bg-background rounded-lg border border-border">
-              <span class="text-sm text-text-secondary">Referred Stores</span>
+              <span class="text-sm text-text-secondary">Tiendas referidas</span>
               <p class="text-lg font-semibold text-text-primary">{{ partner()!.total_referred_stores }}</p>
             </div>
           </div>
 
           <div class="border-t border-border pt-6">
-            <h2 class="text-sm font-semibold text-text-primary mb-4">Partner Settings</h2>
+            <h2 class="text-sm font-semibold text-text-primary mb-4">Configuración del partner</h2>
 
             <form [formGroup]="form" class="space-y-4">
               <div class="flex items-center gap-3">
                 <app-toggle formControlName="is_partner"></app-toggle>
-                <span class="text-sm text-text-primary">Is Partner</span>
+                <span class="text-sm text-text-primary">Es partner</span>
               </div>
 
               <app-margin-cap-input
@@ -96,7 +96,7 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
                   type="button"
                   (clicked)="router.navigate(['/super-admin/subscriptions/partners'])"
                 >
-                  Cancel
+                  Cancelar
                 </app-button>
                 <app-button
                   variant="primary"
@@ -104,7 +104,7 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
                   [loading]="saving()"
                   (clicked)="onSave()"
                 >
-                  Save Changes
+                  Guardar cambios
                 </app-button>
               </div>
             </form>

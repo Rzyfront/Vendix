@@ -736,7 +736,6 @@ export class StoreCreateModalComponent implements OnInit {
       slug: v.slug || undefined,
       store_code: v.store_code || undefined,
       store_type: v.store_type,
-      website: v.website || undefined,
       timezone: v.timezone || undefined,
       is_active: v.is_active,
       operating_hours: v.operating_hours || undefined,

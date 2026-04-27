@@ -13,6 +13,7 @@ import { seedDefaultAccountMappings } from './seeds/default-account-mappings.see
 import { seedDefaultPayrollRules } from './seeds/default-payroll-rules.seed';
 import { seedAIEngineApps } from './seeds/ai-engine-apps.seed';
 import { seedSystemPaymentMethods } from './seeds/system-payment-methods.seed';
+import { seedSubscriptionPlans } from './seeds/subscription-plans.seed';
 
 const seeds = [
   { name: 'Default Templates', fn: seedDefaultTemplates },
@@ -21,6 +22,7 @@ const seeds = [
   { name: 'Default Payroll Rules', fn: seedDefaultPayrollRules },
   { name: 'AI Engine Applications', fn: seedAIEngineApps },
   { name: 'System Payment Methods', fn: seedSystemPaymentMethods },
+  { name: 'Subscription Plans (Default Trial)', fn: seedSubscriptionPlans },
 ];
 
 async function main() {

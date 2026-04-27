@@ -42,21 +42,21 @@ import { FormsModule } from '@angular/forms';
           iconColor="text-blue-600"
         ></app-stats>
         <app-stats
-          title="Active"
+          title="Activas"
           [value]="activeCount()"
           iconName="check"
           iconBgColor="bg-green-100"
           iconColor="text-green-600"
         ></app-stats>
         <app-stats
-          title="Grace"
+          title="Gracia"
           [value]="graceCount()"
           iconName="clock"
           iconBgColor="bg-amber-100"
           iconColor="text-amber-600"
         ></app-stats>
         <app-stats
-          title="Suspended"
+          title="Suspendidas"
           [value]="suspendedCount()"
           iconName="alert-triangle"
           iconBgColor="bg-red-100"
@@ -70,13 +70,13 @@ import { FormsModule } from '@angular/forms';
           <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
             <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
               <h2 class="text-[13px] font-semibold text-text-secondary tracking-wide md:text-lg md:font-semibold md:text-text-primary md:tracking-normal">
-                Store Subscriptions <span class="font-normal text-text-secondary/50 md:font-semibold md:text-text-primary">({{ pagination().total }})</span>
+                Suscripciones por tienda <span class="font-normal text-text-secondary/50 md:font-semibold md:text-text-primary">({{ pagination().total }})</span>
               </h2>
               <div class="flex items-center gap-2 w-full md:w-auto">
                 <app-inputsearch
                   class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
                   size="sm"
-                  placeholder="Search subscriptions..."
+                  placeholder="Buscar suscripciones..."
                   [debounceTime]="500"
                   (searchChange)="onSearch($event)"
                 />
@@ -97,7 +97,7 @@ import { FormsModule } from '@angular/forms';
           @if (loading()) {
             <div class="p-4 md:p-6 text-center">
               <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-              <p class="mt-2 text-text-secondary">Loading...</p>
+              <p class="mt-2 text-text-secondary">Cargando...</p>
             </div>
           }
 
@@ -105,8 +105,8 @@ import { FormsModule } from '@angular/forms';
           @if (!loading() && subscriptions().length === 0) {
             <app-empty-state
               icon="credit-card"
-              title="No subscriptions found"
-              description="No store subscriptions match your filters."
+              title="No hay suscripciones"
+              description="Ninguna suscripción coincide con los filtros."
               [showActionButton]="false"
             ></app-empty-state>
           }
@@ -161,23 +161,23 @@ export class ActiveSubscriptionsComponent {
   });
 
   readonly statusOptions = [
-    { value: '', label: 'All Statuses' },
-    { value: 'active', label: 'Active' },
-    { value: 'grace', label: 'Grace' },
-    { value: 'suspended', label: 'Suspended' },
-    { value: 'cancelled', label: 'Cancelled' },
-    { value: 'trial', label: 'Trial' },
+    { value: '', label: 'Todos los estados' },
+    { value: 'active', label: 'Activa' },
+    { value: 'grace', label: 'Gracia' },
+    { value: 'suspended', label: 'Suspendida' },
+    { value: 'cancelled', label: 'Cancelada' },
+    { value: 'trial', label: 'Prueba' },
   ];
 
   columns: TableColumn[] = [
-    { key: 'store_name', label: 'Store', sortable: true, width: '200px', priority: 1 },
-    { key: 'organization_name', label: 'Organization', sortable: true, width: '200px', priority: 2 },
+    { key: 'store_name', label: 'Tienda', sortable: true, width: '200px', priority: 1 },
+    { key: 'organization_name', label: 'Organización', sortable: true, width: '200px', priority: 2 },
     { key: 'plan_name', label: 'Plan', sortable: true, width: '150px', priority: 2 },
-    { key: 'billing_cycle', label: 'Cycle', sortable: true, width: '100px', priority: 3 },
-    { key: 'price', label: 'Price', sortable: true, width: '120px', align: 'right', priority: 2 },
+    { key: 'billing_cycle', label: 'Ciclo', sortable: true, width: '100px', priority: 3 },
+    { key: 'price', label: 'Precio', sortable: true, width: '120px', align: 'right', priority: 2 },
     {
       key: 'status',
-      label: 'Status',
+      label: 'Estado',
       sortable: true,
       width: '100px',
       align: 'center',
@@ -195,12 +195,18 @@ export class ActiveSubscriptionsComponent {
         },
       },
     },
-    { key: 'current_period_end', label: 'Period End', sortable: true, width: '130px', priority: 3 },
+    { key: 'current_period_end', label: 'Fin del periodo', sortable: true, width: '130px', priority: 3 },
   ];
 
   actions: TableAction[] = [
     {
-      label: 'Events',
+      label: 'Detalle',
+      icon: 'eye',
+      variant: 'primary',
+      action: (item: StoreSubscription) => this.router.navigate(['/super-admin/subscriptions/active', item.id]),
+    },
+    {
+      label: 'Eventos',
       icon: 'activity',
       variant: 'info',
       action: (item: StoreSubscription) => this.router.navigate(['/super-admin/subscriptions/events'], { queryParams: { subscriptionId: item.id } }),
@@ -224,9 +230,9 @@ export class ActiveSubscriptionsComponent {
     },
     detailKeys: [
       { key: 'plan_name', label: 'Plan' },
-      { key: 'billing_cycle', label: 'Cycle' },
-      { key: 'price', label: 'Price' },
-      { key: 'current_period_end', label: 'Ends' },
+      { key: 'billing_cycle', label: 'Ciclo' },
+      { key: 'price', label: 'Precio' },
+      { key: 'current_period_end', label: 'Termina' },
     ],
   };
 

@@ -33,28 +33,28 @@ import { ResponsiveDataViewComponent, TableColumn, TableAction, ItemListCardConf
       <!-- Stats -->
       <div class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent">
         <app-stats
-          title="Total Plans"
+          title="Total de planes"
           [value]="stats().totalPlans"
           iconName="clipboard-list"
           iconBgColor="bg-blue-100"
           iconColor="text-blue-600"
         ></app-stats>
         <app-stats
-          title="Active Plans"
+          title="Planes activos"
           [value]="stats().activePlans"
           iconName="check"
           iconBgColor="bg-green-100"
           iconColor="text-green-600"
         ></app-stats>
         <app-stats
-          title="Active Subs"
+          title="Suscripciones activas"
           [value]="stats().activeSubscriptions"
           iconName="credit-card"
           iconBgColor="bg-purple-100"
           iconColor="text-purple-600"
         ></app-stats>
         <app-stats
-          title="Monthly Revenue"
+          title="Ingresos mensuales"
           [value]="stats().totalMonthlyRevenue | currency"
           iconName="banknote"
           iconBgColor="bg-amber-100"
@@ -68,13 +68,13 @@ import { ResponsiveDataViewComponent, TableColumn, TableAction, ItemListCardConf
           <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
             <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
               <h2 class="text-[13px] font-semibold text-text-secondary tracking-wide md:text-lg md:font-semibold md:text-text-primary md:tracking-normal">
-                Plans <span class="font-normal text-text-secondary/50 md:font-semibold md:text-text-primary">({{ pagination().total }})</span>
+                Planes <span class="font-normal text-text-secondary/50 md:font-semibold md:text-text-primary">({{ pagination().total }})</span>
               </h2>
               <div class="flex items-center gap-2 w-full md:w-auto">
                 <app-inputsearch
                   class="flex-1 md:w-64 shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none rounded-[10px]"
                   size="sm"
-                  placeholder="Search plans..."
+                  placeholder="Buscar planes..."
                   [debounceTime]="500"
                   (searchChange)="onSearch($event)"
                 />
@@ -83,7 +83,7 @@ import { ResponsiveDataViewComponent, TableColumn, TableAction, ItemListCardConf
                   size="md"
                   customClasses="w-10 sm:w-11 !px-0 bg-surface shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none !rounded-[10px] shrink-0"
                   (clicked)="router.navigate(['/super-admin/subscriptions/plans/new'])"
-                  title="New Plan"
+                  title="Nuevo plan"
                 >
                   <app-icon slot="icon" name="plus" [size]="18"></app-icon>
                 </app-button>
@@ -95,7 +95,7 @@ import { ResponsiveDataViewComponent, TableColumn, TableAction, ItemListCardConf
           @if (loading()) {
             <div class="p-4 md:p-6 text-center">
               <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-              <p class="mt-2 text-text-secondary">Loading...</p>
+              <p class="mt-2 text-text-secondary">Cargando...</p>
             </div>
           }
 
@@ -103,8 +103,8 @@ import { ResponsiveDataViewComponent, TableColumn, TableAction, ItemListCardConf
           @if (!loading() && plans().length === 0) {
             <app-empty-state
               icon="layers"
-              title="No plans found"
-              description="Create your first subscription plan to get started."
+              title="No se encontraron planes"
+              description="Crea tu primer plan de suscripción para comenzar."
               [showActionButton]="false"
             ></app-empty-state>
           }
@@ -167,43 +167,43 @@ export class PlansComponent {
   });
 
   columns: TableColumn[] = [
-    { key: 'name', label: 'Name', sortable: true, width: '200px', priority: 1 },
+    { key: 'name', label: 'Nombre', sortable: true, width: '200px', priority: 1 },
     { key: 'slug', label: 'Slug', sortable: true, width: '150px', priority: 3 },
-    { key: 'description', label: 'Description', sortable: false, width: '300px', priority: 2 },
+    { key: 'description', label: 'Descripción', sortable: false, width: '300px', priority: 2 },
     {
       key: 'is_active',
-      label: 'Status',
+      label: 'Estado',
       sortable: true,
       width: '100px',
       align: 'center',
       badge: true,
       priority: 1,
       badgeConfig: { type: 'status', size: 'sm' },
-      transform: (v: boolean) => (v ? 'Active' : 'Inactive'),
+      transform: (v: boolean) => (v ? 'Activo' : 'Inactivo'),
     },
     {
       key: 'is_public',
-      label: 'Visibility',
+      label: 'Visibilidad',
       sortable: true,
       width: '100px',
       align: 'center',
       badge: true,
       priority: 2,
-      badgeConfig: { type: 'custom', size: 'sm', colorMap: { Public: '#3b82f6', Private: '#6b7280' } },
-      transform: (v: boolean) => (v ? 'Public' : 'Private'),
+      badgeConfig: { type: 'custom', size: 'sm', colorMap: { 'Público': '#3b82f6', 'Privado': '#6b7280' } },
+      transform: (v: boolean) => (v ? 'Público' : 'Privado'),
     },
-    { key: 'grace_threshold_days', label: 'Grace', sortable: true, width: '80px', align: 'center', priority: 3 },
+    { key: 'grace_threshold_days', label: 'Gracia', sortable: true, width: '80px', align: 'center', priority: 3 },
   ];
 
   actions: TableAction[] = [
     {
-      label: 'Edit',
+      label: 'Editar',
       icon: 'edit',
       variant: 'primary',
       action: (item: SubscriptionPlan) => this.router.navigate(['/super-admin/subscriptions/plans', item.id, 'edit']),
     },
     {
-      label: 'View',
+      label: 'Ver',
       icon: 'eye',
       variant: 'info',
       action: (item: SubscriptionPlan) => this.router.navigate(['/super-admin/subscriptions/plans', item.id]),
@@ -215,10 +215,10 @@ export class PlansComponent {
     subtitleKey: 'slug',
     badgeKey: 'is_active',
     badgeConfig: { type: 'status', size: 'sm' },
-    badgeTransform: (v: boolean) => (v ? 'Active' : 'Inactive'),
+    badgeTransform: (v: boolean) => (v ? 'Activo' : 'Inactivo'),
     detailKeys: [
-      { key: 'description', label: 'Description' },
-      { key: 'grace_threshold_days', label: 'Grace Days' },
+      { key: 'description', label: 'Descripción' },
+      { key: 'grace_threshold_days', label: 'Días de gracia' },
     ],
   };
 

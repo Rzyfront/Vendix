@@ -346,6 +346,8 @@ model organizations {
   is_partner                    Boolean                        @default(false)
   partner_settings              Json?
   partner_since                 DateTime?                      @db.Timestamp(6)
+  has_consumed_trial            Boolean                        @default(false)
+  trial_consumed_at             DateTime?                      @db.Timestamp(6)
   addresses                     addresses[]
   audit_logs                    audit_logs[]
   domain_settings               domain_settings[]
@@ -410,8 +412,11 @@ model organizations {
   partner_commissions partner_commissions[]    @relation("partner_commissions")
   partner_payouts     partner_payout_batches[] @relation("partner_payouts")
 
+  // Trial consumption audit (one-shot per org, replaces has_consumed_trial flag)
+  organization_trial_consumption organization_trial_consumptions?
+
   // Onboarding State
-  onboarding_state    organization_onboarding_state?
+  onboarding_state organization_onboarding_state?
 
   @@index([onboarding])
   @@index([account_type])
@@ -420,20 +425,20 @@ model organizations {
 }
 
 model organization_onboarding_state {
-  id                           Int       @id @default(autoincrement())
-  organization_id              Int       @unique
-  current_step                 Int       @default(1)
-  selected_app_type            String?   @db.VarChar(50)
-  step_data                    Json?     @default("{}")
-  user_data_draft              Json?     @default("{}")
-  organization_data_draft      Json?     @default("{}")
-  store_data_draft             Json?     @default("{}")
-  app_config_draft             Json?     @default("{}")
-  email_verification_sent_at   DateTime? @db.Timestamp(6)
-  last_resend_at               DateTime? @db.Timestamp(6)
-  created_at                   DateTime? @default(now()) @db.Timestamp(6)
-  updated_at                   DateTime? @default(now()) @db.Timestamp(6)
-  organization                 organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade)
+  id                         Int           @id @default(autoincrement())
+  organization_id            Int           @unique
+  current_step               Int           @default(1)
+  selected_app_type          String?       @db.VarChar(50)
+  step_data                  Json?         @default("{}")
+  user_data_draft            Json?         @default("{}")
+  organization_data_draft    Json?         @default("{}")
+  store_data_draft           Json?         @default("{}")
+  app_config_draft           Json?         @default("{}")
+  email_verification_sent_at DateTime?     @db.Timestamp(6)
+  last_resend_at             DateTime?     @db.Timestamp(6)
+  created_at                 DateTime?     @default(now()) @db.Timestamp(6)
+  updated_at                 DateTime?     @default(now()) @db.Timestamp(6)
+  organization               organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade)
 
   @@index([organization_id])
 }
@@ -503,6 +508,8 @@ model stores {
   timezone                    String?                       @db.VarChar(50)
   operating_hours             Json?
   onboarding                  Boolean                       @default(false)
+  default_location_id         Int?                          @unique
+  default_location            inventory_locations?          @relation("StoreDefaultLocation", fields: [default_location_id], references: [id])
   addresses                   addresses[]
   audit_logs                  audit_logs[]
   brands                      brands[]
@@ -1257,6 +1264,7 @@ model inventory_locations {
   code                     String                     @db.VarChar(50)
   type                     location_type_enum         @default(warehouse)
   is_active                Boolean                    @default(true)
+  is_default               Boolean                    @default(false)
   address_id               Int?
   created_at               DateTime?                  @default(now()) @db.Timestamp(6)
   updated_at               DateTime?                  @default(now()) @db.Timestamp(6)
@@ -1265,6 +1273,7 @@ model inventory_locations {
   addresses                addresses?                 @relation("inventory_location_addresses", fields: [address_id], references: [id], onDelete: Restrict, onUpdate: NoAction)
   organizations            organizations              @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   stores                   stores?                    @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  default_for_store        stores?                    @relation("StoreDefaultLocation")
   movements_from           inventory_movements[]      @relation("from_location")
   movements_to             inventory_movements[]      @relation("to_location")
   inventory_serial_numbers inventory_serial_numbers[]
@@ -5741,6 +5750,9 @@ model subscription_plans {
   is_promotional         Boolean                         @default(false)
   promo_rules            Json?
   promo_priority         Int                             @default(0)
+  is_popular             Boolean                         @default(false)
+  sort_order             Int                             @default(0)
+  is_default             Boolean                         @default(false)
   parent_plan_id         Int?
   parent_plan            subscription_plans?             @relation("plan_lineage", fields: [parent_plan_id], references: [id])
   child_plans            subscription_plans[]            @relation("plan_lineage")
@@ -5815,6 +5827,10 @@ model store_subscriptions {
   replaces         store_subscriptions[]   @relation("store_sub_lineage")
   invoices         subscription_invoices[]
   events           subscription_events[]
+
+  // Trial consumption audit rows that point at this subscription as the
+  // originating trial subscription for the parent organization.
+  organization_trial_consumptions organization_trial_consumptions[]
 
   @@index([state, current_period_end])
   @@index([plan_id])
@@ -5935,4 +5951,21 @@ model platform_settings {
   description        String?  @db.Text
   created_at         DateTime @default(now()) @db.Timestamp(6)
   updated_at         DateTime @default(now()) @db.Timestamp(6)
+}
+
+/// Audit row that records when a single organization consumed its
+/// platform-wide auto-trial. The UNIQUE constraint on `organization_id`
+/// is the enforcement primitive that makes "one trial per org, ever"
+/// concurrency-safe — a second concurrent INSERT raises P2002.
+model organization_trial_consumptions {
+  id                    Int      @id @default(autoincrement())
+  organization_id       Int      @unique
+  store_subscription_id Int
+  consumed_at           DateTime @default(now()) @db.Timestamp(6)
+  metadata              Json?
+
+  organization       organizations       @relation(fields: [organization_id], references: [id], onDelete: Restrict)
+  store_subscription store_subscriptions @relation(fields: [store_subscription_id], references: [id], onDelete: Restrict)
+
+  @@index([store_subscription_id])
 }

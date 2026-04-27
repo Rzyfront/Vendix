@@ -1,6 +1,14 @@
 import { Component, computed, input, model, output } from '@angular/core';
 import { CommonModule } from '@angular/common';
 import { ModalComponent } from '../modal/modal.component';
+import { IconComponent } from '../icon/icon.component';
+import { ButtonComponent } from '../button/button.component';
+import { BadgeComponent, BadgeVariant } from '../badge/badge.component';
+import {
+  PaywallCategory,
+  PaywallSeverity,
+  PaywallVariant,
+} from '../../../core/services/subscription-access.service';
 
 /**
  * Legacy variant codes still consumed by older callers. New paywall flows
@@ -10,28 +18,104 @@ import { ModalComponent } from '../modal/modal.component';
  */
 export type PaywallLegacyVariant = 'NOT_INCLUDED' | 'GRACE_HARD' | 'TRIAL_ENDED';
 
-export interface PaywallVariantConfig {
-  title: string;
-  description: string;
-  ctaLabel: string;
-  ctaRoute?: string;
-}
+/**
+ * Re-exported alias so existing imports keep working. The canonical
+ * definition lives in `SubscriptionAccessService`.
+ */
+export type PaywallVariantConfig = PaywallVariant;
+
+const SEVERITY_BADGE: Record<PaywallSeverity, BadgeVariant> = {
+  critical: 'error',
+  warning: 'warning',
+  info: 'info',
+  upsell: 'success',
+};
+
+const CATEGORY_ICON: Record<PaywallCategory, string> = {
+  upgrade: 'crown',
+  'feature-locked': 'lock',
+  'quota-exhausted': 'zap',
+  'payment-due': 'alert-octagon',
+  'trial-ended': 'sparkles',
+};
+
+const CATEGORIES_WITH_BENEFITS: ReadonlySet<PaywallCategory> = new Set([
+  'upgrade',
+  'feature-locked',
+  'trial-ended',
+]);
 
 @Component({
   selector: 'app-ai-paywall-modal',
   standalone: true,
-  imports: [CommonModule, ModalComponent],
+  imports: [CommonModule, ModalComponent, IconComponent, ButtonComponent, BadgeComponent],
   template: `
-    <app-modal [(isOpen)]="isOpen" [size]="'md'">
-      <div slot="header">
-        <h3 class="text-lg font-semibold">{{ resolvedTitle() }}</h3>
+    <app-modal [(isOpen)]="isOpen" [size]="'md'" [showCloseButton]="false">
+      <div class="paywall-shell" [class]="'severity-' + severityKey()">
+        <!-- Hero zone -->
+        <div class="paywall-hero">
+          <div class="paywall-hero-bg"></div>
+          <div class="paywall-hero-icon">
+            <span class="paywall-hero-halo" aria-hidden="true"></span>
+            <app-icon
+              [name]="iconName()"
+              [size]="44"
+              class="relative z-10 text-white drop-shadow-sm"
+            />
+          </div>
+          @if (badgeLabel()) {
+            <div class="paywall-hero-badge">
+              <app-badge [variant]="badgeVariant()" size="sm" badgeStyle="solid">
+                {{ badgeLabel() }}
+              </app-badge>
+            </div>
+          }
+        </div>
+
+        <!-- Body -->
+        <div class="paywall-body">
+          <h3 class="paywall-title">{{ resolvedTitle() }}</h3>
+          <p class="paywall-description">{{ resolvedDescription() }}</p>
+
+          @if (showBenefits()) {
+            <ul class="paywall-benefits">
+              @for (benefit of benefits(); track benefit) {
+                <li class="paywall-benefit-item">
+                  <span class="paywall-benefit-check" aria-hidden="true">
+                    <app-icon name="check" [size]="14" />
+                  </span>
+                  <span>{{ benefit }}</span>
+                </li>
+              }
+            </ul>
+          }
+
+          @if (recommendedHint()) {
+            <p class="paywall-hint">
+              <app-icon name="sparkles" [size]="14" class="paywall-hint-icon" />
+              {{ recommendedHint() }}
+            </p>
+          }
+        </div>
       </div>
-      <div>
-        <p>{{ resolvedDescription() }}</p>
-      </div>
-      <div slot="footer" class="flex gap-3 justify-end">
-        <button (click)="dismiss()">{{ dismissText() }}</button>
-        <button (click)="primaryAction()">{{ resolvedPrimaryText() }}</button>
+
+      <div slot="footer" class="paywall-footer">
+        <app-button
+          variant="ghost"
+          size="md"
+          (click)="dismiss()"
+          [class]="'paywall-secondary-btn'"
+        >
+          {{ resolvedSecondaryLabel() }}
+        </app-button>
+        <app-button
+          variant="primary"
+          size="md"
+          (click)="primaryAction()"
+          [class]="'paywall-primary-btn paywall-primary-' + severityKey()"
+        >
+          {{ resolvedPrimaryText() }}
+        </app-button>
       </div>
     </app-modal>
   `,
@@ -103,9 +187,41 @@ export class AiPaywallModalComponent {
     }
   });
 
+  readonly resolvedSecondaryLabel = computed(
+    () => this.variantConfig()?.secondaryCtaLabel ?? this.dismissText(),
+  );
+
+  readonly severityKey = computed<PaywallSeverity>(
+    () => this.variantConfig()?.severity ?? this.legacySeverity(),
+  );
+
+  readonly badgeVariant = computed<BadgeVariant>(
+    () => SEVERITY_BADGE[this.severityKey()],
+  );
+
+  readonly badgeLabel = computed(() => this.variantConfig()?.badgeLabel ?? '');
+
+  readonly iconName = computed<string>(() => {
+    const config = this.variantConfig();
+    if (config?.iconName) return config.iconName;
+    if (config?.category) return CATEGORY_ICON[config.category];
+    return this.legacyIcon();
+  });
+
+  readonly benefits = computed(() => this.variantConfig()?.benefits ?? []);
+
+  readonly showBenefits = computed(() => {
+    const config = this.variantConfig();
+    if (!config?.benefits?.length) return false;
+    if (!config.category) return true;
+    return CATEGORIES_WITH_BENEFITS.has(config.category);
+  });
+
+  readonly recommendedHint = computed(
+    () => this.variantConfig()?.recommendedPlanHint ?? '',
+  );
+
   primaryAction(): void {
-    // Legacy 'pay' channel is preserved for GRACE_HARD; the new flow always
-    // emits 'upgrade' and lets the service decide the destination.
     if (!this.variantConfig() && this.variant() === 'GRACE_HARD') {
       this.action.emit('pay');
     } else {
@@ -117,5 +233,27 @@ export class AiPaywallModalComponent {
   dismiss(): void {
     this.action.emit('dismiss');
     this.isOpen.set(false);
+  }
+
+  private legacySeverity(): PaywallSeverity {
+    switch (this.variant()) {
+      case 'GRACE_HARD':
+        return 'critical';
+      case 'TRIAL_ENDED':
+        return 'upsell';
+      default:
+        return 'info';
+    }
+  }
+
+  private legacyIcon(): string {
+    switch (this.variant()) {
+      case 'GRACE_HARD':
+        return 'alert-octagon';
+      case 'TRIAL_ENDED':
+        return 'sparkles';
+      default:
+        return 'lock';
+    }
   }
 }

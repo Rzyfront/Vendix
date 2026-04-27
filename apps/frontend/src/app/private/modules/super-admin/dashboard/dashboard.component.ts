@@ -1,12 +1,18 @@
-import {Component, OnInit, signal,
+import {
+  Component,
+  OnInit,
+  signal,
+  computed,
   DestroyRef,
-  inject} from '@angular/core';
+  inject,
+} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import type { EChartsOption } from 'echarts';
 
-import { SuperAdminDashboardService } from './services/super-admin-dashboard.service';
-
-
+import { SuperAdminDashboardService, SuperAdminStats } from './services/super-admin-dashboard.service';
 import { StatsComponent } from '../../../../shared/components';
+import { ChartComponent } from '../../../../shared/components/chart';
+import { CurrencyFormatService } from '../../../../shared/pipes/currency/currency.pipe';
 
 interface StatCard {
   title: string;
@@ -15,11 +21,12 @@ interface StatCard {
   icon: string;
   iconBgColor: string;
   iconColor: string;
+  subtitle?: string;
 }
 
 interface ActivityItem {
   id: string;
-  type: 'organization' | 'user' | 'system' | 'store';
+  type: 'organization' | 'user' | 'subscription' | 'payment' | 'store';
   title: string;
   description: string;
   timestamp: string;
@@ -27,25 +34,15 @@ interface ActivityItem {
   color: string;
 }
 
-interface ChartData {
-  labels: string[];
-  datasets: {
-    label: string;
-    data: number[];
-    borderColor: string;
-    backgroundColor: string;
-  }[];
-}
-
 @Component({
   selector: 'app-super-admin-dashboard',
   standalone: true,
-  imports: [StatsComponent],
+  imports: [StatsComponent, ChartComponent],
   template: `
-    <div style="background-color: var(--color-background);">
+    <div class="w-full space-y-4 pb-6">
       <!-- Stats Cards -->
       <div class="stats-container">
-        @for (stat of statsData(); track stat) {
+        @for (stat of statsData(); track stat.title) {
           <app-stats
             [title]="stat.title"
             [value]="stat.value"
@@ -56,465 +53,352 @@ interface ChartData {
           ></app-stats>
         }
       </div>
-    
+
       <!-- Charts Section -->
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 mb-6">
-        <div
-          class="lg:col-span-2 rounded-card shadow-card"
-          style="background: var(--color-surface); border: 1px solid var(--color-border);"
-          >
-          <div
-            class="flex justify-between items-center p-6"
-            style="border-bottom: 1px solid var(--color-border);"
-            >
-            <div class="flex items-center gap-3">
-              <div
-                class="w-10 h-10 rounded-lg flex items-center justify-center shadow-card"
-                style="background: linear-gradient(135deg, rgba(126, 215, 165, 0.8) 0%, rgba(126, 215, 165, 0.6) 100%);"
-                >
-                <i class="fas fa-chart-line text-white"></i>
-              </div>
-              <h3
-                class="text-lg font-semibold"
-                style="color: var(--color-text-primary);"
-                >
-                Resumen de Crecimiento
-              </h3>
-            </div>
-            <div
-              class="flex gap-2 rounded-lg p-1.5"
-              style="background: rgba(126, 215, 165, 0.08);"
-              >
-              <button
-                class="px-3 py-1.5 text-xs rounded-md font-medium transition-colors"
-                style="background: var(--color-primary); color: white;"
-                >
-                7D
-              </button>
-              <button
-                class="px-3 py-1.5 text-xs rounded-md font-medium transition-colors hover:bg-white/50"
-                style="color: var(--color-text-secondary);"
-                >
-                30D
-              </button>
-              <button
-                class="px-3 py-1.5 text-xs rounded-md font-medium transition-colors hover:bg-white/50"
-                style="color: var(--color-text-secondary);"
-                >
-                90D
-              </button>
-            </div>
+      <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        <!-- Revenue & Subscriptions Chart -->
+        <div class="lg:col-span-2 bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border overflow-hidden flex flex-col">
+          <div class="p-4 border-b border-border">
+            <h3 class="font-semibold text-text-primary text-sm">Ingresos y Suscripciones</h3>
+            <p class="text-xs text-text-secondary">Últimos 6 meses</p>
           </div>
-          <div class="p-6 h-80">
-            <!-- Chart Header with Stats -->
-            <div class="flex justify-between items-center mb-6">
-              <div class="flex gap-8">
-                <div class="text-center">
-                  <p
-                    class="text-2xl font-bold"
-                    style="color: var(--color-primary);"
-                    >
-                    1,367
-                  </p>
-                  <p class="text-xs" style="color: var(--color-text-muted);">
-                    Total
-                  </p>
-                </div>
-                <div class="text-center">
-                  <p
-                    class="text-lg font-semibold"
-                    style="color: var(--color-primary);"
-                    >
-                    +23.5%
-                  </p>
-                  <p class="text-xs" style="color: var(--color-text-muted);">
-                    vs semana anterior
-                  </p>
-                </div>
-                <div class="text-center">
-                  <p
-                    class="text-lg font-semibold"
-                    style="color: var(--color-accent);"
-                    >
-                    256
-                  </p>
-                  <p class="text-xs" style="color: var(--color-text-muted);">
-                    Pico (Sáb)
-                  </p>
-                </div>
+          <div class="p-4 flex-1">
+            @if (isLoading()) {
+              <div class="h-56 flex items-center justify-center">
+                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
               </div>
-            </div>
-    
-            <!-- Main Chart -->
-            <div class="relative h-52">
-              <!-- Grid Lines -->
+            } @else {
+              <app-chart [options]="revenueChartOptions()" size="large"></app-chart>
+            }
+          </div>
+        </div>
+
+        <!-- Distribution Chart (Rose Pie) -->
+        <div class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border overflow-hidden flex flex-col">
+          <div class="p-4 border-b border-border">
+            <h3 class="font-semibold text-text-primary text-sm">Distribución de la Plataforma</h3>
+            <p class="text-xs text-text-secondary">Entidades activas</p>
+          </div>
+          <div class="p-4 flex-1">
+            @if (isLoading()) {
+              <div class="h-56 flex items-center justify-center">
+                <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+              </div>
+            } @else {
+              <app-chart [options]="distributionChartOptions()" size="large"></app-chart>
+            }
+          </div>
+        </div>
+      </div>
+
+      <!-- Activity & Top Organizations -->
+      <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <!-- Recent Activity -->
+        <div class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border overflow-hidden">
+          <div class="px-4 py-3 border-b border-border">
+            <h3 class="font-semibold text-text-primary text-sm">Actividad Reciente</h3>
+          </div>
+          <div class="p-3 space-y-0">
+            @for (activity of recentActivities().slice(0, 6); track activity.id) {
               <div
-                class="absolute inset-0 flex flex-col justify-between opacity-30"
+                class="flex gap-3 py-2.5 transition-colors rounded-lg"
+                style="border-bottom: 1px solid var(--color-border);"
+              >
+                <div
+                  class="w-7 h-7 rounded-full flex items-center justify-center text-xs flex-shrink-0"
+                  [style.background]="activity.color + '1a'"
+                  [style.color]="activity.color"
                 >
-                <div
-                  class="border-b"
-                  style="border-color: var(--color-border);"
-                ></div>
-                <div
-                  class="border-b"
-                  style="border-color: var(--color-border);"
-                ></div>
-                <div
-                  class="border-b"
-                  style="border-color: var(--color-border);"
-                ></div>
-                <div
-                  class="border-b"
-                  style="border-color: var(--color-border);"
-                ></div>
-              </div>
-    
-              <!-- Bars -->
-              @if (chartData().datasets.length > 0) {
-                <div
-                  class="absolute inset-0 flex items-end justify-between gap-3 px-4"
-                  >
-                  @for (bar of chartData().datasets[0].data; track $index; let i = $index) {
-                    <div
-                      class="flex-1 rounded-t-lg min-h-4 transition-all duration-500 hover:shadow-lg relative group cursor-pointer"
-                      style="background: linear-gradient(to top, rgba(126, 215, 165, 0.6) 0%, rgba(126, 215, 165, 0.3) 100%);"
-                      [style.height.%]="getBarHeight(bar)"
-                      >
-                      <!-- Value Tooltip -->
-                      <div
-                        class="absolute -top-12 left-1/2 transform -translate-x-1/2 rounded-lg opacity-0 group-hover:opacity-100 transition-all duration-300 whitespace-nowrap shadow-lg z-20 p-2 text-xs"
-                        style="background: var(--color-surface); border: 1px solid var(--color-border); color: var(--color-text-primary);"
-                        >
-                        <div class="font-semibold">{{ bar }}</div>
-                        <div style="color: var(--color-text-muted);">
-                          {{ chartData().labels[i] }}
-                        </div>
-                        <div
-                          class="absolute bottom-0 left-1/2 transform -translate-x-1/2 translate-y-1/2 rotate-45 w-2 h-2"
-                          style="background: var(--color-surface); border-right: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border);"
-                        ></div>
-                      </div>
-                      <!-- Bar Animation -->
-                      <div
-                        class="absolute inset-0 rounded-t-lg opacity-0 group-hover:opacity-100 transition-opacity duration-300"
-                        style="background: linear-gradient(to top, rgba(126, 215, 165, 0.8) 0%, rgba(126, 215, 165, 0.4) 100%);"
-                      ></div>
-                    </div>
-                  }
+                  <i class="fas {{ activity.icon }}"></i>
                 </div>
-              }
-    
-              <!-- Y-axis Labels -->
-              <div
-                class="absolute left-0 top-0 h-full flex flex-col justify-between text-xs -ml-10"
-                style="color: var(--color-text-muted);"
-                >
-                <span>250</span>
-                <span>200</span>
-                <span>150</span>
-                <span>100</span>
-                <span>50</span>
-                <span>0</span>
+                <div class="flex-1 min-w-0">
+                  <p class="text-sm font-medium truncate text-text-primary">
+                    {{ activity.title }}
+                  </p>
+                  <p class="text-xs truncate text-text-secondary">
+                    {{ activity.description }}
+                  </p>
+                </div>
+                <p class="text-[11px] whitespace-nowrap flex-shrink-0 mt-0.5 text-text-secondary">
+                  {{ activity.timestamp }}
+                </p>
               </div>
-            </div>
-    
-            <!-- X-axis Labels -->
-            <div class="flex justify-between mt-6 px-4">
-              @for (label of chartData().labels; track label) {
+            }
+            @if (recentActivities().length === 0) {
+              <p class="text-sm text-center py-8 text-text-secondary">
+                No hay actividad reciente
+              </p>
+            }
+          </div>
+        </div>
+
+        <!-- Top Organizations -->
+        <div class="bg-surface rounded-xl shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:border md:border-border overflow-hidden">
+          <div class="px-4 py-3 border-b border-border">
+            <h3 class="font-semibold text-text-primary text-sm">Principales Organizaciones</h3>
+          </div>
+          <div class="p-3 space-y-0">
+            @for (org of topOrganizations(); track org.id; let i = $index) {
+              <div
+                class="flex items-center gap-3 py-2.5 rounded-lg transition-colors"
+                style="border-bottom: 1px solid var(--color-border);"
+              >
                 <span
-                  class="text-xs font-medium px-3 py-1.5 rounded-md transition-colors cursor-pointer"
-                  style="color: var(--color-text-secondary); background: rgba(126, 215, 165, 0.08);"
-                  class="hover:bg-opacity-20"
-                  >{{ label }}</span
-                  >
-                }
-              </div>
-            </div>
-          </div>
-    
-          <div
-            class="bg-gradient-to-br from-white via-green-50/20 to-emerald-50/10 border border-green-100/50 rounded-2xl p-6 shadow-xl"
-            >
-            <div class="flex items-center gap-3 mb-6">
-              <div
-                class="w-10 h-10 rounded-lg flex items-center justify-center shadow-card"
-                style="background: linear-gradient(135deg, rgba(126, 215, 165, 0.8) 0%, rgba(126, 215, 165, 0.6) 100%);"
-                >
-                <i class="fas fa-heartbeat text-white"></i>
-              </div>
-              <h3
-                class="text-lg font-semibold"
-                style="color: var(--color-text-primary);"
-                >
-                Salud del Sistema
-              </h3>
-            </div>
-            <div class="grid grid-cols-2 gap-4">
-              <div
-                class="flex items-center gap-3 rounded-lg p-4 transition-all duration-200 hover:shadow-md"
-                style="background: rgba(126, 215, 165, 0.08);"
-                >
-                <i
-                  class="fas fa-server w-10 h-10 rounded-lg flex items-center justify-center text-sm shadow-card text-white"
-                  style="background: linear-gradient(135deg, rgba(126, 215, 165, 0.8) 0%, rgba(126, 215, 165, 0.6) 100%);"
-                ></i>
-                <div>
-                  <p
-                    class="text-lg font-bold"
-                    style="color: var(--color-text-primary);"
-                    >
-                    99.9%
-                  </p>
-                  <p
-                    class="text-xs font-medium"
-                    style="color: var(--color-text-muted);"
-                    >
-                    Tiempo Activo
-                  </p>
-                </div>
-              </div>
-              <div
-                class="flex items-center gap-3 rounded-lg p-4 transition-all duration-200 hover:shadow-md"
-                style="background: rgba(6, 182, 212, 0.08);"
-                >
-                <i
-                  class="fas fa-tachometer-alt w-10 h-10 rounded-lg flex items-center justify-center text-sm shadow-card text-white"
-                  style="background: linear-gradient(135deg, rgba(6, 182, 212, 0.8) 0%, rgba(6, 182, 212, 0.6) 100%);"
-                ></i>
-                <div>
-                  <p
-                    class="text-lg font-bold"
-                    style="color: var(--color-text-primary);"
-                    >
-                    0.8s
-                  </p>
-                  <p
-                    class="text-xs font-medium"
-                    style="color: var(--color-text-muted);"
-                    >
-                    Respuesta
-                  </p>
-                </div>
-              </div>
-              <div
-                class="flex items-center gap-3 rounded-lg p-4 transition-all duration-200 hover:shadow-md"
-                style="background: rgba(139, 92, 246, 0.08);"
-                >
-                <i
-                  class="fas fa-database w-10 h-10 rounded-lg flex items-center justify-center text-sm shadow-card text-white"
-                  style="background: linear-gradient(135deg, rgba(139, 92, 246, 0.8) 0%, rgba(139, 92, 246, 0.6) 100%);"
-                ></i>
-                <div>
-                  <p
-                    class="text-lg font-bold"
-                    style="color: var(--color-text-primary);"
-                    >
-                    8.7TB
-                  </p>
-                  <p
-                    class="text-xs font-medium"
-                    style="color: var(--color-text-muted);"
-                    >
-                    Storage
-                  </p>
-                </div>
-              </div>
-              <div
-                class="flex items-center gap-3 rounded-lg p-4 transition-all duration-200 hover:shadow-md"
-                style="background: rgba(126, 215, 165, 0.08);"
-                >
-                <i
-                  class="fas fa-shield-alt w-10 h-10 rounded-lg flex items-center justify-center text-sm shadow-card text-white"
-                  style="background: linear-gradient(135deg, rgba(126, 215, 165, 0.8) 0%, rgba(126, 215, 165, 0.6) 100%);"
-                ></i>
-                <div>
-                  <p
-                    class="text-lg font-bold"
-                    style="color: var(--color-text-primary);"
-                    >
-                    A+
-                  </p>
-                  <p
-                    class="text-xs font-medium"
-                    style="color: var(--color-text-muted);"
-                    >
-                    Security
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-    
-        <!-- Activity Section -->
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div
-            class="rounded-card shadow-card"
-            style="background: var(--color-surface); border: 1px solid var(--color-border);"
-            >
-            <div
-              class="flex justify-between items-center p-6"
-              style="border-bottom: 1px solid var(--color-border);"
-              >
-              <h3
-                class="text-lg font-semibold"
-                style="color: var(--color-text-primary);"
-                >
-                Actividad Reciente
-              </h3>
-              <button
-                class="text-xs px-3 py-1.5 rounded-md font-medium transition-colors hover:bg-opacity-10"
-                style="color: var(--color-primary); background: rgba(126, 215, 165, 0.1);"
-                >
-                Ver todo
-              </button>
-            </div>
-            <div class="p-6">
-              @for (activity of recentActivities().slice(0, 4); track activity) {
-                <div
-                  class="flex gap-4 py-4 transition-colors -mx-2 px-2 rounded-lg"
-                  style="border-bottom: 1px solid var(--color-border);"
-                  [class.last:border-b-0]="true"
-                  [style.background]="'rgba(126, 215, 165, 0.05)'"
-                  class="hover:bg-opacity-10"
-                  >
-                  <div
-                    class="w-10 h-10 rounded-lg flex items-center justify-center text-sm flex-shrink-0 shadow-card"
-                    style="background: linear-gradient(135deg, rgba(126, 215, 165, 0.2) 0%, rgba(126, 215, 165, 0.1) 100%); color: var(--color-primary);"
-                    >
-                    <i class="fas {{ activity.icon }}"></i>
-                  </div>
-                  <div class="flex-1">
-                    <p
-                      class="text-sm font-semibold mb-1"
-                      style="color: var(--color-text-primary);"
-                      >
-                      {{ activity.title }}
+                  class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold flex-shrink-0 text-white"
+                  [style.background]="org.isPartner
+                    ? 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)'
+                    : 'linear-gradient(135deg, rgba(59, 130, 246, 0.8) 0%, rgba(59, 130, 246, 0.6) 100%)'"
+                >{{ i + 1 }}</span>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center gap-2">
+                    <p class="text-sm font-medium truncate text-text-primary">
+                      {{ org.name }}
                     </p>
-                    <p
-                      class="text-xs mb-2"
-                      style="color: var(--color-text-secondary);"
-                      >
-                      {{ activity.description }}
-                    </p>
-                    <p
-                      class="text-xs font-medium"
-                      style="color: var(--color-text-muted);"
-                      >
-                      {{ activity.timestamp }}
-                    </p>
-                  </div>
-                </div>
-              }
-            </div>
-          </div>
-    
-          <div
-            class="rounded-card shadow-card"
-            style="background: var(--color-surface); border: 1px solid var(--color-border);"
-            >
-            <div
-              class="flex justify-between items-center p-6"
-              style="border-bottom: 1px solid var(--color-border);"
-              >
-              <h3
-                class="text-lg font-semibold"
-                style="color: var(--color-text-primary);"
-                >
-                Principales Organizaciones
-              </h3>
-              <button
-                class="p-2 rounded-lg transition-colors hover:bg-opacity-10"
-                style="color: var(--color-text-secondary); background: rgba(126, 215, 165, 0.05);"
-                >
-                <i class="fas fa-sync-alt text-sm"></i>
-              </button>
-            </div>
-            <div class="p-6">
-              @for (org of topOrganizations().slice(0, 5); track org; let i = $index) {
-                <div
-                  class="flex items-center gap-4 py-4 transition-colors -mx-2 px-2 rounded-lg"
-                  style="border-bottom: 1px solid var(--color-border);"
-                  [class.last:border-b-0]="true"
-                  [style.background]="'rgba(126, 215, 165, 0.05)'"
-                  class="hover:bg-opacity-10"
-                  >
-                  <span
-                    class="w-8 h-8 rounded-lg flex items-center justify-center text-sm font-bold flex-shrink-0 shadow-card text-white"
-                    style="background: linear-gradient(135deg, rgba(126, 215, 165, 0.8) 0%, rgba(126, 215, 165, 0.6) 100%);"
-                    >{{ i + 1 }}</span
-                    >
-                    <div class="flex-1">
-                      <p
-                        class="text-sm font-semibold mb-1"
-                        style="color: var(--color-text-primary);"
-                        >
-                        {{ org.name }}
-                      </p>
-                      <p
-                        class="text-xs font-medium"
-                        style="color: var(--color-text-secondary);"
-                        >
-                        {{ org.stores }} stores •
-                        {{ org.users.toLocaleString() }} users
-                      </p>
-                    </div>
-                    <div class="flex items-center gap-1">
-                      <i
-                        class="fas text-xs"
-                        [class.fa-arrow-up]="org.growth > 0"
-                        [class.fa-arrow-down]="org.growth < 0"
-                  [style.color]="
-                    org.growth > 0
-                      ? 'var(--color-primary)'
-                      : 'var(--color-destructive)'
-                  "
-                      ></i>
+                    @if (org.isPartner) {
                       <span
-                        class="text-xs font-bold"
-                  [style.color]="
-                    org.growth > 0
-                      ? 'var(--color-primary)'
-                      : 'var(--color-destructive)'
-                  "
-                        >
-                        {{ getAbsValue(org.growth) }}%
+                        class="text-[10px] px-1.5 py-0.5 rounded-full font-semibold"
+                        style="background: rgba(245, 158, 11, 0.15); color: #d97706;"
+                      >
+                        Partner
                       </span>
-                    </div>
+                    }
                   </div>
-                }
+                  <div class="flex items-center gap-2 mt-0.5">
+                    <p class="text-xs text-text-secondary">
+                      {{ org.stores }} tiendas &middot; {{ org.users }} usuarios
+                    </p>
+                    <span class="text-xs font-medium text-text-secondary">
+                      &middot; {{ currencyService.formatCompact(org.revenue) }}
+                    </span>
+                  </div>
+                </div>
+                <div class="flex items-center gap-1 flex-shrink-0">
+                  <i
+                    class="fas text-xs"
+                    [class.fa-arrow-up]="org.growth > 0"
+                    [class.fa-arrow-down]="org.growth < 0"
+                    [style.color]="org.growth > 0 ? 'var(--color-primary)' : 'var(--color-destructive)'"
+                  ></i>
+                  <span
+                    class="text-xs font-bold"
+                    [style.color]="org.growth > 0 ? 'var(--color-primary)' : 'var(--color-destructive)'"
+                  >
+                    {{ getAbsValue(org.growth) }}%
+                  </span>
+                </div>
               </div>
-            </div>
+            }
+            @if (topOrganizations().length === 0) {
+              <p class="text-sm text-center py-8 text-text-secondary">
+                No hay organizaciones
+              </p>
+            }
           </div>
         </div>
+      </div>
+    </div>
+  `,
+  styles: [
+    `
+      .stats-container {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 1rem;
+      }
+
+      @media (max-width: 1024px) {
+        .stats-container {
+          grid-template-columns: repeat(2, 1fr);
+        }
+      }
+
+      @media (max-width: 640px) {
+        .stats-container {
+          grid-template-columns: 1fr;
+        }
+      }
     `,
-  styles: []})
+  ],
+})
 export class DashboardComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
-readonly isLoading = signal(false);
+  readonly currencyService = inject(CurrencyFormatService);
+  private dashboardService = inject(SuperAdminDashboardService);
 
+  readonly isLoading = signal(false);
   readonly statsData = signal<StatCard[]>([]);
-  readonly chartData = signal<ChartData>({
-    labels: [],
-    datasets: []});
   readonly recentActivities = signal<ActivityItem[]>([]);
   readonly topOrganizations = signal<any[]>([]);
+  readonly rawData = signal<SuperAdminStats | null>(null);
 
-  constructor(private superAdminDashboardService: SuperAdminDashboardService) { }
+  readonly revenueChartOptions = computed<EChartsOption>(() => {
+    const data = this.rawData();
+    if (!data?.monthlyTrend) return {};
+
+    const style = getComputedStyle(document.documentElement);
+    const primaryColor = style.getPropertyValue('--color-primary').trim() || '#3b82f6';
+    const accentColor = style.getPropertyValue('--color-accent').trim() || '#06b6d4';
+    const mutedColor = style.getPropertyValue('--color-muted-foreground').trim() || '#6b7280';
+    const borderColor = style.getPropertyValue('--color-border').trim() || '#e5e7eb';
+
+    const months = data.monthlyTrend.map((m) => m.month);
+    const revenues = data.monthlyTrend.map((m) => m.revenue);
+    const subscriptions = data.monthlyTrend.map((m) => m.newSubscriptions);
+
+    return {
+      tooltip: {
+        trigger: 'axis',
+        formatter: (params: any) => {
+          const rev = params[0];
+          const sub = params[1];
+          return `<strong>${rev.name}</strong><br/>Ingresos: ${this.currencyService.formatCompact(rev.value)}<br/>Suscripciones: ${sub?.value || 0}`;
+        },
+      },
+      legend: {
+        data: ['Ingresos', 'Suscripciones'],
+        bottom: 0,
+        textStyle: { color: mutedColor, fontSize: 11 },
+      },
+      grid: { left: '3%', right: '4%', bottom: '15%', top: '5%', containLabel: true },
+      xAxis: {
+        type: 'category',
+        data: months,
+        axisLine: { lineStyle: { color: borderColor } },
+        axisLabel: { color: mutedColor, fontSize: 10 },
+      },
+      yAxis: [
+        {
+          type: 'value',
+          position: 'left',
+          axisLine: { show: false },
+          axisLabel: {
+            color: mutedColor,
+            fontSize: 10,
+            formatter: (value: number) => this.currencyService.formatChartAxis(value),
+          },
+          splitLine: { lineStyle: { color: borderColor } },
+        },
+        {
+          type: 'value',
+          position: 'right',
+          axisLine: { show: false },
+          axisLabel: { color: mutedColor, fontSize: 10 },
+          splitLine: { show: false },
+        },
+      ],
+      series: [
+        {
+          name: 'Ingresos',
+          type: 'line',
+          smooth: true,
+          data: revenues,
+          yAxisIndex: 0,
+          areaStyle: {
+            color: {
+              type: 'linear',
+              x: 0, y: 0, x2: 0, y2: 1,
+              colorStops: [
+                { offset: 0, color: primaryColor + '4D' },
+                { offset: 1, color: primaryColor + '0D' },
+              ],
+            },
+          },
+          lineStyle: { color: primaryColor, width: 2 },
+          itemStyle: { color: primaryColor },
+        },
+        {
+          name: 'Suscripciones',
+          type: 'bar',
+          data: subscriptions,
+          yAxisIndex: 1,
+          barMaxWidth: 16,
+          itemStyle: { color: accentColor + '99', borderRadius: [2, 2, 0, 0] },
+        },
+      ],
+    } as EChartsOption;
+  });
+
+  readonly distributionChartOptions = computed<EChartsOption>(() => {
+    const data = this.rawData();
+    if (!data) return {};
+
+    const style = getComputedStyle(document.documentElement);
+    const mutedColor = style.getPropertyValue('--color-muted-foreground').trim() || '#6b7280';
+    const textColor = style.getPropertyValue('--color-text-primary').trim() || '#374151';
+    const surfaceColor = style.getPropertyValue('--color-surface').trim() || '#fff';
+    const primaryColor = style.getPropertyValue('--color-primary').trim() || '#3b82f6';
+    const secondaryColor = style.getPropertyValue('--color-secondary').trim() || '#06b6d4';
+    const accentColor = style.getPropertyValue('--color-accent').trim() || '#8b5cf6';
+    const warningColor = style.getPropertyValue('--color-warning').trim() || '#f59e0b';
+
+    const chartData = [
+      { value: data.totalOrganizations || 0, name: 'Organizaciones', itemStyle: { color: primaryColor } },
+      { value: data.activeStores || 0, name: 'Tiendas Activas', itemStyle: { color: secondaryColor } },
+      { value: data.totalUsers || 0, name: 'Usuarios', itemStyle: { color: accentColor } },
+      { value: data.activeSubscriptions || 0, name: 'Suscripciones', itemStyle: { color: warningColor } },
+    ].filter((d) => d.value > 0);
+
+    if (chartData.length === 0) return {};
+
+    return {
+      tooltip: {
+        trigger: 'item',
+        formatter: (params: any) =>
+          `<strong>${params.name}</strong><br/>${params.value.toLocaleString()}<br/>${params.percent.toFixed(1)}%`,
+      },
+      legend: {
+        bottom: 0,
+        left: 'center',
+        orient: 'horizontal',
+        textStyle: { color: mutedColor, fontSize: 10 },
+        itemWidth: 12,
+        itemHeight: 12,
+        itemGap: 10,
+      },
+      calculable: true,
+      series: [
+        {
+          name: 'Distribución',
+          type: 'pie',
+          radius: [30, 110],
+          center: ['50%', '45%'],
+          roseType: 'area',
+          itemStyle: { borderRadius: 4, borderColor: surfaceColor, borderWidth: 2 },
+          label: {
+            show: true,
+            fontSize: 11,
+            color: textColor,
+          },
+          labelLine: {
+            show: true,
+            length: 10,
+            length2: 15,
+            lineStyle: { color: mutedColor },
+          },
+          emphasis: {
+            label: { show: true, fontSize: 13, fontWeight: 'bold' },
+            itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0, 0, 0, 0.2)' },
+          },
+          data: chartData,
+        },
+      ],
+    } as EChartsOption;
+  });
 
   ngOnInit(): void {
     this.loadDashboardData();
   }
-private loadDashboardData(): void {
+
+  private loadDashboardData(): void {
     this.isLoading.set(true);
 
-    this.superAdminDashboardService
+    this.dashboardService
       .getDashboardStats()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (data) => {
+          this.rawData.set(data);
           this.updateStatsData(data);
-          this.updateChartData(data);
           this.updateRecentActivities(data);
           this.updateTopOrganizations(data);
           this.isLoading.set(false);
@@ -522,108 +406,106 @@ private loadDashboardData(): void {
         error: (error) => {
           console.error('Error loading dashboard data:', error);
           this.isLoading.set(false);
-        }});
+        },
+      });
   }
 
-  private updateStatsData(data: any): void {
+  private updateStatsData(data: SuperAdminStats): void {
     this.statsData.set([
       {
-        title: 'Total de Organizaciones',
+        title: 'Ingresos del Mes',
+        value: this.currencyService.formatCompact(data.currentMonthRevenue),
+        change: data.revenueGrowth || 0,
+        icon: 'dollar-sign',
+        iconBgColor: 'bg-blue-100',
+        iconColor: 'text-blue-600',
+        subtitle: `vs ${this.currencyService.formatCompact(data.lastMonthRevenue)} mes anterior`,
+      },
+      {
+        title: 'MRR',
+        value: this.currencyService.formatCompact(data.mrr),
+        change: data.activeSubscriptions > 0 ? Math.round((data.activeSubscriptions / Math.max(data.totalSubscriptions, 1)) * 100) : 0,
+        icon: 'trending-up',
+        iconBgColor: 'bg-emerald-100',
+        iconColor: 'text-emerald-600',
+        subtitle: `${data.activeSubscriptions} suscripciones activas`,
+      },
+      {
+        title: 'Suscripciones',
+        value: `${data.activeSubscriptions}`,
+        change: data.pendingInvoices + data.overdueInvoices,
+        icon: 'credit-card',
+        iconBgColor: 'bg-purple-100',
+        iconColor: 'text-purple-600',
+        subtitle: `${data.pendingInvoices + data.overdueInvoices} pendientes &middot; ${data.churnRate}% churn`,
+      },
+      {
+        title: 'Organizaciones',
         value: data.totalOrganizations?.toLocaleString() || '0',
         change: data.organizationGrowth || 0,
         icon: 'building',
-        iconBgColor: 'bg-green-100',
-        iconColor: 'text-green-600'},
-      {
-        title: 'Total de Usuarios',
-        value: data.totalUsers?.toLocaleString() || '0',
-        change: data.userGrowth || 0,
-        icon: 'users',
         iconBgColor: 'bg-cyan-100',
-        iconColor: 'text-cyan-600'},
-      {
-        title: 'Tiendas Activas',
-        value: data.activeStores?.toLocaleString() || '0',
-        change: data.storeGrowth || 0,
-        icon: 'store',
-        iconBgColor: 'bg-emerald-100',
-        iconColor: 'text-emerald-600'},
-      {
-        title: 'Crecimiento de la Plataforma',
-        value: `${data.platformGrowth || 0}%`,
-        change: data.platformGrowth || 0,
-        icon: 'trending-up',
-        iconBgColor: 'bg-purple-100',
-        iconColor: 'text-purple-600'},
+        iconColor: 'text-cyan-600',
+        subtitle: `${data.activeStores} tiendas activas`,
+      },
     ]);
   }
 
-  private updateChartData(data: any): void {
-    if (data.weeklyData) {
-      this.chartData.set({
-        labels: data.weeklyData.map((item: any) => item.week),
-        datasets: [
-          {
-            label: 'Nuevas Organizaciones',
-            data: data.weeklyData.map((item: any) => item.organizations),
-            borderColor: '#3b82f6',
-            backgroundColor: '#3b82f6'},
-        ]});
-    }
-  }
-
-  private updateRecentActivities(data: any): void {
+  private updateRecentActivities(data: SuperAdminStats): void {
     this.recentActivities.set(
-      data.recentActivities?.map((activity: any) => ({
+      data.recentActivities?.map((activity) => ({
         id: activity.id,
         type: activity.type,
         title: activity.description,
         description: activity.entityName,
         timestamp: this.formatTimestamp(activity.timestamp),
         icon: this.getActivityIcon(activity.type),
-        color: this.getActivityColor(activity.type)})) || [],
+        color: this.getActivityColor(activity.type),
+      })) || [],
     );
   }
 
-  private updateTopOrganizations(data: any): void {
+  private updateTopOrganizations(data: SuperAdminStats): void {
     this.topOrganizations.set(data.topOrganizations || []);
   }
 
   private formatTimestamp(timestamp: Date | string): string {
     const date = new Date(timestamp);
     const now = new Date();
-    const diffInMinutes = Math.floor(
-      (now.getTime() - date.getTime()) / (1000 * 60),
-    );
+    const diffMs = now.getTime() - date.getTime();
+    const diffMinutes = Math.floor(diffMs / (1000 * 60));
 
-    if (diffInMinutes < 60) {
-      return `${diffInMinutes} minutes ago`;
-    } else if (diffInMinutes < 1440) {
-      return `${Math.floor(diffInMinutes / 60)} hours ago`;
-    } else {
-      return `${Math.floor(diffInMinutes / 1440)} days ago`;
-    }
+    if (diffMinutes < 1) return 'ahora';
+    if (diffMinutes < 60) return `hace ${diffMinutes} min`;
+    const diffHours = Math.floor(diffMinutes / 60);
+    if (diffHours < 24) return `hace ${diffHours}h`;
+    const diffDays = Math.floor(diffHours / 24);
+    if (diffDays < 7) return `hace ${diffDays}d`;
+    return date.toLocaleDateString('es-CO', { day: 'numeric', month: 'short' });
   }
 
   private getActivityIcon(type: string): string {
-    const icons = {
+    const icons: Record<string, string> = {
       organization: 'fa-building',
       user: 'fa-user',
       store: 'fa-store',
-      domain: 'fa-globe'};
-    return icons[type as keyof typeof icons] || 'fa-info-circle';
+      subscription: 'fa-credit-card',
+      payment: 'fa-receipt',
+    };
+    return icons[type] || 'fa-info-circle';
   }
 
   private getActivityColor(type: string): string {
-    const colors = {
-      organization: '#7ed7a5',
+    const colors: Record<string, string> = {
+      organization: '#3b82f6',
       user: '#06b6d4',
       store: '#10b981',
-      domain: '#f59e0b'};
-    return colors[type as keyof typeof colors] || '#6b7280';
+      subscription: '#8b5cf6',
+      payment: '#f59e0b',
+    };
+    return colors[type] || '#6b7280';
   }
 
-  // Helper methods for template expressions
   getTrendText(change: number): string {
     const icon = change >= 0 ? '↑' : '↓';
     const absValue = Math.abs(change);
@@ -633,11 +515,5 @@ private loadDashboardData(): void {
 
   getAbsValue(value: number): number {
     return Math.abs(value);
-  }
-
-  getBarHeight(bar: number): number {
-    const maxValue = Math.max(...this.chartData().datasets[0].data);
-    if (!maxValue) return 0;
-    return (bar / maxValue) * 100;
   }
 }

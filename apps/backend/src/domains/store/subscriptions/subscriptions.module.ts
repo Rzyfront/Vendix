@@ -10,12 +10,15 @@ import { SubscriptionCheckoutController } from './controllers/subscription-check
 import { AiAccessGuard } from './guards/ai-access.guard';
 import { SubscriptionBillingService } from './services/subscription-billing.service';
 import { SubscriptionPaymentService } from './services/subscription-payment.service';
+import { SubscriptionWebhookService } from './services/subscription-webhook.service';
 import { SubscriptionProrationService } from './services/subscription-proration.service';
 import { PromotionalApplyService } from './services/promotional-apply.service';
 import { PromotionalRulesEvaluator } from './evaluators/promotional-rules.evaluator';
 import { PartnerCommissionsService } from './services/partner-commissions.service';
 import { SubscriptionTrialService } from './services/subscription-trial.service';
 import { PaymentsModule } from '../payments/payments.module';
+import { WompiModule } from '../payments/processors/wompi/wompi.module';
+import { PlatformGatewayModule } from '../../superadmin/subscriptions/gateway/gateway.module';
 
 @Global()
 @Module({
@@ -23,6 +26,11 @@ import { PaymentsModule } from '../payments/payments.module';
     PrismaModule,
     ResponseModule,
     forwardRef(() => PaymentsModule),
+    // SaaS billing path: WompiProcessor (called directly, bypassing
+    // per-store PaymentGatewayService) + PlatformGatewayService for
+    // platform-level credentials.
+    WompiModule,
+    PlatformGatewayModule,
   ],
   controllers: [SubscriptionAccessController, StoreSubscriptionsController, SubscriptionCheckoutController],
   providers: [
@@ -32,6 +40,7 @@ import { PaymentsModule } from '../payments/payments.module';
     AiAccessGuard,
     SubscriptionBillingService,
     SubscriptionPaymentService,
+    SubscriptionWebhookService,
     SubscriptionProrationService,
     PromotionalApplyService,
     PromotionalRulesEvaluator,
@@ -45,6 +54,7 @@ import { PaymentsModule } from '../payments/payments.module';
     AiAccessGuard,
     SubscriptionBillingService,
     SubscriptionPaymentService,
+    SubscriptionWebhookService,
     SubscriptionProrationService,
     PromotionalApplyService,
     PartnerCommissionsService,

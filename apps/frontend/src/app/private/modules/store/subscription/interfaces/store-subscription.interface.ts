@@ -60,16 +60,64 @@ export interface Invoice {
   created_at: string;
 }
 
-export interface CheckoutPreview {
-  old_plan: SubscriptionPlan;
-  new_plan: SubscriptionPlan;
-  proration_amount: number;
-  credit_amount: number;
-  charge_amount: number;
-  currency: string;
-  effective_date: string;
-  next_billing_amount: number;
-  next_billing_date: string;
+export interface InvoiceLineItem {
+  description: string;
+  quantity: number;
+  unit_price: string;
+  total: string;
+  meta: {
+    plan_id: number;
+    plan_code: string;
+    margin_pct?: string;
+    billing_cycle: string;
+    prorated?: boolean;
+  };
+}
+
+export interface InvoiceSplitBreakdown {
+  vendix_share: string;
+  partner_share: string;
+  margin_pct_used: string;
+  partner_org_id: number | null;
+}
+
+export interface InvoicePreview {
+  total: string;
+  period_start: string;
+  period_end: string;
+  line_items: InvoiceLineItem[];
+  split_breakdown: InvoiceSplitBreakdown;
+}
+
+export type ProrationKind = 'upgrade' | 'downgrade' | 'same-tier';
+
+export interface ProrationPreview {
+  kind: ProrationKind;
+  days_remaining: number;
+  cycle_days: number;
+  old_effective_price: string;
+  new_effective_price: string;
+  proration_amount: string;
+  applies_immediately: boolean;
+  invoice_to_issue: InvoicePreview | null;
+  credit_to_apply_next_cycle: string;
+}
+
+export interface FreePlanInfo {
+  plan: {
+    id: number;
+    code: string;
+    name: string;
+    effective_price: string;
+    billing_cycle: string;
+    trial_days: number;
+  };
+}
+
+export interface CheckoutPreviewResponse {
+  proration: ProrationPreview | null;
+  invoice: InvoicePreview | null;
+  free_plan: FreePlanInfo | null;
 }
 
 export interface PaymentMethod {

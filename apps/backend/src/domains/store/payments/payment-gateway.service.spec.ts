@@ -23,6 +23,7 @@ describe('PaymentGatewayService', () => {
     currency: 'USD',
     storePaymentMethodId: 1,
     storeId: 1,
+    idempotencyKey: 'idem-gateway-1',
   };
 
   const mockPaymentResult: PaymentResult = {

@@ -1,8 +1,10 @@
 import { Component, DestroyRef, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
+import { HttpClient } from '@angular/common/http';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { SubscriptionAdminService } from '../../services/subscription-admin.service';
 import { PartnerPayout } from '../../interfaces/subscription-admin.interface';
+import { environment } from '../../../../../../../environments/environment';
 import { StatsComponent } from '../../../../../../shared/components/stats/stats.component';
 import { ButtonComponent } from '../../../../../../shared/components/button/button.component';
 import { IconComponent } from '../../../../../../shared/components/icon/icon.component';
@@ -10,6 +12,7 @@ import { ResponsiveDataViewComponent, TableColumn, TableAction, ItemListCardConf
 import { PaginationComponent } from '../../../../../../shared/components/pagination/pagination.component';
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
 import { EmptyStateComponent } from '../../../../../../shared/components/empty-state/empty-state.component';
+import { ToastService } from '../../../../../../shared/components/toast/toast.service';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.pipe';
 
 @Component({
@@ -30,28 +33,28 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.p
       <!-- Stats -->
       <div class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent">
         <app-stats
-          title="Pending"
+          title="Pagos pendientes"
           [value]="pendingCount()"
           iconName="clock"
           iconBgColor="bg-amber-100"
           iconColor="text-amber-600"
         ></app-stats>
         <app-stats
-          title="Approved"
+          title="Pagos aprobados"
           [value]="approvedCount()"
           iconName="check"
           iconBgColor="bg-green-100"
           iconColor="text-green-600"
         ></app-stats>
         <app-stats
-          title="Paid"
+          title="Pagos pagados"
           [value]="paidCount()"
           iconName="banknote"
           iconBgColor="bg-blue-100"
           iconColor="text-blue-600"
         ></app-stats>
         <app-stats
-          title="Total Amount"
+          title="Monto total"
           [value]="totalAmount() | currency"
           iconName="wallet"
           iconBgColor="bg-purple-100"
@@ -65,7 +68,7 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.p
           <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
             <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
               <h2 class="text-[13px] font-semibold text-text-secondary tracking-wide md:text-lg md:font-semibold md:text-text-primary md:tracking-normal">
-                Partner Payouts <span class="font-normal text-text-secondary/50 md:font-semibold md:text-text-primary">({{ pagination().total }})</span>
+                Total pagos <span class="font-normal text-text-secondary/50 md:font-semibold md:text-text-primary">({{ pagination().total }})</span>
               </h2>
               <div class="flex items-center gap-2 w-full md:w-auto justify-end">
                 <app-button
@@ -73,7 +76,7 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.p
                   size="md"
                   customClasses="w-10 sm:w-11 !px-0 bg-surface shadow-[0_2px_8px_rgba(0,0,0,0.07)] md:shadow-none !rounded-[10px] shrink-0"
                   (clicked)="loadPayouts()"
-                  title="Refresh"
+                  title="Refrescar"
                 >
                   <app-icon slot="icon" name="refresh" [size]="18"></app-icon>
                 </app-button>
@@ -85,7 +88,7 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.p
           @if (loading()) {
             <div class="p-4 md:p-6 text-center">
               <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-              <p class="mt-2 text-text-secondary">Loading...</p>
+              <p class="mt-2 text-text-secondary">Cargando...</p>
             </div>
           }
 
@@ -93,8 +96,8 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.p
           @if (!loading() && payouts().length === 0) {
             <app-empty-state
               icon="dollar-sign"
-              title="No payouts found"
-              description="No payouts to review."
+              title="No hay pagos"
+              description="No hay pagos para revisar."
               [showActionButton]="false"
             ></app-empty-state>
           }
@@ -131,6 +134,8 @@ import { CurrencyPipe } from '../../../../../../shared/pipes/currency/currency.p
 export class PartnerPayoutsComponent {
   private service = inject(SubscriptionAdminService);
   private destroyRef = inject(DestroyRef);
+  private http = inject(HttpClient);
+  private toast = inject(ToastService);
   readonly router = inject(Router);
 
   readonly payouts = signal<PartnerPayout[]>([]);
@@ -149,13 +154,13 @@ export class PartnerPayoutsComponent {
 
   columns: TableColumn[] = [
     { key: 'partner_name', label: 'Partner', sortable: true, width: '200px', priority: 1 },
-    { key: 'period_start', label: 'Period Start', sortable: true, width: '130px', priority: 3 },
-    { key: 'period_end', label: 'Period End', sortable: true, width: '130px', priority: 3 },
-    { key: 'total_amount', label: 'Amount', sortable: true, width: '120px', align: 'right', priority: 1 },
-    { key: 'store_count', label: 'Stores', sortable: true, width: '80px', align: 'center', priority: 2 },
+    { key: 'period_start', label: 'Inicio periodo', sortable: true, width: '130px', priority: 3 },
+    { key: 'period_end', label: 'Fin periodo', sortable: true, width: '130px', priority: 3 },
+    { key: 'total_amount', label: 'Monto total', sortable: true, width: '120px', align: 'right', priority: 1 },
+    { key: 'store_count', label: 'Tiendas', sortable: true, width: '80px', align: 'center', priority: 2 },
     {
       key: 'status',
-      label: 'Status',
+      label: 'Estado',
       sortable: true,
       width: '110px',
       align: 'center',
@@ -176,18 +181,31 @@ export class PartnerPayoutsComponent {
 
   actions: TableAction[] = [
     {
-      label: 'Approve',
-      icon: 'check',
-      variant: 'success',
-      action: (item: PartnerPayout) => this.approvePayout(item),
-      disabled: (item: PartnerPayout) => item.status !== 'pending',
+      label: 'Detalle',
+      icon: 'eye',
+      variant: 'info',
+      action: (item: PartnerPayout) => this.router.navigate(['/super-admin/subscriptions/payouts', item.id]),
     },
     {
-      label: 'Reject',
+      label: 'Aprobar',
+      icon: 'check',
+      variant: 'success',
+      show: (item: PartnerPayout) => item.status === 'pending',
+      action: (item: PartnerPayout) => this.approvePayout(item.id),
+    },
+    {
+      label: 'Rechazar',
       icon: 'x',
       variant: 'danger',
-      action: (item: PartnerPayout) => this.rejectPayout(item),
-      disabled: (item: PartnerPayout) => item.status !== 'pending',
+      show: (item: PartnerPayout) => item.status === 'pending',
+      action: (item: PartnerPayout) => this.rejectPayout(item.id),
+    },
+    {
+      label: 'Marcar pagado',
+      icon: 'banknote',
+      variant: 'primary',
+      show: (item: PartnerPayout) => item.status === 'approved',
+      action: (item: PartnerPayout) => this.markAsPaid(item.id),
     },
   ];
 
@@ -206,9 +224,9 @@ export class PartnerPayoutsComponent {
       },
     },
     detailKeys: [
-      { key: 'total_amount', label: 'Amount' },
-      { key: 'store_count', label: 'Stores' },
-      { key: 'period_end', label: 'Period End' },
+      { key: 'total_amount', label: 'Monto total' },
+      { key: 'store_count', label: 'Tiendas' },
+      { key: 'period_end', label: 'Fin periodo' },
     ],
   };
 
@@ -251,25 +269,49 @@ export class PartnerPayoutsComponent {
     this.loadPayouts();
   }
 
-  approvePayout(item: PartnerPayout): void {
+  approvePayout(id: string): void {
     this.service
-      .approvePayout(item.id, { status: 'approved' })
+      .approvePayout(id, { status: 'approved' })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
         next: (res) => {
-          if (res.success) this.loadPayouts();
+          if (res.success) {
+            this.toast.show({ variant: 'success', description: 'Pago aprobado' });
+            this.loadPayouts();
+          }
         },
+        error: () => this.toast.show({ variant: 'error', description: 'Error al aprobar el pago' }),
       });
   }
 
-  rejectPayout(item: PartnerPayout): void {
-    this.service
-      .approvePayout(item.id, { status: 'rejected' })
+  rejectPayout(id: string): void {
+    const reason = window.prompt('Motivo del rechazo (mínimo 3 caracteres):');
+    if (!reason || reason.trim().length < 3) {
+      this.toast.show({ variant: 'error', description: 'Motivo requerido (mínimo 3 caracteres)' });
+      return;
+    }
+    this.http
+      .post(`${environment.apiUrl}/superadmin/subscriptions/payouts/${id}/reject`, { reason: reason.trim() })
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe({
-        next: (res) => {
-          if (res.success) this.loadPayouts();
+        next: () => {
+          this.toast.show({ variant: 'success', description: 'Pago rechazado' });
+          this.loadPayouts();
         },
+        error: () => this.toast.show({ variant: 'error', description: 'Error al rechazar el pago' }),
+      });
+  }
+
+  markAsPaid(id: string): void {
+    this.http
+      .patch(`${environment.apiUrl}/superadmin/subscriptions/payouts/${id}/pay`, {})
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: () => {
+          this.toast.show({ variant: 'success', description: 'Pago marcado como pagado' });
+          this.loadPayouts();
+        },
+        error: () => this.toast.show({ variant: 'error', description: 'Error al marcar como pagado' }),
       });
   }
 }

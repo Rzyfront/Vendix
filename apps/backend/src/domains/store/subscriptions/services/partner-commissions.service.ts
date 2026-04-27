@@ -56,27 +56,33 @@ export class PartnerCommissionsService {
       return;
     }
 
-    const existing = await this.prisma.partner_commissions.findUnique({
-      where: { invoice_id: invoiceId },
-    });
-
-    if (existing) {
-      this.logger.warn(
-        `Commission already exists for invoice ${invoiceId}; skipping accrual`,
-      );
-      return;
+    // Race-safe accrual: upsert keyed on the unique invoice_id.
+    // If a row already exists (concurrent caller won the race), the update
+    // payload is empty so we don't clobber an existing state transition
+    // (e.g. accrued -> pending_payout). Defense in depth: catch P2002 in case
+    // an underlying race surfaces it through the upsert path.
+    try {
+      await this.prisma.partner_commissions.upsert({
+        where: { invoice_id: invoiceId },
+        create: {
+          partner_organization_id: invoice.partner_organization_id,
+          invoice_id: invoiceId,
+          amount: partnerShare,
+          currency: invoice.currency,
+          state: 'accrued',
+          accrued_at: new Date(),
+        },
+        update: {}, // no-op: preserve existing row & state
+      });
+    } catch (e: any) {
+      if (e?.code === 'P2002') {
+        this.logger.warn(
+          `Commission already exists for invoice ${invoiceId}; skipped`,
+        );
+        return;
+      }
+      throw e;
     }
-
-    await this.prisma.partner_commissions.create({
-      data: {
-        partner_organization_id: invoice.partner_organization_id,
-        invoice_id: invoiceId,
-        amount: partnerShare,
-        currency: invoice.currency,
-        state: 'accrued',
-        accrued_at: new Date(),
-      },
-    });
   }
 
   /**

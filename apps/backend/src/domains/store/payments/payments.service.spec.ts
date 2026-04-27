@@ -121,9 +121,13 @@ describe('PaymentsService', () => {
 
       const result = await service.processPayment(createPaymentDto, mockUser);
 
-      expect(paymentGateway.processPayment).toHaveBeenCalledWith(
-        createPaymentDto,
-      );
+      // payments.service injects an `idempotencyKey` UUID for back-compat,
+      // so we assert each known field individually rather than the whole object.
+      const callArg = (paymentGateway.processPayment as jest.Mock).mock.calls[0][0];
+      Object.entries(createPaymentDto).forEach(([key, value]) => {
+        expect(callArg[key]).toEqual(value);
+      });
+      expect(typeof callArg.idempotencyKey).toBe('string');
       expect(result).toEqual({
         success: true,
         data: mockPaymentResult,
@@ -226,9 +230,15 @@ describe('PaymentsService', () => {
         mockUser,
       );
 
-      expect(paymentGateway.processPaymentWithNewOrder).toHaveBeenCalledWith(
-        createOrderPaymentDto,
-      );
+      // payments.service injects an `idempotencyKey` UUID for back-compat,
+      // so we assert each known field individually rather than the whole object.
+      const callArg = (
+        paymentGateway.processPaymentWithNewOrder as jest.Mock
+      ).mock.calls[0][0];
+      Object.entries(createOrderPaymentDto).forEach(([key, value]) => {
+        expect(callArg[key]).toEqual(value);
+      });
+      expect(typeof callArg.idempotencyKey).toBe('string');
       expect(result).toEqual({
         success: true,
         data: mockPaymentResult,

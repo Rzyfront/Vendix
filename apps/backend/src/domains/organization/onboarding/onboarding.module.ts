@@ -9,6 +9,7 @@ import { EmailModule } from '../../../email/email.module';
 import { BrandingGeneratorHelper } from '../../../common/helpers/branding-generator.helper';
 import { DomainGeneratorHelper } from '../../../common/helpers/domain-generator.helper';
 import { DefaultPanelUIService } from '../../../common/services/default-panel-ui.service';
+import { StoreBootstrapHelper } from '../../shared/helpers/store-bootstrap.helper';
 
 @Module({
   imports: [PrismaModule, ResponseModule, EmailModule],
@@ -19,6 +20,9 @@ import { DefaultPanelUIService } from '../../../common/services/default-panel-ui
     BrandingGeneratorHelper,
     DomainGeneratorHelper,
     DefaultPanelUIService,
+    StoreBootstrapHelper,
+    // SubscriptionTrialService is exported by SubscriptionsModule (@Global),
+    // so no import is needed here — Nest resolves it globally.
   ],
   exports: [OnboardingService, OnboardingWizardService],
 })

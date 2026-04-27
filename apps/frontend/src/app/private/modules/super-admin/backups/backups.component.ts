@@ -1,10 +1,8 @@
-import {Component, OnInit, OnDestroy,
-  DestroyRef,
-  inject} from '@angular/core';
+import { Component, DestroyRef, inject, signal, computed } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
-import { timer, forkJoin } from 'rxjs';
+import { timer } from 'rxjs';
 import { map, catchError, filter } from 'rxjs/operators';
 import { of } from 'rxjs';
 import { StatsComponent } from '../../../../shared/components';
@@ -40,10 +38,10 @@ import { BackupStatus, SnapshotInfo } from './interfaces';
         <div class="flex items-center gap-3">
           <span class="text-xs" style="color: var(--color-text-muted);">Auto-refresh: 60s</span>
           <button
-            (click)="showCreateModal = true"
+            (click)="showCreateModal.set(true)"
             class="px-4 py-2 rounded-lg text-sm font-medium text-white flex items-center gap-2 transition-opacity hover:opacity-90"
             style="background: linear-gradient(135deg, #06b6d4, #14b8a6);"
-            [disabled]="creating"
+            [disabled]="creating()"
             >
             <app-icon name="plus" [size]="16" class="text-white"></app-icon>
             Crear Snapshot
@@ -55,64 +53,64 @@ import { BackupStatus, SnapshotInfo } from './interfaces';
       <div class="stats-container">
         <app-stats
           title="Ultimo Backup"
-          [value]="lastBackupValue"
-          [smallText]="lastBackupSmall"
+          [value]="lastBackupValue()"
+          [smallText]="lastBackupSmall()"
           iconName="clock"
           iconBgColor="bg-green-500/10"
           iconColor="text-green-500"
-          [loading]="loadingStatus"
+          [loading]="loadingStatus()"
         ></app-stats>
         <app-stats
           title="Total Snapshots"
-          [value]="totalSnapshotsValue"
-          [smallText]="snapshotsBreakdown"
+          [value]="totalSnapshotsValue()"
+          [smallText]="snapshotsBreakdown()"
           iconName="database"
           iconBgColor="bg-blue-500/10"
           iconColor="text-blue-500"
-          [loading]="loadingSnapshots"
+          [loading]="loadingSnapshots()"
         ></app-stats>
         <app-stats
           title="Retencion"
-          [value]="retentionValue"
-          [smallText]="instanceClassSmall"
+          [value]="retentionValue()"
+          [smallText]="instanceClassSmall()"
           iconName="calendar"
           iconBgColor="bg-purple-500/10"
           iconColor="text-purple-500"
-          [loading]="loadingStatus"
+          [loading]="loadingStatus()"
         ></app-stats>
         <app-stats
           title="PITR Disponible"
-          [value]="pitrValue"
-          [smallText]="pitrSmall"
+          [value]="pitrValue()"
+          [smallText]="pitrSmall()"
           iconName="rotate-ccw"
           iconBgColor="bg-orange-500/10"
           iconColor="text-orange-500"
-          [loading]="loadingStatus"
+          [loading]="loadingStatus()"
         ></app-stats>
       </div>
     
       <!-- Instance Info Bar -->
-      @if (status?.instance) {
+      @if (status()?.instance; as instance) {
         <div
           class="rounded-card shadow-card p-4 flex items-center gap-4 flex-wrap"
           style="background: var(--color-surface); border: 1px solid var(--color-border);"
           >
           <app-icon name="server" [size]="18" style="color: var(--color-text-muted);"></app-icon>
           <span class="text-sm" style="color: var(--color-text-secondary);">
-            Instancia: <strong style="color: var(--color-text-primary);">{{ status!.instance.id }}</strong>
+            Instancia: <strong style="color: var(--color-text-primary);">{{ instance.id }}</strong>
           </span>
           <span class="text-xs px-2 py-0.5 rounded-full" style="background: var(--color-border); color: var(--color-text-secondary);">
-            {{ status!.instance.engine }}
+            {{ instance.engine }}
           </span>
           <span class="text-xs" style="color: var(--color-text-muted);">
-            {{ status!.instance.storage_gb }} GB
+            {{ instance.storage_gb }} GB
           </span>
           <span
             class="text-xs font-medium px-2 py-0.5 rounded-full ml-auto"
-            [style.background]="status!.instance.status === 'available' ? 'rgba(34,197,94,0.1)' : 'rgba(234,179,8,0.1)'"
-            [style.color]="status!.instance.status === 'available' ? '#22c55e' : '#eab308'"
+            [style.background]="instance.status === 'available' ? 'rgba(34,197,94,0.1)' : 'rgba(234,179,8,0.1)'"
+            [style.color]="instance.status === 'available' ? '#22c55e' : '#eab308'"
             >
-            {{ status!.instance.status }}
+            {{ instance.status }}
           </span>
         </div>
       }
@@ -133,13 +131,13 @@ import { BackupStatus, SnapshotInfo } from './interfaces';
             Snapshots de Base de Datos
           </h3>
           <span class="text-xs ml-auto" style="color: var(--color-text-muted);">
-            {{ snapshots.length }} snapshot{{ snapshots.length !== 1 ? 's' : '' }}
+            {{ snapshots().length }} snapshot{{ snapshots().length !== 1 ? 's' : '' }}
           </span>
         </div>
     
         <div class="p-6">
           <!-- Loading state -->
-          @if (loadingSnapshots) {
+          @if (loadingSnapshots()) {
             <div class="flex items-center justify-center py-12">
               <div class="animate-spin w-6 h-6 border-2 border-cyan-500 border-t-transparent rounded-full"></div>
               <span class="ml-3 text-sm" style="color: var(--color-text-muted);">Cargando snapshots...</span>
@@ -147,7 +145,7 @@ import { BackupStatus, SnapshotInfo } from './interfaces';
           }
     
           <!-- Empty state -->
-          @if (!loadingSnapshots && snapshots.length === 0) {
+          @if (!loadingSnapshots() && snapshots().length === 0) {
             <div class="text-center py-12">
               <app-icon name="database" [size]="48" style="color: var(--color-text-muted); opacity: 0.3;"></app-icon>
               <p class="mt-3 text-sm" style="color: var(--color-text-muted);">No se encontraron snapshots</p>
@@ -155,7 +153,7 @@ import { BackupStatus, SnapshotInfo } from './interfaces';
           }
     
           <!-- Table -->
-          @if (!loadingSnapshots && snapshots.length > 0) {
+          @if (!loadingSnapshots() && snapshots().length > 0) {
             <div class="overflow-x-auto">
               <table class="w-full text-sm">
                 <thead>
@@ -169,7 +167,7 @@ import { BackupStatus, SnapshotInfo } from './interfaces';
                   </tr>
                 </thead>
                 <tbody>
-                  @for (snapshot of snapshots; track snapshot) {
+                  @for (snapshot of snapshots(); track snapshot.id) {
                     <tr
                       style="border-bottom: 1px solid var(--color-border);"
                       class="hover:opacity-80 transition-opacity"
@@ -205,15 +203,15 @@ import { BackupStatus, SnapshotInfo } from './interfaces';
                         @if (snapshot.type === 'manual') {
                           <button
                             (click)="deleteSnapshot(snapshot)"
-                            [disabled]="deletingId === snapshot.id"
+                            [disabled]="deletingId() === snapshot.id"
                             class="p-1.5 rounded-lg transition-colors hover:bg-red-500/10"
                             style="color: var(--color-text-muted);"
                             title="Eliminar snapshot"
                             >
                             <app-icon
-                              [name]="deletingId === snapshot.id ? 'loader-2' : 'trash-2'"
+                              [name]="deletingId() === snapshot.id ? 'loader-2' : 'trash-2'"
                               [size]="16"
-                              [class]="deletingId === snapshot.id ? 'animate-spin text-red-400' : 'hover:text-red-500'"
+                              [class]="deletingId() === snapshot.id ? 'animate-spin text-red-400' : 'hover:text-red-500'"
                             ></app-icon>
                           </button>
                         }
@@ -228,7 +226,7 @@ import { BackupStatus, SnapshotInfo } from './interfaces';
       </div>
     
       <!-- Create Snapshot Modal Overlay -->
-      @if (showCreateModal) {
+      @if (showCreateModal()) {
         <div
           class="fixed inset-0 z-50 flex items-center justify-center p-4"
           style="background: rgba(0,0,0,0.5);"
@@ -257,11 +255,11 @@ import { BackupStatus, SnapshotInfo } from './interfaces';
                 placeholder="mi-snapshot-manual"
                 class="w-full px-3 py-2 rounded-lg text-sm outline-none transition-colors"
                 style="background: var(--color-background); border: 1px solid var(--color-border); color: var(--color-text-primary);"
-                [style.border-color]="snapshotNameError ? '#ef4444' : 'var(--color-border)'"
+                [style.border-color]="snapshotNameError() ? '#ef4444' : 'var(--color-border)'"
                 />
-              @if (snapshotNameError) {
+              @if (snapshotNameError()) {
                 <p class="text-xs mt-1" style="color: #ef4444;">
-                  {{ snapshotNameError }}
+                  {{ snapshotNameError() }}
                 </p>
               }
               <p class="text-xs mt-1" style="color: var(--color-text-muted);">
@@ -278,14 +276,14 @@ import { BackupStatus, SnapshotInfo } from './interfaces';
               </button>
               <button
                 (click)="confirmCreateSnapshot()"
-                [disabled]="creating || !newSnapshotName.trim()"
+                [disabled]="creating() || !newSnapshotName().trim()"
                 class="px-4 py-2 rounded-lg text-sm font-medium text-white transition-opacity hover:opacity-90 flex items-center gap-2 disabled:opacity-50"
                 style="background: linear-gradient(135deg, #06b6d4, #14b8a6);"
                 >
-                @if (creating) {
+                @if (creating()) {
                   <app-icon name="loader-2" [size]="14" class="animate-spin text-white"></app-icon>
                 }
-                {{ creating ? 'Creando...' : 'Crear' }}
+                {{ creating() ? 'Creando...' : 'Crear' }}
               </button>
             </div>
           </div>
@@ -294,71 +292,72 @@ import { BackupStatus, SnapshotInfo } from './interfaces';
     </div>
     `,
   styles: [] })
-export class BackupsComponent implements OnInit, OnDestroy {
-  private destroyRef = inject(DestroyRef);
-  status: BackupStatus | null = null;
-  snapshots: SnapshotInfo[] = [];
+export class BackupsComponent {
+  private readonly destroyRef = inject(DestroyRef);
+  private readonly backupService = inject(BackupService);
+  public readonly datePipe = inject(DatePipe);
 
-  loadingStatus = true;
-  loadingSnapshots = true;
-  creating = false;
-  deletingId: string | null = null;
+  // -- Estado fuente (signals) --
+  readonly status = signal<BackupStatus | null>(null);
+  readonly snapshots = signal<SnapshotInfo[]>([]);
+  readonly loadingStatus = signal(true);
+  readonly loadingSnapshots = signal(true);
+  readonly creating = signal(false);
+  readonly deletingId = signal<string | null>(null);
+  readonly showCreateModal = signal(false);
+  readonly newSnapshotName = signal('');
+  readonly snapshotNameError = signal('');
 
-  showCreateModal = false;
-  newSnapshotName = '';
-  snapshotNameError = '';
-private paused = false;
+  // -- Derivados computados --
+  readonly lastBackupValue = computed<string>(() => {
+    const s = this.status();
+    if (!s?.last_backup?.created_at) return '--';
+    return this.getRelativeTime(s.last_backup.created_at);
+  });
+
+  readonly lastBackupSmall = computed<string>(() => {
+    const s = this.status();
+    if (!s?.last_backup) return '';
+    return s.last_backup.type === 'automated' ? 'Automatico' : 'Manual';
+  });
+
+  readonly totalSnapshotsValue = computed<string>(() => {
+    return this.snapshots().length.toString();
+  });
+
+  readonly snapshotsBreakdown = computed<string>(() => {
+    const auto = this.snapshots().filter((s) => s.type === 'automated').length;
+    const manual = this.snapshots().filter((s) => s.type === 'manual').length;
+    return `${auto} auto / ${manual} manual`;
+  });
+
+  readonly retentionValue = computed<string>(() => {
+    const s = this.status();
+    if (!s) return '--';
+    return `${s.retention_days} dias`;
+  });
+
+  readonly instanceClassSmall = computed<string>(() => {
+    return this.status()?.instance?.class || '';
+  });
+
+  readonly pitrValue = computed<string>(() => {
+    const s = this.status();
+    if (!s) return '--';
+    return s.pitr.latest ? 'Activo' : 'Inactivo';
+  });
+
+  readonly pitrSmall = computed<string>(() => {
+    const s = this.status();
+    if (!s?.pitr?.latest) return 'No disponible';
+    return this.datePipe.transform(s.pitr.latest, 'dd/MM/yyyy HH:mm') || '';
+  });
+
+  // -- Privados --
+  private paused = false;
   private visibilityHandler = () => this.onVisibilityChange();
 
-  constructor(
-    private readonly backupService: BackupService,
-    public readonly datePipe: DatePipe,
-  ) {}
-
-  // -- Computed values for stats cards --
-
-  get lastBackupValue(): string {
-    if (!this.status?.last_backup?.created_at) return '--';
-    return this.getRelativeTime(this.status.last_backup.created_at);
-  }
-
-  get lastBackupSmall(): string {
-    if (!this.status?.last_backup) return '';
-    return this.status.last_backup.type === 'automated' ? 'Automatico' : 'Manual';
-  }
-
-  get totalSnapshotsValue(): string {
-    return this.snapshots.length.toString();
-  }
-
-  get snapshotsBreakdown(): string {
-    const auto = this.snapshots.filter((s) => s.type === 'automated').length;
-    const manual = this.snapshots.filter((s) => s.type === 'manual').length;
-    return `${auto} auto / ${manual} manual`;
-  }
-
-  get retentionValue(): string {
-    if (!this.status) return '--';
-    return `${this.status.retention_days} dias`;
-  }
-
-  get instanceClassSmall(): string {
-    return this.status?.instance?.class || '';
-  }
-
-  get pitrValue(): string {
-    if (!this.status) return '--';
-    return this.status.pitr.latest ? 'Activo' : 'Inactivo';
-  }
-
-  get pitrSmall(): string {
-    if (!this.status?.pitr?.latest) return 'No disponible';
-    return this.datePipe.transform(this.status.pitr.latest, 'dd/MM/yyyy HH:mm') || '';
-  }
-
-  // -- Lifecycle --
-
-  ngOnInit(): void {
+  constructor() {
     document.addEventListener('visibilitychange', this.visibilityHandler);
 
     timer(0, 60000)
@@ -370,42 +369,41 @@ private paused = false;
         this.fetchStatus();
         this.fetchSnapshots();
       });
-  }
 
-  ngOnDestroy(): void {
-
-document.removeEventListener('visibilitychange', this.visibilityHandler);
+    this.destroyRef.onDestroy(() => {
+      document.removeEventListener('visibilitychange', this.visibilityHandler);
+    });
   }
 
   // -- Actions --
 
   confirmCreateSnapshot(): void {
-    const name = this.newSnapshotName.trim();
+    const name = this.newSnapshotName().trim();
     if (!name) return;
 
     if (!/^[a-zA-Z0-9-]+$/.test(name)) {
-      this.snapshotNameError = 'Solo se permiten letras, numeros y guiones';
+      this.snapshotNameError.set('Solo se permiten letras, numeros y guiones');
       return;
     }
 
-    this.snapshotNameError = '';
-    this.creating = true;
+    this.snapshotNameError.set('');
+    this.creating.set(true);
 
     this.backupService
       .createSnapshot(name)
       .pipe(
         catchError(() => {
-          this.creating = false;
-          this.snapshotNameError = 'Error al crear el snapshot';
+          this.creating.set(false);
+          this.snapshotNameError.set('Error al crear el snapshot');
           return of(null);
         }),
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((res) => {
-        this.creating = false;
+        this.creating.set(false);
         if (res) {
-          this.showCreateModal = false;
-          this.newSnapshotName = '';
+          this.showCreateModal.set(false);
+          this.newSnapshotName.set('');
           this.fetchStatus();
           this.fetchSnapshots();
         }
@@ -413,26 +411,26 @@ document.removeEventListener('visibilitychange', this.visibilityHandler);
   }
 
   cancelCreateSnapshot(): void {
-    this.showCreateModal = false;
-    this.newSnapshotName = '';
-    this.snapshotNameError = '';
+    this.showCreateModal.set(false);
+    this.newSnapshotName.set('');
+    this.snapshotNameError.set('');
   }
 
   deleteSnapshot(snapshot: SnapshotInfo): void {
-    if (this.deletingId) return;
-    this.deletingId = snapshot.id;
+    if (this.deletingId()) return;
+    this.deletingId.set(snapshot.id);
 
     this.backupService
       .deleteSnapshot(snapshot.id)
       .pipe(
         catchError(() => {
-          this.deletingId = null;
+          this.deletingId.set(null);
           return of(null);
         }),
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((res) => {
-        this.deletingId = null;
+        this.deletingId.set(null);
         if (res) {
           this.fetchStatus();
           this.fetchSnapshots();
@@ -499,8 +497,8 @@ document.removeEventListener('visibilitychange', this.visibilityHandler);
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((data) => {
-        this.status = data;
-        this.loadingStatus = false;
+        this.status.set(data);
+        this.loadingStatus.set(false);
       });
   }
 
@@ -513,8 +511,8 @@ document.removeEventListener('visibilitychange', this.visibilityHandler);
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((data) => {
-        this.snapshots = data;
-        this.loadingSnapshots = false;
+        this.snapshots.set(data);
+        this.loadingSnapshots.set(false);
       });
   }
 }

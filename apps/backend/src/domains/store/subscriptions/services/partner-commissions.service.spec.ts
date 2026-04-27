@@ -15,6 +15,7 @@ describe('PartnerCommissionsService', () => {
       subscription_invoices: { findUnique: jest.fn() },
       partner_commissions: {
         create: jest.fn(),
+        upsert: jest.fn(),
         findUnique: jest.fn(),
         findMany: jest.fn(),
         count: jest.fn(),
@@ -40,29 +41,21 @@ describe('PartnerCommissionsService', () => {
     };
   }
 
-  it('accrueCommission creates row with state=accrued', async () => {
+  it('accrueCommission upserts row with state=accrued (create payload)', async () => {
     prismaMock.subscription_invoices.findUnique.mockResolvedValue(invoiceFixture());
-    prismaMock.partner_commissions.findUnique.mockResolvedValue(null);
+    prismaMock.partner_commissions.upsert.mockResolvedValue({ id: 1 });
 
     await service.accrueCommission(500);
 
-    const arg = prismaMock.partner_commissions.create.mock.calls[0][0];
-    expect(arg.data.partner_organization_id).toBe(42);
-    expect(arg.data.invoice_id).toBe(500);
-    expect(arg.data.state).toBe('accrued');
-    expect(arg.data.currency).toBe('USD');
-  });
-
-  it('accrueCommission is idempotent (skips if existing)', async () => {
-    prismaMock.subscription_invoices.findUnique.mockResolvedValue(invoiceFixture());
-    prismaMock.partner_commissions.findUnique.mockResolvedValue({
-      id: 999,
-      state: 'accrued',
-    });
-
-    await service.accrueCommission(500);
-
-    expect(prismaMock.partner_commissions.create).not.toHaveBeenCalled();
+    expect(prismaMock.partner_commissions.upsert).toHaveBeenCalledTimes(1);
+    const arg = prismaMock.partner_commissions.upsert.mock.calls[0][0];
+    expect(arg.where).toEqual({ invoice_id: 500 });
+    expect(arg.create.partner_organization_id).toBe(42);
+    expect(arg.create.invoice_id).toBe(500);
+    expect(arg.create.state).toBe('accrued');
+    expect(arg.create.currency).toBe('USD');
+    // update payload must be a no-op so we don't clobber existing state
+    expect(arg.update).toEqual({});
   });
 
   it('accrueCommission no-ops when invoice has no partner_organization_id', async () => {
@@ -72,7 +65,63 @@ describe('PartnerCommissionsService', () => {
 
     await service.accrueCommission(500);
 
+    expect(prismaMock.partner_commissions.upsert).not.toHaveBeenCalled();
     expect(prismaMock.partner_commissions.create).not.toHaveBeenCalled();
+  });
+
+  it('accrueCommission concurrent calls produce exactly one row (upsert is invoked once per call, idempotent at DB layer)', async () => {
+    prismaMock.subscription_invoices.findUnique.mockResolvedValue(invoiceFixture());
+    // Simulate Prisma's upsert behavior: the second+ concurrent caller reuses
+    // the existing row via the unique-on-conflict path (returns same row).
+    let resolved = false;
+    prismaMock.partner_commissions.upsert.mockImplementation(async () => {
+      const result = { id: 1, state: 'accrued' };
+      resolved = true;
+      return result;
+    });
+
+    await Promise.all(
+      Array.from({ length: 10 }, () => service.accrueCommission(500)),
+    );
+
+    expect(resolved).toBe(true);
+    // Each call invokes upsert exactly once — the DB unique constraint on
+    // invoice_id guarantees only one row materializes regardless of how many
+    // upserts race in parallel.
+    expect(prismaMock.partner_commissions.upsert).toHaveBeenCalledTimes(10);
+    // Bare create() is never used directly — that was the racy path.
+    expect(prismaMock.partner_commissions.create).not.toHaveBeenCalled();
+  });
+
+  it('accrueCommission catches P2002 from upsert and logs warn without re-throw', async () => {
+    prismaMock.subscription_invoices.findUnique.mockResolvedValue(invoiceFixture());
+    const p2002 = Object.assign(new Error('Unique constraint failed'), {
+      code: 'P2002',
+    });
+    prismaMock.partner_commissions.upsert.mockRejectedValue(p2002);
+
+    // Spy on the service logger to confirm warn path
+    const warnSpy = jest
+      .spyOn((service as any).logger, 'warn')
+      .mockImplementation(() => undefined);
+
+    await expect(service.accrueCommission(500)).resolves.toBeUndefined();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('Commission already exists for invoice 500'),
+    );
+    warnSpy.mockRestore();
+  });
+
+  it('accrueCommission re-throws non-P2002 errors (e.g. P1001 connection)', async () => {
+    prismaMock.subscription_invoices.findUnique.mockResolvedValue(invoiceFixture());
+    const p1001 = Object.assign(new Error('Connection refused'), {
+      code: 'P1001',
+    });
+    prismaMock.partner_commissions.upsert.mockRejectedValue(p1001);
+
+    await expect(service.accrueCommission(500)).rejects.toMatchObject({
+      code: 'P1001',
+    });
   });
 
   it('getPartnerLedger filters by organization_id', async () => {

@@ -34,17 +34,8 @@ export class StoreSubscriptionsController {
   @Get('plans')
   @SkipSubscriptionGate()
   async listPlans() {
-    const plans = await this.prisma.subscription_plans.findMany({
-      where: {
-        state: 'active',
-        archived_at: null,
-        resellable: true,
-        is_promotional: false,
-      },
-      orderBy: { base_price: 'asc' },
-    });
-
     const orgId = RequestContextService.getOrganizationId();
+
     let overrides: Array<{
       base_plan_id: number;
       margin_pct: Prisma.Decimal | null;
@@ -52,7 +43,15 @@ export class StoreSubscriptionsController {
       custom_code: string | null;
       custom_name: string | null;
     }> = [];
+    let isPartnerOrg = false;
+
     if (orgId) {
+      const org = await this.prisma.organizations.findUnique({
+        where: { id: orgId },
+        select: { is_partner: true },
+      });
+      isPartnerOrg = !!org?.is_partner;
+
       overrides = await this.prisma.partner_plan_overrides.findMany({
         where: { organization_id: orgId, is_active: true },
         select: {
@@ -65,9 +64,57 @@ export class StoreSubscriptionsController {
       });
     }
 
+    // Partner-org stores see ONLY plans the partner has overridden.
+    // Non-partner orgs see every active resellable base plan.
+    const planWhere: Prisma.subscription_plansWhereInput = {
+      state: 'active',
+      archived_at: null,
+      resellable: true,
+      is_promotional: false,
+      ...(isPartnerOrg && {
+        id: { in: overrides.map((o) => o.base_plan_id) },
+      }),
+    };
+
+    const plans = isPartnerOrg && overrides.length === 0
+      ? []
+      : await this.prisma.subscription_plans.findMany({
+          where: planWhere,
+          orderBy: [{ sort_order: 'asc' }, { base_price: 'asc' }],
+        });
+
+    const storeId = RequestContextService.getStoreId();
+    let currentPlanId: number | null = null;
+    if (storeId) {
+      const currentSub = await this.prisma.store_subscriptions.findUnique({
+        where: { store_id: storeId },
+        select: { plan_id: true },
+      });
+      currentPlanId = currentSub?.plan_id ?? null;
+    }
+
     const data = plans.map((p) => {
+      const features = Array.isArray(p.feature_matrix)
+        ? (p.feature_matrix as any[]).map((f: any) => ({
+            key: f.key ?? '',
+            label: f.label ?? f.key ?? '',
+            enabled: f.enabled ?? true,
+            limit: f.limit ?? null,
+            unit: f.unit ?? null,
+          }))
+        : [];
+
+      const isCurrent = currentPlanId === p.id;
       const ov = overrides.find((o) => o.base_plan_id === p.id);
-      if (!ov) return p;
+      if (!ov) {
+        return {
+          ...p,
+          features,
+          sort_order: p.sort_order,
+          is_popular: p.is_popular,
+          is_current: isCurrent,
+        };
+      }
 
       const marginPct = ov.margin_pct
         ? new Prisma.Decimal(ov.margin_pct).div(100)
@@ -82,6 +129,10 @@ export class StoreSubscriptionsController {
         base_price: effective,
         code: ov.custom_code ?? p.code,
         name: ov.custom_name ?? p.name,
+        features,
+        sort_order: p.sort_order,
+        is_popular: p.is_popular,
+        is_current: isCurrent,
       };
     });
 
@@ -105,10 +156,12 @@ export class StoreSubscriptionsController {
     });
 
     if (!sub) {
-      throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_001);
+      return this.responseService.success(null, 'No active subscription');
     }
 
-    return this.responseService.success(sub, 'Subscription retrieved');
+    const data = { ...sub, plan_name: sub.plan?.name ?? null, plan_code: sub.plan?.code ?? null };
+
+    return this.responseService.success(data, 'Subscription retrieved');
   }
 
   @Permissions('subscriptions:write')

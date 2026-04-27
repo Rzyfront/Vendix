@@ -1,4 +1,4 @@
-import { Component, inject, DestroyRef } from '@angular/core';
+import { Component, inject, DestroyRef, signal, computed } from '@angular/core';
 
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { timer } from 'rxjs';
@@ -19,39 +19,39 @@ import { MonitoringOverview, ServerInfo, MetricStatus } from '../../interfaces';
       <div class="stats-container">
         <app-stats
           title="EC2 CPU"
-          [value]="ec2CpuValue"
-          [smallText]="ec2CpuSmall"
+          [value]="ec2CpuValue()"
+          [smallText]="ec2CpuSmall()"
           iconName="cpu"
-          [iconBgColor]="ec2CpuBg"
-          [iconColor]="ec2CpuColor"
-          [loading]="loadingOverview"
+          [iconBgColor]="ec2CpuBg()"
+          [iconColor]="ec2CpuColor()"
+          [loading]="loadingOverview()"
         ></app-stats>
         <app-stats
           title="RDS CPU"
-          [value]="rdsCpuValue"
-          [smallText]="rdsConnectionsSmall"
+          [value]="rdsCpuValue()"
+          [smallText]="rdsConnectionsSmall()"
           iconName="database"
-          [iconBgColor]="rdsCpuBg"
-          [iconColor]="rdsCpuColor"
-          [loading]="loadingOverview"
+          [iconBgColor]="rdsCpuBg()"
+          [iconColor]="rdsCpuColor()"
+          [loading]="loadingOverview()"
         ></app-stats>
         <app-stats
           title="Memoria"
-          [value]="memoryValue"
-          [smallText]="memorySmall"
+          [value]="memoryValue()"
+          [smallText]="memorySmall()"
           iconName="memory-stick"
           iconBgColor="bg-blue-500/10"
           iconColor="text-blue-500"
-          [loading]="loadingOverview"
+          [loading]="loadingOverview()"
         ></app-stats>
         <app-stats
           title="Disco"
-          [value]="diskValue"
-          [smallText]="diskSmall"
+          [value]="diskValue()"
+          [smallText]="diskSmall()"
           iconName="hard-drive"
           iconBgColor="bg-purple-500/10"
           iconColor="text-purple-500"
-          [loading]="loadingOverview"
+          [loading]="loadingOverview()"
         ></app-stats>
       </div>
 
@@ -59,29 +59,29 @@ import { MonitoringOverview, ServerInfo, MetricStatus } from '../../interfaces';
       <div class="p-4 rounded-xl" style="background: var(--color-surface); border: 1px solid var(--color-border);">
         <div class="flex items-center justify-between">
           <div class="flex items-center gap-3">
-            <app-status-indicator [status]="overallStatus"></app-status-indicator>
+            <app-status-indicator [status]="overallStatus()"></app-status-indicator>
             <span class="text-sm font-medium" style="color: var(--color-text-primary);">Estado General</span>
           </div>
-          <span class="text-sm" style="color: var(--color-text-muted);">{{ overallStatusLabel }}</span>
+          <span class="text-sm" style="color: var(--color-text-muted);">{{ overallStatusLabel() }}</span>
         </div>
       </div>
 
       <!-- Server Info -->
-      @if (serverInfo) {
+      @if (serverInfo(); as info) {
         <div class="p-4 rounded-xl" style="background: var(--color-surface); border: 1px solid var(--color-border);">
           <h3 class="text-sm font-semibold mb-3" style="color: var(--color-text-primary);">Informacion del Servidor</h3>
           <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
             <div>
               <p class="text-[10px] uppercase" style="color: var(--color-text-muted);">Hostname</p>
-              <p class="font-mono text-sm" style="color: var(--color-text-primary);">{{ serverInfo.hostname }}</p>
+              <p class="font-mono text-sm" style="color: var(--color-text-primary);">{{ info.hostname }}</p>
             </div>
             <div>
               <p class="text-[10px] uppercase" style="color: var(--color-text-muted);">Plataforma</p>
-              <p class="font-mono text-sm" style="color: var(--color-text-primary);">{{ serverInfo.platform }}</p>
+              <p class="font-mono text-sm" style="color: var(--color-text-primary);">{{ info.platform }}</p>
             </div>
             <div>
               <p class="text-[10px] uppercase" style="color: var(--color-text-muted);">Node.js</p>
-              <p class="font-mono text-sm font-bold" style="color: var(--color-text-primary);">{{ serverInfo.nodeVersion }}</p>
+              <p class="font-mono text-sm font-bold" style="color: var(--color-text-primary);">{{ info.nodeVersion }}</p>
             </div>
           </div>
         </div>
@@ -93,25 +93,81 @@ export class MonitoringOverviewPage {
   private readonly monitoringService = inject(MonitoringService);
   private readonly destroyRef = inject(DestroyRef);
 
-  overview: MonitoringOverview | null = null;
-  serverInfo: ServerInfo | null = null;
-  loadingOverview = true;
+  readonly overview = signal<MonitoringOverview | null>(null);
+  readonly serverInfo = signal<ServerInfo | null>(null);
+  readonly loadingOverview = signal(true);
 
-  // Pre-computed values (NOT getters)
-  overallStatus: MetricStatus = 'healthy';
-  overallStatusLabel = 'Cargando...';
-  ec2CpuValue = '--';
-  ec2CpuSmall = '';
-  ec2CpuBg = 'bg-green-500/10';
-  ec2CpuColor = 'text-green-500';
-  rdsCpuValue = '--';
-  rdsConnectionsSmall = '';
-  rdsCpuBg = 'bg-green-500/10';
-  rdsCpuColor = 'text-green-500';
-  memoryValue = '--';
-  memorySmall = '';
-  diskValue = '--';
-  diskSmall = '';
+  readonly overallStatus = computed<MetricStatus>(() => {
+    const o = this.overview();
+    return o?.ec2.status ?? 'healthy';
+  });
+
+  readonly overallStatusLabel = computed<string>(() => {
+    const status = this.overallStatus();
+    return status === 'healthy' ? 'Saludable' : status === 'warning' ? 'Advertencia' : 'Critico';
+  });
+
+  readonly ec2CpuValue = computed<string>(() => {
+    const o = this.overview();
+    return o ? `${o.ec2.cpuUtilization.toFixed(1)}%` : '--';
+  });
+
+  readonly ec2CpuSmall = computed<string>(() => {
+    const o = this.overview();
+    return o?.ec2.status ?? '';
+  });
+
+  readonly ec2CpuBg = computed<string>(() => {
+    const o = this.overview();
+    return o ? this.getCpuBg(o.ec2.cpuUtilization) : 'bg-green-500/10';
+  });
+
+  readonly ec2CpuColor = computed<string>(() => {
+    const o = this.overview();
+    return o ? this.getCpuColor(o.ec2.cpuUtilization) : 'text-green-500';
+  });
+
+  readonly rdsCpuValue = computed<string>(() => {
+    const o = this.overview();
+    return o ? `${o.rds.cpuUtilization.toFixed(1)}%` : '--';
+  });
+
+  readonly rdsConnectionsSmall = computed<string>(() => {
+    const o = this.overview();
+    return o ? `${o.rds.connections} conexiones` : '';
+  });
+
+  readonly rdsCpuBg = computed<string>(() => {
+    const o = this.overview();
+    return o ? this.getCpuBg(o.rds.cpuUtilization) : 'bg-green-500/10';
+  });
+
+  readonly rdsCpuColor = computed<string>(() => {
+    const o = this.overview();
+    return o ? this.getCpuColor(o.rds.cpuUtilization) : 'text-green-500';
+  });
+
+  readonly memoryValue = computed<string>(() => {
+    const o = this.overview();
+    return o ? `${o.server.memoryUsedPercent.toFixed(1)}%` : '--';
+  });
+
+  readonly memorySmall = computed<string>(() => {
+    const o = this.overview();
+    const la = o?.server.loadAverage;
+    return la?.length ? `Load: ${la[0].toFixed(2)}` : '';
+  });
+
+  readonly diskValue = computed<string>(() => {
+    const o = this.overview();
+    return o?.server.disk?.usePercent ?? '--';
+  });
+
+  readonly diskSmall = computed<string>(() => {
+    const o = this.overview();
+    const disk = o?.server.disk;
+    return disk ? `${disk.used} / ${disk.size}` : '';
+  });
 
   private paused = false;
   private visibilityHandler = () => { this.paused = document.hidden; };
@@ -125,7 +181,7 @@ export class MonitoringOverviewPage {
       catchError(() => of(null)),
       takeUntilDestroyed(this.destroyRef),
     ).subscribe(data => {
-      this.serverInfo = data;
+      this.serverInfo.set(data);
     });
 
     // Poll overview every 60s
@@ -157,35 +213,9 @@ export class MonitoringOverviewPage {
       catchError(() => of(null)),
       takeUntilDestroyed(this.destroyRef),
     ).subscribe(data => {
-      this.overview = data;
-      this.loadingOverview = false;
-      this.computeOverviewValues();
+      this.overview.set(data);
+      this.loadingOverview.set(false);
     });
-  }
-
-  private computeOverviewValues(): void {
-    if (!this.overview) return;
-    const o = this.overview;
-
-    this.overallStatus = o.ec2.status;
-    this.overallStatusLabel = o.ec2.status === 'healthy' ? 'Saludable' : o.ec2.status === 'warning' ? 'Advertencia' : 'Critico';
-
-    this.ec2CpuValue = `${o.ec2.cpuUtilization.toFixed(1)}%`;
-    this.ec2CpuSmall = o.ec2.status;
-    this.ec2CpuBg = this.getCpuBg(o.ec2.cpuUtilization);
-    this.ec2CpuColor = this.getCpuColor(o.ec2.cpuUtilization);
-
-    this.rdsCpuValue = `${o.rds.cpuUtilization.toFixed(1)}%`;
-    this.rdsConnectionsSmall = `${o.rds.connections} conexiones`;
-    this.rdsCpuBg = this.getCpuBg(o.rds.cpuUtilization);
-    this.rdsCpuColor = this.getCpuColor(o.rds.cpuUtilization);
-
-    this.memoryValue = `${o.server.memoryUsedPercent.toFixed(1)}%`;
-    const la = o.server.loadAverage;
-    this.memorySmall = la?.length ? `Load: ${la[0].toFixed(2)}` : '';
-
-    this.diskValue = o.server.disk?.usePercent || '--';
-    this.diskSmall = o.server.disk ? `${o.server.disk.used} / ${o.server.disk.size}` : '';
   }
 
   private getCpuBg(cpu: number): string {

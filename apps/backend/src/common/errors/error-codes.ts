@@ -1798,6 +1798,23 @@ export const ErrorCodes = {
     devMessage: 'Store does not meet promotional plan eligibility rules',
   },
 
+  // Platform-level payment gateway (superadmin/subscriptions/gateway)
+  SUBSCRIPTION_GATEWAY_001: {
+    code: 'SUBSCRIPTION_GATEWAY_001',
+    httpStatus: 400,
+    devMessage: 'Credenciales inválidas para entorno de producción',
+  },
+  SUBSCRIPTION_GATEWAY_002: {
+    code: 'SUBSCRIPTION_GATEWAY_002',
+    httpStatus: 400,
+    devMessage: 'Test de conexión requerido antes de activar producción',
+  },
+  SUBSCRIPTION_GATEWAY_003: {
+    code: 'SUBSCRIPTION_GATEWAY_003',
+    httpStatus: 404,
+    devMessage: 'Credenciales no configuradas',
+  },
+
   // Partner / reseller
   PARTNER_001: {
     code: 'PARTNER_001',
@@ -1844,6 +1861,11 @@ export const ErrorCodes = {
     code: 'TRIAL_001',
     httpStatus: 402,
     devMessage: 'Trial ended; choose a plan to continue',
+  },
+  SUBSCRIPTION_TRIAL_001: {
+    code: 'SUBSCRIPTION_TRIAL_001',
+    httpStatus: 409,
+    devMessage: 'Trial ya consumido',
   },
 } as const satisfies Record<string, ErrorCodeEntry>;
 

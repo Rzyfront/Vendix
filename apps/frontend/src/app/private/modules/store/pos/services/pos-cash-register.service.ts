@@ -133,11 +133,12 @@ export class PosCashRegisterService {
       .get<any>(`${this.baseUrl}/sessions/active`)
       .pipe(
         map((res) => res.data || null),
-        tap((session) => this.activeSession.set(session)),
-        catchError(() => {
-          this.activeSession.set(null);
-          return of(null);
+        tap((session) => {
+          if (session) {
+            this.activeSession.set(session);
+          }
         }),
+        catchError(() => of(null)),
       );
   }
 

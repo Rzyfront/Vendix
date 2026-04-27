@@ -5,7 +5,7 @@ import { environment } from '../../../../../../environments/environment';
 import {
   SubscriptionPlan,
   Invoice,
-  CheckoutPreview,
+  CheckoutPreviewResponse,
   PaymentMethod,
   ApiResponse,
 } from '../interfaces/store-subscription.interface';
@@ -26,15 +26,26 @@ export class StoreSubscriptionService {
     return this.http.get<ApiResponse<Invoice[]>>(this.getApiUrl('current/invoices'), { params });
   }
 
-  checkoutPreview(planId: string): Observable<ApiResponse<CheckoutPreview>> {
-    return this.http.post<ApiResponse<CheckoutPreview>>(this.getApiUrl('checkout/preview'), { plan_id: planId });
+  checkoutPreview(planId: string | number): Observable<ApiResponse<CheckoutPreviewResponse>> {
+    return this.http.post<ApiResponse<CheckoutPreviewResponse>>(
+      this.getApiUrl('checkout/preview'),
+      { planId: Number(planId) },
+    );
   }
 
-  checkoutCommit(planId: string, paymentMethodId?: string): Observable<ApiResponse<any>> {
-    return this.http.post<ApiResponse<any>>(this.getApiUrl('checkout/commit'), {
-      plan_id: planId,
-      payment_method_id: paymentMethodId,
-    });
+  checkoutCommit(
+    planId: string | number,
+    paymentMethodId?: string | number,
+    returnUrl?: string,
+  ): Observable<ApiResponse<any>> {
+    const body: Record<string, number | string> = { planId: Number(planId) };
+    if (paymentMethodId !== undefined && paymentMethodId !== null && paymentMethodId !== '') {
+      body['paymentMethodId'] = Number(paymentMethodId);
+    }
+    if (returnUrl) {
+      body['returnUrl'] = returnUrl;
+    }
+    return this.http.post<ApiResponse<any>>(this.getApiUrl('checkout/commit'), body);
   }
 
   getPaymentMethods(): Observable<ApiResponse<PaymentMethod[]>> {

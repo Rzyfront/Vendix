@@ -32,8 +32,8 @@ export class PromotionalService {
         grace_period_hard_days: dto.grace_period_hard_days ?? 10,
         suspension_day: dto.suspension_day ?? 14,
         cancellation_day: dto.cancellation_day ?? 45,
-        feature_matrix: dto.feature_matrix as any,
-        ai_feature_flags: dto.ai_feature_flags as any,
+        feature_matrix: (dto.feature_matrix ?? {}) as any,
+        ai_feature_flags: (dto.ai_feature_flags ?? {}) as any,
         resellable: false,
         is_promotional: true,
         promo_rules: dto.promo_rules as any,
@@ -91,7 +91,26 @@ export class PromotionalService {
       throw new VendixHttpException(ErrorCodes.SYS_NOT_FOUND_001);
     }
 
-    return plan;
+    // Histórico de aplicaciones del plan promocional
+    // subscription_events.payload es Json — usamos JSON path query de Prisma
+    const applications = await this.prisma.subscription_events.findMany({
+      where: {
+        type: 'promotional_applied',
+        payload: { path: ['promotional_plan_id'], equals: id },
+      },
+      orderBy: { created_at: 'desc' },
+      take: 50,
+      select: {
+        id: true,
+        store_subscription_id: true,
+        payload: true,
+        created_at: true,
+        triggered_by_user_id: true,
+        triggered_by_job: true,
+      },
+    });
+
+    return { ...plan, applications };
   }
 
   async update(id: number, dto: UpdatePromotionalDto) {

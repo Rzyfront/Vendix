@@ -1,4 +1,4 @@
-import { Component, inject, DestroyRef } from '@angular/core';
+import { Component, computed, DestroyRef, inject, signal } from '@angular/core';
 
 import { RouterModule } from '@angular/router';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
@@ -15,8 +15,8 @@ import { MonitoringService } from './services/monitoring.service';
       title="Monitoreo del Sistema"
       subtitle="Estado en tiempo real de la infraestructura"
       icon="activity"
-      [metadataContent]="'Ultima actualizacion: hace ' + secondsSinceRefresh + 's'"
-      [actions]="headerActions"
+      [metadataContent]="'Ultima actualizacion: hace ' + secondsSinceRefresh() + 's'"
+      [actions]="headerActions()"
       (actionClicked)="onHeaderAction($event)"
     ></app-sticky-header>
 
@@ -52,9 +52,20 @@ export class MonitoringLayoutComponent {
   private readonly destroyRef = inject(DestroyRef);
   private tickInterval: ReturnType<typeof setInterval> | null = null;
 
-  autoRefresh = true;
-  secondsSinceRefresh = 0;
-  headerActions: StickyHeaderActionButton[] = [];
+  readonly secondsSinceRefresh = signal(0);
+
+  readonly headerActions = computed<StickyHeaderActionButton[]>(() => {
+    const autoRefresh = this.monitoringService.autoRefresh();
+    return [
+      { id: 'refresh', label: 'Refrescar', variant: 'outline', icon: 'refresh-cw' },
+      {
+        id: 'auto-refresh',
+        label: autoRefresh ? 'Auto: ON' : 'Auto: OFF',
+        variant: autoRefresh ? 'primary' : 'outline',
+        icon: autoRefresh ? 'play' : 'pause',
+      },
+    ];
+  });
 
   readonly tabs = [
     { path: 'overview', label: 'Overview', icon: 'layout-dashboard' },
@@ -64,23 +75,14 @@ export class MonitoringLayoutComponent {
   ];
 
   constructor() {
-    this.updateHeaderActions();
-
-    this.monitoringService.autoRefresh$.pipe(
-      takeUntilDestroyed(),
-    ).subscribe(v => {
-      this.autoRefresh = v;
-      this.updateHeaderActions();
-    });
-
     this.monitoringService.manualRefresh$.pipe(
       takeUntilDestroyed(),
     ).subscribe(() => {
-      this.secondsSinceRefresh = 0;
+      this.secondsSinceRefresh.set(0);
     });
 
     this.tickInterval = setInterval(() => {
-      this.secondsSinceRefresh++;
+      this.secondsSinceRefresh.update(v => v + 1);
     }, 1000);
 
     this.destroyRef.onDestroy(() => {
@@ -93,21 +95,9 @@ export class MonitoringLayoutComponent {
   onHeaderAction(actionId: string): void {
     if (actionId === 'refresh') {
       this.monitoringService.triggerRefresh();
-      this.secondsSinceRefresh = 0;
+      this.secondsSinceRefresh.set(0);
     } else if (actionId === 'auto-refresh') {
       this.monitoringService.toggleAutoRefresh();
     }
-  }
-
-  private updateHeaderActions(): void {
-    this.headerActions = [
-      { id: 'refresh', label: 'Refrescar', variant: 'outline', icon: 'refresh-cw' },
-      {
-        id: 'auto-refresh',
-        label: this.autoRefresh ? 'Auto: ON' : 'Auto: OFF',
-        variant: this.autoRefresh ? 'primary' : 'outline',
-        icon: this.autoRefresh ? 'play' : 'pause',
-      },
-    ];
   }
 }

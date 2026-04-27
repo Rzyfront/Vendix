@@ -12,6 +12,7 @@ export { ActiveSubscriptionsComponent } from './pages/active/active-subscription
 export { DunningBoardComponent } from './pages/dunning/dunning-board.component';
 export { PartnerPayoutsComponent } from './pages/payouts/partner-payouts.component';
 export { SubscriptionEventsComponent } from './pages/events/subscription-events.component';
+export { GatewayComponent } from './pages/gateway/gateway.component';
 
 // Components
 export { AiFeatureMatrixComponent } from './components/ai-feature-matrix.component';
@@ -23,6 +24,7 @@ export { DunningCardComponent } from './components/dunning-card.component';
 
 // Services
 export { SubscriptionAdminService } from './services/subscription-admin.service';
+export { GatewayAdminService } from './services/gateway-admin.service';
 
 // Interfaces
 export type {
@@ -46,3 +48,14 @@ export type {
   SubscriptionStatus,
   BillingCycle,
 } from './interfaces/subscription-admin.interface';
+
+export type {
+  GatewayProcessor,
+  GatewayEnvironment,
+  MaskedCredentials,
+  PlatformGatewayLastTestResult,
+  PlatformGatewayView,
+  UpsertGatewayDto,
+  TestGatewayDto,
+  TestConnectionResult,
+} from './interfaces/platform-gateway.interface';

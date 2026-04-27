@@ -18,6 +18,24 @@ export type PaywallCode =
   | 'PLAN_001'
   | 'TRIAL_001';
 
+/**
+ * Visual severity drives gradient, badge color and animation on
+ * `<app-ai-paywall-modal>`. Decoupled from the backend code so the same
+ * severity can be reused across different `PaywallCode`s.
+ */
+export type PaywallSeverity = 'critical' | 'warning' | 'info' | 'upsell';
+
+/**
+ * Functional grouping of the variants — used to decide layout details such
+ * as whether the benefits list is shown or what the default icon is.
+ */
+export type PaywallCategory =
+  | 'upgrade'
+  | 'feature-locked'
+  | 'quota-exhausted'
+  | 'payment-due'
+  | 'trial-ended';
+
 export interface PaywallVariant {
   /** Modal title shown in the header. */
   title: string;
@@ -27,6 +45,20 @@ export interface PaywallVariant {
   ctaLabel: string;
   /** Route the primary CTA should navigate to. */
   ctaRoute: string;
+  /** Visual tone of the modal — controls colors, badge, and animations. */
+  severity?: PaywallSeverity;
+  /** Functional grouping — decides icon fallback and benefits visibility. */
+  category?: PaywallCategory;
+  /** Lucide icon name shown in the hero zone (overrides category default). */
+  iconName?: string;
+  /** Short label for the floating badge above the title (e.g. "Pago pendiente"). */
+  badgeLabel?: string;
+  /** Optional 3-4 short bullets reinforcing the upgrade value proposition. */
+  benefits?: string[];
+  /** Optional helper line under the description (e.g. "Recomendado: Plan Pro"). */
+  recommendedPlanHint?: string;
+  /** Override for the secondary CTA label (defaults to "Cerrar"). */
+  secondaryCtaLabel?: string;
 }
 
 export interface PaywallState {
@@ -41,46 +73,91 @@ export interface PaywallState {
  */
 const PAYWALL_VARIANTS: Record<PaywallCode, PaywallVariant> = {
   SUBSCRIPTION_004: {
-    title: 'Sin suscripción activa',
-    description: 'Tu tienda no tiene una suscripción activa. Elige un plan para continuar.',
+    title: 'Activa tu suscripción',
+    description: 'Tu tienda aún no tiene un plan activo. Elige uno y desbloquea todo el potencial de Vendix.',
     ctaLabel: 'Elegir plan',
     ctaRoute: '/admin/subscription/plans',
+    severity: 'upsell',
+    category: 'upgrade',
+    iconName: 'crown',
+    badgeLabel: 'Mejora tu plan',
+    benefits: [
+      'Inventario, ventas y POS sin límites',
+      'IA integrada para automatizar tareas',
+      'Soporte prioritario y onboarding guiado',
+    ],
   },
   SUBSCRIPTION_005: {
-    title: 'Plan no incluye esta función',
-    description: 'Esta función no está disponible en tu plan actual.',
+    title: 'Función incluida en planes superiores',
+    description: 'Esta función no está disponible en tu plan actual. Mejóralo para acceder a más herramientas.',
     ctaLabel: 'Mejorar plan',
     ctaRoute: '/admin/subscription/plans',
+    severity: 'info',
+    category: 'feature-locked',
+    iconName: 'lock',
+    badgeLabel: 'Función bloqueada',
+    benefits: [
+      'Acceso completo a esta y otras funciones',
+      'Más usuarios, almacenes y reportes',
+      'Sin sobreprecios sorpresa',
+    ],
   },
   SUBSCRIPTION_006: {
     title: 'Cuota de IA agotada',
-    description: 'Has alcanzado el límite de IA de tu plan. Mejora tu plan para seguir usando esta función.',
-    ctaLabel: 'Mejorar plan',
+    description: 'Has alcanzado el límite de IA de tu plan en este periodo. Mejora tu plan para seguir disfrutando.',
+    ctaLabel: 'Ampliar mi plan',
     ctaRoute: '/admin/subscription/plans',
+    severity: 'warning',
+    category: 'quota-exhausted',
+    iconName: 'zap',
+    badgeLabel: 'Cuota agotada',
   },
   SUBSCRIPTION_008: {
     title: 'Suscripción suspendida',
-    description: 'Tu suscripción está suspendida por falta de pago. Regulariza para continuar.',
+    description: 'Tu suscripción está suspendida por un pago pendiente. Regulariza ahora para retomar tu actividad sin perder datos.',
     ctaLabel: 'Pagar ahora',
     ctaRoute: '/admin/subscription/payment',
+    severity: 'critical',
+    category: 'payment-due',
+    iconName: 'alert-octagon',
+    badgeLabel: 'Pago pendiente',
+    secondaryCtaLabel: 'Recordarme luego',
   },
   SUBSCRIPTION_009: {
     title: 'Suscripción bloqueada',
-    description: 'Tu suscripción ha sido bloqueada. Realiza el pago pendiente para reactivarla.',
+    description: 'Tu suscripción ha sido bloqueada por falta de pago. Realiza el pago pendiente para reactivarla de inmediato.',
     ctaLabel: 'Pagar ahora',
     ctaRoute: '/admin/subscription/payment',
+    severity: 'critical',
+    category: 'payment-due',
+    iconName: 'pause-circle',
+    badgeLabel: 'Acceso bloqueado',
+    secondaryCtaLabel: 'Recordarme luego',
   },
   TRIAL_001: {
-    title: 'Trial finalizado',
-    description: 'Tu periodo de prueba ha terminado. Elige un plan para continuar.',
-    ctaLabel: 'Elegir plan',
+    title: 'Tu trial ha terminado',
+    description: 'Esperamos que hayas disfrutado tu periodo de prueba. Elige un plan para seguir creciendo con Vendix.',
+    ctaLabel: 'Elegir mi plan',
     ctaRoute: '/admin/subscription/plans',
+    severity: 'upsell',
+    category: 'trial-ended',
+    iconName: 'sparkles',
+    badgeLabel: 'Trial finalizado',
+    benefits: [
+      'Mantén tus datos, configuración y catálogo',
+      'Plan flexible: cambia o cancela cuando quieras',
+      'Atención humana para acompañarte',
+    ],
   },
   PLAN_001: {
-    title: 'Plan no disponible',
-    description: 'El plan solicitado no está disponible. Revisa el catálogo de planes.',
+    title: 'Explora nuestros planes',
+    description: 'Revisa el catálogo y elige el plan que mejor se adapte a tu negocio.',
     ctaLabel: 'Ver planes',
     ctaRoute: '/admin/subscription/plans',
+    severity: 'upsell',
+    category: 'upgrade',
+    iconName: 'crown',
+    badgeLabel: 'Mejora tu plan',
   },
 };
 

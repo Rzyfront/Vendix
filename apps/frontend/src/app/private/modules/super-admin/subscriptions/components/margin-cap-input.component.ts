@@ -10,22 +10,22 @@ import { InputComponent } from '../../../../../shared/components';
     <div class="space-y-2">
       <app-input
         type="number"
-        label="Partner Margin %"
+        label="Margen %"
         [(ngModel)]="percent"
         (ngModelChange)="emitChange()"
         [min]="0"
         [max]="100"
-        helpText="Percentage of each subscription the partner earns"
+        helpText="Porcentaje de cada suscripción que gana el partner"
       >
         <span slot="suffix">%</span>
       </app-input>
 
       <app-input
         [currency]="true"
-        label="Margin Cap (optional)"
+        label="Tope de margen % (opcional)"
         [(ngModel)]="cap"
         (ngModelChange)="emitChange()"
-        helpText="Maximum monthly payout per store"
+        helpText="Pago máximo mensual por tienda"
       >
         <span slot="prefix-icon">$</span>
       </app-input>

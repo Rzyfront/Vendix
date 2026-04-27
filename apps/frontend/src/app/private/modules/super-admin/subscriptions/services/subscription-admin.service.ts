@@ -4,6 +4,7 @@ import { Observable, map } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
 import {
   SubscriptionPlan,
+  PlanPricing,
   PartnerOrganization,
   PromotionalPlan,
   StoreSubscription,
@@ -44,55 +45,255 @@ export class SubscriptionAdminService {
 
   // ─── Plans ───
 
+  /** Decimal-string | number | null | undefined -> number | null */
+  private toNumber(v: any): number | null {
+    if (v === null || v === undefined || v === '') return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  /** Same but returns 0 instead of null (for non-nullable numeric fields) */
+  private toNumberOrZero(v: any): number {
+    return this.toNumber(v) ?? 0;
+  }
+
   private toBackendPlanPayload(data: Partial<CreatePlanDto> | Partial<UpdatePlanDto>): Record<string, any> {
     const d = data as any;
-    const pricingFirst = Array.isArray(d.pricing) && d.pricing.length
-      ? (d.pricing.find((p: any) => p.is_default) ?? d.pricing[0])
-      : null;
-
     const payload: Record<string, any> = {};
+
+    // Identity
+    if (d.code !== undefined) payload['code'] = d.code;
     if (d.name !== undefined) payload['name'] = d.name;
     if (d.description !== undefined) payload['description'] = d.description;
-    if (d.slug !== undefined) payload['code'] = d.slug;
-    if (d.is_active !== undefined) payload['state'] = d.is_active ? 'active' : 'draft';
-    if (d.is_public !== undefined) payload['resellable'] = d.is_public;
+
+    // Type / state / billing
+    if (d.plan_type !== undefined) payload['plan_type'] = d.plan_type;
+    if (d.state !== undefined) payload['state'] = d.state;
+    if (d.billing_cycle !== undefined) payload['billing_cycle'] = d.billing_cycle;
+
+    // Money (Prisma Decimal accepts number on input)
+    if (d.base_price !== undefined && d.base_price !== null) {
+      payload['base_price'] = Number(d.base_price);
+    }
+    if (d.currency !== undefined) payload['currency'] = d.currency;
+    if (d.setup_fee !== undefined) {
+      payload['setup_fee'] = d.setup_fee === null ? null : Number(d.setup_fee);
+    }
+
+    // Trial + dunning
+    if (d.trial_days !== undefined) payload['trial_days'] = Number(d.trial_days);
+    if (d.grace_period_soft_days !== undefined) payload['grace_period_soft_days'] = Number(d.grace_period_soft_days);
+    if (d.grace_period_hard_days !== undefined) payload['grace_period_hard_days'] = Number(d.grace_period_hard_days);
+    if (d.suspension_day !== undefined) payload['suspension_day'] = Number(d.suspension_day);
+    if (d.cancellation_day !== undefined) payload['cancellation_day'] = Number(d.cancellation_day);
+
+    // Partner
+    if (d.resellable !== undefined) payload['resellable'] = Boolean(d.resellable);
+    if (d.max_partner_margin_pct !== undefined) {
+      payload['max_partner_margin_pct'] =
+        d.max_partner_margin_pct === null ? null : Number(d.max_partner_margin_pct);
+    }
+
+    // Promotional
+    if (d.is_promotional !== undefined) payload['is_promotional'] = Boolean(d.is_promotional);
+    if (d.promo_priority !== undefined) payload['promo_priority'] = Number(d.promo_priority);
+
+    // Display
+    if (d.is_popular !== undefined) payload['is_popular'] = Boolean(d.is_popular);
+    if (d.sort_order !== undefined) payload['sort_order'] = Number(d.sort_order);
+    if (d.is_default !== undefined) payload['is_default'] = Boolean(d.is_default);
+
+    // Feature matrices
     if (d.ai_feature_flags !== undefined) payload['ai_feature_flags'] = d.ai_feature_flags;
+    if (d.feature_matrix !== undefined) payload['feature_matrix'] = d.feature_matrix ?? {};
+
+    // ---- Backwards-compat shim (legacy callers using slug / is_active / is_public / grace_threshold_days / pricing[]) ----
+    if (payload['code'] === undefined && d.slug !== undefined) payload['code'] = d.slug;
+    if (payload['state'] === undefined && d.is_active !== undefined) payload['state'] = d.is_active ? 'active' : 'draft';
+    if (payload['resellable'] === undefined && d.is_public !== undefined) payload['resellable'] = Boolean(d.is_public);
     if (d.grace_threshold_days !== undefined) {
-      payload['grace_period_soft_days'] = d.grace_threshold_days;
-      payload['grace_period_hard_days'] = d.grace_threshold_days;
+      if (payload['grace_period_soft_days'] === undefined) payload['grace_period_soft_days'] = Number(d.grace_threshold_days);
+      if (payload['grace_period_hard_days'] === undefined) payload['grace_period_hard_days'] = Number(d.grace_threshold_days);
     }
-    if (pricingFirst) {
-      payload['billing_cycle'] = pricingFirst.billing_cycle;
-      payload['base_price'] = Number(pricingFirst.price);
-      if (pricingFirst.currency_code) payload['currency'] = pricingFirst.currency_code;
+    if (Array.isArray(d.pricing) && d.pricing.length) {
+      const pricingFirst = d.pricing.find((p: any) => p.is_default) ?? d.pricing[0];
+      if (payload['billing_cycle'] === undefined && pricingFirst.billing_cycle) {
+        payload['billing_cycle'] = pricingFirst.billing_cycle;
+      }
+      if (payload['base_price'] === undefined && pricingFirst.price !== undefined) {
+        payload['base_price'] = Number(pricingFirst.price);
+      }
+      if (payload['currency'] === undefined && pricingFirst.currency_code) {
+        payload['currency'] = pricingFirst.currency_code;
+      }
     }
-    payload['feature_matrix'] = d.feature_matrix ?? {};
+
     return payload;
   }
 
   private toFrontendPlan(raw: any): SubscriptionPlan {
-    const basePrice = raw.base_price != null ? Number(raw.base_price) : 0;
+    const base_price = this.toNumberOrZero(raw.base_price);
+    const setup_fee = this.toNumber(raw.setup_fee);
+    const max_partner_margin_pct = this.toNumber(raw.max_partner_margin_pct);
+    const billing_cycle = (raw.billing_cycle ?? 'monthly') as SubscriptionPlan['billing_cycle'];
+    const currency = raw.currency ?? 'COP';
+    const grace_period_soft_days = Number(raw.grace_period_soft_days ?? 0);
+
     return {
       id: String(raw.id),
-      name: raw.name,
-      slug: raw.code,
+      code: raw.code ?? '',
+      name: raw.name ?? '',
       description: raw.description ?? '',
+
+      plan_type: (raw.plan_type ?? 'base') as SubscriptionPlan['plan_type'],
+      state: (raw.state ?? 'draft') as SubscriptionPlan['state'],
+      billing_cycle,
+
+      base_price,
+      currency,
+      setup_fee,
+
+      trial_days: Number(raw.trial_days ?? 0),
+      grace_period_soft_days,
+      grace_period_hard_days: Number(raw.grace_period_hard_days ?? 0),
+      suspension_day: Number(raw.suspension_day ?? 0),
+      cancellation_day: Number(raw.cancellation_day ?? 0),
+
+      feature_matrix: raw.feature_matrix ?? {},
+      ai_feature_flags: raw.ai_feature_flags ?? ({} as any),
+
+      resellable: Boolean(raw.resellable),
+      max_partner_margin_pct,
+
+      is_promotional: Boolean(raw.is_promotional),
+      promo_rules: raw.promo_rules ?? null,
+      promo_priority: Number(raw.promo_priority ?? 0),
+
+      is_popular: Boolean(raw.is_popular),
+      sort_order: Number(raw.sort_order ?? 0),
+      is_default: Boolean(raw.is_default),
+
+      parent_plan_id: raw.parent_plan_id ?? null,
+      created_at: raw.created_at,
+      updated_at: raw.updated_at,
+      archived_at: raw.archived_at ?? null,
+
+      // Derived legacy
+      slug: raw.code ?? '',
       is_active: raw.state === 'active',
       is_public: Boolean(raw.resellable),
-      ai_feature_flags: raw.ai_feature_flags ?? {},
       pricing: [
         {
-          id: `${raw.id}-${raw.billing_cycle}`,
-          billing_cycle: raw.billing_cycle,
-          price: basePrice,
-          currency_code: raw.currency ?? 'COP',
+          id: `${raw.id}-${billing_cycle}`,
+          billing_cycle: (billing_cycle as PlanPricing['billing_cycle']),
+          price: base_price,
+          currency_code: currency,
           is_default: true,
         },
       ],
-      grace_threshold_days: raw.grace_period_soft_days ?? 0,
+      grace_threshold_days: grace_period_soft_days,
+    };
+  }
+
+  // ─── Subscription transformers (Phase B) ───
+
+  private mapBackendStateToStatus(state: string): StoreSubscription['status'] {
+    if (state === 'grace_soft' || state === 'grace_hard') return 'grace';
+    if (state === 'expired' || state === 'cancelled') return 'cancelled';
+    if (state === 'blocked' || state === 'suspended') return 'suspended';
+    if (state === 'trial') return 'trial';
+    return 'active';
+  }
+
+  private toFrontendStoreSubscription(raw: any): StoreSubscription {
+    return {
+      id: String(raw.id),
+      store_id: String(raw.store_id),
+      store_name: raw.store?.name ?? '—',
+      organization_name: raw.store?.organizations?.name ?? raw.organization?.name ?? '—',
+      plan_name: raw.partner_override?.custom_name ?? raw.plan?.name ?? '—',
+      billing_cycle: raw.plan?.billing_cycle ?? 'monthly',
+      price: Number(raw.effective_price ?? 0),
+      currency_code: raw.currency ?? 'COP',
+      status: this.mapBackendStateToStatus(raw.state),
+      current_period_start: raw.current_period_start,
+      current_period_end: raw.current_period_end,
+      grace_period_end: raw.grace_hard_until ?? raw.grace_soft_until ?? null,
+      auto_renew: Boolean(raw.auto_renew),
+      partner_id: raw.partner_override?.organization_id ? String(raw.partner_override.organization_id) : null,
+      partner_margin_amount: Number(raw.partner_margin_amount ?? 0),
       created_at: raw.created_at,
-      updated_at: raw.updated_at,
-    } as SubscriptionPlan;
+    };
+  }
+
+  private toFrontendDunning(raw: any): DunningSubscription {
+    const base = this.toFrontendStoreSubscription(raw);
+    const invoice = raw.invoices?.[0] ?? raw.latest_invoice ?? null;
+    const dueAt = invoice?.due_at ? new Date(invoice.due_at) : null;
+    const days_overdue = dueAt
+      ? Math.max(0, Math.floor((Date.now() - dueAt.getTime()) / 86400000))
+      : 0;
+    return {
+      id: base.id,
+      store_id: base.store_id,
+      store_name: base.store_name,
+      organization_name: base.organization_name,
+      plan_name: base.plan_name,
+      price: base.price,
+      currency_code: base.currency_code,
+      status: base.status === 'grace' ? 'grace' : 'suspended',
+      current_period_end: base.current_period_end,
+      grace_period_end: base.grace_period_end,
+      days_overdue,
+      payment_attempts: invoice?.payments?.length ?? 0,
+      last_payment_attempt: invoice?.payments?.[invoice.payments.length - 1]?.created_at ?? null,
+    };
+  }
+
+  private toFrontendPayout(raw: any): PartnerPayout {
+    const rawState = raw.state ?? 'pending';
+    const mappedStatus = (rawState === 'draft'
+      ? 'pending'
+      : rawState === 'sent'
+        ? 'approved'
+        : rawState) as PartnerPayout['status'];
+    return {
+      id: String(raw.id),
+      partner_id: String(raw.partner_organization_id),
+      partner_name: raw.organization?.name ?? raw.partner_organization?.name ?? '—',
+      period_start: raw.period_start,
+      period_end: raw.period_end,
+      total_amount: Number(raw.total_amount ?? 0),
+      currency_code: raw.currency ?? 'COP',
+      store_count: raw._count?.commissions ?? 0,
+      status: mappedStatus,
+      approved_at: raw.sent_at ?? null,
+      paid_at: raw.paid_at ?? null,
+      created_at: raw.created_at,
+    };
+  }
+
+  private describeEvent(raw: any): string {
+    const from = raw.from_state ? `${raw.from_state} → ` : '';
+    const to = raw.to_state ?? '';
+    if (from || to) return `${from}${to}`;
+    return raw.type;
+  }
+
+  private toFrontendEvent(raw: any): SubscriptionEvent {
+    const userFull = raw.triggered_by
+      ? `${raw.triggered_by.first_name ?? ''} ${raw.triggered_by.last_name ?? ''}`.trim() || raw.triggered_by.email
+      : null;
+    return {
+      id: String(raw.id),
+      subscription_id: String(raw.store_subscription_id),
+      event_type: raw.type,
+      description: this.describeEvent(raw),
+      metadata: (raw.payload ?? {}) as Record<string, unknown>,
+      created_at: raw.created_at,
+      user_id: raw.triggered_by_user_id ? String(raw.triggered_by_user_id) : null,
+      user_name: userFull ?? raw.triggered_by_job ?? null,
+    };
   }
 
   getPlans(query?: { page?: number; limit?: number; search?: string; is_active?: boolean }): Observable<PaginatedResponse<SubscriptionPlan>> {
@@ -193,7 +394,14 @@ export class SubscriptionAdminService {
     if (query?.status) params = params.set('status', query.status);
     if (query?.search) params = params.set('search', query.search);
 
-    return this.http.get<PaginatedResponse<StoreSubscription>>(`${this.apiUrl}/superadmin/subscriptions/active`, { params });
+    return this.http
+      .get<PaginatedResponse<any>>(`${this.apiUrl}/superadmin/subscriptions/active`, { params })
+      .pipe(
+        map((res) => ({
+          ...res,
+          data: (res.data ?? []).map((row: any) => this.toFrontendStoreSubscription(row)),
+        })),
+      );
   }
 
   // ─── Dunning ───
@@ -204,7 +412,14 @@ export class SubscriptionAdminService {
     if (query?.limit) params = params.set('limit', query.limit.toString());
     if (query?.status) params = params.set('status', query.status);
 
-    return this.http.get<PaginatedResponse<DunningSubscription>>(`${this.apiUrl}/superadmin/subscriptions/dunning`, { params });
+    return this.http
+      .get<PaginatedResponse<any>>(`${this.apiUrl}/superadmin/subscriptions/dunning`, { params })
+      .pipe(
+        map((res) => ({
+          ...res,
+          data: (res.data ?? []).map((row: any) => this.toFrontendDunning(row)),
+        })),
+      );
   }
 
   // ─── Partner Payouts ───
@@ -215,7 +430,14 @@ export class SubscriptionAdminService {
     if (query?.limit) params = params.set('limit', query.limit.toString());
     if (query?.status) params = params.set('status', query.status);
 
-    return this.http.get<PaginatedResponse<PartnerPayout>>(`${this.apiUrl}/superadmin/subscriptions/payouts`, { params });
+    return this.http
+      .get<PaginatedResponse<any>>(`${this.apiUrl}/superadmin/subscriptions/payouts`, { params })
+      .pipe(
+        map((res) => ({
+          ...res,
+          data: (res.data ?? []).map((row: any) => this.toFrontendPayout(row)),
+        })),
+      );
   }
 
   approvePayout(id: string, data: PayoutApprovalDto): Observable<ApiResponse<PartnerPayout>> {
@@ -229,7 +451,14 @@ export class SubscriptionAdminService {
     if (query?.page) params = params.set('page', query.page.toString());
     if (query?.limit) params = params.set('limit', query.limit.toString());
 
-    return this.http.get<PaginatedResponse<SubscriptionEvent>>(`${this.apiUrl}/superadmin/subscriptions/events/${subscriptionId}`, { params });
+    return this.http
+      .get<PaginatedResponse<any>>(`${this.apiUrl}/superadmin/subscriptions/events/${subscriptionId}`, { params })
+      .pipe(
+        map((res) => ({
+          ...res,
+          data: (res.data ?? []).map((row: any) => this.toFrontendEvent(row)),
+        })),
+      );
   }
 
   // ─── Stats ───

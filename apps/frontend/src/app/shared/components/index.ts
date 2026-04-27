@@ -50,6 +50,8 @@ export { ScrollableTabsComponent } from './scrollable-tabs/scrollable-tabs.compo
 export { StepsLineComponent } from './steps-line/steps-line.component';
 export { ExpandableCardComponent } from './expandable-card/expandable-card.component';
 export { EmptyStateComponent } from './empty-state/empty-state.component';
+export { PricingCardComponent } from './pricing-card/pricing-card.component';
+export type { PricingCardPlan, PricingCardFeature } from './pricing-card/pricing-card.component';
 export { SubscriptionBannerComponent } from './subscription-banner/subscription-banner.component';
 export { AiPaywallModalComponent } from './ai-paywall-modal/ai-paywall-modal.component';
 export { DateRangePickerComponent } from './date-range-picker/date-range-picker.component';

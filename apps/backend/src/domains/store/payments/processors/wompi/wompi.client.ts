@@ -40,7 +40,7 @@ export class WompiClient {
   private async request<T>(
     method: string,
     path: string,
-    options?: { body?: any; bearerToken?: string },
+    options?: { body?: any; bearerToken?: string; idempotencyKey?: string },
   ): Promise<T> {
     this.ensureConfigured();
 
@@ -51,6 +51,14 @@ export class WompiClient {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${token}`,
     };
+
+    // Wompi supports HTTP header `Idempotency-Key` for write endpoints
+    // (POST /transactions, POST /transactions/:id/void, POST /payment_links).
+    // A retried request with the same key returns the original result instead
+    // of creating a duplicate transaction.
+    if (options?.idempotencyKey) {
+      headers['Idempotency-Key'] = options.idempotencyKey;
+    }
 
     const fetchOptions: RequestInit = { method, headers };
     if (options?.body) {
@@ -78,9 +86,11 @@ export class WompiClient {
 
   async createTransaction(
     data: WompiCreateTransactionRequest,
+    idempotencyKey?: string,
   ): Promise<WompiTransactionResponse> {
     return this.request<WompiTransactionResponse>('POST', '/transactions', {
       body: data,
+      idempotencyKey,
     });
   }
 
@@ -95,10 +105,12 @@ export class WompiClient {
 
   async voidTransaction(
     transactionId: string,
+    idempotencyKey?: string,
   ): Promise<WompiTransactionResponse> {
     return this.request<WompiTransactionResponse>(
       'POST',
       `/transactions/${transactionId}/void`,
+      { idempotencyKey },
     );
   }
 

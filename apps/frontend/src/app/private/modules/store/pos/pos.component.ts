@@ -2,6 +2,7 @@ import {
   Component,
   signal,
   computed,
+  effect,
   HostListener,
   inject,
   DestroyRef,
@@ -199,33 +200,33 @@ const DEFAULT_CART_SUMMARY: CartSummary = {
                 <!-- Customer Badge -->
                 @if (selectedCustomer()) {
                   <div
-                    class="group flex items-center gap-2.5 self-stretch bg-gradient-to-r from-primary-light/50 to-primary-light/30 px-3 rounded-lg cursor-pointer hover:from-primary-light/70 hover:to-primary-light/50 transition-all border border-primary/30 shadow-sm"
+                    class="group flex items-center gap-2 px-2.5 py-1.5 bg-gradient-to-r from-primary-light/50 to-primary-light/30 rounded-lg cursor-pointer hover:from-primary-light/70 hover:to-primary-light/50 transition-all border border-primary/30 shadow-sm"
                     (click)="onOpenCustomerModal()"
                   >
                     <div
-                      class="w-8 h-8 rounded-full bg-primary/20 flex items-center justify-center text-primary flex-shrink-0"
+                      class="w-7 h-7 rounded-full bg-primary/20 flex items-center justify-center text-primary flex-shrink-0"
                     >
-                      <app-icon name="user" [size]="16"></app-icon>
+                      <app-icon name="user" [size]="14"></app-icon>
                     </div>
-                    <div class="flex flex-col min-w-0 flex-1">
+                    <div class="flex flex-col min-w-0">
                       <span
-                        class="font-semibold text-text-primary text-sm leading-tight truncate"
+                        class="font-semibold text-text-primary text-sm leading-none truncate"
                         [title]="selectedCustomer()?.name"
                         >{{ selectedCustomer()?.name }}</span
                       >
                       <span
-                        class="text-xs text-text-secondary leading-tight truncate"
+                        class="text-xs text-text-secondary leading-none truncate mt-0.5"
                         [title]="selectedCustomer()?.email"
                         >{{ selectedCustomer()?.email }}</span
                       >
                     </div>
                     <div
-                      class="w-6 h-6 rounded-full hover:bg-surface/60 flex items-center justify-center transition-colors flex-shrink-0"
+                      class="w-5 h-5 rounded-full hover:bg-surface/60 flex items-center justify-center transition-colors flex-shrink-0"
                       (click)="$event.stopPropagation(); onClearCustomer()"
                     >
                       <app-icon
                         name="x"
-                        [size]="14"
+                        [size]="12"
                         class="text-text-secondary group-hover:text-destructive transition-colors"
                       ></app-icon>
                     </div>
@@ -809,6 +810,13 @@ export class PosComponent {
       .subscribe(() => {
         this.showSessionOpenModal.set(true);
       });
+
+    effect(() => {
+      const serviceSession = this.cashRegisterService.activeSession();
+      if (serviceSession !== null) {
+        this.activeSession.set(serviceSession);
+      }
+    });
   }
 
   @HostListener('window:resize')
@@ -1906,18 +1914,20 @@ export class PosComponent {
       .fetchActiveSession()
       .pipe(takeUntilDestroyed(this.destroyRef))
       .subscribe((session) => {
-        this.activeSession.set(session);
+        if (session !== null) {
+          this.cashRegisterService.activeSession.set(session);
+        }
       });
   }
 
   onSessionOpened(session: CashRegisterSession): void {
-    this.activeSession.set(session);
+    this.cashRegisterService.activeSession.set(session);
     this.showSessionOpenModal.set(false);
     this.toastService.success(`Caja "${session.register?.name}" abierta`);
   }
 
   onSessionClosed(session: CashRegisterSession): void {
-    this.activeSession.set(null);
+    this.cashRegisterService.activeSession.set(null);
     this.showSessionCloseModal.set(false);
 
     this.closedSessionIdForSummary.set(session.id);

@@ -1,70 +1,90 @@
-.subscription-banner {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.625rem 1rem;
+:host {
+  display: block;
+  width: 100%;
+}
+
+.sub-banner {
+  position: relative;
+  width: 100%;
   border-bottom: 1px solid transparent;
-  gap: 0.75rem;
+  z-index: 40;
+  animation: sub-banner-slide 280ms ease-out both;
 }
 
-.subscription-banner--info {
-  background-color: var(--color-blue-50, #eff6ff);
-  border-color: var(--color-blue-200, #bfdbfe);
-  color: var(--color-blue-800, #1e40af);
-}
-
-.subscription-banner--warning {
-  background-color: var(--color-yellow-50, #fefce8);
-  border-color: var(--color-yellow-200, #fef08a);
-  color: var(--color-yellow-800, #854d0e);
-}
-
-.subscription-banner--danger {
-  background-color: var(--color-red-50, #fef2f2);
-  border-color: var(--color-red-200, #fecaca);
-  color: var(--color-red-800, #991b1b);
-}
-
-.subscription-banner__content {
+.sub-banner__inner {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.75rem;
+  padding: 0.6rem 1rem;
+  max-width: 1280px;
+  margin: 0 auto;
+}
+
+.sub-banner__icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  background: var(--banner-icon-bg, rgba(255, 255, 255, 0.6));
+  color: var(--banner-icon-color, currentColor);
+}
+
+.sub-banner__text {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.45rem;
   min-width: 0;
   flex: 1;
+  line-height: 1.35;
 }
 
-.subscription-banner__text {
+.sub-banner__title {
+  font-weight: 600;
+  font-size: 0.875rem;
+  color: var(--banner-title-color, currentColor);
+}
+
+.sub-banner__detail {
   font-size: 0.8125rem;
   font-weight: 500;
-  line-height: 1.4;
+  opacity: 0.85;
 }
 
-.subscription-banner__action {
+.sub-banner__cta {
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.4rem 0.9rem;
+  border-radius: 999px;
   font-size: 0.8125rem;
   font-weight: 600;
-  padding: 0.25rem 0.75rem;
-  border-radius: var(--radius-md, 6px);
-  border: 1px solid currentColor;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  transition: opacity 150ms ease;
-  min-height: 32px;
+  text-decoration: none;
+  background: var(--banner-cta-bg, rgba(255, 255, 255, 0.85));
+  color: var(--banner-cta-color, currentColor);
+  border: 1px solid var(--banner-cta-border, transparent);
+  transition: transform 160ms ease, box-shadow 160ms ease, background 160ms ease;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
 }
 
-.subscription-banner__action:hover {
-  opacity: 0.8;
+.sub-banner__cta:hover {
+  transform: translateY(-1px);
+  background: var(--banner-cta-bg-hover, rgba(255, 255, 255, 1));
+  box-shadow: 0 6px 14px -6px rgba(0, 0, 0, 0.18);
 }
 
-.subscription-banner__action:focus-visible {
+.sub-banner__cta:focus-visible {
   outline: 2px solid var(--color-ring, #3b82f6);
   outline-offset: 2px;
 }
 
-.subscription-banner__dismiss {
+.sub-banner__dismiss {
   flex-shrink: 0;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
   width: 28px;
@@ -73,15 +93,90 @@
   background: transparent;
   color: inherit;
   cursor: pointer;
-  border-radius: var(--radius-md, 6px);
-  transition: opacity 150ms ease;
+  border-radius: 999px;
+  transition: background 150ms ease, opacity 150ms ease;
+  opacity: 0.65;
 }
 
-.subscription-banner__dismiss:hover {
-  opacity: 0.7;
+.sub-banner__dismiss:hover {
+  opacity: 1;
+  background: rgba(0, 0, 0, 0.06);
 }
 
-.subscription-banner__dismiss:focus-visible {
+.sub-banner__dismiss:focus-visible {
   outline: 2px solid var(--color-ring, #3b82f6);
   outline-offset: 2px;
+}
+
+/* ===== Severity palettes ===== */
+
+.sub-banner--info {
+  background: linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%);
+  border-color: rgba(59, 130, 246, 0.25);
+  color: #1e40af;
+  --banner-icon-bg: rgba(59, 130, 246, 0.18);
+  --banner-icon-color: #1e3a8a;
+  --banner-cta-bg: rgba(255, 255, 255, 0.9);
+  --banner-cta-bg-hover: #ffffff;
+  --banner-cta-color: #1e40af;
+  --banner-cta-border: rgba(59, 130, 246, 0.35);
+}
+
+.sub-banner--warning {
+  background: linear-gradient(180deg, #fff7ed 0%, #ffedd5 100%);
+  border-color: rgba(251, 146, 60, 0.35);
+  color: #9a3412;
+  --banner-icon-bg: rgba(251, 146, 60, 0.22);
+  --banner-icon-color: #c2410c;
+  --banner-cta-bg: linear-gradient(135deg, #fb923c 0%, #ea580c 100%);
+  --banner-cta-bg-hover: linear-gradient(135deg, #ea580c 0%, #c2410c 100%);
+  --banner-cta-color: #ffffff;
+  --banner-cta-border: transparent;
+}
+
+.sub-banner--danger {
+  background: linear-gradient(180deg, #fef2f2 0%, #fee2e2 100%);
+  border-color: rgba(239, 68, 68, 0.35);
+  color: #991b1b;
+  --banner-icon-bg: rgba(239, 68, 68, 0.22);
+  --banner-icon-color: #b91c1c;
+  --banner-cta-bg: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%);
+  --banner-cta-bg-hover: linear-gradient(135deg, #b91c1c 0%, #7f1d1d 100%);
+  --banner-cta-color: #ffffff;
+  --banner-cta-border: transparent;
+}
+
+@keyframes sub-banner-slide {
+  from { transform: translateY(-6px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+/* ===== Mobile fine-tuning ===== */
+
+@media (max-width: 640px) {
+  .sub-banner__inner {
+    gap: 0.5rem;
+    padding: 0.55rem 0.75rem;
+  }
+  .sub-banner__text {
+    flex-direction: column;
+    gap: 0.05rem;
+    line-height: 1.3;
+  }
+  .sub-banner__cta {
+    padding: 0.35rem 0.7rem;
+    font-size: 0.78rem;
+  }
+  .sub-banner__detail {
+    font-size: 0.75rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sub-banner {
+    animation: none;
+  }
+  .sub-banner__cta:hover {
+    transform: none;
+  }
 }

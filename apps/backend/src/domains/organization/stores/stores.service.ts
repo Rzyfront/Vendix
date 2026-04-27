@@ -24,6 +24,7 @@ import { getDefaultStoreSettings } from '../../store/settings/defaults/default-s
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 import { StoreSettings } from '../../store/settings/interfaces/store-settings.interface';
 import { StoreBootstrapHelper } from '../../shared/helpers/store-bootstrap.helper';
+import { SubscriptionTrialService } from '../../store/subscriptions/services/subscription-trial.service';
 
 @Injectable()
 export class StoresService {
@@ -32,6 +33,7 @@ export class StoresService {
     private domainGeneratorHelper: DomainGeneratorHelper,
     private brandingGeneratorHelper: BrandingGeneratorHelper,
     private storeBootstrapHelper: StoreBootstrapHelper,
+    private readonly subscriptionTrialService: SubscriptionTrialService,
   ) {}
 
   // ... (lines 27-465 remain unchanged, I will use MultiReplace to target specific blocks)
@@ -131,6 +133,18 @@ export class StoresService {
             data: { operating_hours: operating_hours as any },
           });
         }
+
+        // 5) auto-trial bootstrap (one-shot per organization). Runs INSIDE
+        //    this tx so the FOR UPDATE lock on organizations and the
+        //    has_consumed_trial flip commit atomically with the store. If
+        //    the org has already consumed its trial or no default plan is
+        //    configured, the service returns null silently and the store
+        //    creation continues without a subscription.
+        await this.subscriptionTrialService.createTrialForStore(
+          store.id,
+          organization_id,
+          tx,
+        );
 
         return store.id;
       },

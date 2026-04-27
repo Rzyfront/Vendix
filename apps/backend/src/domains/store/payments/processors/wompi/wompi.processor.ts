@@ -1,3 +1,4 @@
+import * as crypto from 'crypto';
 import { BasePaymentProcessor } from '../../interfaces/base-processor.interface';
 import {
   PaymentData,
@@ -48,7 +49,15 @@ export class WompiProcessor extends BasePaymentProcessor {
         };
       }
 
-      const reference = `vendix_${paymentData.storeId}_${paymentData.orderId}_${Date.now()}`;
+      // SaaS billing path injects a `reference` string in metadata so the
+      // platform-level transaction can be distinguished from per-store/POS/
+      // eCommerce flows in Wompi reports. eCommerce/POS callers omit it and
+      // we generate the legacy `vendix_<storeId>_<orderId>_<ts>` shape.
+      const reference =
+        typeof paymentData.metadata?.reference === 'string' &&
+        paymentData.metadata.reference.length > 0
+          ? paymentData.metadata.reference
+          : `vendix_${paymentData.storeId}_${paymentData.orderId}_${Date.now()}`;
 
       const integritySignature = this.client.generateIntegritySignature(
         reference,
@@ -68,7 +77,14 @@ export class WompiProcessor extends BasePaymentProcessor {
         signature: integritySignature,
       };
 
-      const response = await this.client.createTransaction(request);
+      // Wompi: Idempotency-Key HTTP header. Fall back to a fresh UUID for
+      // back-compat with callers (eCommerce) that have not yet been updated.
+      const idempotencyKey =
+        paymentData.idempotencyKey && paymentData.idempotencyKey.length > 0
+          ? paymentData.idempotencyKey
+          : crypto.randomUUID();
+
+      const response = await this.client.createTransaction(request, idempotencyKey);
       const txn = response.data;
 
       return {

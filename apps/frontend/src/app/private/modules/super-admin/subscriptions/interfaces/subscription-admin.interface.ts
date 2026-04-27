@@ -1,15 +1,67 @@
+export type PlanType = 'base' | 'partner_custom' | 'promotional';
+export type PlanState = 'draft' | 'active' | 'archived';
+export type PlanBillingCycle =
+  | 'monthly'
+  | 'quarterly'
+  | 'semiannual'
+  | 'biannual'
+  | 'annual'
+  | 'lifetime';
+
 export interface SubscriptionPlan {
+  // Identity
   id: string;
+  code: string;
   name: string;
-  slug: string;
   description: string;
-  is_active: boolean;
-  is_public: boolean;
+
+  // Type / state / billing
+  plan_type: PlanType;
+  state: PlanState;
+  billing_cycle: PlanBillingCycle;
+
+  // Money (Decimal coerced to number; null allowed for optional)
+  base_price: number;
+  currency: string;
+  setup_fee: number | null;
+
+  // Trial + dunning
+  trial_days: number;
+  grace_period_soft_days: number;
+  grace_period_hard_days: number;
+  suspension_day: number;
+  cancellation_day: number;
+
+  // Feature matrices
+  feature_matrix: Record<string, unknown>;
   ai_feature_flags: AIFeatureFlags;
-  pricing: PlanPricing[];
-  grace_threshold_days: number;
+
+  // Partner
+  resellable: boolean;
+  max_partner_margin_pct: number | null;
+
+  // Promotional
+  is_promotional: boolean;
+  promo_rules: Record<string, unknown> | null;
+  promo_priority: number;
+
+  // Display
+  is_popular: boolean;
+  sort_order: number;
+  is_default: boolean;
+
+  // Hierarchy / metadata (read-only)
+  parent_plan_id: number | null;
   created_at: string;
   updated_at: string;
+  archived_at: string | null;
+
+  // Derived helpers (kept for legacy consumers like plan-card / plans table)
+  slug: string;            // alias of code
+  is_active: boolean;      // state === 'active'
+  is_public: boolean;      // alias of resellable
+  pricing: PlanPricing[];  // derived from base_price + billing_cycle + currency
+  grace_threshold_days: number; // alias of grace_period_soft_days
 }
 
 export interface AIFeatureFlags {
@@ -137,25 +189,73 @@ export interface SubscriptionStats {
 }
 
 export interface PlanFormData {
+  // Identity
+  code: string;
   name: string;
-  slug: string;
   description: string;
-  is_active: boolean;
-  is_public: boolean;
+  // Type / state / billing
+  plan_type: PlanType;
+  state: PlanState;
+  billing_cycle: PlanBillingCycle;
+  // Money
+  base_price: number;
+  currency: string;
+  setup_fee: number | null;
+  // Trial + dunning
+  trial_days: number;
+  grace_period_soft_days: number;
+  grace_period_hard_days: number;
+  suspension_day: number;
+  cancellation_day: number;
+  // Partner
+  resellable: boolean;
+  max_partner_margin_pct: number | null;
+  // Promotional
+  is_promotional: boolean;
+  promo_priority: number;
+  // Display
+  is_popular: boolean;
+  sort_order: number;
+  is_default: boolean;
+  // Feature matrices
   ai_feature_flags: AIFeatureFlags;
+  feature_matrix?: Record<string, unknown>;
+  // Pricing array (derived from base_price + billing_cycle + currency, kept for child cmp)
   pricing: PlanPricing[];
-  grace_threshold_days: number;
 }
 
 export interface CreatePlanDto {
+  // Identity
+  code: string;
   name: string;
-  slug: string;
-  description: string;
-  is_active: boolean;
-  is_public: boolean;
-  ai_feature_flags: AIFeatureFlags;
-  pricing: Omit<PlanPricing, 'id'>[];
-  grace_threshold_days: number;
+  description?: string;
+  // Type / state / billing
+  plan_type: PlanType;
+  state: PlanState;
+  billing_cycle: PlanBillingCycle;
+  // Money
+  base_price: number;
+  currency: string;
+  setup_fee?: number | null;
+  // Trial + dunning
+  trial_days?: number;
+  grace_period_soft_days?: number;
+  grace_period_hard_days?: number;
+  suspension_day?: number;
+  cancellation_day?: number;
+  // Partner
+  resellable?: boolean;
+  max_partner_margin_pct?: number | null;
+  // Promotional
+  is_promotional?: boolean;
+  promo_priority?: number;
+  // Display
+  is_popular?: boolean;
+  sort_order?: number;
+  is_default?: boolean;
+  // Feature matrices
+  ai_feature_flags?: AIFeatureFlags;
+  feature_matrix?: Record<string, unknown>;
 }
 
 export interface UpdatePlanDto extends Partial<CreatePlanDto> {}
@@ -186,4 +286,4 @@ export interface PayoutApprovalDto {
 }
 
 export type SubscriptionStatus = 'active' | 'grace' | 'suspended' | 'cancelled' | 'trial';
-export type BillingCycle = 'monthly' | 'quarterly' | 'biannual' | 'annual';
+export type BillingCycle = PlanBillingCycle;

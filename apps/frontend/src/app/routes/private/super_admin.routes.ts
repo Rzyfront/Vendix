@@ -147,46 +147,6 @@ export const superAdminRoutes: Routes = [
           ),
       },
       {
-        path: 'analytics/platform',
-        loadComponent: () =>
-          import(
-            '../../shared/components/under-construction/under-construction.component'
-          ).then((c) => c.UnderConstructionComponent),
-        data: { title: 'Analíticas de Plataforma', description: 'Las analíticas de plataforma estarán disponibles próximamente.' },
-      },
-      {
-        path: 'analytics/users',
-        loadComponent: () =>
-          import(
-            '../../shared/components/under-construction/under-construction.component'
-          ).then((c) => c.UnderConstructionComponent),
-        data: { title: 'Analíticas de Usuarios', description: 'Las analíticas de usuarios estarán disponibles próximamente.' },
-      },
-      {
-        path: 'analytics/performance',
-        loadComponent: () =>
-          import(
-            '../../shared/components/under-construction/under-construction.component'
-          ).then((c) => c.UnderConstructionComponent),
-        data: { title: 'Rendimiento', description: 'El módulo de rendimiento está siendo desarrollado.' },
-      },
-      {
-        path: 'system/settings',
-        loadComponent: () =>
-          import(
-            '../../shared/components/under-construction/under-construction.component'
-          ).then((c) => c.UnderConstructionComponent),
-        data: { title: 'Configuración del Sistema', description: 'La configuración del sistema está siendo desarrollada.' },
-      },
-      {
-        path: 'system/logs',
-        loadComponent: () =>
-          import(
-            '../../shared/components/under-construction/under-construction.component'
-          ).then((c) => c.UnderConstructionComponent),
-        data: { title: 'Registros del Sistema', description: 'Los registros del sistema estarán disponibles próximamente.' },
-      },
-      {
         path: 'system/backups',
         loadComponent: () =>
           import(

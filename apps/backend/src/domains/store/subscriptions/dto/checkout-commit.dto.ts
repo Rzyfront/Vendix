@@ -1,4 +1,4 @@
-import { IsNumber, IsOptional } from 'class-validator';
+import { IsNumber, IsOptional, IsString, IsUrl } from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class CheckoutCommitDto {
@@ -10,4 +10,9 @@ export class CheckoutCommitDto {
   @Type(() => Number)
   @IsNumber()
   paymentMethodId?: number;
+
+  @IsOptional()
+  @IsString()
+  @IsUrl({ require_tld: false })
+  returnUrl?: string;
 }

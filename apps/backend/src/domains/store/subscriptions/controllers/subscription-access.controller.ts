@@ -39,7 +39,19 @@ export class SubscriptionAccessController {
     const resolved = await this.resolver.resolveSubscription(storeId);
 
     if (!resolved.found) {
-      throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_001);
+      return this.responseService.success(
+        {
+          found: false,
+          state: 'draft' as store_subscription_state_enum,
+          planCode: '',
+          features: {},
+          currentPeriodEnd: null,
+          overlayActive: false,
+          overlayExpiresAt: null,
+          bannerLevel: 'info' as SubscriptionBannerLevel,
+        },
+        'No subscription found',
+      );
     }
 
     const dto: AccessCheckResponseDto = {

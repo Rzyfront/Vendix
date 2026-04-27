@@ -99,8 +99,12 @@ export class StoresService {
     // Create default location automatically
     await this.createDefaultLocationForStore(refetched, organization_id);
 
-    // Create trial subscription for the store
-    await this.subscriptionTrialService.createTrialForStore(store.id);
+    // Create trial subscription for the store (no-op if org already consumed
+    // its one-shot trial or no default plan is configured).
+    await this.subscriptionTrialService.createTrialForStore(
+      store.id,
+      organization_id,
+    );
 
     return {
       ...refetched,

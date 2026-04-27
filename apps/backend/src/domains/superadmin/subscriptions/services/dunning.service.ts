@@ -1,4 +1,6 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import { InjectQueue } from '@nestjs/bullmq';
+import { Queue } from 'bullmq';
 import { Prisma } from '@prisma/client';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
@@ -8,10 +10,14 @@ import { DunningQueryDto } from '../dto';
 
 @Injectable()
 export class DunningService {
+  private readonly logger = new Logger(DunningService.name);
+
   constructor(
     private readonly prisma: GlobalPrismaService,
     private readonly stateService: SubscriptionStateService,
     private readonly notifications: NotificationsService,
+    @InjectQueue('subscription-payment-retry')
+    private readonly paymentRetryQueue: Queue,
   ) {}
 
   async findAll(query: DunningQueryDto) {
@@ -45,7 +51,14 @@ export class DunningService {
         orderBy: { [sort_by]: sort_order },
         include: {
           plan: { select: { id: true, code: true, name: true } },
-          store: { select: { id: true, name: true, organization_id: true } },
+          store: {
+            select: {
+              id: true,
+              name: true,
+              organization_id: true,
+              organizations: { select: { id: true, name: true } },
+            },
+          },
           invoices: {
             where: { state: { in: ['overdue', 'draft'] } },
             take: 1,
@@ -145,5 +158,73 @@ export class DunningService {
     });
 
     return { success: true, subscription: result };
+  }
+
+  async enqueueRetryPayment(subscriptionId: number, triggeredByUserId: number | null = null) {
+    const sub = await this.prisma.store_subscriptions.findUnique({
+      where: { id: subscriptionId },
+      include: {
+        invoices: {
+          where: { state: { in: ['issued', 'overdue', 'partially_paid'] } },
+          orderBy: { due_at: 'asc' },
+          take: 1,
+        },
+      },
+    });
+
+    if (!sub) {
+      throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_001);
+    }
+
+    const invoice = sub.invoices[0];
+    if (!invoice) {
+      throw new VendixHttpException(
+        ErrorCodes.SUBSCRIPTION_001,
+        'No pending invoice to retry',
+      );
+    }
+
+    const job = await this.paymentRetryQueue.add(
+      'manual-retry',
+      {
+        invoiceId: invoice.id,
+        subscriptionId: sub.id,
+        attempt: 0,
+      },
+      {
+        // No backoff delay — superadmin manual trigger fires immediately
+        attempts: 1,
+        removeOnComplete: { age: 3600, count: 100 },
+        removeOnFail: { age: 86400 },
+      },
+    );
+
+    await this.prisma.subscription_events.create({
+      data: {
+        store_subscription_id: sub.id,
+        type: 'state_transition',
+        from_state: sub.state,
+        to_state: sub.state,
+        payload: {
+          reason: 'manual_payment_retry_enqueued',
+          invoice_id: invoice.id,
+          job_id: job.id,
+          triggered_by: 'superadmin',
+        } as Prisma.InputJsonValue,
+        triggered_by_user_id: triggeredByUserId,
+      },
+    });
+
+    this.logger.log(
+      `Enqueued manual payment retry for subscription ${sub.id}, invoice ${invoice.id}, job ${job.id}`,
+    );
+
+    return {
+      success: true,
+      subscription_id: sub.id,
+      invoice_id: invoice.id,
+      job_id: job.id,
+      enqueued_at: new Date().toISOString(),
+    };
   }
 }

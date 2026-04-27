@@ -1,10 +1,13 @@
 import { Prisma } from '@prisma/client';
 import { SubscriptionPaymentService } from './subscription-payment.service';
+import { VendixHttpException } from '../../../../common/errors';
+import { PlatformGatewayEnvironmentEnum } from '../../../superadmin/subscriptions/gateway/dto/upsert-gateway.dto';
 
 /**
  * Unit tests for SubscriptionPaymentService.
- * Focus: charge happy path, gateway failure, and partner commission side-effect
- * on handleChargeSuccess.
+ * Focus: charge happy path (SaaS gateway path), gateway failure, partner
+ * commission side-effect on handleChargeSuccess, idempotency key shape, and
+ * PlatformGatewayService credential resolution.
  */
 describe('SubscriptionPaymentService', () => {
   let service: SubscriptionPaymentService;
@@ -14,6 +17,8 @@ describe('SubscriptionPaymentService', () => {
   let commissionsMock: any;
   let configMock: any;
   let eventEmitterMock: any;
+  let platformGwMock: any;
+  let wompiProcessorMock: any;
 
   beforeEach(() => {
     prismaMock = {
@@ -26,10 +31,13 @@ describe('SubscriptionPaymentService', () => {
         update: jest.fn(),
         findFirst: jest.fn(),
         findUnique: jest.fn(),
+        count: jest.fn().mockResolvedValue(0),
       },
       partner_commissions: {
         create: jest.fn(),
         update: jest.fn(),
+        updateMany: jest.fn(),
+        upsert: jest.fn(),
         findUnique: jest.fn(),
       },
       $transaction: jest.fn(async (cb: any) => cb(prismaMock)),
@@ -44,6 +52,18 @@ describe('SubscriptionPaymentService', () => {
     commissionsMock = {};
     configMock = { get: jest.fn() };
     eventEmitterMock = { emit: jest.fn() };
+    platformGwMock = {
+      getActiveCredentials: jest.fn().mockResolvedValue({
+        public_key: 'pub_test',
+        private_key: 'priv_test',
+        events_secret: 'events_test',
+        integrity_secret: 'integ_test',
+        environment: PlatformGatewayEnvironmentEnum.SANDBOX,
+      }),
+    };
+    wompiProcessorMock = {
+      processPayment: jest.fn(),
+    };
 
     service = new SubscriptionPaymentService(
       prismaMock,
@@ -52,6 +72,8 @@ describe('SubscriptionPaymentService', () => {
       commissionsMock,
       configMock,
       eventEmitterMock,
+      platformGwMock,
+      wompiProcessorMock,
     );
   });
 
@@ -59,23 +81,13 @@ describe('SubscriptionPaymentService', () => {
     return {
       id: 500,
       store_id: 10,
+      store_subscription_id: 200,
       invoice_number: 'SAAS-20260423-00001',
       state: 'issued',
       total: new Prisma.Decimal(100),
       currency: 'USD',
       partner_organization_id: null,
       split_breakdown: null,
-      store_subscription: {
-        store: {
-          store_payment_methods: [
-            {
-              id: 1,
-              state: 'enabled',
-              system_payment_method: { type: 'credit_card' },
-            },
-          ],
-        },
-      },
       ...overrides,
     };
   }
@@ -88,7 +100,7 @@ describe('SubscriptionPaymentService', () => {
       state: 'succeeded',
     });
     prismaMock.subscription_invoices.update.mockResolvedValue({});
-    gatewayMock.processPayment.mockResolvedValue({
+    wompiProcessorMock.processPayment.mockResolvedValue({
       success: true,
       transactionId: 'tx_abc',
       gatewayResponse: { foo: 'bar' },
@@ -96,7 +108,10 @@ describe('SubscriptionPaymentService', () => {
 
     const result = await service.charge(500);
 
-    expect(gatewayMock.processPayment).toHaveBeenCalled();
+    expect(wompiProcessorMock.processPayment).toHaveBeenCalled();
+    expect(platformGwMock.getActiveCredentials).toHaveBeenCalledWith('wompi');
+    // SaaS path bypasses the per-store registry
+    expect(gatewayMock.processPayment).not.toHaveBeenCalled();
     const updateArg = prismaMock.subscription_payments.update.mock.calls[0][0];
     expect(updateArg.where.id).toBe(77);
     expect(updateArg.data.state).toBe('succeeded');
@@ -111,7 +126,7 @@ describe('SubscriptionPaymentService', () => {
       id: 78,
       state: 'failed',
     });
-    gatewayMock.processPayment.mockResolvedValue({
+    wompiProcessorMock.processPayment.mockResolvedValue({
       success: false,
       message: 'Insufficient funds',
     });
@@ -129,7 +144,7 @@ describe('SubscriptionPaymentService', () => {
     expect(result.state).toBe('failed');
   });
 
-  it('handleChargeSuccess creates partner_commissions (pending_payout) when invoice has partner_organization_id', async () => {
+  it('handleChargeSuccess upserts partner_commissions (pending_payout) when no row exists yet', async () => {
     const invoiceWithPartner = invoiceFixture({
       partner_organization_id: 42,
       split_breakdown: {
@@ -145,21 +160,35 @@ describe('SubscriptionPaymentService', () => {
       id: 79,
       state: 'succeeded',
     });
-    prismaMock.partner_commissions.findUnique.mockResolvedValue(null); // no existing
-    gatewayMock.processPayment.mockResolvedValue({
+    // updateMany affects 0 rows -> falls through to upsert
+    prismaMock.partner_commissions.updateMany.mockResolvedValue({ count: 0 });
+    prismaMock.partner_commissions.upsert.mockResolvedValue({
+      id: 1,
+      state: 'pending_payout',
+    });
+    wompiProcessorMock.processPayment.mockResolvedValue({
       success: true,
       transactionId: 'tx_xyz',
     });
 
     await service.charge(500);
 
-    const commArg = prismaMock.partner_commissions.create.mock.calls[0][0];
-    expect(commArg.data.partner_organization_id).toBe(42);
-    expect(commArg.data.invoice_id).toBe(500);
-    expect(commArg.data.state).toBe('pending_payout');
+    expect(prismaMock.partner_commissions.updateMany).toHaveBeenCalledWith({
+      where: { invoice_id: 500, state: 'accrued' },
+      data: { state: 'pending_payout' },
+    });
+
+    const upsertArg = prismaMock.partner_commissions.upsert.mock.calls[0][0];
+    expect(upsertArg.where).toEqual({ invoice_id: 500 });
+    expect(upsertArg.create.partner_organization_id).toBe(42);
+    expect(upsertArg.create.invoice_id).toBe(500);
+    expect(upsertArg.create.state).toBe('pending_payout');
+    expect(upsertArg.update).toEqual({});
+    // Race-safe: no direct create() call
+    expect(prismaMock.partner_commissions.create).not.toHaveBeenCalled();
   });
 
-  it('transitions existing accrued commission to pending_payout on success', async () => {
+  it('transitions existing accrued commission to pending_payout via updateMany state-machine guard', async () => {
     const invoiceWithPartner = invoiceFixture({
       partner_organization_id: 42,
       split_breakdown: {
@@ -175,20 +204,197 @@ describe('SubscriptionPaymentService', () => {
       id: 80,
       state: 'succeeded',
     });
-    prismaMock.partner_commissions.findUnique.mockResolvedValue({
-      id: 1001,
-      state: 'accrued',
-    });
-    gatewayMock.processPayment.mockResolvedValue({
+    // updateMany found and transitioned the accrued row
+    prismaMock.partner_commissions.updateMany.mockResolvedValue({ count: 1 });
+    wompiProcessorMock.processPayment.mockResolvedValue({
       success: true,
       transactionId: 'tx_next',
     });
 
     await service.charge(500);
 
-    const updArg = prismaMock.partner_commissions.update.mock.calls[0][0];
-    expect(updArg.where.id).toBe(1001);
-    expect(updArg.data.state).toBe('pending_payout');
+    expect(prismaMock.partner_commissions.updateMany).toHaveBeenCalledWith({
+      where: { invoice_id: 500, state: 'accrued' },
+      data: { state: 'pending_payout' },
+    });
+    // No upsert/create needed when transition succeeded
+    expect(prismaMock.partner_commissions.upsert).not.toHaveBeenCalled();
     expect(prismaMock.partner_commissions.create).not.toHaveBeenCalled();
+    expect(prismaMock.partner_commissions.update).not.toHaveBeenCalled();
+  });
+
+  it('handleChargeSuccess is idempotent when commission already in pending_payout (state-machine guard)', async () => {
+    const invoiceWithPartner = invoiceFixture({
+      partner_organization_id: 42,
+      split_breakdown: {
+        vendix_share: '100.00',
+        partner_share: '20.00',
+        margin_pct_used: '20.00',
+        partner_org_id: 42,
+      },
+    });
+    prismaMock.subscription_invoices.findUnique.mockResolvedValue(invoiceWithPartner);
+    prismaMock.subscription_payments.create.mockResolvedValue({ id: 81 });
+    prismaMock.subscription_payments.update.mockResolvedValue({
+      id: 81,
+      state: 'succeeded',
+    });
+    // updateMany finds 0 rows in 'accrued' (already in pending_payout)
+    prismaMock.partner_commissions.updateMany.mockResolvedValue({ count: 0 });
+    // upsert update payload is {} so the existing pending_payout row is unchanged
+    prismaMock.partner_commissions.upsert.mockResolvedValue({
+      id: 1001,
+      state: 'pending_payout',
+    });
+    wompiProcessorMock.processPayment.mockResolvedValue({
+      success: true,
+      transactionId: 'tx_idem',
+    });
+
+    await service.charge(500);
+
+    // updateMany filter excludes already-transitioned rows (no regression)
+    const updArg = prismaMock.partner_commissions.updateMany.mock.calls[0][0];
+    expect(updArg.where.state).toBe('accrued');
+    // upsert update payload is no-op, preserving pending_payout state
+    const upsertArg = prismaMock.partner_commissions.upsert.mock.calls[0][0];
+    expect(upsertArg.update).toEqual({});
+    expect(prismaMock.partner_commissions.create).not.toHaveBeenCalled();
+  });
+
+  it('handleChargeSuccess swallows P2002 from concurrent upsert and continues', async () => {
+    const invoiceWithPartner = invoiceFixture({
+      partner_organization_id: 42,
+      split_breakdown: {
+        vendix_share: '100.00',
+        partner_share: '20.00',
+        margin_pct_used: '20.00',
+        partner_org_id: 42,
+      },
+    });
+    prismaMock.subscription_invoices.findUnique.mockResolvedValue(invoiceWithPartner);
+    prismaMock.subscription_payments.create.mockResolvedValue({ id: 82 });
+    prismaMock.subscription_payments.update.mockResolvedValue({
+      id: 82,
+      state: 'succeeded',
+    });
+    prismaMock.partner_commissions.updateMany.mockResolvedValue({ count: 0 });
+    const p2002 = Object.assign(new Error('Unique constraint failed'), {
+      code: 'P2002',
+    });
+    prismaMock.partner_commissions.upsert.mockRejectedValue(p2002);
+    wompiProcessorMock.processPayment.mockResolvedValue({
+      success: true,
+      transactionId: 'tx_p2002',
+    });
+
+    const result = await service.charge(500);
+    expect(result.state).toBe('succeeded');
+  });
+
+  // ── SaaS billing path: PlatformGatewayService + idempotency ──────
+
+  it('uses stable idempotency key sub_inv_<id>_att_1 when no previous payments exist', async () => {
+    prismaMock.subscription_invoices.findUnique.mockResolvedValue(invoiceFixture());
+    prismaMock.subscription_payments.count.mockResolvedValue(0);
+    prismaMock.subscription_payments.create.mockResolvedValue({ id: 100 });
+    prismaMock.subscription_payments.update.mockResolvedValue({
+      id: 100,
+      state: 'succeeded',
+    });
+    prismaMock.subscription_invoices.update.mockResolvedValue({});
+    wompiProcessorMock.processPayment.mockResolvedValue({
+      success: true,
+      transactionId: 'tx_first',
+    });
+
+    await service.charge(500);
+
+    const processArg = wompiProcessorMock.processPayment.mock.calls[0][0];
+    expect(processArg.idempotencyKey).toBe('sub_inv_500_att_1');
+
+    // The idempotency key is also persisted in subscription_payments.metadata
+    const createArg = prismaMock.subscription_payments.create.mock.calls[0][0];
+    expect(createArg.data.metadata.idempotency_key).toBe('sub_inv_500_att_1');
+    expect(createArg.data.metadata.attempt).toBe(1);
+  });
+
+  it('idempotency key advances to att_2 when one previous payment exists', async () => {
+    prismaMock.subscription_invoices.findUnique.mockResolvedValue(invoiceFixture());
+    prismaMock.subscription_payments.count.mockResolvedValue(1);
+    prismaMock.subscription_payments.create.mockResolvedValue({ id: 101 });
+    prismaMock.subscription_payments.update.mockResolvedValue({
+      id: 101,
+      state: 'succeeded',
+    });
+    prismaMock.subscription_invoices.update.mockResolvedValue({});
+    wompiProcessorMock.processPayment.mockResolvedValue({
+      success: true,
+      transactionId: 'tx_retry',
+    });
+
+    await service.charge(500);
+
+    const processArg = wompiProcessorMock.processPayment.mock.calls[0][0];
+    expect(processArg.idempotencyKey).toBe('sub_inv_500_att_2');
+  });
+
+  it('builds SaaS reference vendix_saas_<subId>_<invoiceId>_<ts> in metadata', async () => {
+    prismaMock.subscription_invoices.findUnique.mockResolvedValue(invoiceFixture());
+    prismaMock.subscription_payments.count.mockResolvedValue(0);
+    prismaMock.subscription_payments.create.mockResolvedValue({ id: 102 });
+    prismaMock.subscription_payments.update.mockResolvedValue({
+      id: 102,
+      state: 'succeeded',
+    });
+    prismaMock.subscription_invoices.update.mockResolvedValue({});
+    wompiProcessorMock.processPayment.mockResolvedValue({
+      success: true,
+      transactionId: 'tx_ref',
+    });
+
+    await service.charge(500);
+
+    const processArg = wompiProcessorMock.processPayment.mock.calls[0][0];
+    expect(processArg.metadata.reference).toMatch(/^vendix_saas_200_500_\d+$/);
+    expect(processArg.metadata.subscription_payment).toBe(true);
+    expect(processArg.metadata.subscriptionId).toBe(200);
+    expect(processArg.metadata.invoiceId).toBe(500);
+  });
+
+  it('injects platform wompiConfig into metadata so the processor uses platform creds', async () => {
+    prismaMock.subscription_invoices.findUnique.mockResolvedValue(invoiceFixture());
+    prismaMock.subscription_payments.count.mockResolvedValue(0);
+    prismaMock.subscription_payments.create.mockResolvedValue({ id: 103 });
+    prismaMock.subscription_payments.update.mockResolvedValue({
+      id: 103,
+      state: 'succeeded',
+    });
+    prismaMock.subscription_invoices.update.mockResolvedValue({});
+    wompiProcessorMock.processPayment.mockResolvedValue({
+      success: true,
+      transactionId: 'tx_creds',
+    });
+
+    await service.charge(500);
+
+    const processArg = wompiProcessorMock.processPayment.mock.calls[0][0];
+    expect(processArg.metadata.wompiConfig).toMatchObject({
+      public_key: 'pub_test',
+      private_key: 'priv_test',
+      events_secret: 'events_test',
+      integrity_secret: 'integ_test',
+    });
+  });
+
+  it('throws SUBSCRIPTION_GATEWAY_003 when platform credentials are not configured', async () => {
+    prismaMock.subscription_invoices.findUnique.mockResolvedValue(invoiceFixture());
+    platformGwMock.getActiveCredentials.mockResolvedValue(null);
+
+    await expect(service.charge(500)).rejects.toBeInstanceOf(VendixHttpException);
+
+    // Ensure no payment record was created and no charge attempted
+    expect(prismaMock.subscription_payments.create).not.toHaveBeenCalled();
+    expect(wompiProcessorMock.processPayment).not.toHaveBeenCalled();
   });
 });

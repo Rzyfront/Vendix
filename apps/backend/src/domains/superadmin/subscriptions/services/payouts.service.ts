@@ -91,6 +91,46 @@ export class PayoutsService {
     return updated;
   }
 
+  async rejectBatch(id: number, reason: string) {
+    const batch = await this.prisma.partner_payout_batches.findUnique({ where: { id } });
+
+    if (!batch) {
+      throw new VendixHttpException(ErrorCodes.SYS_NOT_FOUND_001);
+    }
+
+    if (!['draft', 'pending', 'sent'].includes(batch.state)) {
+      throw new VendixHttpException(
+        ErrorCodes.PARTNER_004,
+        `Cannot reject batch in state ${batch.state}`,
+      );
+    }
+
+    const existingMetadata = (batch.metadata && typeof batch.metadata === 'object' && !Array.isArray(batch.metadata))
+      ? (batch.metadata as Prisma.JsonObject)
+      : {};
+
+    const updated = await this.prisma.partner_payout_batches.update({
+      where: { id },
+      data: {
+        state: 'rejected',
+        metadata: {
+          ...existingMetadata,
+          reject_reason: reason,
+          rejected_at: new Date().toISOString(),
+        } as Prisma.InputJsonValue,
+        updated_at: new Date(),
+      },
+    });
+
+    // Release commissions back to accrued so they can be re-batched
+    await this.prisma.partner_commissions.updateMany({
+      where: { payout_batch_id: id },
+      data: { state: 'accrued', payout_batch_id: null },
+    });
+
+    return updated;
+  }
+
   async markPaid(id: number) {
     const batch = await this.prisma.partner_payout_batches.findUnique({ where: { id } });
 

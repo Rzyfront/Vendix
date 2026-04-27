@@ -2503,6 +2503,24 @@ export async function seedPermissionsAndRoles(
       path: '/api/superadmin/subscriptions/events',
       method: 'GET',
     },
+    {
+      name: 'superadmin:subscriptions:gateway:read',
+      description: 'Ver configuración (enmascarada) de la pasarela SaaS',
+      path: '/api/superadmin/subscriptions/gateway/:processor',
+      method: 'GET',
+    },
+    {
+      name: 'superadmin:subscriptions:gateway:write',
+      description: 'Crear/actualizar credenciales de la pasarela SaaS',
+      path: '/api/superadmin/subscriptions/gateway/:processor',
+      method: 'PATCH',
+    },
+    {
+      name: 'superadmin:subscriptions:gateway:test',
+      description: 'Probar conexión con la pasarela SaaS',
+      path: '/api/superadmin/subscriptions/gateway/:processor/test',
+      method: 'POST',
+    },
   ];
 
   // Get valid permission names from our list

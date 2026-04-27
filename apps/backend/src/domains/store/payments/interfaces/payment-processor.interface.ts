@@ -5,8 +5,25 @@ export interface PaymentData {
   customerId?: number;
   amount: number;
   currency: string;
-  storePaymentMethodId: number;
+  /**
+   * Optional for SaaS subscription path (where there is no per-store payment method
+   * resolved up-front and the gateway resolves it itself). Required for store/POS/
+   * eCommerce flows that already select a `store_payment_methods` row.
+   */
+  storePaymentMethodId?: number;
   storeId: number;
+  /**
+   * Idempotency key for at-least-once retry safety. Provider mapping:
+   * - Wompi: HTTP header `Idempotency-Key`
+   * - Stripe: SDK option `idempotencyKey`
+   * - PayPal: HTTP header `PayPal-Request-Id`
+   * - Bank transfer / cash / wallet: no-op (provider has no idempotency primitive)
+   *
+   * Callers MUST provide a stable key per logical attempt so a retry of the same
+   * charge does not double-charge. If empty, the processor falls back to a
+   * `crypto.randomUUID()` for back-compat (still safe within a single invocation).
+   */
+  idempotencyKey: string;
   metadata?: Record<string, any>;
   returnUrl?: string;
   cancelUrl?: string;

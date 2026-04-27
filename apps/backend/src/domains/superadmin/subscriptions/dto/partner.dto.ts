@@ -66,6 +66,26 @@ export class CreatePartnerOverrideDto {
   feature_overrides?: Record<string, any>;
 }
 
+export class UpdatePartnerOrganizationDto {
+  @IsOptional()
+  @IsBoolean()
+  is_partner?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  partner_margin_percent?: number;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  partner_margin_cap?: number | null;
+
+  @IsOptional()
+  @IsObject()
+  partner_override_pricing?: Record<string, number>;
+}
+
 export class UpdatePartnerOverrideDto {
   @IsOptional()
   @IsString()

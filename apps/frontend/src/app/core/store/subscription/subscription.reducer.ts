@@ -50,6 +50,9 @@ export const subscriptionReducer = createReducer(
 
   on(SubscriptionActions.loadCurrentFailure, (state, { error }) => ({
     ...state,
+    current: null,
+    status: 'none',
+    loaded: true,
     loading: false,
     error,
   })),
@@ -69,6 +72,7 @@ export const subscriptionReducer = createReducer(
 
   on(SubscriptionActions.loadAccessFailure, (state, { error }) => ({
     ...state,
+    loaded: true,
     loading: false,
     error,
   })),

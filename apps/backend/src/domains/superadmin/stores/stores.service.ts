@@ -14,10 +14,14 @@ import {
 import { Prisma } from '@prisma/client';
 import slugify from 'slugify';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { SubscriptionTrialService } from '../../store/subscriptions/services/subscription-trial.service';
 
 @Injectable()
 export class StoresService {
-  constructor(private readonly prisma: GlobalPrismaService) {}
+  constructor(
+    private readonly prisma: GlobalPrismaService,
+    private readonly subscriptionTrialService: SubscriptionTrialService,
+  ) {}
 
   async create(createStoreDto: CreateStoreDto) {
     if (!createStoreDto.organization_id) {
@@ -58,6 +62,15 @@ export class StoresService {
         store_users: true,
       },
     });
+
+    // Auto-trial bootstrap (one-shot per organization). The service is a
+    // no-op when the org has already consumed its trial or when no default
+    // plan is configured — store creation continues either way. No tx is
+    // passed here because the superadmin create path is not transactional.
+    await this.subscriptionTrialService.createTrialForStore(
+      store.id,
+      organization_id,
+    );
 
     // Create store settings if provided
     if (settings && Object.keys(settings).length > 0) {

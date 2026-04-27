@@ -454,7 +454,6 @@ openCreateStoreModal(): void {
         store_code: formData.name.toLowerCase().replace(/\s+/g, '-'),
         email: formData.email,
         phone: formData.phone || undefined,
-        website: formData.website || undefined,
         description: formData.description || undefined,
         address: formData.address || undefined,
         city: formData.city || undefined,

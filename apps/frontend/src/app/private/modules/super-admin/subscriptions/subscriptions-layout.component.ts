@@ -16,7 +16,7 @@ import { IconComponent } from '../../../../shared/components';
             class="flex items-center gap-2 px-3 py-2 text-sm font-medium text-text-secondary whitespace-nowrap hover:text-text-primary transition-colors"
           >
             <app-icon name="clipboard-list" [size]="16"></app-icon>
-            Plans
+            Planes
           </a>
           <a
             routerLink="partners"
@@ -40,7 +40,7 @@ import { IconComponent } from '../../../../shared/components';
             class="flex items-center gap-2 px-3 py-2 text-sm font-medium text-text-secondary whitespace-nowrap hover:text-text-primary transition-colors"
           >
             <app-icon name="credit-card" [size]="16"></app-icon>
-            Active
+            Activas
           </a>
           <a
             routerLink="dunning"
@@ -48,7 +48,7 @@ import { IconComponent } from '../../../../shared/components';
             class="flex items-center gap-2 px-3 py-2 text-sm font-medium text-text-secondary whitespace-nowrap hover:text-text-primary transition-colors"
           >
             <app-icon name="alert-triangle" [size]="16"></app-icon>
-            Dunning
+            Cobranza
           </a>
           <a
             routerLink="payouts"
@@ -56,7 +56,7 @@ import { IconComponent } from '../../../../shared/components';
             class="flex items-center gap-2 px-3 py-2 text-sm font-medium text-text-secondary whitespace-nowrap hover:text-text-primary transition-colors"
           >
             <app-icon name="banknote" [size]="16"></app-icon>
-            Payouts
+            Pagos
           </a>
           <a
             routerLink="events"
@@ -64,7 +64,15 @@ import { IconComponent } from '../../../../shared/components';
             class="flex items-center gap-2 px-3 py-2 text-sm font-medium text-text-secondary whitespace-nowrap hover:text-text-primary transition-colors"
           >
             <app-icon name="activity" [size]="16"></app-icon>
-            Events
+            Eventos
+          </a>
+          <a
+            routerLink="gateway"
+            routerLinkActive="text-primary border-b-2 border-primary"
+            class="flex items-center gap-2 px-3 py-2 text-sm font-medium text-text-secondary whitespace-nowrap hover:text-text-primary transition-colors"
+          >
+            <app-icon name="shield-check" [size]="16"></app-icon>
+            Pasarela
           </a>
         </div>
       </div>

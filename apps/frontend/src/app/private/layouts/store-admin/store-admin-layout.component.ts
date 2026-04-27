@@ -596,9 +596,20 @@ export class StoreAdminLayoutComponent {
     this.checkOnboardingWithRoleValidation();
     this.checkAndStartPosTour();
 
-    if (!this.subscriptionFacade.isLoaded() && !this.subscriptionFacade.isLoading()) {
-      this.subscriptionFacade.loadCurrent();
-    }
+    // Reload subscription on every store change (including initial). Without
+    // this, the layout's first load would freeze the facade state, so the
+    // sidebar would keep showing the previous store's plan after a switch.
+    this.authFacade.userStore$
+      .pipe(
+        map((s: any) => s?.id ?? null),
+        distinctUntilChanged(),
+        takeUntilDestroyed(this.destroyRef),
+      )
+      .subscribe((storeId) => {
+        if (storeId) {
+          this.subscriptionFacade.loadCurrent();
+        }
+      });
   }
 
   /**

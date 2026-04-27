@@ -17,6 +17,7 @@ import { seedDefaultPayrollRules } from './seeds/default-payroll-rules.seed';
 import { seedIcaMunicipalRates } from './seeds/ica-municipal-rates.seed';
 import { seedAIEngineApps } from './seeds/ai-engine-apps.seed';
 import { seedPayrollSystemDefaults } from './seeds/payroll-system-defaults.seed';
+import { seedSubscriptionPlans } from './seeds/subscription-plans.seed';
 
 /**
  * Seed modules registry
@@ -131,6 +132,11 @@ const seedModules = [
     fn: seedPayrollSystemDefaults,
     description: 'Colombian payroll parameters baseline (2026)',
   },
+  {
+    name: 'Subscription Plans (Default Trial)',
+    fn: seedSubscriptionPlans,
+    description: 'Default trial plan for the auto-trial flow (is_default=true)',
+  },
 ];
 
 /**
@@ -237,3 +243,4 @@ export * from './seeds/default-payroll-rules.seed';
 export * from './seeds/ica-municipal-rates.seed';
 export * from './seeds/ai-engine-apps.seed';
 export * from './seeds/payroll-system-defaults.seed';
+export * from './seeds/subscription-plans.seed';

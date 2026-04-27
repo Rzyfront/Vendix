@@ -14,7 +14,14 @@ import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { PartnersService } from '../services/partners.service';
 import { ResponseService } from '../../../../common/responses/response.service';
-import { TogglePartnerDto, SetMarginCapDto, CreatePartnerOverrideDto, UpdatePartnerOverrideDto, PartnerQueryDto } from '../dto';
+import {
+  TogglePartnerDto,
+  SetMarginCapDto,
+  CreatePartnerOverrideDto,
+  UpdatePartnerOverrideDto,
+  PartnerQueryDto,
+  UpdatePartnerOrganizationDto,
+} from '../dto';
 import { RolesGuard } from '../../../auth/guards/roles.guard';
 import { Roles } from '../../../auth/decorators/roles.decorator';
 import { UserRole } from '../../../auth/enums/user-role.enum';
@@ -59,6 +66,20 @@ export class PartnersController {
   async setMarginCap(@Body() dto: SetMarginCapDto) {
     const result = await this.partnersService.setMarginCap(dto);
     return this.responseService.updated(result, 'Partner margin cap updated');
+  }
+
+  @Permissions('superadmin:subscriptions:partners:update')
+  @Patch(':organizationId')
+  @ApiOperation({ summary: 'Update partner organization settings' })
+  async updatePartner(
+    @Param('organizationId', ParseIntPipe) organizationId: number,
+    @Body() dto: UpdatePartnerOrganizationDto,
+  ) {
+    const result = await this.partnersService.updatePartnerOrganization(
+      organizationId,
+      dto,
+    );
+    return this.responseService.updated(result, 'Partner updated');
   }
 
   @Permissions('superadmin:subscriptions:partners:update')

@@ -37,7 +37,14 @@ export class ActiveSubscriptionsService {
         orderBy: { [sort_by]: sort_order },
         include: {
           plan: { select: { id: true, code: true, name: true, plan_type: true } },
-          store: { select: { id: true, name: true, organization_id: true } },
+          store: {
+            select: {
+              id: true,
+              name: true,
+              organization_id: true,
+              organizations: { select: { id: true, name: true } },
+            },
+          },
           promotional_plan: { select: { id: true, code: true, name: true } },
           partner_override: { select: { id: true, custom_name: true, margin_pct: true } },
         },
@@ -61,7 +68,14 @@ export class ActiveSubscriptionsService {
       where: { id },
       include: {
         plan: true,
-        store: { select: { id: true, name: true, organization_id: true } },
+        store: {
+          select: {
+            id: true,
+            name: true,
+            organization_id: true,
+            organizations: { select: { id: true, name: true } },
+          },
+        },
         promotional_plan: { select: { id: true, code: true, name: true } },
         partner_override: true,
         invoices: {

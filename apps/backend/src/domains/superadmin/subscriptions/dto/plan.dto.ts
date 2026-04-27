@@ -76,11 +76,13 @@ export class CreatePlanDto {
   @Min(0)
   cancellation_day?: number;
 
+  @IsOptional()
   @IsObject()
-  feature_matrix: Record<string, any>;
+  feature_matrix?: Record<string, any>;
 
+  @IsOptional()
   @IsObject()
-  ai_feature_flags: Record<string, any>;
+  ai_feature_flags?: Record<string, any>;
 
   @IsOptional()
   @IsBoolean()
@@ -102,6 +104,18 @@ export class CreatePlanDto {
   @IsOptional()
   @IsNumber()
   promo_priority?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  is_popular?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  is_default?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  sort_order?: number;
 
   @IsOptional()
   @IsNumber()

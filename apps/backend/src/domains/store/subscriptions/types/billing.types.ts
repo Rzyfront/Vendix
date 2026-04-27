@@ -53,6 +53,24 @@ export interface ProrationPreview {
   credit_to_apply_next_cycle: string; // Decimal serialized
 }
 
+export interface FreePlanInfo {
+  plan: {
+    id: number;
+    code: string;
+    name: string;
+    effective_price: string; // Decimal serialized — always "0" or "0.00"
+    billing_cycle: string;
+    trial_days: number;
+  };
+}
+
+/** Response shape for /checkout/preview. Distinguishes paid vs free plan flows. */
+export interface CheckoutPreviewResult {
+  proration: ProrationPreview | null;
+  invoice: InvoicePreview | null;
+  free_plan: FreePlanInfo | null;
+}
+
 export interface PartnerLedger {
   accrued: string;
   pending_payout: string;

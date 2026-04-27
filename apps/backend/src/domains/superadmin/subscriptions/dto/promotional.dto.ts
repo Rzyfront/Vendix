@@ -42,11 +42,13 @@ export class CreatePromotionalDto {
   @Min(0)
   trial_days?: number;
 
+  @IsOptional()
   @IsObject()
-  feature_matrix: Record<string, any>;
+  feature_matrix?: Record<string, any>;
 
+  @IsOptional()
   @IsObject()
-  ai_feature_flags: Record<string, any>;
+  ai_feature_flags?: Record<string, any>;
 
   @IsOptional()
   @IsNumber()

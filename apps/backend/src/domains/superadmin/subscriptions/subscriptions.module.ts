@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { BullModule } from '@nestjs/bullmq';
 import { PrismaModule } from '../../../prisma/prisma.module';
 import { ResponseModule } from '../../../common/responses/response.module';
 import { NotificationsModule } from '../../store/notifications/notifications.module';
@@ -18,9 +19,16 @@ import { EventsController } from './controllers/events.controller';
 import { EventsService } from './services/events.service';
 import { SubscriptionsStatsController } from './controllers/stats.controller';
 import { SubscriptionsStatsService } from './services/stats.service';
+import { PlatformGatewayModule } from './gateway/gateway.module';
 
 @Module({
-  imports: [PrismaModule, ResponseModule, NotificationsModule],
+  imports: [
+    PrismaModule,
+    ResponseModule,
+    NotificationsModule,
+    PlatformGatewayModule,
+    BullModule.registerQueue({ name: 'subscription-payment-retry' }),
+  ],
   controllers: [
     PlansController,
     PartnersController,
@@ -50,6 +58,7 @@ import { SubscriptionsStatsService } from './services/stats.service';
     PayoutsService,
     EventsService,
     SubscriptionsStatsService,
+    PlatformGatewayModule,
   ],
 })
 export class SuperadminSubscriptionsModule {}

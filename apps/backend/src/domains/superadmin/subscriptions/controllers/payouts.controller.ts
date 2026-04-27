@@ -13,7 +13,7 @@ import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { PayoutsService } from '../services/payouts.service';
 import { ResponseService } from '../../../../common/responses/response.service';
-import { PayoutQueryDto, ApprovePayoutDto } from '../dto';
+import { PayoutQueryDto, ApprovePayoutDto, RejectPayoutDto } from '../dto';
 import { RolesGuard } from '../../../auth/guards/roles.guard';
 import { Roles } from '../../../auth/decorators/roles.decorator';
 import { UserRole } from '../../../auth/enums/user-role.enum';
@@ -58,5 +58,13 @@ export class PayoutsController {
   async markPaid(@Param('id', ParseIntPipe) id: number) {
     const result = await this.payoutsService.markPaid(id);
     return this.responseService.updated(result, 'Payout batch marked as paid');
+  }
+
+  @Permissions('superadmin:subscriptions:payouts:update')
+  @Post(':id/reject')
+  @ApiOperation({ summary: 'Reject a payout batch with reason' })
+  async reject(@Param('id', ParseIntPipe) id: number, @Body() dto: RejectPayoutDto) {
+    const result = await this.payoutsService.rejectBatch(id, dto.reason);
+    return this.responseService.updated(result, 'Payout batch rejected');
   }
 }
