@@ -481,57 +481,119 @@ onDateRangeChange(range: DateRangeFilter): void {
       style.getPropertyValue('--color-primary').trim() || '#3b82f6';
     const warnColor =
       style.getPropertyValue('--color-warning').trim() || '#f59e0b';
+    const textSecondary = style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
+    const borderColor = style.getPropertyValue('--color-border').trim() || '#e5e7eb';
 
     this.trendsChartOptions.set({
       tooltip: {
         trigger: 'axis',
-        axisPointer: { type: 'shadow' }},
+        formatter: (params: any) => {
+          return params.map((p: any) => `${p.marker} ${p.seriesName}: ${p.value}`).join('<br/>');
+        },
+      },
       legend: {
         data: ['Entradas', 'Salidas', 'Ajustes', 'Transferencias'],
-        bottom: 0},
+        bottom: 30,
+        textStyle: { color: textSecondary },
+      },
       grid: {
         left: '3%',
         right: '4%',
-        bottom: '15%',
+        bottom: '20%',
         top: '5%',
-        containLabel: true},
+        containLabel: true,
+      },
       xAxis: {
         type: 'category',
         data: labels,
-        axisLabel: { fontSize: 11 }},
+        axisLine: { lineStyle: { color: borderColor } },
+        axisLabel: { color: textSecondary, fontSize: 11 },
+      },
       yAxis: {
         type: 'value',
-        axisLabel: { fontSize: 11 }},
+        axisLine: { show: false },
+        axisLabel: { color: textSecondary, fontSize: 11 },
+        splitLine: { lineStyle: { color: borderColor } },
+      },
       series: [
         {
           name: 'Entradas',
           type: 'line',
-          smooth: true,
           data: trends.map((t) => t.stock_in),
-          lineStyle: { color: successColor, width: 2 },
-          itemStyle: { color: successColor }},
+          itemStyle: { color: successColor },
+          areaStyle: {
+            color: {
+              type: 'linear',
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
+              colorStops: [
+                { offset: 0, color: `${successColor}4D` },
+                { offset: 1, color: `${successColor}0D` },
+              ],
+            },
+          },
+        },
         {
           name: 'Salidas',
           type: 'line',
-          smooth: true,
           data: trends.map((t) => t.stock_out),
-          lineStyle: { color: dangerColor, width: 2 },
-          itemStyle: { color: dangerColor }},
+          itemStyle: { color: dangerColor },
+          areaStyle: {
+            color: {
+              type: 'linear',
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
+              colorStops: [
+                { offset: 0, color: `${dangerColor}4D` },
+                { offset: 1, color: `${dangerColor}0D` },
+              ],
+            },
+          },
+        },
         {
           name: 'Ajustes',
           type: 'line',
-          smooth: true,
           data: trends.map((t) => t.adjustments),
-          lineStyle: { color: primaryColor, width: 2 },
-          itemStyle: { color: primaryColor }},
+          itemStyle: { color: primaryColor },
+          areaStyle: {
+            color: {
+              type: 'linear',
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
+              colorStops: [
+                { offset: 0, color: `${primaryColor}4D` },
+                { offset: 1, color: `${primaryColor}0D` },
+              ],
+            },
+          },
+        },
         {
           name: 'Transferencias',
           type: 'line',
-          smooth: true,
           data: trends.map((t) => t.transfers),
-          lineStyle: { color: warnColor, width: 2 },
-          itemStyle: { color: warnColor }},
-      ]});
+          itemStyle: { color: warnColor },
+          areaStyle: {
+            color: {
+              type: 'linear',
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
+              colorStops: [
+                { offset: 0, color: `${warnColor}4D` },
+                { offset: 1, color: `${warnColor}0D` },
+              ],
+            },
+          },
+        },
+      ],
+    });
   }
 
   private updateDistributionChart(summary: MovementSummaryItem[]): void {
@@ -547,24 +609,23 @@ onDateRangeChange(range: DateRangeFilter): void {
 
     this.distributionChartOptions.set({
       tooltip: {
-        trigger: 'item',
-        formatter: '{b}: {c} ({d}%)'},
-      legend: {
-        orient: 'vertical',
-        right: '5%',
-        top: 'center'},
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
+        formatter: (params: any) => {
+          const p = params[0];
+          return `${p.name}: <b>${p.value}</b>`;
+        }},
+      grid: { left: '3%', right: '10%', bottom: '3%', top: '3%', containLabel: true },
+      xAxis: { type: 'value' },
+      yAxis: {
+        type: 'category',
+        data: summary.map((s) => typeLabels[s.movement_type] || s.movement_type),
+      },
       series: [
         {
-          type: 'pie',
-          radius: ['40%', '70%'],
-          center: ['35%', '50%'],
-          avoidLabelOverlap: false,
-          label: { show: false },
-          emphasis: {
-            label: { show: true, fontSize: 14, fontWeight: 'bold' }},
-          data: summary.map((s) => ({
-            name: typeLabels[s.movement_type] || s.movement_type,
-            value: s.count}))},
+          type: 'line',
+          data: summary.map((s, i) => ({ value: s.count, itemStyle: { color: ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4'][i % 6] } })),
+        },
       ]});
   }
 

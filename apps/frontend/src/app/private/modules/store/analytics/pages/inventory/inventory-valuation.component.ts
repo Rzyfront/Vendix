@@ -230,42 +230,59 @@ loadData(): void {
   private updateChart(data: InventoryValuation[]): void {
     const chartData = data.map((item) => ({
       value: item.total_value,
-      name: item.location_name}));
+      name: item.location_name,
+    }));
 
     this.chartOptions.set({
       tooltip: {
-        trigger: 'item',
+        trigger: 'axis',
         formatter: (params: any) => {
-          return `${params.name}<br/>Valor: ${this.formatCurrency(params.value)}<br/>Porcentaje: ${params.percent}%`;
-        }},
+          const p = params[0];
+          return `${p.name}<br/>Valor: ${this.formatCurrency(p.value)}<br/>Porcentaje: ${p.percent}%`;
+        },
+      },
       legend: {
-        orient: 'vertical',
-        right: '5%',
-        top: 'middle',
-        textStyle: { color: '#6b7280' }},
+        data: ['Valor'],
+        bottom: 30,
+        textStyle: { color: '#6b7280' },
+      },
+      grid: { left: '3%', right: '4%', bottom: '20%', top: '3%', containLabel: true },
+      xAxis: {
+        type: 'category',
+        data: chartData.map((d: any) => d.name),
+        axisLine: { lineStyle: { color: '#e5e7eb' } },
+        axisLabel: { color: '#6b7280', fontSize: 11 },
+      },
+      yAxis: {
+        type: 'value',
+        axisLine: { show: false },
+        axisLabel: { color: '#6b7280', fontSize: 11, formatter: (v: number) => this.formatCurrency(v) },
+        splitLine: { lineStyle: { color: '#e5e7eb' } },
+      },
       series: [
         {
-          name: 'Valoración',
-          type: 'pie',
-          radius: ['40%', '70%'],
-          center: ['35%', '50%'],
-          avoidLabelOverlap: false,
-          itemStyle: {
-            borderRadius: 4,
-            borderColor: '#fff',
-            borderWidth: 2},
-          label: {
-            show: false},
-          emphasis: {
-            label: {
-              show: true,
-              fontSize: 14,
-              fontWeight: 'bold'}},
-          labelLine: {
-            show: false},
-          data: chartData},
+          name: 'Valor',
+          type: 'line',
+          smooth: true,
+          data: chartData.map((d: any) => d.value),
+          itemStyle: { color: '#3b82f6' },
+          lineStyle: { color: '#3b82f6', width: 2 },
+          areaStyle: {
+            color: {
+              type: 'linear',
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
+              colorStops: [
+                { offset: 0, color: '#3b82f64D' },
+                { offset: 1, color: '#3b82f60D' },
+              ],
+            },
+          },
+        },
       ],
-      color: ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4']});
+    });
   }
 
   exportReport(): void {

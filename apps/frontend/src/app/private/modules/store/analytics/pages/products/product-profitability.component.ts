@@ -239,34 +239,57 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
 
     this.marginDistributionChartOptions = {
       tooltip: {
-        trigger: 'item',
-        formatter: '{b}: {c} ({d}%)',
+        trigger: 'axis',
+        formatter: (params: any) => {
+          const data = params[0];
+          return `${data.name}: ${data.value} productos`;
+        },
       },
       legend: {
-        orient: 'horizontal',
-        bottom: 0,
+        data: ['Distribución'],
+        bottom: 30,
         textStyle: { color: textSecondary },
+      },
+      grid: {
+        left: '3%',
+        right: '4%',
+        bottom: '20%',
+        containLabel: true,
+      },
+      xAxis: {
+        type: 'category',
+        data: ['Rentables', 'No Rentables', 'Sin Margen'],
+        axisLine: { lineStyle: { color: borderColor } },
+        axisLabel: { color: textSecondary },
+      },
+      yAxis: {
+        type: 'value',
+        axisLine: { show: false },
+        axisLabel: { color: textSecondary },
+        splitLine: { lineStyle: { color: borderColor } },
       },
       series: [
         {
-          type: 'pie',
-          radius: ['40%', '70%'],
-          avoidLabelOverlap: false,
-          itemStyle: {
-            borderRadius: 8,
-            borderColor,
-            borderWidth: 2,
-          },
-          label: {
-            show: true,
-            formatter: '{b}\n{d}%',
-            color: textSecondary,
-          },
+          name: 'Distribución',
+          type: 'line',
           data: [
-            { value: profitable, name: 'Rentables', itemStyle: { color: '#22c55e' } },
-            { value: unprofitable, name: 'No Rentables', itemStyle: { color: '#ef4444' } },
-            { value: zeroMargin, name: 'Sin Margen', itemStyle: { color: '#f59e0b' } },
+            { value: profitable, itemStyle: { color: '#22c55e' } },
+            { value: unprofitable, itemStyle: { color: '#ef4444' } },
+            { value: zeroMargin, itemStyle: { color: '#f59e0b' } },
           ],
+          areaStyle: {
+            color: {
+              type: 'linear',
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
+              colorStops: [
+                { offset: 0, color: '#3b82f64D' },
+                { offset: 1, color: '#3b82f60D' },
+              ],
+            },
+          },
         },
       ],
     };
@@ -291,7 +314,6 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
     this.topProfitChartOptions = {
       tooltip: {
         trigger: 'axis',
-        axisPointer: { type: 'shadow' },
         confine: true,
         backgroundColor: 'rgba(255,255,255,0.98)',
         borderColor,
@@ -321,46 +343,47 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
           `;
         },
       },
+      legend: {
+        data: ['Ganancia'],
+        bottom: 30,
+        textStyle: { color: textSecondary },
+      },
       grid: {
         left: '3%',
-        right: '8%',
-        bottom: '3%',
+        right: '4%',
+        bottom: '20%',
         top: '3%',
         containLabel: true,
       },
       xAxis: {
-        type: 'value',
-        axisLine: { show: false },
-        axisLabel: { color: textSecondary, fontSize: 11, formatter: (value: number) => this.currencyService.format(value, 0) },
-        splitLine: { lineStyle: { color: borderColor, type: 'dashed' } },
-      },
-      yAxis: {
         type: 'category',
         data: names,
         axisLine: { lineStyle: { color: borderColor } },
         axisLabel: { color: textSecondary, fontSize: 11 },
       },
+      yAxis: {
+        type: 'value',
+        axisLine: { show: false },
+        axisLabel: { color: textSecondary, fontSize: 11, formatter: (value: number) => this.currencyService.format(value, 0) },
+        splitLine: { lineStyle: { color: borderColor, type: 'dashed' } },
+      },
       series: [
         {
           name: 'Ganancia',
-          type: 'bar',
+          type: 'line',
           data: profits,
-          itemStyle: {
+          itemStyle: { color: primaryColor },
+          areaStyle: {
             color: {
               type: 'linear',
-              x: 0, y: 0, x2: 1, y2: 0,
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
               colorStops: [
-                { offset: 0, color: `${primaryColor}99` },
-                { offset: 1, color: primaryColor },
+                { offset: 0, color: `${primaryColor}4D` },
+                { offset: 1, color: `${primaryColor}0D` },
               ],
-            },
-            borderRadius: [0, 6, 6, 0],
-          },
-          barMaxWidth: 32,
-          emphasis: {
-            itemStyle: {
-              shadowBlur: 10,
-              shadowColor: `${primaryColor}40`,
             },
           },
         },
@@ -425,16 +448,13 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
       },
       legend: {
         data: ['Ingresos', 'Costo', 'Ganancia'],
-        bottom: 0,
-        textStyle: { color: textSecondary, fontSize: 11 },
-        icon: 'roundRect',
-        itemWidth: 14,
-        itemHeight: 8,
+        bottom: 30,
+        textStyle: { color: textSecondary },
       },
       grid: {
         left: '3%',
         right: '4%',
-        bottom: '15%',
+        bottom: '20%',
         top: '3%',
         containLabel: true,
       },
@@ -444,43 +464,92 @@ export class ProductProfitabilityComponent implements OnInit, OnDestroy {
         axisLine: { lineStyle: { color: borderColor } },
         axisLabel: { color: textSecondary, fontSize: 10 },
       },
-      yAxis: {
-        type: 'value',
-        axisLine: { show: false },
-        axisLabel: { color: textSecondary, fontSize: 11, formatter: (value: number) => this.currencyService.format(value, 0) },
-        splitLine: { lineStyle: { color: borderColor, type: 'dashed' } },
-      },
+      yAxis: [
+        {
+          type: 'value',
+          name: 'Ingresos',
+          position: 'left',
+          axisLine: { show: false },
+          axisLabel: { color: textSecondary, fontSize: 11, formatter: (value: number) => this.currencyService.format(value, 0) },
+          splitLine: { lineStyle: { color: borderColor, type: 'dashed' } },
+        },
+        {
+          type: 'value',
+          name: 'Costo',
+          position: 'right',
+          axisLine: { show: false },
+          axisLabel: { color: textSecondary, fontSize: 11, formatter: (value: number) => this.currencyService.format(value, 0) },
+          splitLine: { show: false },
+        },
+        {
+          type: 'value',
+          name: 'Ganancia',
+          position: 'right',
+          axisLine: { show: false },
+          axisLabel: { color: textSecondary, fontSize: 11, formatter: (value: number) => this.currencyService.format(value, 0) },
+          splitLine: { show: false },
+        },
+      ],
       series: [
         {
           name: 'Ingresos',
-          type: 'bar',
+          type: 'line',
           data: revenues,
-          itemStyle: { color: '#3b82f6', borderRadius: [4, 4, 0, 0] },
-          barMaxWidth: 28,
+          yAxisIndex: 0,
+          itemStyle: { color: '#3b82f6' },
+          areaStyle: {
+            color: {
+              type: 'linear',
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
+              colorStops: [
+                { offset: 0, color: '#3b82f64D' },
+                { offset: 1, color: '#3b82f60D' },
+              ],
+            },
+          },
         },
         {
           name: 'Costo',
-          type: 'bar',
+          type: 'line',
           data: costs,
-          itemStyle: { color: redColor, borderRadius: [4, 4, 0, 0] },
-          barMaxWidth: 28,
+          yAxisIndex: 1,
+          itemStyle: { color: redColor },
+          areaStyle: {
+            color: {
+              type: 'linear',
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
+              colorStops: [
+                { offset: 0, color: '#ef44444D' },
+                { offset: 1, color: '#ef44440D' },
+              ],
+            },
+          },
         },
         {
           name: 'Ganancia',
-          type: 'bar',
+          type: 'line',
           data: profits,
-          itemStyle: {
+          yAxisIndex: 2,
+          itemStyle: { color: greenColor },
+          areaStyle: {
             color: {
               type: 'linear',
-              x: 0, y: 0, x2: 0, y2: 1,
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
               colorStops: [
-                { offset: 0, color: greenColor },
-                { offset: 1, color: `${greenColor}80` },
+                { offset: 0, color: '#22c55e4D' },
+                { offset: 1, color: '#22c55e0D' },
               ],
             },
-            borderRadius: [4, 4, 0, 0],
           },
-          barMaxWidth: 28,
         },
       ],
     };

@@ -1,12 +1,10 @@
 import {Component, OnInit, inject, signal,
   DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-
 import { RouterModule } from '@angular/router';
 import { FormsModule } from '@angular/forms';
-
-
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
+import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import { TableColumn } from '../../../../../../shared/components/table/table.component';
 import {
   ResponsiveDataViewComponent,
@@ -18,13 +16,13 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
 import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
-
 import { AnalyticsService } from '../../services/analytics.service';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
 import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared/utils/date.util';
 import {
   StockMovementReport,
   InventoryAnalyticsQueryDto} from '../../interfaces/inventory-analytics.interface';
+import { EChartsOption } from 'echarts';
 
 @Component({
   selector: 'vendix-stock-movements',
@@ -33,12 +31,13 @@ import {
     RouterModule,
     FormsModule,
     CardComponent,
+    ChartComponent,
     ResponsiveDataViewComponent,
     SelectorComponent,
     IconComponent,
     DateRangeFilterComponent,
     ExportButtonComponent
-],
+  ],
   template: `
     <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
       <!-- Header -->
@@ -116,21 +115,37 @@ import {
           ></app-responsive-data-view>
         </div>
       </app-card>
+
+      <!-- Chart -->
+      <app-card shadow="none" [responsivePadding]="true" [showHeader]="true">
+        <div slot="header" class="flex flex-col">
+          <span class="text-sm font-bold text-[var(--color-text-primary)]">
+            Tendencia de Movimientos
+          </span>
+        </div>
+        @if (!loading() && movementsChartOptions()) {
+        <app-chart
+          [options]="movementsChartOptions()"
+          size="large"
+          [showLegend]="true"
+        ></app-chart>
+        }
+      </app-card>
     </div>
   `})
 export class StockMovementsComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
   private analyticsService = inject(AnalyticsService);
   private toastService = inject(ToastService);
-loading = signal(true);
+  loading = signal(true);
   exporting = signal(false);
   data = signal<StockMovementReport[]>([]);
+  movementsChartOptions = signal<EChartsOption>({});
   typeFilter = signal<string>('');
   dateRange = signal<DateRangeFilter>({
     start_date: getDefaultStartDate(),
     end_date: getDefaultEndDate(),
     preset: 'thisMonth'});
-
   typeOptions: SelectorOption[] = [
     { value: '', label: 'Todos' },
     { value: 'stock_in', label: 'Entrada' },
@@ -248,6 +263,7 @@ onDateRangeChange(range: DateRangeFilter): void {
       .subscribe({
         next: (response) => {
           this.data.set(response.data);
+          this.updateChart(response.data);
           this.loading.set(false);
         },
         error: () => {
@@ -277,6 +293,101 @@ onDateRangeChange(range: DateRangeFilter): void {
           this.toastService.error('Error al exportar');
           this.exporting.set(false);
         }});
+  }
+
+  private updateChart(data: StockMovementReport[]): void {
+    if (!data.length) return;
+
+    const style = getComputedStyle(document.documentElement);
+    const borderColor = style.getPropertyValue('--color-border').trim() || '#e5e7eb';
+    const textSecondary = style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
+
+    const types = ['stock_in', 'stock_out', 'sale', 'return', 'transfer', 'adjustment', 'damage'];
+    const typeLabels: Record<string, string> = {
+      stock_in: 'Entradas',
+      stock_out: 'Salidas',
+      sale: 'Ventas',
+      return: 'Devoluciones',
+      transfer: 'Transferencias',
+      adjustment: 'Ajustes',
+      damage: 'Daños',
+    };
+    const typeColors: Record<string, string> = {
+      stock_in: '#22c55e',
+      stock_out: '#3b82f6',
+      sale: '#8b5cf6',
+      return: '#f59e0b',
+      transfer: '#6366f1',
+      adjustment: '#6b7280',
+      damage: '#ef4444',
+    };
+
+    const movementsByType: Record<string, number> = {};
+    types.forEach((t) => (movementsByType[t] = 0));
+    data.forEach((m) => {
+      if (movementsByType[m.movement_type] !== undefined) {
+        movementsByType[m.movement_type] += Math.abs(m.quantity);
+      }
+    });
+
+    const labels = types.map((t) => typeLabels[t]);
+    const values = types.map((t) => movementsByType[t]);
+
+    this.movementsChartOptions.set({
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
+        formatter: (params: any) => {
+          const p = params[0];
+          return `${p.name}: <b>${p.value}</b> unidades`;
+        },
+      },
+      legend: {
+        data: ['Movimientos'],
+        bottom: 30,
+        textStyle: { color: textSecondary },
+      },
+      grid: {
+        left: '3%',
+        right: '4%',
+        bottom: '20%',
+        containLabel: true,
+      },
+      xAxis: {
+        type: 'category',
+        data: labels,
+        axisLine: { lineStyle: { color: borderColor } },
+        axisLabel: { color: textSecondary, fontSize: 11 },
+      },
+      yAxis: {
+        type: 'value',
+        axisLine: { show: false },
+        axisLabel: { color: textSecondary },
+        splitLine: { lineStyle: { color: borderColor } },
+      },
+      series: [
+        {
+          name: 'Movimientos',
+          type: 'line',
+          data: values,
+          itemStyle: { color: '#3b82f6' },
+          lineStyle: { color: '#3b82f6', width: 2 },
+          areaStyle: {
+            color: {
+              type: 'linear',
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
+              colorStops: [
+                { offset: 0, color: '#3b82f64D' },
+                { offset: 1, color: '#3b82f60D' },
+              ],
+            },
+          },
+        },
+      ],
+    });
   }
 
 }

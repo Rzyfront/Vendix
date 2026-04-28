@@ -278,10 +278,15 @@ export class ReviewSummaryComponent implements OnInit {
           return `${star.name} estrellas: <b>${star.value}</b>`;
         },
       },
+      legend: {
+        data: ['Distribución'],
+        bottom: 30,
+        textStyle: { color: textSecondary },
+      },
       grid: {
         left: '3%',
         right: '6%',
-        bottom: '3%',
+        bottom: '20%',
         top: '3%',
         containLabel: true,
       },
@@ -299,48 +304,59 @@ export class ReviewSummaryComponent implements OnInit {
       },
       series: [
         {
-          type: 'bar',
+          name: 'Distribución',
+          type: 'line',
           data: counts,
           itemStyle: {
-            color: (params: any) => {
-              const colors = ['#f59e0b', '#f59e0b', '#f59e0b', '#f59e0b', '#f59e0b'];
-              return colors[params.dataIndex];
-            },
-            borderRadius: [4, 4, 0, 0],
+            color: '#f59e0b',
           },
-          barMaxWidth: 40,
+          areaStyle: {
+            color: {
+              type: 'linear',
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
+              colorStops: [
+                { offset: 0, color: '#f59e0b40' },
+                { offset: 1, color: '#f59e0b05' },
+              ],
+            },
+          },
         },
       ],
     };
 
-    // Reviews Status Pie
+    // Reviews Status Line
     this.reviewsStatusChartOptions = {
       tooltip: {
-        trigger: 'item',
-        formatter: (params: any) => `${params.name}: <b>${params.value}</b>`,
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
+        formatter: (params: any) => {
+          const p = params[0];
+          return `${p.name}: <b>${p.value}</b>`;
+        },
       },
       legend: {
-        bottom: 0,
+        data: ['Estado Reviews'],
+        bottom: 30,
         textStyle: { color: textSecondary },
+      },
+      grid: { left: '3%', right: '10%', bottom: '20%', top: '3%', containLabel: true },
+      xAxis: { type: 'value' },
+      yAxis: {
+        type: 'category',
+        data: ['Pendientes', 'Aprobadas', 'Rechazadas'],
+        axisLabel: { color: textSecondary },
       },
       series: [
         {
-          type: 'pie',
-          radius: ['40%', '70%'],
-          avoidLabelOverlap: false,
-          itemStyle: {
-            borderRadius: 4,
-            borderColor: '#fff',
-            borderWidth: 2,
-          },
-          label: { show: false },
-          emphasis: {
-            label: { show: true, fontSize: 14, fontWeight: 'bold' },
-          },
+          name: 'Estado Reviews',
+          type: 'line',
           data: [
-            { value: data.pending_reviews || 0, name: 'Pendientes', itemStyle: { color: '#f59e0b' } },
-            { value: data.approved_reviews || 0, name: 'Aprobadas', itemStyle: { color: '#22c55e' } },
-            { value: data.rejected_reviews || 0, name: 'Rechazadas', itemStyle: { color: '#ef4444' } },
+            { value: data.pending_reviews || 0, itemStyle: { color: '#f59e0b' } },
+            { value: data.approved_reviews || 0, itemStyle: { color: '#22c55e' } },
+            { value: data.rejected_reviews || 0, itemStyle: { color: '#ef4444' } },
           ],
         },
       ],

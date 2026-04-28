@@ -267,24 +267,37 @@ export class RefundsSummaryComponent implements OnInit {
     if (!d) return;
 
     // Refunds Breakdown Bar Chart
+    const refundCats = ['Subtotal', 'Impuesto', 'Envío'];
+    const refundValues = [d.subtotal_refunds || 0, d.tax_refunds || 0, d.shipping_refunds || 0];
+    const refundColors = ['#f97316', '#f59e0b', '#3b82f6'];
+
     this.refundsBreakdownChartOptions = {
       tooltip: {
         trigger: 'axis',
         axisPointer: { type: 'shadow' },
         formatter: (params: any) => {
-          return `${params[0].name}: <b>${this.currencyService.format(params[0].value)}</b>`;
+          let html = `<strong>${params[0].name}</strong><br/>`;
+          for (const p of params) {
+            if (p.value != null) html += `${p.marker} ${p.seriesName}: <b>${this.currencyService.format(p.value)}</b><br/>`;
+          }
+          return html;
         },
+      },
+      legend: {
+        data: refundCats,
+        bottom: 30,
+        textStyle: { color: textSecondary },
       },
       grid: {
         left: '3%',
         right: '6%',
-        bottom: '3%',
+        bottom: '20%',
         top: '3%',
         containLabel: true,
       },
       xAxis: {
         type: 'category',
-        data: ['Subtotal', 'Impuesto', 'Envío'],
+        data: refundCats,
         axisLine: { lineStyle: { color: '#e5e7eb' } },
         axisLabel: { color: textSecondary },
       },
@@ -297,51 +310,75 @@ export class RefundsSummaryComponent implements OnInit {
         },
         splitLine: { lineStyle: { color: '#e5e7eb' } },
       },
-      series: [
-        {
-          type: 'bar',
-          data: [
-            { value: d.subtotal_refunds || 0, itemStyle: { color: '#f97316' } },
-            { value: d.tax_refunds || 0, itemStyle: { color: '#f59e0b' } },
-            { value: d.shipping_refunds || 0, itemStyle: { color: '#3b82f6' } },
-          ],
-          itemStyle: { borderRadius: [4, 4, 0, 0] },
-          barMaxWidth: 60,
+      series: refundCats.map((cat, i) => ({
+        name: cat,
+        type: 'line' as const,
+        data: refundCats.map((_, j) => j === i ? refundValues[i] : null),
+        itemStyle: { color: refundColors[i] },
+        areaStyle: {
+          color: {
+            type: 'linear',
+            x: 0,
+            y: 0,
+            x2: 0,
+            y2: 1,
+            colorStops: [
+              { offset: 0, color: refundColors[i] + '40' },
+              { offset: 1, color: refundColors[i] + '05' },
+            ],
+          },
         },
-      ],
+      })),
     };
 
-    // Refunds Distribution Pie
+    // Refunds Distribution Horizontal Bar
+    const distCats = ['Subtotal', 'Impuesto', 'Envío'];
+    const distValues = [d.subtotal_refunds || 0, d.tax_refunds || 0, d.shipping_refunds || 0];
+    const distColors = ['#f97316', '#f59e0b', '#3b82f6'];
+
     this.refundsDistributionChartOptions = {
       tooltip: {
-        trigger: 'item',
-        formatter: (params: any) => `${params.name}: <b>${this.currencyService.format(params.value)}</b> (${params.percent}%)`,
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
+        formatter: (params: any) => {
+          let html = `<strong>${params[0].name}</strong><br/>`;
+          for (const p of params) {
+            if (p.value != null) html += `${p.marker} ${p.seriesName}: <b>${this.currencyService.format(p.value)}</b><br/>`;
+          }
+          return html;
+        },
       },
       legend: {
-        bottom: 0,
+        data: distCats,
+        bottom: 30,
         textStyle: { color: textSecondary },
       },
-      series: [
-        {
-          type: 'pie',
-          radius: ['40%', '70%'],
-          avoidLabelOverlap: false,
-          itemStyle: {
-            borderRadius: 4,
-            borderColor: '#fff',
-            borderWidth: 2,
+      grid: { left: '3%', right: '10%', bottom: '20%', top: '3%', containLabel: true },
+      xAxis: { type: 'value' },
+      yAxis: {
+        type: 'category',
+        data: distCats,
+        axisLabel: { color: textSecondary },
+      },
+      series: distCats.map((cat, i) => ({
+        name: cat,
+        type: 'line' as const,
+        data: distCats.map((_, j) => j === i ? distValues[i] : null),
+        itemStyle: { color: distColors[i] },
+        areaStyle: {
+          color: {
+            type: 'linear',
+            x: 0,
+            y: 0,
+            x2: 0,
+            y2: 1,
+            colorStops: [
+              { offset: 0, color: distColors[i] + '40' },
+              { offset: 1, color: distColors[i] + '05' },
+            ],
           },
-          label: { show: false },
-          emphasis: {
-            label: { show: true, fontSize: 14, fontWeight: 'bold' },
-          },
-          data: [
-            { value: d.subtotal_refunds || 0, name: 'Subtotal', itemStyle: { color: '#f97316' } },
-            { value: d.tax_refunds || 0, name: 'Impuesto', itemStyle: { color: '#f59e0b' } },
-            { value: d.shipping_refunds || 0, name: 'Envío', itemStyle: { color: '#3b82f6' } },
-          ],
         },
-      ],
+      })),
     };
   }
 }

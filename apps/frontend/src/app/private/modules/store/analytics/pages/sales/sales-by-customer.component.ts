@@ -1,11 +1,9 @@
 import {Component, OnInit, inject, signal,
   DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-
 import { RouterModule } from '@angular/router';
-
-
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
+import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import { TableColumn } from '../../../../../../shared/components/table/table.component';
 import {
   ResponsiveDataViewComponent,
@@ -14,7 +12,6 @@ import { IconComponent } from '../../../../../../shared/components/icon/icon.com
 import { DateRangeFilterComponent } from '../../components/date-range-filter/date-range-filter.component';
 import { ExportButtonComponent } from '../../components/export-button/export-button.component';
 import { ToastService } from '../../../../../../shared/components/toast/toast.service';
-
 import { AnalyticsService } from '../../services/analytics.service';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency/currency.pipe';
 import { DateRangeFilter } from '../../interfaces/analytics.interface';
@@ -22,6 +19,7 @@ import { getDefaultStartDate, getDefaultEndDate } from '../../../../../../shared
 import {
   SalesByCustomer,
   SalesAnalyticsQueryDto} from '../../interfaces/sales-analytics.interface';
+import { EChartsOption } from 'echarts';
 
 @Component({
   selector: 'vendix-sales-by-customer',
@@ -29,11 +27,12 @@ import {
   imports: [
     RouterModule,
     CardComponent,
+    ChartComponent,
     ResponsiveDataViewComponent,
     IconComponent,
     DateRangeFilterComponent,
     ExportButtonComponent
-],
+  ],
   template: `
     <div class="space-y-6 w-full max-w-[1600px] mx-auto py-4">
       <!-- Header -->
@@ -86,6 +85,35 @@ import {
             <span
               class="text-xs text-[var(--color-text-secondary)] font-normal ml-2"
             >
+            ({{ data().length }} clientes)
+            </span>
+          </span>
+        </div>
+
+        <div class="p-4">
+          @if (!loading() && topCustomersChartOptions()) {
+          <app-chart
+            [options]="topCustomersChartOptions()"
+            size="large"
+            [showLegend]="true"
+          ></app-chart>
+          }
+        </div>
+      </app-card>
+
+      <!-- Main Content Card -->
+      <app-card
+        shadow="none"
+        [padding]="false"
+        overflow="hidden"
+        [showHeader]="true"
+      >
+        <div slot="header" class="flex flex-col">
+          <span class="text-sm font-bold text-[var(--color-text-primary)]">
+            Detalle de Clientes
+            <span
+              class="text-xs text-[var(--color-text-secondary)] font-normal ml-2"
+            >
               ({{ data().length }} clientes)
             </span>
           </span>
@@ -109,9 +137,10 @@ export class SalesByCustomerComponent implements OnInit {
   private analyticsService = inject(AnalyticsService);
   private toastService = inject(ToastService);
   private currencyService = inject(CurrencyFormatService);
-loading = signal(true);
+  loading = signal(true);
   exporting = signal(false);
   data = signal<SalesByCustomer[]>([]);
+  topCustomersChartOptions = signal<EChartsOption>({});
   dateRange = signal<DateRangeFilter>({
     start_date: getDefaultStartDate(),
     end_date: getDefaultEndDate(),
@@ -194,6 +223,7 @@ onDateRangeChange(range: DateRangeFilter): void {
       .subscribe({
         next: (response) => {
           this.data.set(response.data);
+          this.updateChart(response.data);
           this.loading.set(false);
         },
         error: () => {
@@ -225,6 +255,80 @@ onDateRangeChange(range: DateRangeFilter): void {
 
   formatCurrency(value: number): string {
     return this.currencyService.format(value, 0);
+  }
+
+  private updateChart(data: SalesByCustomer[]): void {
+    if (!data.length) return;
+
+    const top10 = [...data]
+      .sort((a, b) => b.total_spent - a.total_spent)
+      .slice(0, 10)
+      .reverse();
+
+    const style = getComputedStyle(document.documentElement);
+    const borderColor = style.getPropertyValue('--color-border').trim() || '#e5e7eb';
+    const textSecondary = style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
+    const primaryColor = '#3b82f6';
+
+    this.topCustomersChartOptions.set({
+      tooltip: {
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
+        formatter: (params: any) => {
+          const p = params[0];
+          const customer = top10.find((c) => c.total_spent === p.value);
+          return `${p.name}<br/>Total: ${this.currencyService.format(p.value)}<br/>Órdenes: ${customer?.total_orders || 0}`;
+        },
+      },
+      legend: {
+        data: ['Top Clientes'],
+        bottom: 30,
+        textStyle: { color: textSecondary },
+      },
+      grid: {
+        left: '3%',
+        right: '6%',
+        bottom: '20%',
+        top: '3%',
+        containLabel: true,
+      },
+      xAxis: {
+        type: 'value',
+        axisLine: { show: false },
+        axisLabel: {
+          color: textSecondary,
+          formatter: (v: number) => this.formatCurrency(v),
+        },
+        splitLine: { lineStyle: { color: borderColor } },
+      },
+      yAxis: {
+        type: 'category',
+        data: top10.map((c) => c.customer_name.length > 20 ? c.customer_name.substring(0, 20) + '...' : c.customer_name),
+        axisLine: { lineStyle: { color: borderColor } },
+        axisLabel: { color: textSecondary, fontSize: 11 },
+      },
+      series: [
+        {
+          name: 'Top Clientes',
+          type: 'line',
+          data: top10.map((p) => p.total_spent),
+          itemStyle: { color: primaryColor },
+          areaStyle: {
+            color: {
+              type: 'linear',
+              x: 0,
+              y: 0,
+              x2: 1,
+              y2: 0,
+              colorStops: [
+                { offset: 0, color: primaryColor + '40' },
+                { offset: 1, color: primaryColor },
+              ],
+            },
+          },
+        },
+      ],
+    });
   }
 
 }

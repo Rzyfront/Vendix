@@ -247,9 +247,9 @@ this.store.dispatch(InventoryActions.clearInventoryOverviewState());
         } },
       legend: {
         data: ['Entradas', 'Salidas', 'Ajustes', 'Transferencias'],
-        bottom: 0,
+        bottom: 30,
         textStyle: { color: textSecondary, fontSize: 12 } },
-      grid: { left: '3%', right: '4%', bottom: '15%', containLabel: true },
+      grid: { left: '3%', right: '4%', bottom: '20%', containLabel: true },
       xAxis: {
         type: 'category',
         data: labels,
@@ -284,11 +284,10 @@ this.store.dispatch(InventoryActions.clearInventoryOverviewState());
       ] };
   }
 
-  private buildLineSeries(name: string, data: number[], color: string): any {
+private buildLineSeries(name: string, data: number[], color: string): any {
     return {
       name,
       type: 'line',
-      smooth: true,
       data,
       areaStyle: {
         color: {
@@ -298,11 +297,14 @@ this.store.dispatch(InventoryActions.clearInventoryOverviewState());
           x2: 0,
           y2: 1,
           colorStops: [
-            { offset: 0, color: `${color}33` },
-            { offset: 1, color: `${color}05` },
-          ] } },
+            { offset: 0, color: `${color}4D` },
+            { offset: 1, color: `${color}0D` },
+          ],
+        },
+      },
       lineStyle: { color, width: 2 },
-      itemStyle: { color } };
+      itemStyle: { color },
+    };
   }
 
   // ─── Valuation by Location Rose Chart ───
@@ -310,7 +312,7 @@ this.store.dispatch(InventoryActions.clearInventoryOverviewState());
   private updateValuationChart(valuations: InventoryValuation[]): void {
     if (!valuations.length) return;
 
-    const { textSecondary } = this.getThemeColors();
+    const { textSecondary, border } = this.getThemeColors();
     const sorted = [...valuations]
       .sort((a, b) => b.total_value - a.total_value)
       .slice(0, 10);
@@ -330,34 +332,61 @@ this.store.dispatch(InventoryActions.clearInventoryOverviewState());
 
     this.valuationChartOptions = {
       tooltip: {
-        trigger: 'item',
-        formatter: (params: any) =>
-          `${params.name}<br/>Valor: <b>${this.currencyService.format(params.value)}</b> (${params.percent}%)` },
+        trigger: 'axis',
+        formatter: (params: any) => {
+          const p = params[0];
+          return `${p.name}<br/>Valor: <b>${this.currencyService.format(p.value)}</b>`;
+        },
+      },
       legend: {
-        orient: 'vertical',
-        right: 10,
-        top: 'center',
-        textStyle: { color: textSecondary, fontSize: 12 } },
+        data: ['Valor'],
+        bottom: 30,
+        textStyle: { color: textSecondary },
+      },
+      grid: { left: '3%', right: '4%', bottom: '20%', top: '3%', containLabel: true },
+      xAxis: {
+        type: 'category',
+        data: sorted.map((v) => v.location_name),
+        axisLine: { lineStyle: { color: border } },
+        axisLabel: { color: textSecondary, fontSize: 11 },
+      },
+      yAxis: {
+        type: 'value',
+        axisLine: { show: false },
+        axisLabel: { color: textSecondary, fontSize: 11, formatter: (v: number) => this.currencyService.format(v) },
+        splitLine: { lineStyle: { color: border } },
+      },
       series: [
         {
-          type: 'pie',
-          roseType: 'area',
-          radius: ['20%', '75%'],
-          center: ['35%', '50%'],
-          label: { show: false },
-          data: sorted.map((v, i) => ({
-            name: v.location_name,
-            value: v.total_value,
-            itemStyle: { color: locationColors[i % locationColors.length] } })) },
-      ] };
+          name: 'Valor',
+          type: 'line',
+          data: sorted.map((v) => v.total_value),
+          itemStyle: { color: '#3b82f6' },
+          lineStyle: { color: '#3b82f6', width: 2 },
+          areaStyle: {
+            color: {
+              type: 'linear',
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
+              colorStops: [
+                { offset: 0, color: '#3b82f64D' },
+                { offset: 1, color: '#3b82f60D' },
+              ],
+            },
+          },
+        },
+      ],
+    };
   }
 
-  // ─── Quantity by Location Rose Chart ───
+  // ─── Quantity by Location Bar Chart ───
 
   private updateQuantityChart(valuations: InventoryValuation[]): void {
     if (!valuations.length) return;
 
-    const { textSecondary } = this.getThemeColors();
+    const { textSecondary, border } = this.getThemeColors();
     const sorted = [...valuations]
       .sort((a, b) => b.total_quantity - a.total_quantity)
       .slice(0, 10);
@@ -377,26 +406,53 @@ this.store.dispatch(InventoryActions.clearInventoryOverviewState());
 
     this.quantityChartOptions = {
       tooltip: {
-        trigger: 'item',
-        formatter: (params: any) =>
-          `${params.name}<br/>Cantidad: <b>${params.value.toLocaleString('es-CO')}</b> uds (${params.percent}%)` },
+        trigger: 'axis',
+        formatter: (params: any) => {
+          const p = params[0];
+          return `${p.name}<br/>Cantidad: <b>${p.value.toLocaleString('es-CO')}</b> uds`;
+        },
+      },
       legend: {
-        orient: 'vertical',
-        right: 10,
-        top: 'center',
-        textStyle: { color: textSecondary, fontSize: 12 } },
+        data: ['Cantidad'],
+        bottom: 30,
+        textStyle: { color: textSecondary },
+      },
+      grid: { left: '3%', right: '4%', bottom: '20%', top: '3%', containLabel: true },
+      xAxis: {
+        type: 'category',
+        data: sorted.map((v) => v.location_name),
+        axisLine: { lineStyle: { color: border } },
+        axisLabel: { color: textSecondary, fontSize: 11 },
+      },
+      yAxis: {
+        type: 'value',
+        axisLine: { show: false },
+        axisLabel: { color: textSecondary, fontSize: 11 },
+        splitLine: { lineStyle: { color: border } },
+      },
       series: [
         {
-          type: 'pie',
-          roseType: 'area',
-          radius: ['20%', '75%'],
-          center: ['35%', '50%'],
-          label: { show: false },
-          data: sorted.map((v, i) => ({
-            name: v.location_name,
-            value: v.total_quantity,
-            itemStyle: { color: locationColors[i % locationColors.length] } })) },
-      ] };
+          name: 'Cantidad',
+          type: 'line',
+          data: sorted.map((v) => v.total_quantity),
+          itemStyle: { color: '#8b5cf6' },
+          lineStyle: { color: '#8b5cf6', width: 2 },
+          areaStyle: {
+            color: {
+              type: 'linear',
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
+              colorStops: [
+                { offset: 0, color: '#8b5cf64D' },
+                { offset: 1, color: '#8b5cf60D' },
+              ],
+            },
+          },
+        },
+      ],
+    };
   }
 
 }

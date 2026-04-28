@@ -267,25 +267,37 @@ export class TaxSummaryComponent implements OnInit {
     const d = this.data();
     if (!d) return;
 
-    // Tax Comparison Bar Chart
+    const taxCategories = ['Cobrados', 'Devueltos', 'Neto'];
+    const taxValues = [d.tax_collected || 0, -(d.tax_refunded || 0), d.net_tax || 0];
+    const taxColors = ['#22c55e', '#ef4444', '#3b82f6'];
+
     this.taxComparisonChartOptions = {
       tooltip: {
         trigger: 'axis',
         axisPointer: { type: 'shadow' },
         formatter: (params: any) => {
-          return `${params[0].name}: <b>${this.currencyService.format(params[0].value)}</b>`;
+          let html = `<strong>${params[0].name}</strong><br/>`;
+          for (const p of params) {
+            if (p.value != null) html += `${p.marker} ${p.seriesName}: <b>${this.currencyService.format(p.value)}</b><br/>`;
+          }
+          return html;
         },
+      },
+      legend: {
+        data: taxCategories,
+        bottom: 30,
+        textStyle: { color: textSecondary },
       },
       grid: {
         left: '3%',
         right: '6%',
-        bottom: '3%',
+        bottom: '20%',
         top: '3%',
         containLabel: true,
       },
       xAxis: {
         type: 'category',
-        data: ['Cobrados', 'Devueltos', 'Neto'],
+        data: taxCategories,
         axisLine: { lineStyle: { color: '#e5e7eb' } },
         axisLabel: { color: textSecondary },
       },
@@ -298,18 +310,14 @@ export class TaxSummaryComponent implements OnInit {
         },
         splitLine: { lineStyle: { color: '#e5e7eb' } },
       },
-      series: [
-        {
-          type: 'bar',
-          data: [
-            { value: d.tax_collected || 0, itemStyle: { color: '#22c55e' } },
-            { value: -(d.tax_refunded || 0), itemStyle: { color: '#ef4444' } },
-            { value: d.net_tax || 0, itemStyle: { color: '#3b82f6' } },
-          ],
-          itemStyle: { borderRadius: [4, 4, 0, 0] },
-          barMaxWidth: 60,
-        },
-      ],
+      series: taxCategories.map((cat, i) => ({
+        name: cat,
+        type: 'line',
+        data: taxCategories.map((_, j) => j === i ? taxValues[i] : null),
+        itemStyle: { color: taxColors[i] },
+        barMaxWidth: 60,
+        barGap: '-100%',
+      })),
     };
 
     // Effective Rate Gauge

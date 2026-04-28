@@ -135,39 +135,60 @@ onDateRangeChange(range: DateRangeFilter): void {
     this.topSellersChartOptions = {
       tooltip: {
         trigger: 'axis',
-        axisPointer: { type: 'shadow' },
         formatter: (params: any) => {
           const data = params[0];
           const product = reversed[data.dataIndex];
           return `<strong>${product.product_name}</strong><br/>Ingresos: ${this.currencyService.format(data.value)}<br/>Unidades: ${product.units_sold}`;
-        }},
+        },
+      },
+      legend: {
+        data: ['Ingresos'],
+        bottom: 30,
+        textStyle: { color: textSecondary },
+      },
       grid: {
         left: '3%',
-        right: '6%',
-        bottom: '3%',
+        right: '4%',
+        bottom: '20%',
         top: '3%',
-        containLabel: true},
+        containLabel: true,
+      },
       xAxis: {
+        type: 'category',
+        data: names,
+        axisLine: { lineStyle: { color: borderColor } },
+        axisLabel: { color: textSecondary, fontSize: 11 },
+      },
+      yAxis: {
         type: 'value',
         axisLine: { show: false },
         axisLabel: {
           color: textSecondary,
-          formatter: (value: number) => this.currencyService.format(value, 0)},
-        splitLine: { lineStyle: { color: borderColor } }},
-      yAxis: {
-        type: 'category',
-        data: names,
-        axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary, fontSize: 11 }},
+          formatter: (value: number) => this.currencyService.format(value, 0),
+        },
+        splitLine: { lineStyle: { color: borderColor } },
+      },
       series: [
         {
           name: 'Ingresos',
-          type: 'bar',
+          type: 'line',
           data: revenues,
-          itemStyle: {
-            color: primaryColor,
-            borderRadius: [0, 4, 4, 0]},
-          barMaxWidth: 30},
-      ]};
+          itemStyle: { color: primaryColor },
+          areaStyle: {
+            color: {
+              type: 'linear',
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
+              colorStops: [
+                { offset: 0, color: `${primaryColor}4D` },
+                { offset: 1, color: `${primaryColor}0D` },
+              ],
+            },
+          },
+        },
+      ],
+    };
   }
 }

@@ -281,13 +281,13 @@ export class ProfitLossComponent implements OnInit {
       },
       legend: {
         data: ['Ingresos', 'COGS', 'Reembolsos', 'Gastos'],
-        bottom: 0,
+        bottom: 30,
         textStyle: { color: textSecondary },
       },
       grid: {
         left: '3%',
         right: '4%',
-        bottom: '15%',
+        bottom: '20%',
         containLabel: true,
       },
       xAxis: {
@@ -308,27 +308,27 @@ export class ProfitLossComponent implements OnInit {
       series: [
         {
           name: 'Ingresos',
-          type: 'bar',
+          type: 'line',
           data: [d.revenue?.gross_revenue || 0],
-          itemStyle: { color: '#22c55e', borderRadius: [4, 4, 0, 0] },
+          itemStyle: { color: '#22c55e' },
         },
         {
           name: 'COGS',
-          type: 'bar',
+          type: 'line',
           data: [-(d.costs?.cost_of_goods_sold || 0)],
-          itemStyle: { color: '#ef4444', borderRadius: [4, 4, 0, 0] },
+          itemStyle: { color: '#ef4444' },
         },
         {
           name: 'Reembolsos',
-          type: 'bar',
+          type: 'line',
           data: [-(d.refunds?.total_refunds || 0)],
-          itemStyle: { color: '#f59e0b', borderRadius: [4, 4, 0, 0] },
+          itemStyle: { color: '#f59e0b' },
         },
         {
           name: 'Gastos Operativos',
-          type: 'bar',
+          type: 'line',
           data: [-(d.operating_expenses || 0)],
-          itemStyle: { color: '#8b5cf6', borderRadius: [4, 4, 0, 0] },
+          itemStyle: { color: '#8b5cf6' },
         },
       ],
     };
@@ -344,30 +344,36 @@ export class ProfitLossComponent implements OnInit {
         trigger: 'item',
         formatter: (params: any) => `${params.name}: <b>${this.currencyService.format(params.value)}</b>`,
       },
-      legend: {
-        bottom: 0,
-        textStyle: { color: textSecondary },
+      grid: { left: '3%', right: '10%', bottom: '3%', top: '3%', containLabel: true },
+      xAxis: { type: 'value' },
+      yAxis: {
+        type: 'category',
+        data: ['Ganancia Bruta', 'Reembolsos', 'Gastos', 'Ganancia Neta'],
+        axisLabel: { color: textSecondary },
       },
       series: [
         {
-          type: 'pie',
-          radius: ['40%', '70%'],
-          avoidLabelOverlap: false,
-          itemStyle: {
-            borderRadius: 4,
-            borderColor: '#fff',
-            borderWidth: 2,
-          },
-          label: { show: false },
-          emphasis: {
-            label: { show: true, fontSize: 14, fontWeight: 'bold' },
-          },
+          name: 'Ganancias',
+          type: 'line',
           data: [
-            { value: Math.max(0, grossProfit), name: 'Ganancia Bruta', itemStyle: { color: '#22c55e' } },
-            { value: Math.max(0, refunds), name: 'Reembolsos', itemStyle: { color: '#f59e0b' } },
-            { value: Math.max(0, expenses), name: 'Gastos', itemStyle: { color: '#8b5cf6' } },
-            { value: Math.max(0, netProfit), name: 'Ganancia Neta', itemStyle: { color: '#3b82f6' } },
+            { value: Math.max(0, grossProfit), itemStyle: { color: '#22c55e' } },
+            { value: Math.max(0, refunds), itemStyle: { color: '#f59e0b' } },
+            { value: Math.max(0, expenses), itemStyle: { color: '#8b5cf6' } },
+            { value: Math.max(0, netProfit), itemStyle: { color: '#3b82f6' } },
           ],
+          areaStyle: {
+            color: {
+              type: 'linear',
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
+              colorStops: [
+                { offset: 0, color: '#3b82f640' },
+                { offset: 1, color: '#3b82f605' },
+              ],
+            },
+          },
         },
       ],
     };

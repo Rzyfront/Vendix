@@ -1,11 +1,12 @@
 import {Component, OnInit, inject, signal, computed,
   DestroyRef} from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
-
 import { RouterModule } from '@angular/router';
 import { forkJoin } from 'rxjs';
+import { getViewsByCategory, AnalyticsView } from '../../config/analytics-registry';
 
 import { CardComponent } from '../../../../../../shared/components/card/card.component';
+import { ChartComponent } from '../../../../../../shared/components/chart/chart.component';
 import { TableColumn } from '../../../../../../shared/components/table/table.component';
 import {
   ResponsiveDataViewComponent,
@@ -24,18 +25,20 @@ import { AnalyticsService } from '../../services/analytics.service';
 import {
   StockLevelReport,
   InventorySummary} from '../../interfaces/inventory-analytics.interface';
+import { EChartsOption } from 'echarts';
 
 @Component({
   selector: 'vendix-low-stock',
   standalone: true,
-  imports: [
+imports: [
     RouterModule,
     CardComponent,
+    ChartComponent,
     ResponsiveDataViewComponent,
     StatsComponent,
     InputsearchComponent,
     OptionsDropdownComponent
-],
+  ],
   template: `
     <div class="w-full">
       <!-- Stats: Sticky on mobile, static on desktop -->
@@ -78,6 +81,22 @@ import {
           iconColor="text-blue-600"
         ></app-stats>
       </div>
+
+      <!-- Chart: Stock Alert Distribution -->
+      <app-card shadow="none" [responsivePadding]="true" [showHeader]="true">
+        <div slot="header" class="flex flex-col">
+          <span class="text-sm font-bold text-[var(--color-text-primary)]">
+            Distribución por Estado
+          </span>
+        </div>
+        @if (!loading() && chartOptions()) {
+        <app-chart
+          [options]="chartOptions()"
+          size="large"
+          [showLegend]="true"
+        ></app-chart>
+        }
+      </app-card>
 
       <!-- Card with search + data -->
       <div class="md:space-y-4">
@@ -163,6 +182,7 @@ export class LowStockComponent implements OnInit {
   summary = signal<InventorySummary | null>(null);
   searchTerm = signal('');
   statusFilter = signal<string>('');
+  chartOptions = signal<EChartsOption>({});
 
   // Computed: filtered data based on search + status filter
   filteredData = computed(() => {
@@ -305,7 +325,7 @@ export class LowStockComponent implements OnInit {
   ngOnInit(): void {
     this.loadData();
   }
-loadData(): void {
+  loadData(): void {
     this.loading.set(true);
 
     forkJoin({
@@ -316,12 +336,74 @@ loadData(): void {
         next: ({ alerts, summary }) => {
           this.data.set(alerts.data);
           this.summary.set(summary.data);
+          this.updateChart(alerts.data);
           this.loading.set(false);
         },
         error: () => {
           this.toastService.error('Error al cargar alertas de stock');
           this.loading.set(false);
         }});
+  }
+
+  private updateChart(alerts: StockLevelReport[]): void {
+    const borderColor = '#e5e7eb';
+    const textSecondary = '#6b7280';
+
+    const outOfStock = alerts.filter(a => a.status === 'out_of_stock').length;
+    const lowStock = alerts.filter(a => a.status === 'low_stock').length;
+    const inStock = alerts.filter(a => a.status === 'in_stock').length;
+
+    this.chartOptions.set({
+      tooltip: {
+        trigger: 'axis',
+        formatter: (params: any) => {
+          const p = params[0];
+          return `${p.name}: ${p.value} productos`;
+        },
+      },
+      legend: {
+        data: ['Alertas'],
+        bottom: 30,
+        textStyle: { color: textSecondary },
+      },
+      grid: {
+        left: '3%',
+        right: '4%',
+        bottom: '20%',
+        containLabel: true,
+      },
+      xAxis: {
+        type: 'category',
+        data: ['Agotados', 'Stock Bajo', 'En Stock'],
+        axisLine: { lineStyle: { color: borderColor } },
+        axisLabel: { color: textSecondary },
+      },
+      yAxis: {
+        type: 'value',
+        axisLine: { show: false },
+        axisLabel: { color: textSecondary },
+        splitLine: { lineStyle: { color: borderColor } },
+      },
+      series: [
+        {
+          name: 'Alertas',
+          type: 'line',
+          data: [outOfStock, lowStock, inStock],
+          itemStyle: { color: '#f59e0b' },
+          lineStyle: { color: '#f59e0b', width: 2 },
+          areaStyle: {
+            color: {
+              type: 'linear',
+              x: 0, y: 0, x2: 0, y2: 1,
+              colorStops: [
+                { offset: 0, color: '#f59e0b4D' },
+                { offset: 1, color: '#f59e0b0D' },
+              ],
+            },
+          },
+        },
+      ],
+    });
   }
 
   onSearch(term: string): void {

@@ -231,19 +231,15 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
             </div>
           `;
         } },
-      dataZoom: [
-        {
-          type: 'inside',
-          start: 0,
-          end: 100,
-          zoomOnMouseWheel: true,
-          moveOnMouseMove: true,
-        },
-      ],
+      legend: {
+        data: ['Nuevos Clientes'],
+        bottom: 30,
+        textStyle: { color: textSecondary },
+      },
       grid: {
         left: '3%',
         right: '4%',
-        bottom: '18%',
+        bottom: '15%',
         containLabel: true },
       xAxis: {
         type: 'category',
@@ -259,12 +255,8 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
         {
           name: 'Nuevos Clientes',
           type: 'line',
-          smooth: 0.4,
           data: newCustomers,
-          symbol: 'circle',
-          symbolSize: 6,
-          showSymbol: false,
-          emphasis: { scale: true },
+          itemStyle: { color: primaryColor },
           areaStyle: {
             color: {
               type: 'linear',
@@ -273,12 +265,11 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
               x2: 0,
               y2: 1,
               colorStops: [
-                { offset: 0, color: `${primaryColor}60` },
-                { offset: 0.5, color: `${primaryColor}30` },
-                { offset: 1, color: `${primaryColor}05` },
-              ] } },
-          lineStyle: { color: primaryColor, width: 3 },
-          itemStyle: { color: primaryColor },
+                { offset: 0, color: primaryColor + '40' },
+                { offset: 1, color: primaryColor + '05' },
+              ],
+            },
+          },
         },
       ] };
   }
@@ -294,7 +285,7 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
 
     const channelColors = ['#8b5cf6', '#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#6366f1'];
 
-    const labels = channels.map((c) => c.channel);
+    const labels = channels.map((c) => c.display_name || c.channel);
     const values = channels.map((c) => c.new_customers);
 
     this.channelsChartOptions = {
@@ -333,10 +324,15 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
             </div>
           `;
         } },
+      legend: {
+        data: ['Canales'],
+        bottom: 30,
+        textStyle: { color: textSecondary },
+      },
       grid: {
         left: '3%',
         right: '4%',
-        bottom: '15%',
+        bottom: '20%',
         containLabel: true },
       xAxis: {
         type: 'category',
@@ -354,14 +350,25 @@ export class CustomerAcquisitionComponent implements OnInit, OnDestroy {
         splitLine: { lineStyle: { color: borderColor, type: 'dashed' } } },
       series: [
         {
-          name: 'Nuevos Clientes',
-          type: 'bar',
+          name: 'Canales',
+          type: 'line',
           data: values,
           itemStyle: {
             color: (params: any) => channelColors[params.dataIndex % channelColors.length],
-            borderRadius: [6, 6, 0, 0],
           },
-          barMaxWidth: 48,
+          areaStyle: {
+            color: {
+              type: 'linear',
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
+              colorStops: [
+                { offset: 0, color: `${channelColors[0]}40` },
+                { offset: 1, color: `${channelColors[0]}05` },
+              ],
+            },
+          },
         },
       ] };
   }

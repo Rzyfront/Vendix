@@ -237,10 +237,15 @@ this.store.dispatch(SalesActions.clearSalesSummaryState());
           const data = params[0];
           return `${data.name}<br/>Ingresos: ${this.currencyService.format(data.value)}`;
         } },
+      legend: {
+        data: ['Ingresos'],
+        bottom: 30,
+        textStyle: { color: textSecondary },
+      },
       grid: {
         left: '3%',
         right: '4%',
-        bottom: '3%',
+        bottom: '20%',
         containLabel: true },
       xAxis: {
         type: 'category',
@@ -258,7 +263,6 @@ this.store.dispatch(SalesActions.clearSalesSummaryState());
         {
           name: 'Ingresos',
           type: 'line',
-          smooth: true,
           data: revenues,
           areaStyle: {
             color: {
@@ -271,7 +275,6 @@ this.store.dispatch(SalesActions.clearSalesSummaryState());
                 { offset: 0, color: `${successColor}4D` },
                 { offset: 1, color: `${successColor}0D` },
               ] } },
-          lineStyle: { color: successColor, width: 2 },
           itemStyle: { color: successColor } },
       ] };
   }

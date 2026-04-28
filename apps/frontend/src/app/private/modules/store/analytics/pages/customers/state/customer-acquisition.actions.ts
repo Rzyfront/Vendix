@@ -53,6 +53,7 @@ export const clearCustomerAcquisitionState = createAction(
 
 export interface AcquisitionChannel {
   channel: string;
+  display_name?: string;
   new_customers: number;
   conversion_rate: number;
   spend: number;

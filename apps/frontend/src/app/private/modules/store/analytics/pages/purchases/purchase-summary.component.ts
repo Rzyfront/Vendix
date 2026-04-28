@@ -289,10 +289,15 @@ export class PurchaseSummaryComponent implements OnInit {
           return `<strong>${data.name}</strong><br/>Gasto: ${this.currencyService.format(data.value)}`;
         },
       },
+      legend: {
+        data: ['Proveedores'],
+        bottom: 30,
+        textStyle: { color: textSecondary },
+      },
       grid: {
         left: '3%',
         right: '6%',
-        bottom: '3%',
+        bottom: '20%',
         top: '3%',
         containLabel: true,
       },
@@ -313,41 +318,43 @@ export class PurchaseSummaryComponent implements OnInit {
       },
       series: [
         {
-          type: 'bar',
+          name: 'Proveedores',
+          type: 'line',
           data: suppliersData.map((s) => s.total_spent).reverse(),
-          itemStyle: { color: '#3b82f6', borderRadius: [0, 4, 4, 0] },
-          barMaxWidth: 30,
+          itemStyle: { color: '#3b82f6' },
         },
       ],
     };
 
-    // Orders Status Pie
+    // Orders Status Line
     this.ordersStatusChartOptions = {
       tooltip: {
-        trigger: 'item',
-        formatter: (params: any) => `${params.name}: <b>${params.value}</b>`,
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
+        formatter: (params: any) => {
+          const p = params[0];
+          return `${p.name}: <b>${p.value}</b>`;
+        },
       },
       legend: {
-        bottom: 0,
+        data: ['Estado de Órdenes'],
+        bottom: 30,
         textStyle: { color: textSecondary },
+      },
+      grid: { left: '3%', right: '10%', bottom: '20%', top: '3%', containLabel: true },
+      xAxis: { type: 'value' },
+      yAxis: {
+        type: 'category',
+        data: ['Pendientes', 'Completadas'],
+        axisLabel: { color: textSecondary },
       },
       series: [
         {
-          type: 'pie',
-          radius: ['40%', '70%'],
-          avoidLabelOverlap: false,
-          itemStyle: {
-            borderRadius: 4,
-            borderColor: '#fff',
-            borderWidth: 2,
-          },
-          label: { show: false },
-          emphasis: {
-            label: { show: true, fontSize: 14, fontWeight: 'bold' },
-          },
+          name: 'Estado de Órdenes',
+          type: 'line',
           data: [
-            { value: pending, name: 'Pendientes', itemStyle: { color: '#f59e0b' } },
-            { value: completed, name: 'Completadas', itemStyle: { color: '#22c55e' } },
+            { value: pending, itemStyle: { color: '#f59e0b' } },
+            { value: completed, itemStyle: { color: '#22c55e' } },
           ],
         },
       ],

@@ -49,6 +49,7 @@ import {
   CustomerTrend,
   TopCustomer,
   CustomersAnalyticsQueryDto,
+  CustomersByChannel,
 } from '../interfaces/customers-analytics.interface';
 import {
   AbandonedCartsSummary,
@@ -500,6 +501,15 @@ export class AnalyticsService {
   ): Observable<ApiResponse<TopCustomer[]>> {
     return this.http.get<ApiResponse<TopCustomer[]>>(
       this.getApiUrl('customers/top'),
+      { params: this.buildParams(query) },
+    );
+  }
+
+  getCustomersChannels(
+    query: CustomersAnalyticsQueryDto = {},
+  ): Observable<ApiResponse<CustomersByChannel>> {
+    return this.http.get<ApiResponse<CustomersByChannel>>(
+      this.getApiUrl('customers/channels'),
       { params: this.buildParams(query) },
     );
   }

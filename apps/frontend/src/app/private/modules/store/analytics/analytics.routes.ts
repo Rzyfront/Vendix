@@ -259,6 +259,10 @@ export const analyticsRoutes: Routes = [
           },
           {
             path: 'acquisition',
+            providers: [
+              provideState({ name: 'customerAcquisition', reducer: customerAcquisitionReducer }),
+              provideEffects(CustomerAcquisitionEffects),
+            ],
             loadComponent: () =>
               import('./pages/customers/customer-acquisition.component').then(
                 (c) => c.CustomerAcquisitionComponent,

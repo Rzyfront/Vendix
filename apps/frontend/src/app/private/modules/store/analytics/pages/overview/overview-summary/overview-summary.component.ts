@@ -376,12 +376,12 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
         } },
       legend: {
         data: ['Ventas', 'Gastos', 'Impuestos', 'Rend. Bruto', 'Rend. Neto'],
-        bottom: 0,
+        bottom: 30,
         textStyle: { color: textSecondary } },
       grid: {
         left: '3%',
         right: '4%',
-        bottom: '15%',
+        bottom: '20%',
         containLabel: true },
       xAxis: {
         type: 'category',
@@ -399,9 +399,9 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
         {
           name: 'Ventas',
           type: 'line',
-          smooth: true,
+          
           data: trends.map((t) => t.sales),
-          lineStyle: { color: '#22c55e', width: 2 },
+          
           itemStyle: { color: '#22c55e' },
           areaStyle: {
             color: {
@@ -417,9 +417,9 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
         {
           name: 'Gastos',
           type: 'line',
-          smooth: true,
+          
           data: trends.map((t) => t.expenses),
-          lineStyle: { color: '#ef4444', width: 2 },
+          
           itemStyle: { color: '#ef4444' },
           areaStyle: {
             color: {
@@ -435,9 +435,9 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
         {
           name: 'Impuestos',
           type: 'line',
-          smooth: true,
+          
           data: trends.map((t) => t.taxes),
-          lineStyle: { color: '#f59e0b', width: 2 },
+          
           itemStyle: { color: '#f59e0b' },
           areaStyle: {
             color: {
@@ -453,9 +453,9 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
         {
           name: 'Rend. Bruto',
           type: 'line',
-          smooth: true,
+          
           data: trends.map((t) => t.gross_profit),
-          lineStyle: { color: '#3b82f6', width: 2 },
+          
           itemStyle: { color: '#3b82f6' },
           areaStyle: {
             color: {
@@ -471,9 +471,9 @@ this.store.dispatch(OverviewActions.clearOverviewSummaryState());
         {
           name: 'Rend. Neto',
           type: 'line',
-          smooth: true,
+          
           data: trends.map((t) => t.net_profit),
-          lineStyle: { color: '#8b5cf6', width: 2 },
+          
           itemStyle: { color: '#8b5cf6' },
           areaStyle: {
             color: {

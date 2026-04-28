@@ -222,44 +222,67 @@ onDateRangeChange(range: DateRangeFilter): void {
   }
 
   private updateChart(data: SalesByPaymentMethod[]): void {
-    const chartData = data.map((item) => ({
-      value: item.total_amount,
-      name: item.display_name}));
+    const categories = data.map((item) => item.display_name);
+    const values = data.map((item) => item.total_amount);
+    const colors = ['#3b82f6', '#22c55e', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899'];
 
     this.chartOptions.set({
       tooltip: {
-        trigger: 'item',
+        trigger: 'axis',
+        axisPointer: { type: 'shadow' },
         formatter: (params: any) => {
-          return `${params.name}<br/>Monto: ${this.formatCurrency(params.value)}<br/>Porcentaje: ${params.percent}%`;
+          let html = `<strong>${params[0].name}</strong><br/>`;
+          for (const p of params) {
+            if (p.value != null) html += `${p.marker} ${p.seriesName}: <b>${this.formatCurrency(p.value)}</b><br/>`;
+          }
+          return html;
         }},
       legend: {
-        orient: 'vertical',
-        right: '5%',
-        top: 'middle',
-        textStyle: { color: '#6b7280' }},
-      series: [
-        {
-          name: 'Ventas por Método de Pago',
-          type: 'pie',
-          radius: ['40%', '70%'],
-          center: ['35%', '50%'],
-          avoidLabelOverlap: false,
-          itemStyle: {
-            borderRadius: 4,
-            borderColor: '#fff',
-            borderWidth: 2},
-          label: {
-            show: false},
-          emphasis: {
-            label: {
-              show: true,
-              fontSize: 14,
-              fontWeight: 'bold'}},
-          labelLine: {
-            show: false},
-          data: chartData},
-      ],
-      color: ['#22c55e', '#3b82f6', '#f59e0b', '#ef4444', '#8b5cf6']});
+        data: ['Ventas'],
+        bottom: 30,
+        textStyle: { color: '#6b7280' },
+      },
+      grid: { left: '3%', right: '4%', bottom: '25%', top: '3%', containLabel: true },
+      xAxis: {
+        type: 'category',
+        data: categories,
+        axisLine: { lineStyle: { color: '#e5e7eb' } },
+        axisLabel: { color: '#6b7280', fontSize: 11 },
+      },
+      yAxis: {
+        type: 'value',
+        axisLine: { show: false },
+        axisLabel: {
+          color: '#6b7280',
+          formatter: (v: number) => this.formatCurrency(v),
+        },
+        splitLine: { lineStyle: { color: '#f3f4f6' } },
+      },
+      series: [{
+          name: 'Ventas',
+          type: 'line',
+          data: values,
+          smooth: 0.3,
+          symbol: 'circle',
+          symbolSize: 10,
+          showSymbol: true,
+          itemStyle: { color: '#3b82f6' },
+          lineStyle: { width: 3 },
+          areaStyle: {
+            color: {
+              type: 'linear',
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
+              colorStops: [
+                { offset: 0, color: '#3b82f640' },
+                { offset: 1, color: '#3b82f605' },
+              ],
+            },
+          },
+        }],
+    });
   }
 
   exportReport(): void {

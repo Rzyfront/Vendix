@@ -274,29 +274,16 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
       },
       legend: {
         data: ['Abandonados', 'Recuperados'],
-        bottom: 0,
+        bottom: 30,
         textStyle: { color: textSecondary, fontSize: 11 },
         icon: 'roundRect',
         itemWidth: 14,
         itemHeight: 8,
       },
-      dataZoom: [
-        { type: 'inside', start: 0, end: 100, zoomOnMouseWheel: true, moveOnMouseMove: true },
-        {
-          type: 'slider',
-          show: true,
-          bottom: 32,
-          height: 25,
-          borderColor: 'transparent',
-          backgroundColor: 'rgba(0,0,0,0.03)',
-          handleStyle: { color: primaryColor, borderColor: primaryColor },
-          textStyle: { color: textSecondary, fontSize: 10 },
-        },
-      ],
       grid: {
         left: '3%',
         right: '4%',
-        bottom: '18%',
+        bottom: '15%',
         containLabel: true,
       },
       xAxis: {
@@ -315,46 +302,40 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
         {
           name: 'Abandonados',
           type: 'line',
-          smooth: 0.4,
           data: abandonedCarts,
-          symbol: 'circle',
-          symbolSize: 5,
-          showSymbol: false,
-          emphasis: { scale: true },
+          itemStyle: { color: primaryColor },
           areaStyle: {
             color: {
               type: 'linear',
-              x: 0, y: 0, x2: 0, y2: 1,
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
               colorStops: [
-                { offset: 0, color: `${primaryColor}50` },
+                { offset: 0, color: `${primaryColor}40` },
                 { offset: 1, color: `${primaryColor}05` },
               ],
             },
           },
-          lineStyle: { color: primaryColor, width: 2.5 },
-          itemStyle: { color: primaryColor },
         },
         {
           name: 'Recuperados',
           type: 'line',
-          smooth: 0.4,
           data: recoveredCarts,
-          symbol: 'circle',
-          symbolSize: 5,
-          showSymbol: false,
-          emphasis: { scale: true },
+          itemStyle: { color: secondaryColor },
           areaStyle: {
             color: {
               type: 'linear',
-              x: 0, y: 0, x2: 0, y2: 1,
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
               colorStops: [
-                { offset: 0, color: `${secondaryColor}50` },
+                { offset: 0, color: `${secondaryColor}40` },
                 { offset: 1, color: `${secondaryColor}05` },
               ],
             },
           },
-          lineStyle: { color: secondaryColor, width: 2.5 },
-          itemStyle: { color: secondaryColor },
         },
       ],
     };
@@ -430,7 +411,7 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
       series: [
         {
           name: 'Cantidad',
-          type: 'bar',
+          type: 'line',
           data: counts,
           itemStyle: {
             color: {
@@ -443,14 +424,6 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
                 { offset: 0, color: primaryColor },
                 { offset: 1, color: `${primaryColor}60` },
               ],
-            },
-            borderRadius: [4, 4, 0, 0],
-          },
-          barMaxWidth: 50,
-          emphasis: {
-            itemStyle: {
-              shadowBlur: 8,
-              shadowColor: `${primaryColor}40`,
             },
           },
         },
@@ -491,13 +464,15 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
           `;
         },
       },
-      dataZoom: [
-        { type: 'inside', start: 0, end: 100, zoomOnMouseWheel: true, moveOnMouseMove: true },
-      ],
+      legend: {
+        data: ['Tasa Recuperación'],
+        bottom: 30,
+        textStyle: { color: textSecondary },
+      },
       grid: {
         left: '3%',
         right: '4%',
-        bottom: '18%',
+        bottom: '15%',
         containLabel: true,
       },
       xAxis: {
@@ -521,12 +496,8 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
         {
           name: 'Tasa Recuperación',
           type: 'line',
-          smooth: 0.4,
           data: recoveryRates,
-          symbol: 'circle',
-          symbolSize: 5,
-          showSymbol: false,
-          emphasis: { scale: true },
+          itemStyle: { color: primaryColor },
           areaStyle: {
             color: {
               type: 'linear',
@@ -535,13 +506,11 @@ export class AbandonedCartsComponent implements OnInit, OnDestroy {
               x2: 0,
               y2: 1,
               colorStops: [
-                { offset: 0, color: `${primaryColor}50` },
+                { offset: 0, color: `${primaryColor}40` },
                 { offset: 1, color: `${primaryColor}05` },
               ],
             },
           },
-          lineStyle: { color: primaryColor, width: 2.5 },
-          itemStyle: { color: primaryColor },
         },
       ],
     };

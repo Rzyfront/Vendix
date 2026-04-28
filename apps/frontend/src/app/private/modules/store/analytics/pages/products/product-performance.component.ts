@@ -228,12 +228,19 @@ this.store.dispatch(ProductsActions.clearProductsAnalyticsState());
           const data = params[0];
           const trend = trends[data.dataIndex];
           return `${data.name}<br/>Unidades: ${data.value}<br/>Ingresos: ${this.currencyService.format(trend.revenue)}`;
-        } },
+        },
+      },
+      legend: {
+        data: ['Unidades'],
+        bottom: 30,
+        textStyle: { color: textSecondary },
+      },
       grid: {
         left: '3%',
         right: '4%',
-        bottom: '3%',
-        containLabel: true },
+        bottom: '20%',
+        containLabel: true,
+      },
       xAxis: {
         type: 'category',
         data: labels,
@@ -277,50 +284,69 @@ this.store.dispatch(ProductsActions.clearProductsAnalyticsState());
     const textSecondary =
       style.getPropertyValue('--color-text-secondary').trim() || '#6b7280';
 
-    // Top 5 by units (reversed for horizontal bar chart — top item at top)
+    // Top 5 by units
     const top5 = topSellers.slice(0, 5);
-    const reversed = [...top5].reverse();
-    const names = reversed.map((p) =>
+    const names = top5.map((p) =>
       p.product_name.length > 25
         ? p.product_name.substring(0, 25) + '...'
         : p.product_name,
     );
-    const units = reversed.map((p) => p.units_sold);
+    const units = top5.map((p) => p.units_sold);
 
     this.topSellersChartOptions = {
       tooltip: {
         trigger: 'axis',
-        axisPointer: { type: 'shadow' },
         formatter: (params: any) => {
           const data = params[0];
-          const product = reversed[data.dataIndex];
+          const product = top5[data.dataIndex];
           return `<strong>${product.product_name}</strong><br/>Unidades: ${data.value}<br/>Ingresos: ${this.currencyService.format(product.revenue)}`;
-        } },
+        },
+      },
+      legend: {
+        data: ['Unidades'],
+        bottom: 30,
+        textStyle: { color: textSecondary },
+      },
       grid: {
         left: '3%',
-        right: '6%',
-        bottom: '3%',
+        right: '4%',
+        bottom: '20%',
         top: '3%',
-        containLabel: true },
+        containLabel: true,
+      },
       xAxis: {
-        type: 'value',
-        axisLine: { show: false },
-        axisLabel: { color: textSecondary },
-        splitLine: { lineStyle: { color: borderColor } } },
-      yAxis: {
         type: 'category',
         data: names,
         axisLine: { lineStyle: { color: borderColor } },
-        axisLabel: { color: textSecondary, fontSize: 11 } },
+        axisLabel: { color: textSecondary, fontSize: 11 },
+      },
+      yAxis: {
+        type: 'value',
+        axisLine: { show: false },
+        axisLabel: { color: textSecondary },
+        splitLine: { lineStyle: { color: borderColor } },
+      },
       series: [
         {
           name: 'Unidades',
-          type: 'bar',
+          type: 'line',
           data: units,
-          itemStyle: {
-            color: primaryColor,
-            borderRadius: [0, 4, 4, 0] },
-          barMaxWidth: 30 },
-      ] };
+          itemStyle: { color: primaryColor },
+          areaStyle: {
+            color: {
+              type: 'linear',
+              x: 0,
+              y: 0,
+              x2: 0,
+              y2: 1,
+              colorStops: [
+                { offset: 0, color: `${primaryColor}4D` },
+                { offset: 1, color: `${primaryColor}0D` },
+              ],
+            },
+          },
+        },
+      ],
+    };
   }
 }

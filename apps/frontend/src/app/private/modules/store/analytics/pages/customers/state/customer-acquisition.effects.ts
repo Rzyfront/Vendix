@@ -87,15 +87,29 @@ export class CustomerAcquisitionEffects {
         this.store.select(selectDateRange),
       ),
       mergeMap(([, dateRange]) => {
-        const mockChannels: AcquisitionChannel[] = [
-          { channel: 'Directo', new_customers: 45, conversion_rate: 12.5, spend: 0 },
-          { channel: 'Organic Search', new_customers: 32, conversion_rate: 8.3, spend: 0 },
-          { channel: 'Paid Ads', new_customers: 28, conversion_rate: 15.2, spend: 150000 },
-          { channel: 'Social Media', new_customers: 18, conversion_rate: 6.7, spend: 80000 },
-          { channel: 'Email', new_customers: 12, conversion_rate: 22.1, spend: 25000 },
-          { channel: 'Referral', new_customers: 8, conversion_rate: 18.9, spend: 0 },
-        ];
-        return of(AcquisitionActions.loadAcquisitionChannelsSuccess({ channels: mockChannels }));
+        const query: CustomersAnalyticsQueryDto = {
+          date_range: dateRange,
+        };
+        return this.analyticsService.getCustomersChannels(query).pipe(
+          map((response) => {
+            const channelsData = response.data?.channels || response.data || [];
+            return AcquisitionActions.loadAcquisitionChannelsSuccess({
+              channels: channelsData.map((c: any) => ({
+                channel: c.channel || c.display_name || 'Unknown',
+                display_name: c.display_name || c.channel || 'Unknown',
+                new_customers: c.new_customers || 0,
+                conversion_rate: c.conversion_rate || (c.average_order_value > 0 ? (c.new_customers / c.total_orders) * 100 : 0),
+                spend: c.spend || c.revenue || 0,
+              })),
+            });
+          }),
+          catchError((error) => {
+            console.error('Channels error:', error);
+            return of(AcquisitionActions.loadAcquisitionChannelsFailure({
+              error: error.error?.message || error.message || 'Error al cargar los canales de adquisición',
+            }));
+          }),
+        );
       }),
     ),
   );

@@ -240,12 +240,12 @@ onDateRangeChange(range: DateRangeFilter): void {
         axisPointer: { type: 'cross' }},
       legend: {
         data: ['Ingresos', 'Órdenes'],
-        top: 0,
+        bottom: 30,
         textStyle: { color: '#6b7280' }},
       grid: {
         left: '3%',
         right: '4%',
-        bottom: '3%',
+        bottom: '15%',
         top: '15%',
         containLabel: true},
       xAxis: {
@@ -276,10 +276,8 @@ onDateRangeChange(range: DateRangeFilter): void {
         {
           name: 'Ingresos',
           type: 'line',
-          smooth: true,
           data: revenues,
           yAxisIndex: 0,
-          lineStyle: { color: '#22c55e', width: 2 },
           itemStyle: { color: '#22c55e' },
           areaStyle: {
             color: {
@@ -291,15 +289,15 @@ onDateRangeChange(range: DateRangeFilter): void {
               colorStops: [
                 { offset: 0, color: 'rgba(34, 197, 94, 0.2)' },
                 { offset: 1, color: 'rgba(34, 197, 94, 0)' },
-              ]}}},
+              ] }},
+        },
         {
           name: 'Órdenes',
-          type: 'bar',
+          type: 'line',
           data: orders,
           yAxisIndex: 1,
-          itemStyle: {
-            color: '#3b82f6',
-            borderRadius: [4, 4, 0, 0]}},
+          itemStyle: { color: '#3b82f6' },
+        },
       ]});
 
     // AOV Chart
@@ -310,10 +308,15 @@ onDateRangeChange(range: DateRangeFilter): void {
           const d = params[0];
           return `${d.name}<br/>Ticket Promedio: ${this.formatCurrency(d.value)}`;
         }},
+      legend: {
+        data: ['Ticket Promedio'],
+        bottom: 30,
+        textStyle: { color: '#6b7280' },
+      },
       grid: {
         left: '3%',
         right: '4%',
-        bottom: '3%',
+        bottom: '15%',
         containLabel: true},
       xAxis: {
         type: 'category',
@@ -332,9 +335,7 @@ onDateRangeChange(range: DateRangeFilter): void {
         {
           name: 'Ticket Promedio',
           type: 'line',
-          smooth: true,
           data: aov,
-          lineStyle: { color: '#8b5cf6', width: 2 },
           itemStyle: { color: '#8b5cf6' },
           areaStyle: {
             color: {
@@ -346,7 +347,8 @@ onDateRangeChange(range: DateRangeFilter): void {
               colorStops: [
                 { offset: 0, color: 'rgba(139, 92, 246, 0.2)' },
                 { offset: 1, color: 'rgba(139, 92, 246, 0)' },
-              ]}}},
+              ] }},
+        },
       ]});
   }
 
