@@ -98,12 +98,14 @@ export class DispatchNotesService {
       throw new VendixHttpException(ErrorCodes.CUST_FIND_001);
     }
 
-    const customer_name = `${customer.first_name || ''} ${customer.last_name || ''}`.trim();
+    const customer_name =
+      `${customer.first_name || ''} ${customer.last_name || ''}`.trim();
 
     // Calculate totals from items
     const items: any[] = dto.items || [];
     const subtotal = items.reduce(
-      (sum, item) => sum + Number(item.unit_price || 0) * item.dispatched_quantity,
+      (sum, item) =>
+        sum + Number(item.unit_price || 0) * item.dispatched_quantity,
       0,
     );
     const total_discount = items.reduce(
@@ -158,7 +160,7 @@ export class DispatchNotesService {
                 discount_amount: item.discount_amount || 0,
                 tax_amount: item.tax_amount || 0,
                 total_price:
-                  (Number(item.unit_price || 0) * item.dispatched_quantity) -
+                  Number(item.unit_price || 0) * item.dispatched_quantity -
                   Number(item.discount_amount || 0) +
                   Number(item.tax_amount || 0),
                 lot_serial: item.lot_serial,
@@ -224,12 +226,11 @@ export class DispatchNotesService {
       throw new NotFoundException('Orden de venta no encontrada');
     }
 
-    const customer_name = `${sales_order.customer?.first_name || ''} ${sales_order.customer?.last_name || ''}`.trim();
+    const customer_name =
+      `${sales_order.customer?.first_name || ''} ${sales_order.customer?.last_name || ''}`.trim();
 
     // Build items from sales order items
-    const items_map = new Map(
-      dto.items.map((i) => [i.sales_order_item_id, i]),
-    );
+    const items_map = new Map(dto.items.map((i) => [i.sales_order_item_id, i]));
 
     const dispatch_items: any[] = [];
     for (const dto_item of dto.items) {
@@ -253,7 +254,7 @@ export class DispatchNotesService {
         discount_amount: so_item.discount_amount || 0,
         tax_amount: so_item.tax_amount || 0,
         total_price:
-          (Number(so_item.unit_price || 0) * dto_item.dispatched_quantity) -
+          Number(so_item.unit_price || 0) * dto_item.dispatched_quantity -
           Number(so_item.discount_amount || 0) +
           Number(so_item.tax_amount || 0),
         lot_serial: dto_item.lot_serial,
@@ -262,7 +263,8 @@ export class DispatchNotesService {
     }
 
     const subtotal = dispatch_items.reduce(
-      (sum, item) => sum + Number(item.unit_price || 0) * item.dispatched_quantity,
+      (sum, item) =>
+        sum + Number(item.unit_price || 0) * item.dispatched_quantity,
       0,
     );
     const total_discount = dispatch_items.reduce(
@@ -434,11 +436,16 @@ export class DispatchNotesService {
         if (dto.customer_id && dto.customer_id !== dispatch_note.customer_id) {
           const customer = await tx.users.findUnique({
             where: { id: dto.customer_id },
-            select: { first_name: true, last_name: true, document_number: true },
+            select: {
+              first_name: true,
+              last_name: true,
+              document_number: true,
+            },
           });
           if (customer) {
             customer_data = {
-              customer_name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+              customer_name:
+                `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
               customer_tax_id: customer.document_number || null,
             };
           }
@@ -477,7 +484,7 @@ export class DispatchNotesService {
                 discount_amount: item.discount_amount || 0,
                 tax_amount: item.tax_amount || 0,
                 total_price:
-                  (Number(item.unit_price || 0) * item.dispatched_quantity) -
+                  Number(item.unit_price || 0) * item.dispatched_quantity -
                   Number(item.discount_amount || 0) +
                   Number(item.tax_amount || 0),
                 lot_serial: item.lot_serial,
@@ -502,7 +509,8 @@ export class DispatchNotesService {
       });
       if (customer) {
         customer_data = {
-          customer_name: `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
+          customer_name:
+            `${customer.first_name || ''} ${customer.last_name || ''}`.trim(),
           customer_tax_id: customer.document_number || null,
         };
       }
@@ -597,8 +605,16 @@ export class DispatchNotesService {
     };
 
     if (query.customer_id) where.customer_id = Number(query.customer_id);
-    if (query.date_from) where.emission_date = { ...(where.emission_date || {}), gte: new Date(query.date_from) };
-    if (query.date_to) where.emission_date = { ...(where.emission_date || {}), lte: new Date(query.date_to) };
+    if (query.date_from)
+      where.emission_date = {
+        ...(where.emission_date || {}),
+        gte: new Date(query.date_from),
+      };
+    if (query.date_to)
+      where.emission_date = {
+        ...(where.emission_date || {}),
+        lte: new Date(query.date_to),
+      };
 
     const page = Number(query.page || 1);
     const limit = Number(query.limit || 20);
@@ -631,8 +647,16 @@ export class DispatchNotesService {
 
     if (query.customer_id) where.customer_id = Number(query.customer_id);
     if (query.status) where.status = query.status;
-    if (query.date_from) where.emission_date = { ...(where.emission_date || {}), gte: new Date(query.date_from) };
-    if (query.date_to) where.emission_date = { ...(where.emission_date || {}), lte: new Date(query.date_to) };
+    if (query.date_from)
+      where.emission_date = {
+        ...(where.emission_date || {}),
+        gte: new Date(query.date_from),
+      };
+    if (query.date_to)
+      where.emission_date = {
+        ...(where.emission_date || {}),
+        lte: new Date(query.date_to),
+      };
     if (query.search) {
       where.OR = [
         { dispatch_number: { contains: query.search, mode: 'insensitive' } },
@@ -649,7 +673,9 @@ export class DispatchNotesService {
         include: {
           customer: { select: { id: true, first_name: true, last_name: true } },
           dispatch_note_items: {
-            include: { product: { select: { id: true, name: true, sku: true } } },
+            include: {
+              product: { select: { id: true, name: true, sku: true } },
+            },
           },
         },
         orderBy: { emission_date: 'desc' },
@@ -675,29 +701,47 @@ export class DispatchNotesService {
     };
 
     if (query.customer_id) where.customer_id = Number(query.customer_id);
-    if (query.date_from) where.emission_date = { ...(where.emission_date || {}), gte: new Date(query.date_from) };
-    if (query.date_to) where.emission_date = { ...(where.emission_date || {}), lte: new Date(query.date_to) };
+    if (query.date_from)
+      where.emission_date = {
+        ...(where.emission_date || {}),
+        gte: new Date(query.date_from),
+      };
+    if (query.date_to)
+      where.emission_date = {
+        ...(where.emission_date || {}),
+        lte: new Date(query.date_to),
+      };
 
     const dispatch_notes = await this.prisma.dispatch_notes.findMany({
       where,
       include: {
         dispatch_note_items: true,
         invoice: {
-          select: { id: true, invoice_number: true, total_amount: true, status: true },
+          select: {
+            id: true,
+            invoice_number: true,
+            total_amount: true,
+            status: true,
+          },
         },
       },
       orderBy: { emission_date: 'desc' },
     });
 
     const summary = {
-      total_dispatched: dispatch_notes.reduce((sum, dn) => sum + Number(dn.grand_total), 0),
+      total_dispatched: dispatch_notes.reduce(
+        (sum, dn) => sum + Number(dn.grand_total),
+        0,
+      ),
       total_invoiced: dispatch_notes
         .filter((dn) => dn.invoice)
         .reduce((sum, dn) => sum + Number(dn.invoice?.total_amount || 0), 0),
       gap: 0,
       dispatch_notes_count: dispatch_notes.length,
-      invoiced_count: dispatch_notes.filter((dn) => dn.status === 'invoiced').length,
-      pending_count: dispatch_notes.filter((dn) => dn.status === 'delivered').length,
+      invoiced_count: dispatch_notes.filter((dn) => dn.status === 'invoiced')
+        .length,
+      pending_count: dispatch_notes.filter((dn) => dn.status === 'delivered')
+        .length,
     };
     summary.gap = summary.total_dispatched - summary.total_invoiced;
 

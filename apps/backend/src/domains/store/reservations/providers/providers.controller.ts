@@ -35,51 +35,84 @@ export class ProvidersController {
   @Permissions('store:reservations:read')
   async findAll() {
     const result = await this.providersService.findAll();
-    return this.responseService.success(result, 'Proveedores obtenidos exitosamente');
+    return this.responseService.success(
+      result,
+      'Proveedores obtenidos exitosamente',
+    );
   }
 
   @Get('available-employees')
   @Permissions('store:reservations:read')
   async getAvailableEmployees() {
     const result = await this.providersService.getAvailableEmployees();
-    return this.responseService.success(result, 'Empleados disponibles obtenidos exitosamente');
+    return this.responseService.success(
+      result,
+      'Empleados disponibles obtenidos exitosamente',
+    );
   }
 
   @Get('for-service/:productId')
   @Permissions('store:reservations:read')
-  async getProvidersForService(@Param('productId', ParseIntPipe) productId: number) {
-    const result = await this.providersService.getProvidersForService(productId);
-    return this.responseService.success(result, 'Proveedores del servicio obtenidos exitosamente');
+  async getProvidersForService(
+    @Param('productId', ParseIntPipe) productId: number,
+  ) {
+    const result =
+      await this.providersService.getProvidersForService(productId);
+    return this.responseService.success(
+      result,
+      'Proveedores del servicio obtenidos exitosamente',
+    );
   }
 
   @Get(':id')
   @Permissions('store:reservations:read')
   async findOne(@Param('id', ParseIntPipe) id: number) {
     const result = await this.providersService.findOne(id);
-    return this.responseService.success(result, 'Proveedor obtenido exitosamente');
+    return this.responseService.success(
+      result,
+      'Proveedor obtenido exitosamente',
+    );
   }
 
   @Post()
   @Permissions('store:reservations:update')
   async create(@Body() dto: CreateProviderDto) {
     const result = await this.providersService.create(dto);
-    return this.responseService.created(result, 'Proveedor creado exitosamente');
+    return this.responseService.created(
+      result,
+      'Proveedor creado exitosamente',
+    );
   }
 
   @Patch(':id')
   @Permissions('store:reservations:update')
-  async update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdateProviderDto) {
+  async update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdateProviderDto,
+  ) {
     const result = await this.providersService.update(id, dto);
-    return this.responseService.success(result, 'Proveedor actualizado exitosamente');
+    return this.responseService.success(
+      result,
+      'Proveedor actualizado exitosamente',
+    );
   }
 
   // --- Services ---
 
   @Post(':id/services')
   @Permissions('store:reservations:update')
-  async assignService(@Param('id', ParseIntPipe) id: number, @Body() dto: AssignServiceDto) {
-    const result = await this.providersService.assignService(id, dto.product_id);
-    return this.responseService.created(result, 'Servicio asignado exitosamente');
+  async assignService(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: AssignServiceDto,
+  ) {
+    const result = await this.providersService.assignService(
+      id,
+      dto.product_id,
+    );
+    return this.responseService.created(
+      result,
+      'Servicio asignado exitosamente',
+    );
   }
 
   @Delete(':id/services/:productId')
@@ -98,7 +131,10 @@ export class ProvidersController {
   @Permissions('store:reservations:read')
   async getSchedule(@Param('id', ParseIntPipe) id: number) {
     const result = await this.providerScheduleService.getSchedule(id);
-    return this.responseService.success(result, 'Horario obtenido exitosamente');
+    return this.responseService.success(
+      result,
+      'Horario obtenido exitosamente',
+    );
   }
 
   @Put(':id/schedules')
@@ -107,8 +143,14 @@ export class ProvidersController {
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: UpsertProviderScheduleDto,
   ) {
-    const result = await this.providerScheduleService.upsertSchedule(id, dto.items);
-    return this.responseService.success(result, 'Horario guardado exitosamente');
+    const result = await this.providerScheduleService.upsertSchedule(
+      id,
+      dto.items,
+    );
+    return this.responseService.success(
+      result,
+      'Horario guardado exitosamente',
+    );
   }
 
   // --- Exceptions ---
@@ -120,8 +162,15 @@ export class ProvidersController {
     @Query('date_from') dateFrom?: string,
     @Query('date_to') dateTo?: string,
   ) {
-    const result = await this.providerScheduleService.getExceptions(id, dateFrom, dateTo);
-    return this.responseService.success(result, 'Excepciones obtenidas exitosamente');
+    const result = await this.providerScheduleService.getExceptions(
+      id,
+      dateFrom,
+      dateTo,
+    );
+    return this.responseService.success(
+      result,
+      'Excepciones obtenidas exitosamente',
+    );
   }
 
   @Post(':id/exceptions')
@@ -131,13 +180,19 @@ export class ProvidersController {
     @Body() dto: CreateProviderExceptionDto,
   ) {
     const result = await this.providerScheduleService.createException(id, dto);
-    return this.responseService.created(result, 'Excepcion creada exitosamente');
+    return this.responseService.created(
+      result,
+      'Excepcion creada exitosamente',
+    );
   }
 
   @Delete(':id/exceptions/:exId')
   @Permissions('store:reservations:update')
   async deleteException(@Param('exId', ParseIntPipe) exId: number) {
     await this.providerScheduleService.deleteException(exId);
-    return this.responseService.success(null, 'Excepcion eliminada exitosamente');
+    return this.responseService.success(
+      null,
+      'Excepcion eliminada exitosamente',
+    );
   }
 }

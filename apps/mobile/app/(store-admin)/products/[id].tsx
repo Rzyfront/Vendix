@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, ScrollView, Pressable } from 'react-native';
+import { View, Text, ScrollView, Pressable, StyleSheet, Image } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ProductService } from '@/features/store/services';
@@ -12,6 +12,7 @@ import { Button } from '@/shared/components/button/button';
 import { Spinner } from '@/shared/components/spinner/spinner';
 import { ConfirmDialog } from '@/shared/components/confirm-dialog/confirm-dialog';
 import { toastSuccess, toastError } from '@/shared/components/toast/toast.store';
+import { spacing, borderRadius, typography, colorScales, colors } from '@/shared/theme';
 
 const stateVariant = (state: ProductState) =>
   state === 'active' ? 'success' : state === 'inactive' ? 'warning' : 'default';
@@ -21,9 +22,9 @@ const stateLabel = (state: ProductState) =>
 
 function InfoRow({ label, value }: { label: string; value: string }) {
   return (
-    <View className="flex-row justify-between py-2 border-b border-gray-100">
-      <Text className="text-sm text-gray-500">{label}</Text>
-      <Text className="text-sm font-medium text-gray-900">{value}</Text>
+    <View style={styles.infoRow}>
+      <Text style={styles.infoLabel}>{label}</Text>
+      <Text style={styles.infoValue}>{value}</Text>
     </View>
   );
 }
@@ -66,32 +67,32 @@ export default function ProductDetailScreen() {
 
   if (isLoading || !product) {
     return (
-      <View className="flex-1 items-center justify-center bg-white">
+      <View style={styles.loadingContainer}>
         <Spinner />
       </View>
     );
   }
 
   return (
-    <View className="flex-1 bg-white">
+    <View style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false}>
-        <View className="h-48 bg-gray-100 items-center justify-center">
+        <View style={styles.imagePlaceholder}>
           {product.image_url ? (
-            <Icon name="package" size={64} color="#9ca3af" />
+            <Image source={{ uri: product.image_url }} style={styles.productImage} />
           ) : (
-            <Icon name="package" size={64} color="#9ca3af" />
+            <Icon name="package" size={64} color={colorScales.gray[400]} />
           )}
         </View>
 
-        <View className="p-4 gap-4">
-          <View className="flex-row items-center justify-between">
-            <Text className="text-xl font-bold text-gray-900 flex-1" numberOfLines={2}>
+        <View style={styles.content}>
+          <View style={styles.titleRow}>
+            <Text style={styles.productName} numberOfLines={2}>
               {product.name}
             </Text>
             <Badge label={stateLabel(product.state)} variant={stateVariant(product.state)} />
           </View>
 
-          <Card className="p-4">
+          <Card style={styles.cardPadding}>
             <InfoRow label="Precio" value={formatCurrency(product.final_price)} />
             {product.base_price !== product.final_price && (
               <InfoRow label="Precio base" value={formatCurrency(product.base_price)} />
@@ -107,16 +108,16 @@ export default function ProductDetailScreen() {
           </Card>
 
           {product.description && (
-            <Card className="p-4">
-              <Text className="text-sm font-semibold text-gray-700 mb-2">Descripción</Text>
-              <Text className="text-sm text-gray-600">{product.description}</Text>
+            <Card style={styles.cardPadding}>
+              <Text style={styles.sectionTitle}>Descripción</Text>
+              <Text style={styles.descriptionText}>{product.description}</Text>
             </Card>
           )}
 
           {product.categories && product.categories.length > 0 && (
-            <Card className="p-4">
-              <Text className="text-sm font-semibold text-gray-700 mb-2">Categorías</Text>
-              <View className="flex-row gap-2 flex-wrap">
+            <Card style={styles.cardPadding}>
+              <Text style={styles.sectionTitle}>Categorías</Text>
+              <View style={styles.wrapRow}>
                 {product.categories.map((cat) => (
                   <Badge key={cat.id} label={cat.name} variant="info" size="sm" />
                 ))}
@@ -125,22 +126,22 @@ export default function ProductDetailScreen() {
           )}
 
           {product.brand && (
-            <Card className="p-4">
+            <Card style={styles.cardPadding}>
               <InfoRow label="Marca" value={product.brand.name} />
             </Card>
           )}
 
           {product.product_variants && product.product_variants.length > 0 && (
-            <Card className="p-4">
-              <Text className="text-sm font-semibold text-gray-700 mb-2">
+            <Card style={styles.cardPadding}>
+              <Text style={styles.sectionTitle}>
                 Variantes ({product.product_variants.length})
               </Text>
               {product.product_variants.map((variant, idx) => (
-                <View key={variant.id ?? idx} className="flex-row justify-between py-2 border-b border-gray-100">
-                  <Text className="text-sm text-gray-700">
+                <View key={variant.id ?? idx} style={styles.infoRow}>
+                  <Text style={styles.variantName}>
                     {variant.name ?? `Variante ${idx + 1}`}
                   </Text>
-                  <Text className="text-sm font-medium text-gray-900">
+                  <Text style={styles.infoValue}>
                     {formatCurrency(variant.price_override ?? product.final_price)}
                   </Text>
                 </View>
@@ -150,11 +151,11 @@ export default function ProductDetailScreen() {
         </View>
       </ScrollView>
 
-      <View className="p-4 gap-3 border-t border-gray-200 bg-white">
-        <View className="flex-row gap-3">
+      <View style={styles.footer}>
+        <View style={styles.footerRow}>
           <Button
             title="Editar"
-            onPress={() => router.push(`/(store-admin)/products/create` as never)}
+            onPress={() => router.push(`/(store-admin)/products/edit/${id}` as never)}
             variant="primary"
             fullWidth
           />
@@ -189,3 +190,91 @@ export default function ProductDetailScreen() {
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.background,
+  },
+  imagePlaceholder: {
+    height: 192,
+    backgroundColor: colorScales.gray[100],
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  productImage: {
+    width: '100%',
+    height: 192,
+  },
+  content: {
+    padding: spacing[4],
+    gap: spacing[4],
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  productName: {
+    fontSize: typography.fontSize.xl,
+    fontWeight: typography.fontWeight.bold,
+    color: colorScales.gray[900],
+    flex: 1,
+  },
+  cardPadding: {
+    padding: spacing[4],
+  },
+  sectionTitle: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.semibold,
+    color: colorScales.gray[700],
+    marginBottom: spacing[2],
+  },
+  descriptionText: {
+    fontSize: typography.fontSize.sm,
+    color: colorScales.gray[600],
+  },
+  wrapRow: {
+    flexDirection: 'row',
+    gap: spacing[2],
+    flexWrap: 'wrap',
+  },
+  infoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: spacing[2],
+    borderBottomWidth: 1,
+    borderBottomColor: colorScales.gray[100],
+  },
+  infoLabel: {
+    fontSize: typography.fontSize.sm,
+    color: colorScales.gray[500],
+  },
+  infoValue: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.medium,
+    color: colorScales.gray[900],
+  },
+  variantName: {
+    fontSize: typography.fontSize.sm,
+    color: colorScales.gray[700],
+  },
+  footer: {
+    padding: spacing[4],
+    gap: spacing[3],
+    borderTopWidth: 1,
+    borderTopColor: colorScales.gray[200],
+    backgroundColor: colors.background,
+  },
+  footerRow: {
+    flexDirection: 'row',
+    gap: spacing[3],
+  },
+});

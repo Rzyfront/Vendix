@@ -27,7 +27,7 @@ export class AddressesController {
   constructor(
     private readonly addressesService: AddressesService,
     private readonly responseService: ResponseService,
-  ) { }
+  ) {}
 
   @Post()
   @Permissions('organization:addresses:create')

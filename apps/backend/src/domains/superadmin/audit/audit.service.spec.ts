@@ -311,13 +311,13 @@ describe('AuditService', () => {
           user_id: 1,
           store_id: 1,
           // organization_id is automatically scoped by OrganizationPrismaService logic (mocked here implicitly or explicitly if needed)
-          // For finding calls, we expect what passes to the prisma findMany. 
+          // For finding calls, we expect what passes to the prisma findMany.
           // Since we are moving to automatic scoping, the service won't manually add organization_id to 'where'
           // UNLESS the service expects OrganizationPrismaService to handle it.
           // In the service implementation plan, we remove manual adding of organization_id.
           // So we should NOT expect organization_id in the 'where' clause that is passed to prisma.findMany
-          // HOWEVER, if OrganizationPrismaService intercepts it, the Service code passes a 'where' WITHOUT organization_id, 
-          // and OrganizationPrismaService ADDS it. 
+          // HOWEVER, if OrganizationPrismaService intercepts it, the Service code passes a 'where' WITHOUT organization_id,
+          // and OrganizationPrismaService ADDS it.
           // Since we are mocking PrismaService, we check what AuditService calls.
           // AuditService calls findMany({ where: { ... } }).
           // It will NOT have organization_id in 'where' anymore.

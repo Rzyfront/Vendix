@@ -1,0 +1,253 @@
+<div class="w-full max-w-5xl mx-auto px-4 py-6 lg:py-8 space-y-6">
+  <!-- Critical banner -->
+  <app-card customClasses="border-l-4 border-l-red-500 bg-red-50/40">
+    <div class="p-5 flex items-start gap-4">
+      <div class="p-3 bg-red-100 rounded-xl shrink-0">
+        <app-icon
+          name="alert-octagon"
+          [size]="28"
+          class="text-red-600"
+        ></app-icon>
+      </div>
+      <div class="flex-1 space-y-1">
+        <h1 class="text-lg lg:text-xl font-bold text-text-primary">
+          {{ bannerTitle() }}
+        </h1>
+        <p class="text-sm text-text-secondary">{{ bannerSubtitle() }}</p>
+      </div>
+    </div>
+  </app-card>
+
+  <!-- Countdown + total due -->
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+    @if (nextDeadline(); as deadline) {
+      <app-card>
+        <div class="p-5 space-y-2">
+          <p
+            class="text-xs font-semibold text-text-secondary uppercase tracking-wide"
+          >
+            {{ deadline.label }}
+          </p>
+          <p class="text-2xl lg:text-3xl font-bold text-red-600">
+            {{ countdown() }}
+          </p>
+          @if (deadline.at) {
+            <p class="text-xs text-text-secondary">
+              Fecha límite:
+              {{ deadline.at | date: "dd MMM yyyy, HH:mm" : undefined : "es" }}
+            </p>
+          }
+        </div>
+      </app-card>
+    }
+
+    <app-card>
+      <div class="p-5 space-y-2">
+        <p
+          class="text-xs font-semibold text-text-secondary uppercase tracking-wide"
+        >
+          Total adeudado
+        </p>
+        <p class="text-2xl lg:text-3xl font-bold text-text-primary">
+          {{ totalDue() | currency: "COP" : "symbol-narrow" : "1.0-0" }}
+        </p>
+        <p class="text-xs text-text-secondary">
+          @if (hasInvoices()) {
+            {{ dunning()?.invoices_overdue?.length }} factura(s) pendiente(s)
+          } @else {
+            Sin facturas pendientes
+          }
+        </p>
+      </div>
+    </app-card>
+  </div>
+
+  <!-- S2.2 — Payment method recovery CTA (during grace_soft/grace_hard with invalid PM) -->
+  @if (needsPaymentMethodUpdate()) {
+    <app-card customClasses="border-l-4 border-l-amber-500 bg-amber-50/40">
+      <div
+        class="p-5 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4"
+      >
+        <div class="flex items-start gap-3">
+          <div class="p-3 bg-amber-100 rounded-xl shrink-0">
+            <app-icon
+              name="credit-card"
+              [size]="24"
+              class="text-amber-700"
+            ></app-icon>
+          </div>
+          <div>
+            <p class="text-sm font-semibold text-text-primary">
+              Tu método de pago no es válido
+            </p>
+            <p class="text-xs text-text-secondary mt-1">
+              Actualiza tu tarjeta para reintentar el cobro y recuperar el
+              acceso completo.
+            </p>
+          </div>
+        </div>
+        <app-button
+          variant="primary"
+          size="lg"
+          (clicked)="onUpdatePaymentMethod()"
+        >
+          <span class="flex items-center gap-2">
+            <app-icon name="refresh-ccw" [size]="18"></app-icon>
+            Actualizar método de pago
+          </span>
+        </app-button>
+      </div>
+    </app-card>
+  }
+
+  <!-- Pay now CTA -->
+  @if (hasInvoices()) {
+    <app-card>
+      <div class="p-5 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+        <div>
+          <p class="text-sm font-semibold text-text-primary">
+            Regulariza tu pago para recuperar el acceso completo
+          </p>
+          <p class="text-xs text-text-secondary mt-1">
+            Procesaremos el cobro de la factura pendiente más reciente.
+          </p>
+        </div>
+        <app-button
+          variant="primary"
+          size="lg"
+          [disabled]="retrying()"
+          (clicked)="onRetryPayment()"
+        >
+          @if (retrying()) {
+            Procesando…
+          } @else {
+            <span class="flex items-center gap-2">
+              <app-icon name="credit-card" [size]="18"></app-icon>
+              Pagar ahora
+            </span>
+          }
+        </app-button>
+      </div>
+    </app-card>
+  }
+
+  <!-- Overdue invoices table -->
+  @if (hasInvoices()) {
+    <app-card>
+      <div class="p-5 space-y-3">
+        <h2 class="text-sm font-semibold text-text-primary uppercase tracking-wide">
+          Facturas vencidas
+        </h2>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="border-b border-gray-200">
+                <th class="text-left py-2 px-3 font-medium text-text-secondary">
+                  N°
+                </th>
+                <th class="text-left py-2 px-3 font-medium text-text-secondary">
+                  Período
+                </th>
+                <th class="text-right py-2 px-3 font-medium text-text-secondary">
+                  Monto
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (
+                inv of dunning()?.invoices_overdue ?? [];
+                track inv.id
+              ) {
+                <tr class="border-b border-gray-100">
+                  <td class="py-2 px-3 font-medium text-text-primary">
+                    {{ inv.invoice_number }}
+                  </td>
+                  <td class="py-2 px-3 text-text-secondary">
+                    @if (inv.period_start && inv.period_end) {
+                      {{
+                        inv.period_start
+                          | date: "dd MMM" : undefined : "es"
+                      }}
+                      —
+                      {{
+                        inv.period_end | date: "dd MMM yyyy" : undefined : "es"
+                      }}
+                    } @else {
+                      —
+                    }
+                  </td>
+                  <td class="py-2 px-3 text-right font-semibold text-text-primary">
+                    {{
+                      inv.amount_due
+                        | currency: "COP" : "symbol-narrow" : "1.0-0"
+                    }}
+                  </td>
+                </tr>
+              }
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </app-card>
+  }
+
+  <!-- Features kept vs lost -->
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <app-card>
+      <div class="p-5 space-y-3">
+        <h2 class="text-sm font-semibold text-text-primary uppercase tracking-wide">
+          Mantienes acceso a:
+        </h2>
+        @if (featuresKept().length === 0) {
+          <p class="text-xs text-text-secondary">
+            No hay funciones disponibles en este momento.
+          </p>
+        }
+        <ul class="space-y-2">
+          @for (key of featuresKept(); track key) {
+            <li class="flex items-center gap-2 text-sm text-text-primary">
+              <app-icon
+                name="check-circle"
+                [size]="16"
+                class="text-green-600"
+              ></app-icon>
+              <span>{{ featureLabel(key) }}</span>
+            </li>
+          }
+        </ul>
+      </div>
+    </app-card>
+
+    <app-card>
+      <div class="p-5 space-y-3">
+        <h2 class="text-sm font-semibold text-text-primary uppercase tracking-wide">
+          Has perdido acceso a:
+        </h2>
+        @if (featuresLost().length === 0) {
+          <p class="text-xs text-text-secondary">
+            Aún tienes todas tus funciones disponibles.
+          </p>
+        }
+        <ul class="space-y-2">
+          @for (key of featuresLost(); track key) {
+            <li class="flex items-center gap-2 text-sm text-text-secondary">
+              <app-icon
+                name="x-circle"
+                [size]="16"
+                class="text-red-500"
+              ></app-icon>
+              <span>{{ featureLabel(key) }}</span>
+            </li>
+          }
+        </ul>
+      </div>
+    </app-card>
+  </div>
+
+  <!-- Footer disclaimer -->
+  <p class="text-xs text-text-secondary text-center pt-4 border-t border-gray-200">
+    Si tu suscripción se cancela por falta de pago, perderás acceso al servicio.
+    Las suscripciones canceladas no son reembolsables ni admiten créditos
+    retroactivos.
+  </p>
+</div>

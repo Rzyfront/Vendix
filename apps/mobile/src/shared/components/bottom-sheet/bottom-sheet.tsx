@@ -1,6 +1,7 @@
 import { useCallback } from 'react';
-import { View, Modal, Pressable, Dimensions, ScrollView } from 'react-native';
+import { View, Modal, Pressable, Dimensions, ScrollView, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { colors, borderRadius, colorScales, spacing } from '@/shared/theme';
 
 type SnapPoint = 'partial' | 'full';
 
@@ -17,6 +18,32 @@ const snapHeights: Record<SnapPoint, string> = {
   full: '90%',
 };
 
+const styles = StyleSheet.create({
+  backdrop: {
+    flex: 1,
+  },
+  sheet: {
+    backgroundColor: colors.card,
+    borderTopLeftRadius: borderRadius['2xl'],
+    borderTopRightRadius: borderRadius['2xl'],
+  },
+  handleContainer: {
+    width: '100%',
+    alignItems: 'center',
+    paddingTop: spacing[2],
+    paddingBottom: spacing[4],
+  },
+  handle: {
+    width: 40,
+    height: 4,
+    backgroundColor: colorScales.gray[300],
+    borderRadius: borderRadius.full,
+  },
+  scrollContent: {
+    flex: 1,
+  },
+});
+
 export function BottomSheet({
   visible,
   onClose,
@@ -32,17 +59,22 @@ export function BottomSheet({
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
-      <Pressable className="flex-1" onPress={handleClose} />
+      <Pressable style={styles.backdrop} onPress={handleClose} />
       <View
-        className="bg-white rounded-t-2xl"
-        style={{ height: Dimensions.get('window').height * (snapPoint === 'full' ? 0.9 : 0.5), paddingBottom: insets.bottom || 16 }}
+        style={[
+          styles.sheet,
+          {
+            height: Dimensions.get('window').height * (snapPoint === 'full' ? 0.9 : 0.5),
+            paddingBottom: insets.bottom || spacing[4],
+          },
+        ]}
       >
-        <View className="w-full items-center pt-2 pb-4">
+        <View style={styles.handleContainer}>
           <Pressable onPress={handleClose} hitSlop={12}>
-            <View className="w-10 h-1 bg-gray-300 rounded-full" />
+            <View style={styles.handle} />
           </Pressable>
         </View>
-        <ScrollView className="flex-1" showsVerticalScrollIndicator={false}>
+        <ScrollView style={styles.scrollContent} showsVerticalScrollIndicator={false}>
           {children}
         </ScrollView>
       </View>

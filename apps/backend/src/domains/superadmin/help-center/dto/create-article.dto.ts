@@ -1,4 +1,12 @@
-import { IsString, IsEnum, IsOptional, IsNumber, IsBoolean, IsArray, MaxLength } from 'class-validator';
+import {
+  IsString,
+  IsEnum,
+  IsOptional,
+  IsNumber,
+  IsBoolean,
+  IsArray,
+  MaxLength,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 export enum HelpArticleTypeEnum {

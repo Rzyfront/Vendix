@@ -57,7 +57,9 @@ export class PurchaseOrderItemDto {
   @IsOptional()
   batch_number?: string;
 
-  @ApiProperty({ description: 'Manufacturing date for lot tracking (optional)' })
+  @ApiProperty({
+    description: 'Manufacturing date for lot tracking (optional)',
+  })
   @IsDateString()
   @IsOptional()
   manufacturing_date?: string;
@@ -121,7 +123,9 @@ export class PurchaseOrderItemDto {
   @IsOptional()
   brand_name?: string;
 
-  @ApiProperty({ description: 'Category names comma separated (for new products)' })
+  @ApiProperty({
+    description: 'Category names comma separated (for new products)',
+  })
   @IsString()
   @IsOptional()
   category_names?: string;

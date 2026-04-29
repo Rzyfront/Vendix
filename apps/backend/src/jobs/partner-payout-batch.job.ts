@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
-import { Prisma } from '@prisma/client';
+import { Prisma, partner_payout_batch_state_enum } from '@prisma/client';
 import { GlobalPrismaService } from '../prisma/services/global-prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 
@@ -42,7 +42,9 @@ export class PartnerPayoutBatchJob {
       });
 
       if (partners.length === 0) {
-        this.logger.log('No partners with accrued commissions for previous month');
+        this.logger.log(
+          'No partners with accrued commissions for previous month',
+        );
         return;
       }
 
@@ -64,9 +66,7 @@ export class PartnerPayoutBatchJob {
         }
       }
     } catch (error) {
-      this.logger.error(
-        `Partner payout batch failed: ${error.message}`,
-      );
+      this.logger.error(`Partner payout batch failed: ${error.message}`);
     } finally {
       this.isRunning = false;
     }
@@ -115,7 +115,7 @@ export class PartnerPayoutBatchJob {
           period_end: periodEnd,
           total_amount: totalAmount,
           currency: commissions[0].currency,
-          state: 'draft',
+          state: partner_payout_batch_state_enum.draft,
           payout_method: 'manual',
         },
       });

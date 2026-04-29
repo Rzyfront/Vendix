@@ -10,6 +10,10 @@ export interface SendMessageOptions {
 }
 
 export interface MessagingProvider {
-  send(phone: string, body: string, options?: SendMessageOptions): Promise<MessageResult>;
+  send(
+    phone: string,
+    body: string,
+    options?: SendMessageOptions,
+  ): Promise<MessageResult>;
   getName(): string;
 }

@@ -1,0 +1,32 @@
+meta {
+  name: Superadmin Apply Promotional to Store
+  type: http
+  seq: 35
+}
+
+# NOTE: Endpoint POST /superadmin/subscriptions/promotional/:id/apply is NOT implemented
+# as of Sprint 4. PromotionalController exposes only CRUD (POST/GET/PATCH/DELETE).
+# Promotional overlay application currently happens via the customer-facing checkout
+# coupon flow (see 13-coupon-redeem-checkout.bru). Re-enable when the superadmin
+# direct-apply route lands.
+
+post {
+  url: {{url}}/superadmin/subscriptions/promotional/{{superadmin_promo_id}}/apply
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "store_id": {{store_id}}
+  }
+}
+
+tests {
+  test("Promotional overlay applied (DISABLED — endpoint missing)", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.be.true;
+    expect(res.body.data).to.have.property("subscription_id");
+    expect(res.body.data).to.have.property("overlay_plan_id");
+  });
+}

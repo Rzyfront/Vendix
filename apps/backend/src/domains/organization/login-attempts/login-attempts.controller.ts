@@ -9,7 +9,7 @@ import { Permissions } from '../../auth/decorators/permissions.decorator';
 @Controller('organization/login-attempts')
 @UseGuards(PermissionsGuard)
 export class LoginAttemptsController {
-  constructor(private readonly loginAttemptsService: LoginAttemptsService) { }
+  constructor(private readonly loginAttemptsService: LoginAttemptsService) {}
 
   @Get()
   @Permissions('organization:login_attempts:read')

@@ -8,7 +8,11 @@ import {
 } from '@aws-sdk/client-cloudwatch';
 import { VendixHttpException } from '../../../../common/errors/vendix-http.exception';
 import { ErrorCodes } from '../../../../common/errors/error-codes';
-import { AWS_REGION_DEFAULT, EC2_INSTANCE_ID_DEFAULT, RDS_DB_IDENTIFIER_DEFAULT } from '../constants/cloudwatch.constants';
+import {
+  AWS_REGION_DEFAULT,
+  EC2_INSTANCE_ID_DEFAULT,
+  RDS_DB_IDENTIFIER_DEFAULT,
+} from '../constants/cloudwatch.constants';
 
 export interface MetricDataResult {
   timestamps: string[];
@@ -45,8 +49,12 @@ export class CloudWatchService {
     }
 
     this.client = new CloudWatchClient(clientConfig);
-    this.ec2InstanceId = this.configService.get<string>('EC2_INSTANCE_ID') || EC2_INSTANCE_ID_DEFAULT;
-    this.rdsDbIdentifier = this.configService.get<string>('RDS_DB_IDENTIFIER') || RDS_DB_IDENTIFIER_DEFAULT;
+    this.ec2InstanceId =
+      this.configService.get<string>('EC2_INSTANCE_ID') ||
+      EC2_INSTANCE_ID_DEFAULT;
+    this.rdsDbIdentifier =
+      this.configService.get<string>('RDS_DB_IDENTIFIER') ||
+      RDS_DB_IDENTIFIER_DEFAULT;
   }
 
   async getMetricData(params: {
@@ -59,7 +67,10 @@ export class CloudWatchService {
     stat?: string;
   }): Promise<MetricDataResult> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.CLOUDWATCH_TIMEOUT);
+    const timeout = setTimeout(
+      () => controller.abort(),
+      this.CLOUDWATCH_TIMEOUT,
+    );
     try {
       const command = new GetMetricDataCommand({
         StartTime: params.startTime,
@@ -80,16 +91,20 @@ export class CloudWatchService {
         ],
       });
 
-      const response = await this.client.send(command, { abortSignal: controller.signal });
+      const response = await this.client.send(command, {
+        abortSignal: controller.signal,
+      });
       const result = response.MetricDataResults?.[0];
 
       return {
         timestamps: (result?.Timestamps || []).map((t) => t.toISOString()),
-        values: (result?.Values || []) as number[],
+        values: result?.Values || [],
       };
     } catch (error) {
       if (error.name === 'AbortError' || controller.signal.aborted) {
-        this.logger.warn(`CloudWatch getMetricData timed out after ${this.CLOUDWATCH_TIMEOUT}ms for ${params.metricName}`);
+        this.logger.warn(
+          `CloudWatch getMetricData timed out after ${this.CLOUDWATCH_TIMEOUT}ms for ${params.metricName}`,
+        );
         return { timestamps: [], values: [] };
       }
       this.logger.error(
@@ -112,7 +127,10 @@ export class CloudWatchService {
     period: number,
   ): Promise<Map<string, MetricDataResult>> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.CLOUDWATCH_TIMEOUT);
+    const timeout = setTimeout(
+      () => controller.abort(),
+      this.CLOUDWATCH_TIMEOUT,
+    );
     try {
       const metricDataQueries: MetricDataQuery[] = queries.map((q) => ({
         Id: q.id,
@@ -133,14 +151,16 @@ export class CloudWatchService {
         MetricDataQueries: metricDataQueries,
       });
 
-      const response = await this.client.send(command, { abortSignal: controller.signal });
+      const response = await this.client.send(command, {
+        abortSignal: controller.signal,
+      });
       const resultMap = new Map<string, MetricDataResult>();
 
       for (const result of response.MetricDataResults || []) {
         if (result.Id) {
           resultMap.set(result.Id, {
             timestamps: (result.Timestamps || []).map((t) => t.toISOString()),
-            values: (result.Values || []) as number[],
+            values: result.Values || [],
           });
         }
       }
@@ -148,7 +168,9 @@ export class CloudWatchService {
       return resultMap;
     } catch (error) {
       if (error.name === 'AbortError' || controller.signal.aborted) {
-        this.logger.warn(`CloudWatch getMultipleMetrics timed out after ${this.CLOUDWATCH_TIMEOUT}ms`);
+        this.logger.warn(
+          `CloudWatch getMultipleMetrics timed out after ${this.CLOUDWATCH_TIMEOUT}ms`,
+        );
         return new Map();
       }
       this.logger.error(

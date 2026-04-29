@@ -45,7 +45,11 @@ export class StoreShippingMethodsController {
     try {
       const method_id_num = parseInt(methodId);
       if (!method_id_num || isNaN(method_id_num)) {
-        return this.responseService.error('Invalid shipping method ID', '', 400);
+        return this.responseService.error(
+          'Invalid shipping method ID',
+          '',
+          400,
+        );
       }
 
       const result =
@@ -138,7 +142,11 @@ export class StoreShippingMethodsController {
     try {
       const method_id_num = parseInt(methodId);
       if (!method_id_num || isNaN(method_id_num)) {
-        return this.responseService.error('Invalid shipping method ID', '', 400);
+        return this.responseService.error(
+          'Invalid shipping method ID',
+          '',
+          400,
+        );
       }
 
       const result =
@@ -208,7 +216,11 @@ export class StoreShippingMethodsController {
     try {
       const method_id_num = parseInt(methodId);
       if (!method_id_num || isNaN(method_id_num)) {
-        return this.responseService.error('Invalid shipping method ID', '', 400);
+        return this.responseService.error(
+          'Invalid shipping method ID',
+          '',
+          400,
+        );
       }
 
       const result = await this.storeShippingMethodsService.updateStoreMethod(
@@ -239,7 +251,11 @@ export class StoreShippingMethodsController {
     try {
       const method_id_num = parseInt(methodId);
       if (!method_id_num || isNaN(method_id_num)) {
-        return this.responseService.error('Invalid shipping method ID', '', 400);
+        return this.responseService.error(
+          'Invalid shipping method ID',
+          '',
+          400,
+        );
       }
 
       const result =
@@ -270,11 +286,17 @@ export class StoreShippingMethodsController {
     try {
       const method_id_num = parseInt(methodId);
       if (!method_id_num || isNaN(method_id_num)) {
-        return this.responseService.error('Invalid shipping method ID', '', 400);
+        return this.responseService.error(
+          'Invalid shipping method ID',
+          '',
+          400,
+        );
       }
 
       await this.storeShippingMethodsService.removeFromStore(method_id_num);
-      return this.responseService.deleted('Shipping method removed successfully');
+      return this.responseService.deleted(
+        'Shipping method removed successfully',
+      );
     } catch (error) {
       return this.responseService.error(
         error.message || 'Failed to remove shipping method',

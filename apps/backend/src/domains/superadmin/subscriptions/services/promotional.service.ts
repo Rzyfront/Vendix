@@ -2,7 +2,11 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
-import { CreatePromotionalDto, UpdatePromotionalDto, PromotionalQueryDto } from '../dto';
+import {
+  CreatePromotionalDto,
+  UpdatePromotionalDto,
+  PromotionalQueryDto,
+} from '../dto';
 
 @Injectable()
 export class PromotionalService {
@@ -45,7 +49,14 @@ export class PromotionalService {
   }
 
   async findAll(query: PromotionalQueryDto) {
-    const { page = 1, limit = 10, search, state, sort_by = 'created_at', sort_order = 'desc' } = query;
+    const {
+      page = 1,
+      limit = 10,
+      search,
+      state,
+      sort_by = 'created_at',
+      sort_order = 'desc',
+    } = query;
 
     const skip = (page - 1) * Number(limit);
     const where: Prisma.subscription_plansWhereInput = {
@@ -123,7 +134,9 @@ export class PromotionalService {
     }
 
     if (dto.code && dto.code !== existing.code) {
-      const conflict = await this.prisma.subscription_plans.findUnique({ where: { code: dto.code } });
+      const conflict = await this.prisma.subscription_plans.findUnique({
+        where: { code: dto.code },
+      });
       if (conflict) {
         throw new VendixHttpException(ErrorCodes.SYS_CONFLICT_001);
       }
@@ -139,15 +152,33 @@ export class PromotionalService {
         ...(dto.base_price !== undefined && { base_price: dto.base_price }),
         ...(dto.currency && { currency: dto.currency }),
         ...(dto.trial_days !== undefined && { trial_days: dto.trial_days }),
-        ...(dto.grace_period_soft_days !== undefined && { grace_period_soft_days: dto.grace_period_soft_days }),
-        ...(dto.grace_period_hard_days !== undefined && { grace_period_hard_days: dto.grace_period_hard_days }),
-        ...(dto.suspension_day !== undefined && { suspension_day: dto.suspension_day }),
-        ...(dto.cancellation_day !== undefined && { cancellation_day: dto.cancellation_day }),
-        ...(dto.feature_matrix !== undefined && { feature_matrix: dto.feature_matrix as any }),
-        ...(dto.ai_feature_flags !== undefined && { ai_feature_flags: dto.ai_feature_flags as any }),
-        ...(dto.promo_rules !== undefined && { promo_rules: dto.promo_rules as any }),
-        ...(dto.promo_priority !== undefined && { promo_priority: dto.promo_priority }),
-        ...(dto.parent_plan_id !== undefined && { parent_plan_id: dto.parent_plan_id }),
+        ...(dto.grace_period_soft_days !== undefined && {
+          grace_period_soft_days: dto.grace_period_soft_days,
+        }),
+        ...(dto.grace_period_hard_days !== undefined && {
+          grace_period_hard_days: dto.grace_period_hard_days,
+        }),
+        ...(dto.suspension_day !== undefined && {
+          suspension_day: dto.suspension_day,
+        }),
+        ...(dto.cancellation_day !== undefined && {
+          cancellation_day: dto.cancellation_day,
+        }),
+        ...(dto.feature_matrix !== undefined && {
+          feature_matrix: dto.feature_matrix as any,
+        }),
+        ...(dto.ai_feature_flags !== undefined && {
+          ai_feature_flags: dto.ai_feature_flags as any,
+        }),
+        ...(dto.promo_rules !== undefined && {
+          promo_rules: dto.promo_rules as any,
+        }),
+        ...(dto.promo_priority !== undefined && {
+          promo_priority: dto.promo_priority,
+        }),
+        ...(dto.parent_plan_id !== undefined && {
+          parent_plan_id: dto.parent_plan_id,
+        }),
         updated_at: new Date(),
       },
     });

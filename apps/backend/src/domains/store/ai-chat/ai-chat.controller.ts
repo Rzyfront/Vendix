@@ -9,11 +9,20 @@ import {
   Sse,
   MessageEvent,
   ParseIntPipe,
+  UseGuards,
 } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { AIChatService } from './ai-chat.service';
 import { ResponseService } from '../../../common/responses/response.service';
-import { CreateConversationDto, SendMessageDto, ConversationQueryDto } from './dto';
+import {
+  AiAccessGuard,
+  RequireAIFeature,
+} from '../subscriptions/guards/ai-access.guard';
+import {
+  CreateConversationDto,
+  SendMessageDto,
+  ConversationQueryDto,
+} from './dto';
 
 @Controller('store/ai-chat')
 export class AIChatController {
@@ -23,6 +32,8 @@ export class AIChatController {
   ) {}
 
   @Post('conversations')
+  @UseGuards(AiAccessGuard)
+  @RequireAIFeature('conversations')
   async createConversation(@Body() dto: CreateConversationDto) {
     const conversation = await this.chatService.createConversation(dto);
     return this.responseService.success(conversation, 'Conversation created');
@@ -31,7 +42,11 @@ export class AIChatController {
   @Get('conversations')
   async listConversations(@Query() query: ConversationQueryDto) {
     const result = await this.chatService.listConversations(query);
-    return this.responseService.success(result.data, 'Conversations retrieved', result.meta);
+    return this.responseService.success(
+      result.data,
+      'Conversations retrieved',
+      result.meta,
+    );
   }
 
   @Get('conversations/:id')
@@ -41,6 +56,8 @@ export class AIChatController {
   }
 
   @Post('conversations/:id/messages')
+  @UseGuards(AiAccessGuard)
+  @RequireAIFeature('streaming_chat')
   async sendMessage(
     @Param('id', ParseIntPipe) id: number,
     @Body() dto: SendMessageDto,
@@ -50,6 +67,8 @@ export class AIChatController {
   }
 
   @Sse('conversations/:id/stream')
+  @UseGuards(AiAccessGuard)
+  @RequireAIFeature('streaming_chat')
   streamMessage(
     @Param('id') id: string,
     @Query('content') content: string,

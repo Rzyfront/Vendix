@@ -129,7 +129,9 @@ describe('SubscriptionStateService', () => {
       state: 'active',
     });
 
-    const result = await service.transition(10, 'active', { reason: 'idempotent' });
+    const result = await service.transition(10, 'active', {
+      reason: 'idempotent',
+    });
 
     expect(prismaMock.store_subscriptions.update).not.toHaveBeenCalled();
     expect(prismaMock.subscription_events.create).not.toHaveBeenCalled();
@@ -190,7 +192,9 @@ describe('SubscriptionStateService', () => {
       });
 
       expect(evalSpy).not.toHaveBeenCalled();
-      expect(prismaMock.subscription_invoices.findUnique).not.toHaveBeenCalled();
+      expect(
+        prismaMock.subscription_invoices.findUnique,
+      ).not.toHaveBeenCalled();
     });
 
     it('flag unset → no-op (default: cron-only)', async () => {
@@ -249,7 +253,9 @@ describe('SubscriptionStateService', () => {
         reason: 'still_declined',
       });
 
-      expect(prismaMock.subscription_invoices.findUnique).not.toHaveBeenCalled();
+      expect(
+        prismaMock.subscription_invoices.findUnique,
+      ).not.toHaveBeenCalled();
       expect(evalSpy).toHaveBeenCalledWith(555);
     });
 

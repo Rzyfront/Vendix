@@ -29,7 +29,7 @@ export class StoresController {
   constructor(
     private readonly storesService: StoresService,
     private readonly responseService: ResponseService,
-  ) { }
+  ) {}
 
   @Post()
   @Permissions('store:stores:create')
@@ -208,5 +208,4 @@ export class StoresController {
       );
     }
   }
-
 }

@@ -31,7 +31,7 @@ import { SessionsService } from '../cash-registers/sessions/sessions.service';
 import { MovementsService } from '../cash-registers/movements/movements.service';
 import { PaymentEncryptionService } from './services/payment-encryption.service';
 import { InvoiceDataRequestsService } from '../invoicing/invoice-data-requests/invoice-data-requests.service';
-import { WompiClient } from './processors/wompi/wompi.client';
+import { WompiClientFactory } from './processors/wompi/wompi.factory';
 import { WompiProcessor } from './processors/wompi/wompi.processor';
 import { WompiEnvironment } from './processors/wompi/wompi.types';
 import { WebhookHandlerService } from './services/webhook-handler.service';
@@ -52,7 +52,7 @@ export class PaymentsService {
     private readonly movementsService: MovementsService,
     private readonly paymentEncryption: PaymentEncryptionService,
     private readonly invoiceDataRequestsService: InvoiceDataRequestsService,
-    private readonly wompiClient: WompiClient,
+    private readonly wompiClientFactory: WompiClientFactory,
     private readonly wompiProcessor: WompiProcessor,
     private readonly webhookHandler: WebhookHandlerService,
   ) {}
@@ -255,7 +255,13 @@ export class PaymentsService {
     }
 
     // Idempotency: terminal-state payments don't need a Wompi roundtrip
-    const terminal = ['succeeded', 'captured', 'failed', 'cancelled', 'refunded'];
+    const terminal = [
+      'succeeded',
+      'captured',
+      'failed',
+      'cancelled',
+      'refunded',
+    ];
     if (terminal.includes(payment.state)) {
       return {
         state: payment.state,
@@ -267,7 +273,9 @@ export class PaymentsService {
     // Resolve per-tenant Wompi credentials from the store_payment_method row
     const customConfig = payment.store_payment_method?.custom_config;
     if (!customConfig) {
-      throw new BadRequestException('Wompi no está configurado para esta tienda');
+      throw new BadRequestException(
+        'Wompi no está configurado para esta tienda',
+      );
     }
 
     const config = this.paymentEncryption.decryptConfig(
@@ -279,21 +287,17 @@ export class PaymentsService {
       throw new BadRequestException('Credenciales Wompi incompletas');
     }
 
-    // TODO(concurrency): WompiClient is a DI singleton — `configure()`
-    // mutates shared state. Currently safe here because every read
-    // (`request()`) snapshots config synchronously before any await,
-    // and there are no sync config reads between this configure() and
-    // the subsequent processor calls. Migrate to `withConfig()` per-call
-    // pattern (see iter 7) when refactoring `WompiProcessor` for full
-    // statelessness.
-    this.wompiClient.configure({
+    const wompiConfig = {
       public_key: config.public_key,
       private_key: config.private_key,
       events_secret: config.events_secret || '',
       integrity_secret: config.integrity_secret || '',
       environment:
         (config.environment as WompiEnvironment) || WompiEnvironment.SANDBOX,
-    });
+    };
+
+    const cacheKey = `store-${payment.orders?.stores?.id ?? 'unknown'}`;
+    const client = this.wompiClientFactory.getClient(cacheKey, wompiConfig);
 
     // Lookup priority — match WompiReconciliationService.reconcileOne and
     // CheckoutService.confirmWompiPayment to keep behavior consistent:
@@ -310,15 +314,13 @@ export class PaymentsService {
       payment.transaction_id.length > 0
     ) {
       try {
-        const status = await this.wompiProcessor.getPaymentStatus(
-          payment.transaction_id,
-        );
-        if (status?.gatewayResponse && (status.gatewayResponse as any)?.id) {
-          txn = status.gatewayResponse;
+        const response = await client.getTransaction(payment.transaction_id);
+        if (response?.data?.id) {
+          txn = response.data;
         }
       } catch (err) {
         this.logger.warn(
-          `confirmPosWompiPayment getPaymentStatus failed: ${(err as Error).message}`,
+          `confirmPosWompiPayment getTransaction failed: ${(err as Error).message}`,
         );
       }
     }
@@ -333,7 +335,22 @@ export class PaymentsService {
           message: 'No reference available to confirm payment',
         };
       }
-      txn = await this.wompiProcessor.getTransactionByReference(reference);
+      try {
+        const response = await client.getTransactionsByReference(reference);
+        const txns = response?.data ?? [];
+        if (txns.length > 0) {
+          txn = txns.reduce((latest: any, candidate: any) => {
+            if (!latest) return candidate;
+            return new Date(candidate.created_at) > new Date(latest.created_at)
+              ? candidate
+              : latest;
+          }, txns[0]);
+        }
+      } catch (err) {
+        this.logger.warn(
+          `confirmPosWompiPayment getTransactionsByReference failed: ${(err as Error).message}`,
+        );
+      }
     }
 
     if (!txn) {
@@ -633,7 +650,9 @@ export class PaymentsService {
 
           // BLOCK: If not allowing oversell and requested quantity exceeds available, throw immediately
           if (!allowOversell && item.quantity > available) {
-            const variantInfo = item.product_variant_id ? ` (variant ${item.product_variant_id})` : '';
+            const variantInfo = item.product_variant_id
+              ? ` (variant ${item.product_variant_id})`
+              : '';
             throw new BadRequestException(
               `Insufficient stock for ${product.name}${variantInfo}: requested ${item.quantity}, available ${available}. Set allow_oversell=true to permit overselling.`,
             );
@@ -672,8 +691,12 @@ export class PaymentsService {
             const location_id = stockLevel?.location_id || defaultLocation?.id;
 
             if (!location_id) {
-              await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT stock_reserve_sp');
-              this.logger.warn(`No location found for stock reservation of product ${item.product_id} in order #${order.id}`);
+              await tx.$executeRawUnsafe(
+                'ROLLBACK TO SAVEPOINT stock_reserve_sp',
+              );
+              this.logger.warn(
+                `No location found for stock reservation of product ${item.product_id} in order #${order.id}`,
+              );
               continue;
             }
 
@@ -692,8 +715,14 @@ export class PaymentsService {
             await tx.$executeRawUnsafe('RELEASE SAVEPOINT stock_reserve_sp');
           } catch (error) {
             // Rollback to savepoint to recover the transaction from PostgreSQL's aborted state
-            try { await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT stock_reserve_sp'); } catch {}
-            this.logger.warn(`Stock reservation failed for product ${item.product_id} in order #${order.id}: ${error.message}`);
+            try {
+              await tx.$executeRawUnsafe(
+                'ROLLBACK TO SAVEPOINT stock_reserve_sp',
+              );
+            } catch {}
+            this.logger.warn(
+              `Stock reservation failed for product ${item.product_id} in order #${order.id}: ${error.message}`,
+            );
           }
         }
 
@@ -701,16 +730,15 @@ export class PaymentsService {
         if (createPosPaymentDto.promotion_ids?.length) {
           for (const promoId of createPosPaymentDto.promotion_ids) {
             try {
-              const { discount } =
-                await this.promotionEngine.validatePromotion(
-                  promoId,
-                  createPosPaymentDto.items.map((i) => ({
-                    product_id: i.product_id,
-                    unit_price: i.unit_price,
-                    quantity: i.quantity,
-                  })),
-                  createPosPaymentDto.customer_id,
-                );
+              const { discount } = await this.promotionEngine.validatePromotion(
+                promoId,
+                createPosPaymentDto.items.map((i) => ({
+                  product_id: i.product_id,
+                  unit_price: i.unit_price,
+                  quantity: i.quantity,
+                })),
+                createPosPaymentDto.customer_id,
+              );
               await this.promotionEngine.applyPromotion(
                 order.id,
                 promoId,
@@ -726,12 +754,15 @@ export class PaymentsService {
 
         // 2. Process payment if required
         let payment: any = null;
-        const isDigitalPayment = createPosPaymentDto.requires_payment &&
+        const isDigitalPayment =
+          createPosPaymentDto.requires_payment &&
           ['wompi', 'wallet'].includes(
-            (await tx.store_payment_methods.findUnique({
-              where: { id: createPosPaymentDto.store_payment_method_id },
-              include: { system_payment_method: true },
-            }))?.system_payment_method?.type || '',
+            (
+              await tx.store_payment_methods.findUnique({
+                where: { id: createPosPaymentDto.store_payment_method_id },
+                include: { system_payment_method: true },
+              })
+            )?.system_payment_method?.type || '',
           );
 
         if (createPosPaymentDto.requires_payment && !isDigitalPayment) {
@@ -807,7 +838,8 @@ export class PaymentsService {
           // 5b. Emit order.completed for COGS on direct POS sales
           if (order.delivery_type === 'direct_delivery') {
             const total_cost = order.order_items.reduce(
-              (sum: number, item: any) => sum + Number(item.cost_price || 0) * item.quantity,
+              (sum: number, item: any) =>
+                sum + Number(item.cost_price || 0) * item.quantity,
               0,
             );
             if (total_cost > 0) {
@@ -839,7 +871,10 @@ export class PaymentsService {
         }
 
         // 5d. Register coupon use if applicable
-        if (createPosPaymentDto.coupon_id && (createPosPaymentDto.discount_amount ?? 0) > 0) {
+        if (
+          createPosPaymentDto.coupon_id &&
+          (createPosPaymentDto.discount_amount ?? 0) > 0
+        ) {
           await tx.coupon_uses.create({
             data: {
               coupon_id: createPosPaymentDto.coupon_id,
@@ -870,7 +905,11 @@ export class PaymentsService {
             id: order.id,
             order_number: order.order_number,
             status: order.state,
-            payment_status: payment ? payment.state : (isDigitalPayment ? 'pending' : 'pending'),
+            payment_status: payment
+              ? payment.state
+              : isDigitalPayment
+                ? 'pending'
+                : 'pending',
             total_amount: order.grand_total,
           },
           payment: payment
@@ -885,10 +924,10 @@ export class PaymentsService {
                 status: payment.status,
                 transaction_id: payment.transaction_id,
                 change: payment.change,
-                nextAction: (payment as any)?.nextAction,
+                nextAction: payment?.nextAction,
               }
             : undefined,
-          nextAction: (payment as any)?.nextAction,
+          nextAction: payment?.nextAction,
           _digitalPaymentPending: isDigitalPayment || false,
         };
       });
@@ -898,7 +937,10 @@ export class PaymentsService {
         try {
           const payment = await this.processPosPaymentTransaction(
             this.prisma as any,
-            { id: result.order.id, store_id: createPosPaymentDto.store_id } as any,
+            {
+              id: result.order.id,
+              store_id: createPosPaymentDto.store_id,
+            } as any,
             createPosPaymentDto,
           );
           if (payment) {
@@ -907,18 +949,22 @@ export class PaymentsService {
               amount: payment.amount,
               payment_method:
                 payment.store_payment_method?.display_name ||
-                payment.store_payment_method?.system_payment_method?.display_name ||
+                payment.store_payment_method?.system_payment_method
+                  ?.display_name ||
                 'Wompi',
               status: payment.state,
               transaction_id: payment.transaction_id,
               change: 0,
-              nextAction: (payment as any)?.nextAction,
+              nextAction: payment?.nextAction,
             };
-            result.nextAction = (payment as any)?.nextAction;
+            result.nextAction = payment?.nextAction;
             result.message = 'Payment initiated successfully';
           }
         } catch (err) {
-          this.logger.error(`Digital payment processing failed: ${err.message}`, err.stack);
+          this.logger.error(
+            `Digital payment processing failed: ${err.message}`,
+            err.stack,
+          );
           result.payment = { success: false, message: err.message };
 
           // Release stock reservations and revert order status so it can be retried or cancelled
@@ -935,7 +981,9 @@ export class PaymentsService {
               data: { state: 'created', updated_at: new Date() },
             });
           } catch (revertErr) {
-            this.logger.error(`Failed to revert order/stock: ${revertErr.message}`);
+            this.logger.error(
+              `Failed to revert order/stock: ${revertErr.message}`,
+            );
           }
         }
         delete result._digitalPaymentPending;
@@ -949,7 +997,10 @@ export class PaymentsService {
           result.payment,
           user,
         ).catch((err) => {
-          this.logger.error(`Failed to record cash register movement: ${err.message}`, err.stack);
+          this.logger.error(
+            `Failed to record cash register movement: ${err.message}`,
+            err.stack,
+          );
         });
 
         // Create order installments for credit sales
@@ -967,13 +1018,17 @@ export class PaymentsService {
         // Create invoice data request for anonymous/CF sales
         if (!createPosPaymentDto.customer_id && result.order?.id) {
           try {
-            const invoiceDataRequest = await this.invoiceDataRequestsService.createRequest(
-              createPosPaymentDto.store_id,
-              Number(result.order.id),
-            );
+            const invoiceDataRequest =
+              await this.invoiceDataRequestsService.createRequest(
+                createPosPaymentDto.store_id,
+                Number(result.order.id),
+              );
             result.order.invoice_data_token = invoiceDataRequest.token;
           } catch (err) {
-            this.logger.error(`Failed to create invoice data request: ${err.message}`, err.stack);
+            this.logger.error(
+              `Failed to create invoice data request: ${err.message}`,
+              err.stack,
+            );
           }
         }
       }
@@ -1020,7 +1075,8 @@ export class PaymentsService {
       if (creditType === 'installments') {
         const initialPayment = terms.initial_payment || 0;
         // Subtract initial payment from total BEFORE calculating installments
-        const amountToFinance = Math.round((Number(order.total_amount) - initialPayment) * 100) / 100;
+        const amountToFinance =
+          Math.round((Number(order.total_amount) - initialPayment) * 100) / 100;
 
         const schedule = calculateSchedule({
           total_amount: amountToFinance,
@@ -1038,7 +1094,8 @@ export class PaymentsService {
         // total_with_interest = initial payment + sum of all installments (which include interest on financed amount)
         updateData.total_with_interest =
           Math.round((initialPayment + totalInstallments) * 100) / 100;
-        updateData.remaining_balance = Math.round(totalInstallments * 100) / 100;
+        updateData.remaining_balance =
+          Math.round(totalInstallments * 100) / 100;
 
         // Create installments (calculated on amount AFTER initial payment)
         for (const item of schedule) {
@@ -1068,8 +1125,7 @@ export class PaymentsService {
               state: 'succeeded',
               transaction_id: transactionId,
               paid_at: new Date(),
-              store_payment_method_id:
-                terms.initial_payment_method_id || null,
+              store_payment_method_id: terms.initial_payment_method_id || null,
               gateway_response: {
                 payment_type: 'direct',
                 metadata: { is_initial_credit_payment: true },
@@ -1083,12 +1139,10 @@ export class PaymentsService {
       } else {
         // Free credit - just set interest fields if applicable
         if (interestRate > 0) {
-          const totalInterest =
-            Number(order.total_amount) * interestRate;
+          const totalInterest = Number(order.total_amount) * interestRate;
           updateData.total_with_interest =
-            Math.round(
-              (Number(order.total_amount) + totalInterest) * 100,
-            ) / 100;
+            Math.round((Number(order.total_amount) + totalInterest) * 100) /
+            100;
           updateData.remaining_balance = updateData.total_with_interest;
         }
       }
@@ -1324,8 +1378,8 @@ export class PaymentsService {
       });
 
       if (payment) {
-        (payment as any).nextAction = gatewayResult.nextAction;
-        (payment as any).change = 0;
+        payment.nextAction = gatewayResult.nextAction;
+        payment.change = 0;
       }
 
       return payment;
@@ -1386,7 +1440,7 @@ export class PaymentsService {
     deliveryType?: string,
   ) {
     let orderState: string;
-    let additionalData: any = { updated_at: new Date() };
+    const additionalData: any = { updated_at: new Date() };
 
     switch (paymentState) {
       case 'succeeded':
@@ -1434,7 +1488,8 @@ export class PaymentsService {
         where: { id: item.product_id },
         select: { track_inventory: true, product_type: true },
       });
-      if (!product?.track_inventory || product.product_type === 'service') continue;
+      if (!product?.track_inventory || product.product_type === 'service')
+        continue;
 
       // Find active reservation to get the correct location_id (matches Phase 1 reservation)
       const reservation = await tx.stock_reservations.findFirst({
@@ -1599,18 +1654,24 @@ export class PaymentsService {
     try {
       const settings = await this.settingsService.getSettings();
       const cr_settings = (settings as any)?.pos?.cash_register;
-      this.logger.debug(`[CashRegister] cr_settings.enabled=${cr_settings?.enabled}`);
+      this.logger.debug(
+        `[CashRegister] cr_settings.enabled=${cr_settings?.enabled}`,
+      );
       if (!cr_settings?.enabled) return;
 
       // Find active session for this user
       const session = await this.sessionsService.getActiveSession(user.id);
-      this.logger.debug(`[CashRegister] Active session for user ${user.id}: ${session ? `id=${session.id}` : 'NONE'}`);
+      this.logger.debug(
+        `[CashRegister] Active session for user ${user.id}: ${session ? `id=${session.id}` : 'NONE'}`,
+      );
       if (!session) return;
 
       const order_id = order?.id;
       const payment_id = payment?.id;
       const amount = Number(payment?.amount || order?.total_amount || 0);
-      this.logger.debug(`[CashRegister] order_id=${order_id}, payment_id=${payment_id}, amount=${amount}`);
+      this.logger.debug(
+        `[CashRegister] order_id=${order_id}, payment_id=${payment_id}, amount=${amount}`,
+      );
       if (!order_id || amount <= 0) return;
 
       // Resolve the actual system payment method type (cash, card, etc.)
@@ -1624,11 +1685,15 @@ export class PaymentsService {
         payment_method = method?.system_payment_method?.type || 'cash';
       }
 
-      this.logger.debug(`[CashRegister] payment_method=${payment_method}, track_non_cash=${cr_settings.track_non_cash_payments}`);
+      this.logger.debug(
+        `[CashRegister] payment_method=${payment_method}, track_non_cash=${cr_settings.track_non_cash_payments}`,
+      );
 
       // Only track non-cash if setting enabled
       if (payment_method !== 'cash' && !cr_settings.track_non_cash_payments) {
-        this.logger.debug(`[CashRegister] Skipping non-cash movement (tracking disabled)`);
+        this.logger.debug(
+          `[CashRegister] Skipping non-cash movement (tracking disabled)`,
+        );
         return;
       }
 
@@ -1640,9 +1705,14 @@ export class PaymentsService {
         order_id,
         payment_id,
       });
-      this.logger.log(`[CashRegister] Sale movement recorded for session ${session.id}, order ${order_id}`);
+      this.logger.log(
+        `[CashRegister] Sale movement recorded for session ${session.id}, order ${order_id}`,
+      );
     } catch (error) {
-      this.logger.error(`[CashRegister] Error recording movement: ${error.message}`, error.stack);
+      this.logger.error(
+        `[CashRegister] Error recording movement: ${error.message}`,
+        error.stack,
+      );
     }
   }
 }

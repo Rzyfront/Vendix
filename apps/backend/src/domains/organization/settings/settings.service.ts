@@ -231,7 +231,12 @@ export class SettingsService {
       existing?.id ?? 0,
       { inventory_mode: currentMode },
       { inventory_mode: newMode },
-      { action: 'set_inventory_mode', organization_id, from: currentMode, to: newMode },
+      {
+        action: 'set_inventory_mode',
+        organization_id,
+        from: currentMode,
+        to: newMode,
+      },
     );
 
     return { mode: newMode, changed: true };

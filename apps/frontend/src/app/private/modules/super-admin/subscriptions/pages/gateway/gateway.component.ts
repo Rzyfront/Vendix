@@ -399,28 +399,25 @@ export class GatewayComponent {
   }
 
   /**
-   * Builds the body for PATCH. When the gateway is already configured AND
-   * the user did not type fresh secrets, we send the cached masked values
-   * — the backend treats unchanged plaintext as "no rotation" and keeps
-   * the stored encrypted blob untouched.
-   *
-   * NOTE: the backend currently requires the 4 fields in the DTO. Sending
-   * the masked placeholder would fail the `pub_test|prod_*` regex. Until
-   * the backend exposes a "patch partial" mode, we require the operator
-   * to re-type the secrets when rotating.
+   * Builds the body for PATCH. Secrets that the operator did NOT type
+   * are omitted from the payload entirely — the backend interprets a
+   * missing field as "no rotation" and merges with the stored encrypted
+   * plaintext. Only fresh, non-empty values travel over the wire.
    */
   private buildSaveDto(): UpsertGatewayDto {
     const v = this.form.getRawValue();
-    return {
-      public_key: v.public_key ?? '',
-      private_key: v.private_key ?? '',
-      events_secret: v.events_secret ?? '',
-      integrity_secret: v.integrity_secret ?? '',
+    const dto: UpsertGatewayDto = {
       environment: v.environment,
       is_active: v.is_active,
-      confirm_production:
-        v.environment === 'production' ? v.confirm_production : undefined,
     };
+    if (v.public_key) dto.public_key = v.public_key;
+    if (v.private_key) dto.private_key = v.private_key;
+    if (v.events_secret) dto.events_secret = v.events_secret;
+    if (v.integrity_secret) dto.integrity_secret = v.integrity_secret;
+    if (v.environment === 'production') {
+      dto.confirm_production = v.confirm_production;
+    }
+    return dto;
   }
 
   // ── Template helpers (called from .html) ──────────────────────────

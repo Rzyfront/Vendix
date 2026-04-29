@@ -20,7 +20,10 @@ export class McpAuthGuard implements CanActivate {
     }
 
     if (!token) {
-      throw new VendixHttpException(ErrorCodes.AI_MCP_001, 'No authentication token provided');
+      throw new VendixHttpException(
+        ErrorCodes.AI_MCP_001,
+        'No authentication token provided',
+      );
     }
 
     const payload: McpTokenPayload = await this.mcpAuth.validateToken(token);

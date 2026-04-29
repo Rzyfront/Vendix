@@ -1,13 +1,7 @@
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { UseGuards } from '@nestjs/common';
-import {
-  Controller,
-  Get,
-  Query,
-  Res,
-  StreamableFile,
-} from '@nestjs/common';
+import { Controller, Get, Query, Res, StreamableFile } from '@nestjs/common';
 import { Response } from 'express';
 import { SalesAnalyticsService } from './services/sales-analytics.service';
 import { InventoryAnalyticsService } from './services/inventory-analytics.service';
@@ -15,7 +9,12 @@ import { ProductsAnalyticsService } from './services/products-analytics.service'
 import { OverviewAnalyticsService } from './services/overview-analytics.service';
 import { CustomersAnalyticsService } from './services/customers-analytics.service';
 import { FinancialAnalyticsService } from './services/financial-analytics.service';
-import { AnalyticsQueryDto, SalesAnalyticsQueryDto, InventoryAnalyticsQueryDto, ProductsAnalyticsQueryDto } from './dto/analytics-query.dto';
+import {
+  AnalyticsQueryDto,
+  SalesAnalyticsQueryDto,
+  InventoryAnalyticsQueryDto,
+  ProductsAnalyticsQueryDto,
+} from './dto/analytics-query.dto';
 import { ResponseService } from '../../../common/responses/response.service';
 
 @Controller('store/analytics')
@@ -36,14 +35,16 @@ export class AnalyticsController {
   @Get('overview/summary')
   @Permissions('store:analytics:read')
   async getOverviewSummary(@Query() query: AnalyticsQueryDto) {
-    const result = await this.overview_analytics_service.getOverviewSummary(query);
+    const result =
+      await this.overview_analytics_service.getOverviewSummary(query);
     return this.response_service.success(result);
   }
 
   @Get('overview/trends')
   @Permissions('store:analytics:read')
   async getOverviewTrends(@Query() query: AnalyticsQueryDto) {
-    const result = await this.overview_analytics_service.getOverviewTrends(query);
+    const result =
+      await this.overview_analytics_service.getOverviewTrends(query);
     return this.response_service.success(result);
   }
 
@@ -89,7 +90,8 @@ export class AnalyticsController {
   @Get('sales/by-payment-method')
   @Permissions('store:analytics:read')
   async getSalesByPaymentMethod(@Query() query: SalesAnalyticsQueryDto) {
-    const result = await this.sales_analytics_service.getSalesByPaymentMethod(query);
+    const result =
+      await this.sales_analytics_service.getSalesByPaymentMethod(query);
     if (Array.isArray(result)) {
       return this.response_service.success(result);
     }
@@ -138,24 +140,24 @@ export class AnalyticsController {
   ) {
     const rows = await this.sales_analytics_service.getOrdersForExport(query);
 
-    const data = rows.map(r => ({
+    const data = rows.map((r) => ({
       'Nº Orden': r.order_number,
-      'Fecha': r.date,
-      'Cliente': r.customer_name,
-      'Email': r.customer_email,
-      'Canal': r.channel,
-      'Producto': r.product_name,
-      'SKU': r.sku,
-      'Cantidad': r.quantity,
+      Fecha: r.date,
+      Cliente: r.customer_name,
+      Email: r.customer_email,
+      Canal: r.channel,
+      Producto: r.product_name,
+      SKU: r.sku,
+      Cantidad: r.quantity,
       'Precio Unitario': r.unit_price,
       'Total Item': r.item_total,
-      'Subtotal': r.subtotal,
-      'Descuento': r.discount,
-      'Impuesto': r.tax,
-      'Envío': r.shipping,
+      Subtotal: r.subtotal,
+      Descuento: r.discount,
+      Impuesto: r.tax,
+      Envío: r.shipping,
       'Gran Total': r.grand_total,
       'Método de Pago': r.payment_method,
-      'Estado': r.state,
+      Estado: r.state,
     }));
 
     const XLSX = await import('xlsx');
@@ -166,7 +168,8 @@ export class AnalyticsController {
 
     const filename = `ventas_${new Date().toISOString().split('T')[0]}.xlsx`;
     res.set({
-      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="${filename}"`,
     });
 
@@ -178,28 +181,32 @@ export class AnalyticsController {
   @Get('products/summary')
   @Permissions('store:analytics:read')
   async getProductsSummary(@Query() query: ProductsAnalyticsQueryDto) {
-    const result = await this.products_analytics_service.getProductsSummary(query);
+    const result =
+      await this.products_analytics_service.getProductsSummary(query);
     return this.response_service.success(result);
   }
 
   @Get('products/top-sellers')
   @Permissions('store:analytics:read')
   async getTopSellingProducts(@Query() query: ProductsAnalyticsQueryDto) {
-    const result = await this.products_analytics_service.getTopSellingProducts(query);
+    const result =
+      await this.products_analytics_service.getTopSellingProducts(query);
     return this.response_service.success(result);
   }
 
   @Get('products/trends')
   @Permissions('store:analytics:read')
   async getProductsTrends(@Query() query: ProductsAnalyticsQueryDto) {
-    const result = await this.products_analytics_service.getProductsTrends(query);
+    const result =
+      await this.products_analytics_service.getProductsTrends(query);
     return this.response_service.success(result);
   }
 
   @Get('products/table')
   @Permissions('store:analytics:read')
   async getProductsTable(@Query() query: ProductsAnalyticsQueryDto) {
-    const result = await this.products_analytics_service.getProductsTable(query);
+    const result =
+      await this.products_analytics_service.getProductsTable(query);
     return this.response_service.paginated(
       result.data,
       result.meta.pagination.total,
@@ -214,16 +221,17 @@ export class AnalyticsController {
     @Query() query: ProductsAnalyticsQueryDto,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const rows = await this.products_analytics_service.getProductsForExport(query);
+    const rows =
+      await this.products_analytics_service.getProductsForExport(query);
 
-    const data = rows.map(r => ({
-      'Producto': r.name,
-      'SKU': r.sku,
+    const data = rows.map((r) => ({
+      Producto: r.name,
+      SKU: r.sku,
       'Precio Base': r.base_price,
       'Precio Costo': r.cost_price,
-      'Stock': r.stock_quantity,
+      Stock: r.stock_quantity,
       'Unidades Vendidas': r.units_sold,
-      'Ingresos': r.revenue,
+      Ingresos: r.revenue,
       'Margen (%)': r.profit_margin,
     }));
 
@@ -235,7 +243,8 @@ export class AnalyticsController {
 
     const filename = `productos_${new Date().toISOString().split('T')[0]}.xlsx`;
     res.set({
-      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="${filename}"`,
     });
 
@@ -245,7 +254,8 @@ export class AnalyticsController {
   @Get('products/performance')
   @Permissions('store:analytics:read')
   async getProductPerformance(@Query() query: ProductsAnalyticsQueryDto) {
-    const result = await this.products_analytics_service.getProductPerformance(query);
+    const result =
+      await this.products_analytics_service.getProductPerformance(query);
     if (Array.isArray(result)) {
       return this.response_service.success(result);
     }
@@ -260,7 +270,8 @@ export class AnalyticsController {
   @Get('products/profitability')
   @Permissions('store:analytics:read')
   async getProductProfitability(@Query() query: ProductsAnalyticsQueryDto) {
-    const result = await this.products_analytics_service.getProductProfitability(query);
+    const result =
+      await this.products_analytics_service.getProductProfitability(query);
     if ((result as any).products) {
       return this.response_service.success(result);
     }
@@ -278,7 +289,10 @@ export class AnalyticsController {
     @Query() query: ProductsAnalyticsQueryDto,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const data = await this.products_analytics_service.getProductPerformanceForExport(query);
+    const data =
+      await this.products_analytics_service.getProductPerformanceForExport(
+        query,
+      );
 
     const XLSX = await import('xlsx');
     const wb = XLSX.utils.book_new();
@@ -288,7 +302,8 @@ export class AnalyticsController {
 
     const filename = `rendimiento_productos_${new Date().toISOString().split('T')[0]}.xlsx`;
     res.set({
-      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="${filename}"`,
     });
 
@@ -301,7 +316,10 @@ export class AnalyticsController {
     @Query() query: ProductsAnalyticsQueryDto,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const data = await this.products_analytics_service.getProductProfitabilityForExport(query);
+    const data =
+      await this.products_analytics_service.getProductProfitabilityForExport(
+        query,
+      );
 
     const XLSX = await import('xlsx');
     const wb = XLSX.utils.book_new();
@@ -311,7 +329,8 @@ export class AnalyticsController {
 
     const filename = `rentabilidad_productos_${new Date().toISOString().split('T')[0]}.xlsx`;
     res.set({
-      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="${filename}"`,
     });
 
@@ -323,7 +342,8 @@ export class AnalyticsController {
   @Get('inventory/summary')
   @Permissions('store:analytics:read')
   async getInventorySummary(@Query() query: InventoryAnalyticsQueryDto) {
-    const result = await this.inventory_analytics_service.getInventorySummary(query);
+    const result =
+      await this.inventory_analytics_service.getInventorySummary(query);
     return this.response_service.success(result);
   }
 
@@ -345,7 +365,8 @@ export class AnalyticsController {
   @Get('inventory/low-stock')
   @Permissions('store:analytics:read')
   async getLowStockAlerts(@Query() query: InventoryAnalyticsQueryDto) {
-    const result = await this.inventory_analytics_service.getLowStockAlerts(query);
+    const result =
+      await this.inventory_analytics_service.getLowStockAlerts(query);
     if (Array.isArray(result)) {
       return this.response_service.success(result);
     }
@@ -360,7 +381,8 @@ export class AnalyticsController {
   @Get('inventory/movements')
   @Permissions('store:analytics:read')
   async getStockMovements(@Query() query: InventoryAnalyticsQueryDto) {
-    const result = await this.inventory_analytics_service.getStockMovements(query);
+    const result =
+      await this.inventory_analytics_service.getStockMovements(query);
     if (Array.isArray(result)) {
       return this.response_service.success(result);
     }
@@ -375,21 +397,24 @@ export class AnalyticsController {
   @Get('inventory/valuation')
   @Permissions('store:analytics:read')
   async getInventoryValuation(@Query() query: InventoryAnalyticsQueryDto) {
-    const result = await this.inventory_analytics_service.getInventoryValuation(query);
+    const result =
+      await this.inventory_analytics_service.getInventoryValuation(query);
     return this.response_service.success(result);
   }
 
   @Get('inventory/movement-summary')
   @Permissions('store:analytics:read')
   async getMovementSummary(@Query() query: InventoryAnalyticsQueryDto) {
-    const result = await this.inventory_analytics_service.getMovementSummary(query);
+    const result =
+      await this.inventory_analytics_service.getMovementSummary(query);
     return this.response_service.success(result);
   }
 
   @Get('inventory/movement-trends')
   @Permissions('store:analytics:read')
   async getMovementTrends(@Query() query: InventoryAnalyticsQueryDto) {
-    const result = await this.inventory_analytics_service.getMovementTrends(query);
+    const result =
+      await this.inventory_analytics_service.getMovementTrends(query);
     return this.response_service.success(result);
   }
 
@@ -399,7 +424,8 @@ export class AnalyticsController {
     @Query() query: InventoryAnalyticsQueryDto,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const data = await this.inventory_analytics_service.getMovementsForExport(query);
+    const data =
+      await this.inventory_analytics_service.getMovementsForExport(query);
 
     const XLSX = await import('xlsx');
     const wb = XLSX.utils.book_new();
@@ -409,7 +435,8 @@ export class AnalyticsController {
 
     const filename = `movimientos_inventario_${new Date().toISOString().split('T')[0]}.xlsx`;
     res.set({
-      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="${filename}"`,
     });
 
@@ -450,21 +477,24 @@ export class AnalyticsController {
   @Get('customers/summary')
   @Permissions('store:analytics:read')
   async getCustomersSummary(@Query() query: AnalyticsQueryDto) {
-    const result = await this.customers_analytics_service.getCustomersSummary(query);
+    const result =
+      await this.customers_analytics_service.getCustomersSummary(query);
     return this.response_service.success(result);
   }
 
   @Get('customers/trends')
   @Permissions('store:analytics:read')
   async getCustomersTrends(@Query() query: AnalyticsQueryDto) {
-    const result = await this.customers_analytics_service.getCustomersTrends(query);
+    const result =
+      await this.customers_analytics_service.getCustomersTrends(query);
     return this.response_service.success(result);
   }
 
   @Get('customers/top')
   @Permissions('store:analytics:read')
   async getTopCustomers(@Query() query: AnalyticsQueryDto) {
-    const result = await this.customers_analytics_service.getTopCustomers(query);
+    const result =
+      await this.customers_analytics_service.getTopCustomers(query);
     if (Array.isArray(result)) {
       return this.response_service.success(result);
     }
@@ -482,17 +512,18 @@ export class AnalyticsController {
     @Query() query: AnalyticsQueryDto,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const rows = await this.customers_analytics_service.getCustomersForExport(query);
+    const rows =
+      await this.customers_analytics_service.getCustomersForExport(query);
 
-    const data = rows.map(r => ({
-      'Nombre': r.name,
-      'Email': r.email,
-      'Teléfono': r.phone,
+    const data = rows.map((r) => ({
+      Nombre: r.name,
+      Email: r.email,
+      Teléfono: r.phone,
       'Total Órdenes': r.total_orders,
       'Total Gastado': r.total_spent,
       'Última Orden': r.last_order_date,
       'Fecha Registro': r.registration_date,
-      'Estado': r.state,
+      Estado: r.state,
     }));
 
     const XLSX = await import('xlsx');
@@ -503,7 +534,8 @@ export class AnalyticsController {
 
     const filename = `clientes_${new Date().toISOString().split('T')[0]}.xlsx`;
     res.set({
-      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="${filename}"`,
     });
 
@@ -522,7 +554,8 @@ export class AnalyticsController {
   @Get('financial/cash-sessions')
   @Permissions('store:analytics:read')
   async getCashSessionsReport(@Query() query: AnalyticsQueryDto) {
-    const result = await this.financial_analytics_service.getCashSessionsReport(query);
+    const result =
+      await this.financial_analytics_service.getCashSessionsReport(query);
     return this.response_service.paginated(
       result.data,
       result.meta.pagination.total,
@@ -534,7 +567,8 @@ export class AnalyticsController {
   @Get('financial/profit-loss')
   @Permissions('store:analytics:read')
   async getProfitLossSummary(@Query() query: AnalyticsQueryDto) {
-    const result = await this.financial_analytics_service.getProfitLossSummary(query);
+    const result =
+      await this.financial_analytics_service.getProfitLossSummary(query);
     return this.response_service.success(result);
   }
 
@@ -544,7 +578,8 @@ export class AnalyticsController {
     @Query() query: AnalyticsQueryDto,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const data = await this.financial_analytics_service.getTaxSummaryForExport(query);
+    const data =
+      await this.financial_analytics_service.getTaxSummaryForExport(query);
 
     const XLSX = await import('xlsx');
     const wb = XLSX.utils.book_new();
@@ -554,7 +589,8 @@ export class AnalyticsController {
 
     const filename = `impuestos_${new Date().toISOString().split('T')[0]}.xlsx`;
     res.set({
-      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="${filename}"`,
     });
 
@@ -567,7 +603,8 @@ export class AnalyticsController {
     @Query() query: AnalyticsQueryDto,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const data = await this.financial_analytics_service.getCashSessionsForExport(query);
+    const data =
+      await this.financial_analytics_service.getCashSessionsForExport(query);
 
     const XLSX = await import('xlsx');
     const wb = XLSX.utils.book_new();
@@ -577,7 +614,8 @@ export class AnalyticsController {
 
     const filename = `sesiones_caja_${new Date().toISOString().split('T')[0]}.xlsx`;
     res.set({
-      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Type':
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="${filename}"`,
     });
 

@@ -1,10 +1,22 @@
-import { Injectable, NestInterceptor, ExecutionContext, CallHandler, HttpException } from '@nestjs/common';
+import {
+  Injectable,
+  NestInterceptor,
+  ExecutionContext,
+  CallHandler,
+  HttpException,
+} from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { tap, catchError } from 'rxjs/operators';
 import { PerformanceCollectorService } from '../services/performance-collector.service';
 
-const EXCLUDED_PATHS = ['/health', '/api-docs', '/monitoring/performance', '/monitoring/overview'];
-const UUID_REGEX = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+const EXCLUDED_PATHS = [
+  '/health',
+  '/api-docs',
+  '/monitoring/performance',
+  '/monitoring/overview',
+];
+const UUID_REGEX =
+  /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
 const NUMERIC_ID_REGEX = /\/\d+(?=\/|$)/g;
 
 @Injectable()
@@ -16,7 +28,7 @@ export class PerformanceInterceptor implements NestInterceptor {
     const url: string = req.url || '';
 
     // Fast path: skip excluded routes
-    if (EXCLUDED_PATHS.some(p => url.includes(p))) {
+    if (EXCLUDED_PATHS.some((p) => url.includes(p))) {
       return next.handle();
     }
 

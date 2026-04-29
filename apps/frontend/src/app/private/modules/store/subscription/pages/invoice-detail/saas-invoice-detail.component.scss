@@ -1,0 +1,8 @@
+// Estilos del detalle de factura SaaS.
+// La mayoría del layout usa Tailwind + tokens del sistema; este archivo
+// solo cubre ajustes finos que Tailwind no puede expresar inline.
+
+:host {
+  display: block;
+  width: 100%;
+}

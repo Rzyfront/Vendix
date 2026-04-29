@@ -1,6 +1,9 @@
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
-import { ModuleFlowGuard, RequireModuleFlow } from '../../../../common/guards/module-flow.guard';
+import {
+  ModuleFlowGuard,
+  RequireModuleFlow,
+} from '../../../../common/guards/module-flow.guard';
 import { UseGuards } from '@nestjs/common';
 import {
   Controller,

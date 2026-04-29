@@ -25,6 +25,9 @@ export class EcommerceInvoiceDataController {
     @Body() dto: SubmitInvoiceDataDto,
   ) {
     const result = await this.invoiceDataService.submitData(token, dto);
-    return this.responseService.success(result, 'Datos de facturación recibidos correctamente');
+    return this.responseService.success(
+      result,
+      'Datos de facturación recibidos correctamente',
+    );
   }
 }

@@ -7,6 +7,8 @@ import {
   EyeOff,
   ArrowLeft,
   User,
+  UserCheck,
+  UserPlus,
   Mail,
   Phone,
   Building2,
@@ -30,6 +32,7 @@ import {
   Search,
   Plus,
   Minus,
+  PlusCircle,
   Trash2,
   X,
   ChevronRight,
@@ -53,6 +56,9 @@ import {
   Share,
   Printer,
   RefreshCw,
+  Sliders,
+  ShoppingBag,
+  Edit2,
 } from 'lucide-react-native';
 import { colors } from '@/shared/theme/colors';
 
@@ -64,6 +70,8 @@ const iconMap: Record<string, typeof ShoppingCart> = {
   'eye-off': EyeOff,
   'arrow-left': ArrowLeft,
   user: User,
+  'user-check': UserCheck,
+  'user-plus': UserPlus,
   mail: Mail,
   phone: Phone,
   building: Building2,
@@ -87,6 +95,7 @@ const iconMap: Record<string, typeof ShoppingCart> = {
   search: Search,
   plus: Plus,
   minus: Minus,
+  'plus-circle': PlusCircle,
   trash: Trash2,
   x: X,
   'chevron-right': ChevronRight,
@@ -110,6 +119,9 @@ const iconMap: Record<string, typeof ShoppingCart> = {
   share: Share,
   printer: Printer,
   refresh: RefreshCw,
+  sliders: Sliders,
+  'shopping-bag': ShoppingBag,
+  'edit-2': Edit2,
 };
 
 interface IconProps {

@@ -10,7 +10,7 @@ import { PaymentsModule } from '../payments/payments.module';
   imports: [
     PrismaModule,
     ResponseModule,
-    WompiModule,
+    forwardRef(() => WompiModule),
     forwardRef(() => PaymentsModule),
   ],
   controllers: [PaymentLinksController],

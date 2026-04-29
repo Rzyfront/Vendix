@@ -13,7 +13,7 @@ import {
 
 @Injectable()
 export class OnboardingService {
-  constructor(private readonly prismaService: OrganizationPrismaService) { }
+  constructor(private readonly prismaService: OrganizationPrismaService) {}
 
   // ===== ORGANIZATION ONBOARDING METHODS =====
 
@@ -448,12 +448,13 @@ export class OnboardingService {
 
   private async setupOrganizationPaymentPolicy(organizationId: number) {
     try {
-      const baseMethods = await this.prismaService.system_payment_methods.findMany({
-        where: {
-          name: { in: ['cash', 'payment_vouchers'] },
-          is_active: true,
-        },
-      });
+      const baseMethods =
+        await this.prismaService.system_payment_methods.findMany({
+          where: {
+            name: { in: ['cash', 'payment_vouchers'] },
+            is_active: true,
+          },
+        });
 
       if (baseMethods.length === 0) return;
 
@@ -480,14 +481,18 @@ export class OnboardingService {
     }
   }
 
-  private async setupStorePaymentMethods(storeId: number, organizationId: number) {
+  private async setupStorePaymentMethods(
+    storeId: number,
+    organizationId: number,
+  ) {
     try {
-      const baseMethods = await this.prismaService.system_payment_methods.findMany({
-        where: {
-          name: { in: ['cash', 'payment_vouchers'] },
-          is_active: true,
-        },
-      });
+      const baseMethods =
+        await this.prismaService.system_payment_methods.findMany({
+          where: {
+            name: { in: ['cash', 'payment_vouchers'] },
+            is_active: true,
+          },
+        });
 
       for (const method of baseMethods) {
         await this.prismaService.store_payment_methods.upsert({

@@ -95,6 +95,111 @@ export class SubscriptionBillingService {
           },
         });
 
+        // Idempotent reuse / void of an existing pending invoice for this
+        // subscription. Prevents duplicate billing rows when the user retries
+        // checkout (closed widget, re-open) or changes plan while pending:
+        //   - Same plan, still `issued`  → reuse the row (no new number, no
+        //     duplicate partner commission). Caller treats as a no-op emission.
+        //   - Different plan, still `issued` → void the old one and metadata
+        //     mark it as `replaced_by_plan_change`; commission accrual on the
+        //     old row gets cleaned up by the void path so there's no rev-share
+        //     leak. Continue and emit a fresh invoice for the new plan.
+        // Only runs for non-prorated emissions; proration emits its own
+        // delta invoice and never collides with a pending full-period one.
+        if (!opts.prorated) {
+          const existingPending = await tx.subscription_invoices.findFirst({
+            where: {
+              store_subscription_id: sub.id,
+              state: 'issued',
+            },
+            orderBy: { created_at: 'desc' },
+          });
+          if (existingPending) {
+            // Resolve the plan_id this pending invoice was issued against so
+            // we can detect a plan change. Line items carry plan_id in `meta`.
+            const lineItems = Array.isArray(existingPending.line_items)
+              ? (existingPending.line_items as unknown as InvoiceLineItem[])
+              : [];
+            const invoicePlanId = lineItems[0]?.meta?.plan_id ?? null;
+            const samePlan =
+              invoicePlanId === null || invoicePlanId === sub.plan_id;
+
+            if (samePlan) {
+              this.logger.log(
+                JSON.stringify({
+                  event: 'INVOICE_REUSED',
+                  subscription_id: sub.id,
+                  invoice_id: existingPending.id,
+                  invoice_number: existingPending.invoice_number,
+                  plan_id: sub.plan_id,
+                }),
+              );
+              return existingPending;
+            }
+
+            // Plan changed since the previous emission. Void the old invoice
+            // and any pending payments under it, then continue to emit a new
+            // one for the current plan. Commission accrual: when `state` flips
+            // off `issued` the partner_commissions row stays in `accrued` —
+            // we mark it `voided` so the monthly batch skips it.
+            const existingMeta =
+              existingPending.metadata && typeof existingPending.metadata === 'object'
+                ? (existingPending.metadata as Record<string, unknown>)
+                : {};
+            await tx.subscription_invoices.update({
+              where: { id: existingPending.id },
+              data: {
+                state: 'void',
+                metadata: {
+                  ...existingMeta,
+                  void_reason: 'replaced_by_plan_change',
+                  voided_at: new Date().toISOString(),
+                  previous_plan_id: invoicePlanId,
+                  new_plan_id: sub.plan_id,
+                } as Prisma.InputJsonValue,
+                updated_at: new Date(),
+              },
+            });
+
+            // Cancel any pending payments tied to the voided invoice. There's
+            // no `cancelled` state in subscription_payment_state_enum, so we
+            // mark them `failed` with reason in metadata.
+            const pendingPayments = await tx.subscription_payments.findMany({
+              where: { invoice_id: existingPending.id, state: 'pending' },
+              select: { id: true, metadata: true },
+            });
+            for (const pp of pendingPayments) {
+              const ppMeta =
+                pp.metadata && typeof pp.metadata === 'object'
+                  ? (pp.metadata as Record<string, unknown>)
+                  : {};
+              await tx.subscription_payments.update({
+                where: { id: pp.id },
+                data: {
+                  state: 'failed',
+                  metadata: {
+                    ...ppMeta,
+                    cancellation_reason: 'invoice_voided_plan_change',
+                    cancelled_at: new Date().toISOString(),
+                  } as Prisma.InputJsonValue,
+                  updated_at: new Date(),
+                },
+              });
+            }
+
+            this.logger.warn(
+              JSON.stringify({
+                event: 'INVOICE_VOIDED_PLAN_CHANGE',
+                subscription_id: sub.id,
+                old_invoice_id: existingPending.id,
+                old_invoice_number: existingPending.invoice_number,
+                old_plan_id: invoicePlanId,
+                new_plan_id: sub.plan_id,
+              }),
+            );
+          }
+        }
+
         const pricing = this.computePricing(sub);
         const cycleMs = this.billingCycleMs(sub.plan.billing_cycle);
 
@@ -107,14 +212,13 @@ export class SubscriptionBillingService {
           : (sub.current_period_end ?? now);
         const basePeriodEnd = opts.prorated
           ? (sub.current_period_end ?? new Date(now.getTime() + cycleMs))
-          : new Date(
-              (sub.current_period_end ?? now).getTime() + cycleMs,
-            );
+          : new Date((sub.current_period_end ?? now).getTime() + cycleMs);
 
         const quantity = 1;
-        const unitPrice = opts.prorated && opts.proratedAmount
-          ? opts.proratedAmount
-          : pricing.effective_price;
+        const unitPrice =
+          opts.prorated && opts.proratedAmount
+            ? opts.proratedAmount
+            : pricing.effective_price;
 
         // Free-plan skip (non-prorated only).
         if (
@@ -150,12 +254,17 @@ export class SubscriptionBillingService {
         }
 
         // Apply pending downgrade credit, if any (stored in metadata).
+        // CRITICAL: if pending_credit > subtotal, cap applied at subtotal
+        // and ROLL OVER the remainder to the next cycle (persist in metadata).
+        // Previous bug: any credit excess over subtotal was silently lost.
         const pendingCredit = this.extractPendingCredit(sub.metadata);
         let subtotal = unitPrice.times(quantity);
         let creditApplied = DECIMAL_ZERO;
+        let remainingCredit = DECIMAL_ZERO;
         if (pendingCredit.greaterThan(DECIMAL_ZERO) && !opts.prorated) {
-          // Cap credit so subtotal >= 0
+          // Cap credit so subtotal_after >= 0
           creditApplied = Prisma.Decimal.min(pendingCredit, subtotal);
+          remainingCredit = pendingCredit.minus(creditApplied);
           subtotal = subtotal.minus(creditApplied);
         }
         const total = this.round2(subtotal);
@@ -201,9 +310,9 @@ export class SubscriptionBillingService {
         }
 
         const splitBreakdown: InvoiceSplitBreakdown = {
-          vendix_share: this.round2(
-            pricing.base_price.times(quantity),
-          ).toFixed(2),
+          vendix_share: this.round2(pricing.base_price.times(quantity)).toFixed(
+            2,
+          ),
           partner_share: this.round2(
             pricing.margin_amount.times(quantity),
           ).toFixed(2),
@@ -230,8 +339,7 @@ export class SubscriptionBillingService {
             amount_paid: DECIMAL_ZERO,
             currency: sub.currency,
             line_items: lineItems as unknown as Prisma.InputJsonValue,
-            split_breakdown:
-              splitBreakdown as unknown as Prisma.InputJsonValue,
+            split_breakdown: splitBreakdown as unknown as Prisma.InputJsonValue,
             metadata: {
               prorated: !!opts.prorated,
               credit_applied: creditApplied.toFixed(2),
@@ -239,14 +347,32 @@ export class SubscriptionBillingService {
           },
         });
 
-        // Reset pending credit if used
+        // Reset / rollover pending credit if used.
+        // - applied >= original pending_credit: clear key entirely.
+        // - applied < pending_credit (subtotal too small): persist remainder
+        //   as string Decimal under metadata.pending_credit so it rolls over
+        //   to the next cycle. Operates inside the SAME tx as the invoice.
         if (creditApplied.greaterThan(DECIMAL_ZERO)) {
           const nextMeta = {
             ...(sub.metadata && typeof sub.metadata === 'object'
               ? (sub.metadata as Record<string, unknown>)
               : {}),
           };
-          delete nextMeta['pending_credit'];
+          if (remainingCredit.greaterThan(DECIMAL_ZERO)) {
+            const roundedRemaining = this.round2(remainingCredit);
+            nextMeta['pending_credit'] = roundedRemaining.toFixed(2);
+            this.logger.log(
+              JSON.stringify({
+                event: 'PENDING_CREDIT_ROLLOVER',
+                subscription_id: sub.id,
+                applied: this.round2(creditApplied).toFixed(2),
+                remaining: roundedRemaining.toFixed(2),
+                invoice_id: invoice.id,
+              }),
+            );
+          } else {
+            delete nextMeta['pending_credit'];
+          }
           await tx.store_subscriptions.update({
             where: { id: sub.id },
             data: { metadata: nextMeta as Prisma.InputJsonValue },
@@ -344,6 +470,22 @@ export class SubscriptionBillingService {
    * clamping the override margin at emission time vs. the current plan cap.
    * Never trust `store_subscriptions.partner_margin_amount` alone.
    */
+  /**
+   * Check whether a plan would result in a zero-charge invoice (free plan).
+   * Used by checkout to decide if we can short-circuit the
+   * pending_payment → widget flow and activate the subscription synchronously.
+   */
+  isFreePlan(plan: {
+    base_price: Prisma.Decimal;
+    max_partner_margin_pct: Prisma.Decimal | null;
+  }): boolean {
+    const pricing = this.computePricing({ plan });
+    return (
+      pricing.effective_price.lessThanOrEqualTo(DECIMAL_ZERO) &&
+      pricing.margin_amount.lessThanOrEqualTo(DECIMAL_ZERO)
+    );
+  }
+
   computePricing(sub: {
     plan: {
       id: number;

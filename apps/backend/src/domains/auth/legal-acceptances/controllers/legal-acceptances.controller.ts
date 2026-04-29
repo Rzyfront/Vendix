@@ -24,7 +24,7 @@ export class LegalAcceptancesController {
   constructor(
     private readonly legalAcceptancesService: LegalAcceptancesService,
     private readonly responseService: ResponseService,
-  ) { }
+  ) {}
 
   @Get('pending')
   async getPendingTerms(@Request() req) {
@@ -33,7 +33,6 @@ export class LegalAcceptancesController {
     );
     return this.responseService.success(data);
   }
-
 
   @Get('my-acceptances')
   async getMyAcceptances(@Request() req) {

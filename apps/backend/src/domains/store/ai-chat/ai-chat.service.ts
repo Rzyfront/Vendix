@@ -11,7 +11,11 @@ import {
   AIMessage,
   AIStreamChunk,
 } from '../../../ai-engine/interfaces/ai-provider.interface';
-import { CreateConversationDto, SendMessageDto, ConversationQueryDto } from './dto';
+import {
+  CreateConversationDto,
+  SendMessageDto,
+  ConversationQueryDto,
+} from './dto';
 import {
   ConversationWithMessages,
   PaginatedConversations,
@@ -147,7 +151,8 @@ export class AIChatService {
 
     // Check if agent mode is enabled for this app
     const app = await this.aiEngine.getApplication(appKey).catch(() => null);
-    const agentEnabled = app?.metadata && (app.metadata as any).agent_enabled === true;
+    const agentEnabled =
+      app?.metadata && (app.metadata as any).agent_enabled === true;
 
     let responseContent = '';
     let tokensUsed = 0;
@@ -355,7 +360,7 @@ export class AIChatService {
         msg.role === 'assistant'
       ) {
         messages.push({
-          role: msg.role as 'system' | 'user' | 'assistant',
+          role: msg.role,
           content: msg.content,
         });
       }

@@ -287,3 +287,53 @@ export interface PayoutApprovalDto {
 
 export type SubscriptionStatus = 'active' | 'grace' | 'suspended' | 'cancelled' | 'trial';
 export type BillingCycle = PlanBillingCycle;
+
+// ─── Dunning manual transition preview (S4.1) ───
+
+export type DunningPreviewTargetState =
+  | 'draft'
+  | 'pending_payment'
+  | 'trial'
+  | 'active'
+  | 'grace_soft'
+  | 'grace_hard'
+  | 'suspended'
+  | 'blocked'
+  | 'cancelled'
+  | 'expired';
+
+export interface DunningPreviewEmail {
+  key: string;
+  to: string;
+  subject: string;
+}
+
+export interface DunningPreviewInvoice {
+  id: number;
+  invoice_number: string;
+  state: string;
+  total: number;
+}
+
+export interface DunningPreviewCommission {
+  id: number;
+  partner_org_id: number;
+  amount: number;
+  state: string;
+}
+
+export interface DunningPreviewSideEffects {
+  emails_to_send: DunningPreviewEmail[];
+  features_lost: string[];
+  features_gained: string[];
+  invoices_affected: DunningPreviewInvoice[];
+  commissions_affected: DunningPreviewCommission[];
+}
+
+export interface DunningPreviewResponse {
+  legal: boolean;
+  current_state: DunningPreviewTargetState;
+  target_state: DunningPreviewTargetState;
+  side_effects: DunningPreviewSideEffects;
+  warnings: string[];
+}

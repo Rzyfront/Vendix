@@ -1,0 +1,42 @@
+meta {
+  name: Superadmin Create Plan
+  type: http
+  seq: 21
+}
+
+post {
+  url: {{url}}/superadmin/subscriptions/plans
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "code": "test_plan_bru_{{$randomInt}}",
+    "name": "Test Plan Bruno",
+    "description": "Plan created from Bruno superadmin coverage tests",
+    "plan_type": "base",
+    "billing_cycle": "monthly",
+    "base_price": 29900,
+    "currency": "COP",
+    "trial_days": 14,
+    "max_partner_margin_pct": 30
+  }
+}
+
+vars:post-response {
+  superadmin_plan_id: res.body.data.id
+}
+
+tests {
+  test("Plan created successfully", function() {
+    expect(res.status).to.equal(201);
+    expect(res.body.success).to.be.true;
+    expect(res.body.data).to.have.property("id");
+    expect(res.body.data).to.have.property("code");
+  });
+
+  test("Plan defaults to draft state", function() {
+    expect(res.body.data.state).to.equal("draft");
+  });
+}

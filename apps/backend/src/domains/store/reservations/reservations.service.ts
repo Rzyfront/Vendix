@@ -95,11 +95,15 @@ export class ReservationsService {
     }
     // Sign the product image URL if it's an S3 key
     if (booking?.product?.image_url) {
-      booking.product.image_url = await this.s3Service.signUrl(booking.product.image_url);
+      booking.product.image_url = await this.s3Service.signUrl(
+        booking.product.image_url,
+      );
     }
     // Sign the provider avatar URL if it's an S3 key
     if (booking?.provider?.avatar_url) {
-      booking.provider.avatar_url = await this.s3Service.signUrl(booking.provider.avatar_url);
+      booking.provider.avatar_url = await this.s3Service.signUrl(
+        booking.provider.avatar_url,
+      );
     }
     return booking;
   }
@@ -817,8 +821,12 @@ export class ReservationsService {
     });
 
     if (!booking) throw new NotFoundException('Booking not found');
-    if (booking.status !== 'confirmed') throw new BadRequestException('Solo bookings confirmados pueden hacer check-in');
-    if (booking.checked_in_at) throw new BadRequestException('Check-in ya registrado');
+    if (booking.status !== 'confirmed')
+      throw new BadRequestException(
+        'Solo bookings confirmados pueden hacer check-in',
+      );
+    if (booking.checked_in_at)
+      throw new BadRequestException('Check-in ya registrado');
 
     const updated = await this.prisma.bookings.update({
       where: { id },

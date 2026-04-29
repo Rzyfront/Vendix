@@ -1,5 +1,5 @@
 import { Injectable, inject } from '@angular/core';
-import { HttpClient } from '@angular/common/http';
+import { HttpClient, HttpResponse } from '@angular/common/http';
 import { Observable } from 'rxjs';
 import { environment } from '../../../../../../environments/environment';
 import {
@@ -34,6 +34,17 @@ export class OrgSubscriptionsService {
 
   getInvoice(invoiceId: number): Observable<ApiResponse<any>> {
     return this.http.get<ApiResponse<any>>(`${environment.apiUrl}/store/subscriptions/current/invoices/${invoiceId}`);
+  }
+
+  /**
+   * S3.1 — PDF download wrapper for org-level UIs (re-uses the
+   * store-scoped endpoint; the request context is resolved by domain).
+   */
+  downloadInvoicePdf(invoiceId: number): Observable<HttpResponse<Blob>> {
+    return this.http.get(
+      `${environment.apiUrl}/store/subscriptions/current/invoices/${invoiceId}/pdf`,
+      { responseType: 'blob', observe: 'response' },
+    );
   }
 
   getPlans(): Observable<ApiResponse<any>> {

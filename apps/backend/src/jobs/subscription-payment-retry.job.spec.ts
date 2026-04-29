@@ -58,9 +58,7 @@ describe('SubscriptionPaymentRetryJob', () => {
   it('chargeInvoice returns state=failed: throws (BullMQ will retry)', async () => {
     payment.chargeInvoice.mockResolvedValue({ id: 43, state: 'failed' });
 
-    await expect(processor.process(makeJob())).rejects.toThrow(
-      /state=failed/,
-    );
+    await expect(processor.process(makeJob())).rejects.toThrow(/state=failed/);
     expect(emitter.emit).toHaveBeenCalledWith(
       'subscription.payment.retry.failed',
       expect.objectContaining({ invoiceId: 100, paymentId: 43, attempt: 1 }),

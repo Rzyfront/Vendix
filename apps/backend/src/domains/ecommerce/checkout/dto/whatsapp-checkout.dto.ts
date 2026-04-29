@@ -1,4 +1,11 @@
-import { IsOptional, IsString, IsArray, ValidateNested, IsInt, Min } from 'class-validator';
+import {
+  IsOptional,
+  IsString,
+  IsArray,
+  ValidateNested,
+  IsInt,
+  Min,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 class WhatsappCartItemDto {

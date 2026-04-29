@@ -47,7 +47,7 @@ export class RolesController {
   constructor(
     private readonly rolesService: RolesService,
     private readonly responseService: ResponseService,
-  ) { }
+  ) {}
 
   @Post()
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)

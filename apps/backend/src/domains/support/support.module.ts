@@ -5,17 +5,8 @@ import { SupportNotificationsModule } from './notifications/support-notification
 import { TicketListeners } from './events/ticket.listeners';
 
 @Module({
-  imports: [
-    TicketsModule,
-    CommentsModule,
-    SupportNotificationsModule,
-  ],
-  providers: [
-    TicketListeners,
-  ],
-  exports: [
-    TicketsModule,
-    CommentsModule,
-  ],
+  imports: [TicketsModule, CommentsModule, SupportNotificationsModule],
+  providers: [TicketListeners],
+  exports: [TicketsModule, CommentsModule],
 })
 export class SupportModule {}

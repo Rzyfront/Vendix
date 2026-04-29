@@ -1,5 +1,6 @@
-import { View, Text, type ViewProps } from 'react-native';
+import { View, Text, StyleSheet, type ViewProps, type ViewStyle } from 'react-native';
 import { Button } from '../button/button';
+import { colorScales, spacing, typography } from '@/shared/theme';
 
 interface EmptyStateProps extends ViewProps {
   icon?: React.ReactNode;
@@ -7,7 +8,35 @@ interface EmptyStateProps extends ViewProps {
   description?: string;
   actionLabel?: string;
   onAction?: () => void;
+  style?: ViewStyle;
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: spacing[8],
+    paddingVertical: spacing[12],
+  },
+  iconWrapper: {
+    marginBottom: spacing[4],
+  },
+  title: {
+    fontSize: typography.fontSize.lg,
+    fontWeight: typography.fontWeight.semibold as any,
+    color: colorScales.gray[900],
+    textAlign: 'center',
+    marginBottom: spacing[2],
+  },
+  description: {
+    fontSize: typography.fontSize.sm,
+    color: colorScales.gray[500],
+    textAlign: 'center',
+    marginBottom: spacing[6],
+    maxWidth: 320,
+  },
+});
 
 export function EmptyState({
   icon,
@@ -15,24 +44,21 @@ export function EmptyState({
   description,
   actionLabel,
   onAction,
-  className = '',
+  style,
   ...props
 }: EmptyStateProps) {
   return (
-    <View
-      className={`flex-1 items-center justify-center px-8 py-12 ${className}`}
-      {...props}
-    >
+    <View style={[styles.container, style]} {...props}>
       {icon && (
-        <View className="mb-4 text-gray-400">
+        <View style={styles.iconWrapper}>
           {icon}
         </View>
       )}
-      <Text className="text-lg font-semibold text-gray-900 text-center mb-2">
+      <Text style={styles.title}>
         {title}
       </Text>
       {description && (
-        <Text className="text-sm text-gray-500 text-center mb-6 max-w-xs">
+        <Text style={styles.description}>
           {description}
         </Text>
       )}

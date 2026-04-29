@@ -253,8 +253,7 @@ export class StoreBootstrapHelper {
     const baseCode =
       input.location_overrides?.code ??
       this.buildDefaultLocationCode(store.slug);
-    const locationName =
-      input.location_overrides?.name ?? store.name;
+    const locationName = input.location_overrides?.name ?? store.name;
 
     let default_location: inventory_locations;
     try {

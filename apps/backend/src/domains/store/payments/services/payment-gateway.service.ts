@@ -18,7 +18,7 @@ export class PaymentGatewayService {
   constructor(
     private prisma: StorePrismaService,
     private validatorService: PaymentValidatorService,
-  ) { }
+  ) {}
 
   registerProcessor(name: string, processor: BasePaymentProcessor): void {
     this.processors.set(name, processor);
@@ -43,7 +43,9 @@ export class PaymentGatewayService {
       const paymentMethod = await this.getPaymentMethod(
         paymentData.storePaymentMethodId,
       );
-      const processor = this.getProcessor(paymentMethod.system_payment_method?.type || paymentMethod.type);
+      const processor = this.getProcessor(
+        paymentMethod.system_payment_method?.type || paymentMethod.type,
+      );
 
       if (!processor.isEnabled()) {
         throw new PaymentError(
@@ -126,7 +128,9 @@ export class PaymentGatewayService {
     try {
       const payment = await this.prisma.payments.findFirst({
         where: { transaction_id: paymentId },
-        include: { store_payment_method: { include: { system_payment_method: true } } },
+        include: {
+          store_payment_method: { include: { system_payment_method: true } },
+        },
       });
 
       if (!payment) {
@@ -166,7 +170,9 @@ export class PaymentGatewayService {
     try {
       const payment = await this.prisma.payments.findFirst({
         where: { transaction_id: transactionId },
-        include: { store_payment_method: { include: { system_payment_method: true } } },
+        include: {
+          store_payment_method: { include: { system_payment_method: true } },
+        },
       });
 
       if (!payment) {

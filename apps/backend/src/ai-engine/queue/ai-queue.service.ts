@@ -1,7 +1,9 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectQueue } from '@nestjs/bullmq';
 import { Queue, Job } from 'bullmq';
+import { randomUUID } from 'crypto';
 import { VendixHttpException, ErrorCodes } from '../../common/errors';
+import { RequestContextService } from '../../common/context/request-context.service';
 import {
   AIGenerationJob,
   AIEmbeddingJob,
@@ -21,13 +23,19 @@ export class AIQueueService {
 
   async enqueueGeneration(params: AIGenerationJob): Promise<Job> {
     try {
-      const job = await this.generationQueue.add('generate', params, {
+      const enriched: AIGenerationJob = {
+        ...params,
+        request_id: this.resolveRequestId(params.request_id),
+      };
+      const job = await this.generationQueue.add('generate', enriched, {
         attempts: 3,
         backoff: { type: 'exponential', delay: 2000 },
         removeOnComplete: { count: 100 },
         removeOnFail: { count: 50 },
       });
-      this.logger.log(`Enqueued AI generation job ${job.id} for app_key: ${params.app_key}`);
+      this.logger.log(
+        `Enqueued AI generation job ${job.id} for app_key: ${params.app_key} (request_id=${enriched.request_id})`,
+      );
       return job;
     } catch (error: any) {
       this.logger.error(`Failed to enqueue generation: ${error.message}`);
@@ -43,7 +51,9 @@ export class AIQueueService {
         removeOnComplete: { count: 500 },
         removeOnFail: { count: 100 },
       });
-      this.logger.log(`Enqueued embedding job ${job.id} for ${params.entity_type}:${params.entity_id}`);
+      this.logger.log(
+        `Enqueued embedding job ${job.id} for ${params.entity_type}:${params.entity_id}`,
+      );
       return job;
     } catch (error: any) {
       this.logger.error(`Failed to enqueue embedding: ${error.message}`);
@@ -53,17 +63,41 @@ export class AIQueueService {
 
   async enqueueAgentTask(params: AIAgentJob): Promise<Job> {
     try {
-      const job = await this.agentQueue.add('agent-task', params, {
+      const enriched: AIAgentJob = {
+        ...params,
+        request_id: this.resolveRequestId(params.request_id),
+      };
+      const job = await this.agentQueue.add('agent-task', enriched, {
         attempts: 1,
         removeOnComplete: { count: 50 },
         removeOnFail: { count: 25 },
       });
-      this.logger.log(`Enqueued agent task ${job.id}: ${params.goal.substring(0, 80)}`);
+      this.logger.log(
+        `Enqueued agent task ${job.id}: ${params.goal.substring(0, 80)} (request_id=${enriched.request_id})`,
+      );
       return job;
     } catch (error: any) {
       this.logger.error(`Failed to enqueue agent task: ${error.message}`);
       throw new VendixHttpException(ErrorCodes.AI_QUEUE_001);
     }
+  }
+
+  /**
+   * Resolve the correlation id stamped onto a queued AI job.
+   *
+   * Order of preference:
+   *   1. Explicit request_id supplied by the caller.
+   *   2. The active HTTP request's X-Request-Id (via AsyncLocalStorage).
+   *   3. A freshly minted UUID (job-local correlation, still dedup-safe across
+   *      BullMQ retries because the same job replays the same id).
+   */
+  private resolveRequestId(explicit?: string): string {
+    if (typeof explicit === 'string' && explicit.trim().length > 0) {
+      return explicit;
+    }
+    const fromContext = RequestContextService.getRequestId();
+    if (fromContext) return fromContext;
+    return `queue-${randomUUID()}`;
   }
 
   async getJobStatus(queueName: string, jobId: string): Promise<AIJobResult> {

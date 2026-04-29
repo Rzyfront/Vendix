@@ -1,11 +1,11 @@
 import {
   IsBoolean,
   IsEnum,
-  IsNotEmpty,
   IsOptional,
   IsString,
   Matches,
 } from 'class-validator';
+import { Transform } from 'class-transformer';
 
 export enum PlatformGatewayEnvironmentEnum {
   SANDBOX = 'sandbox',
@@ -18,29 +18,40 @@ export enum PlatformGatewayEnvironmentEnum {
  *
  * Mirror of the per-store Wompi config DTO but with extra production
  * confirmation for the platform-level configuration.
+ *
+ * NOTE: The 4 secret fields are OPTIONAL on PATCH. When omitted (or sent
+ * as ""), the existing stored credential is preserved — this lets the
+ * superadmin toggle `environment` / `is_active` without re-typing every
+ * secret. The empty-string → undefined transform is required because
+ * `@Matches` runs on present values (including ""), and we want "" to
+ * mean "do not rotate this secret".
  */
 export class UpsertGatewayDto {
+  @Transform(({ value }) => (value === '' ? undefined : value))
+  @IsOptional()
   @IsString()
-  @IsNotEmpty({ message: 'La llave pública de Wompi es requerida' })
   @Matches(/^pub_(test|prod)_/, {
     message: 'La llave pública debe iniciar con pub_test_ o pub_prod_',
   })
-  public_key: string;
+  public_key?: string;
 
+  @Transform(({ value }) => (value === '' ? undefined : value))
+  @IsOptional()
   @IsString()
-  @IsNotEmpty({ message: 'La llave privada de Wompi es requerida' })
   @Matches(/^prv_(test|prod)_/, {
     message: 'La llave privada debe iniciar con prv_test_ o prv_prod_',
   })
-  private_key: string;
+  private_key?: string;
 
+  @Transform(({ value }) => (value === '' ? undefined : value))
+  @IsOptional()
   @IsString()
-  @IsNotEmpty({ message: 'El secret de eventos de Wompi es requerido' })
-  events_secret: string;
+  events_secret?: string;
 
+  @Transform(({ value }) => (value === '' ? undefined : value))
+  @IsOptional()
   @IsString()
-  @IsNotEmpty({ message: 'El secret de integridad de Wompi es requerido' })
-  integrity_secret: string;
+  integrity_secret?: string;
 
   @IsEnum(PlatformGatewayEnvironmentEnum, {
     message: 'El ambiente debe ser sandbox o production',

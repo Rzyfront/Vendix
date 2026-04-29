@@ -15,7 +15,7 @@ describe('EventsService', () => {
         count: jest.fn(),
       },
     };
-    service = new EventsService(prisma as any);
+    service = new EventsService(prisma);
   });
 
   describe('findAll', () => {

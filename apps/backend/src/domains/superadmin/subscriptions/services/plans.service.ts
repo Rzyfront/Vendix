@@ -50,7 +50,16 @@ export class PlansService {
   }
 
   async findAll(query: PlanQueryDto) {
-    const { page = 1, limit = 10, search, plan_type, state, billing_cycle, sort_by = 'created_at', sort_order = 'desc' } = query;
+    const {
+      page = 1,
+      limit = 10,
+      search,
+      plan_type,
+      state,
+      billing_cycle,
+      sort_by = 'created_at',
+      sort_order = 'desc',
+    } = query;
 
     const skip = (page - 1) * Number(limit);
     const where: Prisma.subscription_plansWhereInput = {};
@@ -104,14 +113,18 @@ export class PlansService {
   }
 
   async update(id: number, dto: UpdatePlanDto) {
-    const existing = await this.prisma.subscription_plans.findUnique({ where: { id } });
+    const existing = await this.prisma.subscription_plans.findUnique({
+      where: { id },
+    });
 
     if (!existing) {
       throw new VendixHttpException(ErrorCodes.SYS_NOT_FOUND_001);
     }
 
     if (dto.code && dto.code !== existing.code) {
-      const conflict = await this.prisma.subscription_plans.findUnique({ where: { code: dto.code } });
+      const conflict = await this.prisma.subscription_plans.findUnique({
+        where: { code: dto.code },
+      });
       if (conflict) {
         throw new VendixHttpException(ErrorCodes.SYS_CONFLICT_001);
       }
@@ -130,28 +143,52 @@ export class PlansService {
         ...(dto.currency && { currency: dto.currency }),
         ...(dto.setup_fee !== undefined && { setup_fee: dto.setup_fee }),
         ...(dto.trial_days !== undefined && { trial_days: dto.trial_days }),
-        ...(dto.grace_period_soft_days !== undefined && { grace_period_soft_days: dto.grace_period_soft_days }),
-        ...(dto.grace_period_hard_days !== undefined && { grace_period_hard_days: dto.grace_period_hard_days }),
-        ...(dto.suspension_day !== undefined && { suspension_day: dto.suspension_day }),
-        ...(dto.cancellation_day !== undefined && { cancellation_day: dto.cancellation_day }),
-        ...(dto.feature_matrix !== undefined && { feature_matrix: dto.feature_matrix as any }),
-        ...(dto.ai_feature_flags !== undefined && { ai_feature_flags: dto.ai_feature_flags as any }),
+        ...(dto.grace_period_soft_days !== undefined && {
+          grace_period_soft_days: dto.grace_period_soft_days,
+        }),
+        ...(dto.grace_period_hard_days !== undefined && {
+          grace_period_hard_days: dto.grace_period_hard_days,
+        }),
+        ...(dto.suspension_day !== undefined && {
+          suspension_day: dto.suspension_day,
+        }),
+        ...(dto.cancellation_day !== undefined && {
+          cancellation_day: dto.cancellation_day,
+        }),
+        ...(dto.feature_matrix !== undefined && {
+          feature_matrix: dto.feature_matrix as any,
+        }),
+        ...(dto.ai_feature_flags !== undefined && {
+          ai_feature_flags: dto.ai_feature_flags as any,
+        }),
         ...(dto.resellable !== undefined && { resellable: dto.resellable }),
-        ...(dto.max_partner_margin_pct !== undefined && { max_partner_margin_pct: dto.max_partner_margin_pct }),
-        ...(dto.is_promotional !== undefined && { is_promotional: dto.is_promotional }),
-        ...(dto.promo_rules !== undefined && { promo_rules: dto.promo_rules as any }),
-        ...(dto.promo_priority !== undefined && { promo_priority: dto.promo_priority }),
+        ...(dto.max_partner_margin_pct !== undefined && {
+          max_partner_margin_pct: dto.max_partner_margin_pct,
+        }),
+        ...(dto.is_promotional !== undefined && {
+          is_promotional: dto.is_promotional,
+        }),
+        ...(dto.promo_rules !== undefined && {
+          promo_rules: dto.promo_rules as any,
+        }),
+        ...(dto.promo_priority !== undefined && {
+          promo_priority: dto.promo_priority,
+        }),
         ...(dto.is_popular !== undefined && { is_popular: dto.is_popular }),
         ...(dto.is_default !== undefined && { is_default: dto.is_default }),
         ...(dto.sort_order !== undefined && { sort_order: dto.sort_order }),
-        ...(dto.parent_plan_id !== undefined && { parent_plan_id: dto.parent_plan_id }),
+        ...(dto.parent_plan_id !== undefined && {
+          parent_plan_id: dto.parent_plan_id,
+        }),
         updated_at: new Date(),
       },
     });
   }
 
   async archive(id: number) {
-    const existing = await this.prisma.subscription_plans.findUnique({ where: { id } });
+    const existing = await this.prisma.subscription_plans.findUnique({
+      where: { id },
+    });
 
     if (!existing) {
       throw new VendixHttpException(ErrorCodes.SYS_NOT_FOUND_001);
@@ -168,7 +205,9 @@ export class PlansService {
   }
 
   async remove(id: number) {
-    const existing = await this.prisma.subscription_plans.findUnique({ where: { id } });
+    const existing = await this.prisma.subscription_plans.findUnique({
+      where: { id },
+    });
 
     if (!existing) {
       throw new VendixHttpException(ErrorCodes.SYS_NOT_FOUND_001);

@@ -12,7 +12,7 @@ import { JwtAuthGuard } from '../../../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../../../auth/guards/roles.guard';
 import { Roles } from '../../../auth/decorators/roles.decorator';
 import { UserRole } from '../../../auth/enums/user-role.enum';
-import { WompiClient } from '../processors/wompi/wompi.client';
+import { WompiClientFactory } from '../processors/wompi/wompi.factory';
 import { WompiEnvironment } from '../processors/wompi/wompi.types';
 import { StorePaymentMethodsService } from '../services/store-payment-methods.service';
 import { WompiReconciliationService } from '../services/wompi-reconciliation.service';
@@ -25,7 +25,7 @@ export class WompiController {
   private readonly logger = new Logger(WompiController.name);
 
   constructor(
-    private readonly wompiClient: WompiClient,
+    private readonly wompiClientFactory: WompiClientFactory,
     private readonly storePaymentMethods: StorePaymentMethodsService,
     private readonly wompiReconciliation: WompiReconciliationService,
   ) {}
@@ -41,7 +41,9 @@ export class WompiController {
     );
 
     if (!wompiMethod) {
-      throw new BadRequestException('Wompi no está configurado para esta tienda');
+      throw new BadRequestException(
+        'Wompi no está configurado para esta tienda',
+      );
     }
 
     // Get decrypted config
@@ -49,39 +51,52 @@ export class WompiController {
   }
 
   /**
-   * Configure the WompiClient with decrypted store credentials
+   * Build an isolated WompiClient from the factory using decrypted store credentials
    */
-  private configureClient(config: Record<string, any>): void {
-    this.wompiClient.configure({
+  private getClient(
+    config: Record<string, any>,
+  ): import('../processors/wompi/wompi.client').WompiClient {
+    const storeId = RequestContextService.getStoreId() ?? 'unknown';
+    return this.wompiClientFactory.getClient(`store-${storeId}`, {
       public_key: config.public_key,
       private_key: config.private_key,
       events_secret: config.events_secret || '',
       integrity_secret: config.integrity_secret || '',
-      environment: (config.environment as WompiEnvironment) || WompiEnvironment.SANDBOX,
+      environment:
+        (config.environment as WompiEnvironment) || WompiEnvironment.SANDBOX,
     });
   }
 
   @Post('prepare')
-  @ApiOperation({ summary: 'Prepare Wompi payment data for frontend Widget/checkout' })
+  @ApiOperation({
+    summary: 'Prepare Wompi payment data for frontend Widget/checkout',
+  })
   @ApiResponse({ status: 200, description: 'Payment preparation data' })
   async preparePayment(
-    @Body() dto: { order_id: number; amount: number; currency?: string; customer_email?: string; redirect_url?: string },
+    @Body()
+    dto: {
+      order_id: number;
+      amount: number;
+      currency?: string;
+      customer_email?: string;
+      redirect_url?: string;
+    },
   ) {
     const config = await this.resolveWompiConfig();
-    this.configureClient(config);
+    const client = this.getClient(config);
 
     const storeId = RequestContextService.getStoreId();
     const reference = `vendix_${storeId}_${dto.order_id}_${Date.now()}`;
     const amountInCents = Math.round(dto.amount * 100);
     const currency = dto.currency || 'COP';
 
-    const integritySignature = this.wompiClient.generateIntegritySignature(
+    const integritySignature = client.generateIntegritySignature(
       reference,
       amountInCents,
       currency,
     );
 
-    const tokens = await this.wompiClient.getAcceptanceTokens();
+    const tokens = await client.getAcceptanceTokens();
 
     return {
       success: true,
@@ -104,8 +119,8 @@ export class WompiController {
   @ApiResponse({ status: 200, description: 'List of banks for PSE' })
   async getFinancialInstitutions() {
     const config = await this.resolveWompiConfig();
-    this.configureClient(config);
-    const institutions = await this.wompiClient.getFinancialInstitutions();
+    const client = this.getClient(config);
+    const institutions = await client.getFinancialInstitutions();
     return { data: institutions };
   }
 
@@ -113,7 +128,12 @@ export class WompiController {
   @ApiOperation({ summary: 'Test Wompi credentials by fetching merchant data' })
   @ApiResponse({ status: 200, description: 'Connection test result' })
   async testConnection(
-    @Body() body?: { public_key?: string; private_key?: string; environment?: string },
+    @Body()
+    body?: {
+      public_key?: string;
+      private_key?: string;
+      environment?: string;
+    },
   ) {
     try {
       // Use credentials from request body (modal pre-save) or from stored config (post-save)
@@ -129,8 +149,8 @@ export class WompiController {
         config = await this.resolveWompiConfig();
       }
 
-      this.configureClient(config);
-      await this.wompiClient.getAcceptanceTokens();
+      const client = this.getClient(config);
+      await client.getAcceptanceTokens();
 
       return {
         success: true,

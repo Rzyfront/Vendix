@@ -178,8 +178,7 @@ export function createInventoryTools(
           },
           product_variant_id: {
             type: 'number',
-            description:
-              'Product variant ID (if checking a specific variant)',
+            description: 'Product variant ID (if checking a specific variant)',
           },
         },
         required: ['product_id', 'quantity'],
@@ -198,7 +197,9 @@ export function createInventoryTools(
             orgId,
             Number(args.product_id),
             Number(args.quantity),
-            args.product_variant_id ? Number(args.product_variant_id) : undefined,
+            args.product_variant_id
+              ? Number(args.product_variant_id)
+              : undefined,
           );
 
         return JSON.stringify({
@@ -391,8 +392,7 @@ export function createInventoryTools(
         if (args.start_date) query.startDate = new Date(args.start_date);
         if (args.end_date) query.endDate = new Date(args.end_date);
 
-        const result =
-          await services.adjustmentsService.getAdjustments(query);
+        const result = await services.adjustmentsService.getAdjustments(query);
 
         const formatted = result.adjustments.map((a: any) => ({
           id: a.id,
@@ -453,11 +453,15 @@ export function createInventoryTools(
           },
           product_variant_id: {
             type: 'number',
-            description:
-              'Product variant ID (if adjusting a specific variant)',
+            description: 'Product variant ID (if adjusting a specific variant)',
           },
         },
-        required: ['product_id', 'location_id', 'quantity_after', 'adjustment_type'],
+        required: [
+          'product_id',
+          'location_id',
+          'quantity_after',
+          'adjustment_type',
+        ],
       },
       requiredPermissions: ['store:inventory:adjustments:create'],
       requiresConfirmation: true,
@@ -495,9 +499,7 @@ export function createInventoryTools(
             quantity_before: adjustment.quantity_before,
             quantity_after: adjustment.quantity_after,
             quantity_change: adjustment.quantity_change,
-            status: adjustment.approved_by_user_id
-              ? 'approved'
-              : 'pending',
+            status: adjustment.approved_by_user_id ? 'approved' : 'pending',
             created_at: adjustment.created_at,
           },
         });

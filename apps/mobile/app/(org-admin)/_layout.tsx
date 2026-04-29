@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { Slot, useRouter, usePathname } from 'expo-router';
-import { View } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import { AdminShell } from '@/shared/layouts/admin-shell';
 import { useAuthStore } from '@/core/store/auth.store';
 
@@ -27,7 +27,7 @@ export default function OrgAdminLayout() {
   }, [isAuthenticated, isLoading]);
 
   if (isLoading) {
-    return <View className="flex-1 bg-white" />;
+    return <View style={styles.loader} />;
   }
 
   if (!isAuthenticated) {
@@ -43,3 +43,10 @@ export default function OrgAdminLayout() {
     </AdminShell>
   );
 }
+
+const styles = StyleSheet.create({
+  loader: {
+    flex: 1,
+    backgroundColor: '#fff',
+  },
+});

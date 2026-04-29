@@ -1,0 +1,25 @@
+meta {
+  name: Superadmin Mark Payout Batch Paid
+  type: http
+  seq: 30
+}
+
+# Endpoint: PATCH /superadmin/subscriptions/payouts/:id/pay
+# Depends on a previously approved batch ({{superadmin_payout_id}} from #28).
+
+patch {
+  url: {{url}}/superadmin/subscriptions/payouts/{{superadmin_payout_id}}/pay
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Payout marked as paid", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.be.true;
+  });
+
+  test("State is paid", function() {
+    expect(res.body.data.state).to.equal("paid");
+  });
+}

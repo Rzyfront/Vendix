@@ -1,11 +1,4 @@
-import {
-  Controller,
-  Get,
-  Post,
-  Body,
-  Param,
-  Delete,
-} from '@nestjs/common';
+import { Controller, Get, Post, Body, Param, Delete } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { CommentsService } from './comments.service';
 import { CreateCommentDto } from './dto/create-comment.dto';
@@ -19,9 +12,7 @@ export class CommentsController {
   @Post()
   @ApiOperation({ summary: 'Create a new comment on a ticket' })
   @ApiResponse({ status: 201, description: 'Comment created successfully' })
-  async create(
-    @Body() createCommentDto: CreateCommentDto,
-  ) {
+  async create(@Body() createCommentDto: CreateCommentDto) {
     const userId = RequestContextService.getUserId();
 
     if (!userId) {

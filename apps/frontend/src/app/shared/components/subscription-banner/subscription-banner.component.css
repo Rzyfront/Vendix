@@ -146,6 +146,21 @@
   --banner-cta-border: transparent;
 }
 
+/* Terminal (cancelled / expired): deep red — definitive state, requires
+   re-subscription. Uses a darker red palette than --danger so the user can
+   visually distinguish "still recoverable" from "lifecycle ended". */
+.sub-banner--terminal {
+  background: linear-gradient(180deg, #fee2e2 0%, #fecaca 100%);
+  border-color: rgba(185, 28, 28, 0.45);
+  color: #7f1d1d;
+  --banner-icon-bg: rgba(185, 28, 28, 0.25);
+  --banner-icon-color: #991b1b;
+  --banner-cta-bg: linear-gradient(135deg, #b91c1c 0%, #7f1d1d 100%);
+  --banner-cta-bg-hover: linear-gradient(135deg, #7f1d1d 0%, #450a0a 100%);
+  --banner-cta-color: #ffffff;
+  --banner-cta-border: transparent;
+}
+
 @keyframes sub-banner-slide {
   from { transform: translateY(-6px); opacity: 0; }
   to { transform: translateY(0); opacity: 1; }

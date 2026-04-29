@@ -5,7 +5,7 @@ import { Public } from '@common/decorators/public.decorator';
 
 @Controller('ecommerce/catalog')
 export class CatalogController {
-  constructor(private readonly catalog_service: CatalogService) { }
+  constructor(private readonly catalog_service: CatalogService) {}
 
   @Public()
   @Get()

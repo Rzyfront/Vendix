@@ -89,10 +89,28 @@ export interface InvoicePreview {
   split_breakdown: InvoiceSplitBreakdown;
 }
 
-export type ProrationKind = 'upgrade' | 'downgrade' | 'same-tier';
+export type ProrationKind =
+  | 'upgrade'
+  | 'downgrade'
+  | 'same-tier'
+  | 'trial_plan_swap'
+  | 're_subscribe';
+
+/**
+ * S3.4 — Trial plan-swap metadata. Surfaced when subscription.state === 'trial'
+ * AND trial_ends_at is in the future. The swap is free: no invoice, no state
+ * change. The first paid charge happens at trial_ends_at.
+ */
+export interface TrialPlanSwapInfo {
+  old_plan: { id: number; code: string; name: string; base_price: string };
+  new_plan: { id: number; code: string; name: string; base_price: string };
+  trial_ends_at: string;
+  message: string;
+}
 
 export interface ProrationPreview {
   kind: ProrationKind;
+  mode?: ProrationKind;
   days_remaining: number;
   cycle_days: number;
   old_effective_price: string;
@@ -101,6 +119,19 @@ export interface ProrationPreview {
   applies_immediately: boolean;
   invoice_to_issue: InvoicePreview | null;
   credit_to_apply_next_cycle: string;
+  /** S3.4 — Set only when kind === 'trial_plan_swap'. */
+  trial_swap?: TrialPlanSwapInfo;
+  /** S3.4 — Moment the new plan starts being billed. */
+  effective_at?: string;
+  /**
+   * S3.5 — Set when the source sub has `scheduled_cancel_at` and the
+   * checkout will void the scheduled cancellation as a side-effect of the
+   * commit. Frontend uses it to render a notice.
+   */
+  voids_scheduled_cancel?: {
+    active: boolean;
+    scheduled_at: string;
+  };
 }
 
 export interface FreePlanInfo {
@@ -118,6 +149,58 @@ export interface CheckoutPreviewResponse {
   proration: ProrationPreview | null;
   invoice: InvoicePreview | null;
   free_plan: FreePlanInfo | null;
+  /** S2.1 — Coupon overlay echoed by the backend when coupon_code was sent. */
+  coupon?: CouponPreviewInfo | null;
+}
+
+/**
+ * S2.1 — Result of POST /store/subscriptions/checkout/validate-coupon.
+ *
+ * `valid:false` discriminator codes:
+ *  - `not_found` — no plan with that redemption_code, or empty input.
+ *  - `expired` — promo_rules.starts_at in the future or ends_at in the past.
+ *  - `already_used` — store has already redeemed this promo, or
+ *    max_uses / max_uses_per_org reached.
+ *  - `not_eligible` — any other rule violation (region, target list, plan
+ *    type mismatch, store count, etc.).
+ *  - `invalid_state` — plan exists but is archived / not active / not
+ *    promotional.
+ */
+export interface CouponValidationResponse {
+  valid: boolean;
+  reason?: 'not_found' | 'expired' | 'already_used' | 'not_eligible' | 'invalid_state';
+  reasons_blocked?: string[];
+  plan?: {
+    id: number;
+    code: string;
+    name: string;
+    description: string | null;
+    plan_type: string;
+    base_price: string;
+    currency: string;
+    promo_priority: number;
+  };
+  overlay_features?: Record<string, unknown>;
+  duration_days?: number | null;
+  starts_at?: string | null;
+  expires_at?: string | null;
+}
+
+export interface CouponPreviewInfo {
+  valid: boolean;
+  reason?: string;
+  reasons_blocked?: string[];
+  code: string;
+  plan?: {
+    id: number;
+    code: string;
+    name: string;
+    plan_type: string;
+  };
+  overlay_features?: Record<string, unknown>;
+  duration_days?: number | null;
+  starts_at?: string | null;
+  expires_at?: string | null;
 }
 
 export interface PaymentMethod {
@@ -127,10 +210,64 @@ export interface PaymentMethod {
   brand: string | null;
   is_default: boolean;
   created_at: string;
+  // G11 — surfaced so the banner / payment-method UI can warn the user
+  // before a charge is attempted with an expired or invalidated card.
+  expiry_month?: string | null;
+  expiry_year?: string | null;
+  state?: 'active' | 'invalid' | 'replaced' | 'removed' | string;
+  consecutive_failures?: number;
 }
 
 export interface ApiResponse<T> {
   success: boolean;
   data: T;
   message?: string;
+}
+
+/**
+ * S3.2 — One row of the per-PM charge history (subscription_payments
+ * filtered by metadata.saved_payment_method_id). Surfaced inside the
+ * "Configurar Tarjeta" modal as recent activity.
+ */
+export interface PaymentMethodCharge {
+  id: string;
+  invoice_number: string | null;
+  amount: string;
+  currency: string;
+  state: 'pending' | 'succeeded' | 'failed' | 'refunded' | string;
+  paid_at: string | null;
+  created_at: string;
+  failure_reason: string | null;
+}
+
+/**
+ * S3.3 — Subscription event row exposed to the customer timeline.
+ * NOTE: `triggered_by_user_id` is intentionally omitted by the backend.
+ */
+export type SubscriptionEventType =
+  | 'created'
+  | 'activated'
+  | 'renewed'
+  | 'trial_started'
+  | 'trial_ended'
+  | 'payment_succeeded'
+  | 'payment_failed'
+  | 'state_transition'
+  | 'plan_changed'
+  | 'cancelled'
+  | 'reactivated'
+  | 'promotional_applied'
+  | 'partner_override_applied'
+  | 'partner_commission_accrued'
+  | 'partner_commission_paid'
+  | 'scheduled_cancel';
+
+export interface SubscriptionTimelineEvent {
+  id: number;
+  type: SubscriptionEventType;
+  from_state: string | null;
+  to_state: string | null;
+  payload: Record<string, unknown> | null;
+  triggered_by: 'user' | 'system' | 'cron';
+  created_at: string;
 }

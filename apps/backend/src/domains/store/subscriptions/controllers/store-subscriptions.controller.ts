@@ -1,12 +1,16 @@
-import { Body, Controller, Get, Post, Query, Param } from '@nestjs/common';
+import { Body, Controller, Get, Post, Put, Delete, Query, Param, Res } from '@nestjs/common';
+import type { Response } from 'express';
 import { RequestContextService } from '@common/context/request-context.service';
 import { ResponseService } from '../../../../common/responses/response.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 import { SubscriptionResolverService } from '../services/subscription-resolver.service';
 import { SubscriptionStateService } from '../services/subscription-state.service';
+import { SubscriptionAccessService } from '../services/subscription-access.service';
 import { SubscriptionBillingService } from '../services/subscription-billing.service';
 import { SubscriptionPaymentService } from '../services/subscription-payment.service';
 import { SubscriptionProrationService } from '../services/subscription-proration.service';
+import { SubscriptionPaymentMethodsService } from '../services/subscription-payment-methods.service';
+import { SubscriptionInvoicePdfService } from '../services/subscription-invoice-pdf.service';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
@@ -14,8 +18,11 @@ import { UseGuards } from '@nestjs/common';
 import { SubscribeDto } from '../dto/subscribe.dto';
 import { CancelDto } from '../dto/cancel.dto';
 import { SubscriptionQueryDto } from '../dto/subscription-query.dto';
+import { TokenizePaymentMethodDto } from '../dto/tokenize-payment-method.dto';
 import { Prisma } from '@prisma/client';
 import { SkipSubscriptionGate } from '../decorators/skip-subscription-gate.decorator';
+import { PromotionalRulesEvaluator } from '../evaluators/promotional-rules.evaluator';
+import { PromoEligibilityResult } from '../types/promo.types';
 
 @UseGuards(PermissionsGuard)
 @SkipSubscriptionGate()
@@ -24,11 +31,15 @@ export class StoreSubscriptionsController {
   constructor(
     private readonly resolver: SubscriptionResolverService,
     private readonly stateService: SubscriptionStateService,
+    private readonly accessService: SubscriptionAccessService,
     private readonly billing: SubscriptionBillingService,
     private readonly payment: SubscriptionPaymentService,
     private readonly proration: SubscriptionProrationService,
+    private readonly paymentMethods: SubscriptionPaymentMethodsService,
+    private readonly invoicePdf: SubscriptionInvoicePdfService,
     private readonly prisma: GlobalPrismaService,
     private readonly responseService: ResponseService,
+    private readonly promoEvaluator: PromotionalRulesEvaluator,
   ) {}
 
   @Get('plans')
@@ -76,21 +87,30 @@ export class StoreSubscriptionsController {
       }),
     };
 
-    const plans = isPartnerOrg && overrides.length === 0
-      ? []
-      : await this.prisma.subscription_plans.findMany({
-          where: planWhere,
-          orderBy: [{ sort_order: 'asc' }, { base_price: 'asc' }],
-        });
+    const plans =
+      isPartnerOrg && overrides.length === 0
+        ? []
+        : await this.prisma.subscription_plans.findMany({
+            where: planWhere,
+            orderBy: [{ sort_order: 'asc' }, { base_price: 'asc' }],
+          });
 
     const storeId = RequestContextService.getStoreId();
     let currentPlanId: number | null = null;
     if (storeId) {
       const currentSub = await this.prisma.store_subscriptions.findUnique({
         where: { store_id: storeId },
-        select: { plan_id: true },
+        select: { plan_id: true, state: true },
       });
-      currentPlanId = currentSub?.plan_id ?? null;
+      // A cancelled/expired subscription's plan is no longer "current" — the
+      // lifecycle ended, so we want the card to render as a fresh purchase
+      // option (re-subscribe path D in the checkout controller). Treating it
+      // as current would disable the CTA and trap the user.
+      const isLiveSubscription =
+        currentSub != null &&
+        currentSub.state !== 'cancelled' &&
+        currentSub.state !== 'expired';
+      currentPlanId = isLiveSubscription ? currentSub!.plan_id : null;
     }
 
     const data = plans.map((p) => {
@@ -159,9 +179,84 @@ export class StoreSubscriptionsController {
       return this.responseService.success(null, 'No active subscription');
     }
 
-    const data = { ...sub, plan_name: sub.plan?.name ?? null, plan_code: sub.plan?.code ?? null };
+    const data = {
+      ...sub,
+      plan_name: sub.plan?.name ?? null,
+      plan_code: sub.plan?.code ?? null,
+    };
 
     return this.responseService.success(data, 'Subscription retrieved');
+  }
+
+  /**
+   * G6 — Dunning board state endpoint.
+   *
+   * Returns the dunning snapshot (state + deadlines + overdue invoices +
+   * features lost/kept) used by the dunning board UI. Read-only — does not
+   * mutate state.
+   *
+   * Active/trial subscriptions return empty deadlines + zero amounts so the
+   * frontend can use this as a single source of truth without 404 branching.
+   */
+  @Permissions('subscriptions:read')
+  @Get('current/dunning-state')
+  async getDunningState() {
+    const storeId = RequestContextService.getStoreId();
+    if (!storeId) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+
+    const data = await this.accessService.getDunningStateForCurrentStore(storeId);
+    return this.responseService.success(data, 'Dunning state retrieved');
+  }
+
+  /**
+   * G6 — Retry payment of the most recent unpaid invoice for the current
+   * store subscription. No body — operates on the latest invoice in
+   * `state IN ('issued','overdue','partially_paid')`.
+   */
+  @Permissions('subscriptions:write')
+  @Post('retry-payment')
+  async retryPayment() {
+    const storeId = RequestContextService.getStoreId();
+    if (!storeId) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+
+    const sub = await this.prisma.store_subscriptions.findUnique({
+      where: { store_id: storeId },
+      select: { id: true },
+    });
+    if (!sub) {
+      throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_001);
+    }
+
+    const invoice = await this.prisma.subscription_invoices.findFirst({
+      where: {
+        store_subscription_id: sub.id,
+        state: { in: ['issued', 'overdue', 'partially_paid'] },
+      },
+      orderBy: { issued_at: 'desc' },
+      select: { id: true },
+    });
+
+    if (!invoice) {
+      throw new VendixHttpException(
+        ErrorCodes.DUNNING_001,
+        'No hay invoices pendientes de pago',
+      );
+    }
+
+    const result = await this.payment.charge(invoice.id);
+
+    return this.responseService.success(
+      {
+        payment_id: result.id,
+        invoice_id: invoice.id,
+        state: result.state,
+      },
+      'Payment retry initiated',
+    );
   }
 
   @Permissions('subscriptions:write')
@@ -308,6 +403,33 @@ export class StoreSubscriptionsController {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
     }
 
+    if (dto.end_of_cycle) {
+      const sub = await this.prisma.store_subscriptions.findUnique({
+        where: { store_id: storeId },
+        select: { current_period_end: true },
+      });
+      if (!sub?.current_period_end) {
+        throw new VendixHttpException(
+          ErrorCodes.SUBSCRIPTION_001,
+          'No active billing period to schedule cancellation',
+        );
+      }
+
+      const result = await this.stateService.scheduleCancel(
+        storeId,
+        new Date(sub.current_period_end),
+        {
+          reason: dto.reason ?? 'user_initiated_schedule_cancel',
+          triggeredByUserId: context?.user_id,
+        },
+      );
+
+      return this.responseService.success(
+        result,
+        'Subscription scheduled for cancellation at end of cycle',
+      );
+    }
+
     const result = await this.stateService.transition(storeId, 'cancelled', {
       reason: dto.reason ?? 'user_initiated_cancel',
       triggeredByUserId: context?.user_id,
@@ -356,9 +478,7 @@ export class StoreSubscriptionsController {
 
   @Permissions('subscriptions:read')
   @Get('current/invoices/:invoiceId')
-  async getInvoice(
-    @Param('invoiceId') invoiceId: string,
-  ) {
+  async getInvoice(@Param('invoiceId') invoiceId: string) {
     const storeId = RequestContextService.getStoreId();
     if (!storeId) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
@@ -366,7 +486,10 @@ export class StoreSubscriptionsController {
 
     const invoice_id_num = parseInt(invoiceId);
     if (!invoice_id_num || isNaN(invoice_id_num)) {
-      throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_INTERNAL_ERROR, 'Invalid invoice ID');
+      throw new VendixHttpException(
+        ErrorCodes.SUBSCRIPTION_INTERNAL_ERROR,
+        'Invalid invoice ID',
+      );
     }
 
     const invoice = await this.prisma.subscription_invoices.findFirst({
@@ -386,15 +509,81 @@ export class StoreSubscriptionsController {
     });
 
     if (!invoice) {
-      throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_001, 'Invoice not found');
+      throw new VendixHttpException(
+        ErrorCodes.SUBSCRIPTION_001,
+        'Invoice not found',
+      );
     }
 
     return this.responseService.success(invoice, 'Invoice retrieved');
   }
 
+  /**
+   * S3.1 — PDF download for a SaaS subscription invoice.
+   *
+   * Customer-facing — explicitly @SkipSubscriptionGate so a suspended
+   * subscriber can still download historical invoices for accounting
+   * purposes. Streams a `application/pdf` payload.
+   */
   @Permissions('subscriptions:read')
+  @SkipSubscriptionGate()
+  @Get('current/invoices/:invoiceId/pdf')
+  async getInvoicePdf(
+    @Param('invoiceId') invoiceId: string,
+    @Res() res: Response,
+  ) {
+    const storeId = RequestContextService.getStoreId();
+    if (!storeId) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+
+    const invoice_id_num = parseInt(invoiceId);
+    if (!invoice_id_num || isNaN(invoice_id_num)) {
+      throw new VendixHttpException(
+        ErrorCodes.SUBSCRIPTION_INTERNAL_ERROR,
+        'Invalid invoice ID',
+      );
+    }
+
+    const { buffer, filename } = await this.invoicePdf.generatePdf(
+      invoice_id_num,
+      storeId,
+    );
+
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${filename}"`,
+    );
+    res.setHeader('Content-Length', buffer.length.toString());
+    res.send(buffer);
+  }
+
+  /**
+   * S3.3 — Cliente timeline de eventos de subscripción.
+   *
+   * Cursor-based pagination (keyset por created_at + id). El payload se
+   * sanitiza: NO se expone `triggered_by_user_id` (PII). En su lugar, se
+   * mapea a un campo `triggered_by` con valores `'user'|'system'|'cron'`.
+   *
+   * Query params:
+   *   - limit: default 50, max 100
+   *   - cursor: opaco (base64 de `${id}|${created_at_iso}`)
+   *   - type: filtro opcional por subscription_event_type_enum
+   *
+   * Response: `{ data: [...], next_cursor: string|null }`
+   *
+   * @SkipSubscriptionGate — el cliente debe poder ver el historial incluso
+   * cuando la subscripción esté suspendida o bloqueada.
+   */
+  @Permissions('subscriptions:read')
+  @SkipSubscriptionGate()
   @Get('current/events')
-  async getEvents(@Query() query: SubscriptionQueryDto) {
+  async getEvents(
+    @Query('limit') limitParam?: string,
+    @Query('cursor') cursorParam?: string,
+    @Query('type') typeParam?: string,
+  ) {
     const storeId = RequestContextService.getStoreId();
     if (!storeId) {
       throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
@@ -408,26 +597,247 @@ export class StoreSubscriptionsController {
       throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_001);
     }
 
-    const page = query.page ?? 1;
-    const limit = query.limit ?? 20;
-    const skip = (page - 1) * limit;
-    const orderBy = {
-      [query.sort_by ?? 'created_at']: query.sort_order ?? 'desc',
+    // Parse limit (default 50, max 100, min 1)
+    const parsedLimit = limitParam ? parseInt(limitParam, 10) : 50;
+    const limit = Math.min(
+      Math.max(Number.isFinite(parsedLimit) ? parsedLimit : 50, 1),
+      100,
+    );
+
+    // Decode opaque cursor: base64(`${id}|${created_at_iso}`)
+    let cursorCreatedAt: Date | null = null;
+    let cursorId: number | null = null;
+    if (cursorParam) {
+      try {
+        const decoded = Buffer.from(cursorParam, 'base64').toString('utf-8');
+        const [idStr, createdAtIso] = decoded.split('|');
+        const idNum = parseInt(idStr, 10);
+        const dt = new Date(createdAtIso);
+        if (Number.isFinite(idNum) && !isNaN(dt.getTime())) {
+          cursorId = idNum;
+          cursorCreatedAt = dt;
+        }
+      } catch {
+        // Invalid cursor — ignore and start from the top.
+        cursorCreatedAt = null;
+        cursorId = null;
+      }
+    }
+
+    // Validate type filter against the allowed enum values.
+    type EventType =
+      | 'created'
+      | 'activated'
+      | 'renewed'
+      | 'trial_started'
+      | 'trial_ended'
+      | 'payment_succeeded'
+      | 'payment_failed'
+      | 'state_transition'
+      | 'plan_changed'
+      | 'cancelled'
+      | 'reactivated'
+      | 'promotional_applied'
+      | 'partner_override_applied'
+      | 'partner_commission_accrued'
+      | 'partner_commission_paid'
+      | 'scheduled_cancel';
+    const validTypes: EventType[] = [
+      'created',
+      'activated',
+      'renewed',
+      'trial_started',
+      'trial_ended',
+      'payment_succeeded',
+      'payment_failed',
+      'state_transition',
+      'plan_changed',
+      'cancelled',
+      'reactivated',
+      'promotional_applied',
+      'partner_override_applied',
+      'partner_commission_accrued',
+      'partner_commission_paid',
+      'scheduled_cancel',
+    ];
+    const typeFilter: EventType | undefined =
+      typeParam && validTypes.includes(typeParam as EventType)
+        ? (typeParam as EventType)
+        : undefined;
+
+    // Keyset pagination: ORDER BY created_at DESC, id DESC
+    // WHERE (created_at, id) < (cursor_created_at, cursor_id) when cursor is provided.
+    const where: Prisma.subscription_eventsWhereInput = {
+      store_subscription_id: sub.id,
+      ...(typeFilter ? { type: typeFilter } : {}),
+      ...(cursorCreatedAt && cursorId !== null
+        ? {
+            OR: [
+              { created_at: { lt: cursorCreatedAt } },
+              {
+                AND: [
+                  { created_at: cursorCreatedAt },
+                  { id: { lt: cursorId } },
+                ],
+              },
+            ],
+          }
+        : {}),
     };
 
-    const [data, total] = await Promise.all([
-      this.prisma.subscription_events.findMany({
-        where: { store_subscription_id: sub.id },
-        skip,
-        take: limit,
-        orderBy,
-      }),
-      this.prisma.subscription_events.count({
-        where: { store_subscription_id: sub.id },
-      }),
-    ]);
+    // Fetch limit+1 to know whether there is a next page.
+    const rows = await this.prisma.subscription_events.findMany({
+      where,
+      orderBy: [{ created_at: 'desc' }, { id: 'desc' }],
+      take: limit + 1,
+    });
 
-    return this.responseService.paginated(data, total, page, limit);
+    const hasMore = rows.length > limit;
+    const slice = hasMore ? rows.slice(0, limit) : rows;
+
+    const data = slice.map((e) => {
+      const triggered_by: 'user' | 'system' | 'cron' = e.triggered_by_user_id
+        ? 'user'
+        : e.triggered_by_job
+          ? 'cron'
+          : 'system';
+      return {
+        id: e.id,
+        type: e.type,
+        from_state: e.from_state,
+        to_state: e.to_state,
+        payload: e.payload ?? null,
+        triggered_by,
+        created_at: e.created_at,
+      };
+    });
+
+    let next_cursor: string | null = null;
+    if (hasMore) {
+      const last = slice[slice.length - 1];
+      const raw = `${last.id}|${last.created_at.toISOString()}`;
+      next_cursor = Buffer.from(raw, 'utf-8').toString('base64');
+    }
+
+    return this.responseService.success(
+      { data, next_cursor },
+      'Subscription events retrieved',
+    );
+  }
+
+  // ── Promotional eligibility ────────────────────────────────────────
+
+  /**
+   * G9 — Public eligibility endpoint for promotional plans.
+   *
+   * Returns the eligibility status of every active promotional plan against
+   * the current store. Read-only, no state mutation. Used by the retention
+   * flow to surface eligible promos when the cancellation reason is `price`.
+   */
+  @SkipSubscriptionGate()
+  @Get('promo/eligibility')
+  async getPromoEligibility() {
+    const storeId = RequestContextService.getStoreId();
+    if (!storeId) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+
+    const promoPlans = await this.prisma.subscription_plans.findMany({
+      where: {
+        is_promotional: true,
+        state: 'active',
+        archived_at: null,
+      },
+      select: { id: true },
+    });
+
+    const promos: PromoEligibilityResult[] = await Promise.all(
+      promoPlans.map((p) => this.promoEvaluator.evaluate(storeId, p.id)),
+    );
+
+    return this.responseService.success(
+      { promos },
+      'Promo eligibility retrieved',
+    );
+  }
+
+  // ── Payment Methods ────────────────────────────────────────────────
+
+  @Permissions('subscriptions:read')
+  @Get('payment-methods')
+  async listPaymentMethods() {
+    const data = await this.paymentMethods.listForStore();
+    return this.responseService.success(data, 'Payment methods retrieved');
+  }
+
+  @Permissions('subscriptions:read')
+  @Get('payment-methods/widget-config')
+  async getPaymentMethodWidgetConfig() {
+    const storeId = RequestContextService.getStoreId();
+    if (!storeId) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const data = await this.paymentMethods.prepareWidgetConfig({
+      redirectUrl: process.env.FRONTEND_URL
+        ? `${process.env.FRONTEND_URL}/admin/subscription/payment`
+        : 'https://vendix.com/admin/subscription/payment',
+    });
+    return this.responseService.success(data, 'Widget config retrieved');
+  }
+
+  @Permissions('subscriptions:write')
+  @Post('payment-methods/tokenize')
+  async tokenizePaymentMethod(@Body() dto: TokenizePaymentMethodDto) {
+    const data = await this.paymentMethods.tokenize(dto);
+    return this.responseService.created(data, 'Payment method tokenized');
+  }
+
+  @Permissions('subscriptions:write')
+  @Put('payment-methods/:id/default')
+  async setDefaultPaymentMethod(@Param('id') id: string) {
+    const data = await this.paymentMethods.setDefault(id);
+    return this.responseService.success(data, 'Default payment method updated');
+  }
+
+  @Permissions('subscriptions:write')
+  @Delete('payment-methods/:id')
+  async removePaymentMethod(@Param('id') id: string) {
+    await this.paymentMethods.remove(id);
+    return this.responseService.deleted('Payment method removed');
+  }
+
+  /**
+   * S3.2 — Returns the last N (default 5, max 20) charges executed against
+   * the given payment method. Used by the "Configurar" modal to show the
+   * user a snapshot of recent billing attempts before they edit / delete
+   * / replace the card.
+   */
+  @Permissions('subscriptions:read')
+  @Get('payment-methods/:id/charges')
+  async listPaymentMethodCharges(
+    @Param('id') id: string,
+    @Query('limit') limit?: string,
+  ) {
+    const parsed = limit ? parseInt(limit, 10) : 5;
+    const safeLimit = isNaN(parsed) ? 5 : parsed;
+    const data = await this.paymentMethods.listCharges(id, safeLimit);
+    return this.responseService.success(data, 'Charges retrieved');
+  }
+
+  /**
+   * G11 — Replace a tokenized payment method with a freshly tokenized one
+   * coming back from the Wompi widget. Soft-deletes the old method so
+   * payment history stays intact, transfers the `is_default` flag, and
+   * audits the replacement in `subscription_events`.
+   */
+  @Permissions('subscriptions:write')
+  @Post('payment-methods/:id/replace')
+  async replacePaymentMethod(
+    @Param('id') id: string,
+    @Body() dto: TokenizePaymentMethodDto,
+  ) {
+    const data = await this.paymentMethods.replace(id, dto);
+    return this.responseService.created(data, 'Payment method replaced');
   }
 
   private billingCycleMs(cycle: string): number {

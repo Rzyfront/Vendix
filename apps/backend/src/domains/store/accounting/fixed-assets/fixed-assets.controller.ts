@@ -14,7 +14,10 @@ import { FixedAssetsService } from './fixed-assets.service';
 import { ResponseService } from '../../../../common/responses/response.service';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
-import { ModuleFlowGuard, RequireModuleFlow } from '../../../../common/guards/module-flow.guard';
+import {
+  ModuleFlowGuard,
+  RequireModuleFlow,
+} from '../../../../common/guards/module-flow.guard';
 import { CreateFixedAssetDto } from './dto/create-fixed-asset.dto';
 import { UpdateFixedAssetDto } from './dto/update-fixed-asset.dto';
 import { QueryFixedAssetsDto } from './dto/query-fixed-assets.dto';
@@ -56,7 +59,10 @@ export class FixedAssetsController {
   @HttpCode(HttpStatus.OK)
   async runMonthlyDepreciation(@Body() dto: RunDepreciationDto) {
     const result = await this.fixed_assets_service.runMonthlyDepreciation(dto);
-    return this.response_service.success(result, 'Monthly depreciation run completed');
+    return this.response_service.success(
+      result,
+      'Monthly depreciation run completed',
+    );
   }
 
   // --- Parameter routes ---
@@ -73,14 +79,20 @@ export class FixedAssetsController {
   @HttpCode(HttpStatus.CREATED)
   async create(@Body() dto: CreateFixedAssetDto) {
     const result = await this.fixed_assets_service.create(dto);
-    return this.response_service.success(result, 'Fixed asset created successfully');
+    return this.response_service.success(
+      result,
+      'Fixed asset created successfully',
+    );
   }
 
   @Patch(':id')
   @Permissions('store:accounting:fixed_assets:write')
   async update(@Param('id') id: string, @Body() dto: UpdateFixedAssetDto) {
     const result = await this.fixed_assets_service.update(+id, dto);
-    return this.response_service.success(result, 'Fixed asset updated successfully');
+    return this.response_service.success(
+      result,
+      'Fixed asset updated successfully',
+    );
   }
 
   @Post(':id/retire')
@@ -88,7 +100,10 @@ export class FixedAssetsController {
   @HttpCode(HttpStatus.OK)
   async retire(@Param('id') id: string) {
     const result = await this.fixed_assets_service.retire(+id);
-    return this.response_service.success(result, 'Fixed asset retired successfully');
+    return this.response_service.success(
+      result,
+      'Fixed asset retired successfully',
+    );
   }
 
   @Post(':id/dispose')
@@ -96,7 +111,10 @@ export class FixedAssetsController {
   @HttpCode(HttpStatus.OK)
   async dispose(@Param('id') id: string, @Body() dto: DisposeAssetDto) {
     const result = await this.fixed_assets_service.dispose(+id, dto);
-    return this.response_service.success(result, 'Fixed asset disposed successfully');
+    return this.response_service.success(
+      result,
+      'Fixed asset disposed successfully',
+    );
   }
 
   @Get(':id/schedule')

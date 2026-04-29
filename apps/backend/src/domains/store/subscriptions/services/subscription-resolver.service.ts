@@ -20,6 +20,7 @@ interface CachedPayload {
   found: boolean;
   storeId: number;
   state: ResolvedSubscription['state'] | null;
+  planId: number | null;
   planCode: string | null;
   partnerOrgId: number | null;
   overlayActive: boolean;
@@ -100,7 +101,9 @@ export class SubscriptionResolverService {
     return `${CACHE_PREFIX}:${storeId}`;
   }
 
-  private async readCache(storeId: number): Promise<ResolvedSubscription | null> {
+  private async readCache(
+    storeId: number,
+  ): Promise<ResolvedSubscription | null> {
     try {
       const raw = await this.redis.get(this.cacheKey(storeId));
       if (!raw) return null;
@@ -108,7 +111,8 @@ export class SubscriptionResolverService {
       return {
         found: payload.found,
         storeId: payload.storeId,
-        state: (payload.state ?? 'draft') as ResolvedSubscription['state'],
+        state: payload.state ?? 'draft',
+        planId: payload.planId ?? null,
         planCode: payload.planCode ?? '',
         partnerOrgId: payload.partnerOrgId,
         overlayActive: payload.overlayActive,
@@ -139,6 +143,7 @@ export class SubscriptionResolverService {
         found: resolved.found,
         storeId: resolved.storeId,
         state: resolved.state,
+        planId: resolved.planId,
         planCode: resolved.planCode,
         partnerOrgId: resolved.partnerOrgId,
         overlayActive: resolved.overlayActive,
@@ -189,6 +194,7 @@ export class SubscriptionResolverService {
         // first branching on `found`. The gate will interpret missing subs
         // via the `found: false` flag.
         state: 'draft',
+        planId: null,
         planCode: '',
         partnerOrgId: null,
         overlayActive: false,
@@ -219,7 +225,9 @@ export class SubscriptionResolverService {
     );
 
     if (overlayActive && sub.promotional_plan) {
-      const overlay = this.coerceFeatures(sub.promotional_plan.ai_feature_flags);
+      const overlay = this.coerceFeatures(
+        sub.promotional_plan.ai_feature_flags,
+      );
       features = this.applyOverlayUnion(features, overlay);
     }
 
@@ -232,6 +240,7 @@ export class SubscriptionResolverService {
       found: true,
       storeId,
       state: sub.state,
+      planId: sub.plan_id,
       planCode: sub.plan.code,
       partnerOrgId: sub.partner_override?.organization_id ?? null,
       overlayActive,
@@ -441,8 +450,10 @@ export class SubscriptionResolverService {
   ): Promise<void> {
     try {
       const candidates = [sub.plan.updated_at];
-      if (sub.partner_override) candidates.push(sub.partner_override.updated_at);
-      if (sub.promotional_plan) candidates.push(sub.promotional_plan.updated_at);
+      if (sub.partner_override)
+        candidates.push(sub.partner_override.updated_at);
+      if (sub.promotional_plan)
+        candidates.push(sub.promotional_plan.updated_at);
       const maxSource = candidates.reduce(
         (acc, d) => (d.getTime() > acc.getTime() ? d : acc),
         candidates[0],

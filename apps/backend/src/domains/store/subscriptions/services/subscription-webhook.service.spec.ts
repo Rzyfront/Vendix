@@ -69,12 +69,17 @@ describe('SubscriptionWebhookService', () => {
       body: approvedBody(),
     });
 
-    expect(paymentServiceMock.markPaymentSucceededFromWebhook).toHaveBeenCalledTimes(1);
-    const succArg = paymentServiceMock.markPaymentSucceededFromWebhook.mock.calls[0][0];
+    expect(
+      paymentServiceMock.markPaymentSucceededFromWebhook,
+    ).toHaveBeenCalledTimes(1);
+    const succArg =
+      paymentServiceMock.markPaymentSucceededFromWebhook.mock.calls[0][0];
     expect(succArg.paymentId).toBe(7);
     expect(succArg.invoiceId).toBe(99);
     expect(succArg.transactionId).toBe('wompi_txn_1');
-    expect(paymentServiceMock.markPaymentFailedFromWebhook).not.toHaveBeenCalled();
+    expect(
+      paymentServiceMock.markPaymentFailedFromWebhook,
+    ).not.toHaveBeenCalled();
 
     // succeeded path emits an observability event
     expect(eventEmitterMock.emit).toHaveBeenCalledTimes(1);
@@ -95,15 +100,23 @@ describe('SubscriptionWebhookService', () => {
     await service.handleWompiEvent({
       subscriptionId: 42,
       invoiceId: 99,
-      body: approvedBody({ status: 'DECLINED', status_message: 'insufficient funds' }),
+      body: approvedBody({
+        status: 'DECLINED',
+        status_message: 'insufficient funds',
+      }),
     });
 
-    expect(paymentServiceMock.markPaymentFailedFromWebhook).toHaveBeenCalledTimes(1);
-    const failArg = paymentServiceMock.markPaymentFailedFromWebhook.mock.calls[0][0];
+    expect(
+      paymentServiceMock.markPaymentFailedFromWebhook,
+    ).toHaveBeenCalledTimes(1);
+    const failArg =
+      paymentServiceMock.markPaymentFailedFromWebhook.mock.calls[0][0];
     expect(failArg.paymentId).toBe(7);
     expect(failArg.invoiceId).toBe(99);
     expect(failArg.reason).toBe('insufficient funds');
-    expect(paymentServiceMock.markPaymentSucceededFromWebhook).not.toHaveBeenCalled();
+    expect(
+      paymentServiceMock.markPaymentSucceededFromWebhook,
+    ).not.toHaveBeenCalled();
   });
 
   it('routes ERROR to markPaymentFailedFromWebhook', async () => {
@@ -119,8 +132,11 @@ describe('SubscriptionWebhookService', () => {
       body: approvedBody({ status: 'ERROR', status_message: undefined }),
     });
 
-    expect(paymentServiceMock.markPaymentFailedFromWebhook).toHaveBeenCalledTimes(1);
-    const failArg = paymentServiceMock.markPaymentFailedFromWebhook.mock.calls[0][0];
+    expect(
+      paymentServiceMock.markPaymentFailedFromWebhook,
+    ).toHaveBeenCalledTimes(1);
+    const failArg =
+      paymentServiceMock.markPaymentFailedFromWebhook.mock.calls[0][0];
     expect(failArg.paymentId).toBe(7);
     // status_message is undefined, so reason falls back to the wompi status
     expect(failArg.reason).toBe('ERROR');
@@ -139,8 +155,11 @@ describe('SubscriptionWebhookService', () => {
       body: approvedBody({ status: 'VOIDED' }),
     });
 
-    expect(paymentServiceMock.markPaymentFailedFromWebhook).toHaveBeenCalledTimes(1);
-    const failArg = paymentServiceMock.markPaymentFailedFromWebhook.mock.calls[0][0];
+    expect(
+      paymentServiceMock.markPaymentFailedFromWebhook,
+    ).toHaveBeenCalledTimes(1);
+    const failArg =
+      paymentServiceMock.markPaymentFailedFromWebhook.mock.calls[0][0];
     expect(failArg.reason).toBe('voided');
   });
 
@@ -153,8 +172,12 @@ describe('SubscriptionWebhookService', () => {
       body: approvedBody(),
     });
 
-    expect(paymentServiceMock.markPaymentSucceededFromWebhook).not.toHaveBeenCalled();
-    expect(paymentServiceMock.markPaymentFailedFromWebhook).not.toHaveBeenCalled();
+    expect(
+      paymentServiceMock.markPaymentSucceededFromWebhook,
+    ).not.toHaveBeenCalled();
+    expect(
+      paymentServiceMock.markPaymentFailedFromWebhook,
+    ).not.toHaveBeenCalled();
   });
 
   it('is no-op when body lacks transaction', async () => {
@@ -165,8 +188,12 @@ describe('SubscriptionWebhookService', () => {
     });
 
     expect(prismaMock.subscription_payments.findFirst).not.toHaveBeenCalled();
-    expect(paymentServiceMock.markPaymentSucceededFromWebhook).not.toHaveBeenCalled();
-    expect(paymentServiceMock.markPaymentFailedFromWebhook).not.toHaveBeenCalled();
+    expect(
+      paymentServiceMock.markPaymentSucceededFromWebhook,
+    ).not.toHaveBeenCalled();
+    expect(
+      paymentServiceMock.markPaymentFailedFromWebhook,
+    ).not.toHaveBeenCalled();
   });
 
   it('treats PENDING transaction as a no-op (no state transition)', async () => {
@@ -182,7 +209,11 @@ describe('SubscriptionWebhookService', () => {
       body: approvedBody({ status: 'PENDING' }),
     });
 
-    expect(paymentServiceMock.markPaymentSucceededFromWebhook).not.toHaveBeenCalled();
-    expect(paymentServiceMock.markPaymentFailedFromWebhook).not.toHaveBeenCalled();
+    expect(
+      paymentServiceMock.markPaymentSucceededFromWebhook,
+    ).not.toHaveBeenCalled();
+    expect(
+      paymentServiceMock.markPaymentFailedFromWebhook,
+    ).not.toHaveBeenCalled();
   });
 });

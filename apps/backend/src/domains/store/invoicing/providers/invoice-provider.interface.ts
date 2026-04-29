@@ -10,7 +10,9 @@ export interface InvoiceProviderAdapter {
   /**
    * Sends a credit note to the provider.
    */
-  sendCreditNote(creditNoteData: ProviderInvoiceData): Promise<ProviderResponse>;
+  sendCreditNote(
+    creditNoteData: ProviderInvoiceData,
+  ): Promise<ProviderResponse>;
 
   /**
    * Checks the status of a previously sent document.

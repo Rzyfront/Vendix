@@ -1,4 +1,5 @@
-import { View, Text, Pressable, type ViewProps } from 'react-native';
+import { View, Text, Pressable, StyleSheet, type ViewStyle, type ViewProps } from 'react-native';
+import { colors, spacing, borderRadius, colorScales, typography } from '@/shared/theme';
 import { Avatar } from '../avatar/avatar';
 import { Badge } from '../badge/badge';
 
@@ -9,10 +10,84 @@ interface ListItemProps extends ViewProps {
   icon?: React.ReactNode;
   badge?: string;
   badgeVariant?: 'default' | 'success' | 'warning' | 'error' | 'info';
-  rightText?: string;
+  rightText?: React.ReactNode;
   showChevron?: boolean;
   onPress?: () => void;
+  style?: ViewStyle;
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[3],
+    backgroundColor: colors.card,
+    borderBottomWidth: 1,
+    borderBottomColor: colorScales.gray[100],
+  },
+  avatarWrap: {
+    marginRight: spacing[3],
+  },
+  iconWrap: {
+    marginRight: spacing[3],
+  },
+  content: {
+    flex: 1,
+  },
+  title: {
+    fontSize: typography.fontSize.base,
+    fontWeight: typography.fontWeight.medium as any,
+    color: colorScales.gray[900],
+  },
+  subtitle: {
+    fontSize: typography.fontSize.sm,
+    color: colorScales.gray[500],
+    marginTop: spacing[0.5],
+  },
+  badgeWrap: {
+    marginRight: spacing[2],
+  },
+  rightText: {
+    fontSize: typography.fontSize.sm,
+    color: colorScales.gray[500],
+    marginRight: spacing[2],
+  },
+  chevron: {
+    color: colorScales.gray[400],
+    fontSize: typography.fontSize.lg,
+  },
+  pressedContainer: {
+    backgroundColor: colorScales.gray[50],
+  },
+  swipeActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  editButton: {
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[2],
+    backgroundColor: colorScales.blue[50],
+    borderRadius: borderRadius.lg,
+    marginRight: spacing[2],
+  },
+  editLabel: {
+    fontSize: typography.fontSize.sm,
+    color: colorScales.blue[600],
+    fontWeight: typography.fontWeight.medium as any,
+  },
+  deleteButton: {
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[2],
+    backgroundColor: colorScales.red[50],
+    borderRadius: borderRadius.lg,
+  },
+  deleteLabel: {
+    fontSize: typography.fontSize.sm,
+    color: colorScales.red[600],
+    fontWeight: typography.fontWeight.medium as any,
+  },
+});
 
 export function ListItem({
   title,
@@ -24,39 +99,36 @@ export function ListItem({
   rightText,
   showChevron = false,
   onPress,
-  className = '',
+  style,
   ...props
 }: ListItemProps) {
   const content = (
-    <View
-      className={`flex-row items-center px-4 py-3 bg-white border-b border-gray-100 ${className}`}
-      {...props}
-    >
+    <View style={[styles.container, style]} {...props}>
       {avatar && (
-        <View className="mr-3">
+        <View style={styles.avatarWrap}>
           <Avatar source={avatar.source} name={avatar.name} size="md" />
         </View>
       )}
-      {icon && <View className="mr-3">{icon}</View>}
-      <View className="flex-1">
-        <Text className="text-base font-medium text-gray-900">{title}</Text>
-        {subtitle && <Text className="text-sm text-gray-500 mt-0.5">{subtitle}</Text>}
+      {icon && <View style={styles.iconWrap}>{icon}</View>}
+      <View style={styles.content}>
+        <Text style={styles.title}>{title}</Text>
+        {subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}
       </View>
       {badge && (
-        <View className="mr-2">
+        <View style={styles.badgeWrap}>
           <Badge label={badge} variant={badgeVariant} size="sm" />
         </View>
       )}
-      {rightText && (
-        <Text className="text-sm text-gray-500 mr-2">{rightText}</Text>
+      {rightText && typeof rightText === 'string' && (
+        <Text style={styles.rightText}>{rightText}</Text>
       )}
-      {showChevron && <Text className="text-gray-400 text-lg">›</Text>}
+      {showChevron && <Text style={styles.chevron}>›</Text>}
     </View>
   );
 
   if (onPress) {
     return (
-      <Pressable onPress={onPress} className="active:bg-gray-50">
+      <Pressable onPress={onPress} style={({ pressed }) => pressed && styles.pressedContainer}>
         {content}
       </Pressable>
     );
@@ -83,23 +155,15 @@ export function SwipeableListItem({
     <ListItem
       {...props}
       rightText={
-        <View className="flex-row items-center">
+        <View style={styles.swipeActions}>
           {onEdit && (
-            <Pressable
-              onPress={onEdit}
-              className="px-3 py-2 bg-blue-50 rounded-lg mr-2"
-              hitSlop={8}
-            >
-              <Text className="text-sm text-blue-600 font-medium">{editLabel}</Text>
+            <Pressable onPress={onEdit} style={styles.editButton} hitSlop={8}>
+              <Text style={styles.editLabel}>{editLabel}</Text>
             </Pressable>
           )}
           {onDelete && (
-            <Pressable
-              onPress={onDelete}
-              className="px-3 py-2 bg-red-50 rounded-lg"
-              hitSlop={8}
-            >
-              <Text className="text-sm text-red-600 font-medium">{deleteLabel}</Text>
+            <Pressable onPress={onDelete} style={styles.deleteButton} hitSlop={8}>
+              <Text style={styles.deleteLabel}>{deleteLabel}</Text>
             </Pressable>
           )}
         </View>

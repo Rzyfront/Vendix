@@ -18,7 +18,7 @@ export class PublicDomainsService {
   constructor(
     private readonly globalPrisma: GlobalPrismaService,
     private readonly s3Service: S3Service,
-  ) { }
+  ) {}
 
   /**
    * Resolve domain configuration by hostname
@@ -35,8 +35,11 @@ export class PublicDomainsService {
   ) {
     this.logger.log(`🔍 Resolving domain: ${hostname}`);
 
-    const domain = await this.globalPrisma.domain_settings.findUnique({
-      where: { hostname },
+    const domain = await this.globalPrisma.domain_settings.findFirst({
+      where: {
+        hostname,
+        status: { notIn: ['disabled', 'failed_ownership', 'failed_certificate', 'failed_alias'] },
+      },
       include: {
         organization: {
           select: {
@@ -82,14 +85,26 @@ export class PublicDomainsService {
         generalSettings = settingsData?.general;
 
         // CLAVE: Para dominios STORE_ECOMMERCE, usar ecommerce.inicio como fuente de verdad
-        if (domain.app_type === 'STORE_ECOMMERCE' && ecommerceSettings?.inicio) {
+        if (
+          domain.app_type === 'STORE_ECOMMERCE' &&
+          ecommerceSettings?.inicio
+        ) {
           // Construir branding desde inicio (única fuente de verdad para ecommerce)
           const inicioColores = ecommerceSettings.inicio.colores || {};
           branding = {
             // Colores desde inicio.colores
-            primary_color: inicioColores.primary_color || storeBranding?.primary_color || '#3B82F6',
-            secondary_color: inicioColores.secondary_color || storeBranding?.secondary_color || '#10B981',
-            accent_color: inicioColores.accent_color || storeBranding?.accent_color || '#F59E0B',
+            primary_color:
+              inicioColores.primary_color ||
+              storeBranding?.primary_color ||
+              '#3B82F6',
+            secondary_color:
+              inicioColores.secondary_color ||
+              storeBranding?.secondary_color ||
+              '#10B981',
+            accent_color:
+              inicioColores.accent_color ||
+              storeBranding?.accent_color ||
+              '#F59E0B',
             // Colores de fondo/texto con defaults
             background_color: '#F4F4F4',
             surface_color: '#FFFFFF',
@@ -98,7 +113,8 @@ export class PublicDomainsService {
             text_muted_color: '#999999',
             // Logo y favicon desde inicio o store branding
             name: storeBranding?.name,
-            logo_url: ecommerceSettings.inicio.logo_url || storeBranding?.logo_url,
+            logo_url:
+              ecommerceSettings.inicio.logo_url || storeBranding?.logo_url,
             favicon_url: storeBranding?.favicon_url,
           };
         } else {
@@ -111,7 +127,9 @@ export class PublicDomainsService {
           branding.logo_url = await this.s3Service.signUrl(branding.logo_url);
         }
         if (branding?.favicon_url && !branding.favicon_url.startsWith('http')) {
-          branding.favicon_url = await this.s3Service.signUrl(branding.favicon_url);
+          branding.favicon_url = await this.s3Service.signUrl(
+            branding.favicon_url,
+          );
         }
 
         // Sign ecommerce images
@@ -122,9 +140,10 @@ export class PublicDomainsService {
     }
     // 2. If it's an ORGANIZATION domain (no store_id) → read from organization_settings
     else if (domain.organization_id) {
-      const orgSettings = await this.globalPrisma.organization_settings.findUnique({
-        where: { organization_id: domain.organization_id },
-      });
+      const orgSettings =
+        await this.globalPrisma.organization_settings.findUnique({
+          where: { organization_id: domain.organization_id },
+        });
 
       if (orgSettings) {
         const settingsData = orgSettings.settings as any;
@@ -137,7 +156,9 @@ export class PublicDomainsService {
           branding.logo_url = await this.s3Service.signUrl(branding.logo_url);
         }
         if (branding?.favicon_url && !branding.favicon_url.startsWith('http')) {
-          branding.favicon_url = await this.s3Service.signUrl(branding.favicon_url);
+          branding.favicon_url = await this.s3Service.signUrl(
+            branding.favicon_url,
+          );
         }
       }
     }
@@ -168,7 +189,10 @@ export class PublicDomainsService {
     }
 
     // Legacy: Firmar imágenes en config si existen (para compatibilidad)
-    if (domain.domain_type === 'ecommerce' || domain.app_type === 'STORE_ECOMMERCE') {
+    if (
+      domain.domain_type === 'ecommerce' ||
+      domain.app_type === 'STORE_ECOMMERCE'
+    ) {
       await this.signEcommerceImages(config);
     }
 
@@ -177,7 +201,15 @@ export class PublicDomainsService {
     if (generalSettings?.currency) {
       currencyDetails = await this.globalPrisma.currencies.findUnique({
         where: { code: generalSettings.currency },
-        select: { code: true, name: true, symbol: true, decimal_places: true, position: true, format_style: true, state: true },
+        select: {
+          code: true,
+          name: true,
+          symbol: true,
+          decimal_places: true,
+          position: true,
+          format_style: true,
+          state: true,
+        },
       });
     }
 
@@ -255,8 +287,11 @@ export class PublicDomainsService {
   async checkHostnameAvailability(hostname: string) {
     this.logger.log(`🔍 Checking hostname availability: ${hostname}`);
 
-    const existing = await this.globalPrisma.domain_settings.findUnique({
-      where: { hostname },
+    const existing = await this.globalPrisma.domain_settings.findFirst({
+      where: {
+        hostname,
+        status: { notIn: ['disabled', 'failed_ownership', 'failed_certificate', 'failed_alias'] },
+      },
     });
 
     return {

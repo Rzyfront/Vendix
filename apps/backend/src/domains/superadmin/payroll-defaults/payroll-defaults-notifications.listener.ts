@@ -5,7 +5,9 @@ import { NotificationsService } from '../../store/notifications/notifications.se
 
 @Injectable()
 export class PayrollDefaultsNotificationsListener {
-  private readonly logger = new Logger(PayrollDefaultsNotificationsListener.name);
+  private readonly logger = new Logger(
+    PayrollDefaultsNotificationsListener.name,
+  );
 
   constructor(
     private readonly global_prisma: GlobalPrismaService,

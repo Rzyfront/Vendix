@@ -9,7 +9,17 @@ export class ActiveSubscriptionsService {
   constructor(private readonly prisma: GlobalPrismaService) {}
 
   async findAll(query: SubscriptionQueryDto) {
-    const { page = 1, limit = 10, state, plan_id, store_id, organization_id, search, sort_by = 'created_at', sort_order = 'desc' } = query;
+    const {
+      page = 1,
+      limit = 10,
+      state,
+      plan_id,
+      store_id,
+      organization_id,
+      search,
+      sort_by = 'created_at',
+      sort_order = 'desc',
+    } = query;
 
     const skip = (page - 1) * Number(limit);
     const where: Prisma.store_subscriptionsWhereInput = {};
@@ -36,7 +46,9 @@ export class ActiveSubscriptionsService {
         take: Number(limit),
         orderBy: { [sort_by]: sort_order },
         include: {
-          plan: { select: { id: true, code: true, name: true, plan_type: true } },
+          plan: {
+            select: { id: true, code: true, name: true, plan_type: true },
+          },
           store: {
             select: {
               id: true,
@@ -46,7 +58,9 @@ export class ActiveSubscriptionsService {
             },
           },
           promotional_plan: { select: { id: true, code: true, name: true } },
-          partner_override: { select: { id: true, custom_name: true, margin_pct: true } },
+          partner_override: {
+            select: { id: true, custom_name: true, margin_pct: true },
+          },
         },
       }),
       this.prisma.store_subscriptions.count({ where }),
@@ -81,7 +95,13 @@ export class ActiveSubscriptionsService {
         invoices: {
           take: 5,
           orderBy: { created_at: 'desc' },
-          select: { id: true, invoice_number: true, state: true, total: true, due_at: true },
+          select: {
+            id: true,
+            invoice_number: true,
+            state: true,
+            total: true,
+            due_at: true,
+          },
         },
       },
     });

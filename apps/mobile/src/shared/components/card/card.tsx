@@ -1,41 +1,87 @@
-import { View, Text, type ViewProps } from 'react-native';
+import { View, Text, StyleSheet, type ViewStyle, type ViewProps } from 'react-native';
+import { colors, spacing, borderRadius, shadows, colorScales } from '@/shared/theme';
 
 interface CardProps extends ViewProps {
   children: React.ReactNode;
+  style?: ViewStyle;
 }
 
 interface CardHeaderProps extends ViewProps {
   title: string;
   subtitle?: string;
   right?: React.ReactNode;
+  style?: ViewStyle;
 }
 
 interface CardBodyProps extends ViewProps {
   children: React.ReactNode;
+  style?: ViewStyle;
 }
 
 interface CardFooterProps extends ViewProps {
   children: React.ReactNode;
+  style?: ViewStyle;
 }
 
-function Card({ children, className = '', ...props }: CardProps) {
+const styles = StyleSheet.create({
+  card: {
+    backgroundColor: colors.card,
+    borderRadius: borderRadius.xl,
+    borderWidth: 1,
+    borderColor: colorScales.gray[100],
+    ...shadows.sm,
+  },
+  header: {
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[3],
+    borderBottomWidth: 1,
+    borderBottomColor: colorScales.gray[100],
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  headerContent: {
+    flex: 1,
+  },
+  title: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: colorScales.gray[900],
+  },
+  subtitle: {
+    fontSize: 14,
+    color: colorScales.gray[500],
+    marginTop: 2,
+  },
+  body: {
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[4],
+  },
+  footer: {
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[3],
+    borderTopWidth: 1,
+    borderTopColor: colorScales.gray[100],
+  },
+});
+
+function Card({ children, style, ...props }: CardProps) {
   return (
-    <View
-      className={`bg-white rounded-xl shadow-sm border border-gray-100 ${className}`}
-      {...props}
-    >
+    <View style={[styles.card, style]} {...props}>
       {children}
     </View>
   );
 }
 
-function CardHeader({ title, subtitle, right, className = '', ...props }: CardHeaderProps) {
+function CardHeader({ title, subtitle, right, style, ...props }: CardHeaderProps) {
   return (
-    <View className={`px-4 py-3 border-b border-gray-100 ${className}`} {...props}>
-      <View className="flex-row items-center justify-between">
-        <View className="flex-1">
-          <Text className="text-base font-semibold text-gray-900">{title}</Text>
-          {subtitle && <Text className="text-sm text-gray-500 mt-0.5">{subtitle}</Text>}
+    <View style={[styles.header, style]} {...props}>
+      <View style={styles.headerRow}>
+        <View style={styles.headerContent}>
+          <Text style={styles.title}>{title}</Text>
+          {subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}
         </View>
         {right && <View>{right}</View>}
       </View>
@@ -43,17 +89,17 @@ function CardHeader({ title, subtitle, right, className = '', ...props }: CardHe
   );
 }
 
-function CardBody({ children, className = '', ...props }: CardBodyProps) {
+function CardBody({ children, style, ...props }: CardBodyProps) {
   return (
-    <View className={`px-4 py-4 ${className}`} {...props}>
+    <View style={[styles.body, style]} {...props}>
       {children}
     </View>
   );
 }
 
-function CardFooter({ children, className = '', ...props }: CardFooterProps) {
+function CardFooter({ children, style, ...props }: CardFooterProps) {
   return (
-    <View className={`px-4 py-3 border-t border-gray-100 ${className}`} {...props}>
+    <View style={[styles.footer, style]} {...props}>
       {children}
     </View>
   );

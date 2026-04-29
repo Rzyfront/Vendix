@@ -74,6 +74,14 @@ import { IconComponent } from '../../../../shared/components';
             <app-icon name="shield-check" [size]="16"></app-icon>
             Pasarela
           </a>
+          <a
+            routerLink="metrics"
+            routerLinkActive="text-primary border-b-2 border-primary"
+            class="flex items-center gap-2 px-3 py-2 text-sm font-medium text-text-secondary whitespace-nowrap hover:text-text-primary transition-colors"
+          >
+            <app-icon name="chart-line" [size]="16"></app-icon>
+            Métricas
+          </a>
         </div>
       </div>
       <router-outlet></router-outlet>

@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
-import { WompiProcessor } from '../processors/wompi/wompi.processor';
+import { WompiClientFactory } from '../processors/wompi/wompi.factory';
 import {
   WompiConfig,
   WompiEnvironment,
@@ -62,7 +62,7 @@ export class WompiReconciliationService {
 
   constructor(
     private readonly prisma: StorePrismaService,
-    private readonly wompiProcessor: WompiProcessor,
+    private readonly wompiClientFactory: WompiClientFactory,
     private readonly paymentEncryption: PaymentEncryptionService,
     private readonly webhookHandler: WebhookHandlerService,
   ) {}
@@ -102,8 +102,7 @@ export class WompiReconciliationService {
   private isCircuitBreakerTripped(): boolean {
     if (!this.circuitBreakerOpen) return false;
 
-    const elapsed =
-      Date.now() - (this.circuitBreakerOpenedAt?.getTime() ?? 0);
+    const elapsed = Date.now() - (this.circuitBreakerOpenedAt?.getTime() ?? 0);
 
     if (elapsed >= WompiReconciliationService.CIRCUIT_BREAKER_COOLDOWN_MS) {
       // Cooldown elapsed — reset breaker for next run.
@@ -121,42 +120,34 @@ export class WompiReconciliationService {
 
   private async runReconciliationBatch(): Promise<void> {
     const now = Date.now();
-    const minAgeCutoff = new Date(
-      now - WompiReconciliationService.MIN_AGE_MS,
-    );
-    const maxAgeCutoff = new Date(
-      now - WompiReconciliationService.MAX_AGE_MS,
-    );
+    const minAgeCutoff = new Date(now - WompiReconciliationService.MIN_AGE_MS);
+    const maxAgeCutoff = new Date(now - WompiReconciliationService.MAX_AGE_MS);
 
     // Cron has no tenant context: use withoutScope() to bypass scope
     // (webhook flow does the exact same thing).
-    const stalePayments = await this.prisma
-      .withoutScope()
-      .payments.findMany({
-        where: {
-          state: 'pending',
-          created_at: { lt: minAgeCutoff, gt: maxAgeCutoff },
-          store_payment_method: {
-            system_payment_method: { type: 'wompi' },
-          },
+    const stalePayments = await this.prisma.withoutScope().payments.findMany({
+      where: {
+        state: 'pending',
+        created_at: { lt: minAgeCutoff, gt: maxAgeCutoff },
+        store_payment_method: {
+          system_payment_method: { type: 'wompi' },
         },
-        include: {
-          store_payment_method: {
-            include: { system_payment_method: true },
-          },
+      },
+      include: {
+        store_payment_method: {
+          include: { system_payment_method: true },
         },
-        orderBy: { created_at: 'asc' },
-        take: WompiReconciliationService.BATCH_SIZE,
-      });
+      },
+      orderBy: { created_at: 'asc' },
+      take: WompiReconciliationService.BATCH_SIZE,
+    });
 
     if (stalePayments.length === 0) {
       this.logger.debug('No stale Wompi payments to reconcile');
       return;
     }
 
-    this.logger.log(
-      `Reconciling ${stalePayments.length} stale Wompi payments`,
-    );
+    this.logger.log(`Reconciling ${stalePayments.length} stale Wompi payments`);
 
     let succeeded = 0;
     let failed = 0;
@@ -200,7 +191,9 @@ export class WompiReconciliationService {
    * Throws on transport / decryption errors so the outer loop can count
    * them toward the circuit breaker.
    */
-  private async reconcileOne(payment: any): Promise<'transitioned' | 'unchanged'> {
+  private async reconcileOne(
+    payment: any,
+  ): Promise<'transitioned' | 'unchanged'> {
     const storePaymentMethod = payment.store_payment_method;
     if (!storePaymentMethod?.custom_config) {
       this.logger.debug(
@@ -230,15 +223,11 @@ export class WompiReconciliationService {
       events_secret: decrypted.events_secret || '',
       integrity_secret: decrypted.integrity_secret || '',
       environment:
-        (decrypted.environment as WompiEnvironment) ||
-        WompiEnvironment.SANDBOX,
+        (decrypted.environment as WompiEnvironment) || WompiEnvironment.SANDBOX,
     };
 
-    // Configure the shared WompiClient with this store's credentials.
-    // (Cron is single-threaded per Node instance: each iteration
-    // configures + calls + completes before the next iteration starts.)
-    const client = this.wompiProcessor.getClient();
-    client.configure(wompiConfig);
+    const cacheKey = `store-${payment.store_id}`;
+    const client = this.wompiClientFactory.getClient(cacheKey, wompiConfig);
 
     // Lookup priority:
     //  1. gateway_reference  -> /v1/transactions/?reference=<ref>
@@ -248,9 +237,24 @@ export class WompiReconciliationService {
     let txn: WompiTransactionData | null = null;
 
     if (payment.gateway_reference) {
-      txn = await this.wompiProcessor.getTransactionByReference(
-        payment.gateway_reference,
-      );
+      try {
+        const response = await client.getTransactionsByReference(
+          payment.gateway_reference,
+        );
+        const txns = response?.data ?? [];
+        if (txns.length > 0) {
+          txn = txns.reduce((latest: any, candidate: any) => {
+            if (!latest) return candidate;
+            return new Date(candidate.created_at) > new Date(latest.created_at)
+              ? candidate
+              : latest;
+          }, txns[0]);
+        }
+      } catch (err) {
+        this.logger.warn(
+          `Reconciliation getTransactionsByReference failed for payment ${payment.id}: ${(err as Error).message}`,
+        );
+      }
     }
 
     if (
@@ -258,12 +262,16 @@ export class WompiReconciliationService {
       payment.transaction_id &&
       !String(payment.transaction_id).startsWith('wompi_')
     ) {
-      const status = await this.wompiProcessor.getPaymentStatus(
-        payment.transaction_id,
-      );
-      // getPaymentStatus returns a normalised object; recover the raw
-      // gateway response so we can hand it off to applyWompiTransaction.
-      txn = (status?.gatewayResponse as WompiTransactionData) ?? null;
+      try {
+        const response = await client.getTransaction(payment.transaction_id);
+        if (response?.data) {
+          txn = response.data;
+        }
+      } catch (err) {
+        this.logger.warn(
+          `Reconciliation getTransaction failed for payment ${payment.id}: ${(err as Error).message}`,
+        );
+      }
     }
 
     if (!txn) {
@@ -274,9 +282,7 @@ export class WompiReconciliationService {
     }
 
     if (txn.status === WompiTransactionStatus.PENDING) {
-      this.logger.debug(
-        `Payment ${payment.id}: Wompi still reports PENDING`,
-      );
+      this.logger.debug(`Payment ${payment.id}: Wompi still reports PENDING`);
       return 'unchanged';
     }
 
@@ -284,10 +290,10 @@ export class WompiReconciliationService {
     // applyWompiTransaction wraps lookup + CAS update + order transition
     // in a single transaction; running it twice on a final-state txn
     // is a no-op.
-    const mappedStatus = await this.webhookHandler.applyWompiTransaction(
-      txn,
-      { transaction: txn, source: 'wompi-reconciliation-cron' },
-    );
+    const mappedStatus = await this.webhookHandler.applyWompiTransaction(txn, {
+      transaction: txn,
+      source: 'wompi-reconciliation-cron',
+    });
 
     if (mappedStatus) {
       this.logger.log(

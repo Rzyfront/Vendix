@@ -32,7 +32,9 @@ export class CertificateExpiryAlertJob {
       });
 
       if (configs.length === 0) {
-        this.logger.debug('No active DIAN configurations with certificate expiry found');
+        this.logger.debug(
+          'No active DIAN configurations with certificate expiry found',
+        );
         return;
       }
 
@@ -90,7 +92,10 @@ export class CertificateExpiryAlertJob {
         this.logger.log(`Sent ${alerts_sent} certificate expiry alert(s)`);
       }
     } catch (error) {
-      this.logger.error(`Certificate expiry check failed: ${error.message}`, error.stack);
+      this.logger.error(
+        `Certificate expiry check failed: ${error.message}`,
+        error.stack,
+      );
     }
   }
 }

@@ -9,6 +9,7 @@ import type { Request, Response } from 'express';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 import { SubscriptionAccessService } from '../services/subscription-access.service';
+import { SubscriptionGateConfig } from '../config/subscription-gate.config';
 import { SKIP_SUBSCRIPTION_GATE } from '../decorators/skip-subscription-gate.decorator';
 
 const WRITE_METHODS = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
@@ -41,6 +42,7 @@ export class StoreOperationsGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     private readonly access: SubscriptionAccessService,
+    private readonly gateConfig: SubscriptionGateConfig,
   ) {}
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
@@ -68,7 +70,8 @@ export class StoreOperationsGuard implements CanActivate {
     // the AsyncLocalStorage interceptor runs AFTER guards, so getStoreId() is
     // undefined here. Fall back to the AsyncLocalStorage in case a future
     // refactor populates it earlier.
-    const reqUser = (req as Request & { user?: { store_id?: number | null } }).user;
+    const reqUser = (req as Request & { user?: { store_id?: number | null } })
+      .user;
     const storeId = reqUser?.store_id ?? RequestContextService.getStoreId();
     if (!storeId) return true;
 
@@ -87,7 +90,7 @@ export class StoreOperationsGuard implements CanActivate {
     }
 
     if (result.mode === 'block') {
-      const enforce = this.isEnforceMode();
+      const enforce = this.gateConfig.isEnforce();
       this.logger.warn(
         JSON.stringify({
           event: 'STORE_GATE_OBSERVATION',
@@ -103,17 +106,15 @@ export class StoreOperationsGuard implements CanActivate {
         const key =
           (result.reason as keyof typeof ErrorCodes) ?? 'SUBSCRIPTION_004';
         const entry = ErrorCodes[key] ?? ErrorCodes.SUBSCRIPTION_004;
-        throw new VendixHttpException(entry);
+        const details = {
+          subscription_state: result.subscription_state,
+          plan_id: result.plan_id ?? null,
+          has_record: result.has_record,
+        };
+        throw new VendixHttpException(entry, undefined, details);
       }
     }
 
     return true;
-  }
-
-  private isEnforceMode(): boolean {
-    return (
-      process.env.STORE_GATE_ENFORCE === 'true' ||
-      process.env.AI_GATE_ENFORCE === 'true'
-    );
   }
 }

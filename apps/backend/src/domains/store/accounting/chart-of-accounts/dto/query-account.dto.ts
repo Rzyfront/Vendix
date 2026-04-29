@@ -1,4 +1,10 @@
-import { IsString, IsOptional, IsNumber, IsBoolean, MaxLength } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsNumber,
+  IsBoolean,
+  MaxLength,
+} from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 
 export class QueryAccountDto {

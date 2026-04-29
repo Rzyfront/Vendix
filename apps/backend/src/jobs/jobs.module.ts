@@ -20,10 +20,28 @@ import { SubscriptionStateEngineJob } from './subscription-state-engine.job';
 import { SubscriptionRenewalBillingJob } from './subscription-renewal-billing.job';
 import { SubscriptionReminderDispatchJob } from './subscription-reminder-dispatch.job';
 import { SubscriptionPaymentRetryJob } from './subscription-payment-retry.job';
+import { SubscriptionWebhookReconcilerJob } from './subscription-webhook-reconciler.job';
+import { SubscriptionWebhookReconcilerController } from './subscription-webhook-reconciler.controller';
+import { SubscriptionTrialNotifierJob } from './subscription-trial-notifier.job';
+import { PaymentMethodExpiryNotifierJob } from './payment-method-expiry-notifier.job';
 import { PromotionalActivationJob } from './promotional-activation.job';
 import { PartnerPayoutBatchJob } from './partner-payout-batch.job';
+import { CommissionAccrualJob } from './commission-accrual.job';
+// PaymentConfirmedEmailJob is intentionally NOT imported here. Its handler
+// logic (job name `payment.confirmed.email`) was consolidated into
+// `EmailNotificationsProcessor` (G10). Registering both as
+// `@Processor('email-notifications')` would create two competing WorkerHosts
+// on the same queue and roughly half of every job kind would be picked up by
+// the wrong worker (and logged as "Unknown email job"). The file is kept on
+// disk for git history and may be removed in a follow-up cleanup.
+// import { PaymentConfirmedEmailJob } from './payment-confirmed-email.job';
+import { EmailNotificationsProcessor } from './email-notifications.processor';
 import { PrismaModule } from '../prisma/prisma.module';
 import { SubscriptionsModule } from '../domains/store/subscriptions/subscriptions.module';
+import { EmailModule } from '../email/email.module';
+import { WompiModule } from '../domains/store/payments/processors/wompi/wompi.module';
+import { PlatformGatewayModule } from '../domains/superadmin/subscriptions/gateway/gateway.module';
+import { ResponseModule } from '../common/responses/response.module';
 
 @Module({
   imports: [
@@ -31,11 +49,21 @@ import { SubscriptionsModule } from '../domains/store/subscriptions/subscription
     OrderFlowModule,
     PrismaModule,
     SubscriptionsModule,
+    EmailModule,
+    // Direct imports needed by SubscriptionWebhookReconcilerJob:
+    // SubscriptionsModule is @Global but does NOT re-export WompiProcessor /
+    // PlatformGatewayService — pull them in explicitly here.
+    WompiModule,
+    PlatformGatewayModule,
+    ResponseModule,
     BullModule.registerQueue(
       { name: 'ai-embedding' },
       { name: 'subscription-payment-retry' },
+      { name: 'commission-accrual' },
+      { name: 'email-notifications' },
     ),
   ],
+  controllers: [SubscriptionWebhookReconcilerController],
   providers: [
     OrderAutoFinishJob,
     LayawayOverdueJob,
@@ -55,8 +83,13 @@ import { SubscriptionsModule } from '../domains/store/subscriptions/subscription
     SubscriptionRenewalBillingJob,
     SubscriptionReminderDispatchJob,
     SubscriptionPaymentRetryJob,
+    SubscriptionWebhookReconcilerJob,
+    SubscriptionTrialNotifierJob,
+    PaymentMethodExpiryNotifierJob,
     PromotionalActivationJob,
     PartnerPayoutBatchJob,
+    CommissionAccrualJob,
+    EmailNotificationsProcessor,
   ],
 })
 export class JobsModule {}

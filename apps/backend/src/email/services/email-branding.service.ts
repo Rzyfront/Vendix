@@ -35,7 +35,9 @@ export class EmailBrandingService {
 
       return this.extractBrandingFromConfig(domain.config as any);
     } catch (error) {
-      this.logger.error(`Error fetching branding for store ${storeId}: ${error.message}`);
+      this.logger.error(
+        `Error fetching branding for store ${storeId}: ${error.message}`,
+      );
       return this.getDefaultBranding();
     }
   }
@@ -46,12 +48,15 @@ export class EmailBrandingService {
    *
    * Source of truth: organization_settings.settings.branding
    */
-  async getOrganizationBranding(organizationId: number): Promise<EmailBranding> {
+  async getOrganizationBranding(
+    organizationId: number,
+  ): Promise<EmailBranding> {
     try {
       // Read from organization_settings (source of truth)
-      const orgSettings = await this.globalPrisma.organization_settings.findUnique({
-        where: { organization_id: organizationId },
-      });
+      const orgSettings =
+        await this.globalPrisma.organization_settings.findUnique({
+          where: { organization_id: organizationId },
+        });
 
       if (orgSettings?.settings) {
         const settings = orgSettings.settings as any;
@@ -60,10 +65,14 @@ export class EmailBrandingService {
         }
       }
 
-      this.logger.warn(`No organization settings found for organization ${organizationId}`);
+      this.logger.warn(
+        `No organization settings found for organization ${organizationId}`,
+      );
       return this.getDefaultBranding();
     } catch (error) {
-      this.logger.error(`Error fetching branding for organization ${organizationId}: ${error.message}`);
+      this.logger.error(
+        `Error fetching branding for organization ${organizationId}: ${error.message}`,
+      );
       return this.getDefaultBranding();
     }
   }
@@ -145,7 +154,9 @@ export class EmailBrandingService {
   /**
    * Fallback: Get organization branding when store branding is not available
    */
-  private async getOrganizationBrandingFromStore(storeId: number): Promise<EmailBranding> {
+  private async getOrganizationBrandingFromStore(
+    storeId: number,
+  ): Promise<EmailBranding> {
     try {
       const store = await this.globalPrisma.stores.findUnique({
         where: { id: storeId },
@@ -158,7 +169,9 @@ export class EmailBrandingService {
 
       return this.getDefaultBranding();
     } catch (error) {
-      this.logger.error(`Error fetching organization branding from store ${storeId}: ${error.message}`);
+      this.logger.error(
+        `Error fetching organization branding from store ${storeId}: ${error.message}`,
+      );
       return this.getDefaultBranding();
     }
   }

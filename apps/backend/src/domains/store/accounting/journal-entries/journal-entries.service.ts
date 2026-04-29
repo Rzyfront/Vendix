@@ -1,7 +1,4 @@
-import {
-  Injectable,
-  ConflictException,
-} from '@nestjs/common';
+import { Injectable, ConflictException } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
@@ -14,13 +11,25 @@ const ENTRY_INCLUDE = {
   accounting_entry_lines: {
     include: {
       account: {
-        select: { id: true, code: true, name: true, account_type: true, nature: true },
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          account_type: true,
+          nature: true,
+        },
       },
     },
     orderBy: { id: 'asc' as const },
   },
   fiscal_period: {
-    select: { id: true, name: true, start_date: true, end_date: true, status: true },
+    select: {
+      id: true,
+      name: true,
+      start_date: true,
+      end_date: true,
+      status: true,
+    },
   },
   created_by_user: {
     select: { id: true, first_name: true, last_name: true },
@@ -195,7 +204,9 @@ export class JournalEntriesService {
     }
 
     // Generate entry number
-    const entry_number = await this.generateEntryNumber(context.organization_id!);
+    const entry_number = await this.generateEntryNumber(
+      context.organization_id!,
+    );
 
     // Determine store_id: use DTO value, or context store_id if available
     const store_id = create_dto.store_id || context.store_id || null;
@@ -249,7 +260,10 @@ export class JournalEntriesService {
     }
 
     // If changing fiscal period, validate it's open
-    if (update_dto.fiscal_period_id && update_dto.fiscal_period_id !== entry.fiscal_period_id) {
+    if (
+      update_dto.fiscal_period_id &&
+      update_dto.fiscal_period_id !== entry.fiscal_period_id
+    ) {
       const fiscal_period = await this.prisma.fiscal_periods.findFirst({
         where: { id: update_dto.fiscal_period_id },
       });
@@ -313,9 +327,15 @@ export class JournalEntriesService {
         await tx.accounting_entries.update({
           where: { id },
           data: {
-            ...(update_dto.entry_date && { entry_date: new Date(update_dto.entry_date) }),
-            ...(update_dto.description !== undefined && { description: update_dto.description }),
-            ...(update_dto.fiscal_period_id && { fiscal_period_id: update_dto.fiscal_period_id }),
+            ...(update_dto.entry_date && {
+              entry_date: new Date(update_dto.entry_date),
+            }),
+            ...(update_dto.description !== undefined && {
+              description: update_dto.description,
+            }),
+            ...(update_dto.fiscal_period_id && {
+              fiscal_period_id: update_dto.fiscal_period_id,
+            }),
             total_debit: new Prisma.Decimal(total_debit),
             total_credit: new Prisma.Decimal(total_credit),
           },
@@ -336,9 +356,15 @@ export class JournalEntriesService {
       await this.prisma.accounting_entries.update({
         where: { id },
         data: {
-          ...(update_dto.entry_date && { entry_date: new Date(update_dto.entry_date) }),
-          ...(update_dto.description !== undefined && { description: update_dto.description }),
-          ...(update_dto.fiscal_period_id && { fiscal_period_id: update_dto.fiscal_period_id }),
+          ...(update_dto.entry_date && {
+            entry_date: new Date(update_dto.entry_date),
+          }),
+          ...(update_dto.description !== undefined && {
+            description: update_dto.description,
+          }),
+          ...(update_dto.fiscal_period_id && {
+            fiscal_period_id: update_dto.fiscal_period_id,
+          }),
         },
       });
     }

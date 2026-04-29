@@ -1,8 +1,8 @@
-import { View, Text, Pressable } from 'react-native';
+import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { Icon } from '@/shared/components/icon/icon';
-import { colors } from '@/shared/theme/colors';
+import { colors, colorScales, typography, spacing } from '@/shared/theme';
 
 interface HeaderProps {
   title: string;
@@ -16,16 +16,13 @@ export function Header({ title, onMenuPress, rightAction, showBack = false }: He
   const router = useRouter();
 
   return (
-    <View
-      className="bg-white border-b border-gray-100"
-      style={{ paddingTop: insets.top }}
-    >
-      <View className="flex-row items-center justify-between px-4 h-14">
+    <View style={[styles.root, { paddingTop: insets.top }]}>
+      <View style={styles.row}>
         {showBack ? (
           <Pressable
             onPress={() => router.back()}
             hitSlop={8}
-            className="w-10 h-10 items-center justify-center -ml-2"
+            style={styles.iconButton}
           >
             <Icon name="arrow-left" size={22} color={colors.text.primary} />
           </Pressable>
@@ -33,20 +30,56 @@ export function Header({ title, onMenuPress, rightAction, showBack = false }: He
           <Pressable
             onPress={onMenuPress}
             hitSlop={8}
-            className="w-10 h-10 items-center justify-center -ml-2"
+            style={styles.iconButton}
           >
             <Icon name="list" size={22} color={colors.text.primary} />
           </Pressable>
         )}
-        <Text className="text-base font-semibold text-gray-900 flex-1 text-center" numberOfLines={1}>
+        <Text style={styles.title} numberOfLines={1}>
           {title}
         </Text>
         {rightAction ? (
-          <View className="w-10 items-end">{rightAction}</View>
+          <View style={styles.rightAction}>{rightAction}</View>
         ) : (
-          <View className="w-10" />
+          <View style={styles.rightSpacer} />
         )}
       </View>
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  root: {
+    backgroundColor: colors.card,
+    borderBottomWidth: 1,
+    borderBottomColor: colorScales.gray[100],
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing[4],
+    height: 56,
+  },
+  iconButton: {
+    width: 40,
+    height: 40,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: -spacing[2],
+  },
+  title: {
+    fontSize: typography.fontSize.base,
+    fontWeight: typography.fontWeight.semibold,
+    color: colorScales.gray[900],
+    flex: 1,
+    textAlign: 'center',
+  },
+  rightAction: {
+    width: 40,
+    alignItems: 'flex-end',
+  },
+  rightSpacer: {
+    width: 40,
+  },
+});

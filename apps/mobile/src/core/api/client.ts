@@ -3,7 +3,7 @@ import Constants from 'expo-constants';
 import { getToken, setToken, clearToken } from '../auth/token.storage';
 import { useAuthStore } from '../store/auth.store';
 
-const API_BASE_URL = Constants.expoConfig?.extra?.apiUrl || 'http://10.163.174.41:3000/api';
+const API_BASE_URL = Constants.expoConfig?.extra?.apiUrl || 'https://api.vendix.online/api';
 
 const apiClient = axios.create({
   baseURL: API_BASE_URL,

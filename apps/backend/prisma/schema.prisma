@@ -348,6 +348,8 @@ model organizations {
   partner_since                 DateTime?                      @db.Timestamp(6)
   has_consumed_trial            Boolean                        @default(false)
   trial_consumed_at             DateTime?                      @db.Timestamp(6)
+  acm_certificate_arn           String?                        @db.VarChar(2048)
+  acm_cert_revision             Int                            @default(0)
   addresses                     addresses[]
   audit_logs                    audit_logs[]
   domain_settings               domain_settings[]
@@ -613,6 +615,7 @@ model stores {
 
   // SaaS Subscription (one per store)
   subscription store_subscriptions?
+  subscription_payment_methods subscription_payment_methods[]
 
   @@unique([organization_id, slug])
   @@index([onboarding])
@@ -629,7 +632,7 @@ model store_settings {
 
 model domain_settings {
   id              Int    @id @default(autoincrement())
-  hostname        String @unique @db.VarChar(255)
+  hostname        String @db.VarChar(255)
   organization_id Int?
   store_id        Int?
 
@@ -649,6 +652,17 @@ model domain_settings {
   status             domain_status_enum    @default(pending_dns)
   verification_token String?               @unique @db.VarChar(100)
   ownership          domain_ownership_enum @default(vendix_subdomain)
+
+  // Domain Provisioning v2 (custom domains workflow)
+  validation_cname_name      String?    @db.VarChar(255)
+  validation_cname_value     String?    @db.VarChar(255)
+  validation_dns_missing_at  DateTime?  @db.Timestamptz(6)
+  cert_expires_at            DateTime?  @db.Timestamptz(6)
+  cloudfront_snapshot_before Json?
+  last_error_code            String?    @db.VarChar(80)
+  retry_count                Int        @default(0)
+  expires_token_at           DateTime?  @db.Timestamptz(6)
+
   organization       organizations?        @relation(fields: [organization_id], references: [id], onDelete: Cascade)
   store              stores?               @relation(fields: [store_id], references: [id], onDelete: Cascade)
 
@@ -659,6 +673,16 @@ model domain_settings {
   @@index([domain_type])
   @@index([ownership])
   @@index([app_type])
+}
+
+model domain_blocklist {
+  id         Int       @id @default(autoincrement())
+  pattern    String    @unique @db.VarChar(255)
+  match_type String    @db.VarChar(20)
+  reason     String?   @db.Text
+  created_at DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@map("domain_blocklist")
 }
 
 model addresses {
@@ -1332,6 +1356,7 @@ model inventory_movements {
   movement_type      movement_type_enum
   source_order_type  source_order_type_enum?
   source_order_id    Int?
+  source_module      String?
   reason             String?
   notes              String?
   user_id            Int?
@@ -2434,6 +2459,15 @@ enum domain_status_enum {
   pending_ssl
   active
   disabled
+  pending_ownership
+  verifying_ownership
+  pending_certificate
+  issuing_certificate
+  pending_alias
+  propagating
+  failed_ownership
+  failed_certificate
+  failed_alias
 }
 
 enum ssl_status_enum {
@@ -5715,6 +5749,22 @@ enum subscription_event_type_enum {
   partner_override_applied
   partner_commission_accrued
   partner_commission_paid
+  scheduled_cancel
+}
+
+enum partner_payout_batch_state_enum {
+  draft
+  approved
+  sent
+  paid
+  rejected
+}
+
+enum subscription_payment_method_state_enum {
+  active
+  invalid
+  removed
+  replaced
 }
 
 enum partner_commission_state_enum {
@@ -5722,6 +5772,13 @@ enum partner_commission_state_enum {
   pending_payout
   paid
   reversed
+}
+
+enum commission_accrual_state_enum {
+  pending
+  processing
+  completed
+  failed
 }
 
 enum notification_severity_enum {
@@ -5754,6 +5811,7 @@ model subscription_plans {
   is_promotional         Boolean                         @default(false)
   promo_rules            Json?
   promo_priority         Int                             @default(0)
+  redemption_code        String?                         @unique @db.VarChar(64)
   is_popular             Boolean                         @default(false)
   sort_order             Int                             @default(0)
   is_default             Boolean                         @default(false)
@@ -5808,6 +5866,7 @@ model store_subscriptions {
   grace_hard_until       DateTime?                     @db.Timestamp(6)
   suspend_at             DateTime?                     @db.Timestamp(6)
   cancel_at              DateTime?                     @db.Timestamp(6)
+  scheduled_cancel_at    DateTime?                     @db.Timestamp(6)
   cancelled_at           DateTime?                     @db.Timestamp(6)
   effective_price        Decimal                       @db.Decimal(12, 2)
   vendix_base_price      Decimal                       @db.Decimal(12, 2)
@@ -5831,6 +5890,7 @@ model store_subscriptions {
   replaces         store_subscriptions[]   @relation("store_sub_lineage")
   invoices         subscription_invoices[]
   events           subscription_events[]
+  payment_methods  subscription_payment_methods[]
 
   // Trial consumption audit rows that point at this subscription as the
   // originating trial subscription for the parent organization.
@@ -5867,6 +5927,7 @@ model subscription_invoices {
   store_subscription store_subscriptions     @relation(fields: [store_subscription_id], references: [id])
   payments           subscription_payments[]
   commission         partner_commissions?
+  commission_accrual commission_accrual_pending?
 
   @@index([state, due_at])
   @@index([store_id])
@@ -5918,7 +5979,7 @@ model partner_payout_batches {
   period_end              DateTime              @db.Timestamp(6)
   total_amount            Decimal               @db.Decimal(12, 2)
   currency                String                @default("COP") @db.VarChar(3)
-  state                   String                @db.VarChar(32)
+  state                   partner_payout_batch_state_enum @default(draft)
   sent_at                 DateTime?             @db.Timestamp(6)
   paid_at                 DateTime?             @db.Timestamp(6)
   payout_method           String                @db.VarChar(64)
@@ -5930,6 +5991,36 @@ model partner_payout_batches {
   updated_at              DateTime              @default(now()) @db.Timestamp(6)
 
   @@index([partner_organization_id, state])
+}
+
+model subscription_payment_methods {
+  id                     Int                 @id @default(autoincrement())
+  store_id               Int
+  store_subscription_id  Int
+  type                   String              @db.VarChar(32)
+  provider               String              @db.VarChar(32)
+  provider_token         String              @db.Text
+  last4                  String?             @db.VarChar(4)
+  brand                  String?             @db.VarChar(32)
+  expiry_month           String?             @db.VarChar(2)
+  expiry_year            String?             @db.VarChar(4)
+  card_holder            String?             @db.VarChar(128)
+  is_default             Boolean             @default(false)
+  state                  subscription_payment_method_state_enum @default(active)
+  consecutive_failures   Int                 @default(0)
+  replaced_by_id         Int?
+  replaced_at            DateTime?           @db.Timestamp(6)
+  metadata               Json?
+  created_at             DateTime            @default(now()) @db.Timestamp(6)
+  updated_at             DateTime            @default(now()) @db.Timestamp(6)
+
+  store              stores              @relation(fields: [store_id], references: [id], onDelete: Cascade)
+  store_subscription store_subscriptions @relation(fields: [store_subscription_id], references: [id], onDelete: Cascade)
+  replaced_by        subscription_payment_methods?  @relation("subscription_payment_methods_replaced_by", fields: [replaced_by_id], references: [id], onDelete: SetNull)
+  replacements       subscription_payment_methods[] @relation("subscription_payment_methods_replaced_by")
+
+  @@index([store_id, state])
+  @@index([store_subscription_id, is_default])
 }
 
 model subscription_events {
@@ -5945,6 +6036,34 @@ model subscription_events {
   store_subscription    store_subscriptions            @relation(fields: [store_subscription_id], references: [id])
 
   @@index([store_subscription_id, created_at(sort: Desc)])
+}
+
+model commission_accrual_pending {
+  invoice_id              Int                           @id @unique
+  partner_organization_id Int
+  amount                  Decimal                       @db.Decimal(12, 2)
+  currency                String                        @default("COP") @db.VarChar(3)
+  state                   commission_accrual_state_enum @default(pending)
+  attempts                Int                           @default(0)
+  error_message           String?                       @db.Text
+  created_at              DateTime                      @default(now()) @db.Timestamp(6)
+  processed_at            DateTime?                     @db.Timestamp(6)
+
+  invoice subscription_invoices @relation(fields: [invoice_id], references: [id], onDelete: Cascade)
+
+  @@index([state, created_at])
+}
+
+model webhook_event_dedup {
+  id          Int      @id @default(autoincrement())
+  processor   String   @db.VarChar(64)
+  event_id    String   @db.VarChar(255)
+  event_type  String?  @db.VarChar(64)
+  received_at DateTime @default(now()) @db.Timestamp(6)
+
+  @@unique([processor, event_id])
+  @@index([processor, event_id])
+  @@index([received_at])
 }
 
 model platform_settings {

@@ -30,7 +30,7 @@ export class TaxesController {
   constructor(
     private readonly taxesService: TaxesService,
     private readonly responseService: ResponseService,
-  ) { }
+  ) {}
 
   @Post()
   @Permissions('store:taxes:create')

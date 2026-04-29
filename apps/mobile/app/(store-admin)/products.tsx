@@ -1,8 +1,7 @@
 import { useState, useCallback } from 'react';
-import { FlatList, Pressable, TouchableOpacity, Text, View } from 'react-native';
+import { FlatList, Pressable, TouchableOpacity, Text, View, StyleSheet, Image } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
-import { Plus } from 'lucide-react-native';
 import { usePagination } from '@/core/hooks/use-pagination';
 import { formatCurrency } from '@/shared/utils/currency';
 import { ProductService } from '@/features/store/services';
@@ -15,12 +14,122 @@ import { SearchBar } from '@/shared/components/search-bar/search-bar';
 import { Badge } from '@/shared/components/badge/badge';
 import { EmptyState } from '@/shared/components/empty-state/empty-state';
 import { Spinner } from '@/shared/components/spinner/spinner';
+import { colors, colorScales, spacing, borderRadius, shadows, typography } from '@/shared/theme';
 
 const STATE_FILTERS: { label: string; value?: ProductState }[] = [
   { label: 'Todos' },
   { label: 'Activos', value: 'active' },
   { label: 'Inactivos', value: 'inactive' },
 ];
+
+const productCardStyles = StyleSheet.create({
+  wrapper: {
+    flex: 1,
+    maxWidth: '50%',
+  },
+  cardInner: {
+    margin: spacing[1],
+    overflow: 'hidden',
+  },
+  imageArea: {
+    aspectRatio: 1,
+    backgroundColor: colorScales.gray[100],
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  productImage: {
+    width: '100%',
+    height: '100%',
+    borderRadius: borderRadius.md,
+  },
+  content: {
+    padding: spacing[3],
+    gap: spacing[1],
+  },
+  name: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.semibold,
+    color: colorScales.gray[900],
+  },
+  price: {
+    fontSize: typography.fontSize.base,
+    fontWeight: typography.fontWeight.bold,
+    color: colorScales.gray[900],
+  },
+  badgeRow: {
+    flexDirection: 'row',
+    gap: spacing[1],
+    flexWrap: 'wrap',
+    marginTop: spacing[1],
+  },
+});
+
+const statsGridStyles = StyleSheet.create({
+  container: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing[3],
+    padding: spacing[4],
+  },
+  item: {
+    width: '48%',
+  },
+});
+
+const filterStyles = StyleSheet.create({
+  list: {
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[2],
+  },
+  chipActive: {
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[2],
+    borderRadius: borderRadius.full,
+    marginRight: spacing[2],
+    backgroundColor: colorScales.blue[600],
+  },
+  chipInactive: {
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[2],
+    borderRadius: borderRadius.full,
+    marginRight: spacing[2],
+    backgroundColor: colorScales.gray[200],
+  },
+  chipTextActive: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.medium,
+    color: colors.background,
+  },
+  chipTextInactive: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.medium,
+    color: colorScales.gray[700],
+  },
+});
+
+const screenStyles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  loader: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fab: {
+    position: 'absolute',
+    bottom: spacing[6],
+    right: spacing[6],
+    width: 56,
+    height: 56,
+    borderRadius: borderRadius.full,
+    backgroundColor: colorScales.blue[600],
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...shadows.lg,
+  },
+});
 
 const ProductCard = ({ product, onPress }: { product: Product; onPress: () => void }) => {
   const stateVariant = product.state === 'active' ? 'success' : product.state === 'inactive' ? 'warning' : 'default';
@@ -38,25 +147,23 @@ const ProductCard = ({ product, onPress }: { product: Product; onPress: () => vo
         : `Stock: ${product.stock_quantity}`;
 
   return (
-    <Pressable onPress={onPress} className="flex-1 max-w-[50%]">
-      <Card className="m-1 p-0 overflow-hidden">
-        <View className="aspect-square bg-gray-100 items-center justify-center">
+    <Pressable onPress={onPress} style={productCardStyles.wrapper}>
+      <Card style={productCardStyles.cardInner}>
+        <View style={productCardStyles.imageArea}>
           {product.image_url ? (
-            <View className="w-full h-full bg-gray-200 items-center justify-center">
-              <Icon name="image" size={32} color="#9ca3af" />
-            </View>
+            <Image source={{ uri: product.image_url }} style={productCardStyles.productImage} />
           ) : (
-            <Icon name="package" size={32} color="#9ca3af" />
+            <Icon name="package" size={32} color={colorScales.gray[400]} />
           )}
         </View>
-        <View className="p-3 gap-1">
-          <Text className="text-sm font-semibold text-gray-900 dark:text-gray-100" numberOfLines={2}>
+        <View style={productCardStyles.content}>
+          <Text style={productCardStyles.name} numberOfLines={2}>
             {product.name}
           </Text>
-          <Text className="text-base font-bold text-gray-900 dark:text-gray-100">
+          <Text style={productCardStyles.price}>
             {formatCurrency(product.final_price)}
           </Text>
-          <View className="flex-row gap-1 flex-wrap mt-1">
+          <View style={productCardStyles.badgeRow}>
             <Badge label={product.state} variant={stateVariant} size="sm" />
             <Badge label={stockLabel} variant={stockVariant} size="sm" />
           </View>
@@ -67,17 +174,17 @@ const ProductCard = ({ product, onPress }: { product: Product; onPress: () => vo
 };
 
 const StatsGrid = ({ stats }: { stats: ProductStats | undefined }) => (
-  <View className="flex-row flex-wrap gap-3 p-4">
-    <View className="w-[48%]">
+  <View style={statsGridStyles.container}>
+    <View style={statsGridStyles.item}>
       <StatsCard label="Total" value={String(stats?.total_products ?? 0)} icon="package" />
     </View>
-    <View className="w-[48%]">
+    <View style={statsGridStyles.item}>
       <StatsCard label="Activos" value={String(stats?.active_products ?? 0)} icon="tag" />
     </View>
-    <View className="w-[48%]">
+    <View style={statsGridStyles.item}>
       <StatsCard label="Bajo Stock" value={String(stats?.low_stock_products ?? 0)} icon="filter" />
     </View>
-    <View className="w-[48%]">
+    <View style={statsGridStyles.item}>
       <StatsCard label="Valor Total" value={formatCurrency(stats?.total_value ?? 0)} icon="tag" />
     </View>
   </View>
@@ -100,17 +207,15 @@ const FilterChips = ({
       return (
         <TouchableOpacity
           onPress={() => onSelect(item.value)}
-          className={`px-4 py-2 rounded-full mr-2 ${
-            isActive ? 'bg-blue-600' : 'bg-gray-200 dark:bg-gray-700'
-          }`}
+          style={isActive ? filterStyles.chipActive : filterStyles.chipInactive}
         >
-          <Text className={`text-sm font-medium ${isActive ? 'text-white' : 'text-gray-700 dark:text-gray-300'}`}>
+          <Text style={isActive ? filterStyles.chipTextActive : filterStyles.chipTextInactive}>
             {item.label}
           </Text>
         </TouchableOpacity>
       );
     }}
-    className="px-4 py-2"
+    style={filterStyles.list}
   />
 );
 
@@ -159,14 +264,14 @@ export default function ProductsScreen() {
 
   if (productsLoading && !productsData) {
     return (
-      <View className="flex-1 items-center justify-center">
+      <View style={screenStyles.loader}>
         <Spinner />
       </View>
     );
   }
 
   return (
-    <View className="flex-1 bg-white dark:bg-gray-950">
+    <View style={screenStyles.root}>
       <StatsGrid stats={stats} />
       <SearchBar value={search} onSubmit={handleSearch} onClear={() => handleSearch('')} placeholder="Buscar productos..." />
       <FilterChips activeFilter={stateFilter} onSelect={(v) => { setStateFilter(v); setPage(1); }} />
@@ -189,13 +294,13 @@ export default function ProductsScreen() {
           />
         }
         ListFooterComponent={productsLoading && productsData ? <Spinner /> : null}
-        contentContainerClassName="pb-24 px-2"
+        contentContainerStyle={{ paddingBottom: spacing[24], paddingHorizontal: spacing[2] }}
       />
       <TouchableOpacity
         onPress={() => router.push('/products/create')}
-        className="absolute bottom-6 right-6 w-14 h-14 rounded-full bg-blue-600 items-center justify-center shadow-lg"
+        style={screenStyles.fab}
       >
-        <Icon name="plus" size={24} color="#ffffff" />
+        <Icon name="plus" size={24} color={colors.background} />
       </TouchableOpacity>
     </View>
   );

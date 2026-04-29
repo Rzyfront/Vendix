@@ -1,10 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { Prisma, store_subscriptions } from '@prisma/client';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
-import {
-  ErrorCodes,
-  VendixHttpException,
-} from '../../../../common/errors';
+import { ErrorCodes, VendixHttpException } from '../../../../common/errors';
 
 /**
  * SubscriptionTrialService
@@ -117,9 +114,11 @@ export class SubscriptionTrialService {
     organizationId: number,
   ): Promise<store_subscriptions | null> {
     // 1. Lock the org row to prevent concurrent trial consumption.
-    const lockedRows = (await tx.$queryRaw(
+    const lockedRows = await tx.$queryRaw<
+      Array<{ id: number; has_consumed_trial: boolean }>
+    >(
       Prisma.sql`SELECT id, has_consumed_trial FROM organizations WHERE id = ${organizationId} FOR UPDATE`,
-    )) as Array<{ id: number; has_consumed_trial: boolean }>;
+    );
 
     if (!lockedRows.length) {
       this.logger.error(
@@ -161,8 +160,7 @@ export class SubscriptionTrialService {
     const platformSettings = await tx.platform_settings.findUnique({
       where: { key: 'core' },
     });
-    const platformDefaultTrialDays =
-      platformSettings?.default_trial_days ?? 14;
+    const platformDefaultTrialDays = platformSettings?.default_trial_days ?? 14;
     const trialDays =
       plan.trial_days && plan.trial_days > 0
         ? plan.trial_days

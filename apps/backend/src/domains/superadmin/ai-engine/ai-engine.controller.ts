@@ -35,7 +35,10 @@ export class AIEngineController {
   @ApiResponse({ status: 201, description: 'Configuration created' })
   async create(@Body() dto: CreateAIConfigDto) {
     const result = await this.aiEngineConfigService.create(dto);
-    return this.responseService.created(result, 'AI configuration created successfully');
+    return this.responseService.created(
+      result,
+      'AI configuration created successfully',
+    );
   }
 
   @Get()
@@ -57,7 +60,10 @@ export class AIEngineController {
   @ApiResponse({ status: 200, description: 'Dashboard stats retrieved' })
   async getDashboardStats() {
     const stats = await this.aiEngineConfigService.getDashboardStats();
-    return this.responseService.success(stats, 'Dashboard statistics retrieved successfully');
+    return this.responseService.success(
+      stats,
+      'Dashboard statistics retrieved successfully',
+    );
   }
 
   @Get('usage-stats')
@@ -83,7 +89,10 @@ export class AIEngineController {
 
   @Get('usage-stats/:orgId')
   @ApiOperation({ summary: 'Get AI usage statistics for a specific tenant' })
-  @ApiResponse({ status: 200, description: 'Tenant usage statistics retrieved' })
+  @ApiResponse({
+    status: 200,
+    description: 'Tenant usage statistics retrieved',
+  })
   async getUsageByTenant(
     @Param('orgId') orgId: string,
     @Query('date_from') dateFrom?: string,
@@ -94,7 +103,10 @@ export class AIEngineController {
       dateFrom ? new Date(dateFrom) : undefined,
       dateTo ? new Date(dateTo) : undefined,
     );
-    return this.responseService.success(stats, 'Tenant AI usage statistics retrieved');
+    return this.responseService.success(
+      stats,
+      'Tenant AI usage statistics retrieved',
+    );
   }
 
   @Get(':id')
@@ -103,7 +115,10 @@ export class AIEngineController {
   @ApiResponse({ status: 404, description: 'Configuration not found' })
   async findOne(@Param('id', ParseIntPipe) id: number) {
     const config = await this.aiEngineConfigService.findOne(id);
-    return this.responseService.success(config, 'AI configuration retrieved successfully');
+    return this.responseService.success(
+      config,
+      'AI configuration retrieved successfully',
+    );
   }
 
   @Patch(':id')
@@ -115,7 +130,10 @@ export class AIEngineController {
     @Body() dto: UpdateAIConfigDto,
   ) {
     const config = await this.aiEngineConfigService.update(id, dto);
-    return this.responseService.updated(config, 'AI configuration updated successfully');
+    return this.responseService.updated(
+      config,
+      'AI configuration updated successfully',
+    );
   }
 
   @Delete(':id')
@@ -124,7 +142,9 @@ export class AIEngineController {
   @ApiResponse({ status: 404, description: 'Configuration not found' })
   async remove(@Param('id', ParseIntPipe) id: number) {
     await this.aiEngineConfigService.remove(id);
-    return this.responseService.deleted('AI configuration deleted successfully');
+    return this.responseService.deleted(
+      'AI configuration deleted successfully',
+    );
   }
 
   @Post(':id/test')

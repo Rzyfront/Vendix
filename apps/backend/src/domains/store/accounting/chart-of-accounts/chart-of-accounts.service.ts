@@ -1,7 +1,4 @@
-import {
-  Injectable,
-  ConflictException,
-} from '@nestjs/common';
+import { Injectable, ConflictException } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
@@ -23,7 +20,15 @@ export class ChartOfAccountsService {
   }
 
   async findAll(query: QueryAccountDto) {
-    const { search, account_type, parent_id, level, accepts_entries, is_active, tree } = query;
+    const {
+      search,
+      account_type,
+      parent_id,
+      level,
+      accepts_entries,
+      is_active,
+      tree,
+    } = query;
 
     const where: Prisma.chart_of_accountsWhereInput = {
       ...(search && {
@@ -51,7 +56,13 @@ export class ChartOfAccountsService {
           select: { id: true, code: true, name: true },
         },
         children: {
-          select: { id: true, code: true, name: true, account_type: true, level: true },
+          select: {
+            id: true,
+            code: true,
+            name: true,
+            account_type: true,
+            level: true,
+          },
           orderBy: { code: 'asc' },
         },
       },
@@ -65,14 +76,25 @@ export class ChartOfAccountsService {
       orderBy: { code: 'asc' },
       include: {
         children: {
-          select: { id: true, code: true, name: true, account_type: true, nature: true, level: true, is_active: true, accepts_entries: true },
+          select: {
+            id: true,
+            code: true,
+            name: true,
+            account_type: true,
+            nature: true,
+            level: true,
+            is_active: true,
+            accepts_entries: true,
+          },
           orderBy: { code: 'asc' },
         },
       },
     });
 
     // Return only root-level accounts (parent_id is null), children are included via relation
-    const root_accounts = all_accounts.filter((account) => account.parent_id === null);
+    const root_accounts = all_accounts.filter(
+      (account) => account.parent_id === null,
+    );
     return root_accounts;
   }
 
@@ -84,7 +106,16 @@ export class ChartOfAccountsService {
           select: { id: true, code: true, name: true },
         },
         children: {
-          select: { id: true, code: true, name: true, account_type: true, nature: true, level: true, is_active: true, accepts_entries: true },
+          select: {
+            id: true,
+            code: true,
+            name: true,
+            account_type: true,
+            nature: true,
+            level: true,
+            is_active: true,
+            accepts_entries: true,
+          },
           orderBy: { code: 'asc' },
         },
       },
@@ -157,7 +188,10 @@ export class ChartOfAccountsService {
 
     // If changing parent, recalculate level
     let level = account.level;
-    if (update_dto.parent_id !== undefined && update_dto.parent_id !== account.parent_id) {
+    if (
+      update_dto.parent_id !== undefined &&
+      update_dto.parent_id !== account.parent_id
+    ) {
       if (update_dto.parent_id === null) {
         level = 1;
       } else {
@@ -201,7 +235,9 @@ export class ChartOfAccountsService {
       where: { id },
       data: {
         ...update_dto,
-        ...(update_dto.account_type && { account_type: update_dto.account_type as any }),
+        ...(update_dto.account_type && {
+          account_type: update_dto.account_type as any,
+        }),
         ...(update_dto.nature && { nature: update_dto.nature as any }),
         level,
       },

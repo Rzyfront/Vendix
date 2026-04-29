@@ -47,7 +47,10 @@ export class PartnerCommissionsService {
       return;
     }
 
-    const splitBreakdown = invoice.split_breakdown as Record<string, unknown> | null;
+    const splitBreakdown = invoice.split_breakdown as Record<
+      string,
+      unknown
+    > | null;
     const partnerShare = splitBreakdown?.partner_share
       ? new Prisma.Decimal(splitBreakdown.partner_share as string)
       : DECIMAL_ZERO;
@@ -165,7 +168,10 @@ export class PartnerCommissionsService {
         _count: true,
       }),
       this.prisma.partner_commissions.aggregate({
-        where: { partner_organization_id: organizationId, state: 'pending_payout' },
+        where: {
+          partner_organization_id: organizationId,
+          state: 'pending_payout',
+        },
         _sum: { amount: true },
         _count: true,
       }),

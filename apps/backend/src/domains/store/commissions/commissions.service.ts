@@ -203,7 +203,12 @@ export class CommissionsService {
         where,
         include: {
           commission_rule: {
-            select: { id: true, name: true, rule_type: true, commission_type: true },
+            select: {
+              id: true,
+              name: true,
+              rule_type: true,
+              commission_type: true,
+            },
           },
         },
         skip: (page - 1) * limit,
@@ -266,7 +271,12 @@ export class CommissionsService {
       rule_ids.length > 0
         ? await this.prisma.commission_rules.findMany({
             where: { id: { in: rule_ids } },
-            select: { id: true, name: true, rule_type: true, commission_type: true },
+            select: {
+              id: true,
+              name: true,
+              rule_type: true,
+              commission_type: true,
+            },
           })
         : [];
 

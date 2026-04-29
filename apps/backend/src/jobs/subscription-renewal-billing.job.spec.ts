@@ -13,14 +13,16 @@ import { SubscriptionPaymentService } from '../domains/store/subscriptions/servi
 
 describe('SubscriptionRenewalBillingJob', () => {
   let job: SubscriptionRenewalBillingJob;
-  let prisma: { store_subscriptions: { findMany: jest.Mock; update: jest.Mock } };
+  let prisma: {
+    store_subscriptions: { findMany: jest.Mock; update: jest.Mock };
+  };
   let billing: { issueInvoice: jest.Mock };
   let payment: { chargeInvoice: jest.Mock };
   let retryQueue: { add: jest.Mock };
   let config: { get: jest.Mock };
   let emitter: { emit: jest.Mock };
 
-  const subRow = { id: 10, store_id: 5 };
+  const subRow = { id: 10, store_id: 5, scheduled_cancel_at: null as Date | null };
   const invoice = {
     id: 100,
     period_end: new Date('2026-05-01T00:00:00Z'),
@@ -48,7 +50,10 @@ describe('SubscriptionRenewalBillingJob', () => {
         { provide: SubscriptionPaymentService, useValue: payment },
         { provide: ConfigService, useValue: config },
         { provide: EventEmitter2, useValue: emitter },
-        { provide: getQueueToken('subscription-payment-retry'), useValue: retryQueue },
+        {
+          provide: getQueueToken('subscription-payment-retry'),
+          useValue: retryQueue,
+        },
       ],
     }).compile();
 
@@ -81,7 +86,10 @@ describe('SubscriptionRenewalBillingJob', () => {
     });
     expect(opts.delay).toBe(BACKOFF_DELAYS[0]);
     expect(opts.attempts).toBe(MAX_ATTEMPTS);
-    expect(opts.backoff).toEqual({ type: 'exponential', delay: 60 * 60 * 1000 });
+    expect(opts.backoff).toEqual({
+      type: 'exponential',
+      delay: 60 * 60 * 1000,
+    });
   });
 
   it('chargeInvoice throws: enqueues retry', async () => {
@@ -129,5 +137,49 @@ describe('SubscriptionRenewalBillingJob', () => {
     expect(billing.issueInvoice).not.toHaveBeenCalled();
     expect(payment.chargeInvoice).not.toHaveBeenCalled();
     expect(retryQueue.add).not.toHaveBeenCalled();
+  });
+
+  it('scheduled_cancel_at reached: transitions to cancelled, no invoice issued', async () => {
+    const pastDate = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    prisma.store_subscriptions.findMany.mockResolvedValue([
+      { ...subRow, scheduled_cancel_at: pastDate },
+    ]);
+    prisma.store_subscriptions.update = jest.fn().mockResolvedValue(undefined);
+    const subscriptionEventsCreate = jest.fn().mockResolvedValue(undefined);
+    (prisma as any).subscription_events = { create: subscriptionEventsCreate };
+
+    await job.handleRenewalBilling();
+
+    expect(billing.issueInvoice).not.toHaveBeenCalled();
+    expect(payment.chargeInvoice).not.toHaveBeenCalled();
+    expect(retryQueue.add).not.toHaveBeenCalled();
+    expect(prisma.store_subscriptions.update).toHaveBeenCalledWith({
+      where: { id: subRow.id },
+      data: {
+        state: 'cancelled',
+        cancelled_at: expect.any(Date),
+        scheduled_cancel_at: null,
+        auto_renew: false,
+        updated_at: expect.any(Date),
+      },
+    });
+    expect(subscriptionEventsCreate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          store_subscription_id: subRow.id,
+          type: 'state_transition',
+          to_state: 'cancelled',
+          triggered_by_job: 'subscription-renewal-billing',
+        }),
+      }),
+    );
+    expect(emitter.emit).toHaveBeenCalledWith(
+      'subscription.state.changed',
+      expect.objectContaining({
+        storeId: subRow.store_id,
+        toState: 'cancelled',
+        reason: 'scheduled_cancel_executed',
+      }),
+    );
   });
 });

@@ -42,7 +42,7 @@ export class AuthController {
     private readonly authService: AuthService,
     private readonly environmentSwitchService: EnvironmentSwitchService,
     private readonly responseService: ResponseService,
-  ) { }
+  ) {}
 
   @Post('register-owner')
   @Public()

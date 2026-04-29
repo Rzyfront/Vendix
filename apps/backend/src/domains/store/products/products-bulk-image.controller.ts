@@ -80,9 +80,7 @@ export class ProductsBulkImageController {
   async analyzeImages(
     @UploadedFile(
       new ParseFilePipe({
-        validators: [
-          new MaxFileSizeValidator({ maxSize: 100 * 1024 * 1024 }),
-        ],
+        validators: [new MaxFileSizeValidator({ maxSize: 100 * 1024 * 1024 })],
       }),
     )
     file: any,

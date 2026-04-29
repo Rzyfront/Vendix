@@ -139,7 +139,9 @@ export class InvoiceRetryQueueService {
   }> {
     const [pending, processing, completed, failed] = await Promise.all([
       this.prisma.invoice_retry_queue.count({ where: { status: 'pending' } }),
-      this.prisma.invoice_retry_queue.count({ where: { status: 'processing' } }),
+      this.prisma.invoice_retry_queue.count({
+        where: { status: 'processing' },
+      }),
       this.prisma.invoice_retry_queue.count({ where: { status: 'completed' } }),
       this.prisma.invoice_retry_queue.count({ where: { status: 'failed' } }),
     ]);

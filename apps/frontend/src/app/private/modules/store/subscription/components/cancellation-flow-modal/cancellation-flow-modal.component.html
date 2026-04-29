@@ -1,0 +1,415 @@
+<app-modal
+  [(isOpen)]="isOpen"
+  (cancel)="close()"
+  title="Cancelar suscripción"
+  [subtitle]="
+    step() === 1
+      ? 'Cuéntanos por qué — paso 1 de 3'
+      : step() === 2
+        ? 'Antes de irte — paso 2 de 3'
+        : 'Confirmación final — paso 3 de 3'
+  "
+  size="md"
+  [closeOnBackdrop]="false"
+>
+  <div class="p-1 space-y-5">
+    <!-- Stepper indicator -->
+    <div class="flex items-center justify-center gap-2 pb-2 border-b border-[var(--color-border)]">
+      @for (s of [1, 2, 3]; track s) {
+        <div class="flex items-center gap-2">
+          <div
+            class="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold border-2 transition-all"
+            [class.bg-[var(--color-primary)]]="step() >= s"
+            [class.text-white]="step() >= s"
+            [class.border-[var(--color-primary)]]="step() >= s"
+            [class.bg-[var(--color-surface)]]="step() < s"
+            [class.text-[var(--color-text-secondary)]]="step() < s"
+            [class.border-[var(--color-border)]]="step() < s"
+          >
+            {{ s }}
+          </div>
+          @if (s < 3) {
+            <div
+              class="w-8 h-0.5 transition-all"
+              [class.bg-[var(--color-primary)]]="step() > s"
+              [class.bg-[var(--color-border)]]="step() <= s"
+            ></div>
+          }
+        </div>
+      }
+    </div>
+
+    <!-- ─────────────────────────── STEP 1 ─────────────────────────── -->
+    @if (step() === 1) {
+      <div class="space-y-4">
+        <div class="space-y-1">
+          <h4 class="text-base font-bold text-[var(--color-text-primary)]">
+            ¿Cuál es la razón principal por la que cancelas?
+          </h4>
+          <p class="text-sm text-[var(--color-text-secondary)]">
+            Tu respuesta nos ayuda a mejorar <span class="font-semibold">{{ planName() }}</span>.
+          </p>
+        </div>
+
+        <div class="space-y-2">
+          @for (option of reasons; track option.code) {
+            <button
+              type="button"
+              class="w-full flex items-center gap-3 p-3 rounded-[var(--radius-md)] border-2 text-left transition-all hover:bg-[var(--color-text-muted)]/10"
+              [class.border-[var(--color-primary)]]="selectedReason() === option.code"
+              [class.bg-[var(--color-primary)]/5]="selectedReason() === option.code"
+              [class.border-[var(--color-border)]]="selectedReason() !== option.code"
+              (click)="selectReason(option.code)"
+            >
+              <div
+                class="w-9 h-9 rounded-[var(--radius-sm)] flex items-center justify-center shrink-0"
+                [class.bg-[var(--color-primary)]/10]="selectedReason() === option.code"
+                [class.bg-[var(--color-text-muted)]/10]="selectedReason() !== option.code"
+              >
+                <app-icon
+                  [name]="option.icon"
+                  [size]="18"
+                  [class.text-[var(--color-primary)]]="selectedReason() === option.code"
+                  [class.text-[var(--color-text-secondary)]]="selectedReason() !== option.code"
+                ></app-icon>
+              </div>
+              <span
+                class="flex-1 text-sm font-medium"
+                [class.text-[var(--color-text-primary)]]="selectedReason() === option.code"
+                [class.text-[var(--color-text-secondary)]]="selectedReason() !== option.code"
+              >
+                {{ option.label }}
+              </span>
+              <div
+                class="w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0"
+                [class.border-[var(--color-primary)]]="selectedReason() === option.code"
+                [class.border-[var(--color-border)]]="selectedReason() !== option.code"
+              >
+                @if (selectedReason() === option.code) {
+                  <div class="w-2.5 h-2.5 rounded-full bg-[var(--color-primary)]"></div>
+                }
+              </div>
+            </button>
+          }
+        </div>
+
+        @if (selectedReason() === 'other') {
+          <div class="space-y-2 pt-2">
+            <label class="text-sm font-semibold text-[var(--color-text-primary)]">
+              Cuéntanos brevemente:
+              <span class="text-[var(--color-error)]">*</span>
+            </label>
+            <app-textarea
+              [control]="otherReasonControl"
+              [formControl]="otherReasonControl"
+              placeholder="Tu motivo de cancelación..."
+              [rows]="3"
+              [required]="true"
+            ></app-textarea>
+            <p class="text-[11px] text-[var(--color-text-secondary)] text-right">
+              {{ otherReasonText().length }} / {{ maxFeedback }}
+            </p>
+          </div>
+        }
+      </div>
+    }
+
+    <!-- ─────────────────────────── STEP 2 ─────────────────────────── -->
+    @if (step() === 2) {
+      <div class="space-y-4">
+        @if (selectedReason() === 'price') {
+          <div
+            class="p-4 rounded-[var(--radius-lg)] border-2 border-[var(--color-primary)]/30 bg-[var(--color-primary)]/5 space-y-3"
+          >
+            <div class="flex items-center gap-2">
+              <app-icon
+                name="circle-dollar-sign"
+                [size]="22"
+                class="text-[var(--color-primary)]"
+              ></app-icon>
+              <h4 class="text-base font-bold text-[var(--color-text-primary)]">
+                ¿Has visto nuestros otros planes?
+              </h4>
+            </div>
+            <p class="text-sm text-[var(--color-text-secondary)] leading-relaxed">
+              Tenemos planes de menor costo que podrían ajustarse mejor a tu presupuesto.
+              Antes de cancelar, considera explorar opciones más económicas.
+            </p>
+            <app-button variant="primary" size="sm" (clicked)="goToPlansAndClose()">
+              <app-icon name="arrow-right" [size]="14" slot="icon"></app-icon>
+              Ver planes
+            </app-button>
+          </div>
+        }
+
+        @if (selectedReason() === 'missing_features') {
+          <div
+            class="p-4 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] space-y-3"
+          >
+            <div class="flex items-center gap-2">
+              <app-icon name="puzzle" [size]="22" class="text-[var(--color-primary)]"></app-icon>
+              <h4 class="text-base font-bold text-[var(--color-text-primary)]">
+                Cuéntanos qué te falta
+              </h4>
+            </div>
+            <p class="text-sm text-[var(--color-text-secondary)] leading-relaxed">
+              Tu feedback va directo al equipo de producto. Si trabajamos en lo que necesitas,
+              te avisaremos.
+            </p>
+            <app-textarea
+              [control]="retentionFeedbackControl"
+              [formControl]="retentionFeedbackControl"
+              placeholder="Ej: Integración con WhatsApp, reportes personalizados, multi-moneda..."
+              [rows]="4"
+            ></app-textarea>
+            <p class="text-[11px] text-[var(--color-text-secondary)] text-right">
+              {{ retentionFeedbackText().length }} / {{ maxFeedback }}
+            </p>
+          </div>
+        }
+
+        @if (selectedReason() === 'low_usage') {
+          <div
+            class="p-4 rounded-[var(--radius-lg)] border-2 border-amber-200 bg-amber-50 space-y-3"
+          >
+            <div class="flex items-center gap-2">
+              <app-icon name="pause" [size]="22" class="text-amber-700"></app-icon>
+              <h4 class="text-base font-bold text-amber-900">
+                ¿Y si pausas tu plan?
+              </h4>
+              <span
+                class="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-200 text-amber-900"
+              >
+                Próximamente
+              </span>
+            </div>
+            <p class="text-sm text-amber-800 leading-relaxed">
+              Estamos trabajando en una opción para pausar tu plan en lugar de cancelarlo.
+              Mientras tanto, puedes mantener tu plan actual con acceso completo.
+            </p>
+          </div>
+        }
+
+        @if (selectedReason() === 'switched') {
+          <div
+            class="p-4 rounded-[var(--radius-lg)] border border-[var(--color-border)] bg-[var(--color-surface)] space-y-3"
+          >
+            <div class="flex items-center gap-2">
+              <app-icon
+                name="arrow-right-left"
+                [size]="22"
+                class="text-[var(--color-primary)]"
+              ></app-icon>
+              <h4 class="text-base font-bold text-[var(--color-text-primary)]">
+                ¿Qué herramienta vas a usar?
+              </h4>
+            </div>
+            <p class="text-sm text-[var(--color-text-secondary)] leading-relaxed">
+              Opcional. Nos ayuda a entender el mercado y mejorar.
+            </p>
+            <app-input
+              [control]="retentionFeedbackControl"
+              [formControl]="retentionFeedbackControl"
+              placeholder="Ej: Shopify, Bsale, otra..."
+              size="md"
+              autocomplete="off"
+            ></app-input>
+          </div>
+        }
+      </div>
+    }
+
+    <!-- ─────────────────────────── STEP 3 ─────────────────────────── -->
+    @if (step() === 3) {
+      <div class="space-y-4">
+        <!-- No-refund disclaimer (prominent) -->
+        <div
+          class="p-4 rounded-[var(--radius-lg)] border-2 border-red-200 bg-red-50 space-y-2"
+        >
+          <div class="flex items-start gap-3">
+            <div class="w-10 h-10 rounded-[var(--radius-md)] bg-red-100 flex items-center justify-center shrink-0">
+              <app-icon name="alert-triangle" [size]="20" class="text-red-600"></app-icon>
+            </div>
+            <div class="space-y-2">
+              <p class="text-sm font-bold text-red-900">
+                Política de cancelación
+              </p>
+              <p class="text-sm text-red-900 leading-relaxed">
+                <span class="font-bold">
+                  Al cancelar no se reembolsa el período actual.
+                </span>
+                @if (periodEndLabel()) {
+                  Tu acceso continúa hasta
+                  <span class="font-bold">{{ periodEndLabel() }}</span>.
+                  Después de esa fecha la tienda quedará suspendida.
+                } @else {
+                  Tu acceso continúa hasta el final del período pagado.
+                  Después de esa fecha la tienda quedará suspendida.
+                }
+                <span class="block mt-2 font-bold">
+                  Esta cancelación no genera reembolso de pagos previos.
+                </span>
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Toggle inmediato vs fin de ciclo -->
+        <div
+          class="flex items-start justify-between gap-3 p-3 rounded-[var(--radius-md)] bg-[var(--color-text-muted)]/10 border border-[var(--color-border)]"
+        >
+          <div class="space-y-0.5 flex-1 min-w-0">
+            <p class="text-sm font-semibold text-[var(--color-text-primary)]">
+              {{
+                cancelAtEndOfCycle()
+                  ? 'Cancelar al final del ciclo'
+                  : 'Cancelar ahora mismo'
+              }}
+            </p>
+            <p class="text-xs text-[var(--color-text-secondary)] leading-relaxed">
+              {{
+                cancelAtEndOfCycle()
+                  ? 'Mantendrás acceso hasta el cierre del periodo pagado. No se emitirán nuevos cobros.'
+                  : 'Perderás el acceso de inmediato.'
+              }}
+            </p>
+          </div>
+          <app-toggle
+            [checked]="cancelAtEndOfCycle()"
+            (toggled)="cancelAtEndOfCycle.set($event)"
+          ></app-toggle>
+        </div>
+
+        <!-- Extra warning si elige cancelar inmediato -->
+        @if (!cancelAtEndOfCycle()) {
+          <div
+            class="p-3 rounded-[var(--radius-md)] border border-red-300 bg-red-100 flex items-start gap-2"
+          >
+            <app-icon
+              name="zap-off"
+              [size]="18"
+              class="text-red-700 shrink-0 mt-0.5"
+            ></app-icon>
+            <p class="text-sm text-red-900 leading-relaxed">
+              Perderás el acceso de inmediato.
+              <span class="font-bold">
+                No hay reembolso por el tiempo restante del periodo.
+              </span>
+            </p>
+          </div>
+        }
+
+        <!-- Checkbox no-refund obligatorio -->
+        <button
+          type="button"
+          class="w-full flex items-start gap-3 p-3 rounded-[var(--radius-md)] border-2 text-left transition-all hover:bg-[var(--color-text-muted)]/10"
+          [class.border-[var(--color-primary)]]="acknowledgedNoRefund()"
+          [class.bg-[var(--color-primary)]/5]="acknowledgedNoRefund()"
+          [class.border-[var(--color-border)]]="!acknowledgedNoRefund()"
+          (click)="toggleAcknowledge()"
+        >
+          <div
+            class="w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 mt-0.5"
+            [class.border-[var(--color-primary)]]="acknowledgedNoRefund()"
+            [class.bg-[var(--color-primary)]]="acknowledgedNoRefund()"
+            [class.border-[var(--color-border)]]="!acknowledgedNoRefund()"
+          >
+            @if (acknowledgedNoRefund()) {
+              <app-icon name="check" [size]="14" class="text-white"></app-icon>
+            }
+          </div>
+          <span class="text-sm text-[var(--color-text-primary)] leading-relaxed">
+            Entiendo que esta cancelación
+            <span class="font-bold">no genera reembolso</span>
+            y que la política de pagos es final.
+          </span>
+        </button>
+
+        <!-- Type-to-confirm -->
+        <div class="space-y-2 pt-2 border-t border-[var(--color-border)]">
+          <p class="text-sm text-[var(--color-text-primary)]">
+            Para confirmar, escribe exactamente:
+            <span class="font-mono font-bold text-red-600 select-all">
+              {{ requiredCancelText }}
+            </span>
+          </p>
+          <app-input
+            [control]="cancelConfirmControl"
+            [formControl]="cancelConfirmControl"
+            placeholder="Escribe el texto de confirmación"
+            [required]="true"
+            autocomplete="off"
+            size="md"
+          ></app-input>
+          @if (
+            cancelConfirmText() &&
+            cancelConfirmText().trim() !== requiredCancelText
+          ) {
+            <p class="text-xs text-red-600 flex items-center gap-1.5">
+              <app-icon name="alert-circle" [size]="14"></app-icon>
+              El texto no coincide. Escríbelo exactamente como se muestra.
+            </p>
+          }
+        </div>
+      </div>
+    }
+  </div>
+
+  <!-- ─────────────────────────── FOOTER ─────────────────────────── -->
+  <div
+    slot="footer"
+    class="flex flex-col-reverse sm:flex-row gap-2 sm:gap-3 sm:justify-between w-full"
+  >
+    <!-- Left side: back button -->
+    <div>
+      @if (step() > 1) {
+        <app-button variant="ghost" (clicked)="goBack()" [disabled]="loading()">
+          <app-icon name="chevron-left" [size]="16" slot="icon"></app-icon>
+          Atrás
+        </app-button>
+      }
+    </div>
+
+    <!-- Right side: actions -->
+    <div class="flex flex-col sm:flex-row gap-2 sm:gap-3">
+      @if (step() === 1) {
+        <app-button variant="ghost" (clicked)="close()" [disabled]="loading()">
+          Mantener mi plan
+        </app-button>
+        <app-button
+          variant="primary"
+          [disabled]="!canAdvanceStep1()"
+          (clicked)="goToStep2()"
+        >
+          Continuar
+          <app-icon name="chevron-right" [size]="16" slot="icon"></app-icon>
+        </app-button>
+      }
+
+      @if (step() === 2) {
+        <app-button variant="ghost" (clicked)="keepPlan()" [disabled]="loading()">
+          Mantener mi plan
+        </app-button>
+        <app-button variant="outline-danger" (clicked)="goToStep3()">
+          Continuar con la cancelación
+          <app-icon name="chevron-right" [size]="16" slot="icon"></app-icon>
+        </app-button>
+      }
+
+      @if (step() === 3) {
+        <app-button variant="ghost" (clicked)="close()" [disabled]="loading()">
+          Mantener mi plan
+        </app-button>
+        <app-button
+          variant="danger"
+          [disabled]="!canConfirmCancel()"
+          [loading]="loading()"
+          (clicked)="confirm()"
+        >
+          <app-icon name="x-circle" [size]="16" slot="icon"></app-icon>
+          Cancelar suscripción
+        </app-button>
+      }
+    </div>
+  </div>
+</app-modal>

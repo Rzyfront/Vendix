@@ -1,0 +1,36 @@
+meta {
+  name: Superadmin Partner Margin Cap Validation
+  type: http
+  seq: 26
+}
+
+# Sends margin_pct above plan.max_partner_margin_pct expecting a 400 with a
+# Vendix error code (margin cap exceeded). Requires the same env vars as test 25.
+
+post {
+  url: {{url}}/superadmin/subscriptions/partners/overrides
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "organization_id": {{partner_organization_id}},
+    "base_plan_id": {{partner_base_plan_id}},
+    "margin_pct": 99,
+    "fixed_surcharge": 0,
+    "is_active": true
+  }
+}
+
+tests {
+  test("Margin cap exceeded rejected", function() {
+    expect(res.status).to.equal(400);
+    expect(res.body.success).to.be.false;
+  });
+
+  test("Error payload includes a code", function() {
+    expect(res.body).to.have.property("error");
+    expect(res.body.error).to.have.property("code");
+  });
+}

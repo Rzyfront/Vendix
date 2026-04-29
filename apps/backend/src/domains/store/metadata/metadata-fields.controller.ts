@@ -1,4 +1,15 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body, Query, ParseIntPipe, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Param,
+  Body,
+  Query,
+  ParseIntPipe,
+  UseGuards,
+} from '@nestjs/common';
 import { MetadataFieldsService } from './metadata-fields.service';
 import { CreateMetadataFieldDto } from './dto/create-metadata-field.dto';
 import { UpdateMetadataFieldDto } from './dto/update-metadata-field.dto';
@@ -20,7 +31,10 @@ export class MetadataFieldsController {
     @Query('entity_type') entityType?: string,
     @Query('include_inactive') includeInactive?: string,
   ) {
-    const result = await this.service.listFields(entityType, includeInactive === 'true');
+    const result = await this.service.listFields(
+      entityType,
+      includeInactive === 'true',
+    );
     return this.responseService.success(result);
   }
 
@@ -45,7 +59,10 @@ export class MetadataFieldsController {
     @Body() dto: UpdateMetadataFieldDto,
   ) {
     const result = await this.service.updateField(id, dto);
-    return this.responseService.success(result, 'Campo actualizado correctamente');
+    return this.responseService.success(
+      result,
+      'Campo actualizado correctamente',
+    );
   }
 
   @Patch(':id/toggle')
@@ -62,6 +79,9 @@ export class MetadataFieldsController {
   @Permissions('store:settings:write')
   async deleteField(@Param('id', ParseIntPipe) id: number) {
     const result = await this.service.deleteField(id);
-    return this.responseService.success(result, 'Campo eliminado correctamente');
+    return this.responseService.success(
+      result,
+      'Campo eliminado correctamente',
+    );
   }
 }

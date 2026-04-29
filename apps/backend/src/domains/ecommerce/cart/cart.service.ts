@@ -261,7 +261,9 @@ export class CartService {
           quantity: item.quantity,
         });
       } catch (error) {
-        this.logger.warn(`Skipping invalid cart item during sync: product_id=${item.product_id}, error=${error.message}`);
+        this.logger.warn(
+          `Skipping invalid cart item during sync: product_id=${item.product_id}, error=${error.message}`,
+        );
       }
     }
 

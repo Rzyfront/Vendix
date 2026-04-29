@@ -275,7 +275,9 @@ export class InventoryAdjustmentsService {
         });
       }
     } catch (error) {
-      this.logger.error(`Failed to emit inventory.adjusted for adjustment #${adjustment_result.adjustment.id}: ${error.message}`);
+      this.logger.error(
+        `Failed to emit inventory.adjusted for adjustment #${adjustment_result.adjustment.id}: ${error.message}`,
+      );
     }
 
     return adjustment_result.adjustment;
@@ -314,7 +316,15 @@ export class InventoryAdjustmentsService {
    */
   async batchCreateAdjustments(
     locationId: number,
-    items: { product_id: number; product_variant_id?: number; batch_id?: number; type: string; quantity_after: number; reason_code?: string; description?: string }[],
+    items: {
+      product_id: number;
+      product_variant_id?: number;
+      batch_id?: number;
+      type: string;
+      quantity_after: number;
+      reason_code?: string;
+      description?: string;
+    }[],
   ): Promise<InventoryAdjustment[]> {
     const results: InventoryAdjustment[] = [];
     for (const item of items) {
@@ -340,7 +350,15 @@ export class InventoryAdjustmentsService {
    */
   async batchCreateAndComplete(
     locationId: number,
-    items: { product_id: number; product_variant_id?: number; batch_id?: number; type: string; quantity_after: number; reason_code?: string; description?: string }[],
+    items: {
+      product_id: number;
+      product_variant_id?: number;
+      batch_id?: number;
+      type: string;
+      quantity_after: number;
+      reason_code?: string;
+      description?: string;
+    }[],
   ): Promise<InventoryAdjustment[]> {
     const results: InventoryAdjustment[] = [];
     const userIdRaw = RequestContextService.getUserId();
@@ -550,7 +568,10 @@ export class InventoryAdjustmentsService {
   /**
    * Libera TODAS las reservas activas de la organización
    */
-  async releaseAllReservations(): Promise<{ released_count: number; total_quantity: number }> {
+  async releaseAllReservations(): Promise<{
+    released_count: number;
+    total_quantity: number;
+  }> {
     return this.stockLevelManager.releaseAllActiveReservations();
   }
 

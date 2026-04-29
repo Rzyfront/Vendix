@@ -37,9 +37,7 @@ export class WalletController {
 
   @Get(':customerId')
   @Permissions('store:wallets:read')
-  async getBalance(
-    @Param('customerId', ParseIntPipe) customerId: number,
-  ) {
+  async getBalance(@Param('customerId', ParseIntPipe) customerId: number) {
     const result = await this.walletService.getBalance(customerId);
     return this.responseService.success(result);
   }
@@ -61,11 +59,7 @@ export class WalletController {
     @Body() dto: TopUpWalletDto,
     @Req() req: any,
   ) {
-    const result = await this.walletService.topUp(
-      customerId,
-      dto,
-      req.user.id,
-    );
+    const result = await this.walletService.topUp(customerId, dto, req.user.id);
     return this.responseService.success(result);
   }
 

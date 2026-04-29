@@ -18,6 +18,8 @@ import {
   CreatePromotionalDto,
   UpdatePromotionalDto,
   PayoutApprovalDto,
+  DunningPreviewResponse,
+  DunningPreviewTargetState,
 } from '../interfaces/subscription-admin.interface';
 
 export interface ApiResponse<T> {
@@ -422,6 +424,21 @@ export class SubscriptionAdminService {
       );
   }
 
+  /**
+   * Compute side-effects of forcing a state transition on a dunning
+   * subscription WITHOUT mutating it. Used by DunningPreviewModalComponent
+   * before the actual force-transition is fired.
+   */
+  previewDunningTransition(
+    subscriptionId: string,
+    target_state: DunningPreviewTargetState,
+  ): Observable<ApiResponse<DunningPreviewResponse>> {
+    return this.http.post<ApiResponse<DunningPreviewResponse>>(
+      `${this.apiUrl}/superadmin/subscriptions/dunning/${subscriptionId}/preview-transition`,
+      { target_state },
+    );
+  }
+
   // ─── Partner Payouts ───
 
   getPayouts(query?: { page?: number; limit?: number; status?: string }): Observable<PaginatedResponse<PartnerPayout>> {
@@ -466,4 +483,46 @@ export class SubscriptionAdminService {
   getStats(): Observable<ApiResponse<SubscriptionStats>> {
     return this.http.get<ApiResponse<SubscriptionStats>>(`${this.apiUrl}/superadmin/subscriptions/stats`);
   }
+
+  // ─── Metrics (MRR, Churn, ARPU, LTV) ───
+
+  getMetrics(
+    period:
+      | 'last_30'
+      | 'last_90'
+      | 'last_365'
+      | { start: string; end: string },
+    evolutionMonths = 12,
+  ): Observable<ApiResponse<SubscriptionMetricsResponse>> {
+    let params = new HttpParams().set(
+      'evolution_months',
+      String(evolutionMonths),
+    );
+    if (typeof period === 'string') {
+      params = params.set('period', period);
+    } else {
+      params = params
+        .set('period', 'custom')
+        .set('start', period.start)
+        .set('end', period.end);
+    }
+    return this.http.get<ApiResponse<SubscriptionMetricsResponse>>(
+      `${this.apiUrl}/superadmin/subscriptions/metrics`,
+      { params },
+    );
+  }
+}
+
+// ─── Metrics types ───
+export interface SubscriptionMetricsResponse {
+  period: { preset: string; start: string; end: string };
+  mrr: { value: string; monthly_avg: string; currency: string };
+  churn: { rate_pct: number; cancelled_count: number; active_at_start: number };
+  arpu: { value: string; currency: string; active_subs: number };
+  ltv: { value: string | null; currency: string };
+  active_breakdown: {
+    by_state: Record<string, number>;
+    by_plan: Array<{ plan_id: number; plan_name: string; count: number }>;
+  };
+  mrr_evolution: Array<{ month: string; mrr: string }>;
 }

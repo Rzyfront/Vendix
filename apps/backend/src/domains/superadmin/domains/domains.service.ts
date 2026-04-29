@@ -16,10 +16,11 @@ export class DomainsService {
   constructor(private readonly prisma: GlobalPrismaService) {}
 
   async create(createDomainSettingDto: CreateDomainSettingDto) {
-    const existingDomain = await (
-      this.prisma as any
-    ).domain_settings.findUnique({
-      where: { hostname: createDomainSettingDto.hostname },
+    const existingDomain = await this.prisma.domain_settings.findFirst({
+      where: {
+        hostname: createDomainSettingDto.hostname,
+        status: { notIn: ['disabled', 'failed_ownership', 'failed_certificate', 'failed_alias'] },
+      },
     });
 
     if (existingDomain) {

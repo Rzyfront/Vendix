@@ -22,7 +22,7 @@ describe('PartnersService', () => {
         delete: jest.fn(),
       },
     };
-    service = new PartnersService(prisma as any);
+    service = new PartnersService(prisma);
   });
 
   function orgFixture(overrides: Partial<any> = {}) {
@@ -48,9 +48,14 @@ describe('PartnersService', () => {
   describe('togglePartner', () => {
     it('updates is_partner flag on organization', async () => {
       prisma.organizations.findUnique.mockResolvedValue(orgFixture());
-      prisma.organizations.update.mockResolvedValue(orgFixture({ is_partner: true }));
+      prisma.organizations.update.mockResolvedValue(
+        orgFixture({ is_partner: true }),
+      );
 
-      await service.togglePartner({ organization_id: 10, is_partner: true } as any);
+      await service.togglePartner({
+        organization_id: 10,
+        is_partner: true,
+      } as any);
 
       const args = prisma.organizations.update.mock.calls[0][0];
       expect(args.where.id).toBe(10);
@@ -62,7 +67,10 @@ describe('PartnersService', () => {
       prisma.organizations.findUnique.mockResolvedValue(null);
       let err: any = null;
       try {
-        await service.togglePartner({ organization_id: 99, is_partner: true } as any);
+        await service.togglePartner({
+          organization_id: 99,
+          is_partner: true,
+        } as any);
       } catch (e) {
         err = e;
       }
@@ -154,7 +162,10 @@ describe('PartnersService', () => {
       prisma.partner_plan_overrides.findUnique.mockResolvedValue({ id: 1 });
       prisma.partner_plan_overrides.update.mockResolvedValue({ id: 1 });
 
-      await service.updateOverride(1, { margin_pct: 12, is_active: false } as any);
+      await service.updateOverride(1, {
+        margin_pct: 12,
+        is_active: false,
+      } as any);
 
       const args = prisma.partner_plan_overrides.update.mock.calls[0][0];
       expect(args.data.margin_pct).toBe(12);
@@ -169,7 +180,9 @@ describe('PartnersService', () => {
       prisma.partner_plan_overrides.delete.mockResolvedValue({ id: 1 });
 
       await service.removeOverride(1);
-      expect(prisma.partner_plan_overrides.delete).toHaveBeenCalledWith({ where: { id: 1 } });
+      expect(prisma.partner_plan_overrides.delete).toHaveBeenCalledWith({
+        where: { id: 1 },
+      });
     });
 
     it('throws SYS_NOT_FOUND_001 when override missing', async () => {

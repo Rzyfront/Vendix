@@ -43,7 +43,10 @@ export class GatewayController {
     const view = await this.gatewayService.getMaskedCredentials(
       processor as PlatformProcessor,
     );
-    return this.responseService.success(view, 'Gateway configuration retrieved');
+    return this.responseService.success(
+      view,
+      'Gateway configuration retrieved',
+    );
   }
 
   @Permissions('superadmin:subscriptions:gateway:write')

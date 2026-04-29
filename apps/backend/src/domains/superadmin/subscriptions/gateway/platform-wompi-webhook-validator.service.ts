@@ -1,5 +1,5 @@
 import { Injectable, Logger } from '@nestjs/common';
-import { WompiClient } from '../../../store/payments/processors/wompi/wompi.client';
+import { WompiClientFactory } from '../../../store/payments/processors/wompi/wompi.factory';
 import {
   WompiConfig,
   WompiEnvironment,
@@ -48,7 +48,9 @@ export interface PlatformWompiValidationResult {
  */
 @Injectable()
 export class PlatformWompiWebhookValidatorService {
-  private readonly logger = new Logger(PlatformWompiWebhookValidatorService.name);
+  private readonly logger = new Logger(
+    PlatformWompiWebhookValidatorService.name,
+  );
 
   // Match `vendix_saas_{subId}_{invoiceId}_{ts}`. The regex is anchored on
   // both sides so the eCommerce reference (`vendix_{storeId}_...`) doesn't
@@ -57,14 +59,16 @@ export class PlatformWompiWebhookValidatorService {
 
   constructor(
     private readonly platformGw: PlatformGatewayService,
-    private readonly wompiClient: WompiClient,
+    private readonly wompiClientFactory: WompiClientFactory,
   ) {}
 
   async validate(body: any): Promise<PlatformWompiValidationResult> {
     try {
       const reference: string | undefined = body?.data?.transaction?.reference;
       if (!reference || typeof reference !== 'string') {
-        this.logger.warn('Platform Wompi webhook missing transaction reference');
+        this.logger.warn(
+          'Platform Wompi webhook missing transaction reference',
+        );
         return { valid: false, reason: 'no_reference' };
       }
 
@@ -95,9 +99,13 @@ export class PlatformWompiWebhookValidatorService {
         return { valid: false, reason: 'no_platform_creds' };
       }
 
-      this.wompiClient.configure(this.toWompiConfig(creds));
+      const wompiConfig = this.toWompiConfig(creds);
+      const client = this.wompiClientFactory.getClient(
+        'platform-webhook',
+        wompiConfig,
+      );
 
-      const isValid = this.wompiClient.validateWebhookSignature(
+      const isValid = client.validateWebhookSignature(
         body as WompiWebhookEvent,
       );
 

@@ -1,8 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
-import {
-  AnalyticsQueryDto,
-} from '../dto/analytics-query.dto';
+import { AnalyticsQueryDto } from '../dto/analytics-query.dto';
 import { parseDateRange } from '../utils/date.util';
 
 @Injectable()
@@ -280,7 +278,9 @@ export class FinancialAnalyticsService {
     const revenue = Number(orderAggregates._sum.subtotal_amount || 0);
     const discounts = Number(orderAggregates._sum.discount_amount || 0);
     const netRevenue = revenue - discounts;
-    const totalCOGS = Number(cogsResult._sum.cost_price || 0) * Number(cogsResult._sum.quantity || 0);
+    const totalCOGS =
+      Number(cogsResult._sum.cost_price || 0) *
+      Number(cogsResult._sum.quantity || 0);
     const grossProfit = netRevenue - totalCOGS;
     const grossMargin = netRevenue > 0 ? (grossProfit / netRevenue) * 100 : 0;
     const taxCollected = Number(orderAggregates._sum.tax_amount || 0);
@@ -290,7 +290,8 @@ export class FinancialAnalyticsService {
     const refundTax = Number(refundAggregates._sum.tax_refund || 0);
     const refundShipping = Number(refundAggregates._sum.shipping_refund || 0);
     const operatingExpenses = Number(expenseAggregates._sum.amount || 0);
-    const netProfit = grossProfit + shippingRevenue - refundSubtotal - operatingExpenses;
+    const netProfit =
+      grossProfit + shippingRevenue - refundSubtotal - operatingExpenses;
     const netMargin = netRevenue > 0 ? (netProfit / netRevenue) * 100 : 0;
 
     return {
@@ -333,7 +334,7 @@ export class FinancialAnalyticsService {
       'Tasa (%)': b.tax_rate,
       'Base Gravable': b.taxable_amount,
       'Impuesto Cobrado': b.total_tax,
-      'Compuesto': b.is_compound ? 'Sí' : 'No',
+      Compuesto: b.is_compound ? 'Sí' : 'No',
     }));
     // Add a summary row at the end
     rows.push({
@@ -341,7 +342,7 @@ export class FinancialAnalyticsService {
       'Tasa (%)': '',
       'Base Gravable': result.total_taxable_revenue,
       'Impuesto Cobrado': result.total_tax_collected,
-      'Compuesto': '',
+      Compuesto: '',
     });
     return rows;
   }
@@ -375,23 +376,32 @@ export class FinancialAnalyticsService {
     return sessions.map((s) => {
       const salesMovements = s.movements.filter((m) => m.type === 'sale');
       const expenseMovements = s.movements.filter((m) => m.type === 'expense');
-      const totalSales = salesMovements.reduce((sum, m) => sum + Number(m.amount || 0), 0);
-      const totalExpenses = expenseMovements.reduce((sum, m) => sum + Number(m.amount || 0), 0);
+      const totalSales = salesMovements.reduce(
+        (sum, m) => sum + Number(m.amount || 0),
+        0,
+      );
+      const totalExpenses = expenseMovements.reduce(
+        (sum, m) => sum + Number(m.amount || 0),
+        0,
+      );
 
       return {
         'Fecha Apertura': s.opened_at.toISOString().split('T')[0],
-        'Caja': (s.register as any)?.name || '',
-        'Cajero Apertura': s.opened_by_user ? `${s.opened_by_user.first_name} ${s.opened_by_user.last_name}` : '',
-        'Cajero Cierre': s.closed_by_user ? `${s.closed_by_user.first_name} ${s.closed_by_user.last_name}` : '',
+        Caja: s.register?.name || '',
+        'Cajero Apertura': s.opened_by_user
+          ? `${s.opened_by_user.first_name} ${s.opened_by_user.last_name}`
+          : '',
+        'Cajero Cierre': s.closed_by_user
+          ? `${s.closed_by_user.first_name} ${s.closed_by_user.last_name}`
+          : '',
         'Monto Apertura': Number(s.opening_amount || 0),
         'Total Ventas': totalSales,
         'Total Gastos': totalExpenses,
         'Cierre Esperado': Number(s.expected_closing_amount || 0),
         'Cierre Real': Number(s.actual_closing_amount || 0),
-        'Diferencia': Number(s.difference || 0),
-        'Estado': s.status,
+        Diferencia: Number(s.difference || 0),
+        Estado: s.status,
       };
     });
   }
-
 }

@@ -1,7 +1,7 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { ResponseService } from '@common/responses/response.service';
-import { WompiClient } from '../payments/processors/wompi/wompi.client';
+import { WompiClientFactory } from '../payments/processors/wompi/wompi.factory';
 import { WompiEnvironment } from '../payments/processors/wompi/wompi.types';
 import { PaymentEncryptionService } from '../payments/services/payment-encryption.service';
 import { CreatePaymentLinkDto } from './dto/create-payment-link.dto';
@@ -14,7 +14,7 @@ export class PaymentLinksService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly response: ResponseService,
-    private readonly wompiClient: WompiClient,
+    private readonly wompiClientFactory: WompiClientFactory,
     private readonly paymentEncryption: PaymentEncryptionService,
   ) {}
 
@@ -26,26 +26,30 @@ export class PaymentLinksService {
 
     const wompiMethod = methods[0];
     if (!wompiMethod?.custom_config) {
-      throw new BadRequestException('Wompi no está configurado para esta tienda. Configúralo en Ajustes > Pagos.');
+      throw new BadRequestException(
+        'Wompi no está configurado para esta tienda. Configúralo en Ajustes > Pagos.',
+      );
     }
 
     const config = wompiMethod.custom_config as Record<string, any>;
     return this.paymentEncryption.decryptConfig(config, 'wompi');
   }
 
-  private configureClient(config: Record<string, any>): void {
-    this.wompiClient.configure({
+  private resolveClient(config: Record<string, any>) {
+    const wompiConfig = {
       public_key: config.public_key,
       private_key: config.private_key,
       events_secret: config.events_secret || '',
       integrity_secret: config.integrity_secret || '',
-      environment: (config.environment as WompiEnvironment) || WompiEnvironment.SANDBOX,
-    });
+      environment:
+        (config.environment as WompiEnvironment) || WompiEnvironment.SANDBOX,
+    };
+    return this.wompiClientFactory.getClient('payment-links', wompiConfig);
   }
 
   async create(dto: CreatePaymentLinkDto) {
     const config = await this.getWompiConfig();
-    this.configureClient(config);
+    const client = this.resolveClient(config);
 
     const wompiData: any = {
       name: dto.name,
@@ -54,17 +58,20 @@ export class PaymentLinksService {
       collect_shipping: dto.collect_shipping,
     };
 
-    if (dto.amount_in_cents != null) wompiData.amount_in_cents = dto.amount_in_cents;
+    if (dto.amount_in_cents != null)
+      wompiData.amount_in_cents = dto.amount_in_cents;
     if (dto.currency) wompiData.currency = dto.currency;
     if (dto.expires_at) wompiData.expires_at = dto.expires_at;
     if (dto.redirect_url) wompiData.redirect_url = dto.redirect_url;
     if (dto.image_url) wompiData.image_url = dto.image_url;
     if (dto.sku) wompiData.sku = dto.sku;
     if (dto.customer_references?.length) {
-      wompiData.customer_data = { customer_references: dto.customer_references };
+      wompiData.customer_data = {
+        customer_references: dto.customer_references,
+      };
     }
 
-    const response = await this.wompiClient.createPaymentLink(wompiData);
+    const response = await client.createPaymentLink(wompiData);
     const linkData = response.data;
 
     const paymentLink = await this.prisma.payment_links.create({
@@ -87,7 +94,10 @@ export class PaymentLinksService {
       },
     });
 
-    return this.response.success(paymentLink, 'Link de pago creado exitosamente');
+    return this.response.success(
+      paymentLink,
+      'Link de pago creado exitosamente',
+    );
   }
 
   async findAll(query: PaymentLinkQueryDto) {
@@ -110,7 +120,9 @@ export class PaymentLinksService {
     const [data, total] = await Promise.all([
       this.prisma.payment_links.findMany({
         where,
-        orderBy: { [query.sort_by || 'created_at']: query.sort_order || 'desc' },
+        orderBy: {
+          [query.sort_by || 'created_at']: query.sort_order || 'desc',
+        },
         skip,
         take: limit,
         include: { orders: { select: { id: true, order_number: true } } },
@@ -127,7 +139,9 @@ export class PaymentLinksService {
   async findOne(id: number) {
     const link = await this.prisma.payment_links.findUnique({
       where: { id },
-      include: { orders: { select: { id: true, order_number: true, grand_total: true } } },
+      include: {
+        orders: { select: { id: true, order_number: true, grand_total: true } },
+      },
     });
 
     if (!link) throw new BadRequestException('Link de pago no encontrado');
@@ -148,7 +162,8 @@ export class PaymentLinksService {
   async deactivate(id: number) {
     const link = await this.prisma.payment_links.findUnique({ where: { id } });
     if (!link) throw new BadRequestException('Link de pago no encontrado');
-    if (link.status !== 'active') throw new BadRequestException('Solo se pueden desactivar links activos');
+    if (link.status !== 'active')
+      throw new BadRequestException('Solo se pueden desactivar links activos');
 
     const updated = await this.prisma.payment_links.update({
       where: { id },
@@ -158,13 +173,20 @@ export class PaymentLinksService {
     return this.response.success(updated, 'Link de pago desactivado');
   }
 
-  async handlePaymentCompleted(wompiLinkId: string, transactionData: any): Promise<void> {
-    const link = await (this.prisma.withoutScope() as any).payment_links.findFirst({
+  async handlePaymentCompleted(
+    wompiLinkId: string,
+    transactionData: any,
+  ): Promise<void> {
+    const link = await (
+      this.prisma.withoutScope() as any
+    ).payment_links.findFirst({
       where: { wompi_link_id: wompiLinkId },
     });
 
     if (!link) {
-      this.logger.warn(`Payment link not found for Wompi link ID: ${wompiLinkId}`);
+      this.logger.warn(
+        `Payment link not found for Wompi link ID: ${wompiLinkId}`,
+      );
       return;
     }
 

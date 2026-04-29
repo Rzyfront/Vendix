@@ -9,7 +9,13 @@ import { S3Module } from '@common/services/s3.module';
 import { SettingsModule } from '../../settings/settings.module';
 
 @Module({
-  imports: [ResponseModule, PrismaModule, InventoryModule, S3Module, SettingsModule],
+  imports: [
+    ResponseModule,
+    PrismaModule,
+    InventoryModule,
+    S3Module,
+    SettingsModule,
+  ],
   controllers: [PurchaseOrdersController],
   providers: [PurchaseOrdersService, InvoiceScannerService],
   exports: [PurchaseOrdersService],

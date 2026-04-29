@@ -118,6 +118,135 @@ correct CTA. No route guards — paywall is feature-level.
 
 ---
 
+## Business Rules (Canonical, spec 2026-04-29)
+
+> **READ THIS FIRST.** These business rules govern every gate decision. They override any
+> earlier assumption in the canonical `stateToMode()` mapping below. Tactical rules
+> (1-12) implement these decisions.
+
+### G1: State machine consolidada (post-cleanup)
+
+Estados activos del enum `store_subscription_state_enum`:
+
+| State | Significado | Writes | Reads | Recovery path |
+|-------|-------------|--------|-------|---------------|
+| `draft` | Pre-checkout. Suscripción creada antes del primer pago. Auto-void en 24h si no se completa. | block | block | Completar checkout → `pending_payment` o `active` |
+| `pending_payment` | Invoice issued esperando confirmación Wompi. | block | block | Webhook payment.succeeded → `active` |
+| `trial` | Trial activo. Plan default auto-aplicado a primera store de la org. | allow | allow | Auto-charge al expirar (si PM válido) o → `expired` |
+| `active` | Operación normal. | allow | allow | — |
+| `grace_soft` | Pago renovación falló, ventana 1 (`plan.grace_period_soft_days`). | allow + warning | allow | Pago exitoso → `active` |
+| `grace_hard` | Ventana 2 (`plan.grace_period_hard_days`). Por feature: warn o block. | warn/block per feature | allow | Pago exitoso → `active` |
+| `suspended` | Lock automático por dunning. Recuperable con pago atrasado. | block | allow | Pago exitoso → `active` (con descuento de días en gracia) |
+| `blocked` | Lock manual super-admin (fraud/abuso/compliance). Requiere unblock manual. `lock_reason` populado. | block | block | Solo super-admin |
+| `cancelled` | Cliente abandonó (scheduled end-of-period o admin cancel). | block | **allow** (read-only indefinido) | Re-suscripción = limpia, sin deuda |
+| `expired` | Fin natural de período. Cliente puede re-adquirir plan disponible. | block | allow | Elegir plan + pagar → `active` |
+| `no_plan` | **Scope estrecho**: solo stores adicionales de orgs sin trial disponible. UI soft picker. | block | allow | Elegir plan + pagar → `active` |
+
+**Eliminado del invoice enum**: `partially_paid` (incompatible con política all-or-nothing).
+
+### G2: `cancelled` permite reads (read-only indefinido)
+
+Implicación: el `stateToMode()` para `cancelled` debe diferenciar HTTP method. La policy
+canónica de `StoreOperationsGuard` ya skip GET/HEAD/OPTIONS, pero hay que asegurar que
+`canUseModule()` para módulos de UI (read-only views) retorne `allow` en `cancelled`,
+NO `block`.
+
+### G3: `lock_reason` audit en suspended/blocked
+
+Añadir columna `store_subscriptions.lock_reason` (nullable string). Valores típicos:
+- `'dunning'` (default cuando suspended automático)
+- `'admin_manual'` (super-admin lock)
+- `'fraud'` (chargebacks anti-fraud)
+- `'compliance'` (compliance lock)
+- `'chargeback'` (suspended por chargeback inmediato)
+
+Mostrar al cliente en mensaje del paywall para contextualizar el bloqueo.
+
+### G4: Trial es por organización; primera store de org auto-trial
+
+- `organization_trial_consumptions UNIQUE(organization_id)` enforce single trial per org.
+- Plan trial = `subscription_plans.is_default=true` (UNIQUE partial index). Configurable
+  super-admin.
+- Stores adicionales de org que ya consumió trial → estado `no_plan`.
+- **Sin extensiones de trial**. Si cliente necesita más tiempo → super-admin asigna
+  promo plan manualmente.
+
+### G5: Promo plans (gratuitos ocasionales) sin partner override
+
+- `subscription_plans.plan_type='promotional'`. Aplicación dual: redemption_code o
+  visible-en-picker (`show_in_picker`).
+- **Bloqueado**: NO se permite `partner_plan_overrides` sobre planes promocionales.
+  Validar al crear el override O al cambiar plan_type.
+- **Sin commission**: el resolver no acrúa partner commission para suscripciones
+  con plan promocional.
+- Expiración del promo → estado `expired` (no `no_plan`). Cliente re-elige plan.
+
+### G6: Partner = organización con `is_partner=true`
+
+- El partner ES la org. No es entidad separada que "asigna" planes a orgs distintas.
+- Si org tiene `is_partner=true`, sus stores reciben `partner_plan_overrides`
+  configurados por super-admin para esa org.
+- **No hay cambio de partner mid-subscription**. La org no cambia.
+
+### G7: Reactivación de grace/suspended descuenta días en gracia
+
+- Al pagar la deuda atrasada, transición a `active` PERO el nuevo período se acorta:
+  `new_period_end = paid_at + plan_duration - days_in_grace`.
+- Previene abuso. Esto se calcula en `SubscriptionBillingService.computePeriod()` o
+  `SubscriptionPaymentService.handleChargeSuccess()` antes de actualizar `period_end`.
+
+### G8: Reactivación desde cancelled/no_plan/expired = limpia, sin deuda
+
+- Cobro siempre por anticipado → no debería existir deuda histórica al llegar a estos
+  estados por flujo natural.
+- Cliente reactiva eligiendo plan + pagando ciclo nuevo. **No bloquear** por invoices
+  viejos.
+- Excepción: estado `blocked` (manual admin lock) NO se reactiva automáticamente. Solo
+  super-admin puede desbloquear.
+
+### G9: Card failover entre tarjetas guardadas del cliente
+
+- Si la default falla, antes de avanzar dunning, sistema prueba todas las
+  `subscription_payment_methods.state='active'` del cliente en orden de creación.
+- La que succeed se promueve a `is_default=true` automáticamente.
+- Solo si todas fallan → entonces sí avanza estado dunning (grace_soft, etc.).
+
+### G10: Chargebacks → suspend + reverse + clawback + 2-strike anti-fraud
+
+- Webhook chargeback → `state='suspended'`, `lock_reason='chargeback'`,
+  `partner_commissions.state='reversed'`, super-admin notif.
+- Si commission `paid` previo → clawback negativo en próximo `partner_payout_batch`.
+- 2do chargeback en una org → `organizations.fraud_blocked=true`. Cliente NO puede
+  crear stores ni suscribirse. Super-admin valida y desbloquea si aplica.
+
+### G11: Notificaciones lean
+
+- **Cliente recibe email solo en**: payment.failed, grace_hard entrada, suspended,
+  chargeback, PM próximo a expirar, T-3 antes de expirar trial.
+- **Path feliz silencioso**.
+- **Super-admin recibe email solo en**: chargebacks, manual payments registrados,
+  intentos de fraude (2do chargeback), promo plans aplicados.
+
+### G12: Cancelación scheduled, reversible libremente
+
+- Cancel UI default = scheduled end-of-period. `scheduled_cancel_at = period_end`.
+- Cliente revierte libremente desde UI antes de `period_end`. Sin límite, sin penalty.
+- Al `period_end` con `scheduled_cancel_at` no nulo → `state='cancelled'`.
+
+### G13: Single gateway Wompi + COP only + sin IVA
+
+- Subscription billing usa Wompi hardcoded. La abstracción multi-gateway de
+  `vendix-payment-processors` aplica solo a pagos de stores ecommerce.
+- Solo COP. Sin currency field en plan.
+- Régimen simple. `effective_price` es monto final sin IVA discriminado.
+
+### G14: Doble asiento contable al confirmar pago
+
+- Listener post-payment success genera asientos en (a) Vendix-platform y (b)
+  store-cliente (gasto admin SaaS). Mapping_key: `saas_subscription_expense`.
+
+---
+
 ## Rules
 
 ### Rule 1: `SubscriptionAccessService` is consumed inline AND via guard

@@ -19,11 +19,19 @@ export interface QuotationEmailData {
 }
 
 function formatCurrency(amount: number): string {
-  return '$' + amount.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  return (
+    '$' +
+    amount.toLocaleString('en-US', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    })
+  );
 }
 
 export function generateQuotationEmailHtml(data: QuotationEmailData): string {
-  const itemsHtml = data.items.map(item => `
+  const itemsHtml = data.items
+    .map(
+      (item) => `
     <tr>
       <td style="padding: 12px 16px; border-bottom: 1px solid #e5e7eb; font-size: 14px; color: #374151;">
         ${item.product_name}
@@ -33,7 +41,9 @@ export function generateQuotationEmailHtml(data: QuotationEmailData): string {
       <td style="padding: 12px 16px; border-bottom: 1px solid #e5e7eb; font-size: 14px; color: #374151; text-align: right; font-family: monospace;">${formatCurrency(item.unit_price)}</td>
       <td style="padding: 12px 16px; border-bottom: 1px solid #e5e7eb; font-size: 14px; color: #374151; text-align: right; font-weight: 600; font-family: monospace;">${formatCurrency(item.total_price)}</td>
     </tr>
-  `).join('');
+  `,
+    )
+    .join('');
 
   return `
 <!DOCTYPE html>
@@ -105,11 +115,15 @@ export function generateQuotationEmailHtml(data: QuotationEmailData): string {
                         <td style="padding: 6px 0; font-size: 14px; color: #6b7280;">Subtotal</td>
                         <td style="padding: 6px 0; font-size: 14px; color: #374151; text-align: right; font-family: monospace;">${formatCurrency(data.subtotal)}</td>
                       </tr>
-                      ${data.discount > 0 ? `
+                      ${
+                        data.discount > 0
+                          ? `
                       <tr>
                         <td style="padding: 6px 0; font-size: 14px; color: #6b7280;">Descuento</td>
                         <td style="padding: 6px 0; font-size: 14px; color: #16a34a; text-align: right; font-family: monospace;">-${formatCurrency(data.discount)}</td>
-                      </tr>` : ''}
+                      </tr>`
+                          : ''
+                      }
                       <tr>
                         <td style="padding: 6px 0; font-size: 14px; color: #6b7280;">Impuestos</td>
                         <td style="padding: 6px 0; font-size: 14px; color: #374151; text-align: right; font-family: monospace;">${formatCurrency(data.tax)}</td>
@@ -128,7 +142,9 @@ export function generateQuotationEmailHtml(data: QuotationEmailData): string {
             </td>
           </tr>
 
-          ${data.notes ? `
+          ${
+            data.notes
+              ? `
           <!-- Notes -->
           <tr>
             <td style="padding: 0 40px 24px;">
@@ -137,9 +153,13 @@ export function generateQuotationEmailHtml(data: QuotationEmailData): string {
                 <p style="margin: 0; font-size: 14px; color: #374151; white-space: pre-wrap;">${data.notes}</p>
               </div>
             </td>
-          </tr>` : ''}
+          </tr>`
+              : ''
+          }
 
-          ${data.terms_and_conditions ? `
+          ${
+            data.terms_and_conditions
+              ? `
           <!-- Terms -->
           <tr>
             <td style="padding: 0 40px 24px;">
@@ -148,7 +168,9 @@ export function generateQuotationEmailHtml(data: QuotationEmailData): string {
                 <p style="margin: 0; font-size: 14px; color: #374151; white-space: pre-wrap;">${data.terms_and_conditions}</p>
               </div>
             </td>
-          </tr>` : ''}
+          </tr>`
+              : ''
+          }
 
           <!-- Footer -->
           <tr>

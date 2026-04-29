@@ -81,7 +81,7 @@ async function bootstrap() {
   // Allow any subdomain for multi-tenant (HTTP and HTTPS)
   // Modified to be more permissive with protocol and subdomains
   const subdomainRegex = new RegExp(
-    `^https?://([a-zA-Z0-9-]+\\.)?${baseDomain.replace('.', '\\.')}$`,
+    `^https?://([a-zA-Z0-9-]+\\.)?${baseDomain.replace(/\./g, '\\.')}$`,
   );
 
   // Allow any CloudFront distribution
@@ -154,7 +154,9 @@ async function bootstrap() {
       res.setHeader('Cache-Control', 'public, max-age=3600');
       res.status(200).send(xml);
     } catch (error) {
-      res.status(500).send('<?xml version="1.0"?><error>Internal Server Error</error>');
+      res
+        .status(500)
+        .send('<?xml version="1.0"?><error>Internal Server Error</error>');
     }
   });
 
@@ -172,7 +174,9 @@ async function bootstrap() {
 
   httpAdapter.get('/google002d194fa98388f5.html', (_req, res) => {
     res.setHeader('Content-Type', 'text/html');
-    res.status(200).send('google-site-verification: google002d194fa98388f5.html');
+    res
+      .status(200)
+      .send('google-site-verification: google002d194fa98388f5.html');
   });
 
   // API prefix

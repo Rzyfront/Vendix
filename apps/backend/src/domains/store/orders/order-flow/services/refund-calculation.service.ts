@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { StorePrismaService } from 'src/prisma/services/store-prisma.service';
 
 export interface RefundItemRequest {
@@ -48,7 +52,9 @@ export interface CalculateRefundParams {
 export class RefundCalculationService {
   constructor(private readonly prisma: StorePrismaService) {}
 
-  async calculate(params: CalculateRefundParams): Promise<RefundCalculationResult> {
+  async calculate(
+    params: CalculateRefundParams,
+  ): Promise<RefundCalculationResult> {
     const { order_id, items, include_shipping } = params;
 
     // Load order with items, taxes, and previous refunds
@@ -101,12 +107,15 @@ export class RefundCalculationService {
     const max_refundable = grand_total - already_refunded;
     const subtotal_amount = Number(order.subtotal_amount) || 0;
     const discount_amount = Number(order.discount_amount) || 0;
-    const discount_ratio = subtotal_amount > 0 ? discount_amount / subtotal_amount : 0;
+    const discount_ratio =
+      subtotal_amount > 0 ? discount_amount / subtotal_amount : 0;
 
     const calculatedItems: RefundItemCalculation[] = [];
 
     for (const reqItem of items) {
-      const orderItem = order.order_items.find((oi) => oi.id === reqItem.order_item_id);
+      const orderItem = order.order_items.find(
+        (oi) => oi.id === reqItem.order_item_id,
+      );
       if (!orderItem) {
         throw new BadRequestException(
           `Order item #${reqItem.order_item_id} does not belong to order #${order_id}`,
@@ -119,7 +128,7 @@ export class RefundCalculationService {
       if (reqItem.quantity > maxRefundableQty) {
         throw new BadRequestException(
           `Cannot refund ${reqItem.quantity} units of "${orderItem.product_name}". ` +
-          `Max refundable: ${maxRefundableQty} (original: ${orderItem.quantity}, already refunded: ${alreadyRefundedQty})`,
+            `Max refundable: ${maxRefundableQty} (original: ${orderItem.quantity}, already refunded: ${alreadyRefundedQty})`,
         );
       }
 
@@ -153,7 +162,8 @@ export class RefundCalculationService {
         product_name: orderItem.product_name,
         variant_sku: orderItem.variant_sku || undefined,
         variant_attributes: orderItem.variant_attributes || undefined,
-        image_url: orderItem.products?.product_images?.[0]?.image_url || undefined,
+        image_url:
+          orderItem.products?.product_images?.[0]?.image_url || undefined,
         quantity: reqItem.quantity,
         unit_price,
         gross_amount,
@@ -167,8 +177,14 @@ export class RefundCalculationService {
       });
     }
 
-    const subtotal_refund = calculatedItems.reduce((sum, i) => sum + i.net_amount, 0);
-    const tax_refund = calculatedItems.reduce((sum, i) => sum + i.tax_amount, 0);
+    const subtotal_refund = calculatedItems.reduce(
+      (sum, i) => sum + i.net_amount,
+      0,
+    );
+    const tax_refund = calculatedItems.reduce(
+      (sum, i) => sum + i.tax_amount,
+      0,
+    );
 
     // Proportional shipping refund
     let shipping_refund = 0;
@@ -186,10 +202,16 @@ export class RefundCalculationService {
     }
 
     // Check if this is a full refund (all items, all quantities)
-    const totalOrderQty = order.order_items.reduce((sum, oi) => sum + oi.quantity, 0);
-    const totalRefundedQty = Array.from(refundedQtyMap.values()).reduce((sum, q) => sum + q, 0);
+    const totalOrderQty = order.order_items.reduce(
+      (sum, oi) => sum + oi.quantity,
+      0,
+    );
+    const totalRefundedQty = Array.from(refundedQtyMap.values()).reduce(
+      (sum, q) => sum + q,
+      0,
+    );
     const thisRefundQty = items.reduce((sum, i) => sum + i.quantity, 0);
-    const is_full_refund = (totalRefundedQty + thisRefundQty) >= totalOrderQty;
+    const is_full_refund = totalRefundedQty + thisRefundQty >= totalOrderQty;
 
     return {
       items: calculatedItems,

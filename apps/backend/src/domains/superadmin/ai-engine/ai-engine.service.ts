@@ -131,8 +131,7 @@ export class AIEngineConfigService {
     // Check for duplicate provider+model_id
     if (
       (dto.provider || dto.model_id) &&
-      (dto.provider !== existing.provider ||
-        dto.model_id !== existing.model_id)
+      (dto.provider !== existing.provider || dto.model_id !== existing.model_id)
     ) {
       const conflict = await this.prisma.ai_engine_configs.findUnique({
         where: {

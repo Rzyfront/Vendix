@@ -43,10 +43,7 @@ export class DomainGeneratorHelper {
    * @param context - The domain context (org, store, shop)
    * @returns The generated hostname
    */
-  generate(
-    slug: string,
-    context: DomainContext,
-  ): string {
+  generate(slug: string, context: DomainContext): string {
     const cleanedSlug = this.cleanSlug(slug);
     const suffix = this.getSuffixForContext(context);
     const baseDomain = DomainConfigService.getBaseDomain();
@@ -169,7 +166,7 @@ export class DomainGeneratorHelper {
     }
 
     // Extract the subdomain part
-    const subdomain = hostname.slice(0, -(`.${baseDomain}`.length));
+    const subdomain = hostname.slice(0, -`.${baseDomain}`.length);
 
     // Extract the suffix (last part after last hyphen)
     const parts = subdomain.split('-');
@@ -177,9 +174,9 @@ export class DomainGeneratorHelper {
 
     // Map suffix to context
     const suffixToContext: Record<string, DomainContext> = {
-      'org': DomainContext.ORGANIZATION,
-      'store': DomainContext.STORE,
-      'shop': DomainContext.ECOMMERCE,
+      org: DomainContext.ORGANIZATION,
+      store: DomainContext.STORE,
+      shop: DomainContext.ECOMMERCE,
     };
 
     return suffixToContext[suffix] || null;
@@ -213,7 +210,7 @@ export class DomainGeneratorHelper {
     }
 
     const baseDomain = DomainConfigService.getBaseDomain();
-    const subdomain = hostname.slice(0, -(`.${baseDomain}`.length));
+    const subdomain = hostname.slice(0, -`.${baseDomain}`.length);
     const suffix = this.getSuffixForContext(context);
     const slug = subdomain.slice(0, -(suffix.length + 1)); // Remove suffix and hyphen
 

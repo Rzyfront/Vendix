@@ -6,6 +6,7 @@ import { Queue } from 'bullmq';
 import { GlobalPrismaService } from '../prisma/services/global-prisma.service';
 import { SubscriptionBillingService } from '../domains/store/subscriptions/services/subscription-billing.service';
 import { SubscriptionPaymentService } from '../domains/store/subscriptions/services/subscription-payment.service';
+import { SubscriptionGateConfig } from '../domains/store/subscriptions/config/subscription-gate.config';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 
 // Retry schedule for failed SaaS subscription charges. Hours: 1h, 4h, 24h, 72h.
@@ -31,6 +32,7 @@ export class SubscriptionRenewalBillingJob {
     private readonly paymentService: SubscriptionPaymentService,
     private readonly eventEmitter: EventEmitter2,
     private readonly config: ConfigService,
+    private readonly gateConfig: SubscriptionGateConfig,
     @InjectQueue('subscription-payment-retry')
     private readonly retryQueue: Queue,
   ) {}
@@ -38,7 +40,9 @@ export class SubscriptionRenewalBillingJob {
   @Cron('0 2 * * *')
   async handleRenewalBilling(): Promise<void> {
     if (this.isRunning) {
-      this.logger.warn('Subscription renewal billing already running, skipping');
+      this.logger.warn(
+        'Subscription renewal billing already running, skipping',
+      );
       return;
     }
 
@@ -52,7 +56,7 @@ export class SubscriptionRenewalBillingJob {
           next_billing_at: { lte: tomorrow },
           state: { in: ['active', 'grace_soft', 'grace_hard'] },
         },
-        select: { id: true, store_id: true },
+        select: { id: true, store_id: true, scheduled_cancel_at: true },
         take: 20,
       });
 
@@ -69,6 +73,65 @@ export class SubscriptionRenewalBillingJob {
 
       for (const sub of subscriptions) {
         try {
+          if (this.gateConfig.isCronDryRun()) {
+            this.logger.log({
+              msg: 'DRY_RUN_SKIP',
+              job: 'subscription-renewal-billing',
+              wouldProcess: {
+                subscriptionId: sub.id,
+                hasScheduledCancel: !!sub.scheduled_cancel_at,
+              },
+            });
+            continue;
+          }
+
+          // Scheduled cancellation check — if the user requested cancellation
+          // at end of cycle and the period has ended, transition to cancelled
+          // and do NOT emit an invoice.
+          if (
+            sub.scheduled_cancel_at &&
+            new Date(sub.scheduled_cancel_at) <= new Date()
+          ) {
+            this.logger.log(
+              `Subscription ${sub.id}: scheduled cancellation reached, transitioning to cancelled`,
+            );
+
+            await this.prisma.store_subscriptions.update({
+              where: { id: sub.id },
+              data: {
+                state: 'cancelled',
+                cancelled_at: new Date(),
+                scheduled_cancel_at: null,
+                auto_renew: false,
+                updated_at: new Date(),
+              },
+            });
+
+            await this.prisma.subscription_events.create({
+              data: {
+                store_subscription_id: sub.id,
+                type: 'state_transition',
+                from_state: 'active',
+                to_state: 'cancelled',
+                payload: {
+                  reason: 'scheduled_cancel_executed',
+                  scheduled_cancel_at: sub.scheduled_cancel_at.toISOString(),
+                } as any,
+                triggered_by_job: 'subscription-renewal-billing',
+              },
+            });
+
+            this.eventEmitter.emit('subscription.state.changed', {
+              storeId: sub.store_id,
+              fromState: 'active',
+              toState: 'cancelled',
+              reason: 'scheduled_cancel_executed',
+              triggeredByJob: 'subscription-renewal-billing',
+            });
+
+            continue;
+          }
+
           const invoice = await this.billingService.issueInvoice(sub.id);
 
           if (!invoice) {
@@ -91,7 +154,9 @@ export class SubscriptionRenewalBillingJob {
             total: invoice.total.toString(),
           });
 
-          this.logger.log(`Issued invoice ${invoice.id} for subscription ${sub.id}`);
+          this.logger.log(
+            `Issued invoice ${invoice.id} for subscription ${sub.id}`,
+          );
 
           // Attempt the immediate first charge inline. If the gateway accepts,
           // we are done. If it rejects (state='failed') or throws, we hand off

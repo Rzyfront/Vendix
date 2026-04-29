@@ -22,10 +22,28 @@ import { SubscriptionsModule } from '../domains/store/subscriptions/subscription
 
 @Global()
 @Module({
-  imports: [PrismaModule, AIQueueModule, EmbeddingModule, InventoryModule, SubscriptionsModule],
+  imports: [
+    PrismaModule,
+    AIQueueModule,
+    EmbeddingModule,
+    InventoryModule,
+    SubscriptionsModule,
+  ],
   controllers: [AIStreamController],
-  providers: [AIEngineService, AILoggingService, AIAgentService, AIToolRegistry],
-  exports: [AIEngineService, AILoggingService, AIAgentService, AIToolRegistry, AIQueueModule, EmbeddingModule],
+  providers: [
+    AIEngineService,
+    AILoggingService,
+    AIAgentService,
+    AIToolRegistry,
+  ],
+  exports: [
+    AIEngineService,
+    AILoggingService,
+    AIAgentService,
+    AIToolRegistry,
+    AIQueueModule,
+    EmbeddingModule,
+  ],
 })
 export class AIEngineModule implements OnModuleInit {
   constructor(

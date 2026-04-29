@@ -297,6 +297,16 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'Invalid domain',
   },
+  ORG_DOMAIN_003: {
+    code: 'ORG_DOMAIN_003',
+    httpStatus: 422,
+    devMessage: 'Hostname is blocked by policy',
+  },
+  ORG_DOMAIN_004: {
+    code: 'ORG_DOMAIN_004',
+    httpStatus: 403,
+    devMessage: 'Pending domain registration limit exceeded',
+  },
 
   // Store
   STORE_FIND_001: {
@@ -393,22 +403,26 @@ export const ErrorCodes = {
   PROD_SVC_HAS_VARIANTS_001: {
     code: 'PROD_SVC_HAS_VARIANTS_001',
     httpStatus: 409,
-    devMessage: 'No se puede cambiar a SERVICE un producto con variantes existentes',
+    devMessage:
+      'No se puede cambiar a SERVICE un producto con variantes existentes',
   },
   PROD_TRACKING_CHANGE_001: {
     code: 'PROD_TRACKING_CHANGE_001',
     httpStatus: 400,
-    devMessage: 'Cambiar track_inventory con variantes requiere stock_transfer_mode',
+    devMessage:
+      'Cambiar track_inventory con variantes requiere stock_transfer_mode',
   },
   PROD_SALE_PRICE_001: {
     code: 'PROD_SALE_PRICE_001',
     httpStatus: 400,
-    devMessage: 'sale_price inválido: debe ser > 0 y < base_price cuando is_on_sale=true',
+    devMessage:
+      'sale_price inválido: debe ser > 0 y < base_price cuando is_on_sale=true',
   },
   PROD_VAR_SALE_PRICE_001: {
     code: 'PROD_VAR_SALE_PRICE_001',
     httpStatus: 400,
-    devMessage: 'sale_price de variante inválido: debe ser > 0 y < precio de referencia',
+    devMessage:
+      'sale_price de variante inválido: debe ser > 0 y < precio de referencia',
   },
   PROD_VAR_PRICE_001: {
     code: 'PROD_VAR_PRICE_001',
@@ -418,7 +432,8 @@ export const ErrorCodes = {
   PROD_VAR_REMOVE_001: {
     code: 'PROD_VAR_REMOVE_001',
     httpStatus: 400,
-    devMessage: 'Eliminar variantes con stock requiere variant_removal_stock_mode',
+    devMessage:
+      'Eliminar variantes con stock requiere variant_removal_stock_mode',
   },
   PROD_HAS_RESERVATIONS_001: {
     code: 'PROD_HAS_RESERVATIONS_001',
@@ -435,7 +450,6 @@ export const ErrorCodes = {
     httpStatus: 400,
     devMessage: 'track_inventory_override inválido',
   },
-
 
   // Orders
   ORD_FIND_001: {
@@ -567,8 +581,7 @@ export const ErrorCodes = {
   INV_SESSION_STORE_MISMATCH: {
     code: 'INV_SESSION_STORE_MISMATCH',
     httpStatus: 403,
-    devMessage:
-      'Cash register session does not belong to the current store',
+    devMessage: 'Cash register session does not belong to the current store',
   },
   INV_CROSS_STORE_TRANSFER_FORBIDDEN: {
     code: 'INV_CROSS_STORE_TRANSFER_FORBIDDEN',
@@ -1673,36 +1686,116 @@ export const ErrorCodes = {
   },
 
   // Metadata Fields
-  META_FIND_001: { code: 'META_FIND_001', httpStatus: 404, devMessage: 'Metadata field not found' },
-  META_CREATE_001: { code: 'META_CREATE_001', httpStatus: 400, devMessage: 'Error creating metadata field' },
-  META_DUP_001: { code: 'META_DUP_001', httpStatus: 409, devMessage: 'Duplicate metadata field key' },
-  META_VALIDATE_001: { code: 'META_VALIDATE_001', httpStatus: 400, devMessage: 'Invalid metadata value' },
-  META_DEL_001: { code: 'META_DEL_001', httpStatus: 409, devMessage: 'Metadata field is used in a template' },
+  META_FIND_001: {
+    code: 'META_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Metadata field not found',
+  },
+  META_CREATE_001: {
+    code: 'META_CREATE_001',
+    httpStatus: 400,
+    devMessage: 'Error creating metadata field',
+  },
+  META_DUP_001: {
+    code: 'META_DUP_001',
+    httpStatus: 409,
+    devMessage: 'Duplicate metadata field key',
+  },
+  META_VALIDATE_001: {
+    code: 'META_VALIDATE_001',
+    httpStatus: 400,
+    devMessage: 'Invalid metadata value',
+  },
+  META_DEL_001: {
+    code: 'META_DEL_001',
+    httpStatus: 409,
+    devMessage: 'Metadata field is used in a template',
+  },
 
   // Data Collection
-  DCOL_FIND_001: { code: 'DCOL_FIND_001', httpStatus: 404, devMessage: 'Data collection template not found' },
-  DCOL_FIND_002: { code: 'DCOL_FIND_002', httpStatus: 404, devMessage: 'Submission not found' },
-  DCOL_TOKEN_001: { code: 'DCOL_TOKEN_001', httpStatus: 404, devMessage: 'Invalid or expired token' },
-  DCOL_TOKEN_002: { code: 'DCOL_TOKEN_002', httpStatus: 400, devMessage: 'Submission already completed' },
-  DCOL_CREATE_001: { code: 'DCOL_CREATE_001', httpStatus: 400, devMessage: 'Error creating submission' },
-  DCOL_DELETE_001: { code: 'DCOL_DELETE_001', httpStatus: 400, devMessage: 'Cannot delete template with existing submissions' },
+  DCOL_FIND_001: {
+    code: 'DCOL_FIND_001',
+    httpStatus: 404,
+    devMessage: 'Data collection template not found',
+  },
+  DCOL_FIND_002: {
+    code: 'DCOL_FIND_002',
+    httpStatus: 404,
+    devMessage: 'Submission not found',
+  },
+  DCOL_TOKEN_001: {
+    code: 'DCOL_TOKEN_001',
+    httpStatus: 404,
+    devMessage: 'Invalid or expired token',
+  },
+  DCOL_TOKEN_002: {
+    code: 'DCOL_TOKEN_002',
+    httpStatus: 400,
+    devMessage: 'Submission already completed',
+  },
+  DCOL_CREATE_001: {
+    code: 'DCOL_CREATE_001',
+    httpStatus: 400,
+    devMessage: 'Error creating submission',
+  },
+  DCOL_DELETE_001: {
+    code: 'DCOL_DELETE_001',
+    httpStatus: 400,
+    devMessage: 'Cannot delete template with existing submissions',
+  },
 
   // Customer History
-  CUST_HISTORY_001: { code: 'CUST_HISTORY_001', httpStatus: 404, devMessage: 'Customer history not found' },
-  CUST_HISTORY_002: { code: 'CUST_HISTORY_002', httpStatus: 404, devMessage: 'Booking not found in history' },
-  CUST_HISTORY_003: { code: 'CUST_HISTORY_003', httpStatus: 404, devMessage: 'Note not found' },
+  CUST_HISTORY_001: {
+    code: 'CUST_HISTORY_001',
+    httpStatus: 404,
+    devMessage: 'Customer history not found',
+  },
+  CUST_HISTORY_002: {
+    code: 'CUST_HISTORY_002',
+    httpStatus: 404,
+    devMessage: 'Booking not found in history',
+  },
+  CUST_HISTORY_003: {
+    code: 'CUST_HISTORY_003',
+    httpStatus: 404,
+    devMessage: 'Note not found',
+  },
 
   // Booking Confirmation
-  BOOK_CONFIRM_001: { code: 'BOOK_CONFIRM_001', httpStatus: 404, devMessage: 'Invalid or expired confirmation token' },
-  BOOK_CONFIRM_002: { code: 'BOOK_CONFIRM_002', httpStatus: 400, devMessage: 'Token already used' },
-  BOOK_CHECKIN_001: { code: 'BOOK_CHECKIN_001', httpStatus: 400, devMessage: 'Booking not in confirmed state' },
-  BOOK_CHECKIN_002: { code: 'BOOK_CHECKIN_002', httpStatus: 400, devMessage: 'Already checked in' },
+  BOOK_CONFIRM_001: {
+    code: 'BOOK_CONFIRM_001',
+    httpStatus: 404,
+    devMessage: 'Invalid or expired confirmation token',
+  },
+  BOOK_CONFIRM_002: {
+    code: 'BOOK_CONFIRM_002',
+    httpStatus: 400,
+    devMessage: 'Token already used',
+  },
+  BOOK_CHECKIN_001: {
+    code: 'BOOK_CHECKIN_001',
+    httpStatus: 400,
+    devMessage: 'Booking not in confirmed state',
+  },
+  BOOK_CHECKIN_002: {
+    code: 'BOOK_CHECKIN_002',
+    httpStatus: 400,
+    devMessage: 'Already checked in',
+  },
 
   // Email Templates
-  EMAIL_TPL_001: { code: 'EMAIL_TPL_001', httpStatus: 404, devMessage: 'Email template not found' },
+  EMAIL_TPL_001: {
+    code: 'EMAIL_TPL_001',
+    httpStatus: 404,
+    devMessage: 'Email template not found',
+  },
 
   // Shipping Assignment
-  ORD_SHIP_LOCKED_001: { code: 'ORD_SHIP_LOCKED_001', httpStatus: 409, devMessage: 'Cannot change shipping method after order has been shipped' },
+  ORD_SHIP_LOCKED_001: {
+    code: 'ORD_SHIP_LOCKED_001',
+    httpStatus: 409,
+    devMessage: 'Cannot change shipping method after order has been shipped',
+  },
 
   // Order Fast-Track & Shipping Flow
   ORD_SHIP_REQUIRED_FOR_FLOW_001: {
@@ -1713,7 +1806,8 @@ export const ErrorCodes = {
   ORD_SHIP_NO_RATE_FOR_ADDRESS_001: {
     code: 'ORD_SHIP_NO_RATE_FOR_ADDRESS_001',
     httpStatus: 422,
-    devMessage: 'No hay tarifas configuradas para la direccion del cliente en este metodo.',
+    devMessage:
+      'No hay tarifas configuradas para la direccion del cliente en este metodo.',
   },
   ORD_FAST_TRACK_INVALID_STATE_001: {
     code: 'ORD_FAST_TRACK_INVALID_STATE_001',
@@ -1723,7 +1817,8 @@ export const ErrorCodes = {
   ORD_FAST_TRACK_PAYMENT_REQUIRED_001: {
     code: 'ORD_FAST_TRACK_PAYMENT_REQUIRED_001',
     httpStatus: 400,
-    devMessage: 'Se requiere informacion de pago para procesar la orden completa.',
+    devMessage:
+      'Se requiere informacion de pago para procesar la orden completa.',
   },
 
   // ===== SaaS Subscriptions =====
@@ -1734,7 +1829,7 @@ export const ErrorCodes = {
   },
   SUBSCRIPTION_002: {
     code: 'SUBSCRIPTION_002',
-    httpStatus: 409,
+    httpStatus: 402,
     devMessage: 'Subscription is in draft state; activation required',
   },
   SUBSCRIPTION_003: {
@@ -1782,6 +1877,11 @@ export const ErrorCodes = {
     httpStatus: 500,
     devMessage: 'Internal error while resolving subscription access',
   },
+  SUBSCRIPTION_VALIDATION: {
+    code: 'SUBSCRIPTION_VALIDATION',
+    httpStatus: 400,
+    devMessage: 'Subscription checkout validation failed',
+  },
   SUBSCRIPTION_PAY_001: {
     code: 'SUBSCRIPTION_PAY_001',
     httpStatus: 400,
@@ -1796,6 +1896,22 @@ export const ErrorCodes = {
     code: 'SUBSCRIPTION_PROMO_002',
     httpStatus: 409,
     devMessage: 'Store does not meet promotional plan eligibility rules',
+  },
+
+  SUBSCRIPTION_TOKEN_INVALID: {
+    code: 'SUBSCRIPTION_TOKEN_INVALID',
+    httpStatus: 400,
+    devMessage: 'Wompi provider token is invalid or expired',
+  },
+  SUBSCRIPTION_CARD_DECLINED: {
+    code: 'SUBSCRIPTION_CARD_DECLINED',
+    httpStatus: 402,
+    devMessage: 'Card was declined or blocked by the payment provider',
+  },
+  SUBSCRIPTION_PROVIDER_UNAVAILABLE: {
+    code: 'SUBSCRIPTION_PROVIDER_UNAVAILABLE',
+    httpStatus: 503,
+    devMessage: 'Payment provider is unavailable or timed out',
   },
 
   // Platform-level payment gateway (superadmin/subscriptions/gateway)
@@ -1843,6 +1959,11 @@ export const ErrorCodes = {
     httpStatus: 409,
     devMessage: 'Promotional plan no longer eligible',
   },
+  PROMO_NOT_ELIGIBLE: {
+    code: 'PROMO_NOT_ELIGIBLE',
+    httpStatus: 400,
+    devMessage: 'Store does not meet promotional plan eligibility rules',
+  },
 
   // Plans
   PLAN_001: {
@@ -1866,6 +1987,13 @@ export const ErrorCodes = {
     code: 'SUBSCRIPTION_TRIAL_001',
     httpStatus: 409,
     devMessage: 'Trial ya consumido',
+  },
+
+  // Dunning
+  DUNNING_001: {
+    code: 'DUNNING_001',
+    httpStatus: 400,
+    devMessage: 'No payable invoice available for retry',
   },
 } as const satisfies Record<string, ErrorCodeEntry>;
 

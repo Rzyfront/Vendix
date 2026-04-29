@@ -1,9 +1,4 @@
-import {
-  Controller,
-  Get,
-  Query,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Query, UseGuards } from '@nestjs/common';
 import { PartnerCommissionsService } from './partner-commissions.service';
 import { CommissionQueryDto, PayoutQueryDto } from './dto';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';

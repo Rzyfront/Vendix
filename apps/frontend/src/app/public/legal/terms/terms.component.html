@@ -1,0 +1,546 @@
+<div class="min-h-screen bg-gray-50">
+  <!-- Header -->
+  <header class="bg-white border-b border-gray-200 sticky top-0 z-10">
+    <div class="max-w-5xl mx-auto px-4 py-4 flex items-center justify-between">
+      <a [routerLink]="'/'" class="flex items-center gap-2">
+        <div class="w-10 h-10 rounded-xl flex items-center justify-center overflow-hidden">
+          <img src="vlogo.png" alt="Vendix" class="w-full h-full object-contain" />
+        </div>
+        <span class="text-lg font-extrabold text-text-primary">Vendix</span>
+      </a>
+      <a
+        [routerLink]="'/'"
+        class="inline-flex items-center gap-1 text-sm text-text-secondary hover:text-text-primary"
+      >
+        <app-icon name="arrow-left" [size]="16"></app-icon>
+        Volver al inicio
+      </a>
+    </div>
+  </header>
+
+  <main class="max-w-5xl mx-auto px-4 py-8 lg:py-12">
+    <h1 class="text-3xl md:text-4xl font-extrabold text-text-primary mb-2">
+      Términos y Condiciones
+    </h1>
+    <p class="text-sm text-text-secondary mb-8">
+      Última actualización: 28 de abril de 2026
+    </p>
+
+    <div class="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-8">
+      <!-- Tabla de contenido -->
+      <aside class="lg:sticky lg:top-24 lg:self-start">
+        <nav
+          class="bg-white border border-gray-200 rounded-xl p-4 space-y-1"
+          aria-label="Tabla de contenido"
+        >
+          <h2 class="text-xs font-semibold uppercase tracking-wide text-text-secondary mb-2">
+            Contenido
+          </h2>
+          <a href="#introduccion" class="block text-sm text-text-primary hover:text-primary py-1">
+            1. Introducción
+          </a>
+          <a href="#cuenta-y-acceso" class="block text-sm text-text-primary hover:text-primary py-1">
+            2. Cuenta y acceso
+          </a>
+          <a href="#uso-aceptable" class="block text-sm text-text-primary hover:text-primary py-1">
+            3. Uso aceptable
+          </a>
+          <a href="#privacidad" class="block text-sm text-text-primary hover:text-primary py-1">
+            4. Privacidad
+          </a>
+          <a
+            href="#pagos-y-reembolsos"
+            class="block text-sm font-semibold text-primary hover:text-primary-700 py-1"
+          >
+            5. Pagos y reembolsos
+          </a>
+          <div class="pl-3 space-y-0.5 border-l-2 border-primary/20 ml-1 mb-1">
+            <a href="#pagos-y-reembolsos" class="block text-xs text-text-secondary hover:text-primary py-0.5">
+              5.1 Cobro recurrente
+            </a>
+            <a href="#pagos-y-reembolsos" class="block text-xs text-text-secondary hover:text-primary py-0.5">
+              5.2 No-reembolso
+            </a>
+            <a href="#pagos-y-reembolsos" class="block text-xs text-text-secondary hover:text-primary py-0.5">
+              5.3 Período de prueba
+            </a>
+            <a href="#pagos-y-reembolsos" class="block text-xs text-text-secondary hover:text-primary py-0.5">
+              5.4 Cancelación
+            </a>
+            <a href="#pagos-y-reembolsos" class="block text-xs text-text-secondary hover:text-primary py-0.5">
+              5.5 Reactivación
+            </a>
+            <a href="#pagos-y-reembolsos" class="block text-xs text-text-secondary hover:text-primary py-0.5">
+              5.6 Gracia y suspensión
+            </a>
+            <a href="#pagos-y-reembolsos" class="block text-xs text-text-secondary hover:text-primary py-0.5">
+              5.7 Plan gratuito
+            </a>
+            <a href="#pagos-y-reembolsos" class="block text-xs text-text-secondary hover:text-primary py-0.5">
+              5.8 Cupones y overlays
+            </a>
+          </div>
+          <a href="#cancelacion-y-suspension" class="block text-sm text-text-primary hover:text-primary py-1">
+            6. Cancelación y suspensión
+          </a>
+          <a href="#propiedad-intelectual" class="block text-sm text-text-primary hover:text-primary py-1">
+            7. Propiedad intelectual
+          </a>
+          <a href="#limitacion-de-responsabilidad" class="block text-sm text-text-primary hover:text-primary py-1">
+            8. Limitación de responsabilidad
+          </a>
+          <a href="#modificaciones" class="block text-sm text-text-primary hover:text-primary py-1">
+            9. Modificaciones
+          </a>
+          <a href="#contacto" class="block text-sm text-text-primary hover:text-primary py-1">
+            10. Contacto
+          </a>
+        </nav>
+      </aside>
+
+      <!-- Contenido -->
+      <article class="bg-white border border-gray-200 rounded-xl p-6 md:p-8 space-y-10 prose-vendix">
+        <section id="introduccion">
+          <h2 class="text-xl font-bold text-text-primary mb-3">1. Introducción</h2>
+          <p class="text-sm text-text-secondary leading-relaxed">
+            <!-- TODO: Completar antes de producción -->
+            Bienvenido a Vendix. Estos términos rigen el uso de la plataforma. Al
+            crear una cuenta o utilizar nuestros servicios, aceptas íntegramente
+            estos términos y condiciones.
+          </p>
+        </section>
+
+        <section id="cuenta-y-acceso">
+          <h2 class="text-xl font-bold text-text-primary mb-3">2. Cuenta y acceso</h2>
+          <p class="text-sm text-text-secondary leading-relaxed">
+            <!-- TODO: Completar antes de producción -->
+            El usuario es responsable de mantener la confidencialidad de sus
+            credenciales y de toda actividad realizada bajo su cuenta.
+          </p>
+        </section>
+
+        <section id="uso-aceptable">
+          <h2 class="text-xl font-bold text-text-primary mb-3">3. Uso aceptable</h2>
+          <p class="text-sm text-text-secondary leading-relaxed">
+            <!-- TODO: Completar antes de producción -->
+            El usuario se compromete a utilizar Vendix exclusivamente para fines
+            legítimos y conforme a la legislación vigente.
+          </p>
+        </section>
+
+        <section id="privacidad">
+          <h2 class="text-xl font-bold text-text-primary mb-3">4. Privacidad</h2>
+          <p class="text-sm text-text-secondary leading-relaxed">
+            <!-- TODO: Completar antes de producción -->
+            El tratamiento de datos personales se rige por la Política de
+            Privacidad de Vendix, que forma parte integral de estos términos.
+          </p>
+        </section>
+
+        <!-- Sección 5 — Pagos y reembolsos (CONTENIDO OFICIAL G8 + S3.5) -->
+        <section id="pagos-y-reembolsos" class="scroll-mt-24">
+          <h2 class="text-xl font-bold text-text-primary mb-3">5. Pagos y reembolsos</h2>
+
+          <div class="space-y-4">
+
+            <!-- 5.1 — Cobro recurrente automático -->
+            <div class="border-l-4 border-primary bg-primary/5 p-4 md:p-6 rounded-r-xl space-y-3">
+              <h3 class="text-base font-bold text-text-primary">
+                5.1 Cobro recurrente automático
+              </h3>
+
+              <p class="text-sm text-text-primary leading-relaxed">
+                Las suscripciones a Vendix funcionan bajo un modelo de
+                <strong>cobro recurrente automatizado</strong>. Al confirmar el
+                pago de tu plan, autorizas a Vendix (a través de su proveedor
+                de pagos) a efectuar los siguientes cargos sin necesidad de
+                reconfirmación:
+              </p>
+
+              <ol class="list-decimal pl-6 space-y-2 text-sm text-text-primary leading-relaxed">
+                <li>
+                  <strong>Primer cargo:</strong> ejecutado al momento de
+                  confirmar tu suscripción, por el valor del plan y ciclo
+                  seleccionado (mensual o anual).
+                </li>
+                <li>
+                  <strong>Cargos posteriores:</strong> ejecutados de forma
+                  automática en la fecha de finalización de cada ciclo
+                  (la fecha exacta se muestra en tu panel como
+                  <em>"Próximo cobro"</em>) usando la tarjeta o medio de pago
+                  registrado durante la primera transacción.
+                </li>
+                <li>
+                  <strong>Tarjeta guardada:</strong> el medio de pago que uses
+                  en el primer cargo queda registrado en tu cuenta como medio
+                  de cobro predeterminado para las renovaciones automáticas.
+                  Puedes consultarlo y reemplazarlo en cualquier momento desde
+                  <code class="text-xs font-mono bg-primary/10 px-1.5 py-0.5 rounded">Mi Suscripción → Métodos de pago</code>.
+                </li>
+                <li>
+                  <strong>Cambios de precio:</strong> si Vendix modifica el
+                  precio del plan, te notificará con al menos 30 días de
+                  anticipación antes del próximo cobro automático. Podrás
+                  cancelar la suscripción antes de que el nuevo precio entre
+                  en vigor sin penalización.
+                </li>
+                <li>
+                  <strong>Fallos de cobro:</strong> si el cobro automático
+                  falla (tarjeta vencida, fondos insuficientes, etc.), tu
+                  suscripción entra en período de gracia. Recibirás
+                  notificaciones para regularizar el pago. Si el período de
+                  gracia se agota, la suscripción se suspende y luego se
+                  cancela automáticamente.
+                </li>
+              </ol>
+
+              <p class="text-sm text-text-primary leading-relaxed font-medium pt-2 border-t border-primary/20">
+                Para detener cargos futuros debes cancelar la auto-renovación
+                desde tu panel <strong>antes</strong> de la fecha del próximo
+                cobro. Una vez ejecutado el cargo, aplica la política de
+                no-reembolso descrita abajo.
+              </p>
+            </div>
+
+            <!-- 5.2 — Política de no-reembolso -->
+            <div class="border-l-4 border-amber-500 bg-amber-50 p-4 md:p-6 rounded-r-xl space-y-4">
+              <h3 class="text-base font-bold text-text-primary">
+                5.2 Política de no-reembolso
+              </h3>
+
+              <p class="text-sm text-text-primary leading-relaxed">
+                Todas las suscripciones a Vendix son finales y no reembolsables.
+                Esto significa que:
+              </p>
+
+              <ol class="list-decimal pl-6 space-y-3 text-sm text-text-primary leading-relaxed">
+                <li>
+                  Una vez confirmado el pago de una suscripción, no se realizan
+                  devoluciones, ni totales ni parciales.
+                </li>
+                <li>
+                  La cancelación de tu suscripción detiene la renovación
+                  automática, pero el periodo ya facturado no genera devolución.
+                </li>
+                <li>
+                  Si una factura cubre un periodo donde el servicio fue prestado
+                  total o parcialmente, el cobro es válido y no procede el
+                  reembolso.
+                </li>
+                <li>
+                  La única excepción es el caso de
+                  <strong>cargo duplicado documentado</strong> (mismo monto cobrado
+                  dos veces por error técnico del proveedor de pagos). En ese
+                  caso, la corrección se realiza manualmente desde el dashboard
+                  del proveedor de pagos y se registra en el historial de eventos
+                  de tu cuenta.
+                </li>
+                <li>
+                  Para detener futuras renovaciones, puedes cancelar tu
+                  suscripción en cualquier momento desde tu panel de
+                  administración.
+                </li>
+              </ol>
+
+              <p class="text-sm text-text-primary leading-relaxed font-medium pt-2 border-t border-amber-300">
+                Al confirmar el pago de cualquier suscripción aceptas
+                explícitamente tanto la política de cobro recurrente automático
+                (5.1) como la política de no-reembolso (5.2).
+              </p>
+            </div>
+
+            <!-- 5.3 — Período de prueba (trial) -->
+            <div class="border-l-4 border-blue-500 bg-blue-50 p-4 md:p-6 rounded-r-xl space-y-3">
+              <h3 class="text-base font-bold text-text-primary">
+                5.3 Período de prueba (trial)
+              </h3>
+
+              <p class="text-sm text-text-primary leading-relaxed">
+                Algunos planes incluyen un período de prueba sin costo. Durante
+                esta etapa:
+              </p>
+
+              <ol class="list-decimal pl-6 space-y-2 text-sm text-text-primary leading-relaxed">
+                <li>
+                  <strong>No se cobra</strong> hasta el día que finaliza la
+                  prueba. La fecha exacta es visible en tu panel.
+                </li>
+                <li>
+                  <strong>El primer cobro automático</strong> se ejecuta al
+                  finalizar la prueba, por el valor completo del plan y ciclo
+                  seleccionados.
+                </li>
+                <li>
+                  <strong>Cambio de plan durante la prueba:</strong> puedes
+                  cambiar a otro plan sin generar cargo inmediato. La prueba
+                  continúa con su fecha original; el cobro al finalizar
+                  corresponde al precio del plan nuevo.
+                </li>
+                <li>
+                  <strong>Cancelación durante la prueba:</strong> si cancelas
+                  antes de que finalice, no se ejecuta cargo alguno y la cuenta
+                  queda en estado finalizado al cumplirse la fecha.
+                </li>
+                <li>
+                  <strong>Una sola prueba por organización:</strong> el período
+                  de prueba se otorga una vez. Si una tienda hermana de tu
+                  misma organización ya consumió la prueba, las nuevas tiendas
+                  inician con cargo desde el primer día.
+                </li>
+              </ol>
+            </div>
+
+            <!-- 5.4 — Cancelación inmediata vs programada -->
+            <div class="border-l-4 border-rose-500 bg-rose-50 p-4 md:p-6 rounded-r-xl space-y-3">
+              <h3 class="text-base font-bold text-text-primary">
+                5.4 Cancelación inmediata y cancelación programada
+              </h3>
+
+              <p class="text-sm text-text-primary leading-relaxed">
+                Vendix te permite dos formas de detener tu suscripción. Ambas
+                pueden gestionarse desde
+                <code class="text-xs font-mono bg-rose-100 px-1.5 py-0.5 rounded">Mi Suscripción → Cancelar plan</code>:
+              </p>
+
+              <ol class="list-decimal pl-6 space-y-3 text-sm text-text-primary leading-relaxed">
+                <li>
+                  <strong>Cancelación programada (recomendada):</strong> tu
+                  plan se mantiene <strong>activo hasta la fecha de fin del
+                  ciclo ya pagado</strong>. No se ejecutan cargos posteriores y
+                  la cuenta pasa a estado <em>cancelado</em> al cumplirse esa
+                  fecha. Conservas todas las funciones del plan hasta el último
+                  día del período facturado.
+                </li>
+                <li>
+                  <strong>Cancelación inmediata:</strong> termina la
+                  suscripción al instante. La tienda pierde acceso a las
+                  funcionalidades del plan de inmediato. <strong>El monto del
+                  ciclo ya facturado no se reembolsa</strong> (ver 5.2).
+                </li>
+                <li>
+                  <strong>Reversión de la cancelación programada:</strong>
+                  mientras la fecha programada no haya llegado, puedes deshacer
+                  la cancelación contratando un plan nuevo o reactivando la
+                  auto-renovación. Al hacerlo se restablece el cobro automático
+                  y la cancelación queda sin efecto.
+                </li>
+              </ol>
+            </div>
+
+            <!-- 5.5 — Reactivación tras cancelación o expiración -->
+            <div class="border-l-4 border-emerald-500 bg-emerald-50 p-4 md:p-6 rounded-r-xl space-y-3">
+              <h3 class="text-base font-bold text-text-primary">
+                5.5 Reactivación tras cancelación o expiración
+              </h3>
+
+              <p class="text-sm text-text-primary leading-relaxed">
+                Si tu suscripción quedó en estado <em>cancelada</em> o
+                <em>expirada</em> y deseas volver a usar Vendix:
+              </p>
+
+              <ol class="list-decimal pl-6 space-y-2 text-sm text-text-primary leading-relaxed">
+                <li>
+                  La reactivación se trata como una <strong>compra nueva</strong>:
+                  inicia un ciclo desde cero por el valor completo del plan
+                  elegido. No hay proración, crédito ni devolución del ciclo
+                  anterior.
+                </li>
+                <li>
+                  Las funcionalidades del plan se restablecen una vez aprobado
+                  el pago. El historial de tu cuenta (datos, configuraciones)
+                  se preserva mientras esté disponible según las políticas de
+                  retención de Vendix.
+                </li>
+                <li>
+                  El medio de pago usado en la reactivación queda registrado
+                  como predeterminado para las renovaciones automáticas
+                  futuras (ver 5.1).
+                </li>
+              </ol>
+            </div>
+
+            <!-- 5.6 — Período de gracia y suspensión por impago -->
+            <div class="border-l-4 border-orange-500 bg-orange-50 p-4 md:p-6 rounded-r-xl space-y-3">
+              <h3 class="text-base font-bold text-text-primary">
+                5.6 Período de gracia y suspensión por impago
+              </h3>
+
+              <p class="text-sm text-text-primary leading-relaxed">
+                Cuando el cobro automático falla, la suscripción transita por
+                etapas progresivas antes de cancelarse:
+              </p>
+
+              <ol class="list-decimal pl-6 space-y-2 text-sm text-text-primary leading-relaxed">
+                <li>
+                  <strong>Gracia suave:</strong> el plan sigue funcionando con
+                  normalidad. Vendix reintenta el cobro y notifica al
+                  responsable de pago.
+                </li>
+                <li>
+                  <strong>Gracia dura:</strong> se restringen acciones de
+                  escritura (crear ventas, productos, etc.). El acceso de
+                  lectura se mantiene. La tienda se rotula como
+                  <em>"En período de gracia"</em>.
+                </li>
+                <li>
+                  <strong>Suspensión:</strong> se bloquea el acceso a la
+                  tienda. Sólo se puede ingresar al panel para regularizar el
+                  pago.
+                </li>
+                <li>
+                  <strong>Cancelación automática:</strong> si tras la
+                  suspensión no se regulariza, la suscripción se cancela y
+                  aplica el flujo 5.5 para volver a contratar.
+                </li>
+              </ol>
+
+              <p class="text-sm text-text-primary leading-relaxed">
+                La duración exacta de cada etapa depende de la configuración
+                del plan. Recibirás notificaciones por correo y desde el panel
+                en cada transición.
+              </p>
+            </div>
+
+            <!-- 5.7 — Plan gratuito -->
+            <div class="border-l-4 border-slate-400 bg-slate-50 p-4 md:p-6 rounded-r-xl space-y-3">
+              <h3 class="text-base font-bold text-text-primary">
+                5.7 Plan gratuito
+              </h3>
+
+              <p class="text-sm text-text-primary leading-relaxed">
+                El plan gratuito de Vendix no genera cargos: no se solicita
+                medio de pago, no se ejecutan cobros automáticos y no aplica la
+                política de no-reembolso porque no hay transacción que
+                reembolsar.
+              </p>
+
+              <ol class="list-decimal pl-6 space-y-2 text-sm text-text-primary leading-relaxed">
+                <li>
+                  Las funcionalidades disponibles son las definidas para el
+                  plan gratuito en el catálogo público.
+                </li>
+                <li>
+                  El cambio de un plan de pago al plan gratuito se trata como
+                  <em>downgrade</em>: el plan pago activo continúa hasta el
+                  fin del ciclo ya facturado y al renovarse aplica el plan
+                  gratuito sin cargo.
+                </li>
+                <li>
+                  Vendix podrá modificar las funcionalidades del plan gratuito
+                  con previo aviso. Si decides no continuar bajo las nuevas
+                  condiciones puedes contratar un plan pago o cancelar la
+                  cuenta.
+                </li>
+              </ol>
+            </div>
+
+            <!-- 5.8 — Cupones, descuentos y overlays -->
+            <div class="border-l-4 border-violet-500 bg-violet-50 p-4 md:p-6 rounded-r-xl space-y-3">
+              <h3 class="text-base font-bold text-text-primary">
+                5.8 Cupones, descuentos y overlays promocionales
+              </h3>
+
+              <ol class="list-decimal pl-6 space-y-2 text-sm text-text-primary leading-relaxed">
+                <li>
+                  Los cupones se aplican <strong>una sola vez por tienda</strong>
+                  y bajo las condiciones específicas (vigencia, plan elegible,
+                  duración del beneficio) que se muestran al validarlos en el
+                  checkout.
+                </li>
+                <li>
+                  Los <strong>overlays promocionales</strong> activos otorgan
+                  funcionalidades adicionales o un plan equivalente por tiempo
+                  limitado. Al expirar el overlay, la tienda regresa a las
+                  condiciones del plan base contratado y se reanuda el cobro
+                  recurrente normal del plan correspondiente.
+                </li>
+                <li>
+                  Vendix puede revocar cupones u overlays con efecto futuro en
+                  caso de uso fraudulento, abuso o incumplimiento de estos
+                  términos. La revocación no genera reembolsos sobre cargos
+                  previos.
+                </li>
+              </ol>
+            </div>
+
+            <!-- 5.9 — Aceptación al confirmar el pago -->
+            <div class="border-l-4 border-text-primary bg-gray-100 p-4 md:p-6 rounded-r-xl space-y-2">
+              <h3 class="text-base font-bold text-text-primary">
+                5.9 Aceptación al confirmar el pago
+              </h3>
+              <p class="text-sm text-text-primary leading-relaxed">
+                Al confirmar el pago de cualquier suscripción, aceptas
+                expresamente las cláusulas 5.1 (cobro recurrente automático),
+                5.2 (no-reembolso), 5.4 (cancelación), 5.5 (reactivación), 5.6
+                (gracia y suspensión), 5.7 (plan gratuito), 5.8 (cupones y
+                overlays) y el resto de los términos vigentes en el momento de
+                la transacción.
+              </p>
+            </div>
+
+          </div>
+        </section>
+
+        <section id="cancelacion-y-suspension">
+          <h2 class="text-xl font-bold text-text-primary mb-3">
+            6. Cancelación y suspensión
+          </h2>
+          <p class="text-sm text-text-secondary leading-relaxed">
+            <!-- TODO: Completar antes de producción -->
+            Vendix podrá suspender o cancelar el acceso a la plataforma en caso
+            de incumplimiento de estos términos, o por motivos legales,
+            técnicos o de seguridad.
+          </p>
+        </section>
+
+        <section id="propiedad-intelectual">
+          <h2 class="text-xl font-bold text-text-primary mb-3">
+            7. Propiedad intelectual
+          </h2>
+          <p class="text-sm text-text-secondary leading-relaxed">
+            <!-- TODO: Completar antes de producción -->
+            Todos los derechos sobre la plataforma, marcas, software y
+            contenidos pertenecen a Vendix o a sus licenciantes.
+          </p>
+        </section>
+
+        <section id="limitacion-de-responsabilidad">
+          <h2 class="text-xl font-bold text-text-primary mb-3">
+            8. Limitación de responsabilidad
+          </h2>
+          <p class="text-sm text-text-secondary leading-relaxed">
+            <!-- TODO: Completar antes de producción -->
+            Vendix no será responsable por daños indirectos, lucro cesante o
+            pérdida de datos derivada del uso del servicio, salvo dolo o culpa
+            grave.
+          </p>
+        </section>
+
+        <section id="modificaciones">
+          <h2 class="text-xl font-bold text-text-primary mb-3">9. Modificaciones</h2>
+          <p class="text-sm text-text-secondary leading-relaxed">
+            <!-- TODO: Completar antes de producción -->
+            Vendix podrá actualizar estos términos en cualquier momento. Las
+            modificaciones serán notificadas a los usuarios por los canales
+            habituales y entrarán en vigor desde su publicación.
+          </p>
+        </section>
+
+        <section id="contacto">
+          <h2 class="text-xl font-bold text-text-primary mb-3">10. Contacto</h2>
+          <p class="text-sm text-text-secondary leading-relaxed">
+            <!-- TODO: Completar antes de producción -->
+            Para cualquier consulta sobre estos términos, contáctanos a través
+            del canal de soporte disponible en tu panel de administración.
+          </p>
+        </section>
+      </article>
+    </div>
+  </main>
+
+  <footer class="border-t border-gray-200 py-6 mt-12">
+    <div class="max-w-5xl mx-auto px-4 text-center text-xs text-text-secondary">
+      &copy; 2026 Vendix. Todos los derechos reservados.
+    </div>
+  </footer>
+</div>

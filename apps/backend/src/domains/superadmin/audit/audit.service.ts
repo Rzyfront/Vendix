@@ -9,7 +9,7 @@ import {
 
 @Injectable()
 export class SuperAdminAuditService {
-  constructor(private readonly prismaService: GlobalPrismaService) { }
+  constructor(private readonly prismaService: GlobalPrismaService) {}
 
   /**
    * Obtiene logs de auditoría con filtros
@@ -92,32 +92,28 @@ export class SuperAdminAuditService {
       where.organization_id = context.organization_id;
     }
 
-    const [
-      totalLogs,
-      logsByAction,
-      logsByResource,
-      logsByUser,
-    ] = await Promise.all([
-      this.prismaService.audit_logs.count({ where }),
-      this.prismaService.audit_logs.groupBy({
-        by: ['action'],
-        where,
-        _count: { id: true },
-      }),
-      this.prismaService.audit_logs.groupBy({
-        by: ['resource'],
-        where,
-        _count: { id: true },
-      }),
-      // Top users by activity
-      this.prismaService.audit_logs.groupBy({
-        by: ['user_id'],
-        where,
-        _count: { id: true },
-        orderBy: { _count: { id: 'desc' } },
-        take: 10,
-      }),
-    ]);
+    const [totalLogs, logsByAction, logsByResource, logsByUser] =
+      await Promise.all([
+        this.prismaService.audit_logs.count({ where }),
+        this.prismaService.audit_logs.groupBy({
+          by: ['action'],
+          where,
+          _count: { id: true },
+        }),
+        this.prismaService.audit_logs.groupBy({
+          by: ['resource'],
+          where,
+          _count: { id: true },
+        }),
+        // Top users by activity
+        this.prismaService.audit_logs.groupBy({
+          by: ['user_id'],
+          where,
+          _count: { id: true },
+          orderBy: { _count: { id: 'desc' } },
+          take: 10,
+        }),
+      ]);
 
     // Get user details for logs by user
     const userIds = logsByUser
@@ -131,14 +127,22 @@ export class SuperAdminAuditService {
       email: string;
     }
 
-    const users = userIds.length > 0
-      ? await this.prismaService.users.findMany({
-          where: { id: { in: userIds } },
-          select: { id: true, first_name: true, last_name: true, email: true },
-        })
-      : [];
+    const users =
+      userIds.length > 0
+        ? await this.prismaService.users.findMany({
+            where: { id: { in: userIds } },
+            select: {
+              id: true,
+              first_name: true,
+              last_name: true,
+              email: true,
+            },
+          })
+        : [];
 
-    const userMap = new Map<number, UserDetail>(users.map((u: UserDetail) => [u.id, u]));
+    const userMap = new Map<number, UserDetail>(
+      users.map((u: UserDetail) => [u.id, u]),
+    );
 
     // Convertir a la estructura que espera el frontend
     const logsByActionFormatted: Record<string, number> = {};
@@ -154,9 +158,10 @@ export class SuperAdminAuditService {
     const logsByUserFormatted = logsByUser
       .filter((item: any) => item.user_id !== null)
       .map((item: any) => {
-        const user = userMap.get(item.user_id!);
+        const user = userMap.get(item.user_id);
         const userName = user
-          ? `${user.first_name || ''} ${user.last_name || ''}`.trim() || user.email
+          ? `${user.first_name || ''} ${user.last_name || ''}`.trim() ||
+            user.email
           : 'Unknown';
         return {
           user_id: String(item.user_id),

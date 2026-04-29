@@ -19,12 +19,15 @@ interface PartnerSettings {
 }
 
 function projectPartner(org: any) {
-  const settings: PartnerSettings = (org.partner_settings as PartnerSettings) || {};
+  const settings: PartnerSettings =
+    (org.partner_settings as PartnerSettings) || {};
   return {
     ...org,
     partner_margin_percent: Number(settings.partner_margin_percent ?? 0),
     partner_margin_cap:
-      settings.partner_margin_cap === undefined ? null : settings.partner_margin_cap,
+      settings.partner_margin_cap === undefined
+        ? null
+        : settings.partner_margin_cap,
     partner_override_pricing: settings.partner_override_pricing ?? {},
   };
 }
@@ -34,7 +37,13 @@ export class PartnersService {
   constructor(private readonly prisma: GlobalPrismaService) {}
 
   async findAllPartners(query: PartnerQueryDto) {
-    const { page = 1, limit = 10, search, sort_by = 'created_at', sort_order = 'desc' } = query;
+    const {
+      page = 1,
+      limit = 10,
+      search,
+      sort_by = 'created_at',
+      sort_order = 'desc',
+    } = query;
 
     const skip = (page - 1) * Number(limit);
     const where: Prisma.organizationsWhereInput = {
@@ -53,7 +62,9 @@ export class PartnersService {
         orderBy: { [sort_by]: sort_order },
         include: {
           partner_overrides: {
-            include: { base_plan: { select: { id: true, code: true, name: true } } },
+            include: {
+              base_plan: { select: { id: true, code: true, name: true } },
+            },
           },
         },
       }),
@@ -76,7 +87,9 @@ export class PartnersService {
       where: { id: organizationId },
       include: {
         partner_overrides: {
-          include: { base_plan: { select: { id: true, code: true, name: true } } },
+          include: {
+            base_plan: { select: { id: true, code: true, name: true } },
+          },
         },
       },
     });
@@ -96,7 +109,9 @@ export class PartnersService {
       where: { id: organizationId },
       include: {
         partner_overrides: {
-          include: { base_plan: { select: { id: true, code: true, name: true } } },
+          include: {
+            base_plan: { select: { id: true, code: true, name: true } },
+          },
         },
       },
     });
@@ -126,13 +141,16 @@ export class PartnersService {
       where: { id: organizationId },
       data: {
         ...(dto.is_partner !== undefined && { is_partner: dto.is_partner }),
-        ...(dto.is_partner === true && !wasPartner && { partner_since: new Date() }),
+        ...(dto.is_partner === true &&
+          !wasPartner && { partner_since: new Date() }),
         partner_settings: nextSettings as any,
         updated_at: new Date(),
       },
       include: {
         partner_overrides: {
-          include: { base_plan: { select: { id: true, code: true, name: true } } },
+          include: {
+            base_plan: { select: { id: true, code: true, name: true } },
+          },
         },
       },
     });
@@ -224,7 +242,9 @@ export class PartnersService {
   }
 
   async updateOverride(id: number, dto: UpdatePartnerOverrideDto) {
-    const existing = await this.prisma.partner_plan_overrides.findUnique({ where: { id } });
+    const existing = await this.prisma.partner_plan_overrides.findUnique({
+      where: { id },
+    });
 
     if (!existing) {
       throw new VendixHttpException(ErrorCodes.SYS_NOT_FOUND_001);
@@ -235,18 +255,26 @@ export class PartnersService {
       data: {
         ...(dto.custom_code !== undefined && { custom_code: dto.custom_code }),
         ...(dto.custom_name !== undefined && { custom_name: dto.custom_name }),
-        ...(dto.custom_description !== undefined && { custom_description: dto.custom_description }),
+        ...(dto.custom_description !== undefined && {
+          custom_description: dto.custom_description,
+        }),
         ...(dto.margin_pct !== undefined && { margin_pct: dto.margin_pct }),
-        ...(dto.fixed_surcharge !== undefined && { fixed_surcharge: dto.fixed_surcharge }),
+        ...(dto.fixed_surcharge !== undefined && {
+          fixed_surcharge: dto.fixed_surcharge,
+        }),
         ...(dto.is_active !== undefined && { is_active: dto.is_active }),
-        ...(dto.feature_overrides !== undefined && { feature_overrides: dto.feature_overrides as any }),
+        ...(dto.feature_overrides !== undefined && {
+          feature_overrides: dto.feature_overrides as any,
+        }),
         updated_at: new Date(),
       },
     });
   }
 
   async removeOverride(id: number) {
-    const existing = await this.prisma.partner_plan_overrides.findUnique({ where: { id } });
+    const existing = await this.prisma.partner_plan_overrides.findUnique({
+      where: { id },
+    });
 
     if (!existing) {
       throw new VendixHttpException(ErrorCodes.SYS_NOT_FOUND_001);

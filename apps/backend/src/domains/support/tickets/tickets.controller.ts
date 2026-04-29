@@ -57,7 +57,10 @@ export class TicketsController {
 
   @Get('stats')
   @ApiOperation({ summary: 'Get support tickets statistics' })
-  @ApiResponse({ status: 200, description: 'Statistics retrieved successfully' })
+  @ApiResponse({
+    status: 200,
+    description: 'Statistics retrieved successfully',
+  })
   async getStats() {
     const organizationId = RequestContextService.getOrganizationId();
     const storeId = RequestContextService.getStoreId();
@@ -95,10 +98,7 @@ export class TicketsController {
   @Patch(':id/assign')
   @ApiOperation({ summary: 'Assign a ticket to a user' })
   @ApiResponse({ status: 200, description: 'Ticket assigned successfully' })
-  async assign(
-    @Param('id') id: string,
-    @Body() assignDto: AssignTicketDto,
-  ) {
+  async assign(@Param('id') id: string, @Body() assignDto: AssignTicketDto) {
     const userId = RequestContextService.getUserId();
 
     if (!userId) {
@@ -110,7 +110,10 @@ export class TicketsController {
 
   @Patch(':id/status')
   @ApiOperation({ summary: 'Update ticket status' })
-  @ApiResponse({ status: 200, description: 'Ticket status updated successfully' })
+  @ApiResponse({
+    status: 200,
+    description: 'Ticket status updated successfully',
+  })
   async updateStatus(
     @Param('id') id: string,
     @Body() statusDto: UpdateTicketStatusDto,
@@ -127,10 +130,7 @@ export class TicketsController {
   @Patch(':id/close')
   @ApiOperation({ summary: 'Close a ticket' })
   @ApiResponse({ status: 200, description: 'Ticket closed successfully' })
-  async close(
-    @Param('id') id: string,
-    @Body() closeDto: CloseTicketDto,
-  ) {
+  async close(@Param('id') id: string, @Body() closeDto: CloseTicketDto) {
     const userId = RequestContextService.getUserId();
 
     if (!userId) {

@@ -210,6 +210,7 @@ export class OrganizationDomainsService {
     ownership: string;
     dns_type: 'CNAME' | 'A';
     target: string;
+    requires_alias?: boolean;
     instructions: {
       record_type: string;
       name: string;
@@ -222,6 +223,7 @@ export class OrganizationDomainsService {
       ownership: string;
       dns_type: 'CNAME' | 'A';
       target: string;
+      requires_alias?: boolean;
       instructions: {
         record_type: string;
         name: string;

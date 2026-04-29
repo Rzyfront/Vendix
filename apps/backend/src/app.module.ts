@@ -6,6 +6,7 @@ import {
 } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { EventEmitterModule } from '@nestjs/event-emitter';
+import { ThrottlerModule, ThrottlerGuard } from '@nestjs/throttler';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { AuthModule } from './domains/auth/auth.module';
@@ -31,12 +32,18 @@ import { SecretsModule } from './common/config/secrets.module';
 import { DefaultPanelUIModule } from './common/services/default-panel-ui.module';
 import { HelpersModule } from './common/helpers/helpers.module';
 import { DomainResolverMiddleware } from './common/middleware/domain-resolver.middleware';
+import { DomainCacheInvalidatorListener } from './common/middleware/domain-cache-invalidator.listener';
 import { AIEngineModule } from './ai-engine/ai-engine.module';
 import { EncryptionModule } from './common/services/encryption.module';
+import { AwsModule } from './common/services/aws/aws.module';
 import { RedisModule } from './common/redis/redis.module';
 import { QueueModule } from './common/queue/queue.module';
 import { VendixCacheModule } from './common/cache/cache.module';
 import { MessagingModule } from './messaging/messaging.module';
+import { DnsModule } from './common/services/dns/dns.module';
+import { CorsModule } from './common/cors/cors.module';
+import { BlocklistModule } from './common/services/blocklist/blocklist.module';
+import { RateLimitModule } from './common/services/rate-limit/rate-limit.module';
 
 @Module({
   imports: [
@@ -45,6 +52,7 @@ import { MessagingModule } from './messaging/messaging.module';
       isGlobal: true,
       envFilePath: '.env',
     }),
+    ThrottlerModule.forRoot([{ ttl: 60000, limit: 100 }]),
     EventEmitterModule.forRoot(),
     AuthModule,
     PrismaModule,
@@ -62,29 +70,44 @@ import { MessagingModule } from './messaging/messaging.module';
     VendixCacheModule,
     AIEngineModule,
     EncryptionModule,
+    AwsModule,
     PerformanceModule,
     MessagingModule,
+    DnsModule,
+    CorsModule,
+    BlocklistModule,
+    RateLimitModule,
   ],
   controllers: [AppController],
   providers: [
     AppService,
     RequestContextService,
+    DomainCacheInvalidatorListener,
     {
       provide: APP_INTERCEPTOR,
       useClass: PerformanceInterceptor,
     },
     {
       provide: APP_GUARD,
+      useClass: ThrottlerGuard,
+    },
+    {
+      provide: APP_GUARD,
       useClass: JwtAuthGuard,
+    },
+    // Subscription gate — runs AFTER JwtAuthGuard so req.user.store_id is
+    // populated. Blocks writes under /api/store/** when the store has no
+    // active subscription (or it's suspended/blocked/cancelled/expired).
+    // Read methods, /api/store/subscriptions/**, and handlers decorated
+    // with @SkipSubscriptionGate() pass through. Enforce mode is gated by
+    // the STORE_GATE_ENFORCE env var (currently 'true' in dev/prod).
+    {
+      provide: APP_GUARD,
+      useClass: StoreOperationsGuard,
     },
     {
       provide: APP_INTERCEPTOR,
       useClass: RequestContextInterceptor,
-    },
-    // Subscription gate runs AFTER auth+context so it can read storeId.
-    {
-      provide: APP_GUARD,
-      useClass: StoreOperationsGuard,
     },
     {
       provide: APP_INTERCEPTOR,

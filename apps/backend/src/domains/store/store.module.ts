@@ -106,4 +106,4 @@ import { SubscriptionsModule } from './subscriptions/subscriptions.module';
   providers: [StorePrismaService],
   exports: [StorePrismaService],
 })
-export class StoreDomainModule { }
+export class StoreDomainModule {}

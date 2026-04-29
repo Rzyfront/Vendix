@@ -29,7 +29,9 @@ export class OpenAICompatibleProvider implements AIProvider {
         model: options?.model || this.config.modelId,
         messages: this.buildMessages(messages, options?.systemPrompt) as any,
         temperature:
-          options?.temperature ?? this.config.settings?.temperature ?? undefined,
+          options?.temperature ??
+          this.config.settings?.temperature ??
+          undefined,
         max_tokens:
           options?.maxTokens ?? this.config.settings?.maxTokens ?? undefined,
         ...(options?.tools?.length && {
@@ -38,7 +40,9 @@ export class OpenAICompatibleProvider implements AIProvider {
             function: t.function,
           })),
         }),
-        ...(options?.tool_choice && { tool_choice: options.tool_choice as any }),
+        ...(options?.tool_choice && {
+          tool_choice: options.tool_choice as any,
+        }),
       });
 
       const message = response.choices[0]?.message;
@@ -91,10 +95,9 @@ export class OpenAICompatibleProvider implements AIProvider {
 
   async testConnection(): Promise<{ success: boolean; message: string }> {
     try {
-      const response = await this.chat(
-        [{ role: 'user', content: 'Say OK' }],
-        { maxTokens: 5 },
-      );
+      const response = await this.chat([{ role: 'user', content: 'Say OK' }], {
+        maxTokens: 5,
+      });
       if (response.success) {
         return {
           success: true,
@@ -115,8 +118,12 @@ export class OpenAICompatibleProvider implements AIProvider {
       const stream = await this.client.chat.completions.create({
         model: options?.model || this.config.modelId,
         messages: this.buildMessages(messages, options?.systemPrompt) as any,
-        temperature: options?.temperature ?? this.config.settings?.temperature ?? undefined,
-        max_tokens: options?.maxTokens ?? this.config.settings?.maxTokens ?? undefined,
+        temperature:
+          options?.temperature ??
+          this.config.settings?.temperature ??
+          undefined,
+        max_tokens:
+          options?.maxTokens ?? this.config.settings?.maxTokens ?? undefined,
         stream: true,
         ...(options?.tools?.length && {
           tools: options.tools.map((t) => ({
@@ -124,7 +131,9 @@ export class OpenAICompatibleProvider implements AIProvider {
             function: t.function,
           })),
         }),
-        ...(options?.tool_choice && { tool_choice: options.tool_choice as any }),
+        ...(options?.tool_choice && {
+          tool_choice: options.tool_choice as any,
+        }),
       });
 
       let totalPromptTokens = 0;

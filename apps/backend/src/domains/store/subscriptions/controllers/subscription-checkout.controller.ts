@@ -6,14 +6,22 @@ import { SubscriptionProrationService } from '../services/subscription-proration
 import { SubscriptionBillingService } from '../services/subscription-billing.service';
 import { SubscriptionPaymentService } from '../services/subscription-payment.service';
 import { SubscriptionResolverService } from '../services/subscription-resolver.service';
+import { SubscriptionStateService } from '../services/subscription-state.service';
+import { PromotionalApplyService } from '../services/promotional-apply.service';
+import { PlatformGatewayService } from '../../../superadmin/subscriptions/gateway/platform-gateway.service';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { UseGuards } from '@nestjs/common';
 import { CheckoutPreviewDto } from '../dto/checkout-preview.dto';
 import { CheckoutCommitDto } from '../dto/checkout-commit.dto';
+import { ValidateCouponDto } from '../dto/validate-coupon.dto';
 import { Prisma } from '@prisma/client';
-import { InvoicePreview, CheckoutPreviewResult } from '../types/billing.types';
+import {
+  InvoicePreview,
+  CheckoutPreviewResult,
+  CouponPreviewInfo,
+} from '../types/billing.types';
 import { SkipSubscriptionGate } from '../decorators/skip-subscription-gate.decorator';
 
 const DECIMAL_ZERO = new Prisma.Decimal(0);
@@ -28,9 +36,33 @@ export class SubscriptionCheckoutController {
     private readonly billing: SubscriptionBillingService,
     private readonly payment: SubscriptionPaymentService,
     private readonly resolver: SubscriptionResolverService,
+    private readonly stateService: SubscriptionStateService,
+    private readonly promotional: PromotionalApplyService,
+    private readonly platformGw: PlatformGatewayService,
     private readonly prisma: GlobalPrismaService,
     private readonly responseService: ResponseService,
   ) {}
+
+  /**
+   * S2.1 — Validate a redemption code for the current store. Returns a
+   * discriminated result so the frontend can show the precise reason
+   * (not_found / expired / already_used / not_eligible) without leaking
+   * internal eligibility codes.
+   *
+   * Reachable in any subscription state (decorated with @SkipSubscriptionGate
+   * at the controller level) so users in draft/pending_payment can still
+   * preview a coupon before committing.
+   */
+  @Permissions('subscriptions:read')
+  @Post('validate-coupon')
+  async validateCoupon(@Body() dto: ValidateCouponDto) {
+    const storeId = RequestContextService.getStoreId();
+    if (!storeId) {
+      throw new VendixHttpException(ErrorCodes.STORE_CONTEXT_001);
+    }
+    const result = await this.promotional.validateCoupon(storeId, dto.code);
+    return this.responseService.success(result, 'Coupon validation result');
+  }
 
   @Permissions('subscriptions:read')
   @Post('preview')
@@ -44,10 +76,16 @@ export class SubscriptionCheckoutController {
       where: { id: dto.planId },
     });
     if (!targetPlan) {
-      throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_001, 'Plan not found');
+      throw new VendixHttpException(
+        ErrorCodes.SUBSCRIPTION_001,
+        'Plan not found',
+      );
     }
     if (targetPlan.archived_at || targetPlan.state !== 'active') {
-      throw new VendixHttpException(ErrorCodes.PLAN_001, 'Plan no disponible para suscripción');
+      throw new VendixHttpException(
+        ErrorCodes.PLAN_001,
+        'Plan no disponible para suscripción',
+      );
     }
 
     const sub = await this.prisma.store_subscriptions.findUnique({
@@ -56,9 +94,23 @@ export class SubscriptionCheckoutController {
     });
 
     const partnerOverrideId = sub?.partner_override_id ?? null;
-    const targetPricing = await this.resolveTargetPricing(targetPlan, partnerOverrideId);
+    const targetPricing = await this.resolveTargetPricing(
+      targetPlan,
+      partnerOverrideId,
+    );
 
-    if (targetPricing.effective_price.lte(DECIMAL_ZERO) && targetPricing.margin_amount.lte(DECIMAL_ZERO)) {
+    // S2.1 — Re-validate the coupon server-side on every preview. The frontend
+    // may have stored a previously valid result; this is the authoritative
+    // pass.
+    const couponPreview = await this.buildCouponPreview(
+      storeId,
+      dto.coupon_code,
+    );
+
+    if (
+      targetPricing.effective_price.lte(DECIMAL_ZERO) &&
+      targetPricing.margin_amount.lte(DECIMAL_ZERO)
+    ) {
       const result: CheckoutPreviewResult = {
         proration: null,
         invoice: null,
@@ -72,8 +124,12 @@ export class SubscriptionCheckoutController {
             trial_days: targetPlan.trial_days ?? 0,
           },
         },
+        coupon: couponPreview,
       };
-      return this.responseService.success(result, 'Free plan ready to activate');
+      return this.responseService.success(
+        result,
+        'Free plan ready to activate',
+      );
     }
 
     // Fresh purchase path — store has no subscription yet (e.g. trial-once
@@ -122,6 +178,7 @@ export class SubscriptionCheckoutController {
         },
         invoice: invoicePreview,
         free_plan: null,
+        coupon: couponPreview,
       };
       return this.responseService.success(result, 'Checkout preview retrieved');
     }
@@ -131,6 +188,38 @@ export class SubscriptionCheckoutController {
     let invoicePreview: InvoicePreview | null = null;
     if (prorationPreview.invoice_to_issue) {
       invoicePreview = prorationPreview.invoice_to_issue;
+    } else if (prorationPreview.kind === 're_subscribe') {
+      // Re-subscribe path: synthesize the invoice preview from the TARGET
+      // plan's pricing (not the stored snapshot, which is stale for
+      // cancelled/expired subs).
+      const now = new Date();
+      const cycleMs = this.billingCycleMs(targetPlan.billing_cycle);
+      const periodEnd = new Date(now.getTime() + cycleMs);
+      invoicePreview = {
+        total: targetPricing.effective_price.toFixed(2),
+        period_start: now.toISOString(),
+        period_end: periodEnd.toISOString(),
+        line_items: [
+          {
+            description: `Plan ${targetPlan.code} (${targetPlan.billing_cycle})`,
+            quantity: 1,
+            unit_price: targetPricing.effective_price.toFixed(2),
+            total: targetPricing.effective_price.toFixed(2),
+            meta: {
+              plan_id: targetPlan.id,
+              plan_code: targetPlan.code,
+              billing_cycle: targetPlan.billing_cycle,
+              prorated: false,
+            },
+          },
+        ],
+        split_breakdown: {
+          vendix_share: targetPricing.base_price.toFixed(2),
+          partner_share: targetPricing.margin_amount.toFixed(2),
+          margin_pct_used: targetPricing.margin_pct.toFixed(2),
+          partner_org_id: targetPricing.partner_org_id,
+        },
+      };
     } else {
       try {
         invoicePreview = await this.billing.previewNextInvoice(sub.id);
@@ -143,12 +232,48 @@ export class SubscriptionCheckoutController {
       proration: prorationPreview,
       invoice: invoicePreview,
       free_plan: null,
+      coupon: couponPreview,
     };
     return this.responseService.success(result, 'Checkout preview retrieved');
   }
 
+  /**
+   * S2.1 — Re-validate a coupon code server-side and shape the preview
+   * payload. Returns null when no code was provided. Never throws — invalid
+   * codes surface as `{ valid: false, reason }`.
+   */
+  private async buildCouponPreview(
+    storeId: number,
+    code: string | undefined,
+  ): Promise<CouponPreviewInfo | null> {
+    if (!code || !code.trim()) return null;
+    const validation = await this.promotional.validateCoupon(storeId, code);
+    return {
+      valid: validation.valid,
+      reason: validation.reason,
+      reasons_blocked: validation.reasons_blocked,
+      code: code.trim(),
+      plan: validation.plan
+        ? {
+            id: validation.plan.id,
+            code: validation.plan.code,
+            name: validation.plan.name,
+            plan_type: validation.plan.plan_type,
+          }
+        : undefined,
+      overlay_features: validation.overlay_features,
+      duration_days: validation.duration_days,
+      starts_at: validation.starts_at,
+      expires_at: validation.expires_at,
+    };
+  }
+
   private async resolveTargetPricing(
-    plan: { id: number; base_price: Prisma.Decimal; max_partner_margin_pct: Prisma.Decimal | null },
+    plan: {
+      id: number;
+      base_price: Prisma.Decimal;
+      max_partner_margin_pct: Prisma.Decimal | null;
+    },
     partnerOverrideId: number | null,
   ) {
     if (!partnerOverrideId) {
@@ -195,17 +320,145 @@ export class SubscriptionCheckoutController {
       where: { store_id: storeId },
     });
 
+    // S3.4 — A trial-state plan swap is a free deferred change: no charge
+    // happens at commit and the user keeps the rest of the trial. The
+    // no-refund acknowledgement only gates flows that emit a charge, so we
+    // skip the hard block here.
+    const isTrialSwap = !!(
+      sub &&
+      sub.state === 'trial' &&
+      sub.trial_ends_at &&
+      sub.trial_ends_at.getTime() > Date.now()
+    );
+
+    // Free-plan detection: when base_price is 0 the commit emits no charge,
+    // so the no-refund acknowledgement is semantically vacuous. Mirrors the
+    // frontend which hides the policy block for free plans.
+    const targetPlan = await this.prisma.subscription_plans.findUnique({
+      where: { id: dto.planId },
+      select: { base_price: true },
+    });
+    const isFreePlan =
+      !!targetPlan && new Prisma.Decimal(targetPlan.base_price).lessThanOrEqualTo(DECIMAL_ZERO);
+
+    // G8 — política de no-reembolso. Bloqueo duro: el cliente debe aceptar
+    // explícitamente. Sin esto no se procesa ningún cargo. Se exenta para
+    // flujos que no emiten cargo (trial swap, free plan).
+    if (!isTrialSwap && !isFreePlan && dto.no_refund_acknowledged !== true) {
+      throw new VendixHttpException(
+        ErrorCodes.SUBSCRIPTION_VALIDATION,
+        'Debes aceptar la política de no-reembolso',
+      );
+    }
+
+    const acknowledgmentMetadata: Record<string, unknown> = {
+      no_refund_acknowledged: dto.no_refund_acknowledged === true,
+      no_refund_acknowledged_at:
+        dto.no_refund_acknowledged_at ?? new Date().toISOString(),
+      acknowledged_user_id: context?.user_id ?? null,
+    };
+
+    // S2.1 — Coupon pre-validation. Re-check server-side; reject the commit
+    // up-front if the code is invalid so the user sees the error before the
+    // Wompi widget opens.
+    let couponCode: string | null = null;
+    if (dto.coupon_code && dto.coupon_code.trim()) {
+      const validation = await this.promotional.validateCoupon(
+        storeId,
+        dto.coupon_code,
+      );
+      if (!validation.valid) {
+        throw new VendixHttpException(
+          ErrorCodes.PROMO_NOT_ELIGIBLE,
+          `Cupón inválido: ${validation.reason ?? 'unknown'}`,
+        );
+      }
+      couponCode = dto.coupon_code.trim();
+    }
+
+    // S3.8b — Bug 1 fix: Free-plan switch while a previous subscription is
+    // stuck in `pending_payment`. The legacy path-E branch below assumed the
+    // target was paid and emitted a new invoice, leaving the user trapped in
+    // pending_payment. For a free plan there's no charge to wait for, so we
+    // short-circuit here:
+    //   1. Void the stranded pending invoice + cancel its pending payments.
+    //   2. Cancel the dead subscription (legal transition pending_payment →
+    //      cancelled per TRANSITIONS map).
+    //   3. Fall through to the !sub fresh-purchase path which creates a clean
+    //      `active` row for the free plan.
+    if (sub && sub.state === 'pending_payment' && isFreePlan) {
+      await this.cancelStrandedPendingSubscription(
+        sub.id,
+        storeId,
+        context?.user_id ?? null,
+        'free_plan_replacement',
+      );
+      // Re-fetch: the row should now be cancelled. We treat downstream like a
+      // fresh purchase by setting `sub` to null via a local rebind.
+      const refreshed = await this.prisma.store_subscriptions.findUnique({
+        where: { store_id: storeId },
+      });
+      if (refreshed && refreshed.state === 'cancelled') {
+        // Re-subscribe path expects sub to exist + state cancelled, which is
+        // exactly what we want for a free-plan cancelled → active jump.
+        const reactivated = await this.proration.applyResubscribe(
+          refreshed.id,
+          dto.planId,
+        );
+        await this.stateService.transition(storeId, 'pending_payment', {
+          reason: 'free_plan_replacement_intermediate',
+          triggeredByUserId: context?.user_id ?? undefined,
+        });
+        await this.stateService.transition(storeId, 'active', {
+          reason: 'free_plan_replacement_active',
+          triggeredByUserId: context?.user_id ?? undefined,
+        });
+        await this.resolver.invalidate(storeId);
+        if (couponCode) {
+          await this.safeApplyCoupon(
+            storeId,
+            couponCode,
+            context?.user_id ?? null,
+          );
+        }
+        return this.responseService.success(
+          {
+            subscription: await this.prisma.store_subscriptions.findUnique({
+              where: { id: reactivated.id },
+            }),
+            widget: null,
+            mode: 'free_plan_replacement',
+          },
+          'Free plan activated (replaced pending subscription)',
+        );
+      }
+    }
+
     // Fresh purchase: store has no subscription yet → create one, issue
     // first invoice, build a Wompi WidgetCheckout config so the frontend can
     // open the embedded widget (same UX as eCommerce checkout). Trial is NOT
     // granted here — checkout is an explicit purchase; trial bootstrapping
     // happens at onboarding only.
     if (!sub) {
-      const created = await this.createFreshSubscription(storeId, dto.planId, context?.user_id ?? null);
+      const created = await this.createFreshSubscription(
+        storeId,
+        dto.planId,
+        context?.user_id ?? null,
+        couponCode,
+      );
       await this.resolver.invalidate(storeId);
 
       const totalDecimal = new Prisma.Decimal(created.effective_price);
       if (totalDecimal.lessThanOrEqualTo(DECIMAL_ZERO)) {
+        // Free plan: subscription is already `active` → apply coupon
+        // synchronously so the overlay lands before the response returns.
+        if (couponCode) {
+          await this.safeApplyCoupon(
+            storeId,
+            couponCode,
+            context?.user_id ?? null,
+          );
+        }
         return this.responseService.success(
           { subscription: created, widget: null },
           'Free plan activated',
@@ -220,7 +473,12 @@ export class SubscriptionCheckoutController {
         );
       }
 
-      const customerEmail = await this.resolveCustomerEmail(context?.user_id ?? null);
+      // G8 — persistir aceptación de no-reembolso en metadata de la factura.
+      await this.mergeInvoiceAckMetadata(invoice.id, acknowledgmentMetadata);
+
+      const customerEmail = await this.resolveCustomerEmail(
+        context?.user_id ?? null,
+      );
       const { widget } = await this.payment.prepareWidgetCharge(invoice.id, {
         customerEmail,
         redirectUrl: dto.returnUrl ?? this.defaultReturnUrl(),
@@ -232,36 +490,331 @@ export class SubscriptionCheckoutController {
       );
     }
 
-    const updated = await this.proration.apply(sub.id, dto.planId);
+    // Path D — Re-subscribe from a terminal state (`cancelled` or `expired`).
+    // Treats the commit like a fresh purchase: transition cancelled/expired →
+    // pending_payment, reset the subscription's billing window via
+    // applyResubscribe(), issue a fresh invoice for the new plan's full price,
+    // and prepare the Wompi widget so the frontend can open the payment modal.
+    // The pending_payment → active promotion happens via the existing
+    // SubscriptionStateListener once the Wompi webhook reports APPROVED.
+    if (sub.state === 'cancelled' || sub.state === 'expired') {
+      // 1. Transition cancelled/expired → pending_payment (legal edge added
+      //    in TRANSITIONS map). Audit row + cache invalidation handled by
+      //    SubscriptionStateService.transition().
+      await this.stateService.transition(storeId, 'pending_payment', {
+        reason: 're_subscribe_checkout',
+        triggeredByUserId: context?.user_id ?? undefined,
+        payload: {
+          from_plan_id: sub.plan_id,
+          to_plan_id: dto.planId,
+          previous_state: sub.state,
+        },
+      });
 
-    const prorationAmount = await this.prisma.subscription_invoices.findFirst({
-      where: { store_subscription_id: sub.id, state: 'issued' },
-      orderBy: { created_at: 'desc' },
-    });
+      // 2. Reset plan + period + dunning crumbs. Stamps a `reactivated`
+      //    subscription_event with mode='re_subscribe'.
+      const reactivated = await this.proration.applyResubscribe(
+        sub.id,
+        dto.planId,
+      );
 
-    if (prorationAmount) {
-      const total = new Prisma.Decimal(prorationAmount.total);
-      if (total.greaterThan(DECIMAL_ZERO)) {
-        await this.payment.charge(prorationAmount.id);
+      // 3. Persist coupon for application after the listener promotes the
+      //    sub to `active` (same pattern as fresh-purchase path).
+      if (couponCode) {
+        const reactMeta = {
+          ...(reactivated.metadata && typeof reactivated.metadata === 'object'
+            ? (reactivated.metadata as Record<string, unknown>)
+            : {}),
+          pending_coupon_code: couponCode,
+        };
+        await this.prisma.store_subscriptions.update({
+          where: { id: reactivated.id },
+          data: { metadata: reactMeta as Prisma.InputJsonValue },
+        });
+      }
+
+      // 4. Issue fresh invoice — pricing snapshot already updated by
+      //    applyResubscribe so issueInvoice picks up the new plan amount.
+      const invoice = await this.billing.issueInvoice(reactivated.id);
+      if (!invoice) {
+        // Free plan re-subscribe (rare). Promote straight to active because
+        // there is no charge to wait for.
+        await this.stateService.transition(storeId, 'active', {
+          reason: 're_subscribe_free_plan',
+          triggeredByUserId: context?.user_id ?? undefined,
+        });
+        await this.resolver.invalidate(storeId);
+        if (couponCode) {
+          await this.safeApplyCoupon(
+            storeId,
+            couponCode,
+            context?.user_id ?? null,
+          );
+        }
+        return this.responseService.success(
+          { subscription: reactivated, widget: null, mode: 're_subscribe' },
+          'Re-subscription activated (free plan)',
+        );
+      }
+
+      // 5. Persist no-refund acknowledgement and prepare Wompi widget.
+      await this.mergeInvoiceAckMetadata(invoice.id, acknowledgmentMetadata);
+      const customerEmail = await this.resolveCustomerEmail(
+        context?.user_id ?? null,
+      );
+      const { widget } = await this.payment.prepareWidgetCharge(invoice.id, {
+        customerEmail,
+        redirectUrl: dto.returnUrl ?? this.defaultReturnUrl(),
+      });
+
+      await this.resolver.invalidate(storeId);
+
+      return this.responseService.success(
+        {
+          subscription: reactivated,
+          widget,
+          invoiceId: invoice.id,
+          mode: 're_subscribe',
+        },
+        'Re-subscription committed',
+      );
+    }
+
+    // S3.8 — Path E: subscription stuck in `pending_payment`. The user
+    // signed up but never completed the first cycle's payment (widget closed,
+    // bank rejection, etc.). Re-route through the re-subscribe pipeline so
+    // we issue/reuse a fresh invoice and emit the Wompi widget; the regular
+    // proration path emits no widget and assumes a stored card, which is
+    // never present in this state.
+    //
+    // Bug 2 fix: when the plan changes while pending we must void the old
+    // invoice + payments to avoid double-charge risk. issueInvoice() now
+    // does this automatically (auto-void on plan change, idempotent reuse on
+    // same plan). We just need to refresh pricing via applyResubscribe before
+    // calling it so the new plan's price is reflected.
+    if (sub.state === 'pending_payment' && !isFreePlan) {
+      if (sub.plan_id !== dto.planId) {
+        // Plan changed while pending — refresh pricing/period so the next
+        // invoice reflects the latest selection. issueInvoice() will detect
+        // the plan mismatch on the existing pending row and void it.
+        await this.proration.applyResubscribe(sub.id, dto.planId);
+      }
+
+      // issueInvoice handles both reuse (same plan, idempotent retries) and
+      // void+create (plan changed). Always non-null for a paid plan.
+      const invoice = await this.billing.issueInvoice(sub.id);
+
+      if (!invoice) {
+        // Defensive: a paid plan must always produce an invoice.
+        throw new VendixHttpException(
+          ErrorCodes.SUBSCRIPTION_INTERNAL_ERROR,
+          'Could not issue invoice for pending_payment subscription',
+        );
+      }
+
+      await this.mergeInvoiceAckMetadata(invoice.id, acknowledgmentMetadata);
+      const customerEmail = await this.resolveCustomerEmail(
+        context?.user_id ?? null,
+      );
+      const { widget } = await this.payment.prepareWidgetCharge(invoice.id, {
+        customerEmail,
+        redirectUrl: dto.returnUrl ?? this.defaultReturnUrl(),
+      });
+
+      await this.resolver.invalidate(storeId);
+
+      return this.responseService.success(
+        {
+          subscription: await this.prisma.store_subscriptions.findUnique({
+            where: { id: sub.id },
+          }),
+          widget,
+          invoiceId: invoice.id,
+          mode: 'pending_payment_resume',
+        },
+        'Pending payment resumed',
+      );
+    }
+
+    // S3.4 — Re-evaluate proration server-side BEFORE applying so we can
+    // branch on `trial_plan_swap` and skip the no-refund-bound invoice/charge
+    // pipeline. The trial swap path is free; no invoice is emitted, no
+    // charge runs, and the subscription stays in `trial`.
+    const previewResult = await this.proration.preview(sub.id, dto.planId);
+    if (previewResult.kind === 'trial_plan_swap') {
+      const updated = await this.proration.apply(sub.id, dto.planId);
+      await this.resolver.invalidate(storeId);
+      // Coupons can still be applied during a trial swap — the overlay
+      // attaches to the destination plan and surfaces at the next billing.
+      if (couponCode) {
+        await this.safeApplyCoupon(
+          storeId,
+          couponCode,
+          context?.user_id ?? null,
+        );
+      }
+      return this.responseService.success(
+        {
+          subscription: updated,
+          mode: 'trial_plan_swap',
+          trial_ends_at: previewResult.trial_swap?.trial_ends_at ?? null,
+        },
+        'Checkout committed (trial plan swap)',
+      );
+    }
+
+    // S3.6 — When the target plan is paid, we may need to charge a proration
+    // amount post-apply. Validate the platform gateway is configured BEFORE
+    // touching `proration.apply()` so the user gets a clean error and the
+    // current plan is left untouched. Without this pre-check, apply() commits
+    // the plan change first and only THEN charge() throws — leaving the
+    // subscription on the new plan with an unpaid proration invoice.
+    if (!isFreePlan) {
+      const wompiCreds = await this.platformGw.getActiveCredentials('wompi');
+      if (!wompiCreds) {
+        throw new VendixHttpException(
+          ErrorCodes.SUBSCRIPTION_GATEWAY_003,
+          'Credenciales de pasarela de plataforma no configuradas',
+        );
       }
     }
 
+    // S3.6 — Atomicity guard around apply + charge. If the charge throws
+    // after `apply()` has committed, revert the plan change to oldPlanId so
+    // the user is not stuck on a plan they did not pay for. The revert reuses
+    // `proration.apply()` so the same audit trail (`plan_changed`) is emitted
+    // with the original plan, making the rollback observable.
+    const oldPlanId = sub.plan_id;
+    const updated = await this.proration.apply(sub.id, dto.planId);
+
+    // S3.6 — Skip the charge step entirely when downgrading to a free plan.
+    // proration.apply() for paid → free produces a NEGATIVE proration_amount
+    // (credit) and emits no new invoice; only `pending_credit` accumulates in
+    // metadata. The legacy `findFirst({ state: 'issued' })` query below was
+    // catching unrelated older invoices and trying to charge them — which is
+    // both wrong semantically and triggers SUBSCRIPTION_GATEWAY_003 when the
+    // platform gateway isn't configured for free flows.
+    if (!isFreePlan) {
+      const prorationAmount = await this.prisma.subscription_invoices.findFirst({
+        where: { store_subscription_id: sub.id, state: 'issued' },
+        orderBy: { created_at: 'desc' },
+      });
+
+      if (prorationAmount) {
+        // G8 — persistir aceptación de no-reembolso en la factura prorrateada.
+        await this.mergeInvoiceAckMetadata(
+          prorationAmount.id,
+          acknowledgmentMetadata,
+        );
+
+        const total = new Prisma.Decimal(prorationAmount.total);
+        if (total.greaterThan(DECIMAL_ZERO)) {
+          try {
+            await this.payment.charge(prorationAmount.id);
+          } catch (chargeErr) {
+            // Revert plan change. We do NOT swallow `chargeErr` — re-throw
+            // after the revert so the user sees the original failure.
+            try {
+              if (oldPlanId !== dto.planId) {
+                await this.proration.apply(sub.id, oldPlanId);
+              }
+              await this.prisma.subscription_invoices.update({
+                where: { id: prorationAmount.id },
+                data: { state: 'void' },
+              });
+            } catch {
+              // Best-effort revert: if it fails the original error still
+              // surfaces; an operator-visible plan_changed audit row remains.
+            }
+            throw chargeErr;
+          }
+        }
+      }
+    }
+
+    // S2.1 — Existing-subscription path: subscription is already `active`
+    // (proration only fires on active subs), so apply the coupon overlay
+    // synchronously.
+    if (couponCode) {
+      await this.safeApplyCoupon(
+        storeId,
+        couponCode,
+        context?.user_id ?? null,
+      );
+    }
+
     return this.responseService.success(updated, 'Checkout committed');
+  }
+
+  /**
+   * S2.1 — Best-effort coupon application. Wraps `applyCoupon()` in a
+   * try/catch so a coupon-only failure does not roll back the checkout
+   * (the subscription/charge are the load-bearing artifacts). The
+   * subscription_state listener can re-attempt later for the
+   * pending_payment → active path via `pending_coupon_code` metadata.
+   */
+  private async safeApplyCoupon(
+    storeId: number,
+    code: string,
+    userId: number | null,
+  ): Promise<void> {
+    try {
+      await this.promotional.applyCoupon(storeId, code, userId);
+    } catch (err) {
+      // Surface as a non-fatal warning. The frontend already validated the
+      // coupon; failures here are edge races (e.g. promo expired between
+      // preview and commit). Operator can re-apply manually.
+      // eslint-disable-next-line no-console
+      console.warn(
+        `[SubscriptionCheckout] applyCoupon failed for store ${storeId} (${code}): ${(err as Error).message}`,
+      );
+    }
+  }
+
+  /**
+   * G8 — Mergea el bloque de aceptación de no-reembolso en
+   * subscription_invoices.metadata sin sobrescribir las claves existentes
+   * (prorated, credit_applied, etc.).
+   */
+  private async mergeInvoiceAckMetadata(
+    invoiceId: number,
+    ack: Record<string, unknown>,
+  ): Promise<void> {
+    const current = await this.prisma.subscription_invoices.findUnique({
+      where: { id: invoiceId },
+      select: { metadata: true },
+    });
+    const existing =
+      current?.metadata && typeof current.metadata === 'object'
+        ? (current.metadata as Record<string, unknown>)
+        : {};
+    const merged = { ...existing, ...ack } as Prisma.InputJsonValue;
+    await this.prisma.subscription_invoices.update({
+      where: { id: invoiceId },
+      data: { metadata: merged },
+    });
   }
 
   private async createFreshSubscription(
     storeId: number,
     planId: number,
     userId: number | null,
+    couponCode: string | null = null,
   ) {
     const plan = await this.prisma.subscription_plans.findUnique({
       where: { id: planId },
     });
     if (!plan) {
-      throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_001, 'Plan not found');
+      throw new VendixHttpException(
+        ErrorCodes.SUBSCRIPTION_001,
+        'Plan not found',
+      );
     }
     if (plan.archived_at || plan.state !== 'active') {
-      throw new VendixHttpException(ErrorCodes.PLAN_001, 'Plan no disponible para suscripción');
+      throw new VendixHttpException(
+        ErrorCodes.PLAN_001,
+        'Plan no disponible para suscripción',
+      );
     }
 
     const pricing = this.billing.computePricing({ plan });
@@ -290,6 +843,13 @@ export class SubscriptionCheckoutController {
         );
       }
 
+      // S2.1 — Persist the coupon code in metadata so the
+      // SubscriptionStateListener can apply it on transition to `active`
+      // (pending_payment → active path after the Wompi webhook).
+      const subMetadata: Record<string, unknown> | null = couponCode
+        ? { pending_coupon_code: couponCode }
+        : null;
+
       const created = await tx.store_subscriptions.create({
         data: {
           store_id: storeId,
@@ -305,6 +865,7 @@ export class SubscriptionCheckoutController {
           current_period_start: now,
           current_period_end: periodEnd,
           next_billing_at: periodEnd,
+          metadata: subMetadata as Prisma.InputJsonValue,
         },
         include: { plan: true },
       });
@@ -336,7 +897,9 @@ export class SubscriptionCheckoutController {
       : 'https://vendix.com/admin/subscription';
   }
 
-  private async resolveCustomerEmail(userId: number | null): Promise<string | undefined> {
+  private async resolveCustomerEmail(
+    userId: number | null,
+  ): Promise<string | undefined> {
     if (!userId) return undefined;
     const user = await this.prisma.users.findUnique({
       where: { id: userId },
@@ -347,12 +910,18 @@ export class SubscriptionCheckoutController {
 
   private billingCycleMs(cycle: string): number {
     switch (cycle) {
-      case 'monthly': return 30 * DAY_MS;
-      case 'quarterly': return 90 * DAY_MS;
-      case 'semiannual': return 180 * DAY_MS;
-      case 'annual': return 365 * DAY_MS;
-      case 'lifetime': return 100 * 365 * DAY_MS;
-      default: return 30 * DAY_MS;
+      case 'monthly':
+        return 30 * DAY_MS;
+      case 'quarterly':
+        return 90 * DAY_MS;
+      case 'semiannual':
+        return 180 * DAY_MS;
+      case 'annual':
+        return 365 * DAY_MS;
+      case 'lifetime':
+        return 100 * 365 * DAY_MS;
+      default:
+        return 30 * DAY_MS;
     }
   }
 }

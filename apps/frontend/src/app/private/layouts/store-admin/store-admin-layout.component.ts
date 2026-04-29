@@ -596,19 +596,18 @@ export class StoreAdminLayoutComponent {
     this.checkOnboardingWithRoleValidation();
     this.checkAndStartPosTour();
 
-    // Reload subscription on every store change (including initial). Without
-    // this, the layout's first load would freeze the facade state, so the
-    // sidebar would keep showing the previous store's plan after a switch.
+    // S1.2 — Notify the subscription feature about store-context changes
+    // (including initial). This wipes any stale data from the previous
+    // store and triggers a fresh `loadCurrent()` via the effect — so the
+    // sidebar plan name and banner cannot show the previous store's data.
     this.authFacade.userStore$
       .pipe(
-        map((s: any) => s?.id ?? null),
+        map((s: any) => (s?.id ?? null) as number | null),
         distinctUntilChanged(),
         takeUntilDestroyed(this.destroyRef),
       )
       .subscribe((storeId) => {
-        if (storeId) {
-          this.subscriptionFacade.loadCurrent();
-        }
+        this.subscriptionFacade.contextChanged(storeId);
       });
   }
 

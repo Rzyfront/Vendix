@@ -1,7 +1,10 @@
 import { create } from 'xmlbuilder2';
 import { UBL_NAMESPACES, UBL_CONSTANTS } from './xml-namespaces';
 import { UblCommonBuilder } from './ubl-common.builder';
-import { DIAN_DOCUMENT_TYPES, DIAN_OPERATION_TYPES } from '../constants/dian-document-types';
+import {
+  DIAN_DOCUMENT_TYPES,
+  DIAN_OPERATION_TYPES,
+} from '../constants/dian-document-types';
 import {
   DianIssuerData,
   DianCustomerData,
@@ -41,8 +44,7 @@ export class UblDebitNoteBuilder {
       original_invoice_date,
     } = params;
 
-    const currency =
-      debit_note_data.currency || UBL_CONSTANTS.DEFAULT_CURRENCY;
+    const currency = debit_note_data.currency || UBL_CONSTANTS.DEFAULT_CURRENCY;
     const profile_execution_id =
       environment === 'production'
         ? UBL_CONSTANTS.PROFILE_EXECUTION_ID_PROD
@@ -62,30 +64,20 @@ export class UblDebitNoteBuilder {
     UblCommonBuilder.buildExtensions(doc, software_security);
 
     // Document metadata
-    doc
-      .ele(UBL_NAMESPACES.CBC, 'UBLVersionID')
-      .txt(UBL_CONSTANTS.UBL_VERSION);
+    doc.ele(UBL_NAMESPACES.CBC, 'UBLVersionID').txt(UBL_CONSTANTS.UBL_VERSION);
     doc
       .ele(UBL_NAMESPACES.CBC, 'CustomizationID')
       .txt(UBL_CONSTANTS.CUSTOMIZATION_ID);
-    doc
-      .ele(UBL_NAMESPACES.CBC, 'ProfileID')
-      .txt(UBL_CONSTANTS.PROFILE_ID);
-    doc
-      .ele(UBL_NAMESPACES.CBC, 'ProfileExecutionID')
-      .txt(profile_execution_id);
-    doc
-      .ele(UBL_NAMESPACES.CBC, 'ID')
-      .txt(debit_note_data.invoice_number);
+    doc.ele(UBL_NAMESPACES.CBC, 'ProfileID').txt(UBL_CONSTANTS.PROFILE_ID);
+    doc.ele(UBL_NAMESPACES.CBC, 'ProfileExecutionID').txt(profile_execution_id);
+    doc.ele(UBL_NAMESPACES.CBC, 'ID').txt(debit_note_data.invoice_number);
     doc
       .ele(UBL_NAMESPACES.CBC, 'UUID')
       .att('schemeID', environment === 'production' ? '1' : '2')
       .att('schemeName', 'CUDE-SHA384')
       .txt(cude);
 
-    doc
-      .ele(UBL_NAMESPACES.CBC, 'IssueDate')
-      .txt(debit_note_data.issue_date);
+    doc.ele(UBL_NAMESPACES.CBC, 'IssueDate').txt(debit_note_data.issue_date);
 
     const issue_time =
       new Date().toISOString().split('T')[1].split('.')[0] + '-05:00';
@@ -96,47 +88,33 @@ export class UblDebitNoteBuilder {
       .txt(DIAN_DOCUMENT_TYPES.DEBIT_NOTE);
 
     if (debit_note_data.notes) {
-      doc
-        .ele(UBL_NAMESPACES.CBC, 'Note')
-        .txt(debit_note_data.notes);
+      doc.ele(UBL_NAMESPACES.CBC, 'Note').txt(debit_note_data.notes);
     }
 
-    doc
-      .ele(UBL_NAMESPACES.CBC, 'DocumentCurrencyCode')
-      .txt(currency);
+    doc.ele(UBL_NAMESPACES.CBC, 'DocumentCurrencyCode').txt(currency);
 
     doc
       .ele(UBL_NAMESPACES.CBC, 'LineCountNumeric')
       .txt(String(debit_note_data.items.length));
 
     // Discrepancy response (reason for debit note)
-    const discrepancy = doc.ele(
-      UBL_NAMESPACES.CAC,
-      'DiscrepancyResponse',
-    );
+    const discrepancy = doc.ele(UBL_NAMESPACES.CAC, 'DiscrepancyResponse');
     discrepancy
       .ele(UBL_NAMESPACES.CBC, 'ReferenceID')
       .txt(original_invoice_number || '');
-    discrepancy
-      .ele(UBL_NAMESPACES.CBC, 'ResponseCode')
-      .txt('2'); // 1=Intereses, 2=Gastos por cobrar, 3=Cambio del valor, 4=Otros
+    discrepancy.ele(UBL_NAMESPACES.CBC, 'ResponseCode').txt('2'); // 1=Intereses, 2=Gastos por cobrar, 3=Cambio del valor, 4=Otros
     discrepancy
       .ele(UBL_NAMESPACES.CBC, 'Description')
       .txt(debit_note_data.notes || 'Nota débito');
 
     // Billing reference (to the original invoice)
     if (original_invoice_number) {
-      const billing_ref = doc.ele(
-        UBL_NAMESPACES.CAC,
-        'BillingReference',
-      );
+      const billing_ref = doc.ele(UBL_NAMESPACES.CAC, 'BillingReference');
       const invoice_ref = billing_ref.ele(
         UBL_NAMESPACES.CAC,
         'InvoiceDocumentReference',
       );
-      invoice_ref
-        .ele(UBL_NAMESPACES.CBC, 'ID')
-        .txt(original_invoice_number);
+      invoice_ref.ele(UBL_NAMESPACES.CBC, 'ID').txt(original_invoice_number);
       if (original_invoice_cufe) {
         invoice_ref
           .ele(UBL_NAMESPACES.CBC, 'UUID')
@@ -155,17 +133,10 @@ export class UblDebitNoteBuilder {
     UblCommonBuilder.buildCustomerParty(doc, customer);
 
     // Tax totals
-    UblCommonBuilder.buildTaxTotals(
-      doc,
-      debit_note_data.taxes,
-      currency,
-    );
+    UblCommonBuilder.buildTaxTotals(doc, debit_note_data.taxes, currency);
 
     // Legal monetary total
-    const monetary = doc.ele(
-      UBL_NAMESPACES.CAC,
-      'LegalMonetaryTotal',
-    );
+    const monetary = doc.ele(UBL_NAMESPACES.CAC, 'LegalMonetaryTotal');
     monetary
       .ele(UBL_NAMESPACES.CBC, 'LineExtensionAmount')
       .att('currencyID', currency)
@@ -211,9 +182,7 @@ export class UblDebitNoteBuilder {
         );
 
       const ubl_item = line.ele(UBL_NAMESPACES.CAC, 'Item');
-      ubl_item
-        .ele(UBL_NAMESPACES.CBC, 'Description')
-        .txt(item.description);
+      ubl_item.ele(UBL_NAMESPACES.CBC, 'Description').txt(item.description);
 
       const price = line.ele(UBL_NAMESPACES.CAC, 'Price');
       price

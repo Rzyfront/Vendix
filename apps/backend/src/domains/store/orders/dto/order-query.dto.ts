@@ -7,7 +7,11 @@ import {
   IsDateString,
   IsBoolean,
 } from 'class-validator';
-import { order_state_enum, payments_state_enum, order_channel_enum } from '@prisma/client';
+import {
+  order_state_enum,
+  payments_state_enum,
+  order_channel_enum,
+} from '@prisma/client';
 import { Transform } from 'class-transformer';
 
 export class OrderQueryDto {

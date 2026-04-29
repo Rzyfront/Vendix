@@ -51,7 +51,10 @@ export class SetupStoreWizardDto {
   @MaxLength(100)
   timezone?: string;
 
-  @ApiPropertyOptional({ example: 'COP', description: 'ISO 4217 currency code' })
+  @ApiPropertyOptional({
+    example: 'COP',
+    description: 'ISO 4217 currency code',
+  })
   @IsOptional()
   @IsString()
   @MaxLength(3)

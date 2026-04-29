@@ -23,18 +23,18 @@ import { EcommerceDataCollectionModule } from './data-collection/ecommerce-data-
  * - EcommerceReviewsModule: Product reviews and ratings
  */
 @Module({
-    imports: [
-        CatalogModule,
-        CartModule,
-        WishlistModule,
-        CheckoutModule,
-        AccountModule,
-        EcommerceLegalModule,
-        EcommerceReviewsModule,
-        EcommerceReservationsModule,
-        EcommerceCustomerQueueModule,
-        EcommerceInvoiceDataModule,
-        EcommerceDataCollectionModule,
-    ],
+  imports: [
+    CatalogModule,
+    CartModule,
+    WishlistModule,
+    CheckoutModule,
+    AccountModule,
+    EcommerceLegalModule,
+    EcommerceReviewsModule,
+    EcommerceReservationsModule,
+    EcommerceCustomerQueueModule,
+    EcommerceInvoiceDataModule,
+    EcommerceDataCollectionModule,
+  ],
 })
-export class EcommerceDomainModule { }
+export class EcommerceDomainModule {}

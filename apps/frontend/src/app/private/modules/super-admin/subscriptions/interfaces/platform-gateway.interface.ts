@@ -53,15 +53,19 @@ export interface PlatformGatewayView {
 
 /**
  * Body for PATCH /superadmin/subscriptions/gateway/:processor.
- * Required fields when configuring from scratch. The backend enforces
- * `confirm_production` when `environment='production'` and a fresh
- * successful test in the last hour before activating production.
+ *
+ * The 4 secret fields are OPTIONAL on the wire: omitting them means
+ * "do not rotate" — the backend keeps the stored encrypted plaintext
+ * untouched. Only include a secret when the operator typed a fresh
+ * value. The backend enforces `confirm_production` when
+ * `environment='production'` and a fresh successful test in the last
+ * hour before activating production.
  */
 export interface UpsertGatewayDto {
-  public_key: string;
-  private_key: string;
-  events_secret: string;
-  integrity_secret: string;
+  public_key?: string;
+  private_key?: string;
+  events_secret?: string;
+  integrity_secret?: string;
   environment: GatewayEnvironment;
   is_active?: boolean;
   confirm_production?: boolean;

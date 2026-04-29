@@ -1,5 +1,8 @@
 import { Prisma } from '@prisma/client';
-import { SubscriptionPaymentService } from './subscription-payment.service';
+import {
+  SubscriptionPaymentService,
+  MAX_CONSECUTIVE_FAILURES,
+} from './subscription-payment.service';
 import { VendixHttpException } from '../../../../common/errors';
 import { PlatformGatewayEnvironmentEnum } from '../../../superadmin/subscriptions/gateway/dto/upsert-gateway.dto';
 
@@ -15,10 +18,13 @@ describe('SubscriptionPaymentService', () => {
   let gatewayMock: any;
   let billingMock: any;
   let commissionsMock: any;
+  let stateServiceMock: any;
   let configMock: any;
   let eventEmitterMock: any;
   let platformGwMock: any;
   let wompiProcessorMock: any;
+  let commissionQueueMock: any;
+  let emailQueueMock: any;
 
   beforeEach(() => {
     prismaMock = {
@@ -33,12 +39,27 @@ describe('SubscriptionPaymentService', () => {
         findUnique: jest.fn(),
         count: jest.fn().mockResolvedValue(0),
       },
+      subscription_payment_methods: {
+        findFirst: jest.fn(),
+        findUnique: jest.fn(),
+        update: jest.fn(),
+        updateMany: jest.fn(),
+      },
+      subscription_events: {
+        create: jest.fn(),
+      },
       partner_commissions: {
         create: jest.fn(),
         update: jest.fn(),
         updateMany: jest.fn(),
         upsert: jest.fn(),
         findUnique: jest.fn(),
+      },
+      commission_accrual_pending: {
+        upsert: jest.fn(),
+      },
+      store_subscriptions: {
+        findUnique: jest.fn().mockResolvedValue({ state: 'pending_payment' }),
       },
       $transaction: jest.fn(async (cb: any) => cb(prismaMock)),
     };
@@ -50,6 +71,10 @@ describe('SubscriptionPaymentService', () => {
     };
     billingMock = {};
     commissionsMock = {};
+    stateServiceMock = {
+      transitionInTx: jest.fn(),
+      transition: jest.fn(),
+    };
     configMock = { get: jest.fn() };
     eventEmitterMock = { emit: jest.fn() };
     platformGwMock = {
@@ -64,16 +89,25 @@ describe('SubscriptionPaymentService', () => {
     wompiProcessorMock = {
       processPayment: jest.fn(),
     };
+    commissionQueueMock = {
+      add: jest.fn().mockResolvedValue({ id: 'job-123' }),
+    };
+    emailQueueMock = {
+      add: jest.fn().mockResolvedValue({ id: 'email-123' }),
+    };
 
     service = new SubscriptionPaymentService(
       prismaMock,
       gatewayMock,
       billingMock,
       commissionsMock,
+      stateServiceMock,
       configMock,
       eventEmitterMock,
       platformGwMock,
       wompiProcessorMock,
+      commissionQueueMock,
+      emailQueueMock,
     );
   });
 
@@ -93,7 +127,9 @@ describe('SubscriptionPaymentService', () => {
   }
 
   it('charge happy path → creates subscription_payment state=succeeded', async () => {
-    prismaMock.subscription_invoices.findUnique.mockResolvedValue(invoiceFixture());
+    prismaMock.subscription_invoices.findUnique.mockResolvedValue(
+      invoiceFixture(),
+    );
     prismaMock.subscription_payments.create.mockResolvedValue({ id: 77 });
     prismaMock.subscription_payments.update.mockResolvedValue({
       id: 77,
@@ -120,7 +156,9 @@ describe('SubscriptionPaymentService', () => {
   });
 
   it('gateway failure → payment state=failed with failure_reason + event emitted', async () => {
-    prismaMock.subscription_invoices.findUnique.mockResolvedValue(invoiceFixture());
+    prismaMock.subscription_invoices.findUnique.mockResolvedValue(
+      invoiceFixture(),
+    );
     prismaMock.subscription_payments.create.mockResolvedValue({ id: 78 });
     prismaMock.subscription_payments.update.mockResolvedValue({
       id: 78,
@@ -154,7 +192,9 @@ describe('SubscriptionPaymentService', () => {
         partner_org_id: 42,
       },
     });
-    prismaMock.subscription_invoices.findUnique.mockResolvedValue(invoiceWithPartner);
+    prismaMock.subscription_invoices.findUnique.mockResolvedValue(
+      invoiceWithPartner,
+    );
     prismaMock.subscription_payments.create.mockResolvedValue({ id: 79 });
     prismaMock.subscription_payments.update.mockResolvedValue({
       id: 79,
@@ -198,7 +238,9 @@ describe('SubscriptionPaymentService', () => {
         partner_org_id: 42,
       },
     });
-    prismaMock.subscription_invoices.findUnique.mockResolvedValue(invoiceWithPartner);
+    prismaMock.subscription_invoices.findUnique.mockResolvedValue(
+      invoiceWithPartner,
+    );
     prismaMock.subscription_payments.create.mockResolvedValue({ id: 80 });
     prismaMock.subscription_payments.update.mockResolvedValue({
       id: 80,
@@ -233,7 +275,9 @@ describe('SubscriptionPaymentService', () => {
         partner_org_id: 42,
       },
     });
-    prismaMock.subscription_invoices.findUnique.mockResolvedValue(invoiceWithPartner);
+    prismaMock.subscription_invoices.findUnique.mockResolvedValue(
+      invoiceWithPartner,
+    );
     prismaMock.subscription_payments.create.mockResolvedValue({ id: 81 });
     prismaMock.subscription_payments.update.mockResolvedValue({
       id: 81,
@@ -272,7 +316,9 @@ describe('SubscriptionPaymentService', () => {
         partner_org_id: 42,
       },
     });
-    prismaMock.subscription_invoices.findUnique.mockResolvedValue(invoiceWithPartner);
+    prismaMock.subscription_invoices.findUnique.mockResolvedValue(
+      invoiceWithPartner,
+    );
     prismaMock.subscription_payments.create.mockResolvedValue({ id: 82 });
     prismaMock.subscription_payments.update.mockResolvedValue({
       id: 82,
@@ -295,7 +341,9 @@ describe('SubscriptionPaymentService', () => {
   // ── SaaS billing path: PlatformGatewayService + idempotency ──────
 
   it('uses stable idempotency key sub_inv_<id>_att_1 when no previous payments exist', async () => {
-    prismaMock.subscription_invoices.findUnique.mockResolvedValue(invoiceFixture());
+    prismaMock.subscription_invoices.findUnique.mockResolvedValue(
+      invoiceFixture(),
+    );
     prismaMock.subscription_payments.count.mockResolvedValue(0);
     prismaMock.subscription_payments.create.mockResolvedValue({ id: 100 });
     prismaMock.subscription_payments.update.mockResolvedValue({
@@ -320,7 +368,9 @@ describe('SubscriptionPaymentService', () => {
   });
 
   it('idempotency key advances to att_2 when one previous payment exists', async () => {
-    prismaMock.subscription_invoices.findUnique.mockResolvedValue(invoiceFixture());
+    prismaMock.subscription_invoices.findUnique.mockResolvedValue(
+      invoiceFixture(),
+    );
     prismaMock.subscription_payments.count.mockResolvedValue(1);
     prismaMock.subscription_payments.create.mockResolvedValue({ id: 101 });
     prismaMock.subscription_payments.update.mockResolvedValue({
@@ -340,7 +390,9 @@ describe('SubscriptionPaymentService', () => {
   });
 
   it('builds SaaS reference vendix_saas_<subId>_<invoiceId>_<ts> in metadata', async () => {
-    prismaMock.subscription_invoices.findUnique.mockResolvedValue(invoiceFixture());
+    prismaMock.subscription_invoices.findUnique.mockResolvedValue(
+      invoiceFixture(),
+    );
     prismaMock.subscription_payments.count.mockResolvedValue(0);
     prismaMock.subscription_payments.create.mockResolvedValue({ id: 102 });
     prismaMock.subscription_payments.update.mockResolvedValue({
@@ -363,7 +415,9 @@ describe('SubscriptionPaymentService', () => {
   });
 
   it('injects platform wompiConfig into metadata so the processor uses platform creds', async () => {
-    prismaMock.subscription_invoices.findUnique.mockResolvedValue(invoiceFixture());
+    prismaMock.subscription_invoices.findUnique.mockResolvedValue(
+      invoiceFixture(),
+    );
     prismaMock.subscription_payments.count.mockResolvedValue(0);
     prismaMock.subscription_payments.create.mockResolvedValue({ id: 103 });
     prismaMock.subscription_payments.update.mockResolvedValue({
@@ -388,13 +442,252 @@ describe('SubscriptionPaymentService', () => {
   });
 
   it('throws SUBSCRIPTION_GATEWAY_003 when platform credentials are not configured', async () => {
-    prismaMock.subscription_invoices.findUnique.mockResolvedValue(invoiceFixture());
+    prismaMock.subscription_invoices.findUnique.mockResolvedValue(
+      invoiceFixture(),
+    );
     platformGwMock.getActiveCredentials.mockResolvedValue(null);
 
-    await expect(service.charge(500)).rejects.toBeInstanceOf(VendixHttpException);
+    await expect(service.charge(500)).rejects.toBeInstanceOf(
+      VendixHttpException,
+    );
 
     // Ensure no payment record was created and no charge attempted
     expect(prismaMock.subscription_payments.create).not.toHaveBeenCalled();
     expect(wompiProcessorMock.processPayment).not.toHaveBeenCalled();
+  });
+
+  // -----------------------------------------------------------------------
+  // S3.5 — Consecutive-failures lifecycle on saved payment methods.
+  //
+  // Flow exercised:
+  //   - charge() resolves a reusable PM, calls Wompi, then on success or
+  //     failure mutates the PM counter accordingly.
+  //   - On failure: counter increments. At MAX_CONSECUTIVE_FAILURES the PM is
+  //     auto-invalidated, a state_transition event is persisted, and a
+  //     payment-method-invalidated-failures email is enqueued.
+  //   - On success: counter resets to 0 (idempotent NOOP if already 0).
+  // -----------------------------------------------------------------------
+
+  function pmFixture(overrides: any = {}) {
+    return {
+      id: 7001,
+      store_id: 10,
+      store_subscription_id: 200,
+      type: 'card',
+      provider: 'wompi',
+      provider_token: 'tok_xyz',
+      last4: '4242',
+      brand: 'visa',
+      expiry_month: '12',
+      expiry_year: '2099',
+      card_holder: null,
+      is_default: true,
+      state: 'active',
+      consecutive_failures: 0,
+      replaced_by_id: null,
+      replaced_at: null,
+      metadata: null,
+      created_at: new Date('2026-01-01'),
+      updated_at: new Date('2026-01-01'),
+      ...overrides,
+    };
+  }
+
+  it('S3.5: PM with consecutive_failures=2 → on failure becomes invalid + emits event + enqueues email', async () => {
+    const pm = pmFixture({ consecutive_failures: 2, is_default: true });
+
+    prismaMock.subscription_invoices.findUnique.mockResolvedValue(
+      invoiceFixture({ store_id: 10 }),
+    );
+    prismaMock.subscription_payment_methods.findFirst.mockResolvedValue(pm);
+    // Inside bumpPaymentMethodFailure — re-fetch + (no other PM to promote)
+    prismaMock.subscription_payment_methods.findUnique.mockResolvedValue(pm);
+    prismaMock.subscription_payment_methods.update.mockResolvedValue({});
+    prismaMock.subscription_payment_methods.updateMany.mockResolvedValue({
+      count: 0,
+    });
+    prismaMock.subscription_events.create.mockResolvedValue({ id: 1 });
+
+    prismaMock.subscription_payments.create.mockResolvedValue({ id: 900 });
+    prismaMock.subscription_payments.update.mockResolvedValue({
+      id: 900,
+      state: 'failed',
+    });
+    wompiProcessorMock.processPayment.mockResolvedValue({
+      success: false,
+      message: 'Declined',
+    });
+
+    await service.charge(500);
+
+    // The PM update setting state='invalid' must be issued.
+    const calls = prismaMock.subscription_payment_methods.update.mock.calls;
+    const invalidateCall = calls.find(
+      (c: any) => c[0]?.data?.state === 'invalid',
+    );
+    expect(invalidateCall).toBeDefined();
+    expect(invalidateCall[0].data.consecutive_failures).toBe(
+      MAX_CONSECUTIVE_FAILURES,
+    );
+    expect(invalidateCall[0].data.is_default).toBe(false);
+
+    // A state_transition event with reason=consecutive_failures_threshold.
+    expect(prismaMock.subscription_events.create).toHaveBeenCalled();
+    const evt = prismaMock.subscription_events.create.mock.calls[0][0];
+    expect(evt.data.type).toBe('state_transition');
+    expect(evt.data.payload.reason).toBe('consecutive_failures_threshold');
+    expect(evt.data.payload.payment_method_id).toBe(pm.id);
+    expect(evt.data.payload.consecutive_failures).toBe(
+      MAX_CONSECUTIVE_FAILURES,
+    );
+
+    // Email enqueued with the PM context.
+    expect(emailQueueMock.add).toHaveBeenCalledWith(
+      'subscription.payment-method-invalidated-failures.email',
+      expect.objectContaining({
+        subscriptionId: pm.store_subscription_id,
+        storeId: pm.store_id,
+        paymentMethodId: pm.id,
+        consecutive_failures: MAX_CONSECUTIVE_FAILURES,
+      }),
+      expect.any(Object),
+    );
+
+    // In-process domain event for banner cache bust.
+    expect(eventEmitterMock.emit).toHaveBeenCalledWith(
+      'payment_method.invalidated',
+      expect.objectContaining({
+        paymentMethodId: pm.id,
+        reason: 'consecutive_failures',
+      }),
+    );
+  });
+
+  it('S3.5: PM with consecutive_failures=2 → on success resets counter to 0 (no invalidation)', async () => {
+    const pm = pmFixture({ consecutive_failures: 2 });
+
+    prismaMock.subscription_invoices.findUnique.mockResolvedValue(
+      invoiceFixture(),
+    );
+    prismaMock.subscription_payment_methods.findFirst.mockResolvedValue(pm);
+    prismaMock.subscription_payment_methods.findUnique.mockResolvedValue(pm);
+    prismaMock.subscription_payment_methods.update.mockResolvedValue({});
+    prismaMock.subscription_payments.create.mockResolvedValue({ id: 901 });
+    prismaMock.subscription_payments.update.mockResolvedValue({
+      id: 901,
+      state: 'succeeded',
+    });
+    prismaMock.subscription_invoices.update.mockResolvedValue({});
+    wompiProcessorMock.processPayment.mockResolvedValue({
+      success: true,
+      transactionId: 'tx_ok',
+    });
+
+    await service.charge(500);
+
+    const calls = prismaMock.subscription_payment_methods.update.mock.calls;
+    const resetCall = calls.find(
+      (c: any) => c[0]?.data?.consecutive_failures === 0,
+    );
+    expect(resetCall).toBeDefined();
+    expect(resetCall[0].where.id).toBe(pm.id);
+    // No invalidation, no event, no email.
+    expect(prismaMock.subscription_events.create).not.toHaveBeenCalled();
+    expect(emailQueueMock.add).not.toHaveBeenCalled();
+  });
+
+  it('S3.5: PM with consecutive_failures=0 → on failure bumps to 1, state stays active, no email', async () => {
+    const pm = pmFixture({ consecutive_failures: 0 });
+
+    prismaMock.subscription_invoices.findUnique.mockResolvedValue(
+      invoiceFixture(),
+    );
+    prismaMock.subscription_payment_methods.findFirst.mockResolvedValue(pm);
+    prismaMock.subscription_payment_methods.findUnique.mockResolvedValue(pm);
+    prismaMock.subscription_payment_methods.update.mockResolvedValue({});
+    prismaMock.subscription_payments.create.mockResolvedValue({ id: 902 });
+    prismaMock.subscription_payments.update.mockResolvedValue({
+      id: 902,
+      state: 'failed',
+    });
+    wompiProcessorMock.processPayment.mockResolvedValue({
+      success: false,
+      message: 'Insufficient funds',
+    });
+
+    await service.charge(500);
+
+    const calls = prismaMock.subscription_payment_methods.update.mock.calls;
+    const bumpCall = calls.find(
+      (c: any) => c[0]?.data?.consecutive_failures === 1,
+    );
+    expect(bumpCall).toBeDefined();
+    // state field must NOT be touched on a sub-threshold bump.
+    expect(bumpCall[0].data.state).toBeUndefined();
+    expect(prismaMock.subscription_events.create).not.toHaveBeenCalled();
+    expect(emailQueueMock.add).not.toHaveBeenCalled();
+  });
+
+  it('S3.5: invalidating a default PM promotes the next active PM as new default', async () => {
+    const pm = pmFixture({
+      consecutive_failures: 2,
+      is_default: true,
+      id: 7001,
+    });
+    const otherActive = pmFixture({
+      id: 7002,
+      is_default: false,
+      consecutive_failures: 0,
+    });
+
+    prismaMock.subscription_invoices.findUnique.mockResolvedValue(
+      invoiceFixture({ store_id: 10 }),
+    );
+    prismaMock.subscription_payment_methods.findFirst
+      // 1st call: resolveReusablePaymentMethod → returns the failing PM
+      .mockResolvedValueOnce(pm)
+      // 2nd call: bumpPaymentMethodFailure tx → promotion candidate lookup
+      .mockResolvedValueOnce({ id: otherActive.id });
+    prismaMock.subscription_payment_methods.findUnique.mockResolvedValue(pm);
+    prismaMock.subscription_payment_methods.update.mockResolvedValue({});
+    prismaMock.subscription_payment_methods.updateMany.mockResolvedValue({
+      count: 1,
+    });
+    prismaMock.subscription_events.create.mockResolvedValue({ id: 1 });
+
+    prismaMock.subscription_payments.create.mockResolvedValue({ id: 903 });
+    prismaMock.subscription_payments.update.mockResolvedValue({
+      id: 903,
+      state: 'failed',
+    });
+    wompiProcessorMock.processPayment.mockResolvedValue({
+      success: false,
+      message: 'Declined',
+    });
+
+    await service.charge(500);
+
+    // The promotion update must target the other active PM with is_default=true.
+    const updates = prismaMock.subscription_payment_methods.update.mock.calls;
+    const promoteCall = updates.find(
+      (c: any) =>
+        c[0]?.where?.id === otherActive.id && c[0]?.data?.is_default === true,
+    );
+    expect(promoteCall).toBeDefined();
+
+    // Defensive clear of any other defaults must run before the promote.
+    expect(
+      prismaMock.subscription_payment_methods.updateMany,
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { store_id: pm.store_id, is_default: true },
+        data: expect.objectContaining({ is_default: false }),
+      }),
+    );
+
+    // Event payload reports the promoted_default_id.
+    const evt = prismaMock.subscription_events.create.mock.calls[0][0];
+    expect(evt.data.payload.promoted_default_id).toBe(otherActive.id);
+    expect(evt.data.payload.was_default).toBe(true);
   });
 });

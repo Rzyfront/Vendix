@@ -13,9 +13,14 @@ import {
  *
  * Adds explicit production confirmation rules: switching to production
  * is destructive (real money flows) so we require:
- *   1. confirm_production === true
- *   2. environment-key alignment (prv_prod_/pub_prod_ ↔ production,
- *      prv_test_/pub_test_ ↔ sandbox)
+ *   1. confirm_production === true when activating production
+ *
+ * NOTE: The cross-field rule "keys must match the declared environment"
+ * is intentionally NOT enforced here. With partial-PATCH semantics, the
+ * effective credentials are only known AFTER merging the DTO with the
+ * stored secrets. That check now lives in
+ * `PlatformGatewayService.upsertCredentials` once the effective
+ * credentials are known.
  */
 @Injectable()
 export class PlatformWompiConfigValidator {
@@ -34,33 +39,16 @@ export class PlatformWompiConfigValidator {
       );
     }
 
-    // 2. Cross-field rule: keys must match their declared environment.
-    const isProductionEnv =
-      dto.environment === PlatformGatewayEnvironmentEnum.PRODUCTION;
-    const looksProdKey =
-      dto.public_key.startsWith('pub_prod_') ||
-      dto.private_key.startsWith('prv_prod_');
-    const looksTestKey =
-      dto.public_key.startsWith('pub_test_') ||
-      dto.private_key.startsWith('prv_test_');
-
-    if (isProductionEnv && looksTestKey) {
-      throw new VendixHttpException(
-        ErrorCodes.SUBSCRIPTION_GATEWAY_001,
-        'Estás declarando ambiente production pero las credenciales son de prueba (pub_test_/prv_test_).',
-      );
-    }
-    if (!isProductionEnv && looksProdKey) {
-      throw new VendixHttpException(
-        ErrorCodes.SUBSCRIPTION_GATEWAY_001,
-        'Estás declarando ambiente sandbox pero las credenciales son de producción (pub_prod_/prv_prod_).',
-      );
-    }
-
-    // 3. Production activation requires explicit confirmation.
+    // 2. Production activation requires explicit confirmation.
     //    If is_active is being set to true while environment=production,
     //    the operator MUST send confirm_production=true.
-    if (isProductionEnv && dto.is_active === true && dto.confirm_production !== true) {
+    const isProductionEnv =
+      dto.environment === PlatformGatewayEnvironmentEnum.PRODUCTION;
+    if (
+      isProductionEnv &&
+      dto.is_active === true &&
+      dto.confirm_production !== true
+    ) {
       throw new VendixHttpException(
         ErrorCodes.SUBSCRIPTION_GATEWAY_001,
         'Activar credenciales de producción requiere confirm_production=true.',

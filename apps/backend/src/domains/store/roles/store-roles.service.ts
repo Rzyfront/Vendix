@@ -19,9 +19,7 @@ export class StoreRolesService {
   /** Core roles that are never exposed to store-level UIs */
   private readonly HIDDEN_ROLES = ['owner', 'super_admin'];
 
-  constructor(
-    private readonly prisma: StorePrismaService,
-  ) {}
+  constructor(private readonly prisma: StorePrismaService) {}
 
   // ===== PRIVATE HELPERS =====
 
@@ -57,10 +55,7 @@ export class StoreRolesService {
     const roles = await this.prisma.roles.findMany({
       where: {
         name: { notIn: this.HIDDEN_ROLES },
-        OR: [
-          { organization_id },
-          { is_system_role: true },
-        ],
+        OR: [{ organization_id }, { is_system_role: true }],
       },
       include: {
         role_permissions: {
@@ -87,10 +82,7 @@ export class StoreRolesService {
     const role = await this.prisma.roles.findFirst({
       where: {
         id,
-        OR: [
-          { organization_id },
-          { is_system_role: true },
-        ],
+        OR: [{ organization_id }, { is_system_role: true }],
       },
       include: {
         role_permissions: {
@@ -125,10 +117,7 @@ export class StoreRolesService {
     const existing = await this.prisma.roles.findFirst({
       where: {
         name: dto.name,
-        OR: [
-          { organization_id },
-          { is_system_role: true },
-        ],
+        OR: [{ organization_id }, { is_system_role: true }],
       },
     });
 
@@ -264,9 +253,7 @@ export class StoreRolesService {
     const role = await this.findOne(role_id);
 
     if (role.is_system_role) {
-      throw new ForbiddenException(
-        'Cannot modify permissions of system roles',
-      );
+      throw new ForbiddenException('Cannot modify permissions of system roles');
     }
 
     // Validate all permissions exist and have store: prefix
@@ -312,9 +299,7 @@ export class StoreRolesService {
     const role = await this.findOne(role_id);
 
     if (role.is_system_role) {
-      throw new ForbiddenException(
-        'Cannot modify permissions of system roles',
-      );
+      throw new ForbiddenException('Cannot modify permissions of system roles');
     }
 
     await this.prisma.role_permissions.deleteMany({
@@ -344,10 +329,7 @@ export class StoreRolesService {
         this.prisma.roles.count({
           where: {
             name: { notIn: this.HIDDEN_ROLES },
-            OR: [
-              { organization_id },
-              { is_system_role: true },
-            ],
+            OR: [{ organization_id }, { is_system_role: true }],
           },
         }),
         this.prisma.roles.count({

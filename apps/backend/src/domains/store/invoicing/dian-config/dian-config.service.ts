@@ -27,8 +27,9 @@ export class DianConfigService {
     return {
       ...config,
       software_pin_encrypted: config.software_pin_encrypted ? '****' : null,
-      certificate_password_encrypted:
-        config.certificate_password_encrypted ? '****' : null,
+      certificate_password_encrypted: config.certificate_password_encrypted
+        ? '****'
+        : null,
     };
   }
 
@@ -242,14 +243,17 @@ export class DianConfigService {
     if (dto.nit_type !== undefined) update_data.nit_type = dto.nit_type;
     if (dto.nit_dv !== undefined) update_data.nit_dv = dto.nit_dv;
     if (dto.is_default !== undefined) update_data.is_default = dto.is_default;
-    if (dto.software_id !== undefined) update_data.software_id = dto.software_id;
+    if (dto.software_id !== undefined)
+      update_data.software_id = dto.software_id;
     // Skip if masked sentinel — frontend sends '****' to indicate "no change"
     if (dto.software_pin !== undefined && dto.software_pin !== '****')
       update_data.software_pin_encrypted = this.encryption.encrypt(
         dto.software_pin,
       );
-    if (dto.environment !== undefined) update_data.environment = dto.environment;
-    if (dto.test_set_id !== undefined) update_data.test_set_id = dto.test_set_id;
+    if (dto.environment !== undefined)
+      update_data.environment = dto.environment;
+    if (dto.test_set_id !== undefined)
+      update_data.test_set_id = dto.test_set_id;
 
     const updated = await this.prisma.dian_configurations.update({
       where: { id },

@@ -1,6 +1,7 @@
 import { Reflector } from '@nestjs/core';
 import { StoreOperationsGuard } from './store-operations.guard';
 import { SubscriptionAccessService } from '../services/subscription-access.service';
+import { SubscriptionGateConfig } from '../config/subscription-gate.config';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { VendixHttpException } from '../../../../common/errors';
 
@@ -42,18 +43,23 @@ describe('StoreOperationsGuard', () => {
     reflector = { getAllAndOverride: jest.fn().mockReturnValue(false) };
     access = { canUseModule: jest.fn() };
     setHeader = jest.fn();
-    guard = new StoreOperationsGuard(reflector as any, access as any);
-    logger = {
-      warn: jest
-        .spyOn((guard as any).logger, 'warn')
-        .mockImplementation(() => undefined),
-    };
 
     // Default: store context present.
     (RequestContextService as any).getStoreId = jest.fn().mockReturnValue(123);
 
     delete process.env.STORE_GATE_ENFORCE;
     delete process.env.AI_GATE_ENFORCE;
+
+    guard = new StoreOperationsGuard(
+      reflector as any,
+      access as any,
+      new SubscriptionGateConfig(),
+    );
+    logger = {
+      warn: jest
+        .spyOn((guard as any).logger, 'warn')
+        .mockImplementation(() => undefined),
+    };
   });
 
   afterEach(() => {

@@ -1,23 +1,24 @@
-import React, { useState, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
   FlatList,
-  TouchableOpacity,
   Pressable,
-  TextInput,
   KeyboardAvoidingView,
   Platform,
-  Alert,
-  ActivityIndicator,
+  StyleSheet,
+  Image,
 } from 'react-native';
+import * as Print from 'expo-print';
+import * as Sharing from 'expo-sharing';
+import { apiClient, Endpoints } from '@/core/api';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ProductService } from '@/features/store/services';
 import { OrderService } from '@/features/store/services';
 import { useCartStore } from '@/features/store/pos/store/cart.store';
 import { formatCurrency } from '@/shared/utils/currency';
-import { colors } from '@/shared/theme/colors';
+import { colors, colorScales, spacing, borderRadius, shadows, typography } from '@/shared/theme';
 import { Icon } from '@/shared/components/icon/icon';
 import { SearchBar } from '@/shared/components/search-bar/search-bar';
 import { Badge } from '@/shared/components/badge/badge';
@@ -26,11 +27,583 @@ import { EmptyState } from '@/shared/components/empty-state/empty-state';
 import { BottomSheet } from '@/shared/components/bottom-sheet/bottom-sheet';
 import { Button } from '@/shared/components/button/button';
 import { Input } from '@/shared/components/input/input';
-import { ListItem } from '@/shared/components/list-item/list-item';
 import { toastSuccess, toastError } from '@/shared/components/toast/toast.store';
 import type { Product, ProductVariant, PosCustomer } from '@/features/store/types';
 
 const ITEM_WIDTH = '48%';
+
+const productCardStyles = StyleSheet.create({
+  card: {
+    width: '48%' as any,
+    backgroundColor: colors.background,
+    borderRadius: borderRadius.xl,
+    padding: spacing[3],
+    marginBottom: spacing[3],
+    borderWidth: 1,
+    borderColor: colorScales.gray[100],
+    ...shadows.sm,
+  },
+  imageArea: {
+    width: '100%',
+    height: 96,
+    borderRadius: borderRadius.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing[2],
+  },
+  name: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.semibold,
+    color: colorScales.gray[900],
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: spacing[1],
+  },
+  price: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.bold,
+    color: colors.primary,
+  },
+  lowStock: {
+    fontSize: typography.fontSize.xs,
+    marginTop: spacing[1],
+    color: colors.warning,
+  },
+  outOfStock: {
+    fontSize: typography.fontSize.xs,
+    marginTop: spacing[1],
+    fontWeight: typography.fontWeight.medium,
+    color: colors.error,
+  },
+  firstLetter: {
+    fontSize: typography.fontSize['2xl'],
+    fontWeight: typography.fontWeight.bold,
+  },
+});
+
+const s = StyleSheet.create({
+  containerPad: {
+    paddingHorizontal: spacing[4],
+    paddingTop: spacing[2],
+    paddingBottom: spacing[4],
+  },
+  sectionTitle: {
+    fontSize: typography.fontSize.lg,
+    fontWeight: typography.fontWeight.bold,
+    color: colorScales.gray[900],
+    marginBottom: spacing[1],
+  },
+  sectionSubtitle: {
+    fontSize: typography.fontSize.sm,
+    color: colorScales.gray[500],
+    marginBottom: spacing[4],
+  },
+  variantRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: spacing[3],
+    paddingHorizontal: spacing[2],
+    borderBottomWidth: 1,
+    borderBottomColor: colorScales.gray[100],
+  },
+  flex1: { flex: 1 },
+  variantName: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.medium,
+    color: colorScales.gray[900],
+  },
+  skuText: {
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[500],
+  },
+  itemsEnd: { alignItems: 'flex-end' },
+  variantPrice: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.bold,
+    color: colors.primary,
+  },
+  outOfStockText: {
+    fontSize: typography.fontSize.xs,
+    color: colors.error,
+  },
+  stockText: {
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[400],
+  },
+  separator: {
+    height: 1,
+    backgroundColor: colorScales.gray[100],
+  },
+  cartItemRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: spacing[3],
+    borderBottomWidth: 1,
+    borderBottomColor: colorScales.gray[100],
+  },
+  cartItemInfo: {
+    flex: 1,
+    marginRight: spacing[3],
+  },
+  cartItemName: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.semibold,
+    color: colorScales.gray[900],
+  },
+  cartItemVariant: {
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[500],
+  },
+  cartItemUnitPrice: {
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[400],
+    marginTop: spacing[0.5],
+  },
+  qtyControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: spacing[3],
+  },
+  qtyBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: borderRadius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  qtyBtnMinus: {
+    backgroundColor: colorScales.gray[100],
+  },
+  qtyBtnPlus: {
+    backgroundColor: colors.primary + '20',
+  },
+  qtyLabel: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.bold,
+    marginHorizontal: spacing[3],
+    width: 24,
+    textAlign: 'center',
+  },
+  cartItemTotal: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.bold,
+    color: colorScales.gray[900],
+    width: 80,
+    textAlign: 'right',
+  },
+  removeBtn: {
+    marginLeft: spacing[2],
+    padding: spacing[1],
+  },
+  customerRow: {
+    paddingVertical: spacing[3],
+    borderBottomWidth: 1,
+    borderBottomColor: colorScales.gray[100],
+  },
+  customerName: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.semibold,
+    color: colorScales.gray[900],
+  },
+  customerContact: {
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[500],
+  },
+  noClientText: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.medium,
+    color: colors.error,
+  },
+  emptyText: {
+    textAlign: 'center',
+    paddingVertical: spacing[4],
+    color: colorScales.gray[400],
+  },
+  cartPanelContent: {
+    flex: 1,
+    paddingHorizontal: spacing[4],
+    paddingTop: spacing[2],
+  },
+  cartHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing[4],
+  },
+  cartTitle: {
+    fontSize: typography.fontSize.lg,
+    fontWeight: typography.fontWeight.bold,
+    color: colorScales.gray[900],
+  },
+  customerBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EFF6FF',
+    borderRadius: borderRadius.lg,
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[2],
+    marginBottom: spacing[3],
+  },
+  customerBtnText: {
+    fontSize: typography.fontSize.sm,
+    color: '#1D4ED8',
+    fontWeight: typography.fontWeight.medium,
+    marginLeft: spacing[2],
+    flex: 1,
+  },
+  selectLabel: {
+    fontSize: typography.fontSize.xs,
+    color: '#2563EB',
+    marginRight: spacing[2],
+  },
+  cartFlatList: {
+    flex: 1,
+  },
+  summarySection: {
+    paddingTop: spacing[3],
+    borderTopWidth: 1,
+    borderTopColor: colorScales.gray[200],
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: spacing[1],
+  },
+  summaryLabel: {
+    fontSize: typography.fontSize.sm,
+    color: colorScales.gray[500],
+  },
+  summaryValue: {
+    fontSize: typography.fontSize.sm,
+    color: colorScales.gray[700],
+  },
+  discountText: {
+    fontSize: typography.fontSize.sm,
+    color: '#16A34A',
+  },
+  addDiscountBtn: {
+    paddingVertical: spacing[2],
+  },
+  addDiscountText: {
+    fontSize: typography.fontSize.sm,
+    color: colors.primary,
+  },
+  totalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: spacing[2],
+    paddingTop: spacing[2],
+    borderTopWidth: 1,
+    borderTopColor: colorScales.gray[200],
+  },
+  totalLabel: {
+    fontSize: typography.fontSize.base,
+    fontWeight: typography.fontWeight.bold,
+    color: colorScales.gray[900],
+  },
+  totalValue: {
+    fontSize: typography.fontSize.base,
+    fontWeight: typography.fontWeight.bold,
+    color: colors.primary,
+  },
+  chargeBtn: {
+    marginTop: spacing[4],
+  },
+  paymentTitle: {
+    fontSize: typography.fontSize.lg,
+    fontWeight: typography.fontWeight.bold,
+    color: colorScales.gray[900],
+    marginBottom: spacing[4],
+  },
+  totalBox: {
+    backgroundColor: '#F0FDF4',
+    borderRadius: borderRadius.xl,
+    padding: spacing[4],
+    alignItems: 'center',
+    marginBottom: spacing[4],
+  },
+  totalBoxLabel: {
+    fontSize: typography.fontSize.sm,
+    color: colorScales.gray[500],
+    marginBottom: spacing[1],
+  },
+  totalBoxValue: {
+    fontSize: typography.fontSize['3xl'],
+    fontWeight: typography.fontWeight.bold,
+    color: colors.primary,
+  },
+  methodRow: {
+    flexDirection: 'row',
+    gap: spacing[3],
+    marginBottom: spacing[4],
+  },
+  methodBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: spacing[3],
+    borderRadius: borderRadius.xl,
+    borderWidth: 2,
+  },
+  methodBtnActive: {
+    borderColor: colors.primary,
+    backgroundColor: '#F0FDF4',
+  },
+  methodBtnInactive: {
+    borderColor: colorScales.gray[200],
+    backgroundColor: '#FFFFFF',
+  },
+  methodLabel: {
+    marginLeft: spacing[2],
+    fontWeight: typography.fontWeight.semibold,
+  },
+  methodLabelActive: {
+    color: '#15803D',
+  },
+  methodLabelInactive: {
+    color: colorScales.gray[500],
+  },
+  cashSection: {
+    marginBottom: spacing[4],
+  },
+  changeBox: {
+    marginTop: spacing[2],
+    backgroundColor: '#EFF6FF',
+    borderRadius: borderRadius.lg,
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[2],
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  changeLabel: {
+    fontSize: typography.fontSize.sm,
+    color: '#2563EB',
+    fontWeight: typography.fontWeight.medium,
+  },
+  changeValue: {
+    fontSize: typography.fontSize.sm,
+    color: '#1D4ED8',
+    fontWeight: typography.fontWeight.bold,
+  },
+  successOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    zIndex: 50,
+  },
+  successCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: borderRadius['2xl'],
+    padding: spacing[6],
+    marginHorizontal: spacing[8],
+    alignItems: 'center',
+    ...shadows.xl,
+  },
+  successIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: borderRadius.full,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: spacing[4],
+    backgroundColor: colors.primary + '20',
+  },
+  successTitle: {
+    fontSize: typography.fontSize.lg,
+    fontWeight: typography.fontWeight.bold,
+    color: colorScales.gray[900],
+    marginBottom: spacing[1],
+  },
+  successSubtitle: {
+    fontSize: typography.fontSize.sm,
+    color: colorScales.gray[500],
+    marginBottom: spacing[1],
+  },
+  orderNumber: {
+    fontSize: typography.fontSize['2xl'],
+    fontWeight: typography.fontWeight.bold,
+    color: colors.primary,
+    marginBottom: spacing[4],
+  },
+  actionRow: {
+    flexDirection: 'row',
+    gap: spacing[3],
+    width: '100%',
+  },
+  actionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 10,
+    borderRadius: borderRadius.xl,
+    borderWidth: 1,
+    borderColor: colorScales.gray[200],
+  },
+  actionBtnText: {
+    marginLeft: spacing[2],
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.medium,
+    color: colorScales.gray[600],
+  },
+  posRoot: {
+    flex: 1,
+    backgroundColor: colorScales.gray[50],
+  },
+  searchWrapper: {
+    paddingHorizontal: spacing[4],
+    paddingTop: spacing[3],
+    paddingBottom: spacing[2],
+  },
+  centerContent: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fabBar: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing[5],
+    paddingVertical: 14,
+    ...shadows.lg,
+  },
+  fabLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  fabBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: borderRadius.full,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing[2],
+  },
+  fabBadgeText: {
+    fontSize: typography.fontSize.xs,
+    fontWeight: typography.fontWeight.bold,
+    color: '#FFFFFF',
+  },
+  fabCountText: {
+    color: '#FFFFFF',
+    fontSize: typography.fontSize.sm,
+  },
+  fabRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  fabTotalText: {
+    color: '#FFFFFF',
+    fontWeight: typography.fontWeight.bold,
+    fontSize: typography.fontSize.lg,
+    marginRight: spacing[2],
+  },
+  fabCartBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    borderRadius: borderRadius.lg,
+    paddingHorizontal: spacing[3],
+    paddingVertical: 6,
+  },
+  fabCartText: {
+    color: '#FFFFFF',
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.semibold,
+    marginRight: spacing[1],
+  },
+  discountSection: {
+    marginTop: spacing[4],
+  },
+});
+
+async function searchCustomers(query: string): Promise<PosCustomer[]> {
+  if (!query.trim()) return [];
+  try {
+    const res = await apiClient.get(`${Endpoints.STORE.CUSTOMERS.SEARCH}?search=${encodeURIComponent(query)}&limit=20`);
+    const data = (res.data as any);
+    if (data?.success !== false && Array.isArray(data)) return data;
+    if (data?.data && Array.isArray(data.data)) return data.data;
+    return [];
+  } catch {
+    return [];
+  }
+}
+
+function generateReceiptHtml(order: { orderNumber: string; items: any[]; summary: any; customer?: PosCustomer | null; paymentMethod: string }): string {
+  const date = new Date().toLocaleDateString('es-CO', { year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  const itemsHtml = order.items.map((item: any) => `
+    <tr>
+      <td style="padding: 8px; border-bottom: 1px solid #eee;">${item.product?.name || ''} ${item.variant_display_name ? `(${item.variant_display_name})` : ''}</td>
+      <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: center;">${item.quantity}</td>
+      <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">$${item.unitPrice.toLocaleString('es-CO')}</td>
+      <td style="padding: 8px; border-bottom: 1px solid #eee; text-align: right;">$${item.totalPrice.toLocaleString('es-CO')}</td>
+    </tr>
+  `).join('');
+
+  return `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta charset="utf-8">
+      <style>
+        body { font-family: -apple-system, sans-serif; max-width: 400px; margin: 0 auto; padding: 20px; }
+        h1 { font-size: 18px; text-align: center; margin-bottom: 5px; }
+        .header { text-align: center; margin-bottom: 20px; }
+        .order-info { font-size: 12px; color: #666; margin-bottom: 20px; }
+        table { width: 100%; border-collapse: collapse; font-size: 14px; }
+        th { background: #f5f5f5; padding: 8px; text-align: left; }
+        .totals { margin-top: 20px; }
+        .row { display: flex; justify-content: space-between; padding: 5px 0; }
+        .total-row { font-weight: bold; font-size: 16px; border-top: 1px solid #333; padding-top: 10px; margin-top: 5px; }
+        .footer { margin-top: 30px; text-align: center; font-size: 12px; color: #999; }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <h1>Vendix</h1>
+        <div class="order-info">Orden #${order.orderNumber}<br>${date}</div>
+      </div>
+      ${order.customer ? `<p><strong>Cliente:</strong> ${order.customer.first_name} ${order.customer.last_name}</p>` : ''}
+      <table>
+        <thead>
+          <tr>
+            <th style="padding: 8px;">Producto</th>
+            <th style="padding: 8px; text-align: center;">Cant</th>
+            <th style="padding: 8px; text-align: right;">Precio</th>
+            <th style="padding: 8px; text-align: right;">Total</th>
+          </tr>
+        </thead>
+        <tbody>${itemsHtml}</tbody>
+      </table>
+      <div class="totals">
+        <div class="row"><span>Subtotal:</span><span>$${order.summary.subtotal.toLocaleString('es-CO')}</span></div>
+        <div class="row"><span>IVA:</span><span>$${order.summary.taxAmount.toLocaleString('es-CO')}</span></div>
+        ${order.summary.discountAmount > 0 ? `<div class="row" style="color: green;"><span>Descuento:</span><span>-$${order.summary.discountAmount.toLocaleString('es-CO')}</span></div>` : ''}
+        <div class="row total-row"><span>Total:</span><span>$${order.summary.total.toLocaleString('es-CO')}</span></div>
+        <div class="row" style="margin-top: 10px; font-size: 12px;"><span>Método:</span><span>${order.paymentMethod === 'cash' ? 'Efectivo' : 'Tarjeta'}</span></div>
+      </div>
+      <div class="footer">¡Gracias por su compra!</div>
+    </body>
+    </html>
+  `;
+}
 
 const ProductCard = ({
   product,
@@ -47,34 +620,32 @@ const ProductCard = ({
   return (
     <Pressable
       onPress={() => !isOutOfStock && onPress(product)}
-      className="bg-white rounded-xl p-3 mb-3 shadow-sm border border-gray-100 active:scale-[0.97]"
-      style={{ width: ITEM_WIDTH as any }}
+      style={productCardStyles.card}
       disabled={isOutOfStock}
     >
       <View
-        className="w-full h-24 rounded-lg items-center justify-center mb-2"
-        style={{ backgroundColor: isOutOfStock ? '#E5E7EB' : colors.primary + '20' }}
+        style={[productCardStyles.imageArea, { backgroundColor: isOutOfStock ? '#E5E7EB' : colors.primary + '20' }]}
       >
         {product.image_url ? (
-          <View className="w-full h-full rounded-lg bg-gray-200 items-center justify-center">
-            <Icon name="package" size={28} color={colors.text.secondary} />
-          </View>
+          <Image
+            source={{ uri: product.image_url }}
+            style={{ width: 48, height: 48, borderRadius: 8 }}
+          />
         ) : (
           <Text
-            className="font-bold text-2xl"
-            style={{ color: isOutOfStock ? '#9CA3AF' : colors.primary }}
+            style={[productCardStyles.firstLetter, { color: isOutOfStock ? '#9CA3AF' : colors.primary }]}
           >
             {firstLetter}
           </Text>
         )}
       </View>
 
-      <Text className="text-sm font-semibold text-gray-900" numberOfLines={2}>
+      <Text style={productCardStyles.name} numberOfLines={2}>
         {product.name}
       </Text>
 
-      <View className="flex-row items-center justify-between mt-1">
-        <Text className="text-sm font-bold" style={{ color: colors.primary }}>
+      <View style={productCardStyles.row}>
+        <Text style={productCardStyles.price}>
           {formatCurrency(product.final_price)}
         </Text>
         {hasVariants && (
@@ -83,12 +654,12 @@ const ProductCard = ({
       </View>
 
       {isLowStock && (
-        <Text className="text-xs mt-1" style={{ color: '#F59E0B' }}>
+        <Text style={productCardStyles.lowStock}>
           Stock: {product.stock_quantity}
         </Text>
       )}
       {isOutOfStock && (
-        <Text className="text-xs mt-1 font-medium" style={{ color: colors.error }}>
+        <Text style={productCardStyles.outOfStock}>
           Agotado
         </Text>
       )}
@@ -111,9 +682,9 @@ const VariantPicker = ({
 
   return (
     <BottomSheet visible={visible} onClose={onClose} snapPoint="partial">
-      <View className="px-4 pt-2 pb-4">
-        <Text className="text-lg font-bold text-gray-900 mb-1">Seleccionar Variante</Text>
-        <Text className="text-sm text-gray-500 mb-4">{product.name}</Text>
+      <View style={s.containerPad}>
+        <Text style={s.sectionTitle}>Seleccionar Variante</Text>
+        <Text style={s.sectionSubtitle}>{product.name}</Text>
         <FlatList
           data={product.product_variants || []}
           keyExtractor={(item) => item.id.toString()}
@@ -124,29 +695,32 @@ const VariantPicker = ({
             return (
               <Pressable
                 onPress={() => !isUnavailable && onSelect(item)}
-                className="flex-row items-center justify-between py-3 px-2 border-b border-gray-100 active:bg-gray-50"
+                style={({ pressed }) => [
+                  s.variantRow,
+                  pressed ? { backgroundColor: colorScales.gray[50] } : undefined,
+                ]}
                 disabled={isUnavailable}
               >
-                <View className="flex-1">
-                  <Text className="text-sm font-medium text-gray-900">
+                <View style={s.flex1}>
+                  <Text style={s.variantName}>
                     {item.name || item.attributes || item.sku}
                   </Text>
-                  <Text className="text-xs text-gray-500">SKU: {item.sku}</Text>
+                  <Text style={s.skuText}>SKU: {item.sku}</Text>
                 </View>
-                <View className="items-end">
-                  <Text className="text-sm font-bold" style={{ color: colors.primary }}>
+                <View style={s.itemsEnd}>
+                  <Text style={s.variantPrice}>
                     {formatCurrency(price)}
                   </Text>
                   {isUnavailable ? (
-                    <Text className="text-xs" style={{ color: colors.error }}>Agotado</Text>
+                    <Text style={s.outOfStockText}>Agotado</Text>
                   ) : (
-                    <Text className="text-xs text-gray-400">Stock: {item.stock_quantity}</Text>
+                    <Text style={s.stockText}>Stock: {item.stock_quantity}</Text>
                   )}
                 </View>
               </Pressable>
             );
           }}
-          ItemSeparatorComponent={() => <View className="h-px bg-gray-100" />}
+          ItemSeparatorComponent={() => <View style={s.separator} />}
         />
       </View>
     </BottomSheet>
@@ -164,50 +738,172 @@ const CartItemRow = ({
   onDecrease: (id: string) => void;
   onRemove: (id: string) => void;
 }) => (
-  <View className="flex-row items-center py-3 border-b border-gray-100">
-    <View className="flex-1 mr-3">
-      <Text className="text-sm font-semibold text-gray-900" numberOfLines={1}>
+  <View style={s.cartItemRow}>
+    <View style={s.cartItemInfo}>
+      <Text style={s.cartItemName} numberOfLines={1}>
         {item.product.name}
       </Text>
       {item.variant_display_name && (
-        <Text className="text-xs text-gray-500" numberOfLines={1}>
+        <Text style={s.cartItemVariant} numberOfLines={1}>
           {item.variant_display_name}
         </Text>
       )}
-      <Text className="text-xs text-gray-400 mt-0.5">
+      <Text style={s.cartItemUnitPrice}>
         {formatCurrency(item.finalPrice)} c/u
       </Text>
     </View>
 
-    <View className="flex-row items-center mr-3">
+    <View style={s.qtyControls}>
       <Pressable
         onPress={() => onDecrease(item.id)}
-        className="w-8 h-8 rounded-full bg-gray-100 items-center justify-center active:bg-gray-200"
+        style={({ pressed }) => [
+          s.qtyBtn,
+          s.qtyBtnMinus,
+          pressed ? { backgroundColor: colorScales.gray[200] } : undefined,
+        ]}
       >
         <Icon name="minus" size={14} color={colors.text.secondary} />
       </Pressable>
-      <Text className="text-sm font-bold mx-3 w-6 text-center">{item.quantity}</Text>
+      <Text style={s.qtyLabel}>{item.quantity}</Text>
       <Pressable
         onPress={() => onIncrease(item.id)}
-        className="w-8 h-8 rounded-full items-center justify-center active:opacity-80"
-        style={{ backgroundColor: colors.primary + '20' }}
+        style={({ pressed }) => [
+          s.qtyBtn,
+          s.qtyBtnPlus,
+          pressed ? { opacity: 0.8 } : undefined,
+        ]}
       >
         <Icon name="plus" size={14} color={colors.primary} />
       </Pressable>
     </View>
 
-    <Text className="text-sm font-bold text-gray-900 w-20 text-right">
+    <Text style={s.cartItemTotal}>
       {formatCurrency(item.totalPrice)}
     </Text>
 
     <Pressable
       onPress={() => onRemove(item.id)}
-      className="ml-2 p-1 active:opacity-50"
+      style={({ pressed }) => [
+        s.removeBtn,
+        pressed ? { opacity: 0.5 } : undefined,
+      ]}
     >
       <Icon name="trash" size={16} color={colors.error} />
     </Pressable>
   </View>
 );
+
+const CustomerSearchSheet = ({
+  visible,
+  onClose,
+  onSelect,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onSelect: (customer: PosCustomer | null) => void;
+}) => {
+  const [query, setQuery] = useState('');
+  const [results, setResults] = useState<PosCustomer[]>([]);
+  const [searching, setSearching] = useState(false);
+
+  const handleSearch = useCallback(async (text: string) => {
+    setQuery(text);
+    if (text.length < 2) {
+      setResults([]);
+      return;
+    }
+    setSearching(true);
+    const customers = await searchCustomers(text);
+    setResults(customers);
+    setSearching(false);
+  }, []);
+
+  return (
+    <BottomSheet visible={visible} onClose={onClose} snapPoint="partial">
+      <View style={s.containerPad}>
+        <Text style={[s.sectionTitle, { marginBottom: spacing[3] }]}>Seleccionar Cliente</Text>
+        <SearchBar
+          placeholder="Buscar por nombre o email..."
+          value={query}
+          onChangeText={handleSearch}
+        />
+        <FlatList
+          data={results}
+          keyExtractor={(item) => item.id.toString()}
+          style={{ maxHeight: 300, marginTop: spacing[3] }}
+          ListHeaderComponent={
+            <Pressable
+              onPress={() => { onSelect(null); onClose(); }}
+              style={s.customerRow}
+            >
+              <Text style={s.noClientText}>
+                Sin cliente
+              </Text>
+            </Pressable>
+          }
+          renderItem={({ item }) => (
+            <Pressable
+              onPress={() => { onSelect(item); onClose(); }}
+              style={s.customerRow}
+            >
+              <Text style={s.customerName}>
+                {item.first_name} {item.last_name}
+              </Text>
+              <Text style={s.customerContact}>
+                {item.email} {item.phone ? `• ${item.phone}` : ''}
+              </Text>
+            </Pressable>
+          )}
+          ListEmptyComponent={
+            query.length >= 2 && !searching ? (
+              <Text style={s.emptyText}>
+                No se encontraron clientes
+              </Text>
+            ) : null
+          }
+        />
+      </View>
+    </BottomSheet>
+  );
+};
+
+const DiscountSheet = ({
+  visible,
+  onClose,
+  onApply,
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onApply: (amount: number) => void;
+}) => {
+  const [amount, setAmount] = useState('');
+
+  const handleApply = () => {
+    const value = parseFloat(amount.replace(',', '.'));
+    if (isNaN(value) || value <= 0) return;
+    onApply(value);
+    setAmount('');
+    onClose();
+  };
+
+  return (
+    <BottomSheet visible={visible} onClose={onClose} snapPoint="partial">
+      <View style={s.containerPad}>
+        <Text style={[s.sectionTitle, { marginBottom: spacing[3] }]}>Agregar Descuento</Text>
+        <Input
+          label="Monto del descuento"
+          placeholder="0.00"
+          keyboardType="decimal-pad"
+          value={amount}
+          onChangeText={setAmount}
+        />
+        <View style={s.discountSection}>
+          <Button title="Aplicar" onPress={handleApply} fullWidth disabled={!amount} />
+        </View>
+      </View>
+    </BottomSheet>
+  );
+};
 
 const CartPanel = ({
   visible,
@@ -224,86 +920,108 @@ const CartPanel = ({
   const updateQuantity = useCartStore((s) => s.updateQuantity);
   const removeItem = useCartStore((s) => s.removeItem);
   const setCustomer = useCartStore((s) => s.setCustomer);
+  const applyDiscount = useCartStore((s) => s.applyDiscount);
+  const [showCustomerSearch, setShowCustomerSearch] = useState(false);
+  const [showDiscount, setShowDiscount] = useState(false);
 
   return (
-    <BottomSheet visible={visible} onClose={onClose} snapPoint="full">
-      <View className="flex-1 px-4 pt-2">
-        <View className="flex-row items-center justify-between mb-4">
-          <Text className="text-lg font-bold text-gray-900">Carrito</Text>
-          <Pressable onPress={onClose}>
-            <Icon name="x" size={24} color={colors.text.secondary} />
-          </Pressable>
-        </View>
+    <>
+      <CustomerSearchSheet
+        visible={showCustomerSearch}
+        onClose={() => setShowCustomerSearch(false)}
+        onSelect={(c) => setCustomer(c)}
+      />
+      <DiscountSheet
+        visible={showDiscount}
+        onClose={() => setShowDiscount(false)}
+        onApply={(amount) => applyDiscount('fixed', amount, 'Descuento manual')}
+      />
+      <BottomSheet visible={visible} onClose={onClose} snapPoint="full">
+        <View style={s.cartPanelContent}>
+          <View style={s.cartHeader}>
+            <Text style={s.cartTitle}>Carrito</Text>
+            <Pressable onPress={onClose}>
+              <Icon name="x" size={24} color={colors.text.secondary} />
+            </Pressable>
+          </View>
 
-        {customer && (
           <Pressable
-            onPress={() => setCustomer(null)}
-            className="flex-row items-center bg-blue-50 rounded-lg px-3 py-2 mb-3 active:bg-blue-100"
+            onPress={() => setShowCustomerSearch(true)}
+            style={({ pressed }) => [
+              s.customerBtn,
+              pressed ? { backgroundColor: '#DBEAFE' } : undefined,
+            ]}
           >
             <Icon name="user" size={16} color="#3B82F6" />
-            <Text className="text-sm text-blue-700 font-medium ml-2 flex-1">
-              {customer.first_name} {customer.last_name}
+            <Text style={s.customerBtnText}>
+              {customer ? `${customer.first_name} ${customer.last_name}` : 'Sin cliente'}
             </Text>
-            <Icon name="x" size={14} color="#3B82F6" />
+            <Text style={s.selectLabel}>Seleccionar</Text>
           </Pressable>
-        )}
 
-        {items.length === 0 ? (
-          <EmptyState
-            title="Carrito vacío"
-            description="Agrega productos desde el catálogo"
-            icon="shopping-cart"
-          />
-        ) : (
-          <FlatList
-            data={items}
-            keyExtractor={(item) => item.id}
-            renderItem={({ item }) => (
-              <CartItemRow
-                item={item}
-                onIncrease={(id) => updateQuantity(id, items.find((i) => i.id === id)!.quantity + 1)}
-                onDecrease={(id) => updateQuantity(id, items.find((i) => i.id === id)!.quantity - 1)}
-                onRemove={removeItem}
-              />
-            )}
-            className="flex-1"
-          />
-        )}
-
-        {items.length > 0 && (
-          <View className="pt-3 border-t border-gray-200">
-            <View className="flex-row justify-between mb-1">
-              <Text className="text-sm text-gray-500">Subtotal</Text>
-              <Text className="text-sm text-gray-700">{formatCurrency(summary.subtotal)}</Text>
-            </View>
-            <View className="flex-row justify-between mb-1">
-              <Text className="text-sm text-gray-500">IVA</Text>
-              <Text className="text-sm text-gray-700">{formatCurrency(summary.taxAmount)}</Text>
-            </View>
-            {summary.discountAmount > 0 && (
-              <View className="flex-row justify-between mb-1">
-                <Text className="text-sm text-gray-500">Descuento</Text>
-                <Text className="text-sm text-green-600">-{formatCurrency(summary.discountAmount)}</Text>
-              </View>
-            )}
-            <View className="flex-row justify-between mt-2 pt-2 border-t border-gray-200">
-              <Text className="text-base font-bold text-gray-900">Total</Text>
-              <Text className="text-base font-bold" style={{ color: colors.primary }}>
-                {formatCurrency(summary.total)}
-              </Text>
-            </View>
-
-            <Button
-              title="COBRAR"
-              onPress={onCharge}
-              fullWidth
-              size="lg"
-              className="mt-4"
+          {items.length === 0 ? (
+            <EmptyState
+              title="Carrito vacío"
+              description="Agrega productos desde el catálogo"
+              icon="shopping-cart"
             />
-          </View>
-        )}
-      </View>
-    </BottomSheet>
+          ) : (
+            <FlatList
+              data={items}
+              keyExtractor={(item) => item.id}
+              style={s.cartFlatList}
+              renderItem={({ item }) => (
+                <CartItemRow
+                  item={item}
+                  onIncrease={(id) => updateQuantity(id, items.find((i) => i.id === id)!.quantity + 1)}
+                  onDecrease={(id) => updateQuantity(id, items.find((i) => i.id === id)!.quantity - 1)}
+                  onRemove={removeItem}
+                />
+              )}
+            />
+          )}
+
+          {items.length > 0 && (
+            <View style={s.summarySection}>
+              <View style={s.summaryRow}>
+                <Text style={s.summaryLabel}>Subtotal</Text>
+                <Text style={s.summaryValue}>{formatCurrency(summary.subtotal)}</Text>
+              </View>
+              <View style={s.summaryRow}>
+                <Text style={s.summaryLabel}>IVA</Text>
+                <Text style={s.summaryValue}>{formatCurrency(summary.taxAmount)}</Text>
+              </View>
+              {summary.discountAmount > 0 ? (
+                <View style={s.summaryRow}>
+                  <Text style={s.summaryLabel}>Descuento</Text>
+                  <Text style={s.discountText}>-{formatCurrency(summary.discountAmount)}</Text>
+                </View>
+              ) : (
+                <Pressable onPress={() => setShowDiscount(true)} style={s.addDiscountBtn}>
+                  <Text style={s.addDiscountText}>
+                    + Agregar descuento
+                  </Text>
+                </Pressable>
+              )}
+              <View style={s.totalRow}>
+                <Text style={s.totalLabel}>Total</Text>
+                <Text style={s.totalValue}>
+                  {formatCurrency(summary.total)}
+                </Text>
+              </View>
+
+              <Button
+                title="COBRAR"
+                onPress={onCharge}
+                fullWidth
+                size="lg"
+                containerStyle={s.chargeBtn}
+              />
+            </View>
+          )}
+        </View>
+      </BottomSheet>
+    </>
   );
 };
 
@@ -314,7 +1032,7 @@ const PaymentSheet = ({
 }: {
   visible: boolean;
   onClose: () => void;
-  onSuccess: (orderNumber: string) => void;
+  onSuccess: (orderNumber: string, receiptData: { items: any[]; summary: any; customer: any; paymentMethod: string }) => void;
 }) => {
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card'>('cash');
   const [cashReceived, setCashReceived] = useState('');
@@ -341,9 +1059,10 @@ const PaymentSheet = ({
     },
     onSuccess: (data) => {
       const orderNumber = data?.order_number || data?.id?.toString() || '---';
+      const receiptData = { items, summary, customer, paymentMethod };
       clearCart();
       queryClient.invalidateQueries({ queryKey: ['orders'] });
-      onSuccess(orderNumber);
+      onSuccess(orderNumber, receiptData);
     },
     onError: () => {
       toastError('Error al procesar el pago. Intenta de nuevo.');
@@ -386,48 +1105,40 @@ const PaymentSheet = ({
     <BottomSheet visible={visible} onClose={onClose} snapPoint="partial">
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        className="px-4 pt-2 pb-4"
+        style={s.containerPad}
       >
-        <Text className="text-lg font-bold text-gray-900 mb-4">Cobrar</Text>
+        <Text style={s.paymentTitle}>Cobrar</Text>
 
-        <View className="bg-green-50 rounded-xl p-4 items-center mb-4">
-          <Text className="text-sm text-gray-500 mb-1">Total a cobrar</Text>
-          <Text className="text-3xl font-bold" style={{ color: colors.primary }}>
+        <View style={s.totalBox}>
+          <Text style={s.totalBoxLabel}>Total a cobrar</Text>
+          <Text style={s.totalBoxValue}>
             {formatCurrency(summary.total)}
           </Text>
         </View>
 
-        <View className="flex-row gap-3 mb-4">
+        <View style={s.methodRow}>
           <Pressable
             onPress={() => setPaymentMethod('cash')}
-            className={`flex-1 flex-row items-center justify-center py-3 rounded-xl border-2 ${
-              paymentMethod === 'cash' ? 'border-green-500 bg-green-50' : 'border-gray-200 bg-white'
-            }`}
+            style={[s.methodBtn, paymentMethod === 'cash' ? s.methodBtnActive : s.methodBtnInactive]}
           >
             <Icon name="dollar-sign" size={18} color={paymentMethod === 'cash' ? colors.primary : colors.text.secondary} />
-            <Text className={`ml-2 font-semibold ${
-              paymentMethod === 'cash' ? 'text-green-700' : 'text-gray-500'
-            }`}>
+            <Text style={[s.methodLabel, paymentMethod === 'cash' ? s.methodLabelActive : s.methodLabelInactive]}>
               Efectivo
             </Text>
           </Pressable>
           <Pressable
             onPress={() => setPaymentMethod('card')}
-            className={`flex-1 flex-row items-center justify-center py-3 rounded-xl border-2 ${
-              paymentMethod === 'card' ? 'border-green-500 bg-green-50' : 'border-gray-200 bg-white'
-            }`}
+            style={[s.methodBtn, paymentMethod === 'card' ? s.methodBtnActive : s.methodBtnInactive]}
           >
             <Icon name="credit-card" size={18} color={paymentMethod === 'card' ? colors.primary : colors.text.secondary} />
-            <Text className={`ml-2 font-semibold ${
-              paymentMethod === 'card' ? 'text-green-700' : 'text-gray-500'
-            }`}>
+            <Text style={[s.methodLabel, paymentMethod === 'card' ? s.methodLabelActive : s.methodLabelInactive]}>
               Tarjeta
             </Text>
           </Pressable>
         </View>
 
         {paymentMethod === 'cash' && (
-          <View className="mb-4">
+          <View style={s.cashSection}>
             <Input
               label="Efectivo recibido"
               placeholder="0.00"
@@ -436,9 +1147,9 @@ const PaymentSheet = ({
               onChangeText={setCashReceived}
             />
             {received > 0 && received >= summary.total && (
-              <View className="mt-2 bg-blue-50 rounded-lg px-3 py-2 flex-row justify-between">
-                <Text className="text-sm text-blue-600 font-medium">Cambio</Text>
-                <Text className="text-sm text-blue-700 font-bold">{formatCurrency(change)}</Text>
+              <View style={s.changeBox}>
+                <Text style={s.changeLabel}>Cambio</Text>
+                <Text style={s.changeValue}>{formatCurrency(change)}</Text>
               </View>
             )}
           </View>
@@ -461,39 +1172,91 @@ const SuccessModal = ({
   visible,
   orderNumber,
   onClose,
+  receiptData,
 }: {
   visible: boolean;
   orderNumber: string;
   onClose: () => void;
-}) => (
-  <View className={`absolute inset-0 items-center justify-center bg-black/50 z-50 ${visible ? '' : 'hidden'}`}>
-    <View className="bg-white rounded-2xl p-6 mx-8 items-center shadow-2xl">
-      <View className="w-16 h-16 rounded-full items-center justify-center mb-4" style={{ backgroundColor: colors.primary + '20' }}>
-        <Icon name="check" size={32} color={colors.primary} />
+  receiptData?: {
+    items: any[];
+    summary: any;
+    customer: any;
+    paymentMethod: string;
+  } | null;
+}) => {
+  const [printing, setPrinting] = useState(false);
+
+  const handlePrint = useCallback(async () => {
+    if (!receiptData) return;
+    setPrinting(true);
+    try {
+      const html = generateReceiptHtml({ orderNumber, ...receiptData });
+      await Print.printAsync({ html });
+    } catch (e) {
+      toastError('Error al imprimir');
+    }
+    setPrinting(false);
+  }, [orderNumber, receiptData]);
+
+  const handleShare = useCallback(async () => {
+    if (!receiptData) return;
+    setPrinting(true);
+    try {
+      const html = generateReceiptHtml({ orderNumber, ...receiptData });
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync('data:text/html,' + encodeURIComponent(html), {
+          mimeType: 'text/html',
+          dialogTitle: 'Compartir recibo',
+        });
+      } else {
+        await Print.printAsync({ html });
+      }
+    } catch (e) {
+      toastError('Error al compartir');
+    }
+    setPrinting(false);
+  }, [orderNumber, receiptData]);
+
+  if (!visible) return null;
+
+  return (
+    <View style={s.successOverlay}>
+      <View style={s.successCard}>
+        <View style={s.successIcon}>
+          <Icon name="check" size={32} color={colors.primary} />
+        </View>
+        <Text style={s.successTitle}>¡Venta exitosa!</Text>
+        <Text style={s.successSubtitle}>Orden</Text>
+        <Text style={s.orderNumber}>#{orderNumber}</Text>
+        <View style={s.actionRow}>
+          <Pressable
+            onPress={handleShare}
+            style={({ pressed }) => [
+              s.actionBtn,
+              pressed ? { backgroundColor: colorScales.gray[50] } : undefined,
+            ]}
+            disabled={printing}
+          >
+            <Icon name="share" size={16} color={colors.text.secondary} />
+            <Text style={s.actionBtnText}>Compartir</Text>
+          </Pressable>
+          <Pressable
+            onPress={handlePrint}
+            style={({ pressed }) => [
+              s.actionBtn,
+              pressed ? { backgroundColor: colorScales.gray[50] } : undefined,
+            ]}
+            disabled={printing}
+          >
+            <Icon name="printer" size={16} color={colors.text.secondary} />
+            <Text style={s.actionBtnText}>Imprimir</Text>
+          </Pressable>
+        </View>
+        <Button title="Nueva venta" onPress={onClose} fullWidth containerStyle={s.chargeBtn} />
       </View>
-      <Text className="text-lg font-bold text-gray-900 mb-1">¡Venta exitosa!</Text>
-      <Text className="text-sm text-gray-500 mb-1">Orden</Text>
-      <Text className="text-2xl font-bold mb-4" style={{ color: colors.primary }}>#{orderNumber}</Text>
-      <View className="flex-row gap-3 w-full">
-        <Pressable
-          onPress={() => {}}
-          className="flex-1 flex-row items-center justify-center py-2.5 rounded-xl border border-gray-200 active:bg-gray-50"
-        >
-          <Icon name="share" size={16} color={colors.text.secondary} />
-          <Text className="ml-2 text-sm font-medium text-gray-600">Compartir</Text>
-        </Pressable>
-        <Pressable
-          onPress={() => {}}
-          className="flex-1 flex-row items-center justify-center py-2.5 rounded-xl border border-gray-200 active:bg-gray-50"
-        >
-          <Icon name="printer" size={16} color={colors.text.secondary} />
-          <Text className="ml-2 text-sm font-medium text-gray-600">Imprimir</Text>
-        </Pressable>
-      </View>
-      <Button title="Nueva venta" onPress={onClose} fullWidth className="mt-4" />
     </View>
-  </View>
-);
+  );
+};
 
 const PosScreen = () => {
   const insets = useSafeAreaInsets();
@@ -504,6 +1267,12 @@ const PosScreen = () => {
   const [showPayment, setShowPayment] = useState(false);
   const [showSuccess, setShowSuccess] = useState(false);
   const [orderNumber, setOrderNumber] = useState('');
+  const [receiptData, setReceiptData] = useState<{
+    items: any[];
+    summary: any;
+    customer: any;
+    paymentMethod: string;
+  } | null>(null);
 
   const summary = useCartStore((s) => s.summary);
   const addItem = useCartStore((s) => s.addItem);
@@ -546,8 +1315,9 @@ const PosScreen = () => {
     [selectedProduct, addItem],
   );
 
-  const handleChargeSuccess = useCallback((num: string) => {
+  const handleChargeSuccess = useCallback((num: string, data: any) => {
     setOrderNumber(num);
+    setReceiptData(data);
     setShowPayment(false);
     setShowSuccess(true);
   }, []);
@@ -555,11 +1325,12 @@ const PosScreen = () => {
   const handleCloseSuccess = useCallback(() => {
     setShowSuccess(false);
     setOrderNumber('');
+    setReceiptData(null);
   }, []);
 
   return (
-    <View className="flex-1 bg-gray-50" style={{ paddingTop: insets.top }}>
-      <View className="px-4 pt-3 pb-2">
+    <View style={[s.posRoot, { paddingTop: insets.top }]}>
+      <View style={s.searchWrapper}>
         <SearchBar
           placeholder="Buscar productos..."
           value={search}
@@ -568,7 +1339,7 @@ const PosScreen = () => {
       </View>
 
       {isLoading ? (
-        <View className="flex-1 items-center justify-center">
+        <View style={s.centerContent}>
           <Spinner />
         </View>
       ) : productList.length === 0 ? (
@@ -582,8 +1353,8 @@ const PosScreen = () => {
           data={productList}
           keyExtractor={(item) => item.id.toString()}
           numColumns={2}
-          columnWrapperClassName="justify-between px-4"
-          contentContainerClassName="pb-24"
+          columnWrapperStyle={{ justifyContent: 'space-between', paddingHorizontal: spacing[4] }}
+          contentContainerStyle={{ paddingBottom: spacing[24] }}
           showsVerticalScrollIndicator={false}
           renderItem={({ item }) => (
             <ProductCard product={item} onPress={handleProductPress} />
@@ -594,26 +1365,28 @@ const PosScreen = () => {
       {summary.itemCount > 0 && (
         <Pressable
           onPress={() => setShowCart(true)}
-          className="absolute bottom-0 left-0 right-0 flex-row items-center justify-between px-5 py-3.5 shadow-lg"
-          style={{
-            backgroundColor: colors.primary,
-            paddingBottom: insets.bottom + 12,
-          }}
+          style={[
+            s.fabBar,
+            {
+              backgroundColor: colors.primary,
+              paddingBottom: insets.bottom + spacing[3],
+            },
+          ]}
         >
-          <View className="flex-row items-center">
-            <View className="w-7 h-7 rounded-full bg-white/20 items-center justify-center mr-2">
-              <Text className="text-xs font-bold text-white">{summary.totalItems}</Text>
+          <View style={s.fabLeft}>
+            <View style={s.fabBadge}>
+              <Text style={s.fabBadgeText}>{summary.totalItems}</Text>
             </View>
-            <Text className="text-white text-sm">
+            <Text style={s.fabCountText}>
               {summary.itemCount} {summary.itemCount === 1 ? 'producto' : 'productos'}
             </Text>
           </View>
-          <View className="flex-row items-center">
-            <Text className="text-white font-bold text-lg mr-2">
+          <View style={s.fabRight}>
+            <Text style={s.fabTotalText}>
               {formatCurrency(summary.total)}
             </Text>
-            <View className="flex-row items-center bg-white/20 rounded-lg px-3 py-1.5">
-              <Text className="text-white text-sm font-semibold mr-1">Ver Carrito</Text>
+            <View style={s.fabCartBtn}>
+              <Text style={s.fabCartText}>Ver Carrito</Text>
               <Icon name="shopping-cart" size={14} color="#fff" />
             </View>
           </View>
@@ -649,6 +1422,7 @@ const PosScreen = () => {
         visible={showSuccess}
         orderNumber={orderNumber}
         onClose={handleCloseSuccess}
+        receiptData={receiptData}
       />
     </View>
   );

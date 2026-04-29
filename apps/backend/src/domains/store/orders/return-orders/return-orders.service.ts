@@ -266,7 +266,9 @@ export class ReturnOrdersService {
             const order_tax = Number(original_order.tax_amount || 0);
             if (order_total > 0 && order_tax > 0) {
               // Proportional tax: refund_amount / grand_total * tax_amount
-              tax_amount = Math.round((refund_amount / order_total) * order_tax * 100) / 100;
+              tax_amount =
+                Math.round((refund_amount / order_total) * order_tax * 100) /
+                100;
             }
           }
         }
@@ -282,7 +284,9 @@ export class ReturnOrdersService {
         });
       }
     } catch (error) {
-      this.logger.error(`Failed to emit refund.completed for return order #${id}: ${error.message}`);
+      this.logger.error(
+        `Failed to emit refund.completed for return order #${id}: ${error.message}`,
+      );
     }
 
     return processed_return;
@@ -415,5 +419,4 @@ export class ReturnOrdersService {
 
     return `${prefix}-${String(sequence).padStart(4, '0')}`;
   }
-
 }

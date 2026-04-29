@@ -13,8 +13,9 @@ import { Reflector } from '@nestjs/core';
 import { StorePrismaService } from '../../prisma/services/store-prisma.service';
 
 export const MODULE_FLOW_KEY = 'module_flow';
-export const RequireModuleFlow = (module: 'accounting' | 'payroll' | 'invoicing') =>
-  SetMetadata(MODULE_FLOW_KEY, module);
+export const RequireModuleFlow = (
+  module: 'accounting' | 'payroll' | 'invoicing',
+) => SetMetadata(MODULE_FLOW_KEY, module);
 
 @Injectable()
 export class ModuleFlowGuard implements CanActivate {
@@ -41,16 +42,20 @@ export class ModuleFlowGuard implements CanActivate {
     const cached = await this.cache.get<boolean>(cacheKey);
     if (cached !== undefined && cached !== null) {
       if (!cached) {
-        throw new ForbiddenException(`Module "${module}" is disabled for this store`);
+        throw new ForbiddenException(
+          `Module "${module}" is disabled for this store`,
+        );
       }
       return true;
     }
 
     try {
-      const settings = await this.prisma.withoutScope().store_settings.findUnique({
-        where: { store_id },
-        select: { settings: true },
-      });
+      const settings = await this.prisma
+        .withoutScope()
+        .store_settings.findUnique({
+          where: { store_id },
+          select: { settings: true },
+        });
       const s = (settings?.settings as any) || {};
 
       let enabled: boolean;
@@ -70,7 +75,9 @@ export class ModuleFlowGuard implements CanActivate {
       await this.cache.set(cacheKey, enabled, 300_000);
 
       if (!enabled) {
-        throw new ForbiddenException(`Module "${module}" is disabled for this store`);
+        throw new ForbiddenException(
+          `Module "${module}" is disabled for this store`,
+        );
       }
       return true;
     } catch (error) {

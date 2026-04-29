@@ -152,7 +152,7 @@ export class TemplatesService {
       where: { id },
       data: {
         ...updateTemplateDto,
-        template_data: (updateTemplateDto as any).template_data as any,
+        template_data: (updateTemplateDto as any).template_data,
         updated_at: new Date(),
       },
     });

@@ -40,13 +40,13 @@ export const DIAN_OPERATION_TYPES = {
  * Identification document types for parties.
  */
 export const DIAN_ID_TYPES: Record<string, string> = {
-  CC: '13',        // Cédula de ciudadanía
-  CE: '22',        // Cédula de extranjería
-  NIT: '31',       // NIT
-  PASSPORT: '41',  // Pasaporte
-  PEP: '47',       // PEP
-  PPT: '50',       // PPT
-  NUIP: '91',      // NUIP
+  CC: '13', // Cédula de ciudadanía
+  CE: '22', // Cédula de extranjería
+  NIT: '31', // NIT
+  PASSPORT: '41', // Pasaporte
+  PEP: '47', // PEP
+  PPT: '50', // PPT
+  NUIP: '91', // NUIP
 };
 
 /**
@@ -54,11 +54,11 @@ export const DIAN_ID_TYPES: Record<string, string> = {
  */
 export const DIAN_PAYMENT_MEANS = {
   CASH: '10',
-  CREDIT: '30',             // Crédito (a plazo)
-  DEBIT_TRANSFER: '42',     // Transferencia débito bancaria
-  CREDIT_CARD: '48',        // Tarjeta crédito
-  DEBIT_CARD: '49',         // Tarjeta débito
-  MUTUAL_AGREEMENT: '1',    // Instrumento no definido
+  CREDIT: '30', // Crédito (a plazo)
+  DEBIT_TRANSFER: '42', // Transferencia débito bancaria
+  CREDIT_CARD: '48', // Tarjeta crédito
+  DEBIT_CARD: '49', // Tarjeta débito
+  MUTUAL_AGREEMENT: '1', // Instrumento no definido
 } as const;
 
 /**

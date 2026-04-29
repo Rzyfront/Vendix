@@ -269,7 +269,10 @@ export class EcommerceCheckoutDto {
   })
   @IsOptional()
   @IsString()
-  @Matches(/^[\d+#*\s()-]*$/, { message: 'El número de WhatsApp solo puede contener números y los símbolos + # * ( ) -' })
+  @Matches(/^[\d+#*\s()-]*$/, {
+    message:
+      'El número de WhatsApp solo puede contener números y los símbolos + # * ( ) -',
+  })
   whatsapp_number?: string;
 }
 
@@ -429,7 +432,8 @@ export class FooterHelpDto {
   shipping_info?: string;
 
   @ApiPropertyOptional({
-    example: 'Si no estás satisfecho con tu compra, puedes solicitar una devolución...',
+    example:
+      'Si no estás satisfecho con tu compra, puedes solicitar una devolución...',
     description: 'Política de devoluciones',
   })
   @IsOptional()

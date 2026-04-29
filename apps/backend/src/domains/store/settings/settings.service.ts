@@ -332,7 +332,7 @@ export class SettingsService {
       await this.auditService.logUpdate(
         user_id!,
         AuditResource.SETTINGS,
-        store_id!, // Validado arriba, siempre existe aquí
+        store_id, // Validado arriba, siempre existe aquí
         null, // No guardamos el objeto completo de oldValues
         changedSections, // Solo las secciones que cambiaron
         {

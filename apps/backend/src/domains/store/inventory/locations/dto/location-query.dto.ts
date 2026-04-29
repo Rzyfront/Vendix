@@ -1,4 +1,10 @@
-import { IsOptional, IsInt, IsEnum, IsBoolean, IsString } from 'class-validator';
+import {
+  IsOptional,
+  IsInt,
+  IsEnum,
+  IsBoolean,
+  IsString,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { location_type_enum } from '@prisma/client';
 

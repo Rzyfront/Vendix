@@ -9,7 +9,15 @@ import { CsvStatementParser } from './csv-statement.parser';
 import { OfxStatementParser } from './ofx-statement.parser';
 import { Mt940StatementParser } from './mt940-statement.parser';
 
-const SUPPORTED_FORMATS = ['.csv', '.txt', '.ofx', '.qfx', '.sta', '.mt940', '.940'];
+const SUPPORTED_FORMATS = [
+  '.csv',
+  '.txt',
+  '.ofx',
+  '.qfx',
+  '.sta',
+  '.mt940',
+  '.940',
+];
 
 @Injectable()
 export class StatementParserFactory {

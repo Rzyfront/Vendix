@@ -70,7 +70,10 @@ export class CouponsController {
   async getStats() {
     try {
       const result = await this.couponsService.getStats();
-      return this.responseService.success(result, 'Stats obtenidas exitosamente');
+      return this.responseService.success(
+        result,
+        'Stats obtenidas exitosamente',
+      );
     } catch (error) {
       return this.responseService.error(
         error.message || 'Error al obtener stats',
@@ -85,7 +88,10 @@ export class CouponsController {
   async validate(@Body() dto: ValidateCouponDto) {
     try {
       const result = await this.couponsService.validate(dto);
-      return this.responseService.success(result, 'Cupón validado exitosamente');
+      return this.responseService.success(
+        result,
+        'Cupón validado exitosamente',
+      );
     } catch (error) {
       return this.responseService.error(
         error.message || 'Error al validar el cupón',
@@ -100,7 +106,10 @@ export class CouponsController {
   async findOne(@Param('id', ParseIntPipe) id: number) {
     try {
       const result = await this.couponsService.findOne(id);
-      return this.responseService.success(result, 'Cupón obtenido exitosamente');
+      return this.responseService.success(
+        result,
+        'Cupón obtenido exitosamente',
+      );
     } catch (error) {
       return this.responseService.error(
         error.message || 'Error al obtener el cupón',

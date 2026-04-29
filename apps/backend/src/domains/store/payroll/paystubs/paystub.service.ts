@@ -52,9 +52,7 @@ export class PaystubService {
    * Generate (or regenerate) a paystub PDF for a single payroll item.
    * Uploads to S3 and persists the key in `payroll_items.paystub_url`.
    */
-  async generatePaystub(
-    payroll_item_id: number,
-  ): Promise<{ url: string }> {
+  async generatePaystub(payroll_item_id: number): Promise<{ url: string }> {
     const item = await this.prisma.payroll_items.findFirst({
       where: { id: payroll_item_id },
       include: {
@@ -88,7 +86,10 @@ export class PaystubService {
     }
 
     const earnings = this.mapJsonToConcepts(item.earnings, EARNINGS_LABELS);
-    const deductions = this.mapJsonToConcepts(item.deductions, DEDUCTIONS_LABELS);
+    const deductions = this.mapJsonToConcepts(
+      item.deductions,
+      DEDUCTIONS_LABELS,
+    );
 
     const data: PaystubData = {
       company_name: org.name,
@@ -203,7 +204,9 @@ export class PaystubService {
       try {
         logo_buffer = await this.s3_service.downloadImage(org.logo_url);
       } catch {
-        this.logger.warn('Could not download organization logo for settlement paystub');
+        this.logger.warn(
+          'Could not download organization logo for settlement paystub',
+        );
       }
     }
 
@@ -237,8 +240,7 @@ export class PaystubService {
       net_settlement: Number(settlement.net_settlement),
     };
 
-    const pdf_buffer =
-      await PaystubPdfBuilder.generateSettlementPaystub(data);
+    const pdf_buffer = await PaystubPdfBuilder.generateSettlementPaystub(data);
 
     const s3_key = `organizations/${org.id}/payroll/settlements/${settlement.settlement_number}.pdf`;
     await this.s3_service.uploadFile(pdf_buffer, s3_key, 'application/pdf');
@@ -276,9 +278,7 @@ export class PaystubService {
   /**
    * Get (or lazily generate) a settlement paystub.
    */
-  async getSettlementPaystub(
-    settlement_id: number,
-  ): Promise<{ url: string }> {
+  async getSettlementPaystub(settlement_id: number): Promise<{ url: string }> {
     const settlement = await this.prisma.payroll_settlements.findFirst({
       where: { id: settlement_id },
       select: { id: true, document_url: true },

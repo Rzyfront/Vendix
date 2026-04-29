@@ -18,6 +18,7 @@ import { seedIcaMunicipalRates } from './seeds/ica-municipal-rates.seed';
 import { seedAIEngineApps } from './seeds/ai-engine-apps.seed';
 import { seedPayrollSystemDefaults } from './seeds/payroll-system-defaults.seed';
 import { seedSubscriptionPlans } from './seeds/subscription-plans.seed';
+import { seedSubscriptionPlansProduction } from './seeds/subscription-plans-production.seed';
 
 /**
  * Seed modules registry
@@ -137,6 +138,12 @@ const seedModules = [
     fn: seedSubscriptionPlans,
     description: 'Default trial plan for the auto-trial flow (is_default=true)',
   },
+  {
+    name: 'Subscription Plans (Canonical Production)',
+    fn: seedSubscriptionPlansProduction,
+    description:
+      'Canonical SaaS plans (starter / pro / enterprise) — idempotent across all environments',
+  },
 ];
 
 /**
@@ -244,3 +251,4 @@ export * from './seeds/ica-municipal-rates.seed';
 export * from './seeds/ai-engine-apps.seed';
 export * from './seeds/payroll-system-defaults.seed';
 export * from './seeds/subscription-plans.seed';
+export * from './seeds/subscription-plans-production.seed';

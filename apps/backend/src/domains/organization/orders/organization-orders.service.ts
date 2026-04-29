@@ -28,12 +28,7 @@ export class OrganizationOrdersService {
   }
 
   async findAll(query: OrganizationOrderQueryDto) {
-    const {
-      page = 1,
-      limit = 50,
-      sort = 'created_at',
-      order = 'desc',
-    } = query;
+    const { page = 1, limit = 50, sort = 'created_at', order = 'desc' } = query;
 
     const skip = (page - 1) * limit;
 
@@ -136,11 +131,15 @@ export class OrganizationOrdersService {
       store: {
         id: order.stores.id.toString(),
         name: order.stores.name,
-        slug: order.stores.store_code || order.stores.name.toLowerCase().replace(/\s+/g, '-'),
+        slug:
+          order.stores.store_code ||
+          order.stores.name.toLowerCase().replace(/\s+/g, '-'),
       },
       order_type: order.channel,
       status: order.state,
-      payment_status: order.payments?.[0] ? this.mapPaymentState(order.payments[0].state) : 'pending',
+      payment_status: order.payments?.[0]
+        ? this.mapPaymentState(order.payments[0].state)
+        : 'pending',
       total_amount: Number(order.grand_total),
       subtotal: Number(order.subtotal_amount),
       tax_amount: Number(order.tax_amount),
@@ -231,11 +230,15 @@ export class OrganizationOrdersService {
       store: {
         id: order.stores.id.toString(),
         name: order.stores.name,
-        slug: order.stores.store_code || order.stores.name.toLowerCase().replace(/\s+/g, '-'),
+        slug:
+          order.stores.store_code ||
+          order.stores.name.toLowerCase().replace(/\s+/g, '-'),
       },
       order_type: order.channel,
       status: order.state,
-      payment_status: order.payments?.[0] ? this.mapPaymentState(order.payments[0].state) : 'pending',
+      payment_status: order.payments?.[0]
+        ? this.mapPaymentState(order.payments[0].state)
+        : 'pending',
       total_amount: Number(order.grand_total),
       subtotal: Number(order.subtotal_amount),
       tax_amount: Number(order.tax_amount),
@@ -313,7 +316,10 @@ export class OrganizationOrdersService {
     ]);
 
     const totalOrders = orders.length;
-    const totalRevenue = orders.reduce((sum, o) => sum + Number(o.grand_total), 0);
+    const totalRevenue = orders.reduce(
+      (sum, o) => sum + Number(o.grand_total),
+      0,
+    );
 
     const ordersByStatusMap: Record<string, number> = {};
     for (const s of ordersByStatus) {
@@ -322,7 +328,9 @@ export class OrganizationOrdersService {
 
     const ordersByStoreList = ordersByStore.map((s) => ({
       store_id: s.store_id.toString(),
-      store_name: orders.find((o) => o.store_id === s.store_id)?.stores?.name || 'Unknown',
+      store_name:
+        orders.find((o) => o.store_id === s.store_id)?.stores?.name ||
+        'Unknown',
       orders_count: s._count.store_id,
       revenue: Number(s._sum.grand_total) || 0,
     }));
@@ -417,7 +425,9 @@ export class OrganizationOrdersService {
       discount_amount: Number(order.discount_amount),
       total_amount: Number(order.grand_total),
       status: order.state,
-      payment_status: order.payments?.[0] ? this.mapPaymentState(order.payments[0].state) : 'pending',
+      payment_status: order.payments?.[0]
+        ? this.mapPaymentState(order.payments[0].state)
+        : 'pending',
     };
 
     return OrderPdfBuilder.generate(pdfData);

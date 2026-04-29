@@ -1,6 +1,9 @@
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
-import { ModuleFlowGuard, RequireModuleFlow } from '../../../../common/guards/module-flow.guard';
+import {
+  ModuleFlowGuard,
+  RequireModuleFlow,
+} from '../../../../common/guards/module-flow.guard';
 import { UseGuards, UseInterceptors, UploadedFile } from '@nestjs/common';
 import {
   Controller,
@@ -31,7 +34,12 @@ export class BankTransactionsController {
   @Permissions('store:accounting:bank_reconciliation:read')
   async findAll(@Query() query_dto: QueryBankTransactionDto) {
     const result = await this.bank_transactions_service.findAll(query_dto);
-    return this.response_service.paginated(result.data, result.meta.total, result.meta.page, result.meta.limit);
+    return this.response_service.paginated(
+      result.data,
+      result.meta.total,
+      result.meta.page,
+      result.meta.limit,
+    );
   }
 
   @Post('import')
@@ -47,7 +55,10 @@ export class BankTransactionsController {
       file.buffer,
       file.originalname,
     );
-    return this.response_service.success(result, 'Statement imported successfully');
+    return this.response_service.success(
+      result,
+      'Statement imported successfully',
+    );
   }
 
   @Post('import/preview')
@@ -70,6 +81,9 @@ export class BankTransactionsController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@Param('id') id: string) {
     await this.bank_transactions_service.remove(+id);
-    return this.response_service.success(null, 'Transaction deleted successfully');
+    return this.response_service.success(
+      null,
+      'Transaction deleted successfully',
+    );
   }
 }

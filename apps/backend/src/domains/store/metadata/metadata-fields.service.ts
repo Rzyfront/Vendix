@@ -31,18 +31,25 @@ export class MetadataFieldsService {
         },
       });
 
-      this.logger.log(`Created metadata field: ${field.field_key} (${field.entity_type})`);
+      this.logger.log(
+        `Created metadata field: ${field.field_key} (${field.entity_type})`,
+      );
       return field;
     } catch (error: any) {
       if (error.code === 'P2002') {
-        throw new VendixHttpException(ErrorCodes.META_DUP_001, `Field key '${dto.field_key}' already exists for entity type '${dto.entity_type}'`);
+        throw new VendixHttpException(
+          ErrorCodes.META_DUP_001,
+          `Field key '${dto.field_key}' already exists for entity type '${dto.entity_type}'`,
+        );
       }
       throw error;
     }
   }
 
   async updateField(fieldId: number, dto: UpdateMetadataFieldDto) {
-    const existing = await this.prisma.entity_metadata_fields.findUnique({ where: { id: fieldId } });
+    const existing = await this.prisma.entity_metadata_fields.findUnique({
+      where: { id: fieldId },
+    });
     if (!existing) throw new VendixHttpException(ErrorCodes.META_FIND_001);
 
     return this.prisma.entity_metadata_fields.update({
@@ -69,13 +76,17 @@ export class MetadataFieldsService {
   }
 
   async getField(fieldId: number) {
-    const field = await this.prisma.entity_metadata_fields.findUnique({ where: { id: fieldId } });
+    const field = await this.prisma.entity_metadata_fields.findUnique({
+      where: { id: fieldId },
+    });
     if (!field) throw new VendixHttpException(ErrorCodes.META_FIND_001);
     return field;
   }
 
   async toggleField(fieldId: number, isActive: boolean) {
-    const existing = await this.prisma.entity_metadata_fields.findUnique({ where: { id: fieldId } });
+    const existing = await this.prisma.entity_metadata_fields.findUnique({
+      where: { id: fieldId },
+    });
     if (!existing) throw new VendixHttpException(ErrorCodes.META_FIND_001);
 
     return this.prisma.entity_metadata_fields.update({
@@ -98,6 +109,8 @@ export class MetadataFieldsService {
       );
     }
 
-    return this.prisma.entity_metadata_fields.delete({ where: { id: fieldId } });
+    return this.prisma.entity_metadata_fields.delete({
+      where: { id: fieldId },
+    });
   }
 }

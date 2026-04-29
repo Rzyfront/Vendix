@@ -1,0 +1,83 @@
+<div class="min-h-screen bg-[var(--color-background)]">
+  <section class="py-12 md:py-20">
+    <div class="container mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="text-center mb-8 md:mb-12">
+        <h1 class="text-3xl md:text-5xl font-bold text-[var(--color-text-primary)] mb-4">
+          Planes y Precios
+        </h1>
+        <p class="text-base md:text-lg text-[var(--color-text-secondary)] max-w-2xl mx-auto">
+          Elige el plan que mejor se adapte a tu negocio. Empieza gratis y escala según crezcas.
+        </p>
+      </div>
+
+      <!-- View toggle (cards / compare) -->
+      @if (hasPlans()) {
+        <div class="flex justify-center mb-8 md:mb-12">
+          <div
+            class="inline-flex bg-white border border-[var(--color-border)] rounded-full p-1 shadow-sm"
+            role="tablist"
+            aria-label="Modo de vista de planes"
+          >
+            <button
+              type="button"
+              role="tab"
+              [attr.aria-selected]="viewMode() === 'cards'"
+              class="px-4 py-2 text-sm font-medium rounded-full transition-colors"
+              [class.bg-primary-600]="viewMode() === 'cards'"
+              [class.text-white]="viewMode() === 'cards'"
+              [class.text-[var(--color-text-secondary)]]="viewMode() !== 'cards'"
+              [class.hover:text-[var(--color-text-primary)]]="viewMode() !== 'cards'"
+              (click)="setViewMode('cards')"
+            >
+              Vista cards
+            </button>
+            <button
+              type="button"
+              role="tab"
+              [attr.aria-selected]="viewMode() === 'compare'"
+              class="px-4 py-2 text-sm font-medium rounded-full transition-colors"
+              [class.bg-primary-600]="viewMode() === 'compare'"
+              [class.text-white]="viewMode() === 'compare'"
+              [class.text-[var(--color-text-secondary)]]="viewMode() !== 'compare'"
+              [class.hover:text-[var(--color-text-primary)]]="viewMode() !== 'compare'"
+              (click)="setViewMode('compare')"
+            >
+              Vista comparativa
+            </button>
+          </div>
+        </div>
+      }
+
+      @if (loading()) {
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-6xl mx-auto">
+          @for (i of [1,2,3]; track i) {
+            <app-pricing-card [plan]="dummyPlan" [loading]="true" />
+          }
+        </div>
+      } @else if (hasPlans()) {
+        @if (viewMode() === 'cards') {
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 max-w-6xl mx-auto">
+            @for (plan of plans(); track plan.id) {
+              <app-pricing-card
+                [plan]="plan"
+                [ctaLabel]="'Empezar ahora'"
+                (select)="onSelectPlan($event)"
+              />
+            }
+          </div>
+        } @else {
+          <div class="max-w-6xl mx-auto">
+            <app-plan-comparison-table
+              [plans]="plans()"
+              (select)="onSelectPlan($event)"
+            />
+          </div>
+        }
+      } @else {
+        <div class="text-center py-20">
+          <p class="text-[var(--color-text-secondary)]">No hay planes disponibles en este momento.</p>
+        </div>
+      }
+    </div>
+  </section>
+</div>

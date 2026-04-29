@@ -18,7 +18,7 @@ import { Permissions } from '../../auth/decorators/permissions.decorator';
 @Controller('organization/sessions')
 @UseGuards(PermissionsGuard)
 export class SessionsController {
-  constructor(private readonly userSessionsService: SessionsService) { }
+  constructor(private readonly userSessionsService: SessionsService) {}
 
   @Get()
   @Permissions('organization:user_sessions:read')

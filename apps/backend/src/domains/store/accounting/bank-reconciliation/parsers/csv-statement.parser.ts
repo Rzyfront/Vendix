@@ -1,6 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
-// eslint-disable-next-line @typescript-eslint/no-var-requires
-const { parse: csvParse } = require('csv-parse/sync') as any;
+
+const { parse: csvParse } = require('csv-parse/sync');
 import { createHash } from 'crypto';
 
 import {
@@ -48,8 +48,7 @@ export class CsvStatementParser {
             result.transactions.push(transaction);
           }
         } catch (err) {
-          const message =
-            err instanceof Error ? err.message : 'Unknown error';
+          const message = err instanceof Error ? err.message : 'Unknown error';
           result.errors.push(`Row ${rowNum}: ${message}`);
           this.logger.warn(`Error parsing row ${rowNum}: ${message}`);
         }
@@ -70,9 +69,7 @@ export class CsvStatementParser {
   ): ParsedTransaction | null {
     const dateStr = row[mapping.date_column]?.trim();
     if (!dateStr) {
-      throw new Error(
-        `Missing date value in column "${mapping.date_column}"`,
-      );
+      throw new Error(`Missing date value in column "${mapping.date_column}"`);
     }
 
     const date = this.parseDate(dateStr, mapping.date_format);
@@ -95,9 +92,7 @@ export class CsvStatementParser {
     if (mapping.amount_column) {
       const rawAmount = row[mapping.amount_column]?.trim();
       if (!rawAmount) {
-        throw new Error(
-          `Missing amount in column "${mapping.amount_column}"`,
-        );
+        throw new Error(`Missing amount in column "${mapping.amount_column}"`);
       }
       amount = this.parseAmount(rawAmount, mapping.decimal_separator);
       if (isNaN(amount)) {

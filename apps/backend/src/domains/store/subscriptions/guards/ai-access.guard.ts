@@ -9,6 +9,7 @@ import { Reflector } from '@nestjs/core';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 import { SubscriptionAccessService } from '../services/subscription-access.service';
+import { SubscriptionGateConfig } from '../config/subscription-gate.config';
 import { AIFeatureKey, isAIFeatureKey } from '../types/access.types';
 
 export const AI_FEATURE_KEY = 'ai_feature';
@@ -41,6 +42,7 @@ export class AiAccessGuard implements CanActivate {
   constructor(
     private readonly reflector: Reflector,
     private readonly access: SubscriptionAccessService,
+    private readonly gateConfig: SubscriptionGateConfig,
   ) {}
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
@@ -55,7 +57,7 @@ export class AiAccessGuard implements CanActivate {
 
     const storeId = RequestContextService.getStoreId();
     if (!storeId) {
-      if (this.isEnforceMode()) {
+      if (this.gateConfig.isEnforce()) {
         throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_001);
       }
       this.logger.warn(
@@ -91,24 +93,22 @@ export class AiAccessGuard implements CanActivate {
           outcome: 'would_block',
           reason: result.reason,
           state: result.subscription_state,
-          enforce: this.isEnforceMode(),
+          enforce: this.gateConfig.isEnforce(),
         }),
       );
-      if (this.isEnforceMode()) {
+      if (this.gateConfig.isEnforce()) {
         const key =
           (result.reason as keyof typeof ErrorCodes) ?? 'SUBSCRIPTION_005';
         const entry = ErrorCodes[key] ?? ErrorCodes.SUBSCRIPTION_005;
-        throw new VendixHttpException(entry);
+        const details = {
+          subscription_state: result.subscription_state,
+          plan_id: result.plan_id ?? null,
+          has_record: result.has_record,
+        };
+        throw new VendixHttpException(entry, undefined, details);
       }
     }
 
     return true;
-  }
-
-  private isEnforceMode(): boolean {
-    return (
-      process.env.STORE_GATE_ENFORCE === 'true' ||
-      process.env.AI_GATE_ENFORCE === 'true'
-    );
   }
 }

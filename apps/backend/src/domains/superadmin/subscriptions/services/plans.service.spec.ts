@@ -17,7 +17,7 @@ describe('PlansService', () => {
         delete: jest.fn(),
       },
     };
-    service = new PlansService(prisma as any);
+    service = new PlansService(prisma);
   });
 
   function planFixture(overrides: Partial<any> = {}) {
@@ -118,7 +118,9 @@ describe('PlansService', () => {
   describe('update', () => {
     it('applies only provided fields (partial update)', async () => {
       prisma.subscription_plans.findUnique.mockResolvedValue(planFixture());
-      prisma.subscription_plans.update.mockResolvedValue(planFixture({ name: 'New' }));
+      prisma.subscription_plans.update.mockResolvedValue(
+        planFixture({ name: 'New' }),
+      );
 
       await service.update(1, { name: 'New', trial_days: 7 } as any);
 
@@ -133,7 +135,9 @@ describe('PlansService', () => {
   describe('archive', () => {
     it('sets state=archived and archived_at (no delete)', async () => {
       prisma.subscription_plans.findUnique.mockResolvedValue(planFixture());
-      prisma.subscription_plans.update.mockResolvedValue(planFixture({ state: 'archived' }));
+      prisma.subscription_plans.update.mockResolvedValue(
+        planFixture({ state: 'archived' }),
+      );
 
       await service.archive(1);
 
@@ -151,7 +155,9 @@ describe('PlansService', () => {
 
       await service.remove(1);
 
-      expect(prisma.subscription_plans.delete).toHaveBeenCalledWith({ where: { id: 1 } });
+      expect(prisma.subscription_plans.delete).toHaveBeenCalledWith({
+        where: { id: 1 },
+      });
     });
 
     it('throws SYS_NOT_FOUND_001 when plan missing', async () => {

@@ -59,9 +59,20 @@ import { DaviviendaBatchBuilder } from './bank-export/builders/davivienda-batch.
     PayrollBankExportService,
     {
       provide: BANK_BATCH_BUILDER_REGISTRY,
-      useFactory: () => [new BancolombiaBatchBuilder(), new DaviviendaBatchBuilder()],
+      useFactory: () => [
+        new BancolombiaBatchBuilder(),
+        new DaviviendaBatchBuilder(),
+      ],
     },
   ],
-  exports: [EmployeesService, PayrollRunsService, PayrollRulesService, AdvancesService, SettlementsService, PaystubService, PayrollBankExportService],
+  exports: [
+    EmployeesService,
+    PayrollRunsService,
+    PayrollRulesService,
+    AdvancesService,
+    SettlementsService,
+    PaystubService,
+    PayrollBankExportService,
+  ],
 })
 export class PayrollModule {}

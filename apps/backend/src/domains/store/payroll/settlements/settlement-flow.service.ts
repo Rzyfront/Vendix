@@ -10,7 +10,12 @@ import { SettlementsService } from './settlements.service';
 import { CreateSettlementDto } from './dto/create-settlement.dto';
 import { ApproveSettlementDto } from './dto/approve-settlement.dto';
 
-type SettlementStatus = 'draft' | 'calculated' | 'approved' | 'paid' | 'cancelled';
+type SettlementStatus =
+  | 'draft'
+  | 'calculated'
+  | 'approved'
+  | 'paid'
+  | 'cancelled';
 
 const VALID_TRANSITIONS: Record<SettlementStatus, SettlementStatus[]> = {
   draft: ['calculated', 'cancelled'],
@@ -75,8 +80,12 @@ export class SettlementFlowService {
     return settlement;
   }
 
-  private validateTransition(current_status: string, target_status: SettlementStatus): void {
-    const valid_targets = VALID_TRANSITIONS[current_status as SettlementStatus] || [];
+  private validateTransition(
+    current_status: string,
+    target_status: SettlementStatus,
+  ): void {
+    const valid_targets =
+      VALID_TRANSITIONS[current_status as SettlementStatus] || [];
     if (!valid_targets.includes(target_status)) {
       throw new VendixHttpException(
         ErrorCodes.SETTLEMENT_STATUS_001,
@@ -111,12 +120,14 @@ export class SettlementFlowService {
     }
 
     // Check no active settlement exists for this employee
-    const existing_settlement = await this.prisma.payroll_settlements.findFirst({
-      where: {
-        employee_id: dto.employee_id,
-        status: { in: ['draft', 'calculated', 'approved'] },
+    const existing_settlement = await this.prisma.payroll_settlements.findFirst(
+      {
+        where: {
+          employee_id: dto.employee_id,
+          status: { in: ['draft', 'calculated', 'approved'] },
+        },
       },
-    });
+    );
 
     if (existing_settlement) {
       throw new VendixHttpException(ErrorCodes.SETTLEMENT_CALC_002);
@@ -139,7 +150,8 @@ export class SettlementFlowService {
     });
 
     // Generate settlement number
-    const settlement_number = await this.settlements_service.generateSettlementNumber();
+    const settlement_number =
+      await this.settlements_service.generateSettlementNumber();
 
     // Create the settlement record
     const settlement = await this.prisma.payroll_settlements.create({
@@ -268,7 +280,8 @@ export class SettlementFlowService {
       organization_id: settlement.organization_id,
       store_id: settlement.store_id,
       employee_id: settlement.employee_id,
-      employee_name: `${settlement.employee?.first_name || ''} ${settlement.employee?.last_name || ''}`.trim(),
+      employee_name:
+        `${settlement.employee?.first_name || ''} ${settlement.employee?.last_name || ''}`.trim(),
       severance: Number(settlement.severance),
       severance_interest: Number(settlement.severance_interest),
       bonus: Number(settlement.bonus),
@@ -314,7 +327,7 @@ export class SettlementFlowService {
     const rules = await this.payroll_rules_service.getRulesForYear(year);
 
     const pending_salary_days =
-      (settlement.calculation_detail as any)?.pending_salary_days || 0;
+      settlement.calculation_detail?.pending_salary_days || 0;
 
     const calculation = this.calculation_service.calculateSettlement({
       base_salary: Number(employee.base_salary),
@@ -348,7 +361,9 @@ export class SettlementFlowService {
       include: SETTLEMENT_DETAIL_INCLUDE,
     });
 
-    this.logger.log(`Settlement #${id} recalculated: net=${calculation.net_settlement}`);
+    this.logger.log(
+      `Settlement #${id} recalculated: net=${calculation.net_settlement}`,
+    );
 
     return updated;
   }

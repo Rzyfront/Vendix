@@ -2,18 +2,40 @@ import { useState } from 'react';
 import {
   View,
   Text,
-  TextInput,
+  TouchableOpacity,
+  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  TouchableOpacity,
-  ActivityIndicator,
-  Image,
 } from 'react-native';
 import { useRouter, Link } from 'expo-router';
 import { AuthService } from '@/core/auth/auth.service';
-import { colors, authStyles as s } from '@/shared/styles/auth.styles';
+import { colors } from '@/shared/theme';
+import { Input } from '@/shared/components/input/input';
 import { Icon } from '@/shared/components/icon/icon';
+
+const styles = {
+  screen: { flex: 1, backgroundColor: colors.background },
+  scrollContent: { flexGrow: 1, justifyContent: 'center' as const, paddingHorizontal: 32, paddingVertical: 48 },
+  logoContainer: { alignItems: 'center' as const, marginBottom: 32 },
+  iconContainer: { width: 64, height: 64, backgroundColor: colors.primaryLight, borderRadius: 16, alignItems: 'center' as const, justifyContent: 'center' as const, marginBottom: 12, borderWidth: 2, borderColor: colors.primary },
+  brandText: { fontSize: 20, fontWeight: '600' as const, color: colors.text.primary },
+  titleContainer: { alignItems: 'center' as const, marginBottom: 24 },
+  title: { fontSize: 26, fontWeight: '700' as const, color: colors.text.primary },
+  subtitle: { fontSize: 14, color: colors.text.secondary, marginTop: 4, textAlign: 'center' as const },
+  card: { backgroundColor: colors.card, borderRadius: 12, borderWidth: 1, borderColor: colors.cardBorder, padding: 24, gap: 20 },
+  errorBox: { backgroundColor: '#FEF2F2', borderWidth: 1, borderColor: '#FECACA', borderRadius: 8, padding: 12 },
+  errorText: { fontSize: 14, color: colors.error, textAlign: 'center' as const },
+  button: { backgroundColor: colors.primary, borderRadius: 8, paddingVertical: 14, paddingHorizontal: 16, alignItems: 'center' as const, justifyContent: 'center' as const },
+  buttonDisabled: { opacity: 0.5 },
+  buttonText: { fontSize: 14, fontWeight: '600' as const, color: '#FFFFFF' },
+  linkContainer: { alignItems: 'center' as const, marginTop: 16 },
+  linkText: { fontSize: 14, fontWeight: '500' as const, color: colors.primary },
+  successContainer: { alignItems: 'center' as const },
+  successIcon: { width: 64, height: 64, backgroundColor: colors.primaryLight, borderRadius: 16, alignItems: 'center' as const, justifyContent: 'center' as const, marginBottom: 16, borderWidth: 2, borderColor: colors.primary },
+  successTitle: { fontSize: 26, fontWeight: '700' as const, color: colors.text.primary, marginBottom: 8 },
+  successSubtitle: { fontSize: 14, color: colors.text.secondary, textAlign: 'center' as const, marginBottom: 32 },
+};
 
 export default function ResetPasswordScreen() {
   const router = useRouter();
@@ -53,28 +75,28 @@ export default function ResetPasswordScreen() {
   if (success) {
     return (
       <KeyboardAvoidingView
-        style={s.screen}
+        style={styles.screen}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
         <ScrollView
-          contentContainerStyle={s.scrollContent}
+          contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
         >
-          <View style={s.successContainer}>
-            <View style={s.successIcon}>
+          <View style={styles.successContainer}>
+            <View style={styles.successIcon}>
               <Icon name="check" size={32} color={colors.primary} />
             </View>
-            <Text style={s.successTitle}>Contraseña Actualizada</Text>
-            <Text style={s.successSubtitle}>
+            <Text style={styles.successTitle}>Contraseña Actualizada</Text>
+            <Text style={styles.successSubtitle}>
               Tu contraseña ha sido restablecida exitosamente.
             </Text>
-            <View style={s.card}>
+            <View style={styles.card}>
               <TouchableOpacity
-                style={s.button}
+                style={styles.button}
                 onPress={() => router.replace('/(auth)/login')}
                 activeOpacity={0.8}
               >
-                <Text style={s.buttonText}>Iniciar Sesión</Text>
+                <Text style={styles.buttonText}>Iniciar Sesión</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -85,36 +107,36 @@ export default function ResetPasswordScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={s.screen}
+      style={styles.screen}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView
-        contentContainerStyle={s.scrollContent}
+        contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
         {/* Icon */}
-        <View style={s.logoContainer}>
-          <View style={s.iconContainer}>
+        <View style={styles.logoContainer}>
+          <View style={styles.iconContainer}>
             <Icon name="lock" size={28} color={colors.primary} />
           </View>
-          <Text style={s.brandText}>Vendix</Text>
+          <Text style={styles.brandText}>Vendix</Text>
         </View>
 
         {/* Title */}
-        <View style={s.titleContainer}>
-          <Text style={s.title}>Restablecer Contraseña</Text>
-          <Text style={s.subtitle}>Ingresa tu nueva contraseña.</Text>
+        <View style={styles.titleContainer}>
+          <Text style={styles.title}>Restablecer Contraseña</Text>
+          <Text style={styles.subtitle}>Ingresa tu nueva contraseña.</Text>
         </View>
 
         {/* Form Card */}
-        <View style={s.card}>
+        <View style={styles.card}>
           {error && (
-            <View style={s.errorBox}>
-              <Text style={s.errorText}>{error}</Text>
+            <View style={styles.errorBox}>
+              <Text style={styles.errorText}>{error}</Text>
             </View>
           )}
 
-          <InputField
+          <Input
             label="NUEVA CONTRASEÑA"
             placeholder="••••••••"
             value={newPassword}
@@ -129,7 +151,7 @@ export default function ResetPasswordScreen() {
             }
           />
 
-          <InputField
+          <Input
             label="CONFIRMAR NUEVA CONTRASEÑA"
             placeholder="••••••••"
             value={confirmPassword}
@@ -144,7 +166,7 @@ export default function ResetPasswordScreen() {
           />
 
           <TouchableOpacity
-            style={[s.button, isLoading && s.buttonDisabled]}
+            style={[styles.button, isLoading && styles.buttonDisabled]}
             onPress={handleSubmit}
             disabled={isLoading}
             activeOpacity={0.8}
@@ -152,69 +174,19 @@ export default function ResetPasswordScreen() {
             {isLoading ? (
               <ActivityIndicator color="#FFFFFF" />
             ) : (
-              <Text style={s.buttonText}>Restablecer Contraseña</Text>
+              <Text style={styles.buttonText}>Restablecer Contraseña</Text>
             )}
           </TouchableOpacity>
 
-          <View style={s.linkContainer}>
+          <View style={styles.linkContainer}>
             <Link href="/(auth)/login" asChild>
               <TouchableOpacity>
-                <Text style={s.linkText}>← Volver a Iniciar Sesión</Text>
+                <Text style={styles.linkText}>← Volver a Iniciar Sesión</Text>
               </TouchableOpacity>
             </Link>
           </View>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
-  );
-}
-
-function InputField({
-  label,
-  placeholder,
-  value,
-  onChangeText,
-  secureTextEntry,
-  helperText,
-  editable,
-  rightIcon,
-}: {
-  label: string;
-  placeholder: string;
-  value: string;
-  onChangeText: (text: string) => void;
-  secureTextEntry?: boolean;
-  helperText?: string;
-  editable?: boolean;
-  rightIcon?: React.ReactNode;
-}) {
-  const [focused, setFocused] = useState(false);
-
-  return (
-    <View>
-      <Text style={s.inputLabel}>{label}</Text>
-      <View
-        style={[
-          s.inputContainer,
-          focused && s.inputContainerFocused,
-        ]}
-      >
-        <TextInput
-          style={s.input}
-          placeholder={placeholder}
-          placeholderTextColor={colors.text.muted}
-          value={value}
-          onChangeText={onChangeText}
-          secureTextEntry={secureTextEntry}
-          editable={editable}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
-        />
-        {rightIcon && <View style={s.inputRightIcon}>{rightIcon}</View>}
-      </View>
-      {helperText && (
-        <Text style={s.helperText}>{helperText}</Text>
-      )}
-    </View>
   );
 }

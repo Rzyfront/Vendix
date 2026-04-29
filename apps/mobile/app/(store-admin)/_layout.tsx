@@ -1,8 +1,9 @@
 import { useEffect } from 'react';
 import { Slot, useRouter, usePathname } from 'expo-router';
-import { View } from 'react-native';
+import { View, StyleSheet } from 'react-native';
 import { AdminShell } from '@/shared/layouts/admin-shell';
 import { useAuthStore } from '@/core/store/auth.store';
+import { colors } from '@/shared/theme';
 
 const routeTitles: Record<string, string> = {
   dashboard: 'Dashboard',
@@ -10,6 +11,11 @@ const routeTitles: Record<string, string> = {
   products: 'Productos',
   orders: 'Órdenes',
   inventory: 'Inventario',
+  adjustments: 'Ajustes de Stock',
+  transfers: 'Transferencias',
+  movements: 'Movimientos',
+  suppliers: 'Proveedores',
+  locations: 'Ubicaciones',
   customers: 'Clientes',
   invoicing: 'Facturación',
   accounting: 'Contabilidad',
@@ -31,7 +37,7 @@ export default function StoreAdminLayout() {
   }, [isAuthenticated, isLoading]);
 
   if (isLoading) {
-    return <View className="flex-1 bg-white" />;
+    return <View style={styles.loader} />;
   }
 
   if (!isAuthenticated) {
@@ -47,3 +53,10 @@ export default function StoreAdminLayout() {
     </AdminShell>
   );
 }
+
+const styles = StyleSheet.create({
+  loader: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+});

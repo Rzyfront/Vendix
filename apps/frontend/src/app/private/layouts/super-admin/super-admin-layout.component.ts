@@ -12,7 +12,8 @@ import {
   MenuItem,
 } from '../../../shared/components/sidebar/sidebar.component';
 import { HeaderComponent } from '../../../shared/components/header/header.component';
-import { SubscriptionBannerComponent } from '../../../shared/components/subscription-banner/subscription-banner.component';
+// S1.2 — SubscriptionBannerComponent removed from SUPER_ADMIN. The banner is
+// store-scoped only and never makes sense in the platform-level layout.
 import { PaywallOutletComponent } from '../../../shared/components/ai-paywall-modal/paywall-outlet.component';
 import { AuthFacade } from '../../../core/store/auth/auth.facade';
 import { SupportService } from '../../modules/super-admin/support/services/support.service';
@@ -27,7 +28,6 @@ import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
     RouterModule,
     SidebarComponent,
     HeaderComponent,
-    SubscriptionBannerComponent,
     PaywallOutletComponent,
   ],
   template: `
@@ -58,7 +58,7 @@ import { toSignal, takeUntilDestroyed } from '@angular/core/rxjs-interop';
         >
         </app-header>
 
-        <app-subscription-banner />
+        <!-- S1.2 — No subscription banner here: banner is store-scoped. -->
 
         <!-- Page Content (Scrollable) -->
         <main
@@ -144,6 +144,7 @@ export class SuperAdminLayoutComponent {
     '/super-admin/subscriptions': 'Suscripciones',
     '/super-admin/subscriptions/plans': 'Planes',
     '/super-admin/subscriptions/active': 'Suscripciones',
+    '/super-admin/subscriptions/metrics': 'Métricas SaaS',
     '/super-admin/support': 'Tickets',
     '/super-admin/system/ai-engine': 'AI Engine',
     '/super-admin/system/templates': 'Plantillas',
@@ -231,6 +232,11 @@ export class SuperAdminLayoutComponent {
             label: 'Suscripciones',
             icon: 'circle',
             route: '/super-admin/subscriptions/active',
+          },
+          {
+            label: 'Métricas SaaS',
+            icon: 'circle',
+            route: '/super-admin/subscriptions/metrics',
           },
           {
             label: 'Métodos de Pago',

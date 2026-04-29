@@ -121,15 +121,16 @@ export class EmailTemplates {
                     <span class="login-label">📧 Tu correo:</span>
                     <span class="login-value">${data.email}</span>
                   </div>
-                  ${data.password
-          ? `
+                  ${
+                    data.password
+                      ? `
                   <div class="login-item">
                     <span class="login-label">🔑 Tu contraseña:</span>
                     <span class="login-value">${'•'.repeat(data.password.length)}</span>
                   </div>
                   `
-          : ''
-        }
+                      : ''
+                  }
                 </div>
                 <div style="color: #92400E; font-size: 14px; margin-top: 15px;">
                   💡 <strong>Consejo:</strong> Guarda esta información en un lugar seguro.
@@ -405,7 +406,11 @@ El equipo de ${this.COMPANY_NAME}
       : this.BASE_URL;
 
     // Dynamic branding with fallback to Vendix defaults
-    const companyName = data.organizationName || data.storeName || data.companyName || this.COMPANY_NAME;
+    const companyName =
+      data.organizationName ||
+      data.storeName ||
+      data.companyName ||
+      this.COMPANY_NAME;
     const primaryColor = data.branding?.primary_color || '#7ED7A5';
     const secondaryColor = data.branding?.secondary_color || '#2F6F4E';
     const accentColor = data.branding?.accent_color || '#FFFFFF';
@@ -657,13 +662,17 @@ El equipo de ${this.COMPANY_NAME}
         <body>
           <div class="container">
             <div class="header">
-              ${logoUrl ? `
+              ${
+                logoUrl
+                  ? `
                 <div class="logo-container">
                   <img src="${logoUrl}" alt="${companyName}" class="logo-image">
                 </div>
-              ` : `
+              `
+                  : `
                 <h1>${getWelcomeEmoji()} ${companyName}</h1>
-              `}
+              `
+              }
               <div class="subtitle">${getSubtitle()}</div>
             </div>
             <div class="content">
@@ -721,9 +730,13 @@ El equipo de ${this.COMPANY_NAME}
               </div>
               <div class="copyright">
                 © ${new Date().getFullYear()} ${companyName}. Todos los derechos reservados.<br>
-                ${userType === 'owner' ? '¡Estás listo para transformar tu negocio! 🚀' :
-          userType === 'staff' ? '¡Bienvenido al equipo! 🎉' :
-            '¡Gracias por elegirnos! 🛍️'}
+                ${
+                  userType === 'owner'
+                    ? '¡Estás listo para transformar tu negocio! 🚀'
+                    : userType === 'staff'
+                      ? '¡Bienvenido al equipo! 🎉'
+                      : '¡Gracias por elegirnos! 🛍️'
+                }
               </div>
             </div>
           </div>
@@ -746,24 +759,36 @@ ${dashboardUrl}
 📧 Correo: ${data.email}
 
 ✨ ¿QUÉ PUEDES HACER AHORA?
-${userType === 'staff' ? '📦 Gestión de inventario en tiempo real\n💳 Punto de venta rápido\n👥 Gestión de clientes\n📊 Reportes de ventas' :
-          userType === 'customer' ? '🛒 Carrito de compras fácil\n📦 Seguimiento de pedidos\n⭐ Programa de lealtad\n🎁 Ofertas exclusivas' :
-            '📊 Ver tu dashboard en tiempo real\n🏪 Administrar múltiples tiendas\n📦 Controlar inventario inteligente\n💳 Procesar pagos digitales\n👥 Gestionar clientes\n📈 Generar reportes avanzados'}
+${
+  userType === 'staff'
+    ? '📦 Gestión de inventario en tiempo real\n💳 Punto de venta rápido\n👥 Gestión de clientes\n📊 Reportes de ventas'
+    : userType === 'customer'
+      ? '🛒 Carrito de compras fácil\n📦 Seguimiento de pedidos\n⭐ Programa de lealtad\n🎁 Ofertas exclusivas'
+      : '📊 Ver tu dashboard en tiempo real\n🏪 Administrar múltiples tiendas\n📦 Controlar inventario inteligente\n💳 Procesar pagos digitales\n👥 Gestionar clientes\n📈 Generar reportes avanzados'
+}
 
-${userType !== 'customer' ? `🎯 SIGUIENTES PASOS RECOMENDADOS:
+${
+  userType !== 'customer'
+    ? `🎯 SIGUIENTES PASOS RECOMENDADOS:
 1. ${userType === 'staff' ? 'Explora el panel de staff' : 'Completa tu perfil de organización'}
 2. ${userType === 'staff' ? 'Familiarízate con el inventario' : 'Configura tu primera tienda'}
 3. ${userType === 'staff' ? 'Comienza a gestionar ventas' : 'Agrega tus primeros productos'}
 4. ${userType === 'staff' ? 'Explora los reportes' : 'Explora el dashboard y reportes'}
 
-` : ''}¿NECESITAS AYUDA?
+`
+    : ''
+}¿NECESITAS AYUDA?
 📧 Soporte: ${this.SUPPORT_EMAIL}
 🌐 Ayuda: https://help.${DomainConfigService.getBaseDomain()}
 ${userType !== 'customer' ? '💬 Chat: https://' + DomainConfigService.getBaseDomain() + '/chat' : ''}
 
-${userType === 'owner' ? '¡Bienvenido al futuro del comercio! 🚀' :
-          userType === 'staff' ? '¡Bienvenido al equipo! 🎉' :
-            '¡Gracias por elegirnos! 🛍️'}
+${
+  userType === 'owner'
+    ? '¡Bienvenido al futuro del comercio! 🚀'
+    : userType === 'staff'
+      ? '¡Bienvenido al equipo! 🎉'
+      : '¡Gracias por elegirnos! 🛍️'
+}
 
 El equipo de ${companyName}
       `,
@@ -918,15 +943,15 @@ El equipo de ${companyName}
               <div class="benefits">
                 <div class="benefits-title">✨ Beneficios de completar este paso</div>
                 ${stepInfo.benefits
-          .map(
-            (benefit) => `
+                  .map(
+                    (benefit) => `
                   <div class="benefit-item">
                     <span class="benefit-icon">✓</span>
                     <span>${benefit}</span>
                   </div>
                 `,
-          )
-          .join('')}
+                  )
+                  .join('')}
               </div>
 
               <div class="timeline">
@@ -1142,6 +1167,113 @@ Este enlace de invitación expirará en 7 días.
 
 El equipo de ${this.COMPANY_NAME}
       `,
+    };
+  }
+
+  static getPaymentConfirmedTemplate(data: {
+    invoiceNumber: string;
+    amount: string;
+    currency: string;
+    planName: string;
+    periodStart: string;
+    periodEnd: string;
+    storeName?: string;
+    organizationName?: string;
+    paymentMethod?: string;
+  }) {
+    const companyName = this.COMPANY_NAME;
+    const supportEmail = this.SUPPORT_EMAIL;
+
+    return {
+      subject: `✅ Pago confirmado – Factura ${data.invoiceNumber}`,
+      html: `
+        <!DOCTYPE html>
+        <html lang="es">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Pago confirmado</title>
+          <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; margin: 0; padding: 0; background-color: #F8FAFC; }
+            .container { max-width: 600px; margin: 0 auto; background-color: #FFFFFF; border-radius: 12px; overflow: hidden; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1); }
+            .header { background: linear-gradient(135deg, #7ED7A5 0%, #2F6F4E 100%); padding: 40px 30px; text-align: center; }
+            .header h1 { color: #FFFFFF; margin: 0; font-size: 28px; font-weight: 700; }
+            .content { padding: 40px 30px; }
+            .title { font-size: 22px; color: #1F2937; margin-bottom: 15px; font-weight: 700; }
+            .message { color: #4B5563; line-height: 1.7; margin-bottom: 25px; font-size: 16px; }
+            .details { background-color: #F8FAFC; border-radius: 12px; padding: 25px; margin: 25px 0; border: 1px solid #E2E8F0; }
+            .detail-item { display: flex; justify-content: space-between; align-items: center; margin: 12px 0; padding: 8px 0; border-bottom: 1px solid #E5E7EB; }
+            .detail-item:last-child { border-bottom: none; }
+            .detail-label { color: #6B7280; font-size: 14px; font-weight: 500; }
+            .detail-value { color: #1F2937; font-weight: 600; }
+            .total { font-size: 18px; color: #166534; font-weight: 700; }
+            .divider { border-top: 2px solid #E5E7EB; margin: 30px 0; }
+            .footer { background-color: #1F2937; padding: 30px; text-align: center; color: #D1D5DB; font-size: 14px; }
+            .footer-logo { font-size: 24px; font-weight: 700; color: #7ED7A5; margin-bottom: 15px; }
+            .footer-links a { color: #7ED7A5; text-decoration: none; margin: 0 10px; }
+            .copyright { margin-top: 20px; color: #9CA3AF; font-size: 12px; }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>✅ Pago Confirmado</h1>
+            </div>
+            <div class="content">
+              <div class="title">¡Gracias por tu pago!</div>
+              <div class="message">
+                Hemos recibido y confirmado el pago de tu suscripción en <strong>${companyName}</strong>.
+                A continuación encontrarás los detalles de tu factura:
+              </div>
+
+              <div class="details">
+                <div class="detail-item">
+                  <span class="detail-label">📄 Número de factura</span>
+                  <span class="detail-value">${data.invoiceNumber}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">🏪 Tienda</span>
+                  <span class="detail-value">${data.storeName || 'N/A'}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">📅 Período</span>
+                  <span class="detail-value">${data.periodStart} – ${data.periodEnd}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">💳 Método de pago</span>
+                  <span class="detail-value">${data.paymentMethod || 'Wompi'}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label">📋 Plan</span>
+                  <span class="detail-value">${data.planName}</span>
+                </div>
+                <div class="detail-item">
+                  <span class="detail-label total">💰 Total pagado</span>
+                  <span class="detail-value total">${data.amount} ${data.currency}</span>
+                </div>
+              </div>
+
+              <div class="divider"></div>
+
+              <div style="text-align: center; color: #6B7280; font-size: 14px;">
+                Si tienes alguna duda, escríbenos a <a href="mailto:${supportEmail}" style="color: #2F6F4E;">${supportEmail}</a>.
+              </div>
+            </div>
+            <div class="footer">
+              <div class="footer-logo">${companyName}</div>
+              <div class="footer-links">
+                <a href="https://${DomainConfigService.getBaseDomain()}">Sitio Web</a>
+                <a href="mailto:${supportEmail}">Soporte</a>
+              </div>
+              <div class="copyright">
+                © ${new Date().getFullYear()} ${companyName}. Todos los derechos reservados.
+              </div>
+            </div>
+          </div>
+        </body>
+        </html>
+      `,
+      text: `Pago confirmado – Factura ${data.invoiceNumber}\n\nGracias por tu pago en ${companyName}.\n\nDetalles:\n- Factura: ${data.invoiceNumber}\n- Tienda: ${data.storeName || 'N/A'}\n- Período: ${data.periodStart} – ${data.periodEnd}\n- Plan: ${data.planName}\n- Total: ${data.amount} ${data.currency}\n\nSi tienes dudas, escríbenos a ${supportEmail}.`,
     };
   }
 }

@@ -15,7 +15,17 @@ export class SubscriptionQueryDto {
   limit?: number = 10;
 
   @IsOptional()
-  @IsEnum(['draft', 'trial', 'active', 'grace_soft', 'grace_hard', 'suspended', 'blocked', 'cancelled', 'expired'])
+  @IsEnum([
+    'draft',
+    'trial',
+    'active',
+    'grace_soft',
+    'grace_hard',
+    'suspended',
+    'blocked',
+    'cancelled',
+    'expired',
+  ])
   state?: string;
 
   @IsOptional()

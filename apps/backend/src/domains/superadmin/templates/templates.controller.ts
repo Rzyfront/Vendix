@@ -12,11 +12,7 @@ import {
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse } from '@nestjs/swagger';
 import { TemplatesService } from './templates.service';
-import {
-  CreateTemplateDto,
-  UpdateTemplateDto,
-  TemplateQueryDto,
-} from './dto';
+import { CreateTemplateDto, UpdateTemplateDto, TemplateQueryDto } from './dto';
 import { RolesGuard } from '../../auth/guards/roles.guard';
 import { Roles } from '../../auth/decorators/roles.decorator';
 import { UserRole } from '../../auth/enums/user-role.enum';
@@ -40,7 +36,10 @@ export class TemplatesController {
   })
   async create(@Body() createTemplateDto: CreateTemplateDto) {
     const result = await this.templatesService.create(createTemplateDto);
-    return this.responseService.created(result, 'Template created successfully');
+    return this.responseService.created(
+      result,
+      'Template created successfully',
+    );
   }
 
   @Get()
@@ -94,7 +93,8 @@ export class TemplatesController {
   @Patch(':id')
   @ApiOperation({
     summary: 'Update a template',
-    description: 'Update any template field including system templates. System template modifications are logged for audit purposes.'
+    description:
+      'Update any template field including system templates. System template modifications are logged for audit purposes.',
   })
   @ApiResponse({
     status: 200,
@@ -116,7 +116,8 @@ export class TemplatesController {
   @Delete(':id')
   @ApiOperation({
     summary: 'Delete a template',
-    description: 'Delete any template including system templates. System template deletions are logged for audit purposes and cannot be undone.'
+    description:
+      'Delete any template including system templates. System template deletions are logged for audit purposes and cannot be undone.',
   })
   @ApiResponse({
     status: 200,

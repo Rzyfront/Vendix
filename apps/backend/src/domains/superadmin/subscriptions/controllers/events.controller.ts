@@ -30,7 +30,13 @@ export class EventsController {
   @ApiOperation({ summary: 'List all subscription events' })
   async findAll(@Query() query: EventsQueryDto) {
     const result = await this.eventsService.findAll(query);
-    return this.responseService.paginated(result.data, result.meta.total, result.meta.page, result.meta.limit, 'Events retrieved');
+    return this.responseService.paginated(
+      result.data,
+      result.meta.total,
+      result.meta.page,
+      result.meta.limit,
+      'Events retrieved',
+    );
   }
 
   @Permissions('superadmin:subscriptions:events:read')
@@ -40,7 +46,16 @@ export class EventsController {
     @Param('subscriptionId', ParseIntPipe) subscriptionId: number,
     @Query() query: EventsQueryDto,
   ) {
-    const result = await this.eventsService.findBySubscription(subscriptionId, query);
-    return this.responseService.paginated(result.data, result.meta.total, result.meta.page, result.meta.limit, 'Subscription events retrieved');
+    const result = await this.eventsService.findBySubscription(
+      subscriptionId,
+      query,
+    );
+    return this.responseService.paginated(
+      result.data,
+      result.meta.total,
+      result.meta.page,
+      result.meta.limit,
+      'Subscription events retrieved',
+    );
   }
 }

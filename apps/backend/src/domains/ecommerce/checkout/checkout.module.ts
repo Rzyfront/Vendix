@@ -14,24 +14,23 @@ import { PaymentsModule } from '../../store/payments/payments.module';
 import { ReservationsModule } from '../../store/reservations/reservations.module';
 
 @Module({
-    imports: [
-        PrismaModule,
-        CartModule,
-        ShippingModule,
-        TaxesModule,
-        SettingsModule,
-        InventoryModule,
-        ProductsModule,
-        WompiModule,
-        // PaymentsModule provides WebhookHandlerService (used by confirm-wompi-payment).
-        // Wrapped in forwardRef defensively because PaymentsModule already pulls in
-        // OrderFlow/Orders/PaymentLinks via forwardRef.
-        forwardRef(() => PaymentsModule),
-        ReservationsModule,
-    ],
-    controllers: [CheckoutController],
-    providers: [CheckoutService, PaymentEncryptionService],
-    exports: [CheckoutService],
+  imports: [
+    PrismaModule,
+    CartModule,
+    ShippingModule,
+    TaxesModule,
+    SettingsModule,
+    InventoryModule,
+    ProductsModule,
+    WompiModule,
+    // PaymentsModule provides WebhookHandlerService (used by confirm-wompi-payment).
+    // Wrapped in forwardRef defensively because PaymentsModule already pulls in
+    // OrderFlow/Orders/PaymentLinks via forwardRef.
+    forwardRef(() => PaymentsModule),
+    ReservationsModule,
+  ],
+  controllers: [CheckoutController],
+  providers: [CheckoutService, PaymentEncryptionService],
+  exports: [CheckoutService],
 })
-export class CheckoutModule { }
-
+export class CheckoutModule {}

@@ -1,4 +1,5 @@
-import { View, Text, type ViewProps } from 'react-native';
+import { View, Text, StyleSheet, type ViewProps, type ViewStyle } from 'react-native';
+import { colorScales, borderRadius, spacing, typography } from '@/shared/theme';
 
 type BadgeVariant = 'default' | 'success' | 'warning' | 'error' | 'info';
 type BadgeSize = 'sm' | 'md';
@@ -7,39 +8,59 @@ interface BadgeProps extends ViewProps {
   label: string;
   variant?: BadgeVariant;
   size?: BadgeSize;
+  style?: ViewStyle;
 }
 
-const variantClasses: Record<BadgeVariant, string> = {
-  default: 'bg-gray-100 text-gray-700',
-  success: 'bg-green-100 text-green-700',
-  warning: 'bg-amber-100 text-amber-700',
-  error: 'bg-red-100 text-red-700',
-  info: 'bg-blue-100 text-blue-700',
+const variantStyles = StyleSheet.create({
+  default: { backgroundColor: colorScales.gray[100] },
+  success: { backgroundColor: colorScales.green[100] },
+  warning: { backgroundColor: colorScales.amber[100] },
+  error: { backgroundColor: colorScales.red[100] },
+  info: { backgroundColor: colorScales.blue[100] },
+});
+
+const variantTextColors: Record<BadgeVariant, string> = {
+  default: colorScales.gray[700],
+  success: colorScales.green[700],
+  warning: colorScales.amber[700],
+  error: colorScales.red[700],
+  info: colorScales.blue[700],
 };
 
-const sizeClasses: Record<BadgeSize, string> = {
-  sm: 'px-2 py-0.5 text-xs',
-  md: 'px-2.5 py-1 text-sm',
+const sizeContainerStyles = StyleSheet.create({
+  sm: { paddingHorizontal: spacing[2], paddingVertical: spacing[0.5] },
+  md: { paddingHorizontal: spacing[2.5], paddingVertical: spacing[1] },
+});
+
+const sizeTextStyles: Record<BadgeSize, { fontSize: number }> = {
+  sm: { fontSize: typography.fontSize.xs },
+  md: { fontSize: typography.fontSize.sm },
 };
+
+const styles = StyleSheet.create({
+  base: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: borderRadius.full,
+    fontWeight: typography.fontWeight.medium as any,
+  },
+});
 
 export function Badge({
   label,
   variant = 'default',
   size = 'md',
-  className = '',
+  style,
   ...props
 }: BadgeProps) {
   return (
     <View
-      className={`
-        inline-flex items-center justify-center rounded-full font-medium
-        ${variantClasses[variant]}
-        ${sizeClasses[size]}
-        ${className}
-      `}
+      style={[styles.base, variantStyles[variant], sizeContainerStyles[size], style]}
       {...props}
     >
-      <Text className={size === 'sm' ? 'text-xs' : 'text-sm'}>{label}</Text>
+      <Text style={[{ color: variantTextColors[variant], fontWeight: typography.fontWeight.medium as any }, sizeTextStyles[size]]}>
+        {label}
+      </Text>
     </View>
   );
 }

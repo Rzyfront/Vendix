@@ -97,7 +97,14 @@ export class StoresService {
   }
 
   async findAll(query: AdminStoreQueryDto) {
-    const { page = 1, limit = 10, search, organization_id, store_type, include_non_production } = query;
+    const {
+      page = 1,
+      limit = 10,
+      search,
+      organization_id,
+      store_type,
+      include_non_production,
+    } = query;
     const skip = (page - 1) * Number(limit);
 
     const where: Prisma.storesWhereInput = {};

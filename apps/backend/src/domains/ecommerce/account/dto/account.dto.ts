@@ -1,122 +1,137 @@
-import { IsString, IsEmail, IsOptional, MinLength, Matches } from 'class-validator';
+import {
+  IsString,
+  IsEmail,
+  IsOptional,
+  MinLength,
+  Matches,
+} from 'class-validator';
 import { ApiSchema } from '@nestjs/swagger';
 
 @ApiSchema({ name: 'EcommerceAccountUpdateProfileDto' })
 export class EcommerceAccountUpdateProfileDto {
-    @IsOptional()
-    @IsString()
-    first_name?: string;
+  @IsOptional()
+  @IsString()
+  first_name?: string;
 
-    @IsOptional()
-    @IsString()
-    last_name?: string;
+  @IsOptional()
+  @IsString()
+  last_name?: string;
 
-    @IsOptional()
-    @IsString()
-    @Matches(/^[\d+#*\s()-]*$/, { message: 'El teléfono solo puede contener números y los símbolos + # * ( ) -' })
-    phone?: string;
+  @IsOptional()
+  @IsString()
+  @Matches(/^[\d+#*\s()-]*$/, {
+    message:
+      'El teléfono solo puede contener números y los símbolos + # * ( ) -',
+  })
+  phone?: string;
 
-    @IsOptional()
-    @IsString()
-    document_type?: string;
+  @IsOptional()
+  @IsString()
+  document_type?: string;
 
-    @IsOptional()
-    @IsString()
-    document_number?: string;
+  @IsOptional()
+  @IsString()
+  document_number?: string;
 
-    @IsOptional()
-    @IsString()
-    avatar_url?: string;
+  @IsOptional()
+  @IsString()
+  avatar_url?: string;
 
-    @IsOptional()
-    @IsString()
-    username?: string;
+  @IsOptional()
+  @IsString()
+  username?: string;
 }
 
 @ApiSchema({ name: 'EcommerceAccountChangePasswordDto' })
 export class EcommerceAccountChangePasswordDto {
-    @IsString()
-    @MinLength(1)
-    current_password: string;
+  @IsString()
+  @MinLength(1)
+  current_password: string;
 
-    @IsString()
-    @MinLength(8)
-    new_password: string;
+  @IsString()
+  @MinLength(8)
+  new_password: string;
 }
 
 @ApiSchema({ name: 'EcommerceAccountCreateAddressDto' })
 export class EcommerceAccountCreateAddressDto {
-    @IsString()
-    address_line1: string;
+  @IsString()
+  address_line1: string;
 
-    @IsOptional()
-    @IsString()
-    address_line2?: string;
+  @IsOptional()
+  @IsString()
+  address_line2?: string;
 
-    @IsString()
-    city: string;
+  @IsString()
+  city: string;
 
-    @IsOptional()
-    @IsString()
-    state_province?: string;
+  @IsOptional()
+  @IsString()
+  state_province?: string;
 
-    @IsString()
-    country_code: string;
+  @IsString()
+  country_code: string;
 
-    @IsOptional()
-    @IsString()
-    postal_code?: string;
+  @IsOptional()
+  @IsString()
+  postal_code?: string;
 
-    @IsOptional()
-    @IsString()
-    @Matches(/^[\d+#*\s()-]*$/, { message: 'El teléfono solo puede contener números y los símbolos + # * ( ) -' })
-    phone_number?: string;
+  @IsOptional()
+  @IsString()
+  @Matches(/^[\d+#*\s()-]*$/, {
+    message:
+      'El teléfono solo puede contener números y los símbolos + # * ( ) -',
+  })
+  phone_number?: string;
 
-    @IsOptional()
-    is_primary?: boolean;
+  @IsOptional()
+  is_primary?: boolean;
 
-    @IsOptional()
-    @IsString()
-    type?: string;
+  @IsOptional()
+  @IsString()
+  type?: string;
 }
 
 export class UpdateAddressDto {
-    @IsString()
-    address_line1: string;
+  @IsString()
+  address_line1: string;
 
-    @IsOptional()
-    @IsString()
-    address_line2?: string;
+  @IsOptional()
+  @IsString()
+  address_line2?: string;
 
-    @IsString()
-    city: string;
+  @IsString()
+  city: string;
 
-    @IsOptional()
-    @IsString()
-    state_province?: string;
+  @IsOptional()
+  @IsString()
+  state_province?: string;
 
-    @IsString()
-    country_code: string;
+  @IsString()
+  country_code: string;
 
-    @IsOptional()
-    @IsString()
-    postal_code?: string;
+  @IsOptional()
+  @IsString()
+  postal_code?: string;
 
-    @IsOptional()
-    @IsString()
-    @Matches(/^[\d+#*\s()-]*$/, { message: 'El teléfono solo puede contener números y los símbolos + # * ( ) -' })
-    phone_number?: string;
+  @IsOptional()
+  @IsString()
+  @Matches(/^[\d+#*\s()-]*$/, {
+    message:
+      'El teléfono solo puede contener números y los símbolos + # * ( ) -',
+  })
+  phone_number?: string;
 
-    @IsOptional()
-    is_primary?: boolean;
+  @IsOptional()
+  is_primary?: boolean;
 
-    @IsOptional()
-    @IsString()
-    type?: string;
+  @IsOptional()
+  @IsString()
+  type?: string;
 }
 
 export {
-    EcommerceAccountUpdateProfileDto as UpdateProfileDto,
-    EcommerceAccountChangePasswordDto as ChangePasswordDto,
-    EcommerceAccountCreateAddressDto as CreateAddressDto,
+  EcommerceAccountUpdateProfileDto as UpdateProfileDto,
+  EcommerceAccountChangePasswordDto as ChangePasswordDto,
+  EcommerceAccountCreateAddressDto as CreateAddressDto,
 };

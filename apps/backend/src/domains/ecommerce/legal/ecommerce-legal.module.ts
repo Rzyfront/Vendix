@@ -6,9 +6,9 @@ import { ResponseModule } from '../../../common/responses/response.module';
 import { S3Module } from '../../../common/services/s3.module';
 
 @Module({
-    imports: [PrismaModule, ResponseModule, S3Module],
-    controllers: [EcommerceLegalController],
-    providers: [EcommerceLegalService],
-    exports: [EcommerceLegalService],
+  imports: [PrismaModule, ResponseModule, S3Module],
+  controllers: [EcommerceLegalController],
+  providers: [EcommerceLegalService],
+  exports: [EcommerceLegalService],
 })
-export class EcommerceLegalModule { }
+export class EcommerceLegalModule {}

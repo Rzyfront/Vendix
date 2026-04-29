@@ -84,6 +84,195 @@ Base Plan (Vendix)                Partner Override (optional)
 
 ---
 
+## Business Rules (Canonical, spec 2026-04-29)
+
+> **READ THIS FIRST.** These are the resolved business rules that govern every billing flow.
+> They override any earlier assumption in this skill or in code. Tactical patterns below
+> (Rules 1-10) implement these decisions.
+
+### B1: Cobro siempre por anticipado, una suscripción por store
+
+- Toda factura se emite al **inicio del período**. No hay billing en arrears.
+- Cada store tiene su propia `store_subscriptions` row independiente. **No** hay
+  consolidated billing por organización ni volume discounts automáticos.
+- Trial es por **organización** (`organization_trial_consumptions UNIQUE(organization_id)`),
+  pero billing es per-store.
+
+### B2: Single gateway (Wompi) + COP only + régimen simple sin IVA
+
+- **Wompi hardcoded** como única pasarela para SaaS billing. NO existe abstracción
+  multi-gateway en este módulo (esa solo aplica a pagos de stores ecommerce).
+- **Solo COP**. Sin campo `currency` en plan ni FX rates. Cualquier expansión
+  internacional requiere migración explícita.
+- **Régimen simple, sin IVA**. `effective_price` es el monto final cobrado, sin
+  discriminación de impuestos en `line_items`. Asientos contables NO contabilizan IVA.
+
+### B3: All-or-nothing payment + política estricta NO-REFUND proactivo
+
+- **Pago parcial rechazado**. Gateway debe cobrar 100% o nada. Si el gateway acepta
+  parcial por error, el sistema reembolsa el parcial automáticamente (única excepción
+  a la política no-refund).
+- **Sin refunds proactivos**. Vendix nunca emite refund voluntario.
+  `SubscriptionPaymentService.refund()` se mantiene SOLO para reaccionar a webhooks
+  de chargeback forzados por el banco/pasarela.
+- `subscription_invoices.state` queda en {`draft`, `issued`, `paid`, `void`,
+  `refunded_chargeback`}. **`partially_paid` queda eliminado** del enum.
+
+### B4: Pago offline (transferencia bancaria) vía endpoint super-admin
+
+- Endpoint: `POST /api/superadmin/subscriptions/invoices/:id/manual-payment`
+  con `bank_reference`, `paid_at`, `amount`.
+- Crea `subscription_payments(method='manual', state='succeeded')`. Auditado.
+- Mismo path de post-payment listener (genera doble asiento + acrue commission).
+
+### B5: Plan trial = `subscription_plans.is_default=true` UNIQUE
+
+- Un solo plan default a la vez. Partial unique index sugerido:
+  `WHERE is_default = true`.
+- Configurable desde panel super-admin. Al cambiar default, el viejo pierde el flag
+  en la misma transacción.
+- **Auto-aplicado a primera store de cada org**. La duración del trial se lee del
+  plan mismo (`trial_days`), no de `platform_settings`.
+- **Stores adicionales** de orgs que ya consumieron trial: arrancan en estado
+  `no_plan` forzando picker.
+- **Sin extensiones de trial**. Si un cliente necesita más tiempo, super-admin asigna
+  un plan promocional gratuito en lugar de extender el trial.
+
+### B6: Planes promocionales (gratuitos ocasionales)
+
+- Aplicación dual:
+  - **Código de redención** (`subscription_plans.redemption_code`) que cliente
+    ingresa al checkout.
+  - **Visible en picker** (flag `show_in_picker` por config). Cliente cualquiera
+    lo ve y puede seleccionarlo.
+  - Ambos modos coexisten, no son mutuamente excluyentes.
+- **Expiración → estado `expired`** (no `no_plan`). El cliente puede re-adquirir
+  cualquier plan disponible (incluido otros gratuitos si existen).
+- **Partner override BLOQUEADO sobre planes promocionales**. Validar al crear
+  `partner_plan_overrides` o al cambiar `plan_type='promotional'`. Promos son
+  exclusividad Vendix-platform sin partner intermediation. **Sin commission**.
+
+### B7: Modelo de partnership simplificado
+
+- **El partner ES la organización** cuando `organizations.is_partner=true` (flag
+  manual super-admin). Las stores de esa org reciben sus planes con
+  `partner_plan_overrides` aplicados de su propia org padre.
+- **No hay cambio de partner mid-subscription**. El partner es la org padre y
+  no cambia. Si la store migra de org → ese caso es store-migration (PUNTED).
+- Una org-partner que se "auto-vende" planes a sus propias stores: política de
+  commission a sí misma → **PUNTED** (revisar antes de implementar).
+
+### B8: Cambios de plan — upgrade inmediato, downgrade end-of-period
+
+- **Upgrade mid-cycle**: factura inmediata por delta proratizado. Acceso al nuevo
+  plan inmediato. **Quotas Redis se resetean** al cap del nuevo plan.
+- **Anti-arrastre desde plan free/promo**: si el plan origen tiene `base_price=0`
+  y/o `plan_type='promotional'`, **NO se acreditan días remanentes ni quotas
+  remanentes** al nuevo plan. El cliente comienza desde cero. Enforced en
+  `SubscriptionProrationService` antes de calcular delta.
+- **Downgrade mid-cycle**: efectivo end-of-period **sin crédito**. Cliente conserva
+  features y quotas del plan caro hasta `period_end`. En la renovación se factura
+  el plan barato. Usar `scheduled_plan_change_at` o similar.
+
+### B9: Cancelación scheduled, reversible
+
+- **Cancelación cliente**: scheduled end-of-period default. `scheduled_cancel_at = period_end`.
+  Suscripción permanece `active` hasta esa fecha; al `period_end` transiciona a `cancelled`.
+- **Cliente puede revertir libremente desde UI** antes del `period_end`. Sin límite,
+  sin penalty.
+- **Reactivación desde cancelled / no_plan / expired**: limpia. Cliente elige plan +
+  paga nuevo ciclo. **Sin deuda histórica** porque el sistema cobra por anticipado.
+
+### B10: Reactivación desde grace/suspended descuenta días en gracia
+
+- Cuando un cliente está en `grace_soft` / `grace_hard` / `suspended` (lock por
+  dunning) y paga la factura atrasada, el nuevo período se **acorta** por los
+  días que estuvo consumiendo servicio en gracia.
+- Fórmula: `new_period_end = paid_at + plan_duration_days - days_in_grace`.
+- Previene abuso del periodo de gracia para extender servicio gratis.
+
+### B11: Cadencia dunning configurable por plan + canal de soporte obligatorio
+
+- Cada `subscription_plan` define `grace_period_soft_days`, `grace_period_hard_days`,
+  `suspension_day`, `cancellation_day`. Defaults sugeridos: 5 / 10 / 14 / 45 días.
+- En cualquier estado dunning, la UI **debe mostrar botón "Contactar soporte"** →
+  endpoint `/api/store/subscriptions/support-request` que crea ticket / notificación
+  a super-admin. Permite trato especial caso por caso (extender grace manualmente,
+  ajustar deuda, asignar plan especial).
+
+### B12: Card failover entre tarjetas guardadas del cliente
+
+- `subscription_payment_methods` almacena **tarjetas tokenizadas con Wompi del
+  cliente**, NO múltiples gateways.
+- Si la tarjeta default falla, antes de marcar el invoice como failed y avanzar
+  dunning, el sistema **prueba todas las tarjetas `state='active'` del cliente
+  en orden de creación**. La que succeed se promueve a `is_default=true`
+  automáticamente.
+- Invalidación: 3 `consecutive_failures` → `state='invalid'`, `is_default=false`.
+
+### B13: Chargebacks (reactive) → suspend + reverse + clawback + anti-fraude
+
+- Webhook chargeback → suscripción a `suspended` con `lock_reason='chargeback'`,
+  `partner_commissions.state='reversed'`, super-admin notificado.
+- Si la commission ya estaba `paid` (post-payout batch ejecutado), generar
+  **clawback negativo** aplicado al próximo `partner_payout_batch` del partner.
+- **Anti-fraude**: 2 chargebacks en una organización → `organizations.fraud_blocked=true`.
+  Cliente bloqueado, debe contactar soporte. Super-admin puede revertir el flag
+  manualmente si valida que fueron disputas legítimas.
+
+### B14: Doble asiento contable al confirmar pago
+
+- Listener de `subscription.payment.succeeded` genera **dos** asientos:
+  - **Vendix-platform**: ingreso operacional + cuenta por pagar partner si aplica.
+  - **Store-cliente**: gasto administrativo SaaS inyectado a sus libros.
+    DR cuenta de gasto admin SaaS / CR caja. Requiere mapping_key
+    `saas_subscription_expense` en `vendix-auto-entries`.
+- Cuentas PUC específicas del store-cliente: **PUNTED** (validar con contador).
+
+### B15: Notificaciones lean — solo failure path al cliente, human-required al admin
+
+- **Cliente recibe email solo en**: pago fallido, entrada a grace_hard, suspended,
+  chargeback recibido, PM próximo a expirar, T-3 antes de expirar trial.
+- **Path feliz silencioso**: cliente verifica estado por panel UI. Sin spam de
+  "tu factura fue emitida" / "tu pago fue exitoso".
+- **Super-admin recibe email solo en**: chargebacks, manual payments registrados,
+  intentos de fraude (2do chargeback en una org), promo plans creados/aplicados.
+
+### B16: Retención de datos post-cancel = read-only indefinido
+
+- Cliente con `state='cancelled'` mantiene **acceso read-only indefinido**. Puede
+  entrar al panel y exportar datos para siempre. Sin eliminación automática.
+- Implicación técnica: `stateToMode()` en `cancelled` debe retornar
+  writes=`block`, reads=`allow` (no `block` total). Refactor a `StoreOperationsGuard`
+  para respetar este matiz.
+
+### B17: Métricas SaaS — MRR/ARR materializado + churn dual
+
+- **MRR/ARR**: tabla `saas_metrics_snapshot` materializada vía cron mensual.
+  Permite gráficos históricos sin recálculo.
+- **Churn rate dual**: voluntary (cancelación cliente) vs involuntary
+  (chargeback / dunning failure → cancelled). Reportar separado.
+
+### B18: State machine (cleanup post-spec)
+
+- **Eliminar** del invoice enum: `partially_paid` (incompatible con B3 all-or-nothing).
+- **Mantener** ambos `suspended` y `blocked` con uso estricto:
+  - `suspended` = lock automático por dunning, recuperable con pago atrasado.
+  - `blocked` = lock manual super-admin (fraud, abuso, compliance), requiere unblock manual.
+- **Añadir columna** `store_subscriptions.lock_reason` (nullable) para audit en
+  suspended/blocked.
+- **`expired`**: fin natural de período, cliente puede re-adquirir plan disponible.
+- **`no_plan`**: scope estrecho — solo stores adicionales de orgs sin trial disponible.
+- **`draft`**: pre-checkout. Si no se completa en 24h → transición a `void`.
+- **`pending_payment`**: invoice issued esperando confirmación Wompi.
+
+### B19: Timezone — UTC siempre
+
+- `period_end`, `next_billing_at`, `accrued_at`, `period_start/end` de batches: todos
+  en UTC. Crons corren en UTC. UI convierte a timezone del store solo al mostrar.
+
+---
+
 ## Rules
 
 ### Rule 1: ALL money math uses `Prisma.Decimal` (HALF_EVEN rounding at 2dp)
@@ -246,7 +435,13 @@ Never call the gateway inside a Prisma `$transaction` — long-running external 
 
 ### Rule 10: Pending credit consumption is one-shot and capped at subtotal
 
-Downgrade credits are stored in `store_subscriptions.metadata.pending_credit`. On the next
+> **Note (post-spec 2026-04-29)**: Per B8, downgrades mid-cycle no longer generate
+> `pending_credit` automatically. They are scheduled end-of-period instead.
+> `pending_credit` is now reserved for **super-admin manual adjustments only** (e.g., a
+> goodwill credit issued from the admin panel). The consumption logic below still applies
+> when those manual credits exist.
+
+Pending credits are stored in `store_subscriptions.metadata.pending_credit`. On the next
 non-prorated invoice:
 
 ```typescript
@@ -425,3 +620,5 @@ Before shipping billing changes:
 - `vendix-prisma-migrations` — enum additions for `partner_commission_state_enum`, etc.
 - `vendix-error-handling` — `SUBSCRIPTION_*` error codes used across billing flows
 - `vendix-payment-processors` — gateway `processPayment`/`refundPayment` contract
+- `vendix-auto-entries` — **double journal entry** on payment success (Vendix-platform +
+  store-cliente). Mapping key: `saas_subscription_expense`. PUC accounts: PUNTED.

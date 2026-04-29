@@ -1,8 +1,4 @@
-import {
-  Injectable,
-  ConflictException,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, ConflictException, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
@@ -20,13 +16,25 @@ const ENTRY_INCLUDE = {
   accounting_entry_lines: {
     include: {
       account: {
-        select: { id: true, code: true, name: true, account_type: true, nature: true },
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          account_type: true,
+          nature: true,
+        },
       },
     },
     orderBy: { id: 'asc' as const },
   },
   fiscal_period: {
-    select: { id: true, name: true, start_date: true, end_date: true, status: true },
+    select: {
+      id: true,
+      name: true,
+      start_date: true,
+      end_date: true,
+      status: true,
+    },
   },
   created_by_user: {
     select: { id: true, first_name: true, last_name: true },
@@ -66,12 +74,16 @@ export class JournalEntryFlowService {
     return entry;
   }
 
-  private validateTransition(current_status: string, target_status: EntryStatus): void {
-    const valid_targets = VALID_TRANSITIONS[current_status as EntryStatus] || [];
+  private validateTransition(
+    current_status: string,
+    target_status: EntryStatus,
+  ): void {
+    const valid_targets =
+      VALID_TRANSITIONS[current_status as EntryStatus] || [];
     if (!valid_targets.includes(target_status)) {
       throw new ConflictException(
         `Invalid status transition: cannot change from '${current_status}' to '${target_status}'. ` +
-        `Valid transitions from '${current_status}': [${valid_targets.join(', ') || 'none (terminal state)'}]`,
+          `Valid transitions from '${current_status}': [${valid_targets.join(', ') || 'none (terminal state)'}]`,
       );
     }
   }
@@ -110,7 +122,9 @@ export class JournalEntryFlowService {
       include: ENTRY_INCLUDE,
     });
 
-    this.logger.log(`Journal entry #${id} (${entry.entry_number}) posted by user #${context.user_id}`);
+    this.logger.log(
+      `Journal entry #${id} (${entry.entry_number}) posted by user #${context.user_id}`,
+    );
     return updated;
   }
 
@@ -143,7 +157,10 @@ export class JournalEntryFlowService {
 
       let sequence = 1;
       if (latest) {
-        const last_number = parseInt(latest.entry_number.replace(prefix, ''), 10);
+        const last_number = parseInt(
+          latest.entry_number.replace(prefix, ''),
+          10,
+        );
         if (!isNaN(last_number)) {
           sequence = last_number + 1;
         }
@@ -160,7 +177,8 @@ export class JournalEntryFlowService {
           status: 'posted',
           fiscal_period_id: entry.fiscal_period_id,
           entry_date: new Date(),
-          description: `Reversal of ${entry.entry_number}: ${entry.description || ''}`.trim(),
+          description:
+            `Reversal of ${entry.entry_number}: ${entry.description || ''}`.trim(),
           source_type: 'reversal',
           source_id: entry.id,
           total_debit: entry.total_debit,
@@ -190,7 +208,7 @@ export class JournalEntryFlowService {
 
     this.logger.log(
       `Journal entry #${id} (${entry.entry_number}) voided by user #${context.user_id}. ` +
-      `Reversal entry created: ${result.reversal_entry.entry_number}`,
+        `Reversal entry created: ${result.reversal_entry.entry_number}`,
     );
 
     // Return the voided entry with full includes

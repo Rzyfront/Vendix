@@ -1,18 +1,44 @@
 import { useState } from 'react';
-import { View, TextInput, Pressable, Text, type TextInputProps } from 'react-native';
+import { View, TextInput, Pressable, Text, StyleSheet, type ViewStyle, type TextInputProps } from 'react-native';
+import { colorScales, spacing, borderRadius, typography } from '@/shared/theme';
 
-interface SearchBarProps extends Omit<TextInputProps, 'className'> {
+interface SearchBarProps extends Omit<TextInputProps, 'style'> {
   onSubmit?: (value: string) => void;
   onClear?: () => void;
-  containerClassName?: string;
+  style?: ViewStyle;
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: colorScales.gray[100],
+    borderRadius: borderRadius.lg,
+    paddingHorizontal: spacing[3],
+    height: 44,
+  },
+  searchIcon: {
+    color: colorScales.gray[400],
+    marginRight: spacing[2],
+    fontSize: 18,
+  },
+  textInput: {
+    flex: 1,
+    color: colorScales.gray[900],
+    fontSize: typography.fontSize.base,
+  },
+  clearButton: {
+    color: colorScales.gray[400],
+    fontSize: 18,
+  },
+});
 
 export function SearchBar({
   value,
   onSubmit,
   onClear,
   placeholder = 'Search...',
-  containerClassName = '',
+  style,
   ...props
 }: SearchBarProps) {
   const [localValue, setLocalValue] = useState(value || '');
@@ -27,21 +53,21 @@ export function SearchBar({
   };
 
   return (
-    <View className={`flex-row items-center bg-gray-100 rounded-lg px-3 h-11 ${containerClassName}`}>
-      <Text className="text-gray-400 mr-2 text-lg">🔍</Text>
+    <View style={[styles.container, style]}>
+      <Text style={styles.searchIcon}>🔍</Text>
       <TextInput
-        className="flex-1 text-gray-900 text-base"
+        style={styles.textInput}
         value={localValue}
         onChangeText={setLocalValue}
         onSubmitEditing={handleSubmit}
         placeholder={placeholder}
-        placeholderTextColor="#9ca3af"
+        placeholderTextColor={colorScales.gray[400]}
         returnKeyType="search"
         {...props}
       />
       {localValue.length > 0 && (
         <Pressable onPress={handleClear} hitSlop={8}>
-          <Text className="text-gray-400 text-lg">×</Text>
+          <Text style={styles.clearButton}>×</Text>
         </Pressable>
       )}
     </View>

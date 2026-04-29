@@ -28,7 +28,10 @@ export class CloseTicketDto {
   @IsOptional()
   resolution_summary?: string;
 
-  @ApiProperty({ description: 'Customer satisfaction (true/false)', required: false })
+  @ApiProperty({
+    description: 'Customer satisfaction (true/false)',
+    required: false,
+  })
   @IsOptional()
   customer_satisfied?: boolean;
 }

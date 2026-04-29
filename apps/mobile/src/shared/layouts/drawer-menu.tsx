@@ -1,9 +1,9 @@
-import { View, Text, Pressable, ScrollView } from 'react-native';
+import { View, Text, Pressable, ScrollView, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useAuthStore } from '@/core/store/auth.store';
 import { Icon } from '@/shared/components/icon/icon';
-import { colors } from '@/shared/theme/colors';
+import { colors, colorScales, typography, spacing, borderRadius } from '@/shared/theme';
 
 interface MenuItem {
   label: string;
@@ -62,8 +62,6 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const user = useAuthStore((s) => s.user);
-  const userSettings = useAuthStore((s) => s.user_settings);
-  const storeSettings = useAuthStore((s) => s.store_settings);
   const logout = useAuthStore((s) => s.logout);
 
   const config = variantConfig[variant];
@@ -81,72 +79,179 @@ export function DrawerMenu({ currentRoute, onClose, variant = 'store' }: DrawerM
   };
 
   return (
-    <View className="flex-1 bg-white" style={{ paddingTop: insets.top }}>
-      <View className="px-4 py-6 border-b border-gray-200">
-        <View className="flex-row items-center">
-          <View className="w-10 h-10 rounded-lg bg-primary items-center justify-center mr-3">
+    <View style={[styles.container, { paddingTop: insets.top }]}>
+      <View style={styles.header}>
+        <View style={styles.headerRow}>
+          <View style={styles.avatar}>
             <Icon name={config.icon} size={20} color="#fff" />
           </View>
-          <View className="flex-1">
-            <Text className="text-lg font-bold text-gray-900" numberOfLines={1}>
+          <View style={styles.headerText}>
+            <Text style={styles.displayName} numberOfLines={1}>
               {displayName}
             </Text>
-            <Text className="text-xs text-gray-500 mt-0.5">
+            <Text style={styles.email}>
               {user?.email || config.label}
             </Text>
           </View>
         </View>
       </View>
 
-      <ScrollView className="flex-1 py-2" showsVerticalScrollIndicator={false}>
+      <ScrollView style={styles.flex} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {config.items.map((item) => {
           const isActive = currentRoute.includes(item.href.split('/').pop() || '');
           return (
             <Pressable
               key={item.href}
               onPress={() => handleNavigate(item.href)}
-              className={`flex-row items-center px-4 py-3 mx-2 rounded-lg ${
-                isActive ? 'bg-green-50' : ''
-              }`}
+              style={[styles.menuItem, isActive && styles.menuItemActive]}
             >
-              <View
-                className={`w-8 h-8 rounded-lg items-center justify-center mr-3 ${
-                  isActive ? 'bg-green-100' : 'bg-gray-50'
-                }`}
-              >
+              <View style={[styles.menuIcon, isActive ? styles.menuIconActive : styles.menuIconInactive]}>
                 <Icon
                   name={item.icon}
                   size={18}
                   color={isActive ? colors.primary : colors.text.secondary}
                 />
               </View>
-              <Text
-                className={`text-sm font-medium flex-1 ${
-                  isActive ? 'text-green-700' : 'text-gray-700'
-                }`}
-              >
+              <Text style={[styles.menuLabel, isActive ? styles.menuLabelActive : styles.menuLabelInactive]}>
                 {item.label}
               </Text>
-              {isActive && <View className="w-1.5 h-1.5 rounded-full bg-primary" />}
+              {isActive && <View style={styles.activeDot} />}
             </Pressable>
           );
         })}
       </ScrollView>
 
-      <View
-        className="px-4 py-3 border-t border-gray-200"
-        style={{ paddingBottom: insets.bottom || 12 }}
-      >
+      <View style={[styles.footer, { paddingBottom: insets.bottom || 12 }]}>
         <Pressable
           onPress={handleLogout}
-          className="flex-row items-center px-4 py-3 rounded-lg active:bg-red-50"
+          style={({ pressed }) => [
+            styles.logoutButton,
+            pressed && styles.logoutButtonPressed,
+          ]}
         >
-          <View className="w-8 h-8 rounded-lg items-center justify-center mr-3 bg-gray-50">
+          <View style={styles.logoutIcon}>
             <Icon name="logout" size={18} color={colors.error} />
           </View>
-          <Text className="text-sm font-medium text-red-600">Cerrar Sesión</Text>
+          <Text style={styles.logoutText}>Cerrar Sesión</Text>
         </Pressable>
       </View>
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: colors.card,
+  },
+  flex: {
+    flex: 1,
+  },
+  header: {
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[6],
+    borderBottomWidth: 1,
+    borderBottomColor: colorScales.gray[200],
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  avatar: {
+    width: 40,
+    height: 40,
+    borderRadius: borderRadius.lg,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing[3],
+  },
+  headerText: {
+    flex: 1,
+  },
+  displayName: {
+    fontSize: typography.fontSize.lg,
+    fontWeight: typography.fontWeight.bold,
+    color: colorScales.gray[900],
+  },
+  email: {
+    fontSize: typography.fontSize.xs,
+    color: colorScales.gray[500],
+    marginTop: 2,
+  },
+  scrollContent: {
+    paddingVertical: spacing[2],
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[3],
+    marginHorizontal: spacing[2],
+    borderRadius: borderRadius.lg,
+  },
+  menuItemActive: {
+    backgroundColor: colorScales.green[50],
+  },
+  menuIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: borderRadius.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing[3],
+  },
+  menuIconActive: {
+    backgroundColor: colorScales.green[100],
+  },
+  menuIconInactive: {
+    backgroundColor: colorScales.gray[50],
+  },
+  menuLabel: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.medium,
+    flex: 1,
+  },
+  menuLabelActive: {
+    color: colorScales.green[700],
+  },
+  menuLabelInactive: {
+    color: colorScales.gray[700],
+  },
+  activeDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.primary,
+  },
+  footer: {
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[3],
+    borderTopWidth: 1,
+    borderTopColor: colorScales.gray[200],
+  },
+  logoutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[3],
+    borderRadius: borderRadius.lg,
+  },
+  logoutButtonPressed: {
+    backgroundColor: colorScales.red[50],
+  },
+  logoutIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: borderRadius.lg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing[3],
+    backgroundColor: colorScales.gray[50],
+  },
+  logoutText: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.medium,
+    color: colorScales.red[600],
+  },
+});

@@ -11,7 +11,10 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { shipping_method_type_enum, shipping_rate_type_enum } from '@prisma/client';
+import {
+  shipping_method_type_enum,
+  shipping_rate_type_enum,
+} from '@prisma/client';
 
 // --- Methods ---
 export class CreateShippingMethodDto {

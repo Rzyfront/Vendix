@@ -11,6 +11,7 @@ describe('PromotionalApplyService', () => {
   let resolverMock: any;
   let eventEmitterMock: any;
   let redisMock: any;
+  let evaluatorMock: any;
 
   const baseFlags = {
     text_generation: {
@@ -37,12 +38,21 @@ describe('PromotionalApplyService', () => {
     resolverMock = { invalidate: jest.fn().mockResolvedValue(undefined) };
     eventEmitterMock = { emit: jest.fn() };
     redisMock = { del: jest.fn().mockResolvedValue(1) };
+    evaluatorMock = {
+      evaluate: jest.fn().mockResolvedValue({
+        promo_plan_id: 99,
+        promo_plan_code: 'black-friday',
+        eligible: true,
+        reasons_blocked: [],
+      }),
+    };
 
     service = new PromotionalApplyService(
       prismaMock,
       resolverMock,
       eventEmitterMock,
       redisMock,
+      evaluatorMock,
     );
   });
 
@@ -87,7 +97,7 @@ describe('PromotionalApplyService', () => {
     await service.apply(10, 99);
 
     const updateCall = prismaMock.store_subscriptions.update.mock.calls[0][0];
-    const resolved = updateCall.data.resolved_features as any;
+    const resolved = updateCall.data.resolved_features;
 
     // Max between base 200000 and promo 500000 → 500000.
     expect(resolved.text_generation.monthly_tokens_cap).toBe(500000);
@@ -114,7 +124,7 @@ describe('PromotionalApplyService', () => {
     await service.apply(10, 99);
 
     const updateCall = prismaMock.store_subscriptions.update.mock.calls[0][0];
-    const resolved = updateCall.data.resolved_features as any;
+    const resolved = updateCall.data.resolved_features;
     expect(resolved.text_generation.monthly_tokens_cap).toBe(200000);
     expect(resolved.text_generation.enabled).toBe(true);
   });
@@ -141,9 +151,9 @@ describe('PromotionalApplyService', () => {
 
     const updateCall = prismaMock.store_subscriptions.update.mock.calls[0][0];
     expect(updateCall.data.promotional_plan_id).toBe(50);
-    expect(updateCall.data.resolved_features.text_generation.monthly_tokens_cap).toBe(
-      999999,
-    );
+    expect(
+      updateCall.data.resolved_features.text_generation.monthly_tokens_cap,
+    ).toBe(999999);
   });
 
   it('apply sets promotional_applied_at and promotional_plan_id', async () => {

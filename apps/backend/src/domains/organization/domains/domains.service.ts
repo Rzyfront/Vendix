@@ -17,6 +17,7 @@ import {
   VerifyDomainResult,
 } from './dto/domain-settings.dto';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
+import { BlocklistService } from 'src/common/services/blocklist/blocklist.service';
 
 interface DomainStats {
   total: number;
@@ -36,6 +37,7 @@ export class DomainsService implements OnModuleInit {
   constructor(
     private prisma: OrganizationPrismaService,
     private eventEmitter: EventEmitter2,
+    private blocklist: BlocklistService,
   ) {}
 
   async onModuleInit() {}
@@ -207,8 +209,11 @@ export class DomainsService implements OnModuleInit {
     forwardedHost?: string,
   ) {
     // Implementation for domain resolution
-    const domain = await this.prisma.domain_settings.findUnique({
-      where: { hostname },
+    const domain = await this.prisma.domain_settings.findFirst({
+      where: {
+        hostname,
+        status: { notIn: ['disabled', 'failed_ownership', 'failed_certificate', 'failed_alias'] },
+      },
       include: {
         organization: true,
         store: true,
@@ -240,8 +245,11 @@ export class DomainsService implements OnModuleInit {
   }
 
   async checkHostnameAvailability(hostname: string) {
-    const existing = await this.prisma.domain_settings.findUnique({
-      where: { hostname },
+    const existing = await this.prisma.domain_settings.findFirst({
+      where: {
+        hostname,
+        status: { notIn: ['disabled', 'failed_ownership', 'failed_certificate', 'failed_alias'] },
+      },
     });
 
     return {
@@ -256,9 +264,22 @@ export class DomainsService implements OnModuleInit {
     // Validate hostname
     this.validateHostnameFormat(data.hostname);
 
-    // Check if hostname already exists
-    const existing = await this.prisma.domain_settings.findUnique({
-      where: { hostname: data.hostname },
+    // Blocklist check — reject brand/financial/gov patterns before creating row
+    const blockResult = await this.blocklist.isBlocked(data.hostname);
+    if (blockResult.blocked) {
+      throw new VendixHttpException(
+        ErrorCodes.ORG_DOMAIN_003,
+        `Hostname ${data.hostname} is blocked: ${blockResult.reason ?? 'policy'}`,
+        { hostname: data.hostname, pattern: blockResult.pattern },
+      );
+    }
+
+    // Check if hostname already exists (excluyendo terminales — pueden re-claimarse)
+    const existing = await this.prisma.domain_settings.findFirst({
+      where: {
+        hostname: data.hostname,
+        status: { notIn: ['disabled', 'failed_ownership', 'failed_certificate', 'failed_alias'] },
+      },
     });
 
     if (existing) {
@@ -280,13 +301,13 @@ export class DomainsService implements OnModuleInit {
     // Handle primary domain logic and status
     const is_primary = data.is_primary || false;
 
-    // Vendix subdomains are automatically active (no DNS verification needed)
-    // Primary domains are also set to active
+    // Vendix subdomains are automatically active (Vendix controls the DNS).
+    // Custom domains ALWAYS enter pending_ownership regardless of is_primary —
+    // DNS proof of ownership (TXT _vendix-verify) is the only valid approval.
     const isVendixSubdomain = inferred_ownership === 'vendix_subdomain';
-    const status =
-      isVendixSubdomain || is_primary
-        ? ('active' as any)
-        : ('pending_dns' as any);
+    const status = isVendixSubdomain
+      ? ('active' as any)
+      : ('pending_ownership' as any);
 
     if (is_primary || status === 'active') {
       await this.ensureSingleActiveType(
@@ -304,6 +325,14 @@ export class DomainsService implements OnModuleInit {
       ? ('issued' as any)
       : ('pending' as any);
 
+    const tokenExpiryDays = parseInt(
+      process.env.DOMAIN_TOKEN_EXPIRY_DAYS || '7',
+      10,
+    );
+    const expires_token_at = isVendixSubdomain
+      ? null
+      : new Date(Date.now() + tokenExpiryDays * 24 * 60 * 60 * 1000);
+
     // Create domain setting
     const domainSetting = await this.prisma.domain_settings.create({
       data: {
@@ -317,9 +346,24 @@ export class DomainsService implements OnModuleInit {
         is_primary,
         ownership: inferred_ownership as any,
         verification_token: verification_token,
+        expires_token_at,
         updated_at: new Date(),
       },
     });
+
+    if (status === 'active') {
+      this.eventEmitter.emit('domain.activated', {
+        domainId: domainSetting.id,
+        hostname: domainSetting.hostname,
+        organization_id: domainSetting.organization_id,
+        store_id: domainSetting.store_id,
+      });
+    } else {
+      this.eventEmitter.emit('domain.updated', {
+        domainId: domainSetting.id,
+        hostname: domainSetting.hostname,
+      });
+    }
 
     return domainSetting;
   }
@@ -432,7 +476,7 @@ export class DomainsService implements OnModuleInit {
   }
 
   async getDomainSettingByHostname(hostname: string) {
-    const domain_setting = await this.prisma.domain_settings.findUnique({
+    const domain_setting = await this.prisma.domain_settings.findFirst({
       where: { hostname },
       include: {
         organization: true,
@@ -521,14 +565,43 @@ export class DomainsService implements OnModuleInit {
       data: updates,
     });
 
+    const transitioned_to_active =
+      existing_record.status !== 'active' && updated.status === 'active';
+    const transitioned_to_disabled =
+      existing_record.status !== 'disabled' && updated.status === 'disabled';
+
+    if (transitioned_to_active) {
+      this.eventEmitter.emit('domain.activated', {
+        domainId: updated.id,
+        hostname: updated.hostname,
+        organization_id: updated.organization_id,
+        store_id: updated.store_id,
+      });
+    } else if (transitioned_to_disabled) {
+      this.eventEmitter.emit('domain.disabled', {
+        domainId: updated.id,
+        hostname: updated.hostname,
+      });
+    } else {
+      this.eventEmitter.emit('domain.updated', {
+        domainId: updated.id,
+        hostname: updated.hostname,
+      });
+    }
+
     return updated;
   }
 
   async deleteDomainSetting(hostname: string) {
-    await this.getDomainSettingByHostname(hostname);
+    const existing = await this.getDomainSettingByHostname(hostname);
 
     await this.prisma.domain_settings.delete({
       where: { hostname },
+    });
+
+    this.eventEmitter.emit('domain.disabled', {
+      domainId: existing.id,
+      hostname: existing.hostname,
     });
   }
 
@@ -545,7 +618,7 @@ export class DomainsService implements OnModuleInit {
       hostname: newHostname,
       organization_id: source.organization_id,
       store_id: source.store_id,
-      config: source.config as any,
+      config: source.config,
       domain_type: source.domain_type,
       ownership: source.ownership,
       is_primary: false, // Duplicates are not primary by default
@@ -553,8 +626,11 @@ export class DomainsService implements OnModuleInit {
   }
 
   async validateHostname(hostname: string) {
-    const exists = await this.prisma.domain_settings.findUnique({
-      where: { hostname },
+    const exists = await this.prisma.domain_settings.findFirst({
+      where: {
+        hostname,
+        status: { notIn: ['disabled', 'failed_ownership', 'failed_certificate', 'failed_alias'] },
+      },
     });
 
     return {
@@ -600,13 +676,20 @@ export class DomainsService implements OnModuleInit {
     if (all_valid) {
       status_after = 'active';
       ssl_status = 'issued';
-      await this.prisma.domain_settings.update({
+      const updated = await this.prisma.domain_settings.update({
         where: { hostname },
         data: {
           status: 'active',
           ssl_status: 'issued',
           last_verified_at: new Date(),
         },
+      });
+
+      this.eventEmitter.emit('domain.activated', {
+        domainId: updated.id,
+        hostname: updated.hostname,
+        organization_id: updated.organization_id,
+        store_id: updated.store_id,
       });
     }
 
@@ -621,7 +704,9 @@ export class DomainsService implements OnModuleInit {
     };
   }
 
-  async renewSsl(domainId: number): Promise<{ renewed: boolean; ssl_status: string; message: string }> {
+  async renewSsl(
+    domainId: number,
+  ): Promise<{ renewed: boolean; ssl_status: string; message: string }> {
     const domain = await this.prisma.domain_settings.findUnique({
       where: { id: domainId },
     });
@@ -630,7 +715,11 @@ export class DomainsService implements OnModuleInit {
       throw new VendixHttpException(ErrorCodes.ORG_DOMAIN_001);
     }
 
-    const renewabelTypes = ['custom_domain', 'custom_subdomain', 'third_party_subdomain'];
+    const renewabelTypes = [
+      'custom_domain',
+      'custom_subdomain',
+      'third_party_subdomain',
+    ];
     if (!renewabelTypes.includes(domain.ownership)) {
       return {
         renewed: false,
@@ -659,6 +748,7 @@ export class DomainsService implements OnModuleInit {
     ownership: string;
     dns_type: 'CNAME' | 'A';
     target: string;
+    requires_alias?: boolean;
     instructions: {
       record_type: string;
       name: string;
@@ -668,37 +758,43 @@ export class DomainsService implements OnModuleInit {
   }> {
     const domain = await this.getDomainSettingByHostname(hostname);
 
-    const edgeHost = process.env.EDGE_HOST || `edge.${process.env.BASE_DOMAIN || 'vendix.com'}`;
+    const edgeHost =
+      process.env.EDGE_HOST ||
+      `edge.${process.env.BASE_DOMAIN || 'vendix.online'}`;
 
-    const isSubdomain = domain.ownership === 'custom_subdomain' ||
-                        domain.ownership === 'third_party_subdomain' ||
-                        domain.ownership === 'vendix_subdomain';
+    const isSubdomain =
+      domain.ownership === 'custom_subdomain' ||
+      domain.ownership === 'third_party_subdomain' ||
+      domain.ownership === 'vendix_subdomain';
 
-    const dnsType: 'CNAME' | 'A' = isSubdomain ? 'CNAME' : 'A';
-    const target = dnsType === 'CNAME' ? edgeHost : '76.76.21.21';
+    // fix(domains): always return CNAME to edge CloudFront host.
+    // A record no soportado actualmente: el cliente debe usar CNAME / ALIAS al edge CloudFront.
+    // For apex/root domains (non-subdomain ownerships) the registrar must support
+    // ALIAS / ANAME / CNAME-flatten, signaled to clients via `requires_alias: true`.
+    const dnsType: 'CNAME' | 'A' = 'CNAME';
+    const target = edgeHost;
+    const requiresAlias = !isSubdomain;
 
-    const instructions: { record_type: string; name: string; value: string; ttl: number }[] = [];
-    if (dnsType === 'CNAME') {
-      instructions.push({
+    const instructions: {
+      record_type: string;
+      name: string;
+      value: string;
+      ttl: number;
+    }[] = [
+      {
         record_type: 'CNAME',
-        name: hostname.split('.')[0],
+        name: isSubdomain ? hostname.split('.')[0] : '@',
         value: target,
         ttl: 300,
-      });
-    } else {
-      instructions.push({
-        record_type: 'A',
-        name: '@',
-        value: target,
-        ttl: 300,
-      });
-    }
+      },
+    ];
 
     return {
       hostname,
       ownership: domain.ownership,
       dns_type: dnsType,
       target,
+      requires_alias: requiresAlias,
       instructions,
     };
   }

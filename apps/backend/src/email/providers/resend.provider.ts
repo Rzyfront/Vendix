@@ -92,10 +92,14 @@ export class ResendProvider implements EmailProvider {
       });
 
       if (result.error) {
-        this.logger.error('Resend email error (with attachments):', result.error);
+        this.logger.error(
+          'Resend email error (with attachments):',
+          result.error,
+        );
         return {
           success: false,
-          error: result.error.message || 'Failed to send email with attachments',
+          error:
+            result.error.message || 'Failed to send email with attachments',
         };
       }
 

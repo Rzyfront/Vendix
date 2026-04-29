@@ -30,7 +30,13 @@ export class ActiveSubscriptionsController {
   @ApiOperation({ summary: 'List all active subscriptions (cross-tenant)' })
   async findAll(@Query() query: SubscriptionQueryDto) {
     const result = await this.activeSubsService.findAll(query);
-    return this.responseService.paginated(result.data, result.meta.total, result.meta.page, result.meta.limit, 'Subscriptions retrieved');
+    return this.responseService.paginated(
+      result.data,
+      result.meta.total,
+      result.meta.page,
+      result.meta.limit,
+      'Subscriptions retrieved',
+    );
   }
 
   @Permissions('superadmin:subscriptions:read')

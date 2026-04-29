@@ -107,8 +107,12 @@ export class StockTransfersService {
         throw new BadRequestException('Organization context is required');
       }
 
-      if (createTransferDto.from_location_id === createTransferDto.to_location_id) {
-        throw new BadRequestException('Source and destination locations must be different');
+      if (
+        createTransferDto.from_location_id === createTransferDto.to_location_id
+      ) {
+        throw new BadRequestException(
+          'Source and destination locations must be different',
+        );
       }
 
       // Validate stock availability for all items
@@ -162,31 +166,37 @@ export class StockTransfersService {
 
       // Move stock using StockLevelManager
       for (const item of stockTransfer.stock_transfer_items) {
-        await this.stockLevelManager.updateStock({
-          product_id: item.product_id,
-          variant_id: item.product_variant_id ?? undefined,
-          location_id: stockTransfer.from_location_id,
-          quantity_change: -item.quantity,
-          movement_type: 'transfer',
-          reason: `Stock transfer ${stockTransfer.transfer_number} - source`,
-          user_id: context?.user_id,
-          create_movement: true,
-          from_location_id: stockTransfer.from_location_id,
-          to_location_id: stockTransfer.to_location_id,
-        }, tx);
+        await this.stockLevelManager.updateStock(
+          {
+            product_id: item.product_id,
+            variant_id: item.product_variant_id ?? undefined,
+            location_id: stockTransfer.from_location_id,
+            quantity_change: -item.quantity,
+            movement_type: 'transfer',
+            reason: `Stock transfer ${stockTransfer.transfer_number} - source`,
+            user_id: context?.user_id,
+            create_movement: true,
+            from_location_id: stockTransfer.from_location_id,
+            to_location_id: stockTransfer.to_location_id,
+          },
+          tx,
+        );
 
-        await this.stockLevelManager.updateStock({
-          product_id: item.product_id,
-          variant_id: item.product_variant_id ?? undefined,
-          location_id: stockTransfer.to_location_id,
-          quantity_change: item.quantity,
-          movement_type: 'transfer',
-          reason: `Stock transfer ${stockTransfer.transfer_number} - destination`,
-          user_id: context?.user_id,
-          create_movement: true,
-          from_location_id: stockTransfer.from_location_id,
-          to_location_id: stockTransfer.to_location_id,
-        }, tx);
+        await this.stockLevelManager.updateStock(
+          {
+            product_id: item.product_id,
+            variant_id: item.product_variant_id ?? undefined,
+            location_id: stockTransfer.to_location_id,
+            quantity_change: item.quantity,
+            movement_type: 'transfer',
+            reason: `Stock transfer ${stockTransfer.transfer_number} - destination`,
+            user_id: context?.user_id,
+            create_movement: true,
+            from_location_id: stockTransfer.from_location_id,
+            to_location_id: stockTransfer.to_location_id,
+          },
+          tx,
+        );
       }
 
       return tx.stock_transfers.findUnique({
@@ -211,7 +221,12 @@ export class StockTransfersService {
       organization_id: result.organization_id,
       from_location_id: result.from_location_id,
       to_location_id: result.to_location_id,
-      total_cost: result.stock_transfer_items?.reduce((sum, item) => sum + Number(item.quantity) * Number(item.unit_cost || 0), 0) || 0,
+      total_cost:
+        result.stock_transfer_items?.reduce(
+          (sum, item) =>
+            sum + Number(item.quantity) * Number(item.unit_cost || 0),
+          0,
+        ) || 0,
       user_id: RequestContextService.getUserId(),
     });
 
@@ -404,32 +419,38 @@ export class StockTransfersService {
         const receivedItem = items.find((i) => i.id === item.id);
         if (receivedItem && receivedItem.quantity_received > 0) {
           // Subtract from source
-          await this.stockLevelManager.updateStock({
-            product_id: item.product_id,
-            variant_id: item.product_variant_id ?? undefined,
-            location_id: stockTransfer.from_location_id,
-            quantity_change: -receivedItem.quantity_received,
-            movement_type: 'transfer',
-            reason: `Stock transfer ${stockTransfer.transfer_number} - source`,
-            user_id: context?.user_id,
-            create_movement: true,
-            from_location_id: stockTransfer.from_location_id,
-            to_location_id: stockTransfer.to_location_id,
-          }, tx);
+          await this.stockLevelManager.updateStock(
+            {
+              product_id: item.product_id,
+              variant_id: item.product_variant_id ?? undefined,
+              location_id: stockTransfer.from_location_id,
+              quantity_change: -receivedItem.quantity_received,
+              movement_type: 'transfer',
+              reason: `Stock transfer ${stockTransfer.transfer_number} - source`,
+              user_id: context?.user_id,
+              create_movement: true,
+              from_location_id: stockTransfer.from_location_id,
+              to_location_id: stockTransfer.to_location_id,
+            },
+            tx,
+          );
 
           // Add to destination
-          await this.stockLevelManager.updateStock({
-            product_id: item.product_id,
-            variant_id: item.product_variant_id ?? undefined,
-            location_id: stockTransfer.to_location_id,
-            quantity_change: receivedItem.quantity_received,
-            movement_type: 'transfer',
-            reason: `Stock transfer ${stockTransfer.transfer_number} - destination`,
-            user_id: context?.user_id,
-            create_movement: true,
-            from_location_id: stockTransfer.from_location_id,
-            to_location_id: stockTransfer.to_location_id,
-          }, tx);
+          await this.stockLevelManager.updateStock(
+            {
+              product_id: item.product_id,
+              variant_id: item.product_variant_id ?? undefined,
+              location_id: stockTransfer.to_location_id,
+              quantity_change: receivedItem.quantity_received,
+              movement_type: 'transfer',
+              reason: `Stock transfer ${stockTransfer.transfer_number} - destination`,
+              user_id: context?.user_id,
+              create_movement: true,
+              from_location_id: stockTransfer.from_location_id,
+              to_location_id: stockTransfer.to_location_id,
+            },
+            tx,
+          );
         }
       }
 
@@ -444,7 +465,9 @@ export class StockTransfersService {
       const allItemsReceived = stockTransfer.stock_transfer_items.every(
         (item) => {
           const receivedItem = items.find((i) => i.id === item.id);
-          return receivedItem && receivedItem.quantity_received >= item.quantity;
+          return (
+            receivedItem && receivedItem.quantity_received >= item.quantity
+          );
         },
       );
 
@@ -479,7 +502,13 @@ export class StockTransfersService {
         organization_id: result.organization_id,
         from_location_id: result.from_location_id,
         to_location_id: result.to_location_id,
-        total_cost: result.stock_transfer_items?.reduce((sum, item) => sum + Number(item.quantity_received) * Number(item.unit_cost || 0), 0) || 0,
+        total_cost:
+          result.stock_transfer_items?.reduce(
+            (sum, item) =>
+              sum +
+              Number(item.quantity_received) * Number(item.unit_cost || 0),
+            0,
+          ) || 0,
         user_id: RequestContextService.getUserId(),
       });
     }
@@ -564,20 +593,36 @@ export class StockTransfersService {
       take: limit,
     });
 
-    const defaultStock = { quantity_on_hand: 0, quantity_reserved: 0, quantity_available: 0 };
+    const defaultStock = {
+      quantity_on_hand: 0,
+      quantity_reserved: 0,
+      quantity_available: 0,
+    };
 
     return products.map((p) => {
-      const originStock = p.stock_levels.find((sl) => sl.location_id === fromLocationId);
-      const destStock = p.stock_levels.find((sl) => sl.location_id === toLocationId);
+      const originStock = p.stock_levels.find(
+        (sl) => sl.location_id === fromLocationId,
+      );
+      const destStock = p.stock_levels.find(
+        (sl) => sl.location_id === toLocationId,
+      );
       return {
         id: p.id,
         name: p.name,
         sku: p.sku,
         stock_at_origin: originStock
-          ? { quantity_on_hand: originStock.quantity_on_hand, quantity_reserved: originStock.quantity_reserved, quantity_available: originStock.quantity_available }
+          ? {
+              quantity_on_hand: originStock.quantity_on_hand,
+              quantity_reserved: originStock.quantity_reserved,
+              quantity_available: originStock.quantity_available,
+            }
           : defaultStock,
         stock_at_destination: destStock
-          ? { quantity_on_hand: destStock.quantity_on_hand, quantity_reserved: destStock.quantity_reserved, quantity_available: destStock.quantity_available }
+          ? {
+              quantity_on_hand: destStock.quantity_on_hand,
+              quantity_reserved: destStock.quantity_reserved,
+              quantity_available: destStock.quantity_available,
+            }
           : defaultStock,
       };
     });

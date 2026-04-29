@@ -82,8 +82,8 @@ export class EmailService implements OnModuleInit {
           '',
         port: parseInt(
           process.env.SMTP_PORT ||
-          this.configService.get<string>('SMTP_PORT') ||
-          '587',
+            this.configService.get<string>('SMTP_PORT') ||
+            '587',
         ),
         secure:
           (process.env.SMTP_SECURE ||
@@ -253,7 +253,9 @@ export class EmailService implements OnModuleInit {
           `Email with ${attachments.length} attachment(s) sent successfully to ${to} using ${this.config.provider}`,
         );
       } else {
-        this.logger.error(`Failed to send email with attachments to ${to}: ${result.error}`);
+        this.logger.error(
+          `Failed to send email with attachments to ${to}: ${result.error}`,
+        );
       }
 
       return result;

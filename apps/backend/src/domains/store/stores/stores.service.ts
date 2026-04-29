@@ -248,7 +248,7 @@ export class StoresService {
         });
 
         for (const domain of domains) {
-          const config = (domain.config as any) || {};
+          const config = domain.config || {};
           const branding = config.branding || {};
 
           await this.prisma.domain_settings.update({

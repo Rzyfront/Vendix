@@ -14,7 +14,11 @@ import { ApiTags, ApiOperation } from '@nestjs/swagger';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
 import { PromotionalService } from '../services/promotional.service';
 import { ResponseService } from '../../../../common/responses/response.service';
-import { CreatePromotionalDto, UpdatePromotionalDto, PromotionalQueryDto } from '../dto';
+import {
+  CreatePromotionalDto,
+  UpdatePromotionalDto,
+  PromotionalQueryDto,
+} from '../dto';
 import { RolesGuard } from '../../../auth/guards/roles.guard';
 import { Roles } from '../../../auth/decorators/roles.decorator';
 import { UserRole } from '../../../auth/enums/user-role.enum';
@@ -42,7 +46,13 @@ export class PromotionalController {
   @ApiOperation({ summary: 'List all promotional plans' })
   async findAll(@Query() query: PromotionalQueryDto) {
     const result = await this.promotionalService.findAll(query);
-    return this.responseService.paginated(result.data, result.meta.total, result.meta.page, result.meta.limit, 'Promotional plans retrieved');
+    return this.responseService.paginated(
+      result.data,
+      result.meta.total,
+      result.meta.page,
+      result.meta.limit,
+      'Promotional plans retrieved',
+    );
   }
 
   @Permissions('superadmin:subscriptions:promotional:read')
@@ -56,7 +66,10 @@ export class PromotionalController {
   @Permissions('superadmin:subscriptions:promotional:update')
   @Patch(':id')
   @ApiOperation({ summary: 'Update a promotional plan' })
-  async update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdatePromotionalDto) {
+  async update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdatePromotionalDto,
+  ) {
     const result = await this.promotionalService.update(id, dto);
     return this.responseService.updated(result, 'Promotional plan updated');
   }

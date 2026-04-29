@@ -26,7 +26,9 @@ export class BankAccountsService {
       ...(search && {
         OR: [
           { name: { contains: search, mode: 'insensitive' as const } },
-          { account_number: { contains: search, mode: 'insensitive' as const } },
+          {
+            account_number: { contains: search, mode: 'insensitive' as const },
+          },
           { bank_name: { contains: search, mode: 'insensitive' as const } },
         ],
       }),
@@ -161,14 +163,30 @@ export class BankAccountsService {
       where: { id },
       data: {
         ...(update_dto.name !== undefined && { name: update_dto.name }),
-        ...(update_dto.account_number !== undefined && { account_number: update_dto.account_number }),
-        ...(update_dto.bank_name !== undefined && { bank_name: update_dto.bank_name }),
-        ...(update_dto.bank_code !== undefined && { bank_code: update_dto.bank_code }),
-        ...(update_dto.currency !== undefined && { currency: update_dto.currency }),
-        ...(update_dto.opening_balance !== undefined && { opening_balance: update_dto.opening_balance }),
-        ...(update_dto.chart_account_id !== undefined && { chart_account_id: update_dto.chart_account_id }),
-        ...(update_dto.store_id !== undefined && { store_id: update_dto.store_id }),
-        ...(update_dto.column_mapping !== undefined && { column_mapping: update_dto.column_mapping as any }),
+        ...(update_dto.account_number !== undefined && {
+          account_number: update_dto.account_number,
+        }),
+        ...(update_dto.bank_name !== undefined && {
+          bank_name: update_dto.bank_name,
+        }),
+        ...(update_dto.bank_code !== undefined && {
+          bank_code: update_dto.bank_code,
+        }),
+        ...(update_dto.currency !== undefined && {
+          currency: update_dto.currency,
+        }),
+        ...(update_dto.opening_balance !== undefined && {
+          opening_balance: update_dto.opening_balance,
+        }),
+        ...(update_dto.chart_account_id !== undefined && {
+          chart_account_id: update_dto.chart_account_id,
+        }),
+        ...(update_dto.store_id !== undefined && {
+          store_id: update_dto.store_id,
+        }),
+        ...(update_dto.column_mapping !== undefined && {
+          column_mapping: update_dto.column_mapping as any,
+        }),
       },
       include: {
         chart_account: {

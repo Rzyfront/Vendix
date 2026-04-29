@@ -1,0 +1,87 @@
+meta {
+  name: Invoice PDF Download (S3.1)
+  type: http
+  seq: 19
+}
+
+get {
+  url: {{url}}/store/subscriptions/current/invoices/{{invoice_id}}/pdf
+  body: none
+  auth: inherit
+}
+
+docs {
+  S3.1 — Downloads a SaaS subscription invoice as a PDF.
+
+  Endpoint:
+    GET /store/subscriptions/current/invoices/:invoiceId/pdf
+
+  Behaviour:
+    - Auth: requires a store-scoped bearer token. The endpoint is
+      @SkipSubscriptionGate so it works even when the subscription is
+      suspended (the customer must still be able to retrieve historical
+      invoices for accounting purposes).
+    - Ownership: server enforces `invoice.store_id === storeId` before
+      rendering. Foreign invoices yield 404 SUBSCRIPTION_001.
+    - Response headers:
+        Content-Type: application/pdf
+        Content-Disposition: attachment; filename="factura-<number>.pdf"
+        Content-Length: <bytes>
+
+  Setup expected:
+    - {{invoice_id}} env var pointing to a real subscription_invoices.id
+      under the bearer token's store. The chained Bruno suite produces
+      one in 02-checkout-commit (var `invoice_id`). When running this
+      file in isolation, set `invoice_id` manually in the env.
+
+  Verification:
+    - 200 OK with binary PDF body
+    - Content-Type starts with "application/pdf"
+    - Content-Disposition contains `attachment` and a filename
+    - PDF magic bytes (%PDF) at the start of the payload
+    - Sanity: response body length > 1000 bytes (header-only smoke check)
+
+  Negative cases (covered by manual variants):
+    - Foreign invoice id  -> 404 SUBSCRIPTION_001
+    - Unauthenticated     -> 401
+    - Suspended store     -> 200 (gate intentionally bypassed)
+}
+
+tests {
+  test("Returns 200 OK", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("Content-Type is application/pdf", function() {
+    const ct = res.headers['content-type'] || res.headers['Content-Type'];
+    expect(ct).to.match(/application\/pdf/i);
+  });
+
+  test("Content-Disposition is an attachment with filename", function() {
+    const cd = res.headers['content-disposition'] || res.headers['Content-Disposition'];
+    expect(cd).to.match(/attachment/i);
+    expect(cd).to.match(/filename="?factura-/i);
+    expect(cd).to.match(/\.pdf"?/i);
+  });
+
+  test("Body is a non-trivial PDF payload", function() {
+    // Bruno surfaces binary payloads as Buffer or string depending on
+    // version; coerce to length and to a leading-magic-bytes check.
+    const body = res.body;
+    let length = 0;
+    let head = '';
+    if (body && typeof body.length === 'number') {
+      length = body.length;
+      head =
+        typeof body === 'string'
+          ? body.slice(0, 4)
+          : Buffer.isBuffer(body)
+            ? body.slice(0, 4).toString('latin1')
+            : '';
+    }
+    expect(length).to.be.greaterThan(1000);
+    if (head) {
+      expect(head).to.equal('%PDF');
+    }
+  });
+}

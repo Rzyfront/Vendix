@@ -11,6 +11,18 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
   }
 
   canActivate(context: ExecutionContext) {
+    const request = context.switchToHttp().getRequest();
+
+    // CORS preflight: OPTIONS requests carry no credentials by spec.
+    // Always allow them to pass — `app.enableCors()` handles the actual
+    // preflight response. Without this short-circuit, any upstream proxy
+    // that bypasses the cors middleware (or rewrites the request) causes
+    // the guard to throw 401 → browser reports "preflight does not have
+    // HTTP ok status".
+    if (request.method === 'OPTIONS') {
+      return true;
+    }
+
     const isPublic = this.reflector.getAllAndOverride<boolean>(IS_PUBLIC_KEY, [
       context.getHandler(),
       context.getClass(),
@@ -20,7 +32,6 @@ export class JwtAuthGuard extends AuthGuard('jwt') {
     }
 
     // Check if the route is one of the public routes
-    const request = context.switchToHttp().getRequest();
     const path = request.path;
     const publicPaths = ['/api/health', '/api-docs'];
     if (

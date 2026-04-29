@@ -1,4 +1,9 @@
-import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+  Logger,
+} from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { CreatePurchaseOrderDto } from './dto/create-purchase-order.dto';
 import { UpdatePurchaseOrderDto } from './dto/update-purchase-order.dto';
@@ -54,20 +59,22 @@ export class PurchaseOrdersService {
           // Try to get store from location if possible, or fallback to first store of org
           const location = await tx.inventory_locations.findUnique({
             where: { id: createPurchaseOrderDto.location_id },
-            select: { store_id: true }
+            select: { store_id: true },
           });
 
           if (location?.store_id) {
             storeId = location.store_id;
           } else {
             const firstStore = await tx.stores.findFirst({
-              where: { organization_id }
+              where: { organization_id },
             });
             storeId = firstStore?.id;
           }
 
           if (!storeId) {
-            throw new BadRequestException('Cannot create new product: No store found for this organization.');
+            throw new BadRequestException(
+              'Cannot create new product: No store found for this organization.',
+            );
           }
 
           // Check if product with SKU exists to avoid duplicates
@@ -75,8 +82,8 @@ export class PurchaseOrdersService {
             where: {
               sku: item.sku,
               store_id: storeId,
-              state: { not: 'archived' }
-            }
+              state: { not: 'archived' },
+            },
           });
 
           // Normalize Data first
@@ -85,21 +92,32 @@ export class PurchaseOrdersService {
             if (typeof val === 'boolean') return val;
             if (typeof val === 'string') {
               const s = val.trim().toLowerCase();
-              return s === 'si' || s === 'yes' || s === 'verdadero' || s === 'true';
+              return (
+                s === 'si' || s === 'yes' || s === 'verdadero' || s === 'true'
+              );
             }
             return !!val;
           };
 
-          const availableForEcommerce = normalizeBool(item.available_for_ecommerce ?? true);
+          const availableForEcommerce = normalizeBool(
+            item.available_for_ecommerce ?? true,
+          );
           const isOnSale = normalizeBool((item as any).is_on_sale ?? false);
 
           // Normalize State
           let productState: any = 'active';
           if (item.state && typeof item.state === 'string') {
             const s = item.state.trim().toLowerCase();
-            if (s === 'activo' || s === 'active' || s === 'habilitado') productState = 'active';
-            else if (s === 'inactivo' || s === 'inactive' || s === 'deshabilitado') productState = 'inactive';
-            else if (s === 'archivado' || s === 'archived') productState = 'archived';
+            if (s === 'activo' || s === 'active' || s === 'habilitado')
+              productState = 'active';
+            else if (
+              s === 'inactivo' ||
+              s === 'inactive' ||
+              s === 'deshabilitado'
+            )
+              productState = 'inactive';
+            else if (s === 'archivado' || s === 'archived')
+              productState = 'archived';
           }
 
           // Price calculation
@@ -108,7 +126,11 @@ export class PurchaseOrdersService {
           let margin = item.profit_margin || 0;
           if (margin > 0 && margin < 1) margin = margin * 100;
 
-          if (margin > 0 && cost > 0 && (!item.base_price || item.base_price === 0)) {
+          if (
+            margin > 0 &&
+            cost > 0 &&
+            (!item.base_price || item.base_price === 0)
+          ) {
             basePrice = cost * (1 + margin / 100);
           }
 
@@ -118,7 +140,9 @@ export class PurchaseOrdersService {
             const normalizedBrandName = item.brand_name.trim().toLowerCase();
             if (normalizedBrandName) {
               const brand = await tx.brands.findFirst({
-                where: { name: { equals: normalizedBrandName, mode: 'insensitive' } }
+                where: {
+                  name: { equals: normalizedBrandName, mode: 'insensitive' },
+                },
               });
               if (brand) {
                 brandId = brand.id;
@@ -128,8 +152,8 @@ export class PurchaseOrdersService {
                   data: {
                     name: titleCaseBrandName,
                     description: 'Creada automáticamente por carga masiva PO',
-                    state: 'active'
-                  }
+                    state: 'active',
+                  },
                 });
                 brandId = newBrand.id;
               }
@@ -139,14 +163,19 @@ export class PurchaseOrdersService {
           // Resolve Categories: split by ",", trim + lowercase for search, Title Case for creation
           const categoryIds: number[] = [];
           if (item.category_names) {
-            const names = item.category_names.split(',').map(n => n.trim()).filter(n => n);
+            const names = item.category_names
+              .split(',')
+              .map((n) => n.trim())
+              .filter((n) => n);
             for (const name of names) {
               const normalizedCatName = name.toLowerCase();
-              const slug = normalizedCatName.replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+              const slug = normalizedCatName
+                .replace(/[^a-z0-9]+/g, '-')
+                .replace(/(^-|-$)+/g, '');
 
               // Search by slug (already lowercase/normalized)
               const cat = await tx.categories.findFirst({
-                where: { slug: slug, store_id: storeId }
+                where: { slug: slug, store_id: storeId },
               });
               if (cat) {
                 categoryIds.push(cat.id);
@@ -157,8 +186,8 @@ export class PurchaseOrdersService {
                     name: titleCaseCatName,
                     slug: slug,
                     store_id: storeId,
-                    state: 'active'
-                  }
+                    state: 'active',
+                  },
                 });
                 categoryIds.push(newCat.id);
               }
@@ -175,24 +204,34 @@ export class PurchaseOrdersService {
                 weight: item.weight || existingProduct.weight,
                 available_for_ecommerce: availableForEcommerce,
                 is_on_sale: isOnSale,
-                sale_price: item.sale_price !== undefined ? item.sale_price : existingProduct.sale_price,
-                brand_id: brandId !== undefined ? brandId : existingProduct.brand_id,
+                sale_price:
+                  item.sale_price !== undefined
+                    ? item.sale_price
+                    : existingProduct.sale_price,
+                brand_id:
+                  brandId !== undefined ? brandId : existingProduct.brand_id,
                 product_categories: {
                   deleteMany: {},
-                  create: categoryIds.map(id => ({ category_id: id }))
+                  create: categoryIds.map((id) => ({ category_id: id })),
                 },
-                base_price: basePrice > 0 ? basePrice : existingProduct.base_price,
-                profit_margin: margin > 0 ? margin : existingProduct.profit_margin,
+                base_price:
+                  basePrice > 0 ? basePrice : existingProduct.base_price,
+                profit_margin:
+                  margin > 0 ? margin : existingProduct.profit_margin,
                 cost_price: cost > 0 ? cost : existingProduct.cost_price,
-                description: item.product_description || existingProduct.description
-              }
+                description:
+                  item.product_description || existingProduct.description,
+              },
             });
-
           } else {
             const newProduct = await tx.products.create({
               data: {
                 name: item.product_name,
-                slug: item.product_name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '') + `-${Date.now()}`,
+                slug:
+                  item.product_name
+                    .toLowerCase()
+                    .replace(/[^a-z0-9]+/g, '-')
+                    .replace(/(^-|-$)+/g, '') + `-${Date.now()}`,
                 description: item.product_description || '',
                 sku: item.sku || `GEN-${Date.now()}`,
                 base_price: basePrice,
@@ -207,9 +246,9 @@ export class PurchaseOrdersService {
                 sale_price: item.sale_price || 0,
                 brand_id: brandId,
                 product_categories: {
-                  create: categoryIds.map(id => ({ category_id: id }))
-                }
-              }
+                  create: categoryIds.map((id) => ({ category_id: id })),
+                },
+              },
             });
             finalProductId = newProduct.id;
           }
@@ -220,7 +259,7 @@ export class PurchaseOrdersService {
           product_id: finalProductId,
           product_name: undefined,
           sku: undefined,
-          product_description: undefined
+          product_description: undefined,
         });
       }
 
@@ -236,36 +275,43 @@ export class PurchaseOrdersService {
         (createPurchaseOrderDto.tax_amount || 0) +
         (createPurchaseOrderDto.shipping_cost || 0);
 
-
       // Generate order number
       const date = new Date();
       const order_number = `PO-${date.getFullYear()}${(date.getMonth() + 1)
         .toString()
-        .padStart(2, '0')}${date.getDate().toString().padStart(2, '0')}-${Math.floor(
-          Math.random() * 1000,
-        )
-          .toString()
-          .padStart(3, '0')}`;
+        .padStart(
+          2,
+          '0',
+        )}${date.getDate().toString().padStart(2, '0')}-${Math.floor(
+        Math.random() * 1000,
+      )
+        .toString()
+        .padStart(3, '0')}`;
 
-      const { items, created_by_user_id, ...orderData } = createPurchaseOrderDto;
+      const { items, created_by_user_id, ...orderData } =
+        createPurchaseOrderDto;
       const user_id = RequestContextService.getUserId();
 
       // Validate Location and Supplier existence to prevent FK errors
       if (orderData.location_id) {
         const locationExists = await tx.inventory_locations.findFirst({
-          where: { id: orderData.location_id, organization_id }
+          where: { id: orderData.location_id, organization_id },
         });
         if (!locationExists) {
-          throw new BadRequestException(`La bodega con ID ${orderData.location_id} no existe o no está activa.`);
+          throw new BadRequestException(
+            `La bodega con ID ${orderData.location_id} no existe o no está activa.`,
+          );
         }
       }
 
       if (orderData.supplier_id) {
         const supplierExists = await tx.suppliers.findFirst({
-          where: { id: orderData.supplier_id, organization_id }
+          where: { id: orderData.supplier_id, organization_id },
         });
         if (!supplierExists) {
-          throw new BadRequestException(`El proveedor con ID ${orderData.supplier_id} no existe.`);
+          throw new BadRequestException(
+            `El proveedor con ID ${orderData.supplier_id} no existe.`,
+          );
         }
       }
 
@@ -279,7 +325,7 @@ export class PurchaseOrdersService {
           total_amount: totalAmount,
           order_date: new Date(),
           purchase_order_items: {
-            create: processedItems.map(item => ({
+            create: processedItems.map((item) => ({
               product_id: item.product_id,
               product_variant_id: item.product_variant_id,
               quantity_ordered: item.quantity,
@@ -287,9 +333,9 @@ export class PurchaseOrdersService {
               notes: item.notes,
               batch_number: item.batch_number,
               manufacturing_date: item.manufacturing_date,
-              expiration_date: item.expiration_date
-            }))
-          }
+              expiration_date: item.expiration_date,
+            })),
+          },
         },
         include: {
           suppliers: true,
@@ -317,14 +363,21 @@ export class PurchaseOrdersService {
         result.id,
       );
     } catch (error) {
-      this.logger.error(`Failed to log audit for PO create #${result.id}: ${error.message}`);
+      this.logger.error(
+        `Failed to log audit for PO create #${result.id}: ${error.message}`,
+      );
     }
 
     return result;
   }
 
   async findAll(query: PurchaseOrderQueryDto) {
-    const { page = 1, limit = 10, sort_by = 'order_date', sort_order = 'desc' } = query;
+    const {
+      page = 1,
+      limit = 10,
+      sort_by = 'order_date',
+      sort_order = 'desc',
+    } = query;
     const skip = (page - 1) * limit;
 
     const where: any = {
@@ -504,7 +557,9 @@ export class PurchaseOrdersService {
         id,
       );
     } catch (error) {
-      this.logger.error(`Failed to log audit for PO approve #${id}: ${error.message}`);
+      this.logger.error(
+        `Failed to log audit for PO approve #${id}: ${error.message}`,
+      );
     }
 
     return result;
@@ -540,7 +595,9 @@ export class PurchaseOrdersService {
         id,
       );
     } catch (error) {
-      this.logger.error(`Failed to log audit for PO cancel #${id}: ${error.message}`);
+      this.logger.error(
+        `Failed to log audit for PO cancel #${id}: ${error.message}`,
+      );
     }
 
     return result;
@@ -596,13 +653,17 @@ export class PurchaseOrdersService {
       // Read costing method from store settings
       const settings = await this.settingsService.getSettings();
       const costingMethod: 'weighted_average' | 'fifo' | 'lifo' =
-        settings.inventory?.costing_method === 'fifo' ? 'fifo' : 'weighted_average';
+        settings.inventory?.costing_method === 'fifo'
+          ? 'fifo'
+          : 'weighted_average';
 
       // Create inventory movements, update stock, and calculate cost for received items
       for (const item of dto.items) {
         if (item.quantity_received <= 0) continue;
 
-        const orderItem = purchaseOrder.purchase_order_items.find(i => i.id === item.id);
+        const orderItem = purchaseOrder.purchase_order_items.find(
+          (i) => i.id === item.id,
+        );
         const productId = orderItem?.product_id;
         const productVariantId = orderItem?.product_variant_id;
 
@@ -617,6 +678,7 @@ export class PurchaseOrdersService {
               movement_type: 'stock_in',
               reason: 'Purchase order receipt',
               create_movement: true,
+              source_module: 'pop_purchase',
             },
             tx,
           );
@@ -658,7 +720,10 @@ export class PurchaseOrdersService {
       let newStatus = purchaseOrder.status;
       if (all_items_received) {
         newStatus = purchase_order_status_enum.received;
-      } else if (some_items_received && newStatus !== purchase_order_status_enum.received) {
+      } else if (
+        some_items_received &&
+        newStatus !== purchase_order_status_enum.received
+      ) {
         newStatus = 'partial' as purchase_order_status_enum;
       }
 
@@ -687,7 +752,9 @@ export class PurchaseOrdersService {
     // Audit log after transaction
     try {
       const user_id = RequestContextService.getUserId();
-      const audit_action = result.all_items_received ? 'PO_RECEIVED' : 'PO_PARTIALLY_RECEIVED';
+      const audit_action = result.all_items_received
+        ? 'PO_RECEIVED'
+        : 'PO_PARTIALLY_RECEIVED';
       await this.auditService.logCustom(
         user_id ?? 0,
         audit_action,
@@ -696,7 +763,9 @@ export class PurchaseOrdersService {
         id,
       );
     } catch (error) {
-      this.logger.error(`Failed to log audit for PO receive #${id}: ${error.message}`);
+      this.logger.error(
+        `Failed to log audit for PO receive #${id}: ${error.message}`,
+      );
     }
 
     // Emit purchase_order.received for accounting ONLY when fully received
@@ -712,7 +781,9 @@ export class PurchaseOrdersService {
           });
         }
       } catch (error) {
-        this.logger.error(`Failed to emit purchase_order.received for PO #${id}: ${error.message}`);
+        this.logger.error(
+          `Failed to emit purchase_order.received for PO #${id}: ${error.message}`,
+        );
       }
     }
 
@@ -725,13 +796,22 @@ export class PurchaseOrdersService {
     return this.prisma.purchase_order_receptions.findMany({
       where: { purchase_order_id: purchaseOrderId },
       include: {
-        received_by: { select: { id: true, username: true, first_name: true, last_name: true } },
+        received_by: {
+          select: {
+            id: true,
+            username: true,
+            first_name: true,
+            last_name: true,
+          },
+        },
         items: {
           include: {
             purchase_order_item: {
               include: {
                 products: { select: { id: true, name: true } },
-                product_variants: { select: { id: true, sku: true, name: true } },
+                product_variants: {
+                  select: { id: true, sku: true, name: true },
+                },
               },
             },
           },
@@ -760,20 +840,50 @@ export class PurchaseOrdersService {
       }),
       this.prisma.purchase_order_receptions.findMany({
         where: { purchase_order_id: purchaseOrderId },
-        include: { received_by: { select: { id: true, username: true, first_name: true, last_name: true } } },
+        include: {
+          received_by: {
+            select: {
+              id: true,
+              username: true,
+              first_name: true,
+              last_name: true,
+            },
+          },
+        },
         orderBy: { received_at: 'desc' },
       }),
       this.prisma.purchase_order_payments.findMany({
         where: { purchase_order_id: purchaseOrderId },
-        include: { created_by: { select: { id: true, username: true, first_name: true, last_name: true } } },
+        include: {
+          created_by: {
+            select: {
+              id: true,
+              username: true,
+              first_name: true,
+              last_name: true,
+            },
+          },
+        },
         orderBy: { created_at: 'desc' },
       }),
     ]);
 
     const timeline = [
-      ...auditLogs.map(l => ({ type: 'audit' as const, date: l.created_at || new Date(0), data: l })),
-      ...receptions.map(r => ({ type: 'reception' as const, date: r.received_at, data: r })),
-      ...payments.map(p => ({ type: 'payment' as const, date: p.created_at, data: p })),
+      ...auditLogs.map((l) => ({
+        type: 'audit' as const,
+        date: l.created_at || new Date(0),
+        data: l,
+      })),
+      ...receptions.map((r) => ({
+        type: 'reception' as const,
+        date: r.received_at,
+        data: r,
+      })),
+      ...payments.map((p) => ({
+        type: 'payment' as const,
+        date: p.created_at,
+        data: p,
+      })),
     ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 
     return timeline;
@@ -781,7 +891,11 @@ export class PurchaseOrdersService {
 
   // ===== Attachments =====
 
-  async addAttachment(purchaseOrderId: number, file: Express.Multer.File, dto: AddAttachmentDto) {
+  async addAttachment(
+    purchaseOrderId: number,
+    file: Express.Multer.File,
+    dto: AddAttachmentDto,
+  ) {
     // 1. Upload to S3 using S3Service (store the KEY, not the presigned URL)
     const s3Key = await this.s3Service.uploadFile(
       file.buffer,
@@ -799,7 +913,9 @@ export class PurchaseOrdersService {
         file_type: file.mimetype,
         file_size: file.size,
         supplier_invoice_number: dto.supplier_invoice_number,
-        supplier_invoice_date: dto.supplier_invoice_date ? new Date(dto.supplier_invoice_date) : null,
+        supplier_invoice_date: dto.supplier_invoice_date
+          ? new Date(dto.supplier_invoice_date)
+          : null,
         supplier_invoice_amount: dto.supplier_invoice_amount,
         notes: dto.notes,
         uploaded_by_user_id: userId,
@@ -816,7 +932,9 @@ export class PurchaseOrdersService {
         purchaseOrderId,
       );
     } catch (error) {
-      this.logger.error(`Failed to log audit for PO attachment #${purchaseOrderId}: ${error.message}`);
+      this.logger.error(
+        `Failed to log audit for PO attachment #${purchaseOrderId}: ${error.message}`,
+      );
     }
 
     return attachment;
@@ -825,7 +943,16 @@ export class PurchaseOrdersService {
   async getAttachments(purchaseOrderId: number) {
     const attachments = await this.prisma.purchase_order_attachments.findMany({
       where: { purchase_order_id: purchaseOrderId },
-      include: { uploaded_by: { select: { id: true, username: true, first_name: true, last_name: true } } },
+      include: {
+        uploaded_by: {
+          select: {
+            id: true,
+            username: true,
+            first_name: true,
+            last_name: true,
+          },
+        },
+      },
       orderBy: { created_at: 'desc' },
     });
 
@@ -851,11 +978,15 @@ export class PurchaseOrdersService {
     try {
       await this.s3Service.deleteFile(attachment.file_url);
     } catch (error) {
-      this.logger.error(`Failed to delete S3 file ${attachment.file_url}: ${error.message}`);
+      this.logger.error(
+        `Failed to delete S3 file ${attachment.file_url}: ${error.message}`,
+      );
     }
 
     // Delete from DB
-    await this.prisma.purchase_order_attachments.delete({ where: { id: attachmentId } });
+    await this.prisma.purchase_order_attachments.delete({
+      where: { id: attachmentId },
+    });
 
     return { deleted: true };
   }
@@ -863,22 +994,28 @@ export class PurchaseOrdersService {
   // ===== Payments =====
 
   async registerPayment(purchaseOrderId: number, dto: RegisterPaymentDto) {
-    const po = await this.prisma.purchase_orders.findUnique({ where: { id: purchaseOrderId } });
+    const po = await this.prisma.purchase_orders.findUnique({
+      where: { id: purchaseOrderId },
+    });
     if (!po) {
       throw new NotFoundException('Purchase order not found');
     }
 
     // Get existing payments total
-    const existingPayments = await this.prisma.purchase_order_payments.aggregate({
-      where: { purchase_order_id: purchaseOrderId },
-      _sum: { amount: true },
-    });
+    const existingPayments =
+      await this.prisma.purchase_order_payments.aggregate({
+        where: { purchase_order_id: purchaseOrderId },
+        _sum: { amount: true },
+      });
 
-    const totalPaid = Number(existingPayments._sum.amount || 0) + Number(dto.amount);
+    const totalPaid =
+      Number(existingPayments._sum.amount || 0) + Number(dto.amount);
     const totalAmount = Number(po.total_amount);
 
     if (totalPaid > totalAmount) {
-      throw new BadRequestException('El pago excedería el monto total de la orden');
+      throw new BadRequestException(
+        'El pago excedería el monto total de la orden',
+      );
     }
 
     const userId = RequestContextService.getUserId();
@@ -912,11 +1049,17 @@ export class PurchaseOrdersService {
         userId ?? 0,
         'PO_PAYMENT_REGISTERED',
         'purchase_orders',
-        { amount: dto.amount, method: dto.payment_method, payment_id: payment.id },
+        {
+          amount: dto.amount,
+          method: dto.payment_method,
+          payment_id: payment.id,
+        },
         purchaseOrderId,
       );
     } catch (error) {
-      this.logger.error(`Failed to log audit for PO payment #${purchaseOrderId}: ${error.message}`);
+      this.logger.error(
+        `Failed to log audit for PO payment #${purchaseOrderId}: ${error.message}`,
+      );
     }
 
     // Emit event for accounting
@@ -929,7 +1072,9 @@ export class PurchaseOrdersService {
         user_id: userId,
       });
     } catch (error) {
-      this.logger.error(`Failed to emit purchase_order.payment for PO #${purchaseOrderId}: ${error.message}`);
+      this.logger.error(
+        `Failed to emit purchase_order.payment for PO #${purchaseOrderId}: ${error.message}`,
+      );
     }
 
     return payment;
@@ -938,7 +1083,16 @@ export class PurchaseOrdersService {
   async getPayments(purchaseOrderId: number) {
     return this.prisma.purchase_order_payments.findMany({
       where: { purchase_order_id: purchaseOrderId },
-      include: { created_by: { select: { id: true, username: true, first_name: true, last_name: true } } },
+      include: {
+        created_by: {
+          select: {
+            id: true,
+            username: true,
+            first_name: true,
+            last_name: true,
+          },
+        },
+      },
       orderBy: { created_at: 'desc' },
     });
   }
@@ -983,8 +1137,15 @@ export class PurchaseOrdersService {
           quantity_on_hand: { gt: 0 },
         },
       });
-      const globalStock = allStockLevels.reduce((sum, sl) => sum + (sl.quantity_on_hand ?? 0), 0);
-      const globalValue = allStockLevels.reduce((sum, sl) => sum + ((sl.quantity_on_hand ?? 0) * Number(sl.cost_per_unit ?? 0)), 0);
+      const globalStock = allStockLevels.reduce(
+        (sum, sl) => sum + (sl.quantity_on_hand ?? 0),
+        0,
+      );
+      const globalValue = allStockLevels.reduce(
+        (sum, sl) =>
+          sum + (sl.quantity_on_hand ?? 0) * Number(sl.cost_per_unit ?? 0),
+        0,
+      );
       const globalCostPerUnit = globalStock > 0 ? globalValue / globalStock : 0;
 
       const newStock = globalStock + item.quantity;
@@ -996,7 +1157,9 @@ export class PurchaseOrdersService {
         newCostPerUnit = item.unit_cost;
       } else {
         // CPP (weighted average) using global stock across all locations
-        newCostPerUnit = ((globalStock * globalCostPerUnit) + (item.quantity * item.unit_cost)) / newStock;
+        newCostPerUnit =
+          (globalStock * globalCostPerUnit + item.quantity * item.unit_cost) /
+          newStock;
       }
 
       // Round to 2 decimals for display
@@ -1023,7 +1186,9 @@ export class PurchaseOrdersService {
         product_name: product?.name || 'Producto desconocido',
         variant_name: variantName,
         current_stock: currentStock,
-        current_cost_per_unit: isReactivation ? 0 : Math.round(currentCost * 100) / 100,
+        current_cost_per_unit: isReactivation
+          ? 0
+          : Math.round(currentCost * 100) / 100,
         global_stock: globalStock,
         global_cost_per_unit: Math.round(globalCostPerUnit * 100) / 100,
         new_stock: newStock,

@@ -30,7 +30,7 @@ export class RolesController {
   constructor(
     private readonly rolesService: RolesService,
     private readonly responseService: ResponseService,
-  ) { }
+  ) {}
 
   @Post()
   @ApiOperation({ summary: 'Create a new role' })

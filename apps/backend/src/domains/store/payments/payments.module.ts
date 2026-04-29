@@ -52,7 +52,7 @@ import { InvoiceDataRequestsModule } from '../invoicing/invoice-data-requests/in
     StripeModule,
     PaypalModule,
     BankTransferModule,
-    WompiModule,
+    forwardRef(() => WompiModule),
     WalletModule,
     forwardRef(() => OrdersModule),
     forwardRef(() => OrderFlowModule),
@@ -108,7 +108,7 @@ export class PaymentsModule implements OnModuleInit {
     private bankTransferProcessor: BankTransferProcessor,
     private wompiProcessor: WompiProcessor,
     private walletProcessor: WalletPaymentProcessor,
-  ) { }
+  ) {}
 
   onModuleInit() {
     this.paymentGateway.registerProcessor('cash', this.cashProcessor);

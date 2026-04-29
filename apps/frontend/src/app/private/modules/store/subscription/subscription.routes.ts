@@ -31,10 +31,31 @@ const subscriptionRoutes: Routes = [
       ),
   },
   {
+    path: 'timeline',
+    loadComponent: () =>
+      import('./pages/timeline/subscription-timeline.component').then(
+        (c) => c.SubscriptionTimelineComponent,
+      ),
+  },
+  {
+    path: 'invoices/:id',
+    loadComponent: () =>
+      import('./pages/invoice-detail/saas-invoice-detail.component').then(
+        (c) => c.SaasInvoiceDetailComponent,
+      ),
+  },
+  {
     path: 'checkout/:planId',
     loadComponent: () =>
       import('./pages/checkout/checkout.component').then(
         (c) => c.CheckoutComponent,
+      ),
+  },
+  {
+    path: 'dunning',
+    loadComponent: () =>
+      import('./pages/dunning/dunning-board.component').then(
+        (c) => c.DunningBoardComponent,
       ),
   },
 ];

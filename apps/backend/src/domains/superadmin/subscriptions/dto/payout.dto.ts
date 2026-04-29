@@ -1,5 +1,6 @@
 import { IsOptional, IsString, IsInt, IsEnum, Min } from 'class-validator';
 import { Type } from 'class-transformer';
+import { partner_payout_batch_state_enum } from '@prisma/client';
 
 export class PayoutQueryDto {
   @IsOptional()
@@ -20,8 +21,8 @@ export class PayoutQueryDto {
   partner_organization_id?: number;
 
   @IsOptional()
-  @IsString()
-  state?: string;
+  @IsEnum(partner_payout_batch_state_enum)
+  state?: partner_payout_batch_state_enum;
 
   @IsOptional()
   @IsString()

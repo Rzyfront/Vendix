@@ -7,7 +7,10 @@ import { ErrorCodes } from '@common/errors/error-codes';
 import { ExogenousGeneratorService } from './exogenous-generator.service';
 import { ExogenousValidatorService } from './exogenous-validator.service';
 import { ExogenousFileBuilderService } from './exogenous-file-builder.service';
-import { EXOGENOUS_FORMATS, ExogenousFormatCode } from './constants/format-definitions';
+import {
+  EXOGENOUS_FORMATS,
+  ExogenousFormatCode,
+} from './constants/format-definitions';
 import { GenerateReportDto, QueryReportsDto } from './dto';
 
 @Injectable()
@@ -48,7 +51,9 @@ export class ExogenousService {
     return {
       data: data.map((r: any) => ({
         ...r,
-        format_name: EXOGENOUS_FORMATS[r.format_code as ExogenousFormatCode]?.name || r.format_code,
+        format_name:
+          EXOGENOUS_FORMATS[r.format_code as ExogenousFormatCode]?.name ||
+          r.format_code,
         line_count: r._count.exogenous_report_lines,
       })),
       meta: { total, page, limit, total_pages: Math.ceil(total / limit) },
@@ -58,7 +63,9 @@ export class ExogenousService {
   async findOne(id: number) {
     const context = RequestContextService.getContext()!;
 
-    const report = await (this.prisma as any).client.exogenous_reports.findFirst({
+    const report = await (
+      this.prisma as any
+    ).client.exogenous_reports.findFirst({
       where: { id, organization_id: context.organization_id },
       include: { _count: { select: { exogenous_report_lines: true } } },
     });
@@ -69,7 +76,9 @@ export class ExogenousService {
 
     return {
       ...report,
-      format_name: EXOGENOUS_FORMATS[report.format_code as ExogenousFormatCode]?.name || report.format_code,
+      format_name:
+        EXOGENOUS_FORMATS[report.format_code as ExogenousFormatCode]?.name ||
+        report.format_code,
       line_count: report._count.exogenous_report_lines,
     };
   }
@@ -78,7 +87,9 @@ export class ExogenousService {
     const context = RequestContextService.getContext()!;
 
     // Verify report belongs to org
-    const report = await (this.prisma as any).client.exogenous_reports.findFirst({
+    const report = await (
+      this.prisma as any
+    ).client.exogenous_reports.findFirst({
       where: { id, organization_id: context.organization_id },
       select: { id: true },
     });
@@ -96,10 +107,15 @@ export class ExogenousService {
         skip,
         take: limit,
       }),
-      (this.prisma as any).client.exogenous_report_lines.count({ where: { report_id: id } }),
+      (this.prisma as any).client.exogenous_report_lines.count({
+        where: { report_id: id },
+      }),
     ]);
 
-    return { data, meta: { total, page, limit, total_pages: Math.ceil(total / limit) } };
+    return {
+      data,
+      meta: { total, page, limit, total_pages: Math.ceil(total / limit) },
+    };
   }
 
   async generateReport(dto: GenerateReportDto) {
@@ -143,28 +159,58 @@ export class ExogenousService {
 
       switch (format_code) {
         case '1001':
-          lines = await this.generator.generateFormat1001(org_id, store_id, fiscal_year);
+          lines = await this.generator.generateFormat1001(
+            org_id,
+            store_id,
+            fiscal_year,
+          );
           break;
         case '1003':
-          lines = await this.generator.generateFormat1003(org_id, store_id, fiscal_year);
+          lines = await this.generator.generateFormat1003(
+            org_id,
+            store_id,
+            fiscal_year,
+          );
           break;
         case '1005':
-          lines = await this.generator.generateFormat1005(org_id, store_id, fiscal_year);
+          lines = await this.generator.generateFormat1005(
+            org_id,
+            store_id,
+            fiscal_year,
+          );
           break;
         case '1006':
-          lines = await this.generator.generateFormat1006(org_id, store_id, fiscal_year);
+          lines = await this.generator.generateFormat1006(
+            org_id,
+            store_id,
+            fiscal_year,
+          );
           break;
         case '1007':
-          lines = await this.generator.generateFormat1007(org_id, store_id, fiscal_year);
+          lines = await this.generator.generateFormat1007(
+            org_id,
+            store_id,
+            fiscal_year,
+          );
           break;
         case '1008':
-          lines = await this.generator.generateFormat1008(org_id, store_id, fiscal_year);
+          lines = await this.generator.generateFormat1008(
+            org_id,
+            store_id,
+            fiscal_year,
+          );
           break;
         case '1009':
-          lines = await this.generator.generateFormat1009(org_id, store_id, fiscal_year);
+          lines = await this.generator.generateFormat1009(
+            org_id,
+            store_id,
+            fiscal_year,
+          );
           break;
         default:
-          this.logger.warn(`Format ${format_code} generator not yet implemented`);
+          this.logger.warn(
+            `Format ${format_code} generator not yet implemented`,
+          );
           lines = [];
       }
 
@@ -174,26 +220,30 @@ export class ExogenousService {
           where: { report_id: report.id },
         }),
         ...(lines.length > 0
-          ? [(this.prisma as any).client.exogenous_report_lines.createMany({
-              data: lines.map((line: any) => ({
-                report_id: report.id,
-                third_party_nit: line.third_party_nit,
-                third_party_name: line.third_party_name,
-                third_party_dv: line.third_party_dv || null,
-                concept_code: line.concept_code,
-                payment_amount: line.payment_amount,
-                tax_amount: line.tax_amount,
-                withholding_amount: line.withholding_amount,
-                line_data: line.line_data || null,
-              })),
-            })]
+          ? [
+              (this.prisma as any).client.exogenous_report_lines.createMany({
+                data: lines.map((line: any) => ({
+                  report_id: report.id,
+                  third_party_nit: line.third_party_nit,
+                  third_party_name: line.third_party_name,
+                  third_party_dv: line.third_party_dv || null,
+                  concept_code: line.concept_code,
+                  payment_amount: line.payment_amount,
+                  tax_amount: line.tax_amount,
+                  withholding_amount: line.withholding_amount,
+                  line_data: line.line_data || null,
+                })),
+              }),
+            ]
           : []),
       ]);
 
       // Update report
       const total_amount = lines.reduce((sum, l) => sum + l.payment_amount, 0);
 
-      const updated_report = await (this.prisma as any).client.exogenous_reports.update({
+      const updated_report = await (
+        this.prisma as any
+      ).client.exogenous_reports.update({
         where: { id: report.id },
         data: {
           status: 'generated',
@@ -206,10 +256,13 @@ export class ExogenousService {
 
       return {
         ...updated_report,
-        format_name: EXOGENOUS_FORMATS[format_code as ExogenousFormatCode]?.name,
+        format_name:
+          EXOGENOUS_FORMATS[format_code as ExogenousFormatCode]?.name,
       };
     } catch (error) {
-      this.logger.error(`Failed to generate format ${format_code}: ${error.message}`);
+      this.logger.error(
+        `Failed to generate format ${format_code}: ${error.message}`,
+      );
 
       await (this.prisma as any).client.exogenous_reports.update({
         where: { id: report.id },
@@ -233,7 +286,9 @@ export class ExogenousService {
   async markAsSubmitted(id: number) {
     const context = RequestContextService.getContext()!;
 
-    const report = await (this.prisma as any).client.exogenous_reports.findFirst({
+    const report = await (
+      this.prisma as any
+    ).client.exogenous_reports.findFirst({
       where: { id, organization_id: context.organization_id },
     });
 
@@ -243,7 +298,11 @@ export class ExogenousService {
 
     return (this.prisma as any).client.exogenous_reports.update({
       where: { id },
-      data: { status: 'submitted', submitted_at: new Date(), updated_at: new Date() },
+      data: {
+        status: 'submitted',
+        submitted_at: new Date(),
+        updated_at: new Date(),
+      },
     });
   }
 
@@ -255,7 +314,9 @@ export class ExogenousService {
     };
     if (context.store_id) where.store_id = context.store_id;
 
-    const reports = await (this.prisma as any).client.exogenous_reports.findMany({
+    const reports = await (
+      this.prisma as any
+    ).client.exogenous_reports.findMany({
       where,
       select: { status: true, format_code: true },
     });
@@ -278,7 +339,9 @@ export class ExogenousService {
   async downloadReport(id: number, format: string = 'txt') {
     const context = RequestContextService.getContext()!;
 
-    const report = await (this.prisma as any).client.exogenous_reports.findFirst({
+    const report = await (
+      this.prisma as any
+    ).client.exogenous_reports.findFirst({
       where: { id, organization_id: context.organization_id },
     });
 
@@ -293,7 +356,9 @@ export class ExogenousService {
     try {
       // Si ya tiene file_key, retornar URL firmada directamente
       if (report.file_key) {
-        const download_url = await this.file_builder.getDownloadUrl(report.file_key);
+        const download_url = await this.file_builder.getDownloadUrl(
+          report.file_key,
+        );
         return {
           download_url,
           file_key: report.file_key,
@@ -303,7 +368,9 @@ export class ExogenousService {
       }
 
       // Generar TXT: obtener todas las lineas del reporte
-      const lines = await (this.prisma as any).client.exogenous_report_lines.findMany({
+      const lines = await (
+        this.prisma as any
+      ).client.exogenous_report_lines.findMany({
         where: { report_id: id },
         orderBy: { third_party_nit: 'asc' },
       });
@@ -333,7 +400,9 @@ export class ExogenousService {
         fiscal_year: report.fiscal_year,
       };
     } catch (error) {
-      this.logger.error(`Failed to generate download for report ${id}: ${error.message}`);
+      this.logger.error(
+        `Failed to generate download for report ${id}: ${error.message}`,
+      );
       throw new VendixHttpException(ErrorCodes.EXO_DOWNLOAD_FAILED);
     }
   }

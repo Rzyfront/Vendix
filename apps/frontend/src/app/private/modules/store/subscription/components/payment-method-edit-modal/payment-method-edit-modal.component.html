@@ -1,0 +1,231 @@
+<app-modal
+  [(isOpen)]="isOpen"
+  [title]="'Configurar tarjeta'"
+  [subtitle]="'Gestiona los detalles, predeterminado e historial de cobros'"
+  size="md"
+  (closed)="onModalClosed()"
+>
+  @if (paymentMethod(); as pm) {
+    <div class="flex flex-col gap-6">
+      <!-- ─── Card details ──────────────────────────────────────────── -->
+      <section class="space-y-3">
+        <h3 class="text-xs font-semibold uppercase tracking-wide text-text-secondary">
+          Datos de la tarjeta
+        </h3>
+
+        <div class="rounded-xl border border-border bg-surface p-4 flex items-start gap-3">
+          <div class="p-3 bg-primary/10 rounded-xl shrink-0">
+            <app-icon
+              [name]="pm.type === 'card' ? 'credit-card' : 'landmark'"
+              [size]="22"
+              class="text-primary"
+            ></app-icon>
+          </div>
+          <div class="min-w-0 flex-1 space-y-1">
+            <p class="font-semibold text-text-primary truncate">
+              {{ brandLabel() }}
+            </p>
+            <div class="flex flex-wrap gap-x-4 gap-y-1 text-sm text-text-secondary">
+              @if (expiryLabel(); as exp) {
+                <span>Vence {{ exp }}</span>
+              }
+              @if (createdAtLabel(); as cd) {
+                <span>Agregada {{ cd }}</span>
+              }
+            </div>
+            <div class="flex flex-wrap gap-2 pt-1">
+              <span
+                class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+                [class]="stateLabel().cls"
+              >
+                {{ stateLabel().text }}
+              </span>
+              @if (pm.is_default) {
+                <span
+                  class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-primary/10 text-primary"
+                >
+                  Predeterminada
+                </span>
+              }
+              @if ((pm.consecutive_failures ?? 0) > 0) {
+                <span
+                  class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-700"
+                  title="Cobros fallidos consecutivos"
+                >
+                  {{ pm.consecutive_failures }} fallos seguidos
+                </span>
+              }
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ─── is_default toggle ────────────────────────────────────── -->
+      <section class="space-y-2">
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <p class="font-medium text-text-primary">Marcar como predeterminada</p>
+            <p class="text-xs text-text-secondary">
+              Se usará automáticamente para cobros futuros de tu suscripción.
+            </p>
+          </div>
+          <app-toggle
+            [checked]="isDefaultOptimistic()"
+            [disabled]="mutating() || pm.state !== 'active'"
+            ariaLabel="Marcar como predeterminada"
+            (changed)="onDefaultToggleChange($event)"
+          ></app-toggle>
+        </div>
+        @if (isOnlyActiveDefault()) {
+          <p class="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-3 py-2">
+            Esta es tu única tarjeta activa. Agrega otra antes de quitarla
+            como predeterminada.
+          </p>
+        }
+      </section>
+
+      <!-- ─── Replace / Delete actions ─────────────────────────────── -->
+      <section class="space-y-2">
+        <h3 class="text-xs font-semibold uppercase tracking-wide text-text-secondary">
+          Acciones
+        </h3>
+        <div class="flex flex-col sm:flex-row gap-2">
+          <app-button
+            variant="outline"
+            size="sm"
+            [disabled]="mutating()"
+            (clicked)="openReplaceWidget()"
+          >
+            <app-icon name="refresh-ccw" [size]="14" slot="icon"></app-icon>
+            Reemplazar tarjeta
+          </app-button>
+          <app-button
+            variant="ghost"
+            size="sm"
+            [disabled]="mutating() || !canDelete()"
+            (clicked)="deletePaymentMethod()"
+          >
+            <app-icon name="trash-2" [size]="14" slot="icon" class="text-red-500"></app-icon>
+            <span class="text-red-600">Eliminar tarjeta</span>
+          </app-button>
+        </div>
+        @if (!canDelete()) {
+          <p class="text-xs text-text-secondary">
+            Para eliminar la tarjeta predeterminada, primero agrega o
+            promueve otra como predeterminada.
+          </p>
+        }
+      </section>
+
+      <!-- ─── Charge history ───────────────────────────────────────── -->
+      <section class="space-y-2">
+        <div class="flex items-center justify-between">
+          <h3 class="text-xs font-semibold uppercase tracking-wide text-text-secondary">
+            Últimos cobros
+          </h3>
+          <span class="text-xs text-text-secondary">Máx. 5</span>
+        </div>
+
+        @if (chargesLoading()) {
+          <div class="p-4 text-center">
+            <div class="inline-block animate-spin rounded-full h-5 w-5 border-b-2 border-primary"></div>
+          </div>
+        }
+
+        @if (!chargesLoading() && chargesError()) {
+          <p class="text-sm text-red-600">No se pudo cargar el historial.</p>
+        }
+
+        @if (!chargesLoading() && !chargesError() && !hasCharges()) {
+          <p class="text-sm text-text-secondary py-2">
+            Aún no hay cobros registrados con esta tarjeta.
+          </p>
+        }
+
+        @if (!chargesLoading() && hasCharges()) {
+          <!-- Mobile: cards. Desktop: table. -->
+          <div class="md:hidden space-y-2">
+            @for (charge of charges(); track charge.id) {
+              <div class="rounded-lg border border-border bg-surface p-3 space-y-1">
+                <div class="flex items-center justify-between gap-2">
+                  <span class="font-medium text-text-primary">
+                    {{ charge.invoice_number ?? '—' }}
+                  </span>
+                  <span
+                    class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium"
+                    [class]="chargeStateBadge(charge.state).cls"
+                  >
+                    {{ chargeStateBadge(charge.state).text }}
+                  </span>
+                </div>
+                <div class="flex items-center justify-between text-sm">
+                  <span class="text-text-secondary">{{ chargeDateLabel(charge) }}</span>
+                  <span class="font-semibold text-text-primary">
+                    {{ chargeAmountNumber(charge) | currency }}
+                  </span>
+                </div>
+                @if (chargeReasonShort(charge); as reason) {
+                  <p class="text-xs text-red-600">{{ reason }}</p>
+                }
+              </div>
+            }
+          </div>
+
+          <div class="hidden md:block overflow-x-auto">
+            <table class="w-full text-sm">
+              <thead>
+                <tr class="text-left text-xs uppercase tracking-wide text-text-secondary border-b border-border">
+                  <th class="py-2 pr-3 font-medium">Fecha</th>
+                  <th class="py-2 pr-3 font-medium">Factura</th>
+                  <th class="py-2 pr-3 font-medium text-right">Monto</th>
+                  <th class="py-2 pr-3 font-medium">Estado</th>
+                </tr>
+              </thead>
+              <tbody>
+                @for (charge of charges(); track charge.id) {
+                  <tr class="border-b border-border last:border-0 align-top">
+                    <td class="py-2 pr-3 text-text-secondary">{{ chargeDateLabel(charge) }}</td>
+                    <td class="py-2 pr-3 font-medium text-text-primary">
+                      {{ charge.invoice_number ?? '—' }}
+                    </td>
+                    <td class="py-2 pr-3 text-right font-semibold text-text-primary">
+                      {{ chargeAmountNumber(charge) | currency }}
+                    </td>
+                    <td class="py-2 pr-3">
+                      <div class="flex flex-col gap-1">
+                        <span
+                          class="inline-flex items-center w-fit px-2 py-0.5 rounded-full text-xs font-medium"
+                          [class]="chargeStateBadge(charge.state).cls"
+                        >
+                          {{ chargeStateBadge(charge.state).text }}
+                        </span>
+                        @if (chargeReasonShort(charge); as reason) {
+                          <span class="text-xs text-red-600">{{ reason }}</span>
+                        }
+                      </div>
+                    </td>
+                  </tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
+      </section>
+    </div>
+
+    <!-- ─── Footer ──────────────────────────────────────────────── -->
+    <div class="flex justify-end pt-4">
+      <app-button variant="ghost" size="sm" (clicked)="cancel()">
+        Cerrar
+      </app-button>
+    </div>
+  }
+</app-modal>
+
+<!-- Wompi tokenization for "Reemplazar tarjeta". Lives outside <app-modal>
+     so its own overlay stacks correctly above ours. -->
+<app-wompi-card-widget
+  [isOpen]="showReplaceWidget()"
+  (isOpenChange)="onReplaceWidgetClose($event)"
+  (tokenized)="onCardTokenized($event)"
+/>

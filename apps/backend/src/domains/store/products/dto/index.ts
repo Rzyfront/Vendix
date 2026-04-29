@@ -1221,6 +1221,70 @@ export class BulkProductItemDto {
   @IsOptional()
   @IsBoolean()
   track_inventory?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  service_duration_minutes?: number;
+
+  @IsOptional()
+  @IsString()
+  service_modality?: string;
+
+  @IsOptional()
+  @IsString()
+  service_pricing_type?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  requires_booking?: boolean;
+
+  @IsOptional()
+  @IsString()
+  booking_mode?: string;
+
+  @IsOptional()
+  @IsNumber()
+  buffer_minutes?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  is_recurring?: boolean;
+
+  @IsOptional()
+  @IsString()
+  service_instructions?: string;
+
+  @IsOptional()
+  @IsNumber()
+  preparation_time_minutes?: number;
+
+  @IsOptional()
+  @IsNumber()
+  min_stock_level?: number;
+
+  @IsOptional()
+  @IsNumber()
+  max_stock_level?: number;
+
+  @IsOptional()
+  @IsNumber()
+  reorder_point?: number;
+
+  @IsOptional()
+  @IsNumber()
+  reorder_quantity?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  requires_serial_numbers?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  requires_batch_tracking?: boolean;
+
+  @IsOptional()
+  @IsString()
+  pricing_type?: string;
 }
 
 export class BulkProductUploadDto {

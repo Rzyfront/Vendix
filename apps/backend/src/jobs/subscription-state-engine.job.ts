@@ -2,6 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { Cron } from '@nestjs/schedule';
 import { GlobalPrismaService } from '../prisma/services/global-prisma.service';
 import { SubscriptionStateService } from '../domains/store/subscriptions/services/subscription-state.service';
+import { SubscriptionGateConfig } from '../domains/store/subscriptions/config/subscription-gate.config';
 
 /**
  * Daily cron that evaluates dunning windows for every non-terminal
@@ -27,6 +28,7 @@ export class SubscriptionStateEngineJob {
   constructor(
     private readonly prisma: GlobalPrismaService,
     private readonly stateService: SubscriptionStateService,
+    private readonly gateConfig: SubscriptionGateConfig,
   ) {}
 
   @Cron('0 3 * * *')
@@ -53,6 +55,15 @@ export class SubscriptionStateEngineJob {
 
       for (const sub of subscriptions) {
         try {
+          if (this.gateConfig.isCronDryRun()) {
+            this.logger.log({
+              msg: 'DRY_RUN_SKIP',
+              job: 'subscription-state-engine',
+              wouldProcess: { subscriptionId: sub.id },
+            });
+            continue;
+          }
+
           await this.stateService.evaluateAndTransitionForSubscription(sub.id);
         } catch (error: any) {
           this.logger.error(

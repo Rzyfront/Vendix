@@ -39,7 +39,11 @@ const VALID_TRANSITIONS: Record<OrderState, OrderState[]> = {
   refunded: [],
 };
 
-const CANCELABLE_STATES: OrderState[] = ['created', 'pending_payment', 'processing'];
+const CANCELABLE_STATES: OrderState[] = [
+  'created',
+  'pending_payment',
+  'processing',
+];
 const REFUNDABLE_STATES: OrderState[] = ['delivered', 'finished'];
 
 @Injectable()
@@ -72,12 +76,15 @@ export class OrderFlowService {
     return order;
   }
 
-  private validateTransition(currentState: OrderState, targetState: OrderState): void {
+  private validateTransition(
+    currentState: OrderState,
+    targetState: OrderState,
+  ): void {
     const validTargets = VALID_TRANSITIONS[currentState];
     if (!validTargets.includes(targetState)) {
       throw new BadRequestException(
         `Invalid state transition: cannot change from '${currentState}' to '${targetState}'. ` +
-        `Valid transitions from '${currentState}': [${validTargets.join(', ') || 'none'}]`
+          `Valid transitions from '${currentState}': [${validTargets.join(', ') || 'none'}]`,
       );
     }
   }
@@ -95,7 +102,8 @@ export class OrderFlowService {
 
     // Map some common fields to existing schema columns
     if (metadata.paid_at || metadata.finished_at) {
-      schemaFields.completed_at = metadata.paid_at || metadata.finished_at || new Date();
+      schemaFields.completed_at =
+        metadata.paid_at || metadata.finished_at || new Date();
     }
     if (metadata.placed_at) {
       schemaFields.placed_at = metadata.placed_at;
@@ -103,7 +111,7 @@ export class OrderFlowService {
 
     // Store additional metadata as JSON in internal_notes
     const metadataKeys = Object.keys(metadata).filter(
-      (k) => !['paid_at', 'finished_at', 'placed_at'].includes(k)
+      (k) => !['paid_at', 'finished_at', 'placed_at'].includes(k),
     );
 
     if (metadataKeys.length > 0) {
@@ -128,7 +136,10 @@ export class OrderFlowService {
 
       const flowMetadata = {
         ...existingMetadata,
-        ...metadataKeys.reduce((acc, key) => ({ ...acc, [key]: metadata[key] }), {}),
+        ...metadataKeys.reduce(
+          (acc, key) => ({ ...acc, [key]: metadata[key] }),
+          {},
+        ),
       };
 
       schemaFields.internal_notes = JSON.stringify({
@@ -182,7 +193,7 @@ export class OrderFlowService {
             (sum, item) => {
               // Services don't have inventory COGS
               if (item.item_type === 'service') return sum;
-              return sum + (Number(item.cost_price || 0) * Number(item.quantity));
+              return sum + Number(item.cost_price || 0) * Number(item.quantity);
             },
             0,
           );
@@ -199,7 +210,9 @@ export class OrderFlowService {
           }
         }
       } catch (error) {
-        this.logger.error(`Failed to emit order.completed for order #${orderId}: ${error.message}`);
+        this.logger.error(
+          `Failed to emit order.completed for order #${orderId}: ${error.message}`,
+        );
       }
 
       // Consume reserved stock: decrement quantity_on_hand + release reservation
@@ -212,7 +225,13 @@ export class OrderFlowService {
           include: {
             order_items: {
               include: {
-                products: { select: { id: true, track_inventory: true, product_type: true } },
+                products: {
+                  select: {
+                    id: true,
+                    track_inventory: true,
+                    product_type: true,
+                  },
+                },
                 product_variants: { select: { id: true } },
               },
             },
@@ -220,12 +239,17 @@ export class OrderFlowService {
         });
 
         for (const item of orderWithItems?.order_items || []) {
-          if (!item.products?.track_inventory || item.products?.product_type === 'service') continue;
+          if (
+            !item.products?.track_inventory ||
+            item.products?.product_type === 'service'
+          )
+            continue;
 
-          const location_id = await this.stockLevelManager.getDefaultLocationForProduct(
-            item.product_id,
-            item.product_variant_id || undefined,
-          );
+          const location_id =
+            await this.stockLevelManager.getDefaultLocationForProduct(
+              item.product_id,
+              item.product_variant_id || undefined,
+            );
 
           await this.stockLevelManager.updateStock({
             product_id: item.product_id,
@@ -247,7 +271,9 @@ export class OrderFlowService {
           'consumed',
         );
       } catch (error) {
-        this.logger.error(`Failed to update stock for finished order #${orderId}: ${error.message}`);
+        this.logger.error(
+          `Failed to update stock for finished order #${orderId}: ${error.message}`,
+        );
       }
     }
 
@@ -265,7 +291,7 @@ export class OrderFlowService {
     const allowedPayStates: OrderState[] = ['created', 'shipped'];
     if (!allowedPayStates.includes(order.state as OrderState)) {
       throw new BadRequestException(
-        `Cannot pay order in state '${order.state}'. Order must be in 'created' or 'shipped' state.`
+        `Cannot pay order in state '${order.state}'. Order must be in 'created' or 'shipped' state.`,
       );
     }
 
@@ -283,10 +309,15 @@ export class OrderFlowService {
       const transactionId = await this.generateTransactionId();
 
       let change = 0;
-      if (paymentMethod.system_payment_method.type === 'cash' && dto.amount_received) {
+      if (
+        paymentMethod.system_payment_method.type === 'cash' &&
+        dto.amount_received
+      ) {
         change = dto.amount_received - Number(order.grand_total);
         if (change < 0) {
-          throw new BadRequestException('Amount received is less than the order total');
+          throw new BadRequestException(
+            'Amount received is less than the order total',
+          );
         }
       }
 
@@ -319,7 +350,12 @@ export class OrderFlowService {
       this.logger.log(`Order #${orderId} payment registered while shipped`);
 
       // Record cash register movement (non-blocking)
-      this.recordPayOrderCashMovement(order.store_id, orderId, Number(order.grand_total), paymentMethod.system_payment_method.type).catch(() => {});
+      this.recordPayOrderCashMovement(
+        order.store_id,
+        orderId,
+        Number(order.grand_total),
+        paymentMethod.system_payment_method.type,
+      ).catch(() => {});
 
       // Compute and persist ETA
       await this.computeAndPersistEta(orderId, new Date());
@@ -336,10 +372,15 @@ export class OrderFlowService {
 
       // Calculate change for cash payments
       let change = 0;
-      if (paymentMethod.system_payment_method.type === 'cash' && dto.amount_received) {
+      if (
+        paymentMethod.system_payment_method.type === 'cash' &&
+        dto.amount_received
+      ) {
         change = dto.amount_received - Number(order.grand_total);
         if (change < 0) {
-          throw new BadRequestException('Amount received is less than the order total');
+          throw new BadRequestException(
+            'Amount received is less than the order total',
+          );
         }
       }
 
@@ -368,14 +409,25 @@ export class OrderFlowService {
 
       if (requiresFulfillment) {
         this.validateTransition(order.state as OrderState, 'processing');
-        const updatedOrder = await this.updateOrderState(orderId, 'processing', {
-          paid_at: new Date(),
-        });
+        const updatedOrder = await this.updateOrderState(
+          orderId,
+          'processing',
+          {
+            paid_at: new Date(),
+          },
+        );
 
-        this.logger.log(`Order #${orderId} paid directly, moved to processing (requires fulfillment)`);
+        this.logger.log(
+          `Order #${orderId} paid directly, moved to processing (requires fulfillment)`,
+        );
 
         // Record cash register movement (non-blocking)
-        this.recordPayOrderCashMovement(order.store_id, orderId, Number(order.grand_total), paymentMethod.system_payment_method.type).catch(() => {});
+        this.recordPayOrderCashMovement(
+          order.store_id,
+          orderId,
+          Number(order.grand_total),
+          paymentMethod.system_payment_method.type,
+        ).catch(() => {});
 
         // Compute and persist ETA
         await this.computeAndPersistEta(orderId, new Date());
@@ -395,7 +447,12 @@ export class OrderFlowService {
       this.logger.log(`Order #${orderId} paid directly and finished`);
 
       // Record cash register movement (non-blocking)
-      this.recordPayOrderCashMovement(order.store_id, orderId, Number(order.grand_total), paymentMethod.system_payment_method.type).catch(() => {});
+      this.recordPayOrderCashMovement(
+        order.store_id,
+        orderId,
+        Number(order.grand_total),
+        paymentMethod.system_payment_method.type,
+      ).catch(() => {});
 
       // Compute and persist ETA
       await this.computeAndPersistEta(orderId, new Date());
@@ -423,9 +480,14 @@ export class OrderFlowService {
       });
 
       this.validateTransition(order.state as OrderState, 'pending_payment');
-      const updatedOrder = await this.updateOrderState(orderId, 'pending_payment');
+      const updatedOrder = await this.updateOrderState(
+        orderId,
+        'pending_payment',
+      );
 
-      this.logger.log(`Order #${orderId} moved to pending_payment for online payment`);
+      this.logger.log(
+        `Order #${orderId} moved to pending_payment for online payment`,
+      );
       return {
         order: updatedOrder,
         payment: { transaction_id: transactionId },
@@ -445,7 +507,7 @@ export class OrderFlowService {
     const allowedStates: OrderState[] = ['pending_payment', 'shipped'];
     if (!allowedStates.includes(order.state as OrderState)) {
       this.logger.warn(
-        `Attempted to confirm payment for order #${orderId} in state '${order.state}'`
+        `Attempted to confirm payment for order #${orderId} in state '${order.state}'`,
       );
       return order;
     }
@@ -469,12 +531,16 @@ export class OrderFlowService {
       const updatedOrder = await this.updateOrderState(orderId, 'processing', {
         paid_at: new Date(),
       });
-      this.logger.log(`Order #${orderId} payment confirmed, moved to processing`);
+      this.logger.log(
+        `Order #${orderId} payment confirmed, moved to processing`,
+      );
       return updatedOrder;
     }
 
     // For shipped state: payment confirmed but state stays as shipped
-    this.logger.log(`Order #${orderId} payment confirmed while in '${order.state}' state`);
+    this.logger.log(
+      `Order #${orderId} payment confirmed while in '${order.state}' state`,
+    );
 
     // Return refreshed order with updated payment data
     return this.prisma.orders.findFirst({
@@ -492,18 +558,22 @@ export class OrderFlowService {
    * Privileged reverse transition — bypasses normal state machine
    * Only admin/owner can perform this action
    */
-  async cancelPayment(orderId: number, dto: CancelPaymentDto, cancelledBy: string) {
+  async cancelPayment(
+    orderId: number,
+    dto: CancelPaymentDto,
+    cancelledBy: string,
+  ) {
     const order = await this.getOrder(orderId);
 
     if (order.state !== 'processing') {
       throw new BadRequestException(
-        `Cannot cancel payment for order in state '${order.state}'. Order must be in 'processing' state.`
+        `Cannot cancel payment for order in state '${order.state}'. Order must be in 'processing' state.`,
       );
     }
 
     // Find the active payment (succeeded or pending — pending covers online payments not yet confirmed)
     const activePayment = order.payments.find(
-      (p) => p.state === 'succeeded' || p.state === 'pending'
+      (p) => p.state === 'succeeded' || p.state === 'pending',
     );
     if (!activePayment) {
       throw new BadRequestException('No active payment found for this order');
@@ -518,8 +588,9 @@ export class OrderFlowService {
           state: 'cancelled',
           updated_at: new Date(),
           gateway_response: {
-            ...(typeof activePayment.gateway_response === 'object' && activePayment.gateway_response !== null
-              ? activePayment.gateway_response as Record<string, any>
+            ...(typeof activePayment.gateway_response === 'object' &&
+            activePayment.gateway_response !== null
+              ? (activePayment.gateway_response as Record<string, any>)
               : {}),
             cancelled_by: cancelledBy,
             cancelled_at: new Date().toISOString(),
@@ -549,7 +620,9 @@ export class OrderFlowService {
       },
     });
 
-    this.logger.log(`Order #${orderId} payment cancelled by ${cancelledBy}: ${dto.reason || 'No reason provided'}`);
+    this.logger.log(
+      `Order #${orderId} payment cancelled by ${cancelledBy}: ${dto.reason || 'No reason provided'}`,
+    );
     return updatedOrder;
   }
 
@@ -561,11 +634,15 @@ export class OrderFlowService {
 
     if (order.state !== 'processing') {
       throw new BadRequestException(
-        `Cannot ship order in state '${order.state}'. Order must be in 'processing' state.`
+        `Cannot ship order in state '${order.state}'. Order must be in 'processing' state.`,
       );
     }
 
-    if (order.delivery_type !== 'direct_delivery' && !order.shipping_method_id && !dto.shipping_method_id) {
+    if (
+      order.delivery_type !== 'direct_delivery' &&
+      !order.shipping_method_id &&
+      !dto.shipping_method_id
+    ) {
       throw new VendixHttpException(ErrorCodes.ORD_SHIP_REQUIRED_001);
     }
 
@@ -763,7 +840,7 @@ export class OrderFlowService {
 
     if (order.state !== 'shipped') {
       throw new BadRequestException(
-        `Cannot deliver order in state '${order.state}'. Order must be in 'shipped' state.`
+        `Cannot deliver order in state '${order.state}'. Order must be in 'shipped' state.`,
       );
     }
 
@@ -786,7 +863,7 @@ export class OrderFlowService {
 
     if (order.state !== 'delivered') {
       throw new BadRequestException(
-        `Cannot confirm delivery for order in state '${order.state}'. Order must be in 'delivered' state.`
+        `Cannot confirm delivery for order in state '${order.state}'. Order must be in 'delivered' state.`,
       );
     }
 
@@ -808,13 +885,13 @@ export class OrderFlowService {
     if (!CANCELABLE_STATES.includes(order.state as OrderState)) {
       throw new BadRequestException(
         `Cannot cancel order in state '${order.state}'. ` +
-        `Cancellation is only allowed from: [${CANCELABLE_STATES.join(', ')}]`
+          `Cancellation is only allowed from: [${CANCELABLE_STATES.join(', ')}]`,
       );
     }
 
     // Cancel any active payments when the order is cancelled
     const activePayments = order.payments.filter(
-      (p) => p.state === 'pending' || p.state === 'succeeded'
+      (p) => p.state === 'pending' || p.state === 'succeeded',
     );
     for (const payment of activePayments) {
       await this.prisma.payments.update({
@@ -834,7 +911,9 @@ export class OrderFlowService {
         'cancelled',
       );
     } catch (error) {
-      this.logger.warn(`Failed to release stock for cancelled order #${orderId}: ${error.message}`);
+      this.logger.warn(
+        `Failed to release stock for cancelled order #${orderId}: ${error.message}`,
+      );
     }
 
     this.validateTransition(order.state as OrderState, 'cancelled');
@@ -877,7 +956,9 @@ export class OrderFlowService {
         finishedCount++;
         this.logger.log(`Order #${order.id} auto-finished after 24h`);
       } catch (error) {
-        this.logger.error(`Failed to auto-finish order #${order.id}: ${error.message}`);
+        this.logger.error(
+          `Failed to auto-finish order #${order.id}: ${error.message}`,
+        );
       }
     }
 
@@ -936,10 +1017,15 @@ export class OrderFlowService {
 
     // Calculate change for cash
     let change = 0;
-    if (paymentMethod.system_payment_method.type === 'cash' && dto.amount_received) {
+    if (
+      paymentMethod.system_payment_method.type === 'cash' &&
+      dto.amount_received
+    ) {
       change = dto.amount_received - paymentAmount;
       if (change < 0) {
-        throw new BadRequestException('Amount received is less than the payment amount');
+        throw new BadRequestException(
+          'Amount received is less than the payment amount',
+        );
       }
     }
 
@@ -997,15 +1083,20 @@ export class OrderFlowService {
           where: { id: dto.installment_id, order_id: orderId },
         });
         if (installment) {
-          const payable = Math.min(remainingPayment, Number(installment.remaining_balance));
+          const payable = Math.min(
+            remainingPayment,
+            Number(installment.remaining_balance),
+          );
           const newPaid = Number(installment.amount_paid) + payable;
-          const newInstBalance = Number(installment.remaining_balance) - payable;
+          const newInstBalance =
+            Number(installment.remaining_balance) - payable;
 
           await this.prisma.order_installments.update({
             where: { id: installment.id },
             data: {
               amount_paid: Math.round(newPaid * 100) / 100,
-              remaining_balance: Math.round(Math.max(newInstBalance, 0) * 100) / 100,
+              remaining_balance:
+                Math.round(Math.max(newInstBalance, 0) * 100) / 100,
               state: newInstBalance <= 0.01 ? 'paid' : 'partial',
               paid_at: newInstBalance <= 0.01 ? new Date() : null,
             },
@@ -1016,17 +1107,21 @@ export class OrderFlowService {
 
       // If there's remaining payment (or no specific installment), apply sequentially
       if (remainingPayment > 0.01) {
-        const pendingInstallments = await this.prisma.order_installments.findMany({
-          where: {
-            order_id: orderId,
-            state: { in: ['pending', 'partial', 'overdue'] },
-          },
-          orderBy: { installment_number: 'asc' },
-        });
+        const pendingInstallments =
+          await this.prisma.order_installments.findMany({
+            where: {
+              order_id: orderId,
+              state: { in: ['pending', 'partial', 'overdue'] },
+            },
+            orderBy: { installment_number: 'asc' },
+          });
 
         for (const inst of pendingInstallments) {
           if (remainingPayment <= 0.01) break;
-          const payable = Math.min(remainingPayment, Number(inst.remaining_balance));
+          const payable = Math.min(
+            remainingPayment,
+            Number(inst.remaining_balance),
+          );
           const newPaid = Number(inst.amount_paid) + payable;
           const newInstBalance = Number(inst.remaining_balance) - payable;
 
@@ -1034,7 +1129,8 @@ export class OrderFlowService {
             where: { id: inst.id },
             data: {
               amount_paid: Math.round(newPaid * 100) / 100,
-              remaining_balance: Math.round(Math.max(newInstBalance, 0) * 100) / 100,
+              remaining_balance:
+                Math.round(Math.max(newInstBalance, 0) * 100) / 100,
               state: newInstBalance <= 0.01 ? 'paid' : 'partial',
               paid_at: newInstBalance <= 0.01 ? new Date() : null,
             },
@@ -1087,7 +1183,9 @@ export class OrderFlowService {
         stores: { select: { id: true, name: true, store_code: true } },
         order_items: { include: { products: true, product_variants: true } },
         payments: {
-          include: { store_payment_method: { include: { system_payment_method: true } } },
+          include: {
+            store_payment_method: { include: { system_payment_method: true } },
+          },
           orderBy: { created_at: 'asc' },
         },
         order_installments: { orderBy: { installment_number: 'asc' } },
@@ -1111,12 +1209,17 @@ export class OrderFlowService {
     });
 
     if (!order) throw new NotFoundException('Order not found');
-    if (order.payment_form !== '2') throw new BadRequestException('Not a credit order');
+    if (order.payment_form !== '2')
+      throw new BadRequestException('Not a credit order');
 
-    const installment = order.order_installments.find((i: any) => i.id === installmentId);
+    const installment = order.order_installments.find(
+      (i: any) => i.id === installmentId,
+    );
     if (!installment) throw new NotFoundException('Installment not found');
     if (installment.state === 'paid' || installment.state === 'forgiven') {
-      throw new BadRequestException(`Installment is already ${installment.state}`);
+      throw new BadRequestException(
+        `Installment is already ${installment.state}`,
+      );
     }
 
     const forgivenAmount = Number(installment.remaining_balance);
@@ -1128,7 +1231,10 @@ export class OrderFlowService {
     });
 
     // Update order balance
-    const newRemaining = Math.max(Number(order.remaining_balance) - forgivenAmount, 0);
+    const newRemaining = Math.max(
+      Number(order.remaining_balance) - forgivenAmount,
+      0,
+    );
     const orderUpdate: any = {
       remaining_balance: Math.round(newRemaining * 100) / 100,
     };
@@ -1152,7 +1258,9 @@ export class OrderFlowService {
       data: orderUpdate,
     });
 
-    this.logger.log(`Installment #${installmentId} forgiven for order #${orderId}`);
+    this.logger.log(
+      `Installment #${installmentId} forgiven for order #${orderId}`,
+    );
 
     return this.prisma.orders.findFirst({
       where: { id: orderId },
@@ -1190,10 +1298,15 @@ export class OrderFlowService {
 
     const terminalStates: OrderState[] = ['finished', 'cancelled', 'refunded'];
     if (terminalStates.includes(order.state as OrderState)) {
-      throw new VendixHttpException(ErrorCodes.ORD_FAST_TRACK_INVALID_STATE_001);
+      throw new VendixHttpException(
+        ErrorCodes.ORD_FAST_TRACK_INVALID_STATE_001,
+      );
     }
 
-    if (order.delivery_type !== 'direct_delivery' && !order.shipping_method_id) {
+    if (
+      order.delivery_type !== 'direct_delivery' &&
+      !order.shipping_method_id
+    ) {
       throw new VendixHttpException(ErrorCodes.ORD_SHIP_REQUIRED_FOR_FLOW_001);
     }
 
@@ -1206,7 +1319,9 @@ export class OrderFlowService {
     // 1) Pay (only if not already paid)
     if (!hasSuccessfulPayment) {
       if (!dto.payment) {
-        throw new VendixHttpException(ErrorCodes.ORD_FAST_TRACK_PAYMENT_REQUIRED_001);
+        throw new VendixHttpException(
+          ErrorCodes.ORD_FAST_TRACK_PAYMENT_REQUIRED_001,
+        );
       }
       await this.payOrder(orderId, dto.payment);
       stepsExecuted.push('pay');
@@ -1341,7 +1456,8 @@ export class OrderFlowService {
       if (!cr_settings?.enabled) return;
 
       // Only track non-cash if setting enabled
-      if (paymentMethodType !== 'cash' && !cr_settings.track_non_cash_payments) return;
+      if (paymentMethodType !== 'cash' && !cr_settings.track_non_cash_payments)
+        return;
 
       const userId = RequestContextService.getUserId();
       if (!userId) return;
@@ -1366,7 +1482,10 @@ export class OrderFlowService {
     return `TXN-${Date.now()}-${Math.random().toString(36).substring(2, 11).toUpperCase()}`;
   }
 
-  private async computeAndPersistEta(orderId: number, paidAt: Date): Promise<void> {
+  private async computeAndPersistEta(
+    orderId: number,
+    paidAt: Date,
+  ): Promise<void> {
     try {
       const orderWithItems = await this.prisma.orders.findUnique({
         where: { id: orderId },
@@ -1390,7 +1509,8 @@ export class OrderFlowService {
 
       const eta = this.orderEtaService.computeEta(
         orderWithItems.order_items.map((item) => ({
-          preparation_time_minutes: item.products?.preparation_time_minutes ?? null,
+          preparation_time_minutes:
+            item.products?.preparation_time_minutes ?? null,
         })),
         orderWithItems.shipping_method?.transit_time_minutes ?? 0,
         (settings as any)?.operations,
@@ -1405,7 +1525,9 @@ export class OrderFlowService {
         },
       });
     } catch (error) {
-      this.logger.error(`Failed to compute ETA for order #${orderId}: ${error.message}`);
+      this.logger.error(
+        `Failed to compute ETA for order #${orderId}: ${error.message}`,
+      );
     }
   }
 }

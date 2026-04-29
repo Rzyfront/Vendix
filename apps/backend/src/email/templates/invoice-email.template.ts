@@ -28,7 +28,13 @@ export interface InvoiceEmailData {
 }
 
 function formatCurrency(amount: number, currency: string = 'COP'): string {
-  return '$' + amount.toLocaleString('en-US', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  return (
+    '$' +
+    amount.toLocaleString('en-US', {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 0,
+    })
+  );
 }
 
 function getInvoiceTypeLabel(type: string): string {
@@ -44,7 +50,9 @@ function getInvoiceTypeLabel(type: string): string {
 export function generateInvoiceEmailHtml(data: InvoiceEmailData): string {
   const typeLabel = getInvoiceTypeLabel(data.invoice_type);
 
-  const itemsHtml = data.items.map(item => `
+  const itemsHtml = data.items
+    .map(
+      (item) => `
     <tr>
       <td style="padding: 12px 16px; border-bottom: 1px solid #e5e7eb; font-size: 14px; color: #374151;">
         ${item.description}
@@ -54,7 +62,9 @@ export function generateInvoiceEmailHtml(data: InvoiceEmailData): string {
       <td style="padding: 12px 16px; border-bottom: 1px solid #e5e7eb; font-size: 14px; color: #374151; text-align: right; font-family: monospace;">${formatCurrency(item.tax_amount, data.currency)}</td>
       <td style="padding: 12px 16px; border-bottom: 1px solid #e5e7eb; font-size: 14px; color: #374151; text-align: right; font-weight: 600; font-family: monospace;">${formatCurrency(item.total_amount, data.currency)}</td>
     </tr>
-  `).join('');
+  `,
+    )
+    .join('');
 
   return `
 <!DOCTYPE html>
@@ -107,13 +117,17 @@ export function generateInvoiceEmailHtml(data: InvoiceEmailData): string {
                           <p style="margin: 0; font-size: 14px; color: #374151;">${data.issue_date}</p>
                         </td>
                       </tr>
-                      ${data.due_date ? `
+                      ${
+                        data.due_date
+                          ? `
                       <tr>
                         <td colspan="2" style="padding-top: 8px; text-align: right;">
                           <p style="margin: 0 0 4px; font-size: 11px; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px;">Fecha de Vencimiento</p>
                           <p style="margin: 0; font-size: 14px; color: #374151;">${data.due_date}</p>
                         </td>
-                      </tr>` : ''}
+                      </tr>`
+                          : ''
+                      }
                     </table>
                   </td>
                 </tr>
@@ -153,20 +167,28 @@ export function generateInvoiceEmailHtml(data: InvoiceEmailData): string {
                         <td style="padding: 6px 0; font-size: 14px; color: #6b7280;">Subtotal</td>
                         <td style="padding: 6px 0; font-size: 14px; color: #374151; text-align: right; font-family: monospace;">${formatCurrency(data.subtotal, data.currency)}</td>
                       </tr>
-                      ${data.discount > 0 ? `
+                      ${
+                        data.discount > 0
+                          ? `
                       <tr>
                         <td style="padding: 6px 0; font-size: 14px; color: #6b7280;">Descuento</td>
                         <td style="padding: 6px 0; font-size: 14px; color: #16a34a; text-align: right; font-family: monospace;">-${formatCurrency(data.discount, data.currency)}</td>
-                      </tr>` : ''}
+                      </tr>`
+                          : ''
+                      }
                       <tr>
                         <td style="padding: 6px 0; font-size: 14px; color: #6b7280;">Impuestos</td>
                         <td style="padding: 6px 0; font-size: 14px; color: #374151; text-align: right; font-family: monospace;">${formatCurrency(data.tax, data.currency)}</td>
                       </tr>
-                      ${data.withholding > 0 ? `
+                      ${
+                        data.withholding > 0
+                          ? `
                       <tr>
                         <td style="padding: 6px 0; font-size: 14px; color: #6b7280;">Retenciones</td>
                         <td style="padding: 6px 0; font-size: 14px; color: #dc2626; text-align: right; font-family: monospace;">-${formatCurrency(data.withholding, data.currency)}</td>
-                      </tr>` : ''}
+                      </tr>`
+                          : ''
+                      }
                       <tr>
                         <td colspan="2" style="border-top: 2px solid #111827; padding-top: 8px;"></td>
                       </tr>
@@ -181,7 +203,9 @@ export function generateInvoiceEmailHtml(data: InvoiceEmailData): string {
             </td>
           </tr>
 
-          ${data.cufe ? `
+          ${
+            data.cufe
+              ? `
           <!-- CUFE -->
           <tr>
             <td style="padding: 0 40px 24px;">
@@ -190,9 +214,13 @@ export function generateInvoiceEmailHtml(data: InvoiceEmailData): string {
                 <p style="margin: 0; font-size: 11px; color: #166534; word-break: break-all; font-family: monospace;">${data.cufe}</p>
               </div>
             </td>
-          </tr>` : ''}
+          </tr>`
+              : ''
+          }
 
-          ${data.notes ? `
+          ${
+            data.notes
+              ? `
           <!-- Notes -->
           <tr>
             <td style="padding: 0 40px 24px;">
@@ -201,9 +229,13 @@ export function generateInvoiceEmailHtml(data: InvoiceEmailData): string {
                 <p style="margin: 0; font-size: 14px; color: #374151; white-space: pre-wrap;">${data.notes}</p>
               </div>
             </td>
-          </tr>` : ''}
+          </tr>`
+              : ''
+          }
 
-          ${data.pdf_url ? `
+          ${
+            data.pdf_url
+              ? `
           <!-- Download Button -->
           <tr>
             <td style="padding: 0 40px 32px; text-align: center;">
@@ -211,7 +243,9 @@ export function generateInvoiceEmailHtml(data: InvoiceEmailData): string {
                 Ver Factura en PDF
               </a>
             </td>
-          </tr>` : ''}
+          </tr>`
+              : ''
+          }
 
           <!-- Store Info -->
           <tr>

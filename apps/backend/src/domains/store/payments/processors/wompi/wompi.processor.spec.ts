@@ -1,10 +1,8 @@
 import { WompiProcessor } from './wompi.processor';
 import { WompiClient } from './wompi.client';
+import { WompiClientFactory } from './wompi.factory';
 import { PaymentData } from '../../interfaces';
-import {
-  WompiEnvironment,
-  WompiTransactionStatus,
-} from './wompi.types';
+import { WompiEnvironment, WompiTransactionStatus } from './wompi.types';
 
 /**
  * Wompi Idempotency-Key tests.
@@ -17,6 +15,7 @@ import {
 describe('WompiProcessor — idempotency key', () => {
   let processor: WompiProcessor;
   let client: WompiClient;
+  let factory: WompiClientFactory;
   let fetchMock: jest.Mock;
 
   const baseConfig = {
@@ -31,8 +30,16 @@ describe('WompiProcessor — idempotency key', () => {
     data: {
       id: 1,
       name: 'Vendix Test',
-      presigned_acceptance: { acceptance_token: 'accept-tok', permalink: '', type: 'END_USER' },
-      presigned_personal_data_auth: { acceptance_token: 'personal-tok', permalink: '', type: 'PERSONAL_DATA_AUTH' },
+      presigned_acceptance: {
+        acceptance_token: 'accept-tok',
+        permalink: '',
+        type: 'END_USER',
+      },
+      presigned_personal_data_auth: {
+        acceptance_token: 'personal-tok',
+        permalink: '',
+        type: 'PERSONAL_DATA_AUTH',
+      },
     },
   };
 
@@ -50,7 +57,9 @@ describe('WompiProcessor — idempotency key', () => {
     },
   };
 
-  const buildPaymentData = (overrides: Partial<PaymentData> = {}): PaymentData => ({
+  const buildPaymentData = (
+    overrides: Partial<PaymentData> = {},
+  ): PaymentData => ({
     orderId: 1,
     customerId: 10,
     amount: 1000,
@@ -67,8 +76,12 @@ describe('WompiProcessor — idempotency key', () => {
   });
 
   beforeEach(() => {
-    client = new WompiClient();
-    processor = new WompiProcessor(client);
+    client = new WompiClient(baseConfig);
+    factory = {
+      getClient: jest.fn().mockReturnValue(client),
+    } as unknown as WompiClientFactory;
+
+    processor = new WompiProcessor(factory, {} as any, {} as any);
 
     fetchMock = jest.fn(async (url: string) => {
       // First call: GET /merchants/:public_key (acceptance tokens)
@@ -104,8 +117,8 @@ describe('WompiProcessor — idempotency key', () => {
     expect(result.success).toBe(true);
 
     // Find the POST /transactions call
-    const txCall = fetchMock.mock.calls.find(([url]) =>
-      typeof url === 'string' && url.endsWith('/transactions'),
+    const txCall = fetchMock.mock.calls.find(
+      ([url]) => typeof url === 'string' && url.endsWith('/transactions'),
     );
     expect(txCall).toBeDefined();
 
@@ -119,8 +132,8 @@ describe('WompiProcessor — idempotency key', () => {
 
     await processor.processPayment(paymentData);
 
-    const txCall = fetchMock.mock.calls.find(([url]) =>
-      typeof url === 'string' && url.endsWith('/transactions'),
+    const txCall = fetchMock.mock.calls.find(
+      ([url]) => typeof url === 'string' && url.endsWith('/transactions'),
     );
     expect(txCall).toBeDefined();
 
@@ -140,8 +153,8 @@ describe('WompiProcessor — idempotency key', () => {
     await processor.processPayment(paymentData);
     await processor.processPayment(paymentData);
 
-    const txCalls = fetchMock.mock.calls.filter(([url]) =>
-      typeof url === 'string' && url.endsWith('/transactions'),
+    const txCalls = fetchMock.mock.calls.filter(
+      ([url]) => typeof url === 'string' && url.endsWith('/transactions'),
     );
     expect(txCalls.length).toBe(2);
 

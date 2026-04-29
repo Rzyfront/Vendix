@@ -1,10 +1,11 @@
-import { ActivityIndicator, View, type ViewProps } from 'react-native';
+import { ActivityIndicator, StyleSheet, View, type ViewProps, type ViewStyle } from 'react-native';
 
 type SpinnerSize = 'sm' | 'md' | 'lg';
 
 interface SpinnerProps extends ViewProps {
   size?: SpinnerSize;
   color?: string;
+  style?: ViewStyle;
 }
 
 const sizeMap: Record<SpinnerSize, 'small' | 'large'> = {
@@ -13,17 +14,29 @@ const sizeMap: Record<SpinnerSize, 'small' | 'large'> = {
   lg: 'large',
 };
 
-export function Spinner({ size = 'md', color = '#2F6F4E', className = '', ...props }: SpinnerProps) {
+const styles = StyleSheet.create({
+  container: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fullScreen: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+});
+
+export function Spinner({ size = 'md', color = '#2F6F4E', style, ...props }: SpinnerProps) {
   return (
-    <View className={`items-center justify-center ${className}`} {...props}>
+    <View style={[styles.container, style]} {...props}>
       <ActivityIndicator size={sizeMap[size]} color={color} />
     </View>
   );
 }
 
-export function FullScreenSpinner({ size = 'lg', color = '#2F6F4E' }: Omit<SpinnerProps, 'className'>) {
+export function FullScreenSpinner({ size = 'lg', color = '#2F6F4E' }: Omit<SpinnerProps, 'style'>) {
   return (
-    <View className="flex-1 items-center justify-center bg-background">
+    <View style={styles.fullScreen}>
       <Spinner size={size} color={color} />
     </View>
   );

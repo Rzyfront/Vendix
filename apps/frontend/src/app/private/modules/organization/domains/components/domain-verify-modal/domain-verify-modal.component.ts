@@ -1,3 +1,6 @@
+// fix(domains): edge host must come from backend (getDnsInstructions.target),
+// not be hardcoded. Parent must pass `edgeHost` from the DNS instructions
+// response so this modal stays env-agnostic (vendix.online / vendix.com / dev).
 import {
   Component,
   OnChanges,
@@ -97,9 +100,9 @@ import {
                   <div
                     class="flex items-center gap-2 px-3 py-2 bg-[var(--color-muted)] rounded border border-[var(--color-border)]"
                   >
-                    <code class="text-sm flex-1">edge.vendix.com</code>
+                    <code class="text-sm flex-1">{{ edgeHost() }}</code>
                     <button
-                      (click)="copyToClipboard('edge.vendix.com')"
+                      (click)="copyToClipboard(edgeHost())"
                       class="text-[var(--color-primary)] hover:text-[var(--color-primary-hover)]"
                       title="Copiar"
                     >
@@ -332,6 +335,9 @@ export class DomainVerifyModalComponent implements OnChanges {
   readonly isVerifying = input(false);
   readonly domain = input<Domain | null>(null);
   readonly verificationResult = input<VerifyDomainResult | null>(null);
+  // Edge host (CloudFront target) provided by backend `getDnsInstructions().target`.
+  // Required so the modal does not hardcode the platform domain.
+  readonly edgeHost = input.required<string>();
 
   readonly isOpenChange = output<boolean>();
   readonly verify = output<string>();

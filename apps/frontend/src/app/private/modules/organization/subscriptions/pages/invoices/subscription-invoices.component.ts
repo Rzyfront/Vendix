@@ -10,6 +10,7 @@ import {
   ResponsiveDataViewComponent,
   EmptyStateComponent,
   TableColumn,
+  TableAction,
   ToastService,
 } from '../../../../../../shared/components/index';
 import { CurrencyFormatService } from '../../../../../../shared/pipes/currency';
@@ -95,6 +96,7 @@ import { InvoiceEntry } from '../../interfaces/org-subscription.interface';
               [data]="filteredInvoices()"
               [columns]="columns"
               [cardConfig]="cardConfig"
+              [actions]="rowActions"
               [loading]="loading()"
             ></app-responsive-data-view>
           </div>
@@ -184,6 +186,51 @@ export class SubscriptionInvoicesComponent implements OnInit {
       },
     ],
   };
+
+  readonly rowActions: TableAction[] = [
+    {
+      label: 'Descargar PDF',
+      icon: 'download',
+      tooltip: 'Descargar factura como PDF',
+      variant: 'ghost',
+      action: (item: InvoiceEntry) => this.downloadPdf(item),
+    },
+  ];
+
+  /**
+   * S3.1 — Stream invoice as PDF and trigger save dialog.
+   */
+  downloadPdf(invoice: InvoiceEntry): void {
+    if (!invoice?.id) {
+      return;
+    }
+    this.orgSubsService
+      .downloadInvoicePdf(Number(invoice.id))
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          const blob = response.body;
+          if (!blob) {
+            this.toastService.error('No se pudo generar el PDF');
+            return;
+          }
+          const cd = response.headers.get('content-disposition');
+          const match = cd ? /filename="?([^";]+)"?/i.exec(cd) : null;
+          const filename = match?.[1] ?? `factura-${invoice.invoice_number}.pdf`;
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        },
+        error: () => {
+          this.toastService.error('Error al descargar el PDF');
+        },
+      });
+  }
 
   ngOnInit(): void {
     this.currencyService.loadCurrency();

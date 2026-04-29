@@ -3,12 +3,22 @@ import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { RequestContextService } from '../../../../common/context/request-context.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
-import { CreateAdvanceDto, ApproveAdvanceDto, QueryAdvanceDto, RegisterAdvancePaymentDto } from './dto';
+import {
+  CreateAdvanceDto,
+  ApproveAdvanceDto,
+  QueryAdvanceDto,
+  RegisterAdvancePaymentDto,
+} from './dto';
 import { validateAdvanceTransition } from './utils/advance-state-machine';
 
 const ADVANCE_INCLUDE = {
   employee: {
-    select: { id: true, first_name: true, last_name: true, employee_code: true },
+    select: {
+      id: true,
+      first_name: true,
+      last_name: true,
+      employee_code: true,
+    },
   },
   approved_by_user: {
     select: { id: true, first_name: true, last_name: true },
@@ -39,7 +49,11 @@ export class AdvancesService {
     return Math.round(value * 100) / 100;
   }
 
-  private calculateDueDate(start: Date, frequency: string, period: number): Date {
+  private calculateDueDate(
+    start: Date,
+    frequency: string,
+    period: number,
+  ): Date {
     const date = new Date(start);
     switch (frequency) {
       case 'weekly':
@@ -66,12 +80,19 @@ export class AdvancesService {
   ): Promise<void> {
     const installment_value = this.round(amount_approved / installments);
 
-    const data: { advance_id: number; installment_number: number; amount: Prisma.Decimal; due_date: Date; status: string }[] = [];
+    const data: {
+      advance_id: number;
+      installment_number: number;
+      amount: Prisma.Decimal;
+      due_date: Date;
+      status: string;
+    }[] = [];
     for (let i = 0; i < installments; i++) {
       const due_date = this.calculateDueDate(start_date, frequency, i + 1);
-      const amount = i === installments - 1
-        ? this.round(amount_approved - installment_value * (installments - 1))
-        : installment_value;
+      const amount =
+        i === installments - 1
+          ? this.round(amount_approved - installment_value * (installments - 1))
+          : installment_value;
 
       data.push({
         advance_id,
@@ -139,7 +160,9 @@ export class AdvancesService {
       include: ADVANCE_INCLUDE,
     });
 
-    this.logger.log(`Advance ${advance_number} created for employee #${dto.employee_id}`);
+    this.logger.log(
+      `Advance ${advance_number} created for employee #${dto.employee_id}`,
+    );
     return advance;
   }
 
@@ -161,9 +184,19 @@ export class AdvancesService {
     const where: Prisma.employee_advancesWhereInput = {
       ...(search && {
         OR: [
-          { advance_number: { contains: search, mode: 'insensitive' as const } },
-          { employee: { first_name: { contains: search, mode: 'insensitive' as const } } },
-          { employee: { last_name: { contains: search, mode: 'insensitive' as const } } },
+          {
+            advance_number: { contains: search, mode: 'insensitive' as const },
+          },
+          {
+            employee: {
+              first_name: { contains: search, mode: 'insensitive' as const },
+            },
+          },
+          {
+            employee: {
+              last_name: { contains: search, mode: 'insensitive' as const },
+            },
+          },
         ],
       }),
       ...(status && { status: status as any }),
@@ -217,7 +250,8 @@ export class AdvancesService {
       throw new VendixHttpException(ErrorCodes.ADV_STATUS_001);
     }
 
-    const amount_approved = dto.amount_approved || Number(advance.amount_requested);
+    const amount_approved =
+      dto.amount_approved || Number(advance.amount_requested);
     const installments = dto.installments || advance.installments;
     const installment_value = this.round(amount_approved / installments);
 
@@ -246,7 +280,9 @@ export class AdvancesService {
       );
     });
 
-    this.logger.log(`Advance #${id} approved for ${amount_approved} with ${installments} installments`);
+    this.logger.log(
+      `Advance #${id} approved for ${amount_approved} with ${installments} installments`,
+    );
     return this.findOne(id);
   }
 
@@ -312,7 +348,9 @@ export class AdvancesService {
       throw new VendixHttpException(ErrorCodes.ADV_STATUS_001);
     }
 
-    const new_amount_paid = this.round(Number(advance.amount_paid) + dto.amount);
+    const new_amount_paid = this.round(
+      Number(advance.amount_paid) + dto.amount,
+    );
     const new_amount_pending = this.round(current_pending - dto.amount);
     const new_status = new_amount_pending <= 0 ? 'paid' : 'repaying';
 
@@ -348,10 +386,11 @@ export class AdvancesService {
         installment_where.id = dto.installment_id;
       }
 
-      const target_installment = await tx.employee_advance_installments.findFirst({
-        where: installment_where,
-        orderBy: { installment_number: 'asc' },
-      });
+      const target_installment =
+        await tx.employee_advance_installments.findFirst({
+          where: installment_where,
+          orderBy: { installment_number: 'asc' },
+        });
 
       if (target_installment) {
         await tx.employee_advance_installments.update({
@@ -366,7 +405,9 @@ export class AdvancesService {
       }
     });
 
-    this.logger.log(`Manual payment of ${dto.amount} registered for advance #${id}. Status: ${new_status}`);
+    this.logger.log(
+      `Manual payment of ${dto.amount} registered for advance #${id}. Status: ${new_status}`,
+    );
     return this.findOne(id);
   }
 
@@ -401,7 +442,10 @@ export class AdvancesService {
       const installment_amount = next_installment
         ? Number(next_installment.amount)
         : Number(advance.installment_value);
-      const deduction = Math.min(installment_amount, Number(advance.amount_pending));
+      const deduction = Math.min(
+        installment_amount,
+        Number(advance.amount_pending),
+      );
       total += deduction;
     }
 
@@ -437,7 +481,9 @@ export class AdvancesService {
         const payment_amount = this.round(Math.min(remaining, pending));
         remaining = this.round(remaining - payment_amount);
 
-        const new_amount_paid = this.round(Number(advance.amount_paid) + payment_amount);
+        const new_amount_paid = this.round(
+          Number(advance.amount_paid) + payment_amount,
+        );
         const new_amount_pending = this.round(pending - payment_amount);
         const new_status = new_amount_pending <= 0 ? 'paid' : 'repaying';
 
@@ -465,13 +511,14 @@ export class AdvancesService {
         // Mark installment(s) as paid
         let deduction_remaining = payment_amount;
         while (deduction_remaining > 0) {
-          const next_installment = await tx.employee_advance_installments.findFirst({
-            where: {
-              advance_id: advance.id,
-              status: { in: ['pending', 'overdue'] },
-            },
-            orderBy: { installment_number: 'asc' },
-          });
+          const next_installment =
+            await tx.employee_advance_installments.findFirst({
+              where: {
+                advance_id: advance.id,
+                status: { in: ['pending', 'overdue'] },
+              },
+              orderBy: { installment_number: 'asc' },
+            });
 
           if (!next_installment) break;
 
@@ -486,7 +533,9 @@ export class AdvancesService {
             },
           });
 
-          deduction_remaining = this.round(deduction_remaining - Number(next_installment.amount));
+          deduction_remaining = this.round(
+            deduction_remaining - Number(next_installment.amount),
+          );
         }
 
         this.logger.log(
@@ -497,16 +546,21 @@ export class AdvancesService {
     });
   }
 
-  async payInstallment(advance_id: number, installment_id: number, dto: RegisterAdvancePaymentDto) {
+  async payInstallment(
+    advance_id: number,
+    installment_id: number,
+    dto: RegisterAdvancePaymentDto,
+  ) {
     const advance = await this.findOne(advance_id);
 
     if (!['approved', 'repaying'].includes(advance.status)) {
       throw new VendixHttpException(ErrorCodes.ADV_STATUS_001);
     }
 
-    const installment = await this.prisma.employee_advance_installments.findFirst({
-      where: { id: installment_id, advance_id },
-    });
+    const installment =
+      await this.prisma.employee_advance_installments.findFirst({
+        where: { id: installment_id, advance_id },
+      });
 
     if (!installment) {
       throw new VendixHttpException(ErrorCodes.ADV_INSTALLMENT_001);
@@ -523,7 +577,9 @@ export class AdvancesService {
       throw new VendixHttpException(ErrorCodes.ADV_PAYMENT_001);
     }
 
-    const new_amount_paid = this.round(Number(advance.amount_paid) + payment_amount);
+    const new_amount_paid = this.round(
+      Number(advance.amount_paid) + payment_amount,
+    );
     const new_amount_pending = this.round(current_pending - payment_amount);
     const new_status = new_amount_pending <= 0 ? 'paid' : 'repaying';
 
@@ -559,7 +615,9 @@ export class AdvancesService {
       });
     });
 
-    this.logger.log(`Installment #${installment_id} paid for advance #${advance_id}`);
+    this.logger.log(
+      `Installment #${installment_id} paid for advance #${advance_id}`,
+    );
     return this.findOne(advance_id);
   }
 
@@ -623,7 +681,8 @@ export class AdvancesService {
       0,
     );
     const monthly_deduction = advances.reduce(
-      (sum, a) => sum + Math.min(Number(a.installment_value), Number(a.amount_pending)),
+      (sum, a) =>
+        sum + Math.min(Number(a.installment_value), Number(a.amount_pending)),
       0,
     );
 

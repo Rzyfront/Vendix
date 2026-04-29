@@ -21,7 +21,7 @@ export class StorePaymentMethodsService {
   constructor(
     private prisma: StorePrismaService,
     private paymentEncryption: PaymentEncryptionService,
-  ) { }
+  ) {}
 
   /**
    * Get available payment methods for a store to enable
@@ -37,16 +37,18 @@ export class StorePaymentMethodsService {
 
     // TODO: Add organization payment methods here when the feature is implemented
     // For now, only system methods are available
-    const available_methods = await this.prisma.system_payment_methods.findMany({
-      where: {
-        is_active: true,
-        id: { notIn: enabled_ids },
+    const available_methods = await this.prisma.system_payment_methods.findMany(
+      {
+        where: {
+          is_active: true,
+          id: { notIn: enabled_ids },
+        },
+        orderBy: [
+          { provider: 'asc' }, // 'organization' methods first, then 'system'
+          { name: 'asc' },
+        ],
       },
-      orderBy: [
-        { provider: 'asc' }, // 'organization' methods first, then 'system'
-        { name: 'asc' },
-      ],
-    });
+    );
 
     return available_methods;
   }
@@ -167,7 +169,10 @@ export class StorePaymentMethodsService {
       if (existing.state !== 'enabled') {
         // Encrypt custom_config if provided
         const encryptedConfig = enable_dto.custom_config
-          ? this.paymentEncryption.encryptConfig(enable_dto.custom_config, providerType)
+          ? this.paymentEncryption.encryptConfig(
+              enable_dto.custom_config,
+              providerType,
+            )
           : undefined;
 
         return base_client.store_payment_methods.update({
@@ -175,7 +180,9 @@ export class StorePaymentMethodsService {
           data: {
             state: 'enabled',
             // Update config if provided, otherwise keep existing
-            ...(enable_dto.display_name && { display_name: enable_dto.display_name }),
+            ...(enable_dto.display_name && {
+              display_name: enable_dto.display_name,
+            }),
             ...(encryptedConfig && { custom_config: encryptedConfig }),
           },
           include: {
@@ -203,7 +210,10 @@ export class StorePaymentMethodsService {
 
     // Encrypt sensitive fields in custom_config before storing
     const configToStore = enable_dto.custom_config
-      ? this.paymentEncryption.encryptConfig(enable_dto.custom_config, providerType)
+      ? this.paymentEncryption.encryptConfig(
+          enable_dto.custom_config,
+          providerType,
+        )
       : (system_method.default_config ?? undefined);
 
     return base_client.store_payment_methods.create({
@@ -246,7 +256,10 @@ export class StorePaymentMethodsService {
     // Validate configuration against provider-specific validator
     if (update_dto.custom_config) {
       const providerType = method.system_payment_method?.type || '';
-      this.validateConfig(providerType, update_dto.custom_config as Record<string, any>);
+      this.validateConfig(
+        providerType,
+        update_dto.custom_config as Record<string, any>,
+      );
     }
 
     // Encrypt sensitive fields in custom_config before storing
@@ -298,9 +311,7 @@ export class StorePaymentMethodsService {
   /**
    * Disable payment method for a store
    */
-  async disableForStore(
-    store_payment_method_id: number,
-  ) {
+  async disableForStore(store_payment_method_id: number) {
     const method = await this.prisma.store_payment_methods.findFirst({
       where: {
         id: store_payment_method_id,
@@ -320,9 +331,7 @@ export class StorePaymentMethodsService {
   /**
    * Delete/remove payment method from store
    */
-  async removeFromStore(
-    store_payment_method_id: number,
-  ) {
+  async removeFromStore(store_payment_method_id: number) {
     const method = await this.prisma.store_payment_methods.findFirst({
       where: {
         id: store_payment_method_id,
@@ -354,9 +363,7 @@ export class StorePaymentMethodsService {
   /**
    * Reorder payment methods for display
    */
-  async reorderMethods(
-    order_dto: ReorderPaymentMethodsDto,
-  ) {
+  async reorderMethods(order_dto: ReorderPaymentMethodsDto) {
     // Update display_order for each method
     const updates = order_dto.methods.map((item, index) =>
       this.prisma.store_payment_methods.updateMany({
@@ -407,7 +414,7 @@ export class StorePaymentMethodsService {
         enabled_methods: 0,
         disabled_methods: 0,
         requires_config: 0,
-      }
+      },
     );
 
     // Get payment statistics (StorePrismaService automatically filters by store_id)
@@ -454,12 +461,18 @@ export class StorePaymentMethodsService {
    * Validate custom_config against provider-specific validator (if one exists).
    * Throws BadRequestException with detailed messages on validation failure.
    */
-  private validateConfig(providerType: string, config: Record<string, any>): void {
+  private validateConfig(
+    providerType: string,
+    config: Record<string, any>,
+  ): void {
     const ValidatorClass = CONFIG_VALIDATORS[providerType];
     if (!ValidatorClass) return; // No validator for this type, skip
 
     const instance = plainToInstance(ValidatorClass, config);
-    const errors = validateSync(instance, { whitelist: false, forbidNonWhitelisted: false });
+    const errors = validateSync(instance, {
+      whitelist: false,
+      forbidNonWhitelisted: false,
+    });
 
     if (errors.length > 0) {
       const messages = errors

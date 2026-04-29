@@ -8,10 +8,7 @@ import { EventEmitterModule } from '@nestjs/event-emitter';
 import { SupportNotificationsModule } from '../notifications/support-notifications.module';
 
 @Module({
-  imports: [
-    EventEmitterModule,
-    SupportNotificationsModule,
-  ],
+  imports: [EventEmitterModule, SupportNotificationsModule],
   controllers: [TicketsController],
   providers: [
     TicketsService,

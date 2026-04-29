@@ -504,7 +504,7 @@ export class UsersService {
       app: user.user_settings[0]?.app_type || 'VENDIX_LANDING',
       roles: user.user_roles.map((ur) => ur.role_id),
       store_ids: user.store_users.map((su) => su.store_id),
-      panel_ui: (user.user_settings[0]?.config as any)?.panel_ui || {},
+      panel_ui: user.user_settings[0]?.config?.panel_ui || {},
     };
 
     return config;
@@ -519,7 +519,7 @@ export class UsersService {
       });
 
       if (existingSettings) {
-        const existingConfig = (existingSettings.config as any) || {};
+        const existingConfig = existingSettings.config || {};
 
         await tx.user_settings.update({
           where: { id: existingSettings.id },
@@ -625,7 +625,8 @@ export class UsersService {
       data: {
         first_name: formatted_first_name,
         last_name: formatted_last_name,
-        username: email.split('@')[0].replace(/[^a-zA-Z0-9_]/g, '_') + '_' + Date.now(),
+        username:
+          email.split('@')[0].replace(/[^a-zA-Z0-9_]/g, '_') + '_' + Date.now(),
         email,
         password: hashed_password,
         state: 'pending_verification',

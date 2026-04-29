@@ -54,7 +54,10 @@ export class ReviewsController {
   async getStats() {
     try {
       const result = await this.reviewsService.getStats();
-      return this.responseService.success(result, 'Stats obtenidas exitosamente');
+      return this.responseService.success(
+        result,
+        'Stats obtenidas exitosamente',
+      );
     } catch (error) {
       return this.responseService.error(
         error.message || 'Error al obtener stats',
@@ -69,7 +72,10 @@ export class ReviewsController {
   async findOne(@Param('id', ParseIntPipe) id: number) {
     try {
       const result = await this.reviewsService.findOne(id);
-      return this.responseService.success(result, 'Reseña obtenida exitosamente');
+      return this.responseService.success(
+        result,
+        'Reseña obtenida exitosamente',
+      );
     } catch (error) {
       return this.responseService.error(
         error.message || 'Error al obtener la reseña',
@@ -84,7 +90,10 @@ export class ReviewsController {
   async approve(@Param('id', ParseIntPipe) id: number) {
     try {
       const result = await this.reviewsService.approve(id);
-      return this.responseService.updated(result, 'Reseña aprobada exitosamente');
+      return this.responseService.updated(
+        result,
+        'Reseña aprobada exitosamente',
+      );
     } catch (error) {
       return this.responseService.error(
         error.message || 'Error al aprobar la reseña',
@@ -99,7 +108,10 @@ export class ReviewsController {
   async reject(@Param('id', ParseIntPipe) id: number) {
     try {
       const result = await this.reviewsService.reject(id);
-      return this.responseService.updated(result, 'Reseña rechazada exitosamente');
+      return this.responseService.updated(
+        result,
+        'Reseña rechazada exitosamente',
+      );
     } catch (error) {
       return this.responseService.error(
         error.message || 'Error al rechazar la reseña',
@@ -114,7 +126,10 @@ export class ReviewsController {
   async hide(@Param('id', ParseIntPipe) id: number) {
     try {
       const result = await this.reviewsService.hide(id);
-      return this.responseService.updated(result, 'Reseña ocultada exitosamente');
+      return this.responseService.updated(
+        result,
+        'Reseña ocultada exitosamente',
+      );
     } catch (error) {
       return this.responseService.error(
         error.message || 'Error al ocultar la reseña',
@@ -147,7 +162,10 @@ export class ReviewsController {
   ) {
     try {
       const result = await this.reviewsService.createResponse(id, dto);
-      return this.responseService.created(result, 'Respuesta creada exitosamente');
+      return this.responseService.created(
+        result,
+        'Respuesta creada exitosamente',
+      );
     } catch (error) {
       return this.responseService.error(
         error.message || 'Error al crear la respuesta',
@@ -165,7 +183,10 @@ export class ReviewsController {
   ) {
     try {
       const result = await this.reviewsService.updateResponse(id, dto);
-      return this.responseService.updated(result, 'Respuesta actualizada exitosamente');
+      return this.responseService.updated(
+        result,
+        'Respuesta actualizada exitosamente',
+      );
     } catch (error) {
       return this.responseService.error(
         error.message || 'Error al actualizar la respuesta',

@@ -1,4 +1,14 @@
-import { IsString, IsBoolean, IsOptional, IsNumber, IsDateString, MaxLength, IsArray, ValidateNested, ArrayMaxSize } from 'class-validator';
+import {
+  IsString,
+  IsBoolean,
+  IsOptional,
+  IsNumber,
+  IsDateString,
+  MaxLength,
+  IsArray,
+  ValidateNested,
+  ArrayMaxSize,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 class CustomerReferenceDto {

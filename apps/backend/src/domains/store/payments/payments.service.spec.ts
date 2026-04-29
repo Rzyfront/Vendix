@@ -123,7 +123,8 @@ describe('PaymentsService', () => {
 
       // payments.service injects an `idempotencyKey` UUID for back-compat,
       // so we assert each known field individually rather than the whole object.
-      const callArg = (paymentGateway.processPayment as jest.Mock).mock.calls[0][0];
+      const callArg = (paymentGateway.processPayment as jest.Mock).mock
+        .calls[0][0];
       Object.entries(createPaymentDto).forEach(([key, value]) => {
         expect(callArg[key]).toEqual(value);
       });
@@ -232,9 +233,8 @@ describe('PaymentsService', () => {
 
       // payments.service injects an `idempotencyKey` UUID for back-compat,
       // so we assert each known field individually rather than the whole object.
-      const callArg = (
-        paymentGateway.processPaymentWithNewOrder as jest.Mock
-      ).mock.calls[0][0];
+      const callArg = (paymentGateway.processPaymentWithNewOrder as jest.Mock)
+        .mock.calls[0][0];
       Object.entries(createOrderPaymentDto).forEach(([key, value]) => {
         expect(callArg[key]).toEqual(value);
       });

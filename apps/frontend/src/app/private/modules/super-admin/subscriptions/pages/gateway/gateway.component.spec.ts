@@ -44,7 +44,7 @@ describe('GatewayComponent', () => {
     gatewayServiceSpy = jasmine.createSpyObj<GatewayAdminService>(
       'GatewayAdminService',
       ['getWompi', 'saveWompi', 'testWompi'],
-    );
+    ) as jasmine.SpyObj<GatewayAdminService>;
     gatewayServiceSpy.getWompi.and.returnValue(initial$);
 
     TestBed.configureTestingModule({

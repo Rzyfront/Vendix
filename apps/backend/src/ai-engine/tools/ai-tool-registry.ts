@@ -48,10 +48,7 @@ export class AIToolRegistry {
       .map((t) => this.toDefinition(t));
   }
 
-  async executeTool(
-    name: string,
-    args: Record<string, any>,
-  ): Promise<string> {
+  async executeTool(name: string, args: Record<string, any>): Promise<string> {
     const tool = this.tools.get(name);
     if (!tool) {
       throw new VendixHttpException(
@@ -70,7 +67,8 @@ export class AIToolRegistry {
 
     // Check permissions — use granular permissions if available, fall back to roles
     if (tool.requiredPermissions?.length) {
-      const userPermissions = requestContext?.permissions || context.roles || [];
+      const userPermissions =
+        requestContext?.permissions || context.roles || [];
       const hasPermission = tool.requiredPermissions.every((p) =>
         userPermissions.includes(p),
       );

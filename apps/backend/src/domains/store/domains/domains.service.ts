@@ -3,12 +3,19 @@ import {
   NotFoundException,
   ConflictException,
 } from '@nestjs/common';
+import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { Prisma } from '@prisma/client';
+import { BlocklistService } from '../../../common/services/blocklist/blocklist.service';
+import { VendixHttpException, ErrorCodes } from '../../../common/errors';
 
 @Injectable()
 export class StoreDomainsService {
-  constructor(private readonly prisma: StorePrismaService) {}
+  constructor(
+    private readonly prisma: StorePrismaService,
+    private readonly eventEmitter: EventEmitter2,
+    private readonly blocklist: BlocklistService,
+  ) {}
 
   /**
    * Create a new domain for the current store
@@ -20,9 +27,22 @@ export class StoreDomainsService {
     ownership?: string;
     config: Record<string, any>;
   }) {
-    // Check for existing hostname
+    // Blocklist check — reject brand/financial/gov patterns
+    const blockResult = await this.blocklist.isBlocked(create_domain_dto.hostname);
+    if (blockResult.blocked) {
+      throw new VendixHttpException(
+        ErrorCodes.ORG_DOMAIN_003,
+        `Hostname ${create_domain_dto.hostname} is blocked: ${blockResult.reason ?? 'policy'}`,
+        { hostname: create_domain_dto.hostname, pattern: blockResult.pattern },
+      );
+    }
+
+    // Check for existing hostname (excluyendo terminales — pueden re-claimarse)
     const existing_domain = await this.prisma.domain_settings.findFirst({
-      where: { hostname: create_domain_dto.hostname },
+      where: {
+        hostname: create_domain_dto.hostname,
+        status: { notIn: ['disabled', 'failed_ownership', 'failed_certificate', 'failed_alias'] },
+      },
     });
 
     if (existing_domain) {
@@ -30,23 +50,53 @@ export class StoreDomainsService {
     }
 
     const domain_type = (create_domain_dto.domain_type || 'store') as any;
+    const ownership = (create_domain_dto.ownership || 'vendix_subdomain') as any;
 
-    // Ensure only one active domain per type
-    if (create_domain_dto.is_primary) {
+    // Vendix subdomains: Vendix controla el DNS, activación inmediata.
+    // Custom domains: SIEMPRE pending_ownership — sólo prueba DNS desbloquea active.
+    const isVendixSubdomain = ownership === 'vendix_subdomain';
+    const status = isVendixSubdomain ? 'active' : 'pending_ownership';
+
+    if (status === 'active' && create_domain_dto.is_primary) {
       await this.ensureSingleActiveType(domain_type);
     }
 
+    const tokenExpiryDays = parseInt(
+      process.env.DOMAIN_TOKEN_EXPIRY_DAYS || '7',
+      10,
+    );
+    const expires_token_at = isVendixSubdomain
+      ? null
+      : new Date(Date.now() + tokenExpiryDays * 24 * 60 * 60 * 1000);
+
     // Create domain - store_id is auto-injected by StorePrismaService
-    return this.prisma.domain_settings.create({
+    const created = await this.prisma.domain_settings.create({
       data: {
         hostname: create_domain_dto.hostname,
         domain_type,
         is_primary: create_domain_dto.is_primary || false,
-        status: create_domain_dto.is_primary ? 'active' : 'pending_dns',
-        ownership: (create_domain_dto.ownership || 'vendix_subdomain') as any,
+        status: status as any,
+        ownership,
         config: create_domain_dto.config as any,
+        expires_token_at,
       },
     });
+
+    if (status === 'active') {
+      this.eventEmitter.emit('domain.activated', {
+        domainId: created.id,
+        hostname: created.hostname,
+        organization_id: created.organization_id,
+        store_id: created.store_id,
+      });
+    } else {
+      this.eventEmitter.emit('domain.updated', {
+        domainId: created.id,
+        hostname: created.hostname,
+      });
+    }
+
+    return created;
   }
 
   private async ensureSingleActiveType(domain_type: any, exclude_id?: number) {
@@ -163,7 +213,13 @@ export class StoreDomainsService {
 
     if (update_domain_dto.is_primary === true) {
       update_data.is_primary = true;
-      update_data.status = 'active';
+      // Sólo elevar a 'active' si la propiedad ya está probada
+      // (vendix_subdomain o ya estaba activo). Custom domains en pending_*
+      // deben pasar por verify() antes — no atajos vía is_primary.
+      const isVendixSubdomain = existing_domain.ownership === 'vendix_subdomain';
+      if (isVendixSubdomain || existing_domain.status === 'active') {
+        update_data.status = 'active';
+      }
       await this.ensureSingleActiveType(domain_type, id);
     } else if (update_domain_dto.is_primary === false) {
       update_data.is_primary = false;
@@ -185,10 +241,36 @@ export class StoreDomainsService {
       update_data.config = update_domain_dto.config as any;
     }
 
-    return this.prisma.domain_settings.update({
+    const updated = await this.prisma.domain_settings.update({
       where: { id },
       data: update_data,
     });
+
+    const transitioned_to_active =
+      existing_domain.status !== 'active' && updated.status === 'active';
+    const transitioned_to_disabled =
+      existing_domain.status !== 'disabled' && updated.status === 'disabled';
+
+    if (transitioned_to_active) {
+      this.eventEmitter.emit('domain.activated', {
+        domainId: updated.id,
+        hostname: updated.hostname,
+        organization_id: updated.organization_id,
+        store_id: updated.store_id,
+      });
+    } else if (transitioned_to_disabled) {
+      this.eventEmitter.emit('domain.disabled', {
+        domainId: updated.id,
+        hostname: updated.hostname,
+      });
+    } else {
+      this.eventEmitter.emit('domain.updated', {
+        domainId: updated.id,
+        hostname: updated.hostname,
+      });
+    }
+
+    return updated;
   }
 
   /**
@@ -201,28 +283,60 @@ export class StoreDomainsService {
       throw new ConflictException('Cannot delete primary domain');
     }
 
-    return this.prisma.domain_settings.delete({
+    const removed = await this.prisma.domain_settings.delete({
       where: { id },
     });
+
+    this.eventEmitter.emit('domain.disabled', {
+      domainId: removed.id,
+      hostname: removed.hostname,
+    });
+
+    return removed;
   }
 
   /**
-   * Set a domain as primary for the store
+   * Set a domain as primary for the store.
+   * IMPORTANTE: sólo puede activar dominios cuya propiedad ya esté probada
+   * (status active o vendix_subdomain). Custom domains en pending_ownership
+   * NO pueden saltar a active vía este endpoint — deben pasar por verify().
    */
   async setAsPrimary(id: number) {
     const domain = await this.findOne(id);
 
+    const isVendixSubdomain = domain.ownership === 'vendix_subdomain';
+    if (!isVendixSubdomain && domain.status !== 'active') {
+      throw new ConflictException(
+        'Custom domains must be verified (DNS proof of ownership) before being set as primary',
+      );
+    }
+
     // Deactivate other domains of the same type
     await this.ensureSingleActiveType(domain.domain_type, id);
 
-    // Set new primary domain and ensure it's active
-    return this.prisma.domain_settings.update({
+    const updated = await this.prisma.domain_settings.update({
       where: { id },
       data: {
         is_primary: true,
-        status: 'active',
+        status: 'active' as any,
         updated_at: new Date(),
       },
     });
+
+    if (domain.status !== 'active') {
+      this.eventEmitter.emit('domain.activated', {
+        domainId: updated.id,
+        hostname: updated.hostname,
+        organization_id: updated.organization_id,
+        store_id: updated.store_id,
+      });
+    } else {
+      this.eventEmitter.emit('domain.updated', {
+        domainId: updated.id,
+        hostname: updated.hostname,
+      });
+    }
+
+    return updated;
   }
 }

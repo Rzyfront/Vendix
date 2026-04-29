@@ -2,19 +2,44 @@ import { useState } from 'react';
 import {
   View,
   Text,
-  TextInput,
+  TouchableOpacity,
+  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
-  TouchableOpacity,
-  ActivityIndicator,
   Image,
 } from 'react-native';
 import { useRouter, Link } from 'expo-router';
 import { AuthService } from '@/core/auth/auth.service';
 import { isValidEmail } from '@/core/utils/validators';
-import { colors, authStyles as s } from '@/shared/styles/auth.styles';
+import { colors } from '@/shared/theme';
+import { Input } from '@/shared/components/input/input';
 import { Icon } from '@/shared/components/icon/icon';
+
+const styles = {
+  screen: { flex: 1, backgroundColor: colors.background },
+  scrollContent: { flexGrow: 1, justifyContent: 'center' as const, paddingHorizontal: 32, paddingVertical: 48 },
+  logoContainer: { alignItems: 'center' as const, marginBottom: 32 },
+  brandText: { fontSize: 20, fontWeight: '600' as const, color: colors.text.primary },
+  titleContainer: { alignItems: 'center' as const, marginBottom: 24 },
+  title: { fontSize: 26, fontWeight: '700' as const, color: colors.text.primary },
+  subtitle: { fontSize: 14, color: colors.text.secondary, marginTop: 4, textAlign: 'center' as const },
+  card: { backgroundColor: colors.card, borderRadius: 12, borderWidth: 1, borderColor: colors.cardBorder, padding: 24, gap: 16 },
+  errorBox: { backgroundColor: '#FEF2F2', borderWidth: 1, borderColor: '#FECACA', borderRadius: 8, padding: 12 },
+  errorText: { fontSize: 14, color: colors.error, textAlign: 'center' as const },
+  button: { backgroundColor: colors.primary, borderRadius: 8, paddingVertical: 14, paddingHorizontal: 16, alignItems: 'center' as const, justifyContent: 'center' as const },
+  buttonDisabled: { opacity: 0.5 },
+  buttonText: { fontSize: 14, fontWeight: '600' as const, color: '#FFFFFF' },
+  linkContainer: { alignItems: 'center' as const, marginTop: 16 },
+  linkText: { fontSize: 14, fontWeight: '500' as const, color: colors.primary },
+  backLinkContainer: { alignItems: 'center' as const, marginTop: 24 },
+  backLinkText: { fontSize: 14, fontWeight: '500' as const, color: colors.text.primary },
+  registerRow: { flexDirection: 'row' as const, justifyContent: 'center' as const, marginTop: 16 },
+  registerText: { fontSize: 13, color: colors.text.secondary },
+  registerLinkText: { fontSize: 13, fontWeight: '600' as const, color: colors.primary },
+  footer: { alignItems: 'center' as const, marginTop: 32, gap: 4 },
+  footerText: { fontSize: 12, color: colors.text.muted },
+};
 
 export default function RegisterScreen() {
   const router = useRouter();
@@ -76,37 +101,37 @@ export default function RegisterScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={s.screen}
+      style={styles.screen}
       behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
     >
       <ScrollView
-        contentContainerStyle={s.scrollContent}
+        contentContainerStyle={styles.scrollContent}
         keyboardShouldPersistTaps="handled"
       >
         {/* Logo */}
-        <View style={s.logoContainer}>
+        <View style={styles.logoContainer}>
           <Image
             source={require('@/assets/vlogo.png')}
             style={{ width: 64, height: 64, resizeMode: 'contain' }}
           />
-          <Text style={s.brandText}>Vendix</Text>
+          <Text style={styles.brandText}>Vendix</Text>
         </View>
 
         {/* Title */}
-        <View style={s.titleContainer}>
-          <Text style={s.title}>Crear tu organización</Text>
-          <Text style={s.subtitle}>Comienza tu viaje empresarial</Text>
+        <View style={styles.titleContainer}>
+          <Text style={styles.title}>Crear tu organización</Text>
+          <Text style={styles.subtitle}>Comienza tu viaje empresarial</Text>
         </View>
 
         {/* Form Card */}
-        <View style={[s.card, { gap: 16 }]}>
+        <View style={styles.card}>
           {error && (
-            <View style={s.errorBox}>
-              <Text style={s.errorText}>{error}</Text>
+            <View style={styles.errorBox}>
+              <Text style={styles.errorText}>{error}</Text>
             </View>
           )}
 
-          <InputField
+          <Input
             label="NOMBRE DE LA ORGANIZACIÓN"
             placeholder="Mi Empresa S.A.S"
             value={orgName}
@@ -114,7 +139,7 @@ export default function RegisterScreen() {
             editable={!isLoading}
           />
 
-          <InputField
+          <Input
             label="NOMBRE"
             placeholder="Juan"
             value={firstName}
@@ -122,7 +147,7 @@ export default function RegisterScreen() {
             editable={!isLoading}
           />
 
-          <InputField
+          <Input
             label="APELLIDO"
             placeholder="Pérez"
             value={lastName}
@@ -130,7 +155,7 @@ export default function RegisterScreen() {
             editable={!isLoading}
           />
 
-          <InputField
+          <Input
             label="EMAIL"
             placeholder="usuario@email.com"
             value={email}
@@ -141,7 +166,7 @@ export default function RegisterScreen() {
             editable={!isLoading}
           />
 
-          <InputField
+          <Input
             label="TELÉFONO"
             placeholder="+57 123 456 7890"
             value={phone}
@@ -151,7 +176,7 @@ export default function RegisterScreen() {
             editable={!isLoading}
           />
 
-          <InputField
+          <Input
             label="CONTRASEÑA"
             placeholder="••••••••"
             value={password}
@@ -167,7 +192,7 @@ export default function RegisterScreen() {
           />
 
           <TouchableOpacity
-            style={[s.button, isLoading && s.buttonDisabled]}
+            style={[styles.button, isLoading && styles.buttonDisabled]}
             onPress={handleRegister}
             disabled={isLoading}
             activeOpacity={0.8}
@@ -175,95 +200,36 @@ export default function RegisterScreen() {
             {isLoading ? (
               <ActivityIndicator color="#FFFFFF" />
             ) : (
-              <Text style={s.buttonText}>Crear cuenta</Text>
+              <Text style={styles.buttonText}>Crear cuenta</Text>
             )}
           </TouchableOpacity>
         </View>
 
         {/* Login Link */}
-        <View style={s.registerRow}>
-          <Text style={s.registerText}>¿Ya tienes cuenta? </Text>
+        <View style={styles.registerRow}>
+          <Text style={styles.registerText}>¿Ya tienes cuenta? </Text>
           <Link href="/(auth)/login" asChild>
             <TouchableOpacity>
-              <Text style={s.registerLinkText}>Inicia sesión</Text>
+              <Text style={styles.registerLinkText}>Inicia sesión</Text>
             </TouchableOpacity>
           </Link>
         </View>
 
         {/* Back Link */}
-        <View style={s.backLinkContainer}>
+        <View style={styles.backLinkContainer}>
           <Link href="/" asChild>
             <TouchableOpacity>
-              <Text style={s.backLinkText}>← Volver al inicio</Text>
+              <Text style={styles.backLinkText}>← Volver al inicio</Text>
             </TouchableOpacity>
           </Link>
         </View>
 
         {/* Footer */}
-        <View style={s.footer}>
-          <Text style={s.footerText}>Acceso a Vendix Platform</Text>
-          <Text style={s.footerText}>Powered by Vendix</Text>
+        <View style={styles.footer}>
+          <Text style={styles.footerText}>Acceso a Vendix Platform</Text>
+          <Text style={styles.footerText}>Powered by Vendix</Text>
         </View>
       </ScrollView>
     </KeyboardAvoidingView>
-  );
-}
-
-function InputField({
-  label,
-  placeholder,
-  value,
-  onChangeText,
-  secureTextEntry,
-  keyboardType,
-  autoCapitalize,
-  autoCorrect,
-  editable,
-  helperText,
-  rightIcon,
-}: {
-  label: string;
-  placeholder: string;
-  value: string;
-  onChangeText: (text: string) => void;
-  secureTextEntry?: boolean;
-  keyboardType?: 'email-address' | 'phone-pad' | 'default';
-  autoCapitalize?: 'none' | 'sentences' | 'words' | 'characters';
-  autoCorrect?: boolean;
-  editable?: boolean;
-  helperText?: string;
-  rightIcon?: React.ReactNode;
-}) {
-  const [focused, setFocused] = useState(false);
-
-  return (
-    <View>
-      <Text style={s.inputLabel}>{label}</Text>
-      <View
-        style={[
-          s.inputContainer,
-          focused && s.inputContainerFocused,
-        ]}
-      >
-        <TextInput
-          style={s.input}
-          placeholder={placeholder}
-          placeholderTextColor={colors.text.muted}
-          value={value}
-          onChangeText={onChangeText}
-          secureTextEntry={secureTextEntry}
-          keyboardType={keyboardType}
-          autoCapitalize={autoCapitalize}
-          autoCorrect={autoCorrect}
-          editable={editable}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
-        />
-        {rightIcon && <View style={s.inputRightIcon}>{rightIcon}</View>}
-      </View>
-      {helperText && (
-        <Text style={s.helperText}>{helperText}</Text>
-      )}
-    </View>
   );
 }

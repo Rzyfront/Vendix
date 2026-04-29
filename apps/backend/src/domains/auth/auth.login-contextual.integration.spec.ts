@@ -205,9 +205,7 @@ describe('Contextual Login Flow - Integration Tests', () => {
       expect(response.body.data.user.email).toBe('customer@test.com');
       expect(response.body.data.user.roles).toContain('customer');
       expect(response.body.data.access_token).toBeDefined();
-      expect(response.body.data.user_settings.app_type).toBe(
-        'STORE_ECOMMERCE',
-      );
+      expect(response.body.data.user_settings.app_type).toBe('STORE_ECOMMERCE');
     });
 
     it('should fail login when no organization or store slug provided', async () => {

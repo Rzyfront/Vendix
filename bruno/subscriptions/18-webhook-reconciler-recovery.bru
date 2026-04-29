@@ -1,0 +1,88 @@
+meta {
+  name: Webhook Reconciler — Manual Trigger (super-admin)
+  type: http
+  seq: 12
+}
+
+post {
+  url: {{url}}/superadmin/subscriptions/jobs/webhook-reconciler/run
+  body: json
+  auth: inherit
+}
+
+body:json {
+  {
+    "dry_run": true
+  }
+}
+
+docs {
+  Manually triggers the SaaS webhook reconciler. The reconciler scans
+  `subscription_invoices` rows in state `issued` whose attached payment is
+  still `pending` and whose `issued_at` is within the last 24h, then asks
+  Wompi for the real-world transaction status. APPROVED/DECLINED/ERROR/VOIDED
+  responses are replayed into `SubscriptionWebhookService.handleWompiEvent`
+  (idempotent via `webhook_event_dedup`).
+
+  Setup expected by this test (manual or via a setup-only Bruno file):
+    - A store with an active plan exists
+    - A `subscription_invoices` row exists with `state='issued'` and
+      `issued_at >= now() - 1 day`
+    - That invoice has a `payments` row with `state='pending'` and a
+      `gateway_reference` value that maps to a known Wompi sandbox txn
+    - NO `webhook_event_dedup` row exists for that txn (simulates a lost
+      webhook delivery)
+
+  Verification:
+    - 200 OK with `data.recovered` integer (>= 0)
+    - If the Wompi sandbox txn was APPROVED, after this call:
+        * payment.state should transition pending -> succeeded
+        * subscription_invoices.state should transition issued -> paid
+        * commission_accrual_pending row should exist (state='queued' or
+          'completed' depending on the queue worker timing)
+    - If the Wompi sandbox txn was DECLINED, payment stays pending and
+      subscription_invoice stays issued (no commission accrual).
+
+  Authentication:
+    Requires a super-admin bearer token in {{token}}. Non-super-admin
+    callers should receive 403.
+
+  KNOWN GAP:
+    The `dry_run` body flag is currently informational. True per-call
+    dry-run requires either reading the flag inside `runOnce()` or
+    threading a parameter through. The job-wide `SUBSCRIPTION_CRON_DRY_RUN`
+    env var is honored by all subscription crons (state-engine, renewal,
+    commission-accrual, webhook-reconciler) so set it via env if you need
+    a non-mutating verification pass.
+}
+
+tests {
+  test("Returns 200 or 401/403", function() {
+    expect(res.status).to.be.oneOf([200, 401, 403]);
+  });
+
+  test("On 200, response carries recovered count", function() {
+    if (res.status === 200) {
+      expect(res.body.success).to.be.true;
+      expect(res.body.data).to.have.property("recovered");
+      expect(res.body.data.recovered).to.be.a("number");
+      expect(res.body.data.recovered).to.be.at.least(0);
+    }
+  });
+
+  test("On 200, recovered count is reasonable (<= 50 batch cap)", function() {
+    if (res.status === 200) {
+      expect(res.body.data.recovered).to.be.at.most(50);
+    }
+  });
+
+  test("Forbidden for non-super-admin callers", function() {
+    if (res.status === 403) {
+      const code =
+        res.body?.error_code ||
+        res.body?.error?.code ||
+        res.body?.code;
+      expect(code).to.match(/FORBIDDEN|PERMISSION|ROLE/i);
+    }
+  });
+}

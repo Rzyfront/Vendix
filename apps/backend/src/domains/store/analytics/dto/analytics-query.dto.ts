@@ -1,4 +1,10 @@
-import { IsOptional, IsString, IsNumber, IsEnum, IsDateString } from 'class-validator';
+import {
+  IsOptional,
+  IsString,
+  IsNumber,
+  IsEnum,
+  IsDateString,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 import { order_channel_enum } from '@prisma/client';
 

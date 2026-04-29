@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 import * as crypto from 'crypto';
 import {
   WompiConfig,
@@ -12,41 +12,14 @@ import {
   WompiPaymentLinkResponse,
 } from './wompi.types';
 
-@Injectable()
+/**
+ * Immutable Wompi API client. Instances are created via WompiClientFactory
+ * so concurrent requests never race on shared mutable config.
+ */
 export class WompiClient {
   private readonly logger = new Logger(WompiClient.name);
-  private config: WompiConfig;
 
-  // ── Configuración ───────────────────────────
-
-  /**
-   * Mutates the shared singleton's credentials. Kept for back-compat with
-   * legacy callers, but PREFER `withConfig()` — `configure()` is unsafe
-   * across concurrent requests because two callers can race between
-   * `configure()` and a subsequent `generateIntegritySignature()` /
-   * other sync method, with the second overwriting credentials before
-   * the first reads them.
-   *
-   * @deprecated Use `withConfig(creds)` to get a fresh per-call instance.
-   */
-  configure(config: WompiConfig): void {
-    this.config = config;
-  }
-
-  /**
-   * Return a fresh, fully-isolated `WompiClient` instance pre-configured
-   * with the given credentials. Use this from request-scoped code paths
-   * (HTTP handlers, cron iterations) so concurrent calls don't race on
-   * the shared singleton's mutable `config`.
-   *
-   * The returned instance is plain `new WompiClient()` — no DI side
-   * effects — and shares no state with the caller.
-   */
-  withConfig(config: WompiConfig): WompiClient {
-    const fresh = new WompiClient();
-    fresh.config = config;
-    return fresh;
-  }
+  constructor(readonly config: WompiConfig) {}
 
   private get baseUrl(): string {
     return this.config.environment === WompiEnvironment.PRODUCTION
@@ -56,7 +29,7 @@ export class WompiClient {
 
   private ensureConfigured(): void {
     if (!this.config) {
-      throw new Error('WompiClient not configured. Call configure() first.');
+      throw new Error('WompiClient not configured.');
     }
   }
 
@@ -77,10 +50,6 @@ export class WompiClient {
       Authorization: `Bearer ${token}`,
     };
 
-    // Wompi supports HTTP header `Idempotency-Key` for write endpoints
-    // (POST /transactions, POST /transactions/:id/void, POST /payment_links).
-    // A retried request with the same key returns the original result instead
-    // of creating a duplicate transaction.
     if (options?.idempotencyKey) {
       headers['Idempotency-Key'] = options.idempotencyKey;
     }
@@ -128,14 +97,6 @@ export class WompiClient {
     );
   }
 
-  /**
-   * List Wompi transactions filtered by `reference`. Wompi exposes the
-   * collection endpoint `GET /v1/transactions/?reference=<ref>` which returns
-   * `{ data: WompiTransactionData[] }` (paginated). Callers typically pick the
-   * most recent matching transaction (Wompi appends new attempts under the
-   * same reference if the merchant reuses it, but Vendix generates a unique
-   * `vendix_<storeId>_<orderId>_<ts>` reference per attempt).
-   */
   async getTransactionsByReference(
     reference: string,
   ): Promise<{ data: import('./wompi.types').WompiTransactionData[] }> {
@@ -158,10 +119,12 @@ export class WompiClient {
 
   // ── Merchant / Acceptance Token ─────────────
 
-  async getAcceptanceTokens(): Promise<{ acceptance_token: string; personal_auth_token: string }> {
+  async getAcceptanceTokens(): Promise<{
+    acceptance_token: string;
+    personal_auth_token: string;
+  }> {
     this.ensureConfigured();
 
-    // No cache — acceptance tokens are single-use per Wompi docs
     const response = await this.request<WompiMerchantResponse>(
       'GET',
       `/merchants/${this.config.public_key}`,
@@ -169,13 +132,18 @@ export class WompiClient {
 
     return {
       acceptance_token: response.data.presigned_acceptance.acceptance_token,
-      personal_auth_token: response.data.presigned_personal_data_auth.acceptance_token,
+      personal_auth_token:
+        response.data.presigned_personal_data_auth.acceptance_token,
     };
   }
 
   // ── Integrity signature ──────────────────────
 
-  generateIntegritySignature(reference: string, amountInCents: number, currency: string): string {
+  generateIntegritySignature(
+    reference: string,
+    amountInCents: number,
+    currency: string,
+  ): string {
     this.ensureConfigured();
     const concatenated = `${reference}${amountInCents}${currency}${this.config.integrity_secret}`;
     return crypto.createHash('sha256').update(concatenated).digest('hex');
@@ -221,8 +189,6 @@ export class WompiClient {
     try {
       const { properties, checksum } = event.signature;
 
-      // Concatenar los valores de las propiedades indicadas en el orden dado
-      // Las properties vienen como paths e.g. ["transaction.id", "transaction.status", ...]
       const values = properties.map((prop) => {
         const keys = prop.split('.');
         let value: any = event.data;
@@ -232,11 +198,8 @@ export class WompiClient {
         return String(value);
       });
 
-      // Concatenar valores + timestamp + events_secret
       const concatenated =
-        values.join('') +
-        String(event.timestamp) +
-        this.config.events_secret;
+        values.join('') + String(event.timestamp) + this.config.events_secret;
 
       const hash = crypto
         .createHash('sha256')

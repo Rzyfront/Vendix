@@ -167,8 +167,7 @@ export class PaymentEncryptionService {
             /* leave as is — will just mask the encrypted blob */
           }
         }
-        masked[key] =
-          value.length > 4 ? '****' + value.slice(-4) : '****';
+        masked[key] = value.length > 4 ? '****' + value.slice(-4) : '****';
       }
     }
     return masked;

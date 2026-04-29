@@ -30,7 +30,14 @@ export class FixedAssetsService {
   }
 
   async findAll(query: QueryFixedAssetsDto) {
-    const { search, status, category_id, store_id, page = 1, limit = 20 } = query;
+    const {
+      search,
+      status,
+      category_id,
+      store_id,
+      page = 1,
+      limit = 20,
+    } = query;
     const skip = (page - 1) * limit;
 
     const where: Prisma.fixed_assetsWhereInput = {
@@ -127,7 +134,9 @@ export class FixedAssetsService {
         where: { id: dto.category_id },
       });
       if (!category) {
-        throw new VendixHttpException(ErrorCodes.FIXED_ASSET_CATEGORY_NOT_FOUND);
+        throw new VendixHttpException(
+          ErrorCodes.FIXED_ASSET_CATEGORY_NOT_FOUND,
+        );
       }
     }
 
@@ -171,7 +180,9 @@ export class FixedAssetsService {
         where: { id: dto.category_id },
       });
       if (!category) {
-        throw new VendixHttpException(ErrorCodes.FIXED_ASSET_CATEGORY_NOT_FOUND);
+        throw new VendixHttpException(
+          ErrorCodes.FIXED_ASSET_CATEGORY_NOT_FOUND,
+        );
       }
     }
 
@@ -180,14 +191,24 @@ export class FixedAssetsService {
     };
 
     if (dto.name !== undefined) update_data.name = dto.name;
-    if (dto.description !== undefined) update_data.description = dto.description;
-    if (dto.category_id !== undefined) update_data.category_id = dto.category_id;
-    if (dto.acquisition_date !== undefined) update_data.acquisition_date = new Date(dto.acquisition_date);
-    if (dto.acquisition_cost !== undefined) update_data.acquisition_cost = new Prisma.Decimal(dto.acquisition_cost);
-    if (dto.salvage_value !== undefined) update_data.salvage_value = new Prisma.Decimal(dto.salvage_value);
-    if (dto.useful_life_months !== undefined) update_data.useful_life_months = dto.useful_life_months;
-    if (dto.depreciation_method !== undefined) update_data.depreciation_method = dto.depreciation_method as any;
-    if (dto.depreciation_start_date !== undefined) update_data.depreciation_start_date = new Date(dto.depreciation_start_date);
+    if (dto.description !== undefined)
+      update_data.description = dto.description;
+    if (dto.category_id !== undefined)
+      update_data.category_id = dto.category_id;
+    if (dto.acquisition_date !== undefined)
+      update_data.acquisition_date = new Date(dto.acquisition_date);
+    if (dto.acquisition_cost !== undefined)
+      update_data.acquisition_cost = new Prisma.Decimal(dto.acquisition_cost);
+    if (dto.salvage_value !== undefined)
+      update_data.salvage_value = new Prisma.Decimal(dto.salvage_value);
+    if (dto.useful_life_months !== undefined)
+      update_data.useful_life_months = dto.useful_life_months;
+    if (dto.depreciation_method !== undefined)
+      update_data.depreciation_method = dto.depreciation_method as any;
+    if (dto.depreciation_start_date !== undefined)
+      update_data.depreciation_start_date = new Date(
+        dto.depreciation_start_date,
+      );
     if (dto.notes !== undefined) update_data.notes = dto.notes;
     if (dto.store_id !== undefined) update_data.store_id = dto.store_id;
 
@@ -228,7 +249,8 @@ export class FixedAssetsService {
     }
 
     const disposal_amount = dto.disposal_amount || 0;
-    const book_value = Number(asset.acquisition_cost) - Number(asset.accumulated_depreciation);
+    const book_value =
+      Number(asset.acquisition_cost) - Number(asset.accumulated_depreciation);
     const gain_loss = disposal_amount - book_value;
 
     const updated = await this.prisma.fixed_assets.update({
@@ -293,7 +315,11 @@ export class FixedAssetsService {
       },
     });
 
-    const results: Array<{ asset_id: number; asset_number: string; amount: number }> = [];
+    const results: Array<{
+      asset_id: number;
+      asset_number: string;
+      amount: number;
+    }> = [];
 
     for (const asset of active_assets) {
       // Check if entry already exists for this period
@@ -322,7 +348,8 @@ export class FixedAssetsService {
 
       if (monthly_amount <= 0) continue;
 
-      const new_accumulated = Number(asset.accumulated_depreciation) + monthly_amount;
+      const new_accumulated =
+        Number(asset.accumulated_depreciation) + monthly_amount;
       const new_book_value = Number(asset.acquisition_cost) - new_accumulated;
 
       // Create depreciation entry and update asset in transaction
@@ -400,7 +427,8 @@ export class FixedAssetsService {
       category: asset.category?.name || null,
       acquisition_cost: Number(asset.acquisition_cost),
       accumulated_depreciation: Number(asset.accumulated_depreciation),
-      book_value: Number(asset.acquisition_cost) - Number(asset.accumulated_depreciation),
+      book_value:
+        Number(asset.acquisition_cost) - Number(asset.accumulated_depreciation),
       status: asset.status,
     }));
   }

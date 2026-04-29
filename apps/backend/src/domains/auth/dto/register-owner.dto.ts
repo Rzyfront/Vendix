@@ -29,7 +29,9 @@ export class RegisterOwnerDto {
   })
   @IsEmail({}, { message: 'Debe ser un email válido' })
   @IsNotEmpty({ message: 'El email es requerido' })
-  @Transform(({ value }) => (typeof value === 'string' ? value.trim().toLowerCase() : value))
+  @Transform(({ value }) =>
+    typeof value === 'string' ? value.trim().toLowerCase() : value,
+  )
   email: string;
 
   @ApiProperty({
@@ -64,6 +66,9 @@ export class RegisterOwnerDto {
   })
   @IsString({ message: 'El teléfono debe ser un string' })
   @IsOptional()
-  @Matches(/^[\d+#*\s()-]*$/, { message: 'El teléfono solo puede contener números y los símbolos + # * ( ) -' })
+  @Matches(/^[\d+#*\s()-]*$/, {
+    message:
+      'El teléfono solo puede contener números y los símbolos + # * ( ) -',
+  })
   phone?: string;
 }

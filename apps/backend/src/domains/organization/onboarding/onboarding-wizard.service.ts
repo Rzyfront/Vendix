@@ -42,7 +42,7 @@ export class OnboardingWizardService {
     private readonly brandingGeneratorHelper: BrandingGeneratorHelper,
     private readonly storeBootstrapHelper: StoreBootstrapHelper,
     private readonly subscriptionTrialService: SubscriptionTrialService,
-  ) { }
+  ) {}
 
   /**
    * Get wizard status for a user
@@ -71,7 +71,7 @@ export class OnboardingWizardService {
       throw new BadRequestException('User not found');
     }
 
-    const userConfig = user.user_settings?.config as any;
+    const userConfig = user.user_settings?.config;
 
     return {
       user_id: userId,
@@ -139,7 +139,7 @@ export class OnboardingWizardService {
         : 'SINGLE_STORE';
 
     // Check if already selected the same type
-    const userConfig = user.user_settings?.config as any;
+    const userConfig = user.user_settings?.config;
     if (userConfig?.selected_app_type === selectAppTypeDto.app_type) {
       return {
         success: true,
@@ -169,7 +169,7 @@ export class OnboardingWizardService {
     };
 
     if (user.user_settings) {
-      const existingConfig = (user.user_settings.config as any) || {};
+      const existingConfig = user.user_settings.config || {};
 
       await this.prismaService.user_settings.update({
         where: { user_id: userId },
@@ -534,9 +534,10 @@ export class OnboardingWizardService {
 
       // Update currency in store_settings if provided
       if (setupStoreDto.currency) {
-        const storeSettings = await this.prismaService.store_settings.findUnique({
-          where: { store_id: existingStore.id },
-        });
+        const storeSettings =
+          await this.prismaService.store_settings.findUnique({
+            where: { store_id: existingStore.id },
+          });
         if (storeSettings) {
           const settings = storeSettings.settings as any;
           settings.general = settings.general || {};
@@ -584,14 +585,13 @@ export class OnboardingWizardService {
                 name: setupStoreDto.name,
                 slug,
                 store_type: (setupStoreDto.store_type as any) || 'physical',
-                timezone:
-                  setupStoreDto.timezone || 'America/Mexico_City',
+                timezone: setupStoreDto.timezone || 'America/Mexico_City',
               },
               address_data: setupStoreDto.address_line1
                 ? {
                     address_line1: setupStoreDto.address_line1,
                     address_line2: setupStoreDto.address_line2 ?? null,
-                    city: setupStoreDto.city,
+                    city: setupStoreDto.city ?? '',
                     state_province: setupStoreDto.state_province ?? null,
                     postal_code: setupStoreDto.postal_code ?? null,
                     country_code: setupStoreDto.country_code || 'MX',
@@ -814,9 +814,12 @@ export class OnboardingWizardService {
         settings: {
           branding: {
             name: user.organizations?.name || 'Organization',
-            primary_color: setupAppConfigDto.primary_color || branding.primary_color,
-            secondary_color: setupAppConfigDto.secondary_color || branding.secondary_color,
-            accent_color: setupAppConfigDto.accent_color || branding.accent_color,
+            primary_color:
+              setupAppConfigDto.primary_color || branding.primary_color,
+            secondary_color:
+              setupAppConfigDto.secondary_color || branding.secondary_color,
+            accent_color:
+              setupAppConfigDto.accent_color || branding.accent_color,
             background_color: branding.background_color,
             surface_color: branding.surface_color,
             text_color: branding.text_color,
@@ -836,9 +839,12 @@ export class OnboardingWizardService {
         settings: {
           branding: {
             name: user.organizations?.name || 'Organization',
-            primary_color: setupAppConfigDto.primary_color || branding.primary_color,
-            secondary_color: setupAppConfigDto.secondary_color || branding.secondary_color,
-            accent_color: setupAppConfigDto.accent_color || branding.accent_color,
+            primary_color:
+              setupAppConfigDto.primary_color || branding.primary_color,
+            secondary_color:
+              setupAppConfigDto.secondary_color || branding.secondary_color,
+            accent_color:
+              setupAppConfigDto.accent_color || branding.accent_color,
             background_color: branding.background_color,
             surface_color: branding.surface_color,
             text_color: branding.text_color,
@@ -879,9 +885,10 @@ export class OnboardingWizardService {
       });
 
       // Read existing store_settings to preserve currency/timezone set during setupStore
-      const existingStoreSettings = await this.prismaService.store_settings.findUnique({
-        where: { store_id: store.id },
-      });
+      const existingStoreSettings =
+        await this.prismaService.store_settings.findUnique({
+          where: { store_id: store.id },
+        });
       const existing = (existingStoreSettings?.settings as any) || {};
 
       // Create/Update store_settings with branding and default settings
@@ -890,14 +897,19 @@ export class OnboardingWizardService {
         ...defaultSettings,
         general: {
           ...defaultSettings.general,
-          currency: existing?.general?.currency || defaultSettings.general.currency,
-          timezone: existing?.general?.timezone || defaultSettings.general.timezone,
+          currency:
+            existing?.general?.currency || defaultSettings.general.currency,
+          timezone:
+            existing?.general?.timezone || defaultSettings.general.timezone,
         },
         branding: {
           name: store.name,
-          primary_color: setupAppConfigDto.primary_color || storeBranding.primary_color,
-          secondary_color: setupAppConfigDto.secondary_color || storeBranding.secondary_color,
-          accent_color: setupAppConfigDto.accent_color || storeBranding.accent_color,
+          primary_color:
+            setupAppConfigDto.primary_color || storeBranding.primary_color,
+          secondary_color:
+            setupAppConfigDto.secondary_color || storeBranding.secondary_color,
+          accent_color:
+            setupAppConfigDto.accent_color || storeBranding.accent_color,
           background_color: storeBranding.background_color,
           surface_color: storeBranding.surface_color,
           text_color: storeBranding.text_color,
@@ -966,8 +978,11 @@ export class OnboardingWizardService {
         // Create new store domain with branding config
         // Check if hostname already exists (to handle retries/back navigation)
         const collidingDomain =
-          await this.prismaService.domain_settings.findUnique({
-            where: { hostname: storeHostname },
+          await this.prismaService.domain_settings.findFirst({
+            where: {
+              hostname: storeHostname,
+              status: { notIn: ['disabled', 'failed_ownership', 'failed_certificate', 'failed_alias'] },
+            },
           });
 
         if (collidingDomain && collidingDomain.store_id === store.id) {
@@ -1033,8 +1048,11 @@ export class OnboardingWizardService {
 
       // Check for ownership conflict
       const existingCustom =
-        await this.prismaService.domain_settings.findUnique({
-          where: { hostname: customDomain },
+        await this.prismaService.domain_settings.findFirst({
+          where: {
+            hostname: customDomain,
+            status: { notIn: ['disabled', 'failed_ownership', 'failed_certificate', 'failed_alias'] },
+          },
         });
 
       if (
@@ -1092,7 +1110,7 @@ export class OnboardingWizardService {
       setupAppConfigDto.app_type,
     );
 
-    const existingConfig = (existingSettings?.config as any) || {};
+    const existingConfig = existingSettings?.config || {};
 
     const updatedConfig = {
       ...existingConfig,
@@ -1183,7 +1201,7 @@ export class OnboardingWizardService {
     const userSettings = await this.prismaService.user_settings.findUnique({
       where: { user_id: userId },
     });
-    const config = (userSettings?.config as any) || {};
+    const config = userSettings?.config || {};
     const selectedAppType = config.selected_app_type;
 
     // Mark organization as onboarded and activate it
@@ -1641,9 +1659,10 @@ export class OnboardingWizardService {
     // Check cooldown using onboarding state table
     const COOLDOWN_SECONDS = 60;
     if (user.organization_id) {
-      const onboardingState = await this.prismaService.organization_onboarding_state.findUnique({
-        where: { organization_id: user.organization_id },
-      });
+      const onboardingState =
+        await this.prismaService.organization_onboarding_state.findUnique({
+          where: { organization_id: user.organization_id },
+        });
 
       if (onboardingState?.last_resend_at) {
         const lastResend = new Date(onboardingState.last_resend_at).getTime();
@@ -1727,7 +1746,11 @@ export class OnboardingWizardService {
    * Save wizard draft data for a specific step
    * Called on each step navigation to persist state
    */
-  async saveWizardDraft(userId: number, step: string, data: any): Promise<void> {
+  async saveWizardDraft(
+    userId: number,
+    step: string,
+    data: any,
+  ): Promise<void> {
     const user = await this.prismaService.users.findUnique({
       where: { id: userId },
       select: { organization_id: true },
@@ -1780,9 +1803,10 @@ export class OnboardingWizardService {
       return null;
     }
 
-    const state = await this.prismaService.organization_onboarding_state.findUnique({
-      where: { organization_id: user.organization_id },
-    });
+    const state =
+      await this.prismaService.organization_onboarding_state.findUnique({
+        where: { organization_id: user.organization_id },
+      });
 
     if (!state) return null;
 
@@ -1830,7 +1854,10 @@ export class OnboardingWizardService {
    * Create default ORG_ADMIN role for the organization creator
    * Assigns full org-level permissions
    */
-  async createDefaultOrgAdminRole(organizationId: number, creatorUserId: number): Promise<void> {
+  async createDefaultOrgAdminRole(
+    organizationId: number,
+    creatorUserId: number,
+  ): Promise<void> {
     // Check if role already exists
     const existingRole = await this.prismaService.roles.findFirst({
       where: {
@@ -1878,7 +1905,10 @@ export class OnboardingWizardService {
   /**
    * Assign a role to a user
    */
-  private async assignRoleToUser(userId: number, roleId: number): Promise<void> {
+  private async assignRoleToUser(
+    userId: number,
+    roleId: number,
+  ): Promise<void> {
     const existingAssignment = await this.prismaService.user_roles.findUnique({
       where: {
         user_id_role_id: {

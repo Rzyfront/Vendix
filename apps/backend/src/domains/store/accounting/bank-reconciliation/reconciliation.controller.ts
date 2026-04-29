@@ -1,6 +1,9 @@
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
-import { ModuleFlowGuard, RequireModuleFlow } from '../../../../common/guards/module-flow.guard';
+import {
+  ModuleFlowGuard,
+  RequireModuleFlow,
+} from '../../../../common/guards/module-flow.guard';
 import { UseGuards } from '@nestjs/common';
 import {
   Controller,
@@ -55,7 +58,10 @@ export class ReconciliationController {
   @HttpCode(HttpStatus.CREATED)
   async create(@Body() create_dto: CreateReconciliationDto) {
     const result = await this.reconciliation_service.create(create_dto);
-    return this.response_service.success(result, 'Reconciliation session created successfully');
+    return this.response_service.success(
+      result,
+      'Reconciliation session created successfully',
+    );
   }
 
   @Post(':id/auto-match')
@@ -67,20 +73,17 @@ export class ReconciliationController {
 
   @Post(':id/manual-match')
   @Permissions('store:accounting:bank_reconciliation:update')
-  async manualMatch(
-    @Param('id') id: string,
-    @Body() dto: ManualMatchDto,
-  ) {
-    const result = await this.reconciliation_matching_service.manualMatch(+id, dto);
+  async manualMatch(@Param('id') id: string, @Body() dto: ManualMatchDto) {
+    const result = await this.reconciliation_matching_service.manualMatch(
+      +id,
+      dto,
+    );
     return this.response_service.success(result, 'Manual match created');
   }
 
   @Post(':id/unmatch/:match_id')
   @Permissions('store:accounting:bank_reconciliation:update')
-  async unmatch(
-    @Param('id') id: string,
-    @Param('match_id') match_id: string,
-  ) {
+  async unmatch(@Param('id') id: string, @Param('match_id') match_id: string) {
     await this.reconciliation_matching_service.unmatch(+id, +match_id);
     return this.response_service.success(null, 'Match removed successfully');
   }
@@ -89,7 +92,10 @@ export class ReconciliationController {
   @Permissions('store:accounting:bank_reconciliation:update')
   async complete(@Param('id') id: string) {
     const result = await this.reconciliation_service.complete(+id);
-    return this.response_service.success(result, 'Reconciliation completed successfully');
+    return this.response_service.success(
+      result,
+      'Reconciliation completed successfully',
+    );
   }
 
   @Delete(':id')
@@ -97,6 +103,9 @@ export class ReconciliationController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@Param('id') id: string) {
     await this.reconciliation_service.remove(+id);
-    return this.response_service.success(null, 'Reconciliation deleted successfully');
+    return this.response_service.success(
+      null,
+      'Reconciliation deleted successfully',
+    );
   }
 }

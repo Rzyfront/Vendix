@@ -7,7 +7,12 @@ import {
   Granularity,
 } from '../dto/analytics-query.dto';
 import { fillTimeSeries } from '../utils/fill-time-series.util';
-import { formatPeriodFromDate, parseDateRange, getPreviousPeriod, getDateTruncInterval } from '../utils/date.util';
+import {
+  formatPeriodFromDate,
+  parseDateRange,
+  getPreviousPeriod,
+  getDateTruncInterval,
+} from '../utils/date.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
@@ -457,8 +462,7 @@ export class SalesAnalyticsService {
       totalAmount += amount;
 
       const methodName =
-        payment.store_payment_method?.system_payment_method?.name ||
-        'unknown';
+        payment.store_payment_method?.system_payment_method?.name || 'unknown';
       const displayName =
         payment.store_payment_method?.display_name ||
         payment.store_payment_method?.system_payment_method?.display_name ||
@@ -607,7 +611,13 @@ export class SalesAnalyticsService {
         .filter(Boolean) as number[];
       const customers = await this.prisma.users.findMany({
         where: { id: { in: customerIds } },
-        select: { id: true, username: true, first_name: true, last_name: true, email: true },
+        select: {
+          id: true,
+          username: true,
+          first_name: true,
+          last_name: true,
+          email: true,
+        },
       });
       const customerMap = new Map(customers.map((c) => [c.id, c]));
 
@@ -661,7 +671,13 @@ export class SalesAnalyticsService {
       .filter(Boolean) as number[];
     const customers = await this.prisma.users.findMany({
       where: { id: { in: customerIds } },
-      select: { id: true, username: true, first_name: true, last_name: true, email: true },
+      select: {
+        id: true,
+        username: true,
+        first_name: true,
+        last_name: true,
+        email: true,
+      },
     });
     const customerMap = new Map(customers.map((c) => [c.id, c]));
 
@@ -820,5 +836,4 @@ export class SalesAnalyticsService {
       }));
     });
   }
-
 }

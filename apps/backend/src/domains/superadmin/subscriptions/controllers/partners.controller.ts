@@ -41,7 +41,13 @@ export class PartnersController {
   @ApiOperation({ summary: 'List all partner organizations' })
   async findAll(@Query() query: PartnerQueryDto) {
     const result = await this.partnersService.findAllPartners(query);
-    return this.responseService.paginated(result.data, result.meta.total, result.meta.page, result.meta.limit, 'Partners retrieved');
+    return this.responseService.paginated(
+      result.data,
+      result.meta.total,
+      result.meta.page,
+      result.meta.limit,
+      'Partners retrieved',
+    );
   }
 
   @Permissions('superadmin:subscriptions:partners:read')
@@ -93,7 +99,10 @@ export class PartnersController {
   @Permissions('superadmin:subscriptions:partners:update')
   @Patch('overrides/:id')
   @ApiOperation({ summary: 'Update a partner plan override' })
-  async updateOverride(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdatePartnerOverrideDto) {
+  async updateOverride(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdatePartnerOverrideDto,
+  ) {
     const result = await this.partnersService.updateOverride(id, dto);
     return this.responseService.updated(result, 'Partner override updated');
   }

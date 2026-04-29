@@ -13,7 +13,7 @@ describe('ActiveSubscriptionsService', () => {
         count: jest.fn(),
       },
     };
-    service = new ActiveSubscriptionsService(prisma as any);
+    service = new ActiveSubscriptionsService(prisma);
   });
 
   function subFixture(overrides: Partial<any> = {}) {

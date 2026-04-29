@@ -1,4 +1,11 @@
-import { IsString, IsEmail, IsOptional, MinLength, MaxLength, IsEnum } from 'class-validator';
+import {
+  IsString,
+  IsEmail,
+  IsOptional,
+  MinLength,
+  MaxLength,
+  IsEnum,
+} from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class InviteUserDto {

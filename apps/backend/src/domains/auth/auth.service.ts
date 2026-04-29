@@ -377,7 +377,7 @@ export class AuthService {
       updateData.avatar_url = this.s3Service.sanitizeForStorage(avatar_url);
     }
 
-    let user = await this.prismaService.users.update({
+    const user = await this.prismaService.users.update({
       where: { id: userId },
       data: updateData,
     });
@@ -1472,7 +1472,7 @@ export class AuthService {
               if (has_access || hasHighPrivilege) {
                 effective_organization_slug = undefined;
                 effective_store_slug = main_store.slug;
-                (user as any).main_store = main_store;
+                user.main_store = main_store;
 
                 // AUTO-RELATION: Si es High Privilege y no tiene acceso, crear la relación
                 if (hasHighPrivilege && !has_access) {

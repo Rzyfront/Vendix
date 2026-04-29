@@ -63,9 +63,12 @@ export class RdsBackupService {
     private readonly configService: ConfigService,
   ) {
     this.rdsClient = new RDSClient({
-      region: this.configService.get<string>('AWS_REGION') || AWS_REGION_DEFAULT,
+      region:
+        this.configService.get<string>('AWS_REGION') || AWS_REGION_DEFAULT,
     });
-    this.rdsDbIdentifier = this.configService.get<string>('RDS_DB_IDENTIFIER') || RDS_DB_IDENTIFIER_DEFAULT;
+    this.rdsDbIdentifier =
+      this.configService.get<string>('RDS_DB_IDENTIFIER') ||
+      RDS_DB_IDENTIFIER_DEFAULT;
   }
 
   async listSnapshots(): Promise<SnapshotInfo[]> {
@@ -167,7 +170,8 @@ export class RdsBackupService {
         instance: {
           id: instance.DBInstanceIdentifier || this.rdsDbIdentifier,
           class: instance.DBInstanceClass || '',
-          engine: `${instance.Engine || ''} ${instance.EngineVersion || ''}`.trim(),
+          engine:
+            `${instance.Engine || ''} ${instance.EngineVersion || ''}`.trim(),
           storage_gb: instance.AllocatedStorage || 0,
           status: instance.DBInstanceStatus || 'unknown',
         },

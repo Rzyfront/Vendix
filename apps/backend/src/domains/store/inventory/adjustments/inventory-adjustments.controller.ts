@@ -49,7 +49,9 @@ export class InventoryAdjustmentsController {
   ) {}
 
   @Get('bulk/template/download')
-  @ApiOperation({ summary: 'Download Excel template for bulk inventory adjustments' })
+  @ApiOperation({
+    summary: 'Download Excel template for bulk inventory adjustments',
+  })
   @ApiResponse({ status: 200, description: 'Template downloaded successfully' })
   @RequirePermissions('store:inventory:adjustments:read')
   async downloadBulkTemplate(
@@ -57,7 +59,8 @@ export class InventoryAdjustmentsController {
     @Res() res: Response,
   ) {
     const parsed_location_id = location_id ? parseInt(location_id) : undefined;
-    const buffer = await this.bulkService.generateExcelTemplate(parsed_location_id);
+    const buffer =
+      await this.bulkService.generateExcelTemplate(parsed_location_id);
 
     const filename = `plantilla_ajuste_inventario_${new Date().toISOString().split('T')[0]}.xlsx`;
 
@@ -80,9 +83,7 @@ export class InventoryAdjustmentsController {
   async uploadBulkAdjustments(
     @UploadedFile(
       new ParseFilePipe({
-        validators: [
-          new MaxFileSizeValidator({ maxSize: 5 * 1024 * 1024 }),
-        ],
+        validators: [new MaxFileSizeValidator({ maxSize: 5 * 1024 * 1024 })],
       }),
     )
     file: any,
@@ -151,7 +152,9 @@ export class InventoryAdjustmentsController {
   }
 
   @Get('search-products')
-  @ApiOperation({ summary: 'Search products with stock at a location for adjustments' })
+  @ApiOperation({
+    summary: 'Search products with stock at a location for adjustments',
+  })
   @ApiResponse({ status: 200, description: 'Products retrieved successfully' })
   @RequirePermissions('store:inventory:adjustments:read')
   async searchProducts(
@@ -177,43 +180,68 @@ export class InventoryAdjustmentsController {
       dto.location_id,
       dto.items,
     );
-    return this.responseService.success(result, 'Adjustments created successfully');
+    return this.responseService.success(
+      result,
+      'Adjustments created successfully',
+    );
   }
 
   @Post('batch-complete')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Batch create and approve inventory adjustments' })
-  @ApiResponse({ status: 201, description: 'Adjustments created and approved successfully' })
+  @ApiResponse({
+    status: 201,
+    description: 'Adjustments created and approved successfully',
+  })
   @RequirePermissions('store:inventory:adjustments:create')
   async batchCreateAndComplete(@Body() dto: BatchCreateAdjustmentsDto) {
     const result = await this.adjustmentsService.batchCreateAndComplete(
       dto.location_id,
       dto.items,
     );
-    return this.responseService.success(result, 'Adjustments created and applied successfully');
+    return this.responseService.success(
+      result,
+      'Adjustments created and applied successfully',
+    );
   }
 
   @Post('reservations/release-by-product')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Release all active reservations for a product' })
-  @ApiResponse({ status: 200, description: 'Reservations released successfully' })
+  @ApiResponse({
+    status: 200,
+    description: 'Reservations released successfully',
+  })
   @RequirePermissions('store:inventory:adjustments:create')
-  async releaseReservationsByProduct(@Body() dto: ReleaseReservationsByProductDto) {
+  async releaseReservationsByProduct(
+    @Body() dto: ReleaseReservationsByProductDto,
+  ) {
     const result = await this.adjustmentsService.releaseReservationsByProduct(
       dto.product_id,
       dto.product_variant_id,
     );
-    return this.responseService.success(result, 'Reservations released successfully');
+    return this.responseService.success(
+      result,
+      'Reservations released successfully',
+    );
   }
 
   @Post('reservations/release-all')
   @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Release all active reservations (emergency administrative tool)' })
-  @ApiResponse({ status: 200, description: 'All reservations released successfully' })
+  @ApiOperation({
+    summary: 'Release all active reservations (emergency administrative tool)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'All reservations released successfully',
+  })
   @RequirePermissions('store:inventory:adjustments:create')
   async releaseAllReservations() {
     const result = await this.adjustmentsService.releaseAllReservations();
-    return this.responseService.success(result, 'All reservations released successfully');
+    return this.responseService.success(
+      result,
+      'All reservations released successfully',
+    );
   }
 
   @Get(':id')

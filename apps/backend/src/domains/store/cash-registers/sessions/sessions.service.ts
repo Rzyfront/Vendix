@@ -39,7 +39,9 @@ export class SessionsService {
     return this.prisma.cash_register_sessions.findFirst({
       where,
       include: {
-        register: { include: { location: { select: { id: true, name: true } } } },
+        register: {
+          include: { location: { select: { id: true, name: true } } },
+        },
         opened_by_user: {
           select: { id: true, first_name: true, last_name: true },
         },
@@ -59,13 +61,14 @@ export class SessionsService {
     }
 
     // Validate no open session on this register
-    const existing_session =
-      await this.prisma.cash_register_sessions.findFirst({
+    const existing_session = await this.prisma.cash_register_sessions.findFirst(
+      {
         where: {
           cash_register_id: dto.cash_register_id,
           status: 'open',
         },
-      });
+      },
+    );
     if (existing_session) {
       throw new BadRequestException(
         'This cash register already has an open session',
@@ -256,8 +259,7 @@ export class SessionsService {
 
     const where: any = {};
     if (query.status) where.status = query.status;
-    if (query.cash_register_id)
-      where.cash_register_id = query.cash_register_id;
+    if (query.cash_register_id) where.cash_register_id = query.cash_register_id;
     if (query.date_from || query.date_to) {
       where.opened_at = {};
       if (query.date_from) where.opened_at.gte = new Date(query.date_from);
@@ -441,7 +443,9 @@ export class SessionsService {
 
       // Re-inject the captured request context into the async callback
       if (context) {
-        RequestContextService.run(context, () => { run(); });
+        RequestContextService.run(context, () => {
+          run();
+        });
       } else {
         run();
       }
@@ -461,9 +465,14 @@ export class SessionsService {
     const formatDecimal = (value: any) =>
       value != null ? String(Number(value)) : '0';
 
-    const formatGrouped = (grouped: Record<string, { count: number; total: number }>) =>
+    const formatGrouped = (
+      grouped: Record<string, { count: number; total: number }>,
+    ) =>
       Object.entries(grouped)
-        .map(([key, val]) => `- ${key}: ${val.count} movimiento(s), total $${val.total}`)
+        .map(
+          ([key, val]) =>
+            `- ${key}: ${val.count} movimiento(s), total $${val.total}`,
+        )
         .join('\n') || 'Sin datos';
 
     return {
@@ -492,13 +501,11 @@ export class SessionsService {
         continue;
 
       const method = m.payment_method || 'unknown';
-      if (!by_method[method])
-        by_method[method] = { count: 0, total: 0 };
+      if (!by_method[method]) by_method[method] = { count: 0, total: 0 };
       by_method[method].count++;
       by_method[method].total += Number(m.amount);
 
-      if (!by_type[m.type])
-        by_type[m.type] = { count: 0, total: 0 };
+      if (!by_type[m.type]) by_type[m.type] = { count: 0, total: 0 };
       by_type[m.type].count++;
       by_type[m.type].total += Number(m.amount);
     }
@@ -529,14 +536,19 @@ export class SessionsService {
     return result;
   }
 
-  private async saveAiSummary(sessionId: number, summary: string): Promise<void> {
+  private async saveAiSummary(
+    sessionId: number,
+    summary: string,
+  ): Promise<void> {
     try {
       await this.prisma.cash_register_sessions.update({
         where: { id: sessionId },
         data: { ai_summary: summary },
       });
     } catch (error: any) {
-      this.logger.error(`Failed to save AI summary for session ${sessionId}: ${error.message}`);
+      this.logger.error(
+        `Failed to save AI summary for session ${sessionId}: ${error.message}`,
+      );
       // Don't throw — saving the summary is best-effort, don't break the stream
     }
   }

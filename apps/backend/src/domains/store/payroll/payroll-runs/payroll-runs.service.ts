@@ -145,7 +145,8 @@ export class PayrollRunsService {
   async create(dto: CreatePayrollRunDto) {
     const context = this.getContext();
 
-    const payroll_number = dto.payroll_number || (await this.generatePayrollNumber());
+    const payroll_number =
+      dto.payroll_number || (await this.generatePayrollNumber());
 
     // Check for duplicate payroll number
     const existing = await this.prisma.payroll_runs.findFirst({
@@ -235,11 +236,7 @@ export class PayrollRunsService {
   }
 
   async getStats() {
-    const [
-      totals,
-      by_status_raw,
-      employee_count,
-    ] = await Promise.all([
+    const [totals, by_status_raw, employee_count] = await Promise.all([
       this.prisma.payroll_runs.aggregate({
         where: { status: { in: ['approved', 'paid', 'sent', 'accepted'] } },
         _sum: {
@@ -260,7 +257,8 @@ export class PayrollRunsService {
       }),
     ]);
 
-    const by_status: Record<string, { count: number; total_net_pay: number }> = {};
+    const by_status: Record<string, { count: number; total_net_pay: number }> =
+      {};
     for (const row of by_status_raw) {
       if (row.status) {
         by_status[row.status] = {
@@ -276,7 +274,8 @@ export class PayrollRunsService {
       total_net_pay: total_net,
       active_employees: employee_count,
       total_employer_cost: Number(totals._sum.total_employer_costs || 0),
-      avg_salary: employee_count > 0 ? Math.round(total_net / employee_count) : 0,
+      avg_salary:
+        employee_count > 0 ? Math.round(total_net / employee_count) : 0,
     };
   }
 }

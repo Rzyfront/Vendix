@@ -1,4 +1,9 @@
-import { Injectable, BadRequestException, NotFoundException, Logger } from '@nestjs/common';
+import {
+  Injectable,
+  BadRequestException,
+  NotFoundException,
+  Logger,
+} from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { CustomersService } from '../customers/customers.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
@@ -20,7 +25,7 @@ export class CustomerQueueService {
     const storeSettings = await this.prisma.store_settings.findFirst({
       where: { store_id: storeId },
     });
-    const settings = (storeSettings?.settings as any) || {};
+    const settings = storeSettings?.settings || {};
     if (!settings?.pos?.customer_queue?.enabled) {
       throw new BadRequestException('CUSTOMER_QUEUE_DISABLED');
     }
@@ -30,7 +35,7 @@ export class CustomerQueueService {
     const storeSettings = await this.prisma.store_settings.findFirst({
       where: { store_id: storeId },
     });
-    const settings = (storeSettings?.settings as any) || {};
+    const settings = storeSettings?.settings || {};
     return settings?.pos?.customer_queue || {};
   }
 

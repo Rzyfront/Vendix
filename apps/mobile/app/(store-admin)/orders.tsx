@@ -1,5 +1,5 @@
 import { useState, useCallback } from 'react';
-import { View, FlatList, RefreshControl, Pressable } from 'react-native';
+import { View, FlatList, RefreshControl, Pressable, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useQuery, useInfiniteQuery } from '@tanstack/react-query';
 import { OrderService } from '@/features/store/services/order.service';
@@ -19,6 +19,7 @@ import { Spinner } from '@/shared/components/spinner/spinner';
 import { ListItem } from '@/shared/components/list-item/list-item';
 import { formatCurrency } from '@/shared/utils/currency';
 import { formatRelative } from '@/shared/utils/date';
+import { spacing, borderRadius, colorScales, colors } from '@/shared/theme';
 
 const STATE_VARIANT_MAP: Record<string, 'default' | 'success' | 'warning' | 'error' | 'info'> = {
   default: 'default',
@@ -39,13 +40,25 @@ const FILTER_CHIPS: FilterChip[] = [
   { label: 'Canceladas', value: 'cancelled' },
 ];
 
-const CHANNEL_ICONS: Record<string, string> = {
-  pos: 'clipboard-list',
-  ecommerce: 'trending-up',
-  agent: 'check',
-  whatsapp: 'alert-triangle',
-  marketplace: 'dollar-sign',
-};
+function getChannelIcon(channel: string): string {
+  switch (channel) {
+    case 'pos': return 'shopping-bag';
+    case 'ecommerce': return 'shopping-cart';
+    case 'whatsapp': return 'message-circle';
+    case 'marketplace': return 'store';
+    default: return 'circle-dot';
+  }
+}
+
+function getChannelColor(channel: string): string {
+  switch (channel) {
+    case 'pos': return colorScales.blue[500];
+    case 'ecommerce': return colors.primary;
+    case 'whatsapp': return colorScales.green[500];
+    case 'marketplace': return colorScales.amber[500];
+    default: return colorScales.gray[400];
+  }
+}
 
 const OrderCard = ({ order, onPress }: { order: Order; onPress: () => void }) => {
   const badgeVariant =
@@ -53,10 +66,10 @@ const OrderCard = ({ order, onPress }: { order: Order; onPress: () => void }) =>
 
   return (
     <Pressable onPress={onPress}>
-      <Card className="mb-3">
-        <View className="flex-row justify-between items-start mb-2">
-          <View className="flex-1">
-            <View className="flex-row items-center gap-2 mb-1">
+      <Card style={styles.cardMargin}>
+        <View style={styles.orderCardHeader}>
+          <View style={styles.flex1}>
+            <View style={styles.orderCardTitleRow}>
               <ListItem
                 title={`#${order.order_number}`}
                 subtitle={
@@ -74,13 +87,13 @@ const OrderCard = ({ order, onPress }: { order: Order; onPress: () => void }) =>
           />
         </View>
 
-        <View className="flex-row justify-between items-center mt-2">
-          <View className="flex-row items-center gap-1">
+        <View style={styles.orderCardFooter}>
+          <View style={styles.orderCardFooterLeft}>
             {order.channel && (
               <Icon
-                name={CHANNEL_ICONS[order.channel] ?? 'clipboard-list'}
+                name={getChannelIcon(order.channel)}
                 size={14}
-                color="#6b7280"
+                color={getChannelColor(order.channel)}
               />
             )}
             <ListItem
@@ -159,36 +172,36 @@ const Orders = () => {
   }, [isFetchingNextPage]);
 
   return (
-    <View className="flex-1 bg-gray-50">
+    <View style={styles.container}>
       <FlatList
         data={orders}
         keyExtractor={(item) => String(item.id)}
         renderItem={renderItem}
         ListHeaderComponent={
           <View>
-            <View className="flex-row flex-wrap gap-3 p-4">
-              <View className="w-[48%]">
+            <View style={styles.statsGrid}>
+              <View style={styles.statsItem}>
                 <StatsCard
                   label="Total Órdenes"
                   value={stats?.total_orders ?? 0}
                   icon="clipboard-list"
                 />
               </View>
-              <View className="w-[48%]">
+              <View style={styles.statsItem}>
                 <StatsCard
                   label="Ingresos"
                   value={formatCurrency(stats?.total_revenue ?? 0)}
                   icon="dollar-sign"
                 />
               </View>
-              <View className="w-[48%]">
+              <View style={styles.statsItem}>
                 <StatsCard
                   label="Pendientes"
                   value={stats?.pending_orders ?? 0}
                   icon="clock"
                 />
               </View>
-              <View className="w-[48%]">
+              <View style={styles.statsItem}>
                 <StatsCard
                   label="Completadas"
                   value={stats?.completed_orders ?? 0}
@@ -197,20 +210,19 @@ const Orders = () => {
               </View>
             </View>
 
-            <View className="px-4 mb-3">
-              <SearchBar value={search} onChangeText={setSearch} placeholder="Buscar órdenes..." />
+            <View style={styles.searchWrap}>
+              <SearchBar value={search} onSubmit={(text) => setSearch(text)} placeholder="Buscar órdenes..." />
             </View>
 
-            <View className="flex-row gap-2 px-4 mb-3">
+            <View style={styles.filterRow}>
               {FILTER_CHIPS.map((chip) => (
                 <Pressable
                   key={chip.value}
                   onPress={() => setActiveFilter(chip.value)}
-                  className={`px-3 py-1.5 rounded-full ${
-                    activeFilter === chip.value
-                      ? 'bg-primary-600'
-                      : 'bg-gray-200'
-                  }`}
+                  style={[
+                    styles.chip,
+                    activeFilter === chip.value ? styles.chipActive : styles.chipInactive,
+                  ]}
                 >
                   <ListItem
                     title={chip.label}
@@ -236,10 +248,79 @@ const Orders = () => {
         }
         onEndReached={handleEndReached}
         onEndReachedThreshold={0.3}
-        contentContainerClassName="pb-6"
+        contentContainerStyle={styles.listContent}
       />
     </View>
   );
 };
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: colorScales.gray[50],
+  },
+  flex1: {
+    flex: 1,
+  },
+  cardMargin: {
+    marginBottom: spacing[3],
+  },
+  orderCardHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: spacing[2],
+  },
+  orderCardTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+    marginBottom: spacing[1],
+  },
+  orderCardFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: spacing[2],
+  },
+  orderCardFooterLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[1],
+  },
+  statsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: spacing[3],
+    padding: spacing[4],
+  },
+  statsItem: {
+    width: '48%',
+  },
+  searchWrap: {
+    paddingHorizontal: spacing[4],
+    marginBottom: spacing[3],
+  },
+  filterRow: {
+    flexDirection: 'row',
+    gap: spacing[2],
+    paddingHorizontal: spacing[4],
+    marginBottom: spacing[3],
+  },
+  chip: {
+    paddingHorizontal: spacing[3],
+    paddingVertical: 6,
+    borderRadius: borderRadius.full,
+  },
+  chipActive: {
+    backgroundColor: colors.primary,
+  },
+  chipInactive: {
+    backgroundColor: colorScales.gray[200],
+  },
+  listContent: {
+    paddingBottom: spacing[6],
+  },
+});
 
 export default Orders;

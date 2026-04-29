@@ -30,7 +30,7 @@ export class StoresController {
   constructor(
     private readonly storesService: StoresService,
     private readonly responseService: ResponseService,
-  ) { }
+  ) {}
 
   @Post()
   @Permissions('organization:stores:create')

@@ -34,7 +34,10 @@ export class LayawayController {
   async create(@Body() dto: CreateLayawayDto) {
     try {
       const result = await this.layaway_service.create(dto);
-      return this.response_service.created(result, 'Plan separé creado exitosamente');
+      return this.response_service.created(
+        result,
+        'Plan separé creado exitosamente',
+      );
     } catch (error) {
       return this.response_service.error(
         error.message || 'Error al crear el plan separé',
@@ -102,7 +105,10 @@ export class LayawayController {
   ) {
     try {
       const result = await this.layaway_service.makePayment(id, dto);
-      return this.response_service.success(result, 'Pago registrado exitosamente');
+      return this.response_service.success(
+        result,
+        'Pago registrado exitosamente',
+      );
     } catch (error) {
       return this.response_service.error(
         error.message || 'Error al registrar pago',
@@ -120,7 +126,10 @@ export class LayawayController {
   ) {
     try {
       const result = await this.layaway_service.modifyInstallments(id, dto);
-      return this.response_service.success(result, 'Cuotas modificadas exitosamente');
+      return this.response_service.success(
+        result,
+        'Cuotas modificadas exitosamente',
+      );
     } catch (error) {
       return this.response_service.error(
         error.message || 'Error al modificar cuotas',

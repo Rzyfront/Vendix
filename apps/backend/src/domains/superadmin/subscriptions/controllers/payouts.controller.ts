@@ -33,7 +33,13 @@ export class PayoutsController {
   @ApiOperation({ summary: 'List all payout batches' })
   async findAll(@Query() query: PayoutQueryDto) {
     const result = await this.payoutsService.findAll(query);
-    return this.responseService.paginated(result.data, result.meta.total, result.meta.page, result.meta.limit, 'Payout batches retrieved');
+    return this.responseService.paginated(
+      result.data,
+      result.meta.total,
+      result.meta.page,
+      result.meta.limit,
+      'Payout batches retrieved',
+    );
   }
 
   @Permissions('superadmin:subscriptions:payouts:read')
@@ -47,7 +53,10 @@ export class PayoutsController {
   @Permissions('superadmin:subscriptions:payouts:update')
   @Post(':id/approve')
   @ApiOperation({ summary: 'Approve a payout batch' })
-  async approve(@Param('id', ParseIntPipe) id: number, @Body() dto: ApprovePayoutDto) {
+  async approve(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: ApprovePayoutDto,
+  ) {
     const result = await this.payoutsService.approve(id, dto);
     return this.responseService.updated(result, 'Payout batch approved');
   }
@@ -63,7 +72,10 @@ export class PayoutsController {
   @Permissions('superadmin:subscriptions:payouts:update')
   @Post(':id/reject')
   @ApiOperation({ summary: 'Reject a payout batch with reason' })
-  async reject(@Param('id', ParseIntPipe) id: number, @Body() dto: RejectPayoutDto) {
+  async reject(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: RejectPayoutDto,
+  ) {
     const result = await this.payoutsService.rejectBatch(id, dto.reason);
     return this.responseService.updated(result, 'Payout batch rejected');
   }

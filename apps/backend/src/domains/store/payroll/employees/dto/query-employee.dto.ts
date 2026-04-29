@@ -1,4 +1,10 @@
-import { IsString, IsOptional, IsNumber, IsInt, MaxLength } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsNumber,
+  IsInt,
+  MaxLength,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class QueryEmployeeDto {
@@ -35,5 +41,4 @@ export class QueryEmployeeDto {
   @IsString()
   @MaxLength(100)
   department?: string;
-
 }

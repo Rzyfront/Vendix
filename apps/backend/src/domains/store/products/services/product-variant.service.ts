@@ -160,7 +160,11 @@ export class ProductVariantService {
     user_id?: number,
   ) {
     // BLOCK: price_override must be null or > 0 (reject 0 as ambiguous)
-    if (createVariantDto.price_override !== null && createVariantDto.price_override !== undefined && createVariantDto.price_override <= 0) {
+    if (
+      createVariantDto.price_override !== null &&
+      createVariantDto.price_override !== undefined &&
+      createVariantDto.price_override <= 0
+    ) {
       throw new VendixHttpException(
         ErrorCodes.PROD_VAR_PRICE_001,
         'price_override de variante debe ser null o mayor que 0',
@@ -335,7 +339,11 @@ export class ProductVariantService {
     const { stock_quantity, ...variantData } = updateVariantDto;
 
     // BLOCK: price_override must be null or > 0 (reject 0 as ambiguous)
-    if (variantData.price_override !== null && variantData.price_override !== undefined && variantData.price_override <= 0) {
+    if (
+      variantData.price_override !== null &&
+      variantData.price_override !== undefined &&
+      variantData.price_override <= 0
+    ) {
       throw new VendixHttpException(
         ErrorCodes.PROD_VAR_PRICE_001,
         'price_override de variante debe ser null o mayor que 0',

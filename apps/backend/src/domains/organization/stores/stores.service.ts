@@ -71,7 +71,13 @@ export class StoresService {
     }
 
     // Extract settings, address and operating_hours from DTO and remove from main store data
-    const { settings, address, operating_hours, organization_id: _ignored, ...storeData } = createStoreDto as any;
+    const {
+      settings,
+      address,
+      operating_hours,
+      organization_id: _ignored,
+      ...storeData
+    } = createStoreDto as any;
 
     // Atomic store bootstrap:
     //  1. stores + optional addresses + inventory_locations (via helper)
@@ -89,7 +95,7 @@ export class StoresService {
               store_data: {
                 name: storeData.name,
                 slug,
-                store_type: storeData.store_type as any,
+                store_type: storeData.store_type,
                 timezone: storeData.timezone ?? null,
                 manager_user_id: storeData.manager_user_id ?? null,
                 store_code: storeData.store_code ?? null,
@@ -130,7 +136,7 @@ export class StoresService {
         if (operating_hours) {
           await tx.stores.update({
             where: { id: store.id },
-            data: { operating_hours: operating_hours as any },
+            data: { operating_hours: operating_hours },
           });
         }
 
@@ -231,7 +237,8 @@ export class StoresService {
     const existing = await this.findOne(id);
 
     // Extract settings, address and operating_hours from DTO
-    const { settings, address, operating_hours, ...storeData } = updateStoreDto as any;
+    const { settings, address, operating_hours, ...storeData } =
+      updateStoreDto as any;
 
     // Update store settings if provided
     if (settings) {
@@ -347,7 +354,7 @@ export class StoresService {
       throw new VendixHttpException(ErrorCodes.ORG_STORE_001);
     }
 
-    let storeSettings = await this.prisma.store_settings.findUnique({
+    const storeSettings = await this.prisma.store_settings.findUnique({
       where: { store_id: storeId },
     });
 
@@ -370,7 +377,7 @@ export class StoresService {
           ...getDefaultStoreSettings().general,
           name: store?.name,
           logo_url: store?.logo_url,
-          store_type: store?.store_type as any,
+          store_type: store?.store_type,
           timezone:
             store?.timezone || getDefaultStoreSettings().general.timezone,
         },
@@ -394,7 +401,7 @@ export class StoresService {
         ...settings.general,
         name: store?.name,
         logo_url: store?.logo_url,
-        store_type: store?.store_type as any,
+        store_type: store?.store_type,
         timezone: store?.timezone || settings.general?.timezone,
       },
       app: {
@@ -731,11 +738,9 @@ export class StoresService {
     // Get branding config from organization domain if exists
     const orgDomain = existingDomains.find(
       (d: any) =>
-        d.config &&
-        typeof d.config === 'object' &&
-        'branding' in (d.config as any),
+        d.config && typeof d.config === 'object' && 'branding' in d.config,
     );
-    const orgBranding = (orgDomain?.config as any)?.branding || null;
+    const orgBranding = orgDomain?.config?.branding || null;
 
     // Generate standardized branding
     const branding = this.brandingGeneratorHelper.generateBranding({
@@ -808,7 +813,7 @@ export class StoresService {
       },
     });
 
-    const orgBranding = (orgDomain?.config as any)?.branding || null;
+    const orgBranding = orgDomain?.config?.branding || null;
 
     // Generate standardized branding for ecommerce
     const branding = this.brandingGeneratorHelper.generateBranding({

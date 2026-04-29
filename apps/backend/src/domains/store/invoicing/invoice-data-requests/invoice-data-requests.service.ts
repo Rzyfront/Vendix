@@ -1,4 +1,9 @@
-import { Injectable, Logger, NotFoundException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  NotFoundException,
+  BadRequestException,
+} from '@nestjs/common';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { v4 as uuidv4 } from 'uuid';
@@ -43,7 +48,9 @@ export class InvoiceDataRequestsService {
       status: 'pending',
     } as InvoiceDataRequestEvent);
 
-    this.logger.log(`Invoice data request created for order #${orderId}, token: ${token}`);
+    this.logger.log(
+      `Invoice data request created for order #${orderId}, token: ${token}`,
+    );
 
     return request;
   }
@@ -200,7 +207,9 @@ export class InvoiceDataRequestsService {
     });
 
     if (!request) {
-      throw new NotFoundException('INVOICE_DATA_REQUEST_NOT_FOUND_OR_NOT_SUBMITTED');
+      throw new NotFoundException(
+        'INVOICE_DATA_REQUEST_NOT_FOUND_OR_NOT_SUBMITTED',
+      );
     }
 
     // Mark as processing
@@ -220,7 +229,10 @@ export class InvoiceDataRequestsService {
       // 1. Find or create customer in the organization
       let customer = await this.prisma.users.findFirst({
         where: {
-          document_number: { equals: request.document_number, mode: 'insensitive' },
+          document_number: {
+            equals: request.document_number,
+            mode: 'insensitive',
+          },
           organization_id: organizationId,
           user_roles: { some: { roles: { name: 'customer' } } },
         },
@@ -243,7 +255,9 @@ export class InvoiceDataRequestsService {
 
         customer = await this.prisma.users.create({
           data: {
-            email: request.email || `invoice_${request.token}@placeholder.vendix.com`,
+            email:
+              request.email ||
+              `invoice_${request.token}@placeholder.vendix.com`,
             password: hashedPassword,
             first_name: request.first_name || '',
             last_name: request.last_name || '',
@@ -273,7 +287,7 @@ export class InvoiceDataRequestsService {
       });
 
       // 3. Create credit note for original CF invoice (if one exists)
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+
       let originalInvoice: any = null;
       if (request.invoice_id) {
         originalInvoice = await this.prisma.invoices.findFirst({
@@ -337,7 +351,9 @@ export class InvoiceDataRequestsService {
         document_number: request.document_number,
       } as InvoiceDataRequestEvent);
 
-      this.logger.log(`Invoice data request #${requestId} processed successfully`);
+      this.logger.log(
+        `Invoice data request #${requestId} processed successfully`,
+      );
 
       return completed;
     } catch (error) {

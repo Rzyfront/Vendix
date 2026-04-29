@@ -38,11 +38,17 @@ import { TOKEN_DEFAULTS } from './constants/token.constants';
       inject: [ConfigService],
       useFactory: async (configService: ConfigService) => {
         const secret = configService.get<string>('JWT_SECRET');
-        const isProduction = configService.get<string>('NODE_ENV') === 'production';
+        const isProduction =
+          configService.get<string>('NODE_ENV') === 'production';
 
         // In production, require a proper secret
-        if (isProduction && (!secret || secret === 'your-super-secret-jwt-key')) {
-          throw new Error('JWT_SECRET must be configured with a secure value in production');
+        if (
+          isProduction &&
+          (!secret || secret === 'your-super-secret-jwt-key')
+        ) {
+          throw new Error(
+            'JWT_SECRET must be configured with a secure value in production',
+          );
         }
 
         return {

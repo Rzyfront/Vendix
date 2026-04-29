@@ -26,6 +26,7 @@ import {
   PaginatedResponse,
 } from '@common/responses';
 import { DomainsService } from './domains.service';
+import { DomainRegistrationGuard } from '@common/services/rate-limit/domain-registration.guard';
 import {
   DomainSettingResponse,
   DomainListResponse,
@@ -52,7 +53,7 @@ export class DomainsController {
   constructor(
     private readonly domainsService: DomainsService,
     private readonly responseService: ResponseService,
-  ) { }
+  ) {}
 
   // ========== ENDPOINTS PRIVADOS (requieren autenticación) ==========
 
@@ -60,6 +61,7 @@ export class DomainsController {
    * Crear configuración de dominio
    */
   @Post()
+  @UseGuards(DomainRegistrationGuard)
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
   @Permissions('organization:domains:create')
   @HttpCode(HttpStatus.CREATED)
@@ -155,7 +157,9 @@ export class DomainsController {
     const is_super_admin = user_role === UserRole.SUPER_ADMIN;
 
     // Super admins see all stats, others see only their organization
-    const organization_id = is_super_admin ? undefined : req?.user?.organization_id;
+    const organization_id = is_super_admin
+      ? undefined
+      : req?.user?.organization_id;
 
     const stats = await this.domainsService.getDomainStats(organization_id);
     return this.responseService.success(
@@ -337,13 +341,18 @@ export class DomainsController {
   @Permissions('organization:domains:update')
   async renewSsl(
     @Param('id') id: string,
-  ): Promise<SuccessResponse<{ renewed: boolean; ssl_status: string; message: string }>> {
+  ): Promise<
+    SuccessResponse<{ renewed: boolean; ssl_status: string; message: string }>
+  > {
     const domainId = parseInt(id, 10);
     if (isNaN(domainId)) {
       throw new BadRequestException('Invalid domain ID');
     }
     const result = await this.domainsService.renewSsl(domainId);
-    return this.responseService.success(result, 'SSL certificate renewed successfully');
+    return this.responseService.success(
+      result,
+      'SSL certificate renewed successfully',
+    );
   }
 
   /**
@@ -352,21 +361,25 @@ export class DomainsController {
   @Get('dns-instructions/:hostname')
   @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.OWNER)
   @Permissions('organization:domains:read')
-  async getDnsInstructions(
-    @Param('hostname') hostname: string,
-  ): Promise<SuccessResponse<{
-    hostname: string;
-    ownership: string;
-    dns_type: 'CNAME' | 'A';
-    target: string;
-    instructions: {
-      record_type: string;
-      name: string;
-      value: string;
-      ttl: number;
-    }[];
-  }>> {
+  async getDnsInstructions(@Param('hostname') hostname: string): Promise<
+    SuccessResponse<{
+      hostname: string;
+      ownership: string;
+      dns_type: 'CNAME' | 'A';
+      target: string;
+      requires_alias?: boolean;
+      instructions: {
+        record_type: string;
+        name: string;
+        value: string;
+        ttl: number;
+      }[];
+    }>
+  > {
     const result = await this.domainsService.getDnsInstructions(hostname);
-    return this.responseService.success(result, 'DNS instructions retrieved successfully');
+    return this.responseService.success(
+      result,
+      'DNS instructions retrieved successfully',
+    );
   }
 }

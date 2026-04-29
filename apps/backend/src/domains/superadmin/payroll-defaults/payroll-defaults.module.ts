@@ -9,7 +9,11 @@ import { NotificationsModule } from '../../store/notifications/notifications.mod
 @Module({
   imports: [ResponseModule, NotificationsModule],
   controllers: [PayrollDefaultsController],
-  providers: [PayrollDefaultsService, GlobalPrismaService, PayrollDefaultsNotificationsListener],
+  providers: [
+    PayrollDefaultsService,
+    GlobalPrismaService,
+    PayrollDefaultsNotificationsListener,
+  ],
   exports: [PayrollDefaultsService],
 })
 export class PayrollDefaultsModule {}

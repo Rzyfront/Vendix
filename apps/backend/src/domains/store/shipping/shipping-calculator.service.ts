@@ -227,9 +227,10 @@ export class ShippingCalculatorService {
   private getCartTotals(items: CartItemDTO[]) {
     return items.reduce(
       (acc, item) => {
-        const isPhysical = !item.product_type || item.product_type === 'physical';
+        const isPhysical =
+          !item.product_type || item.product_type === 'physical';
         return {
-          totalWeight: acc.totalWeight + (isPhysical ? (item.weight || 0) : 0),
+          totalWeight: acc.totalWeight + (isPhysical ? item.weight || 0 : 0),
           totalPrice: acc.totalPrice + item.price,
           hasPhysicalItems: acc.hasPhysicalItems || isPhysical,
         };

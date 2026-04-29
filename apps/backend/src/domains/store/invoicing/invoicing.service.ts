@@ -1,7 +1,4 @@
-import {
-  Injectable,
-  Logger,
-} from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
@@ -67,9 +64,13 @@ export class InvoicingService {
     const where: Prisma.invoicesWhereInput = {
       ...(search && {
         OR: [
-          { invoice_number: { contains: search, mode: 'insensitive' as const } },
+          {
+            invoice_number: { contains: search, mode: 'insensitive' as const },
+          },
           { customer_name: { contains: search, mode: 'insensitive' as const } },
-          { customer_tax_id: { contains: search, mode: 'insensitive' as const } },
+          {
+            customer_tax_id: { contains: search, mode: 'insensitive' as const },
+          },
           { notes: { contains: search, mode: 'insensitive' as const } },
         ],
       }),
@@ -239,8 +240,7 @@ export class InvoicingService {
       await this.invoice_number_generator.generateNextNumber();
 
     const items = (order.order_items || []).map((item: any) => {
-      const description =
-        item.product_name || item.products?.name || 'Product';
+      const description = item.product_name || item.products?.name || 'Product';
       const quantity = Number(item.quantity || 1);
       const unit_price = Number(item.unit_price || 0);
       const discount = Number(item.discount_amount || 0);
@@ -534,15 +534,15 @@ export class InvoicingService {
       where: { id },
     });
 
-    this.logger.log(
-      `Invoice #${id} (${invoice.invoice_number}) deleted`,
-    );
+    this.logger.log(`Invoice #${id} (${invoice.invoice_number}) deleted`);
   }
 
   async getStats(date_from?: string, date_to?: string) {
     const where: Prisma.invoicesWhereInput = {
       // Exclude credit/debit notes from main stats
-      invoice_type: { in: ['sales_invoice', 'purchase_invoice', 'export_invoice'] },
+      invoice_type: {
+        in: ['sales_invoice', 'purchase_invoice', 'export_invoice'],
+      },
       ...(date_from && {
         issue_date: {
           gte: new Date(date_from),
@@ -576,15 +576,16 @@ export class InvoicingService {
       }),
     ]);
 
-    const counts_by_status: Record<string, { count: number; amount: number }> = {
-      draft: { count: 0, amount: 0 },
-      validated: { count: 0, amount: 0 },
-      sent: { count: 0, amount: 0 },
-      accepted: { count: 0, amount: 0 },
-      rejected: { count: 0, amount: 0 },
-      cancelled: { count: 0, amount: 0 },
-      voided: { count: 0, amount: 0 },
-    };
+    const counts_by_status: Record<string, { count: number; amount: number }> =
+      {
+        draft: { count: 0, amount: 0 },
+        validated: { count: 0, amount: 0 },
+        sent: { count: 0, amount: 0 },
+        accepted: { count: 0, amount: 0 },
+        rejected: { count: 0, amount: 0 },
+        cancelled: { count: 0, amount: 0 },
+        voided: { count: 0, amount: 0 },
+      };
 
     for (const row of countsByStatus) {
       if (row.status) {
@@ -605,7 +606,12 @@ export class InvoicingService {
   }
 
   private calculateAmounts(
-    items: { quantity: number; unit_price: number; discount_amount?: number; tax_amount?: number }[],
+    items: {
+      quantity: number;
+      unit_price: number;
+      discount_amount?: number;
+      tax_amount?: number;
+    }[],
   ) {
     let subtotal = 0;
     let discount = 0;

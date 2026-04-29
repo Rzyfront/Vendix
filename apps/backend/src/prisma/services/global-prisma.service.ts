@@ -23,6 +23,10 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.domain_settings;
   }
 
+  get domain_blocklist() {
+    return this.baseClient.domain_blocklist;
+  }
+
   get addresses() {
     return this.baseClient.addresses;
   }
@@ -219,6 +223,10 @@ export class GlobalPrismaService extends BasePrismaService {
   // Global models (no scoping ever applied)
   get organizations() {
     return this.baseClient.organizations;
+  }
+
+  get subscription_plans() {
+    return this.baseClient.subscription_plans;
   }
 
   get currencies() {
@@ -500,19 +508,11 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.messaging_channels;
   }
 
-  // SaaS Subscriptions (platform-level — this service IS the scope boundary
-  // for subscription reads; the SubscriptionResolverService enforces
-  // per-store filtering in application code).
-  get subscription_plans() {
-    return this.baseClient.subscription_plans;
-  }
-
+  // Subscription / SaaS billing models — global access (no tenant scope)
+  // because SaaS billing operations cross stores (cron jobs, listeners,
+  // platform-level webhook reconciliation, etc.).
   get store_subscriptions() {
     return this.baseClient.store_subscriptions;
-  }
-
-  get partner_plan_overrides() {
-    return this.baseClient.partner_plan_overrides;
   }
 
   get subscription_invoices() {
@@ -527,6 +527,10 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.subscription_events;
   }
 
+  get subscription_payment_methods() {
+    return this.baseClient.subscription_payment_methods;
+  }
+
   get partner_commissions() {
     return this.baseClient.partner_commissions;
   }
@@ -535,7 +539,19 @@ export class GlobalPrismaService extends BasePrismaService {
     return this.baseClient.partner_payout_batches;
   }
 
+  get partner_plan_overrides() {
+    return this.baseClient.partner_plan_overrides;
+  }
+
   get platform_settings() {
     return this.baseClient.platform_settings;
+  }
+
+  get commission_accrual_pending() {
+    return this.baseClient.commission_accrual_pending;
+  }
+
+  get webhook_event_dedup() {
+    return this.baseClient.webhook_event_dedup;
   }
 }

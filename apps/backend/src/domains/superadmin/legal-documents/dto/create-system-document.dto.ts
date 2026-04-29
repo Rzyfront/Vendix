@@ -1,4 +1,11 @@
-import { IsString, IsEnum, IsOptional, IsDateString, IsUrl, MaxLength } from 'class-validator';
+import {
+  IsString,
+  IsEnum,
+  IsOptional,
+  IsDateString,
+  IsUrl,
+  MaxLength,
+} from 'class-validator';
 
 export enum LegalDocumentTypeEnum {
   TERMS_OF_SERVICE = 'TERMS_OF_SERVICE',

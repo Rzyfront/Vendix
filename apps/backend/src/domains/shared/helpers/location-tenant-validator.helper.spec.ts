@@ -91,10 +91,11 @@ describe('LocationTenantValidator', () => {
     it('throws INV_LOCATION_NOT_IN_STORE when location belongs to another store', async () => {
       findUnique.mockResolvedValue(makeLocation({ store_id: 99 }));
       await expect(
-        validator.validate(
-          10,
-          { organization_id: 1, store_id: 5, inventory_mode: 'independent' },
-        ),
+        validator.validate(10, {
+          organization_id: 1,
+          store_id: 5,
+          inventory_mode: 'independent',
+        }),
       ).rejects.toMatchObject({
         errorCode: ErrorCodes.INV_LOCATION_NOT_IN_STORE.code,
       });
@@ -102,10 +103,11 @@ describe('LocationTenantValidator', () => {
 
     it('accepts same-store location', async () => {
       findUnique.mockResolvedValue(makeLocation({ store_id: 5 }));
-      const result = await validator.validate(
-        10,
-        { organization_id: 1, store_id: 5, inventory_mode: 'independent' },
-      );
+      const result = await validator.validate(10, {
+        organization_id: 1,
+        store_id: 5,
+        inventory_mode: 'independent',
+      });
       expect(result.id).toBe(10);
     });
   });
@@ -113,10 +115,11 @@ describe('LocationTenantValidator', () => {
   describe('store containment (organizational mode)', () => {
     it('allows cross-store location by default when mode is organizational', async () => {
       findUnique.mockResolvedValue(makeLocation({ store_id: 99 }));
-      const result = await validator.validate(
-        10,
-        { organization_id: 1, store_id: 5, inventory_mode: 'organizational' },
-      );
+      const result = await validator.validate(10, {
+        organization_id: 1,
+        store_id: 5,
+        inventory_mode: 'organizational',
+      });
       expect(result.store_id).toBe(99);
     });
 
@@ -171,12 +174,7 @@ describe('LocationTenantValidator', () => {
       const tx: any = {
         _baseClient: { inventory_locations: { findUnique: txFindUnique } },
       };
-      await validator.validate(
-        10,
-        { organization_id: 1, store_id: 5 },
-        {},
-        tx,
-      );
+      await validator.validate(10, { organization_id: 1, store_id: 5 }, {}, tx);
       expect(txFindUnique).toHaveBeenCalledWith({ where: { id: 10 } });
       expect(findUnique).not.toHaveBeenCalled();
     });
@@ -186,12 +184,7 @@ describe('LocationTenantValidator', () => {
       const tx: any = {
         inventory_locations: { findUnique: txFindUnique },
       };
-      await validator.validate(
-        10,
-        { organization_id: 1, store_id: 5 },
-        {},
-        tx,
-      );
+      await validator.validate(10, { organization_id: 1, store_id: 5 }, {}, tx);
       expect(txFindUnique).toHaveBeenCalled();
     });
   });

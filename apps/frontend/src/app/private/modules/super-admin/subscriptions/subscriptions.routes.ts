@@ -99,6 +99,13 @@ export const SUBSCRIPTIONS_ROUTES: Routes = [
             (c) => c.GatewayComponent,
           ),
       },
+      {
+        path: 'metrics',
+        loadComponent: () =>
+          import(
+            './pages/metrics/subscription-metrics-dashboard.component'
+          ).then((c) => c.SubscriptionMetricsDashboardComponent),
+      },
     ],
   },
 ];

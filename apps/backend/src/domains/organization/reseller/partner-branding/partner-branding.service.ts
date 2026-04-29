@@ -42,7 +42,8 @@ export class PartnerBrandingService {
     }
 
     const existing = (org.partner_settings ?? {}) as Record<string, any>;
-    const currentBranding = (existing.branding ?? {}) as Partial<BrandingConfig>;
+    const currentBranding = (existing.branding ??
+      {}) as Partial<BrandingConfig>;
 
     const nextBranding: BrandingConfig = {
       ...DEFAULT_BRANDING,

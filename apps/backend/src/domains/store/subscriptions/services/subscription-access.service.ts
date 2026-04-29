@@ -1,7 +1,13 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  InternalServerErrorException,
+  Logger,
+} from '@nestjs/common';
 import Redis from 'ioredis';
 import { store_subscription_state_enum } from '@prisma/client';
 import { REDIS_CLIENT } from '../../../../common/redis/redis.module';
+import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import {
   AccessCheckResult,
   AIFeatureKey,
@@ -12,6 +18,35 @@ import {
   ResolvedSubscription,
 } from '../types/access.types';
 import { SubscriptionResolverService } from './subscription-resolver.service';
+
+export interface DunningOverdueInvoice {
+  id: number;
+  invoice_number: string;
+  amount_due: number;
+  issued_at: string | null;
+  period_start: string | null;
+  period_end: string | null;
+}
+
+export interface DunningStateResponse {
+  state: store_subscription_state_enum | 'none';
+  deadlines: {
+    grace_hard_at: string | null;
+    suspend_at: string | null;
+    cancel_at: string | null;
+  };
+  invoices_overdue: DunningOverdueInvoice[];
+  total_due: number;
+  features_lost: string[];
+  features_kept: string[];
+  /**
+   * S2.2 — true when the store has no `state='active'` payment method, OR the
+   * default payment method is in `state='invalid'`. The frontend dunning board
+   * surfaces an "Actualizar método de pago" CTA when this is true while in a
+   * grace_* state, because retrying payment with an invalid card is futile.
+   */
+  payment_method_invalid: boolean;
+}
 
 type Mode = 'allow' | 'warn' | 'block';
 type Severity = 'info' | 'warning' | 'critical' | 'blocker';
@@ -34,9 +69,16 @@ type Severity = 'info' | 'warning' | 'critical' | 'blocker';
  *   - daily features (streaming_chat): YYYYMMDD (UTC)
  *   - monthly features (everything else with a cap): YYYYMM (UTC)
  *
- * Known limitation (v1): `consumeAIQuota` uses bare INCR; provider retries
- * may double-count. True idempotency requires per-request dedup (X-Request-Id).
- * Tracked as a Fase C knowledge gap.
+ * v3 (G7 — atomic dedup): `consumeAIQuota` REQUIRES `requestId` (X-Request-Id).
+ * A Lua script atomically checks a dedup set keyed on requestId before
+ * incrementing the period counter. Same requestId across retries (provider-side
+ * or HTTP-level) yields exactly one increment. Missing requestId is a contract
+ * violation and raises `InternalServerErrorException` — no silent fallback to
+ * non-deduped INCR is permitted.
+ *
+ * Dedup set TTL is the same as the period TTL so the dedup window covers the
+ * entire period in which the increment was recorded; cleanup is automatic at
+ * period rollover (the key is namespaced by period).
  */
 @Injectable()
 export class SubscriptionAccessService {
@@ -45,6 +87,7 @@ export class SubscriptionAccessService {
   constructor(
     private readonly resolver: SubscriptionResolverService,
     @Inject(REDIS_CLIENT) private readonly redis: Redis,
+    private readonly prisma: GlobalPrismaService,
   ) {}
 
   // ------------------------------------------------------------------
@@ -90,6 +133,8 @@ export class SubscriptionAccessService {
         severity: 'blocker',
         reason: 'SUBSCRIPTION_001',
         subscription_state: resolved.state,
+        plan_id: resolved.planId,
+        has_record: false,
       };
     }
 
@@ -104,6 +149,8 @@ export class SubscriptionAccessService {
         severity: stateMode.severity,
         reason: stateMode.reason,
         subscription_state: resolved.state,
+        plan_id: resolved.planId,
+        has_record: resolved.found,
       };
     }
 
@@ -115,6 +162,8 @@ export class SubscriptionAccessService {
         severity: 'blocker',
         reason: 'SUBSCRIPTION_005',
         subscription_state: resolved.state,
+        plan_id: resolved.planId,
+        has_record: resolved.found,
       };
     }
 
@@ -133,6 +182,8 @@ export class SubscriptionAccessService {
           severity: 'critical',
           reason: 'SUBSCRIPTION_006',
           subscription_state: resolved.state,
+          plan_id: resolved.planId,
+          has_record: resolved.found,
           remaining: quota.remaining,
         };
       }
@@ -146,6 +197,8 @@ export class SubscriptionAccessService {
       mode: stateMode.mode,
       severity: stateMode.severity,
       subscription_state: resolved.state,
+      plan_id: resolved.planId,
+      has_record: resolved.found,
       ...(remainingMeta ? { remaining: remainingMeta } : {}),
     };
   }
@@ -176,6 +229,8 @@ export class SubscriptionAccessService {
         severity: 'blocker',
         reason: 'SUBSCRIPTION_004',
         subscription_state: resolved.state,
+        plan_id: resolved.planId,
+        has_record: false,
       };
     }
 
@@ -197,14 +252,38 @@ export class SubscriptionAccessService {
       severity: mode.severity,
       reason: mode.reason,
       subscription_state: resolved.state,
+      plan_id: resolved.planId,
+      has_record: resolved.found,
     };
   }
 
+  /**
+   * Atomically increments the per-period quota counter, deduplicated by
+   * `requestId`. Multiple invocations with the same `requestId` for the same
+   * `(storeId, feature, period)` produce exactly one increment.
+   *
+   * Contract:
+   *   - `requestId` is REQUIRED. Throws `InternalServerErrorException` when
+   *     missing/empty/non-string. This is intentional — silent non-dedup would
+   *     allow provider retries (e.g. OpenAI/Anthropic 5xx auto-retry on the
+   *     same X-Request-Id) to double-charge the customer.
+   *   - Redis errors are still swallowed (observational counter, must not fail
+   *     the surrounding operation), but a missing requestId is a programmer
+   *     error and surfaces immediately.
+   */
   async consumeAIQuota(
     storeId: number,
     feature: AIFeatureKey,
     units: number,
+    requestId: string,
   ): Promise<void> {
+    if (typeof requestId !== 'string' || requestId.trim().length === 0) {
+      throw new InternalServerErrorException(
+        'consumeAIQuota requires a non-empty requestId (X-Request-Id) for atomic dedup. ' +
+          'Pass RequestContextService.getRequestId() or propagate it through job data.',
+      );
+    }
+
     if (!Number.isInteger(storeId) || storeId <= 0) return;
     if (!isAIFeatureKey(feature)) return;
     if (!Number.isFinite(units) || units <= 0) return;
@@ -213,27 +292,287 @@ export class SubscriptionAccessService {
     if (!quotaCfg) return; // feature has no numeric quota
 
     const periodKey = this.periodKey(quotaCfg.period);
-    const key = this.quotaKey(storeId, feature, periodKey);
+    const quotaKey = this.quotaKey(storeId, feature, periodKey);
+    const dedupKey = this.dedupSetKey(storeId, feature, periodKey);
     const ttlSeconds = this.ttlForPeriod(quotaCfg.period);
 
     try {
-      // INCRBY + EXPIRE. We set the TTL unconditionally; the period key
-      // rolls over to a fresh key at period boundary, so extending the TTL
-      // of an existing counter within its own period is harmless.
-      const pipeline = this.redis.pipeline();
-      pipeline.incrby(key, Math.floor(units));
-      pipeline.expire(key, ttlSeconds);
-      await pipeline.exec();
+      // Atomic dedup + increment via Lua script. KEYS[1] = quota counter,
+      // KEYS[2] = dedup set (period-scoped — auto-cleans at rollover).
+      // ARGV[1] = requestId, ARGV[2] = units, ARGV[3] = ttl seconds (applied to
+      // BOTH keys so the dedup window matches the counter window).
+      await this.redis.eval(
+        this.consumeQuotaLua,
+        2,
+        quotaKey,
+        dedupKey,
+        requestId,
+        Math.floor(units),
+        ttlSeconds,
+      );
     } catch (err) {
       // Never throw from consume path — quota is observational. Log and move on.
       this.logger.warn(
-        `consumeAIQuota failed for store=${storeId} feature=${feature}: ${(err as Error).message}`,
+        `consumeAIQuota failed for store=${storeId} feature=${feature} requestId=${requestId}: ${(err as Error).message}`,
       );
     }
   }
 
+  /**
+   * Atomic dedup-then-increment.
+   *
+   * KEYS[1] = quota counter      ai:quota:{storeId}:{feature}:{period}
+   * KEYS[2] = dedup set          ai:quota:dedup:{storeId}:{feature}:{period}
+   * ARGV[1] = request_id, ARGV[2] = units, ARGV[3] = ttl_seconds
+   *
+   * Returns: 0 if duplicate (no increment), new counter value otherwise.
+   */
+  private readonly consumeQuotaLua = `
+    if redis.call('SISMEMBER', KEYS[2], ARGV[1]) == 1 then return 0 end
+    redis.call('SADD', KEYS[2], ARGV[1])
+    redis.call('EXPIRE', KEYS[2], ARGV[3])
+    local v = redis.call('INCRBY', KEYS[1], ARGV[2])
+    redis.call('EXPIRE', KEYS[1], ARGV[3])
+    return v
+  `;
+
   async invalidateCache(storeId: number): Promise<void> {
     await this.resolver.invalidate(storeId);
+  }
+
+  /**
+   * Read-only snapshot of the dunning state for the given store, intended for
+   * the dunning board UI. Computes deadlines from `current_period_end` plus
+   * the plan's grace/suspension/cancellation offsets without mutating any
+   * row (the state engine cron / event listener handle transitions). Returns
+   * a flat shape consumed by the frontend `dunning-board.component`.
+   *
+   * For active/trial subscriptions (no dunning active) returns empty
+   * deadlines + zero amounts so the frontend can use this endpoint as a
+   * single source of truth without 404 branching.
+   */
+  async getDunningStateForCurrentStore(
+    storeId: number,
+  ): Promise<DunningStateResponse> {
+    if (!Number.isInteger(storeId) || storeId <= 0) {
+      throw new InternalServerErrorException('Invalid storeId');
+    }
+
+    const sub = await this.prisma.store_subscriptions.findUnique({
+      where: { store_id: storeId },
+      include: {
+        plan: {
+          select: {
+            grace_period_soft_days: true,
+            grace_period_hard_days: true,
+            suspension_day: true,
+            cancellation_day: true,
+            ai_feature_flags: true,
+            feature_matrix: true,
+          },
+        },
+      },
+    });
+
+    if (!sub) {
+      return {
+        state: 'none',
+        deadlines: {
+          grace_hard_at: null,
+          suspend_at: null,
+          cancel_at: null,
+        },
+        invoices_overdue: [],
+        total_due: 0,
+        features_lost: [],
+        features_kept: [],
+        payment_method_invalid: false,
+      };
+    }
+
+    const state = sub.state;
+    const isDunningState =
+      state === 'grace_soft' ||
+      state === 'grace_hard' ||
+      state === 'suspended' ||
+      state === 'blocked';
+
+    // Deadlines derived from plan + current_period_end. Same offsets the
+    // SubscriptionStateService uses to drive transitions.
+    const deadlines = this.computeDunningDeadlines(
+      sub.current_period_end,
+      sub.plan,
+    );
+
+    // Outstanding invoices: any invoice not paid/void with state in
+    // ('issued','overdue'). When subscription is in dunning we report total
+    // due; when active/trial we still report any overdue but normally none
+    // exist.
+    const invoicesRaw = await this.prisma.subscription_invoices.findMany({
+      where: {
+        store_subscription_id: sub.id,
+        state: { in: ['issued', 'overdue', 'partially_paid'] },
+      },
+      orderBy: { issued_at: 'asc' },
+      select: {
+        id: true,
+        invoice_number: true,
+        total: true,
+        amount_paid: true,
+        issued_at: true,
+        period_start: true,
+        period_end: true,
+      },
+    });
+
+    const invoices_overdue: DunningOverdueInvoice[] = invoicesRaw.map((inv) => {
+      const total = this.toNumber(inv.total);
+      const paid = this.toNumber(inv.amount_paid);
+      const due = Math.max(0, total - paid);
+      return {
+        id: inv.id,
+        invoice_number: inv.invoice_number,
+        amount_due: due,
+        issued_at: inv.issued_at ? inv.issued_at.toISOString() : null,
+        period_start: inv.period_start ? inv.period_start.toISOString() : null,
+        period_end: inv.period_end ? inv.period_end.toISOString() : null,
+      };
+    });
+
+    const total_due = invoices_overdue.reduce((acc, i) => acc + i.amount_due, 0);
+
+    // features_lost / features_kept: compute degradation impact for the
+    // current state. We resolve via the cached resolver and then partition
+    // the AI feature keys into kept vs lost based on stateToMode().
+    let resolved: ResolvedSubscription;
+    try {
+      resolved = await this.resolver.resolveSubscription(storeId);
+    } catch {
+      resolved = {
+        found: false,
+        storeId,
+        state,
+        planId: null,
+        planCode: '',
+        partnerOrgId: null,
+        overlayActive: false,
+        overlayExpiresAt: null,
+        features: {},
+        gracePeriodSoftDays: 0,
+        gracePeriodHardDays: 0,
+        currentPeriodEnd: null,
+      };
+    }
+
+    const features_lost: string[] = [];
+    const features_kept: string[] = [];
+
+    if (isDunningState) {
+      for (const key of AI_FEATURE_KEYS) {
+        const cfg = resolved.features[key];
+        if (!cfg || cfg.enabled === false) continue;
+        const mode = this.stateToMode(state, cfg);
+        if (mode.mode === 'block') {
+          features_lost.push(key);
+        } else {
+          features_kept.push(key);
+        }
+      }
+    } else {
+      // Active/trial: list every enabled AI feature as kept, lost stays empty.
+      for (const key of AI_FEATURE_KEYS) {
+        const cfg = resolved.features[key];
+        if (cfg && cfg.enabled !== false) features_kept.push(key);
+      }
+    }
+
+    // S2.2 — flag whether the store has a usable default payment method. The
+    // frontend uses this to surface "Actualizar método de pago" instead of
+    // (or alongside) "Pagar ahora" while in a grace_* window.
+    let payment_method_invalid = false;
+    try {
+      const activeCount = await this.prisma
+        .subscription_payment_methods.count({
+          where: { store_id: storeId, state: 'active' },
+        });
+      if (activeCount === 0) {
+        payment_method_invalid = true;
+      } else {
+        const activeDefault = await this.prisma
+          .subscription_payment_methods.findFirst({
+            where: {
+              store_id: storeId,
+              state: 'active',
+              is_default: true,
+            },
+            select: { id: true },
+          });
+        if (!activeDefault) {
+          payment_method_invalid = true;
+        }
+      }
+    } catch (err) {
+      this.logger.warn(
+        `payment_method_invalid lookup failed for store=${storeId}: ${(err as Error).message}`,
+      );
+    }
+
+    return {
+      state,
+      deadlines: isDunningState
+        ? deadlines
+        : { grace_hard_at: null, suspend_at: null, cancel_at: null },
+      invoices_overdue,
+      total_due,
+      features_lost,
+      features_kept,
+      payment_method_invalid,
+    };
+  }
+
+  private computeDunningDeadlines(
+    periodEnd: Date | null,
+    plan: {
+      grace_period_soft_days: number;
+      grace_period_hard_days: number;
+      suspension_day: number;
+      cancellation_day: number;
+    } | null,
+  ): {
+    grace_hard_at: string | null;
+    suspend_at: string | null;
+    cancel_at: string | null;
+  } {
+    if (!periodEnd || !plan) {
+      return { grace_hard_at: null, suspend_at: null, cancel_at: null };
+    }
+    const DAY = 24 * 60 * 60 * 1000;
+    const base = new Date(periodEnd).getTime();
+    return {
+      grace_hard_at: new Date(
+        base + plan.grace_period_hard_days * DAY,
+      ).toISOString(),
+      suspend_at: new Date(base + plan.suspension_day * DAY).toISOString(),
+      cancel_at: new Date(base + plan.cancellation_day * DAY).toISOString(),
+    };
+  }
+
+  private toNumber(value: unknown): number {
+    if (value == null) return 0;
+    if (typeof value === 'number') return value;
+    if (typeof value === 'string') {
+      const n = parseFloat(value);
+      return Number.isFinite(n) ? n : 0;
+    }
+    // Prisma.Decimal exposes toNumber()
+    if (typeof (value as any).toNumber === 'function') {
+      try {
+        return (value as any).toNumber();
+      } catch {
+        return 0;
+      }
+    }
+    return 0;
   }
 
   async getQuotaUsed(key: string): Promise<number> {
@@ -366,6 +705,20 @@ export class SubscriptionAccessService {
     return `ai:quota:${storeId}:${feature}:${periodKey}`;
   }
 
+  /**
+   * Period-scoped dedup set key. Lives alongside the counter and shares its
+   * lifetime — when the period rolls over, both keys are abandoned and Redis
+   * reaps them via TTL. Using a SET (not per-request key) keeps the surface
+   * compact: one key per (storeId, feature, period) regardless of request volume.
+   */
+  private dedupSetKey(
+    storeId: number,
+    feature: AIFeatureKey,
+    periodKey: string,
+  ): string {
+    return `ai:quota:dedup:${storeId}:${feature}:${periodKey}`;
+  }
+
   private periodKey(period: 'daily' | 'monthly'): string {
     const now = new Date();
     const y = now.getUTCFullYear();
@@ -397,6 +750,8 @@ export class SubscriptionAccessService {
       severity,
       reason,
       subscription_state: state,
+      plan_id: null,
+      has_record: false,
     };
   }
 
@@ -416,6 +771,8 @@ export class SubscriptionAccessService {
         severity: 'blocker',
         reason: 'SUBSCRIPTION_INTERNAL_ERROR',
         subscription_state: 'draft',
+        plan_id: null,
+        has_record: false,
       };
     }
     return {
@@ -423,6 +780,8 @@ export class SubscriptionAccessService {
       mode: 'allow',
       severity: 'info',
       subscription_state: 'draft',
+      plan_id: null,
+      has_record: false,
     };
   }
 }

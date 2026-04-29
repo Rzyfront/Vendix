@@ -4,7 +4,10 @@
  */
 import { DatePreset, Granularity } from '../dto/analytics-query.dto';
 
-export function formatPeriodFromDate(date: Date, granularity: Granularity): string {
+export function formatPeriodFromDate(
+  date: Date,
+  granularity: Granularity,
+): string {
   const y = date.getUTCFullYear();
   const m = String(date.getUTCMonth() + 1).padStart(2, '0');
   const d = String(date.getUTCDate()).padStart(2, '0');
@@ -40,7 +43,9 @@ export function parseDateRange(query: {
   }
 
   const now = new Date();
-  const today = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+  const today = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
 
   switch (query.date_preset) {
     case DatePreset.TODAY:
@@ -57,18 +62,27 @@ export function parseDateRange(query: {
     }
     case DatePreset.LAST_WEEK: {
       const lastWeekEnd = new Date(today);
-      lastWeekEnd.setUTCDate(lastWeekEnd.getUTCDate() - lastWeekEnd.getUTCDay());
+      lastWeekEnd.setUTCDate(
+        lastWeekEnd.getUTCDate() - lastWeekEnd.getUTCDay(),
+      );
       const lastWeekStart = new Date(lastWeekEnd);
       lastWeekStart.setUTCDate(lastWeekStart.getUTCDate() - 7);
       return { startDate: lastWeekStart, endDate: lastWeekEnd };
     }
     case DatePreset.LAST_MONTH: {
-      const lastMonthEnd = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 0));
-      const lastMonthStart = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 1, 1));
+      const lastMonthEnd = new Date(
+        Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 0),
+      );
+      const lastMonthStart = new Date(
+        Date.UTC(today.getUTCFullYear(), today.getUTCMonth() - 1, 1),
+      );
       return { startDate: lastMonthStart, endDate: lastMonthEnd };
     }
     case DatePreset.THIS_YEAR:
-      return { startDate: new Date(Date.UTC(today.getUTCFullYear(), 0, 1)), endDate: now };
+      return {
+        startDate: new Date(Date.UTC(today.getUTCFullYear(), 0, 1)),
+        endDate: now,
+      };
     case DatePreset.LAST_YEAR:
       return {
         startDate: new Date(Date.UTC(today.getUTCFullYear() - 1, 0, 1)),
@@ -77,7 +91,9 @@ export function parseDateRange(query: {
     case DatePreset.THIS_MONTH:
     default:
       return {
-        startDate: new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1)),
+        startDate: new Date(
+          Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1),
+        ),
         endDate: now,
       };
   }

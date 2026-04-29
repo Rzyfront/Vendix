@@ -25,7 +25,8 @@ export class WalletBalanceService {
         where: { id: walletId },
       });
       if (!wallet) throw new BadRequestException('Wallet not found');
-      if (!wallet.is_active) throw new BadRequestException('Wallet is inactive');
+      if (!wallet.is_active)
+        throw new BadRequestException('Wallet is inactive');
 
       const balance_before = Number(wallet.balance);
       const balance_after = balance_before + amount;
@@ -75,7 +76,8 @@ export class WalletBalanceService {
         where: { id: walletId },
       });
       if (!wallet) throw new BadRequestException('Wallet not found');
-      if (!wallet.is_active) throw new BadRequestException('Wallet is inactive');
+      if (!wallet.is_active)
+        throw new BadRequestException('Wallet is inactive');
 
       const balance_before = Number(wallet.balance);
       const available = balance_before - Number(wallet.held_balance);

@@ -16,7 +16,9 @@ export class SubscriptionReminderDispatchJob {
   @Cron('0 * * * *')
   async handleReminderDispatch(): Promise<void> {
     if (this.isRunning) {
-      this.logger.warn('Subscription reminder dispatch already running, skipping');
+      this.logger.warn(
+        'Subscription reminder dispatch already running, skipping',
+      );
       return;
     }
 

@@ -1,4 +1,4 @@
-import { Component, OnInit, inject, computed } from '@angular/core';
+import { Component, OnInit, inject, computed, signal } from '@angular/core';
 import { DatePipe, CurrencyPipe, DecimalPipe } from '@angular/common';
 import { Router } from '@angular/router';
 import {
@@ -11,6 +11,10 @@ import {
   ToastService,
 } from '../../../../../../shared/components/index';
 import { SubscriptionFacade } from '../../../../../../core/store/subscription/subscription.facade';
+import {
+  CancellationFlowModalComponent,
+  CancellationConfirmedPayload,
+} from '../../components/cancellation-flow-modal/cancellation-flow-modal.component';
 
 @Component({
   selector: 'app-my-subscription',
@@ -20,6 +24,7 @@ import { SubscriptionFacade } from '../../../../../../core/store/subscription/su
     IconComponent,
     EmptyStateComponent,
     StickyHeaderComponent,
+    CancellationFlowModalComponent,
     DatePipe,
     CurrencyPipe,
     DecimalPipe,
@@ -34,7 +39,7 @@ import { SubscriptionFacade } from '../../../../../../core/store/subscription/su
         variant="glass"
         [badgeText]="badgeLabel()"
         [badgeColor]="badgeColor()"
-        [badgePulse]="isTrial() || status() === 'past_due'"
+        [badgePulse]="needsAttention()"
         [actions]="headerActions()"
         (actionClicked)="onHeaderAction($event)"
       ></app-sticky-header>
@@ -58,7 +63,7 @@ import { SubscriptionFacade } from '../../../../../../core/store/subscription/su
           <!-- Hero Card -->
           <div
             class="relative overflow-hidden rounded-2xl shadow-xl text-white p-6 md:p-8"
-            [style.background]="isTrial() ? trialGradient : activeGradient"
+            [style.background]="heroGradient()"
           >
             <!-- Decorative pattern -->
             <div class="absolute inset-0 opacity-10 pointer-events-none">
@@ -77,7 +82,7 @@ import { SubscriptionFacade } from '../../../../../../core/store/subscription/su
                 <!-- Plan avatar -->
                 <div class="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur border border-white/30 flex items-center justify-center shrink-0">
                   <app-icon
-                    [name]="isTrial() ? 'hourglass' : 'sparkles'"
+                    [name]="isTerminal() ? 'alert-octagon' : (isTrial() ? 'hourglass' : 'sparkles')"
                     [size]="28"
                     class="text-white"
                   ></app-icon>
@@ -106,13 +111,27 @@ import { SubscriptionFacade } from '../../../../../../core/store/subscription/su
                 <span class="text-base text-white/80 font-medium">/{{ cycleSuffix() }}</span>
               </div>
 
+              <!-- Scheduled cancellation notice — shown when the user
+                   triggered "cancel at end of cycle" but the period has not
+                   ended yet, so the plan is technically still active. -->
+              @if (scheduledCancelAt(); as cancelAt) {
+                <div class="flex items-start gap-2 bg-amber-400/20 backdrop-blur border border-amber-200/40 rounded-lg px-3 py-2">
+                  <app-icon name="alert-triangle" [size]="16" class="text-amber-100 mt-0.5 shrink-0"></app-icon>
+                  <span class="text-xs text-amber-50 leading-relaxed">
+                    Cancelación programada para
+                    <span class="font-bold">{{ cancelAt | date:'mediumDate' }}</span>.
+                    Tu plan seguirá activo hasta esa fecha.
+                  </span>
+                </div>
+              }
+
               <!-- Metadata chips -->
               <div class="flex flex-wrap gap-2 pt-3 border-t border-white/20">
-                @if (current()?.next_billing_at; as next) {
+                @if (current()?.next_billing_at && !scheduledCancelAt()) {
                   <div class="inline-flex items-center gap-2 bg-white/10 backdrop-blur px-3 py-1.5 rounded-lg border border-white/20">
                     <app-icon name="calendar" [size]="14" class="text-white/90"></app-icon>
                     <span class="text-xs text-white/90">
-                      Próximo cobro: <span class="font-semibold">{{ next | date:'mediumDate' }}</span>
+                      Próximo cobro: <span class="font-semibold">{{ current()?.next_billing_at | date:'mediumDate' }}</span>
                     </span>
                   </div>
                 }
@@ -329,6 +348,16 @@ import { SubscriptionFacade } from '../../../../../../core/store/subscription/su
           ></app-empty-state>
         }
       </div>
+
+      <!-- Cancellation flow modal (wizard 3 pasos) -->
+      <app-cancellation-flow-modal
+        [(isOpen)]="cancelModalOpen"
+        [planName]="planName()"
+        [currentPeriodEnd]="cancellationPeriodEnd()"
+        [loading]="loading()"
+        (confirmed)="onCancellationConfirmed($event)"
+        (closed)="onCancellationModalClosed()"
+      ></app-cancellation-flow-modal>
     </div>
   `,
 })
@@ -348,6 +377,32 @@ export class MySubscriptionComponent implements OnInit {
     'linear-gradient(135deg, #7ED7A5 0%, #2F6F4E 60%, #1f4f37 100%)';
   readonly trialGradient =
     'linear-gradient(135deg, #fbbf24 0%, #d97706 60%, #92400e 100%)';
+  // Red gradient for terminal states (cancelled / expired) — signals to the
+  // user that the subscription is no longer providing access.
+  readonly cancelledGradient =
+    'linear-gradient(135deg, #f87171 0%, #b91c1c 60%, #7f1d1d 100%)';
+
+  readonly isTerminal = computed(() => {
+    const s = this.status();
+    return s === 'cancelled' || s === 'expired';
+  });
+
+  // Surfaces backend's `scheduled_cancel_at` so the user retains a persistent
+  // visual reminder that they triggered an end-of-cycle cancel — the toast
+  // only flashes once. Only relevant while the plan is still in a non-terminal
+  // state (active/trial); after the actual cancel happens the banner takes over.
+  readonly scheduledCancelAt = computed<string | null>(() => {
+    const sub: any = this.current();
+    if (!sub) return null;
+    if (this.isTerminal()) return null;
+    return sub.scheduled_cancel_at ?? null;
+  });
+
+  readonly heroGradient = computed(() => {
+    if (this.isTerminal()) return this.cancelledGradient;
+    if (this.isTrial()) return this.trialGradient;
+    return this.activeGradient;
+  });
 
   readonly planName = computed(() => {
     const sub: any = this.current();
@@ -453,12 +508,35 @@ export class MySubscriptionComponent implements OnInit {
     return this.getStatusLabel();
   });
 
+  readonly needsAttention = computed(() => {
+    const s = this.status();
+    return (
+      this.isTrial() ||
+      s === 'past_due' ||
+      s === 'pending_payment' ||
+      s === 'grace_soft' ||
+      s === 'grace_hard'
+    );
+  });
+
   readonly badgeColor = computed<StickyHeaderBadgeColor>(() => {
     const s = this.status();
     if (s === 'active') return 'green';
     if (s === 'trial' || s === 'trialing') return 'yellow';
-    if (s === 'past_due' || s === 'grace_soft' || s === 'grace_hard') return 'yellow';
-    if (s === 'cancelled' || s === 'expired' || s === 'blocked') return 'red';
+    if (
+      s === 'past_due' ||
+      s === 'pending_payment' ||
+      s === 'grace_soft' ||
+      s === 'grace_hard'
+    )
+      return 'yellow';
+    if (
+      s === 'cancelled' ||
+      s === 'expired' ||
+      s === 'blocked' ||
+      s === 'suspended'
+    )
+      return 'red';
     return 'gray';
   });
 
@@ -468,6 +546,21 @@ export class MySubscriptionComponent implements OnInit {
         { id: 'plans', label: 'Ver Planes', variant: 'primary', icon: 'arrow-right' },
       ];
     }
+    const status = this.status();
+    const isTerminal = status === 'cancelled' || status === 'expired';
+
+    // Terminal lifecycle: only allow re-subscribing + reading audit trail.
+    // Hide "Cancelar" (already cancelled) and "Cambiar Plan" (proration on a
+    // dead subscription is meaningless — checkout treats it as a fresh
+    // purchase via Path D).
+    if (isTerminal) {
+      return [
+        { id: 'history', label: 'Facturas', variant: 'outline', icon: 'file-text' },
+        { id: 'timeline', label: 'Historial', variant: 'outline', icon: 'history' },
+        { id: 'plans', label: 'Reactivar suscripción', variant: 'primary', icon: 'refresh-cw' },
+      ];
+    }
+
     const list: StickyHeaderActionButton[] = [];
     if (this.isActive()) {
       list.push({
@@ -478,11 +571,21 @@ export class MySubscriptionComponent implements OnInit {
       });
     }
     list.push(
-      { id: 'history', label: 'Ver Historial', variant: 'outline', icon: 'file-text' },
+      { id: 'history', label: 'Facturas', variant: 'outline', icon: 'file-text' },
+      { id: 'timeline', label: 'Historial', variant: 'outline', icon: 'history' },
       { id: 'change', label: 'Cambiar Plan', variant: 'primary', icon: 'refresh-cw' },
     );
     return list;
   });
+
+  // ─── Cancel confirmation modal (wizard) ────────────────────────────────────
+
+  readonly cancelModalOpen = signal(false);
+
+  /** Fecha de fin del periodo actual, expuesta al wizard de cancelación. */
+  readonly cancellationPeriodEnd = computed(
+    () => this.current()?.current_period_end ?? this.current()?.next_billing_at ?? null,
+  );
 
   ngOnInit(): void {
     this.facade.loadCurrent();
@@ -503,6 +606,9 @@ export class MySubscriptionComponent implements OnInit {
       case 'history':
         this.goToHistory();
         break;
+      case 'timeline':
+        this.goToTimeline();
+        break;
       case 'cancel':
         this.cancelSubscription();
         break;
@@ -517,23 +623,44 @@ export class MySubscriptionComponent implements OnInit {
     this.router.navigate(['/admin/subscription/history']);
   }
 
+  goToTimeline(): void {
+    this.router.navigate(['/admin/subscription/timeline']);
+  }
+
   cancelSubscription(): void {
-    this.facade.cancel();
-    this.toastService.success('Suscripción cancelada');
+    this.cancelModalOpen.set(true);
+  }
+
+  onCancellationModalClosed(): void {
+    this.cancelModalOpen.set(false);
+  }
+
+  onCancellationConfirmed(payload: CancellationConfirmedPayload): void {
+    if (payload.immediate) {
+      this.facade.cancel(payload.reason);
+      this.toastService.success('Suscripción cancelada');
+    } else {
+      this.facade.scheduleCancel(payload.reason);
+      this.toastService.success('Cancelación programada al final del ciclo');
+    }
+    this.cancelModalOpen.set(false);
   }
 
   getStatusLabel(): string {
     const labels: Record<string, string> = {
       active: 'Activa',
       trialing: 'En Prueba',
+      trial: 'En Prueba',
       past_due: 'Vencida',
+      pending_payment: 'Pago Pendiente',
       cancelled: 'Cancelada',
       expired: 'Expirada',
       blocked: 'Bloqueada',
+      suspended: 'Suspendida',
       grace_soft: 'En Gracia',
       grace_hard: 'Gracia Final',
+      draft: 'Borrador',
       none: 'Sin Plan',
-      trial: 'En Prueba',
     };
     return labels[this.status()] || this.status();
   }

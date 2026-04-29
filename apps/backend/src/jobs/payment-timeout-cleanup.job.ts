@@ -74,13 +74,15 @@ export class PaymentTimeoutCleanupJob {
     try {
       const now = new Date();
 
-      const expiredReservations = await this.prisma.stock_reservations.findMany({
-        where: {
-          status: 'active',
-          expires_at: { lt: now },
+      const expiredReservations = await this.prisma.stock_reservations.findMany(
+        {
+          where: {
+            status: 'active',
+            expires_at: { lt: now },
+          },
+          take: 100,
         },
-        take: 100,
-      });
+      );
 
       if (expiredReservations.length === 0) {
         this.logger.debug('No expired reservations found');
@@ -115,9 +117,7 @@ export class PaymentTimeoutCleanupJob {
         });
       }
     } catch (error) {
-      this.logger.error(
-        `Expired reservation cleanup failed: ${error.message}`,
-      );
+      this.logger.error(`Expired reservation cleanup failed: ${error.message}`);
     }
   }
 
@@ -202,15 +202,13 @@ export class PaymentTimeoutCleanupJob {
    * Expire a single reservation and restore its stock level within a transaction.
    * Mirrors the pattern from InventoryIntegrationService.cleanupExpiredReservations.
    */
-  private async expireReservation(
-    reservation: {
-      id: number;
-      product_id: number;
-      product_variant_id: number | null;
-      location_id: number;
-      quantity: number;
-    },
-  ) {
+  private async expireReservation(reservation: {
+    id: number;
+    product_id: number;
+    product_variant_id: number | null;
+    location_id: number;
+    quantity: number;
+  }) {
     await this.prisma.$transaction(async (tx) => {
       await tx.stock_reservations.update({
         where: { id: reservation.id },

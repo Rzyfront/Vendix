@@ -26,9 +26,7 @@ export class PromotionalActivationJob {
       await this.processExpiredPromos();
       await this.processActivePromos();
     } catch (error) {
-      this.logger.error(
-        `Promotional activation failed: ${error.message}`,
-      );
+      this.logger.error(`Promotional activation failed: ${error.message}`);
     } finally {
       this.isRunning = false;
     }
@@ -111,7 +109,10 @@ export class PromotionalActivationJob {
         if (!rules) continue;
         if (rules.ends_at && new Date(rules.ends_at) < now) continue;
 
-        const eligibleStoreIds = await this.resolveEligibleStores(plan.id, rules);
+        const eligibleStoreIds = await this.resolveEligibleStores(
+          plan.id,
+          rules,
+        );
 
         if (eligibleStoreIds.length === 0) continue;
 

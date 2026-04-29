@@ -6,10 +6,7 @@ import { DianDirectModule } from './dian-direct/dian-direct.module';
 
 @Module({
   imports: [PrismaModule, DianDirectModule],
-  providers: [
-    MockInvoiceProvider,
-    InvoiceProviderResolver,
-  ],
+  providers: [MockInvoiceProvider, InvoiceProviderResolver],
   exports: [InvoiceProviderResolver, MockInvoiceProvider],
 })
 export class InvoiceProviderModule {}

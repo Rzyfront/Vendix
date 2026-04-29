@@ -109,4 +109,24 @@ export const OrderService = {
     const endpoint = Endpoints.STORE.ORDERS.DELETE.replace(':id', String(orderId));
     await apiClient.delete(endpoint);
   },
+
+  async create(dto: {
+    customer_id?: string;
+    items: Array<{
+      product_id: string;
+      variant_id?: string;
+      quantity: number;
+      unit_price: number;
+      tax_amount: number;
+    }>;
+    notes?: string;
+    subtotal: number;
+    tax_amount: number;
+    discount_amount: number;
+    total: number;
+    payment_method_id?: string;
+  }): Promise<Order> {
+    const res = await apiClient.post(Endpoints.STORE.ORDERS.CREATE, dto);
+    return unwrap<Order>(res);
+  },
 };

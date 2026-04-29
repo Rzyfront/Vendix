@@ -14,7 +14,12 @@ import {
   HttpStatus,
 } from '@nestjs/common';
 import { OrdersService } from './orders.service';
-import { CreateOrderDto, UpdateOrderDto, OrderQueryDto, UpdateOrderItemsDto } from './dto';
+import {
+  CreateOrderDto,
+  UpdateOrderDto,
+  OrderQueryDto,
+  UpdateOrderItemsDto,
+} from './dto';
 import { AssignShippingMethodDto } from './dto';
 import { PermissionsGuard } from '../../auth/guards/permissions.guard';
 import { Permissions } from '../../auth/decorators/permissions.decorator';
@@ -117,7 +122,8 @@ export class OrdersController {
           },
         });
         items = cartItems.map((ci: any) => ({
-          preparation_time_minutes: ci.product?.preparation_time_minutes ?? null,
+          preparation_time_minutes:
+            ci.product?.preparation_time_minutes ?? null,
         }));
       }
 

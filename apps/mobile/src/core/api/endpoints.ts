@@ -1,4 +1,4 @@
-export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'http://10.163.174.41:3000/api';
+export const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL || 'https://api.vendix.online/api';
 
 export const Endpoints = {
   AUTH: {
@@ -62,12 +62,20 @@ export const Endpoints = {
       SALES_TRENDS: '/store/analytics/sales/trends',
       SALES_BY_CHANNEL: '/store/analytics/sales/by-channel',
       INVENTORY_SUMMARY: '/store/analytics/inventory/summary',
+      OVERVIEW: '/store/analytics/overview',
+      SALES: '/store/analytics/sales',
+      INVENTORY: '/store/analytics/inventory',
+      FINANCIAL: '/store/analytics/financial',
     },
     CUSTOMERS: {
       LIST: '/store/customers',
       GET: '/store/customers/:id',
       CREATE: '/store/customers',
+      UPDATE: '/store/customers/:id',
+      DELETE: '/store/customers/:id',
       SEARCH: '/store/customers/search',
+      STATS: '/store/customers/stats',
+      TOPUP: '/store/customers/:id/topup',
     },
     CATEGORIES: {
       LIST: '/store/categories',
@@ -88,11 +96,84 @@ export const Endpoints = {
       LIST: '/store/cash-registers',
       SESSIONS: '/store/cash-registers/sessions',
     },
+    INVOICES: {
+      LIST: '/store/invoices',
+      GET: '/store/invoices/:id',
+      CREATE: '/store/invoices',
+      STATS: '/store/invoices/stats',
+      SEND: '/store/invoices/:id/send',
+      VOID: '/store/invoices/:id/void',
+      RESOLUTIONS: '/store/invoices/resolutions',
+      CREATE_RESOLUTION: '/store/invoices/resolutions',
+      DIAN_CONFIG: '/store/invoices/dian-config',
+    },
     STORES: {
       LIST: '/store/stores',
       GET: '/store/stores/:id',
       STATS: '/store/stores/stats',
       SETTINGS: '/store/stores/:id/settings',
+    },
+    SETTINGS: {
+      GET: '/store/settings',
+      UPDATE: '/store/settings',
+      USERS_LIST: '/store/settings/users',
+      USER_CREATE: '/store/settings/users',
+      USER_UPDATE: '/store/settings/users/:id',
+      USER_TOGGLE_STATE: '/store/settings/users/:id/state',
+      ROLES_LIST: '/store/settings/roles',
+      ROLE_CREATE: '/store/settings/roles',
+      ROLE_UPDATE: '/store/settings/roles/:id',
+      ROLE_DELETE: '/store/settings/roles/:id',
+    },
+    INVENTORY: {
+      STATS: '/store/inventory/stats',
+      ADJUSTMENTS: {
+        LIST: '/store/inventory/adjustments',
+        CREATE: '/store/inventory/adjustments',
+      },
+      TRANSFERS: {
+        LIST: '/store/inventory/transfers',
+        CREATE: '/store/inventory/transfers',
+      },
+      MOVEMENTS: {
+        LIST: '/store/inventory/movements',
+      },
+      SUPPLIERS: {
+        LIST: '/store/suppliers',
+        CREATE: '/store/suppliers',
+        UPDATE: '/store/suppliers/:id',
+        DELETE: '/store/suppliers/:id',
+      },
+      LOCATIONS: {
+        LIST: '/store/locations',
+        CREATE: '/store/locations',
+        UPDATE: '/store/locations/:id',
+      },
+    },
+    ACCOUNTING: {
+      ACCOUNTS: {
+        LIST: '/store/accounting/accounts',
+        CREATE: '/store/accounting/accounts',
+        UPDATE: '/store/accounting/accounts/:id',
+        DELETE: '/store/accounting/accounts/:id',
+      },
+      JOURNAL_ENTRIES: {
+        LIST: '/store/accounting/journal-entries',
+        GET: '/store/accounting/journal-entries/:id',
+        CREATE: '/store/accounting/journal-entries',
+      },
+      FISCAL_PERIODS: {
+        LIST: '/store/accounting/fiscal-periods',
+        CREATE: '/store/accounting/fiscal-periods',
+      },
+      RECEIVABLES: {
+        LIST: '/store/accounting/receivables',
+        PAY: '/store/accounting/receivables/:id/pay',
+      },
+      PAYABLES: {
+        LIST: '/store/accounting/payables',
+        PAY: '/store/accounting/payables/:id/pay',
+      },
     },
   },
 } as const;

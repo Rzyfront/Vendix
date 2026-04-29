@@ -9,7 +9,10 @@ import {
   MaxLength,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { CreateInvoiceItemDto, CreateInvoiceTaxDto } from '../../dto/create-invoice.dto';
+import {
+  CreateInvoiceItemDto,
+  CreateInvoiceTaxDto,
+} from '../../dto/create-invoice.dto';
 
 export class CreateCreditNoteDto {
   @IsNumber()

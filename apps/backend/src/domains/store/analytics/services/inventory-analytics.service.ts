@@ -7,7 +7,11 @@ import {
   Granularity,
 } from '../dto/analytics-query.dto';
 import { fillTimeSeries } from '../utils/fill-time-series.util';
-import { formatPeriodFromDate, parseDateRange, getDateTruncInterval } from '../utils/date.util';
+import {
+  formatPeriodFromDate,
+  parseDateRange,
+  getDateTruncInterval,
+} from '../utils/date.util';
 import { VendixHttpException, ErrorCodes } from 'src/common/errors';
 
 @Injectable()
@@ -125,7 +129,7 @@ export class InventoryAnalyticsService {
         product_id: product.id,
         product_name: product.name,
         sku: product.sku,
-        image_url: (product as any).product_images?.[0]?.image_url || null,
+        image_url: product.product_images?.[0]?.image_url || null,
         quantity_on_hand: qty,
         quantity_reserved: 0, // TODO: Calculate from stock_reservations
         quantity_available: qty,
@@ -206,7 +210,7 @@ export class InventoryAnalyticsService {
           product_id: product.id,
           product_name: product.name,
           sku: product.sku,
-          image_url: (product as any).product_images?.[0]?.image_url || null,
+          image_url: product.product_images?.[0]?.image_url || null,
           quantity_available: qty,
           reorder_point: reorderPoint,
           days_of_stock: null, // TODO: Calculate from sales velocity
@@ -579,5 +583,4 @@ export class InventoryAnalyticsService {
       Razón: m.reason || '-',
     }));
   }
-
 }

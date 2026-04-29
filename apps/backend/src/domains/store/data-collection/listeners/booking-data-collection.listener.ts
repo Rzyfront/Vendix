@@ -25,7 +25,12 @@ export class BookingDataCollectionListener {
       // Load product to check consultation config
       const product = await this.prisma.withoutScope().products.findUnique({
         where: { id: event.product_id },
-        select: { is_consultation: true, send_preconsultation: true, consultation_template_id: true, preconsultation_template_id: true },
+        select: {
+          is_consultation: true,
+          send_preconsultation: true,
+          consultation_template_id: true,
+          preconsultation_template_id: true,
+        },
       });
 
       let templateId: number | null = null;
@@ -33,15 +38,21 @@ export class BookingDataCollectionListener {
       if (product?.is_consultation && product.preconsultation_template_id) {
         // Consultation product: use preconsultation template for patient form
         if (!product.send_preconsultation) {
-          this.logger.debug(`Product ${event.product_id} is consultation but send_preconsultation is disabled`);
+          this.logger.debug(
+            `Product ${event.product_id} is consultation but send_preconsultation is disabled`,
+          );
           return;
         }
         templateId = product.preconsultation_template_id;
       } else {
         // Non-consultation: fall back to junction table lookup
-        const template = await this.templatesService.getTemplateForProduct(event.product_id);
+        const template = await this.templatesService.getTemplateForProduct(
+          event.product_id,
+        );
         if (!template) {
-          this.logger.debug(`No data collection template found for product ${event.product_id}`);
+          this.logger.debug(
+            `No data collection template found for product ${event.product_id}`,
+          );
           return;
         }
         templateId = template.id;
@@ -57,7 +68,9 @@ export class BookingDataCollectionListener {
         `Auto-created submission ${submission.id} for booking ${event.booking_id} (template ${templateId})`,
       );
     } catch (error) {
-      this.logger.error(`Failed to auto-create submission for booking ${event.booking_id}: ${error.message}`);
+      this.logger.error(
+        `Failed to auto-create submission for booking ${event.booking_id}: ${error.message}`,
+      );
     }
   }
 }

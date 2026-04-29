@@ -10,6 +10,8 @@ import { SubscriptionFacade } from '../store/subscription';
  * emits a matching `VendixHttpException`.
  */
 export type PaywallCode =
+  | 'SUBSCRIPTION_002_PENDING'
+  | 'SUBSCRIPTION_002_NO_RECORD'
   | 'SUBSCRIPTION_004'
   | 'SUBSCRIPTION_005'
   | 'SUBSCRIPTION_006'
@@ -17,6 +19,18 @@ export type PaywallCode =
   | 'SUBSCRIPTION_009'
   | 'PLAN_001'
   | 'TRIAL_001';
+
+/**
+ * Optional payload that the backend appends to subscription gate exceptions
+ * via the `details` field. Used to derive synthetic variant keys (e.g. split
+ * `SUBSCRIPTION_002` into PENDING vs NO_RECORD) and to resolve dynamic CTA
+ * routes (e.g. resume a pending checkout for a specific plan).
+ */
+export interface PaywallDetails {
+  subscription_state?: string;
+  plan_id?: number | null;
+  has_record?: boolean;
+}
 
 /**
  * Visual severity drives gradient, badge color and animation on
@@ -45,6 +59,12 @@ export interface PaywallVariant {
   ctaLabel: string;
   /** Route the primary CTA should navigate to. */
   ctaRoute: string;
+  /**
+   * Optional resolver invoked when the CTA route depends on runtime details
+   * (e.g. resuming a pending checkout for a specific plan id). When provided,
+   * takes precedence over the static `ctaRoute`.
+   */
+  ctaRouteResolver?: (details: PaywallDetails) => string;
   /** Visual tone of the modal — controls colors, badge, and animations. */
   severity?: PaywallSeverity;
   /** Functional grouping — decides icon fallback and benefits visibility. */
@@ -65,6 +85,7 @@ export interface PaywallState {
   code: PaywallCode;
   variant: PaywallVariant;
   message?: string;
+  details?: PaywallDetails;
 }
 
 /**
@@ -72,6 +93,41 @@ export interface PaywallState {
  * is rendered by `<app-ai-paywall-modal>` from this configuration.
  */
 const PAYWALL_VARIANTS: Record<PaywallCode, PaywallVariant> = {
+  SUBSCRIPTION_002_PENDING: {
+    title: 'Tu suscripción está pendiente de pago',
+    description:
+      'Iniciaste el checkout pero el pago no se completó. Retoma desde donde lo dejaste para activar tu plan.',
+    ctaLabel: 'Retomar pago',
+    ctaRoute: '/admin/subscription/plans',
+    ctaRouteResolver: (details) =>
+      details?.plan_id != null
+        ? `/admin/subscription/checkout/${details.plan_id}`
+        : '/admin/subscription/plans',
+    severity: 'warning',
+    category: 'payment-due',
+    iconName: 'credit-card',
+    badgeLabel: 'Pago pendiente',
+    benefits: [
+      'Tu carrito de plan sigue guardado',
+      'Activación inmediata al confirmar pago',
+    ],
+    secondaryCtaLabel: 'Recordarme luego',
+  },
+  SUBSCRIPTION_002_NO_RECORD: {
+    title: 'Activa Vendix para empezar',
+    description:
+      'Para crear productos y operar tu tienda, elige el plan que mejor se ajuste a tu negocio.',
+    ctaLabel: 'Ver planes',
+    ctaRoute: '/admin/subscription/plans',
+    severity: 'upsell',
+    category: 'upgrade',
+    iconName: 'crown',
+    badgeLabel: 'Activa tu plan',
+    benefits: [
+      'Prueba gratis disponible',
+      'Cancela cuando quieras',
+    ],
+  },
   SUBSCRIPTION_004: {
     title: 'Activa tu suscripción',
     description: 'Tu tienda aún no tiene un plan activo. Elige uno y desbloquea todo el potencial de Vendix.',
@@ -166,7 +222,7 @@ const PAYWALL_VARIANTS: Record<PaywallCode, PaywallVariant> = {
  *
  * - `canUseAI` / `aiBlockReason`: derived signals consumed by `MenuFilterService`
  *   and other UI gating points.
- * - `openPaywall(code, message?)`: idempotent — opening twice while a modal is
+ * - `openPaywall(code, message?, details?)`: idempotent — opening twice while a modal is
  *   already on screen is a no-op (deduped via `isOpen` signal).
  * - `paywallState` / `isPaywallOpen`: read-only signals consumed by the global
  *   `<app-ai-paywall-modal>` mounted in each admin layout.
@@ -210,18 +266,36 @@ export class SubscriptionAccessService {
    * Deduplicated — if a modal is already open, additional calls are ignored.
    * Unknown codes fall back to a generic plan variant so the user always sees
    * actionable UI.
+   *
+   * `details` is the optional payload that the backend appends to subscription
+   * gate exceptions; it lets the service derive a synthetic variant key for
+   * codes that have multiple visual flavors (e.g. `SUBSCRIPTION_002` splits
+   * into PENDING vs NO_RECORD based on `subscription_state` / `has_record`).
    */
-  openPaywall(code: string, message?: string): void {
+  openPaywall(code: string, message?: string, details?: PaywallDetails): void {
     if (this.isOpen()) {
       return;
     }
-    const knownCode = (PAYWALL_VARIANTS as Record<string, PaywallVariant>)[code]
-      ? (code as PaywallCode)
+
+    // Derive a synthetic variant key only for codes that have multiple
+    // visual flavors. Today only SUBSCRIPTION_002 splits — other codes pass
+    // through untouched.
+    let variantKey: string = code;
+    if (code === 'SUBSCRIPTION_002') {
+      variantKey =
+        details?.subscription_state === 'pending_payment'
+          ? 'SUBSCRIPTION_002_PENDING'
+          : 'SUBSCRIPTION_002_NO_RECORD';
+    }
+
+    const knownCode = (PAYWALL_VARIANTS as Record<string, PaywallVariant>)[variantKey]
+      ? (variantKey as PaywallCode)
       : 'PLAN_001';
     this.state.set({
       code: knownCode,
       variant: PAYWALL_VARIANTS[knownCode],
       message,
+      details,
     });
     this.isOpen.set(true);
   }
@@ -236,7 +310,10 @@ export class SubscriptionAccessService {
   triggerCta(): void {
     const current = this.state();
     if (current) {
-      void this.router.navigateByUrl(current.variant.ctaRoute);
+      const route = current.variant.ctaRouteResolver
+        ? current.variant.ctaRouteResolver(current.details ?? {})
+        : current.variant.ctaRoute;
+      void this.router.navigateByUrl(route);
     }
     this.closePaywall();
   }

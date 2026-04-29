@@ -100,8 +100,12 @@ export class PayrollFlowService {
     return run;
   }
 
-  private validateTransition(current_status: string, target_status: PayrollStatus): void {
-    const valid_targets = VALID_TRANSITIONS[current_status as PayrollStatus] || [];
+  private validateTransition(
+    current_status: string,
+    target_status: PayrollStatus,
+  ): void {
+    const valid_targets =
+      VALID_TRANSITIONS[current_status as PayrollStatus] || [];
     if (!valid_targets.includes(target_status)) {
       throw new VendixHttpException(
         ErrorCodes.PAYROLL_STATUS_001,
@@ -147,7 +151,9 @@ export class PayrollFlowService {
       employee_count: calculations.length,
     });
 
-    this.logger.log(`Payroll run #${id} calculated: ${calculations.length} employees`);
+    this.logger.log(
+      `Payroll run #${id} calculated: ${calculations.length} employees`,
+    );
 
     return updated;
   }
@@ -173,14 +179,19 @@ export class PayrollFlowService {
     });
 
     // Build cost center breakdown from payroll items
-    const cost_center_breakdown: Record<string, { earnings: number; employer_costs: number }> = {};
-    for (const item of (run as any).payroll_items || []) {
+    const cost_center_breakdown: Record<
+      string,
+      { earnings: number; employer_costs: number }
+    > = {};
+    for (const item of run.payroll_items || []) {
       const cc = item.employee?.cost_center || 'administrative';
       if (!cost_center_breakdown[cc]) {
         cost_center_breakdown[cc] = { earnings: 0, employer_costs: 0 };
       }
       cost_center_breakdown[cc].earnings += Number(item.total_earnings || 0);
-      cost_center_breakdown[cc].employer_costs += Number(item.total_employer_costs || 0);
+      cost_center_breakdown[cc].employer_costs += Number(
+        item.total_employer_costs || 0,
+      );
     }
 
     this.event_emitter.emit('payroll.approved', {
@@ -212,7 +223,7 @@ export class PayrollFlowService {
     this.validateTransition(run.status, 'sent');
 
     // Prepare data for provider
-    const items = (run as any).payroll_items.map((item: any) => ({
+    const items = run.payroll_items.map((item: any) => ({
       employee_id: item.employee.id,
       employee_code: item.employee.employee_code,
       document_type: item.employee.document_type,
@@ -235,7 +246,9 @@ export class PayrollFlowService {
       items,
     });
 
-    const new_status: PayrollStatus = provider_response.success ? 'sent' : 'approved';
+    const new_status: PayrollStatus = provider_response.success
+      ? 'sent'
+      : 'approved';
 
     const updated = await this.prisma.payroll_runs.update({
       where: { id },
@@ -280,7 +293,7 @@ export class PayrollFlowService {
       organization_id: run.organization_id,
       store_id: run.store_id ?? undefined,
       user_id: this.getContext().user_id,
-      payroll_items: ((run as any).payroll_items ?? []).map((item: any) => ({
+      payroll_items: (run.payroll_items ?? []).map((item: any) => ({
         payroll_item_id: item.id,
         employee_id: item.employee_id,
         cost_center: item.employee?.cost_center ?? 'administrative',
@@ -339,7 +352,7 @@ export class PayrollFlowService {
       );
     }
 
-    const payroll_items = (run as any).payroll_items || [];
+    const payroll_items = run.payroll_items || [];
 
     if (payroll_items.length === 0) {
       throw new VendixHttpException(
@@ -374,7 +387,8 @@ export class PayrollFlowService {
     });
 
     // Extract per-item results from raw_response
-    const item_results = (provider_response.raw_response?.results || []) as Array<{
+    const item_results = (provider_response.raw_response?.results ||
+      []) as Array<{
       employee_document: string;
       success: boolean;
       cune?: string;
@@ -386,7 +400,9 @@ export class PayrollFlowService {
 
     // If the run was approved and all items were sent successfully, transition to 'sent'
     const new_status: PayrollStatus =
-      run.status === 'approved' && provider_response.success ? 'sent' : (run.status as PayrollStatus);
+      run.status === 'approved' && provider_response.success
+        ? 'sent'
+        : (run.status as PayrollStatus);
 
     const updated = await this.prisma.payroll_runs.update({
       where: { id },
@@ -442,7 +458,7 @@ export class PayrollFlowService {
       );
     }
 
-    const payroll_items = (run as any).payroll_items || [];
+    const payroll_items = run.payroll_items || [];
     const item = payroll_items.find((i: any) => i.id === payroll_item_id);
 
     if (!item) {
@@ -510,7 +526,9 @@ export class PayrollFlowService {
       );
     }
 
-    const status_response = await this.dian_payroll_provider.checkStatus(run.cune);
+    const status_response = await this.dian_payroll_provider.checkStatus(
+      run.cune,
+    );
 
     // If status changed to accepted, update the payroll run
     if (status_response.status === 'accepted' && run.status === 'sent') {

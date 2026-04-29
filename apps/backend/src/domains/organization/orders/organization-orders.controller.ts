@@ -1,4 +1,13 @@
-import { Controller, Get, Param, Query, UseGuards, ParseIntPipe, Res, HttpStatus } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Param,
+  Query,
+  UseGuards,
+  ParseIntPipe,
+  Res,
+  HttpStatus,
+} from '@nestjs/common';
 import { Response } from 'express';
 import { OrganizationOrdersService } from './organization-orders.service';
 import { OrganizationOrderQueryDto } from './dto/organization-order-query.dto';
@@ -73,7 +82,10 @@ export class OrganizationOrdersController {
           404,
         );
       }
-      return this.responseService.success(result, 'Orden obtenida exitosamente');
+      return this.responseService.success(
+        result,
+        'Orden obtenida exitosamente',
+      );
     } catch (error) {
       return this.responseService.error(
         error.message || 'Error al obtener la orden',
@@ -85,9 +97,13 @@ export class OrganizationOrdersController {
 
   @Get(':id/invoice')
   @Permissions('organization:orders:read')
-  async getInvoice(@Param('id', ParseIntPipe) id: number, @Res() res: Response) {
+  async getInvoice(
+    @Param('id', ParseIntPipe) id: number,
+    @Res() res: Response,
+  ) {
     try {
-      const pdfBuffer = await this.organizationOrdersService.generateInvoicePdf(id);
+      const pdfBuffer =
+        await this.organizationOrdersService.generateInvoicePdf(id);
 
       res.set({
         'Content-Type': 'application/pdf',

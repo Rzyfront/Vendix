@@ -20,6 +20,8 @@ import {
 } from '../../../../../../shared/components';
 import { CurrencyPipe } from '../../../../../../shared/pipes/currency';
 import { environment } from '../../../../../../../environments/environment';
+import { DunningPreviewModalComponent } from '../../components/dunning-preview-modal.component';
+import { DunningPreviewTargetState } from '../../interfaces/subscription-admin.interface';
 
 @Component({
   selector: 'app-dunning-board',
@@ -33,6 +35,7 @@ import { environment } from '../../../../../../../environments/environment';
     CardComponent,
     EmptyStateComponent,
     CurrencyPipe,
+    DunningPreviewModalComponent,
   ],
   template: `
     <div class="w-full">
@@ -135,6 +138,15 @@ import { environment } from '../../../../../../../environments/environment';
         </app-card>
       </div>
     </div>
+
+    <!-- Force-transition preview modal (S4.1) -->
+    <app-dunning-preview-modal
+      [isOpen]="previewOpen()"
+      [subscriptionId]="previewSubscriptionId()"
+      [targetState]="previewTargetState()"
+      (closed)="closePreview()"
+      (confirmed)="confirmTransition($event)"
+    />
   `,
 })
 export class DunningBoardComponent {
@@ -158,6 +170,11 @@ export class DunningBoardComponent {
     total: 0,
     totalPages: 0,
   });
+
+  // S4.1 — Force-transition preview modal state.
+  readonly previewOpen = signal(false);
+  readonly previewSubscriptionId = signal<string | null>(null);
+  readonly previewTargetState = signal<DunningPreviewTargetState>('cancelled');
 
   columns: TableColumn[] = [
     { key: 'store_name', label: 'Tienda', sortable: true, width: '200px', priority: 1 },
@@ -286,24 +303,60 @@ export class DunningBoardComponent {
       });
   }
 
-  async cancelSubscription(id: string): Promise<void> {
-    const confirmed = await this.dialog.confirm({
-      title: 'Cancelar suscripción',
-      message: '¿Estás seguro de cancelar esta suscripción? Esta acción es irreversible.',
-      confirmText: 'Cancelar suscripción',
-      cancelText: 'Volver',
-      confirmVariant: 'danger',
-    });
-    if (!confirmed) return;
-    this.http
-      .post(`${environment.apiUrl}/superadmin/subscriptions/dunning/${id}/cancel`, {})
-      .pipe(takeUntilDestroyed(this.destroyRef))
-      .subscribe({
-        next: () => {
-          this.toast.success('Suscripción cancelada');
-          this.loadDunning();
-        },
-        error: () => this.toast.error('Error al cancelar'),
-      });
+  /**
+   * Open the force-transition preview modal targeting `cancelled` for the
+   * given subscription. The modal computes the side-effects (emails, feature
+   * deltas, invoices, commissions) before the operator confirms. Replaces
+   * the old plain confirm dialog (S4.1).
+   */
+  cancelSubscription(id: string): void {
+    this.openPreview(id, 'cancelled');
+  }
+
+  openPreview(id: string, target: DunningPreviewTargetState): void {
+    this.previewSubscriptionId.set(id);
+    this.previewTargetState.set(target);
+    this.previewOpen.set(true);
+  }
+
+  closePreview(): void {
+    this.previewOpen.set(false);
+    this.previewSubscriptionId.set(null);
+  }
+
+  /**
+   * Fired by DunningPreviewModalComponent after the operator ticks the
+   * acknowledgement and confirms. Currently only the `cancelled` target is
+   * wired to a backend endpoint (cancel). Other targets are reserved for
+   * future force-transition endpoints.
+   */
+  confirmTransition(target: DunningPreviewTargetState): void {
+    const id = this.previewSubscriptionId();
+    if (!id) return;
+
+    if (target === 'cancelled') {
+      this.http
+        .post(
+          `${environment.apiUrl}/superadmin/subscriptions/dunning/${id}/cancel`,
+          {},
+        )
+        .pipe(takeUntilDestroyed(this.destroyRef))
+        .subscribe({
+          next: () => {
+            this.toast.success('Suscripción cancelada');
+            this.closePreview();
+            this.loadDunning();
+          },
+          error: () => {
+            this.toast.error('Error al cancelar');
+            this.closePreview();
+          },
+        });
+      return;
+    }
+
+    // Defensive: no other target is wired yet.
+    this.toast.error(`Transición a "${target}" no está soportada todavía.`);
+    this.closePreview();
   }
 }

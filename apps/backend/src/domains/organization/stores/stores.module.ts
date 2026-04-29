@@ -19,4 +19,4 @@ import { StoreBootstrapHelper } from '../../shared/helpers/store-bootstrap.helpe
   ],
   exports: [StoresService],
 })
-export class StoresModule { }
+export class StoresModule {}

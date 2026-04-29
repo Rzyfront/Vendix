@@ -1,4 +1,10 @@
-import { IsString, IsOptional, IsNumber, IsDateString, MaxLength } from 'class-validator';
+import {
+  IsString,
+  IsOptional,
+  IsNumber,
+  IsDateString,
+  MaxLength,
+} from 'class-validator';
 import { Type } from 'class-transformer';
 
 export class QueryJournalEntryDto {

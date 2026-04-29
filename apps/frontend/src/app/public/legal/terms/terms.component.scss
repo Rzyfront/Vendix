@@ -1,0 +1,10 @@
+// G8 — Terms component styling. Anchors get scroll-margin so the sticky
+// header doesn't cover them when navigating from the TOC or from the
+// checkout deep-link to #pagos-y-reembolsos.
+:host {
+  display: block;
+
+  section[id] {
+    scroll-margin-top: 6rem;
+  }
+}

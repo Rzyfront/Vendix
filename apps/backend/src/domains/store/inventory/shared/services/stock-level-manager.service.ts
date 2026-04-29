@@ -33,6 +33,7 @@ export interface UpdateStockParams {
   validate_availability?: boolean;
   from_location_id?: number;
   to_location_id?: number;
+  source_module?: string;
 }
 
 export interface StockUpdateResult {
@@ -198,7 +199,7 @@ export class StockLevelManager {
     } as StockUpdatedEvent);
 
     // 9. Emitir alerta de stock bajo si aplica
-    const low_threshold = (existing_stock_level as any).reorder_point ?? 5;
+    const low_threshold = existing_stock_level.reorder_point ?? 5;
     if (
       updated_stock.quantity_available <= low_threshold &&
       updated_stock.quantity_available >= 0
@@ -838,6 +839,7 @@ export class StockLevelManager {
         to_location_id: params.to_location_id || params.location_id,
         quantity: Math.abs(params.quantity_change),
         movement_type: movementType,
+        source_module: params.source_module,
         reason: params.reason,
         notes: params.reason,
         user_id: params.user_id,
@@ -1262,10 +1264,7 @@ export class StockLevelManager {
    * Invariante: un producto NUNCA coexiste con filas base y filas de variante simultáneamente.
    * Esto evita doble conteo en findOne/findAll y stock fantasma heredado de transiciones previas.
    */
-  async enforceStockLevelsMode(
-    prisma: any,
-    product_id: number,
-  ): Promise<void> {
+  async enforceStockLevelsMode(prisma: any, product_id: number): Promise<void> {
     const basePrisma = prisma._baseClient || prisma;
     const variantCount = await basePrisma.product_variants.count({
       where: { product_id },

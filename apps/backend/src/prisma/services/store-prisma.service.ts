@@ -307,29 +307,58 @@ export class StorePrismaService extends BasePrismaService {
       layaway_items: { layaway_plan: { store_id: context.store_id } },
       layaway_installments: { layaway_plan: { store_id: context.store_id } },
       layaway_payments: { layaway_plan: { store_id: context.store_id } },
-      bank_transactions: { bank_account: { organization_id: context.organization_id } },
-      bank_reconciliations: { bank_account: { organization_id: context.organization_id } },
-      bank_reconciliation_matches: { reconciliation: { bank_account: { organization_id: context.organization_id } } },
-      depreciation_entries: { fixed_asset: { organization_id: context.organization_id } },
+      bank_transactions: {
+        bank_account: { organization_id: context.organization_id },
+      },
+      bank_reconciliations: {
+        bank_account: { organization_id: context.organization_id },
+      },
+      bank_reconciliation_matches: {
+        reconciliation: {
+          bank_account: { organization_id: context.organization_id },
+        },
+      },
+      depreciation_entries: {
+        fixed_asset: { organization_id: context.organization_id },
+      },
       budget_lines: { budget: { organization_id: context.organization_id } },
-      consolidation_adjustments: { session: { organization_id: context.organization_id } },
+      consolidation_adjustments: {
+        session: { organization_id: context.organization_id },
+      },
       review_responses: { reviews: { store_id: context.store_id } },
       review_votes: { reviews: { store_id: context.store_id } },
       review_reports: { reviews: { store_id: context.store_id } },
-      ai_messages: { conversation: { store_id: context.store_id, organization_id: context.organization_id } },
+      ai_messages: {
+        conversation: {
+          store_id: context.store_id,
+          organization_id: context.organization_id,
+        },
+      },
       dispatch_note_items: { dispatch_note: { store_id: context.store_id } },
       ar_payments: { accounts_receivable: { store_id: context.store_id } },
-      agreement_installments: { payment_agreement: { store_id: context.store_id } },
+      agreement_installments: {
+        payment_agreement: { store_id: context.store_id },
+      },
       wallet_transactions: { wallet: { store_id: context.store_id } },
-      ap_payments: { accounts_payable: { organization_id: context.organization_id } },
-      ap_payment_schedules: { accounts_payable: { organization_id: context.organization_id } },
+      ap_payments: {
+        accounts_payable: { organization_id: context.organization_id },
+      },
+      ap_payment_schedules: {
+        accounts_payable: { organization_id: context.organization_id },
+      },
       data_collection_tabs: { template: { store_id: context.store_id } },
       data_collection_sections: { template: { store_id: context.store_id } },
-      data_collection_items: { section: { template: { store_id: context.store_id } } },
-      data_collection_template_products: { template: { store_id: context.store_id } },
+      data_collection_items: {
+        section: { template: { store_id: context.store_id } },
+      },
+      data_collection_template_products: {
+        template: { store_id: context.store_id },
+      },
       booking_reminder_logs: { booking: { store_id: context.store_id } },
       subscription_payments: { invoice: { store_id: context.store_id } },
-      subscription_events: { store_subscription: { store_id: context.store_id } },
+      subscription_events: {
+        store_subscription: { store_id: context.store_id },
+      },
     };
 
     const security_filter: Record<string, any> = {};

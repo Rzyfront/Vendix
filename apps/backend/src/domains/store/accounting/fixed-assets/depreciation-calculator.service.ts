@@ -70,7 +70,12 @@ export class DepreciationCalculatorService {
       case 'straight_line':
         return this.calculateStraightLine(cost, salvage, months);
       case 'declining_balance':
-        return this.calculateDecliningBalance(cost, salvage, months, accumulated);
+        return this.calculateDecliningBalance(
+          cost,
+          salvage,
+          months,
+          accumulated,
+        );
       default:
         return this.calculateStraightLine(cost, salvage, months);
     }
@@ -98,11 +103,20 @@ export class DepreciationCalculatorService {
     let accumulated = 0;
 
     for (let i = 0; i < months; i++) {
-      const period_date = new Date(start_date.getFullYear(), start_date.getMonth() + i, 1);
+      const period_date = new Date(
+        start_date.getFullYear(),
+        start_date.getMonth() + i,
+        1,
+      );
 
       let amount: number;
       if (asset.depreciation_method === 'declining_balance') {
-        amount = this.calculateDecliningBalance(cost, salvage, months, accumulated);
+        amount = this.calculateDecliningBalance(
+          cost,
+          salvage,
+          months,
+          accumulated,
+        );
       } else {
         amount = this.calculateStraightLine(cost, salvage, months);
       }

@@ -142,10 +142,11 @@ export class OrdersService {
         for (const item of order.order_items) {
           if (!item.products?.track_inventory) continue;
           try {
-            const location_id = await this.stockLevelManager.getDefaultLocationForProduct(
-              item.product_id,
-              item.product_variant_id || undefined,
-            );
+            const location_id =
+              await this.stockLevelManager.getDefaultLocationForProduct(
+                item.product_id,
+                item.product_variant_id || undefined,
+              );
             await this.stockLevelManager.reserveStock(
               item.product_id,
               item.product_variant_id || undefined,
@@ -157,7 +158,9 @@ export class OrdersService {
               false, // POS: don't validate availability (non-restrictive UX)
             );
           } catch (error) {
-            this.logger.warn(`Stock reservation failed for product ${item.product_id}: ${error.message}`);
+            this.logger.warn(
+              `Stock reservation failed for product ${item.product_id}: ${error.message}`,
+            );
           }
         }
 
@@ -349,7 +352,9 @@ export class OrdersService {
       order.order_items.map(async (item: any) => {
         if (item.products?.product_images?.length) {
           const mainImage = item.products.product_images[0];
-          mainImage.image_url = await this.s3Service.signUrl(mainImage.image_url);
+          mainImage.image_url = await this.s3Service.signUrl(
+            mainImage.image_url,
+          );
           item.products.image_url = mainImage.image_url;
         }
       }),
@@ -570,18 +575,18 @@ export class OrdersService {
         include: {
           stores: { select: { id: true, name: true, store_code: true } },
           order_items: {
-          include: {
-            products: {
-              include: {
-                product_images: {
-                  where: { is_main: true },
-                  take: 1,
+            include: {
+              products: {
+                include: {
+                  product_images: {
+                    where: { is_main: true },
+                    take: 1,
+                  },
                 },
               },
+              product_variants: true,
             },
-            product_variants: true,
           },
-        },
           addresses_orders_billing_address_idToaddresses: true,
           addresses_orders_shipping_address_idToaddresses: true,
           payments: true,
@@ -615,7 +620,13 @@ export class OrdersService {
       throw new VendixHttpException(ErrorCodes.ORD_FIND_001);
     }
 
-    const lockedStates: string[] = ['shipped', 'delivered', 'finished', 'cancelled', 'refunded'];
+    const lockedStates: string[] = [
+      'shipped',
+      'delivered',
+      'finished',
+      'cancelled',
+      'refunded',
+    ];
     if (lockedStates.includes(order.state)) {
       throw new VendixHttpException(ErrorCodes.ORD_SHIP_LOCKED_001);
     }
@@ -647,9 +658,12 @@ export class OrdersService {
         },
       });
 
-      const address = orderForCalc?.addresses_orders_shipping_address_idToaddresses;
+      const address =
+        orderForCalc?.addresses_orders_shipping_address_idToaddresses;
       if (!address || !address.country_code) {
-        throw new VendixHttpException(ErrorCodes.ORD_SHIP_NO_RATE_FOR_ADDRESS_001);
+        throw new VendixHttpException(
+          ErrorCodes.ORD_SHIP_NO_RATE_FOR_ADDRESS_001,
+        );
       }
 
       const items = (orderForCalc?.order_items ?? []).map((it) => ({
@@ -677,7 +691,9 @@ export class OrdersService {
 
       const match = options.find((o) => o.method_id === method.id);
       if (!match) {
-        throw new VendixHttpException(ErrorCodes.ORD_SHIP_NO_RATE_FOR_ADDRESS_001);
+        throw new VendixHttpException(
+          ErrorCodes.ORD_SHIP_NO_RATE_FOR_ADDRESS_001,
+        );
       }
 
       resolvedRateId = match.rate_id;
@@ -698,7 +714,8 @@ export class OrdersService {
       }
     }
 
-    const { deriveDeliveryType } = await import('../shipping/shipping-derivation.util');
+    const { deriveDeliveryType } =
+      await import('../shipping/shipping-derivation.util');
     const deliveryType = deriveDeliveryType(method.type);
 
     const newGrandTotal =

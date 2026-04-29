@@ -4,14 +4,11 @@
  */
 export const UBL_NAMESPACES = {
   /** Main invoice namespace */
-  INVOICE:
-    'urn:oasis:names:specification:ubl:schema:xsd:Invoice-2',
+  INVOICE: 'urn:oasis:names:specification:ubl:schema:xsd:Invoice-2',
   /** Credit note namespace */
-  CREDIT_NOTE:
-    'urn:oasis:names:specification:ubl:schema:xsd:CreditNote-2',
+  CREDIT_NOTE: 'urn:oasis:names:specification:ubl:schema:xsd:CreditNote-2',
   /** Debit note namespace */
-  DEBIT_NOTE:
-    'urn:oasis:names:specification:ubl:schema:xsd:DebitNote-2',
+  DEBIT_NOTE: 'urn:oasis:names:specification:ubl:schema:xsd:DebitNote-2',
   /** Common Aggregate Components */
   CAC: 'urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2',
   /** Common Basic Components */

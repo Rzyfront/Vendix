@@ -59,21 +59,27 @@ export class EmployeesController {
   @HttpCode(HttpStatus.CREATED)
   async create(@Body() create_dto: CreateEmployeeDto) {
     const result = await this.employees_service.create(create_dto);
-    return this.response_service.success(result, 'Employee created successfully');
+    return this.response_service.success(
+      result,
+      'Employee created successfully',
+    );
   }
 
   @Patch(':id')
-  async update(
-    @Param('id') id: string,
-    @Body() update_dto: UpdateEmployeeDto,
-  ) {
+  async update(@Param('id') id: string, @Body() update_dto: UpdateEmployeeDto) {
     const result = await this.employees_service.update(+id, update_dto);
-    return this.response_service.success(result, 'Employee updated successfully');
+    return this.response_service.success(
+      result,
+      'Employee updated successfully',
+    );
   }
 
   @Patch(':id/terminate')
   async terminate(@Param('id') id: string) {
     const result = await this.employees_service.terminate(+id);
-    return this.response_service.success(result, 'Employee terminated successfully');
+    return this.response_service.success(
+      result,
+      'Employee terminated successfully',
+    );
   }
 }

@@ -48,7 +48,8 @@ export class SubscriptionsStatsService {
       }),
     ]);
 
-    const monthlyRevenue = revenueAgg._sum.effective_price ?? new Prisma.Decimal(0);
+    const monthlyRevenue =
+      revenueAgg._sum.effective_price ?? new Prisma.Decimal(0);
 
     return {
       totalPlans,

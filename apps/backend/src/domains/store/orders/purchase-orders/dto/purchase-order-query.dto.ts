@@ -76,12 +76,20 @@ export class PurchaseOrderQueryDto {
   @IsNumber()
   limit?: number = 10;
 
-  @ApiProperty({ description: 'Sort field', required: false, default: 'order_date' })
+  @ApiProperty({
+    description: 'Sort field',
+    required: false,
+    default: 'order_date',
+  })
   @IsOptional()
   @IsString()
   sort_by?: string = 'order_date';
 
-  @ApiProperty({ description: 'Sort direction', required: false, default: 'desc' })
+  @ApiProperty({
+    description: 'Sort direction',
+    required: false,
+    default: 'desc',
+  })
   @IsOptional()
   @IsString()
   sort_order?: 'asc' | 'desc' = 'desc';

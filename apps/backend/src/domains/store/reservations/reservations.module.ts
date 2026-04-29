@@ -14,7 +14,18 @@ import { S3Module } from '@common/services/s3.module';
 @Module({
   imports: [ResponseModule, PrismaModule, OrdersModule, S3Module],
   controllers: [ProvidersController, ReservationsController],
-  providers: [ReservationsService, AvailabilityService, BookingConfirmationService, ProvidersService, ProviderScheduleService],
-  exports: [ReservationsService, AvailabilityService, BookingConfirmationService, ProvidersService],
+  providers: [
+    ReservationsService,
+    AvailabilityService,
+    BookingConfirmationService,
+    ProvidersService,
+    ProviderScheduleService,
+  ],
+  exports: [
+    ReservationsService,
+    AvailabilityService,
+    BookingConfirmationService,
+    ProvidersService,
+  ],
 })
 export class ReservationsModule {}

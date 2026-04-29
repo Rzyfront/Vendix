@@ -6,9 +6,9 @@ import { StorageModule } from '../../../storage.module';
 import { SettingsModule } from '../../store/settings/settings.module';
 
 @Module({
-    imports: [PrismaModule, StorageModule, SettingsModule],
-    controllers: [CartController],
-    providers: [CartService],
-    exports: [CartService],
+  imports: [PrismaModule, StorageModule, SettingsModule],
+  controllers: [CartController],
+  providers: [CartService],
+  exports: [CartService],
 })
-export class CartModule { }
+export class CartModule {}

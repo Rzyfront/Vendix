@@ -86,13 +86,19 @@ export class StoreUsersController {
   @Post('management/:id/deactivate')
   async managementDeactivate(@Param('id', ParseIntPipe) id: number) {
     const result = await this.storeUserManagementService.deactivate(id);
-    return this.responseService.success(result, 'User deactivated successfully');
+    return this.responseService.success(
+      result,
+      'User deactivated successfully',
+    );
   }
 
   @Post('management/:id/reactivate')
   async managementReactivate(@Param('id', ParseIntPipe) id: number) {
     const result = await this.storeUserManagementService.reactivate(id);
-    return this.responseService.success(result, 'User reactivated successfully');
+    return this.responseService.success(
+      result,
+      'User reactivated successfully',
+    );
   }
 
   @Patch('management/:id/roles')
@@ -110,7 +116,10 @@ export class StoreUsersController {
     @Body() dto: UpdateUserPanelUIDto,
   ) {
     const result = await this.storeUserManagementService.updatePanelUI(id, dto);
-    return this.responseService.success(result, 'Panel UI updated successfully');
+    return this.responseService.success(
+      result,
+      'Panel UI updated successfully',
+    );
   }
 
   @Post('management/:id/reset-password')

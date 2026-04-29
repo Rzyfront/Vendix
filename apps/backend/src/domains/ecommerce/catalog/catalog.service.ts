@@ -172,7 +172,7 @@ export class CatalogService {
 
       // Ordenar manualmente según el array de IDs
       const sortedBestSelling = bestSellingProducts.sort((a, b) => {
-        return explicitIds!.indexOf(a.id) - explicitIds!.indexOf(b.id);
+        return explicitIds.indexOf(a.id) - explicitIds.indexOf(b.id);
       });
 
       let finalData = sortedBestSelling;

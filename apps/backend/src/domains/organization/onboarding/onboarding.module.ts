@@ -26,4 +26,4 @@ import { StoreBootstrapHelper } from '../../shared/helpers/store-bootstrap.helpe
   ],
   exports: [OnboardingService, OnboardingWizardService],
 })
-export class OnboardingModule { }
+export class OnboardingModule {}

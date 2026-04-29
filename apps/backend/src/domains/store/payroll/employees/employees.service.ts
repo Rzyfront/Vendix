@@ -67,11 +67,15 @@ export class EmployeesService {
           { first_name: { contains: search, mode: 'insensitive' as const } },
           { last_name: { contains: search, mode: 'insensitive' as const } },
           { employee_code: { contains: search, mode: 'insensitive' as const } },
-          { document_number: { contains: search, mode: 'insensitive' as const } },
+          {
+            document_number: { contains: search, mode: 'insensitive' as const },
+          },
         ],
       }),
       ...(status && { status: status as any }),
-      ...(department && { department: { contains: department, mode: 'insensitive' as const } }),
+      ...(department && {
+        department: { contains: department, mode: 'insensitive' as const },
+      }),
     };
 
     const [data, total] = await Promise.all([
@@ -109,7 +113,9 @@ export class EmployeesService {
     return employee;
   }
 
-  async createOrAssociate(dto: CreateEmployeeDto): Promise<CreateOrAssociateResult> {
+  async createOrAssociate(
+    dto: CreateEmployeeDto,
+  ): Promise<CreateOrAssociateResult> {
     const context = this.getContext();
     const unscoped = this.prisma.withoutScope() as any;
 
@@ -125,7 +131,9 @@ export class EmployeesService {
     if (!existing) {
       // --- CREATE new employee ---
       if (!dto.employee_code) {
-        dto.employee_code = await this.generateNextEmployeeCode(context.organization_id!);
+        dto.employee_code = await this.generateNextEmployeeCode(
+          context.organization_id!,
+        );
       }
 
       // Validate employee_code uniqueness at org level
@@ -228,20 +236,32 @@ export class EmployeesService {
 
       if (dto.first_name) update_data.first_name = dto.first_name;
       if (dto.last_name) update_data.last_name = dto.last_name;
-      if (dto.position !== undefined) update_data.position = dto.position || null;
-      if (dto.department !== undefined) update_data.department = dto.department || null;
+      if (dto.position !== undefined)
+        update_data.position = dto.position || null;
+      if (dto.department !== undefined)
+        update_data.department = dto.department || null;
       if (dto.contract_type) update_data.contract_type = dto.contract_type;
-      if (dto.base_salary !== undefined) update_data.base_salary = new Prisma.Decimal(dto.base_salary);
-      if (dto.payment_frequency) update_data.payment_frequency = dto.payment_frequency;
+      if (dto.base_salary !== undefined)
+        update_data.base_salary = new Prisma.Decimal(dto.base_salary);
+      if (dto.payment_frequency)
+        update_data.payment_frequency = dto.payment_frequency;
       if (dto.hire_date) update_data.hire_date = new Date(dto.hire_date);
-      if (dto.bank_name !== undefined) update_data.bank_name = dto.bank_name || null;
-      if (dto.bank_account_number !== undefined) update_data.bank_account_number = dto.bank_account_number || null;
-      if (dto.bank_account_type !== undefined) update_data.bank_account_type = dto.bank_account_type || null;
-      if (dto.health_provider !== undefined) update_data.health_provider = dto.health_provider || null;
-      if (dto.pension_fund !== undefined) update_data.pension_fund = dto.pension_fund || null;
-      if (dto.arl_risk_level !== undefined) update_data.arl_risk_level = dto.arl_risk_level;
-      if (dto.severance_fund !== undefined) update_data.severance_fund = dto.severance_fund || null;
-      if (dto.compensation_fund !== undefined) update_data.compensation_fund = dto.compensation_fund || null;
+      if (dto.bank_name !== undefined)
+        update_data.bank_name = dto.bank_name || null;
+      if (dto.bank_account_number !== undefined)
+        update_data.bank_account_number = dto.bank_account_number || null;
+      if (dto.bank_account_type !== undefined)
+        update_data.bank_account_type = dto.bank_account_type || null;
+      if (dto.health_provider !== undefined)
+        update_data.health_provider = dto.health_provider || null;
+      if (dto.pension_fund !== undefined)
+        update_data.pension_fund = dto.pension_fund || null;
+      if (dto.arl_risk_level !== undefined)
+        update_data.arl_risk_level = dto.arl_risk_level;
+      if (dto.severance_fund !== undefined)
+        update_data.severance_fund = dto.severance_fund || null;
+      if (dto.compensation_fund !== undefined)
+        update_data.compensation_fund = dto.compensation_fund || null;
 
       if (dto.user_id !== undefined) {
         if (dto.user_id !== null) {
@@ -267,13 +287,15 @@ export class EmployeesService {
     // --- ASSOCIATE existing employee with current store ---
     const employee = await this.prisma.$transaction(async (tx) => {
       // Ensure employee has at least one primary store
-      const activePrimaries = await this.prisma.withoutScope().employee_stores.count({
-        where: {
-          employee_id: existing.id,
-          is_primary: true,
-          status: 'active',
-        },
-      });
+      const activePrimaries = await this.prisma
+        .withoutScope()
+        .employee_stores.count({
+          where: {
+            employee_id: existing.id,
+            is_primary: true,
+            status: 'active',
+          },
+        });
       const shouldBePrimary = activePrimaries === 0;
 
       await tx.employee_stores.create({
@@ -394,7 +416,9 @@ export class EmployeesService {
       data: {
         status: 'terminated',
         termination_date: new Date(),
-        ...(termination_reason && { termination_reason: termination_reason as any }),
+        ...(termination_reason && {
+          termination_reason: termination_reason as any,
+        }),
       },
       include: EMPLOYEE_INCLUDE,
     });
@@ -406,7 +430,9 @@ export class EmployeesService {
     const context = this.getContext();
 
     const storeFilter = {
-      employee_stores: { some: { store_id: context.store_id, status: 'active' as any } },
+      employee_stores: {
+        some: { store_id: context.store_id, status: 'active' as any },
+      },
     };
 
     const [
@@ -476,7 +502,9 @@ export class EmployeesService {
     });
     if (primaryCount > 1) {
       // Data integrity issue - should not happen but log it
-      console.warn(`Employee ${employeeId} has ${primaryCount} primary stores - data integrity issue`);
+      console.warn(
+        `Employee ${employeeId} has ${primaryCount} primary stores - data integrity issue`,
+      );
     }
   }
 

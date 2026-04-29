@@ -31,7 +31,12 @@ export class ReconciliationService {
       orderBy: { created_at: 'desc' },
       include: {
         bank_account: {
-          select: { id: true, name: true, account_number: true, bank_name: true },
+          select: {
+            id: true,
+            name: true,
+            account_number: true,
+            bank_name: true,
+          },
         },
         created_by: {
           select: { id: true, user_name: true },
@@ -151,8 +156,7 @@ export class ReconciliationService {
         ? create_dto.opening_balance
         : Number(account.opening_balance);
 
-    const difference =
-      create_dto.statement_balance - opening_balance;
+    const difference = create_dto.statement_balance - opening_balance;
 
     const reconciliation = await this.prisma.bank_reconciliations.create({
       data: {
@@ -167,7 +171,12 @@ export class ReconciliationService {
       },
       include: {
         bank_account: {
-          select: { id: true, name: true, account_number: true, bank_name: true },
+          select: {
+            id: true,
+            name: true,
+            account_number: true,
+            bank_name: true,
+          },
         },
       },
     });
@@ -185,11 +194,15 @@ export class ReconciliationService {
     }
 
     if (reconciliation.status === ('completed' as any)) {
-      throw new VendixHttpException(ErrorCodes.BANK_RECONCILIATION_ALREADY_COMPLETED);
+      throw new VendixHttpException(
+        ErrorCodes.BANK_RECONCILIATION_ALREADY_COMPLETED,
+      );
     }
 
     if (Number(reconciliation.difference) !== 0) {
-      throw new VendixHttpException(ErrorCodes.BANK_RECONCILIATION_DIFFERENCE_NOT_ZERO);
+      throw new VendixHttpException(
+        ErrorCodes.BANK_RECONCILIATION_DIFFERENCE_NOT_ZERO,
+      );
     }
 
     const updated = await this.prisma.bank_reconciliations.update({
@@ -227,7 +240,9 @@ export class ReconciliationService {
     }
 
     if (reconciliation.status === ('completed' as any)) {
-      throw new VendixHttpException(ErrorCodes.BANK_RECONCILIATION_ALREADY_COMPLETED);
+      throw new VendixHttpException(
+        ErrorCodes.BANK_RECONCILIATION_ALREADY_COMPLETED,
+      );
     }
 
     // Cascade deletes matches via DB relation

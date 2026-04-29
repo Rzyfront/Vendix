@@ -1,4 +1,12 @@
-import { Controller, Get, Patch, Body, Query, Param, UseGuards } from '@nestjs/common';
+import {
+  Controller,
+  Get,
+  Patch,
+  Body,
+  Query,
+  Param,
+  UseGuards,
+} from '@nestjs/common';
 import { OrganizationsService } from './organizations.service';
 import {
   UpdateOrganizationDto,
@@ -80,13 +88,15 @@ export class OrganizationsController {
 
   @Get(':id/stats')
   @Permissions('organization:organizations:read')
-  async getStats(@Param('id') organizationId: string, @Query() dashboard_query: OrganizationDashboardDto) {
+  async getStats(
+    @Param('id') organizationId: string,
+    @Query() dashboard_query: OrganizationDashboardDto,
+  ) {
     try {
-      const result =
-        await this.organizationsService.getOrganizationStats(
-          Number(organizationId),
-          dashboard_query,
-        );
+      const result = await this.organizationsService.getOrganizationStats(
+        Number(organizationId),
+        dashboard_query,
+      );
       return this.responseService.success(
         result,
         'Estadísticas de organización obtenidas exitosamente',

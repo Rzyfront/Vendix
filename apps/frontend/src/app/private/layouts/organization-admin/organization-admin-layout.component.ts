@@ -15,7 +15,9 @@ import { HeaderComponent } from '../../../shared/components/header/header.compon
 import { AuthFacade } from '../../../core/store/auth/auth.facade';
 import { OnboardingWizardService } from '../../../core/services/onboarding-wizard.service';
 import { OnboardingModalComponent } from '../../../shared/components/onboarding-modal';
-import { SubscriptionBannerComponent } from '../../../shared/components/subscription-banner/subscription-banner.component';
+// S1.2 — SubscriptionBannerComponent removed from ORG_ADMIN. The banner is
+// store-scoped only; org-level renders would either flash stale data or show
+// the wrong tienda's status.
 import { PaywallOutletComponent } from '../../../shared/components/ai-paywall-modal/paywall-outlet.component';
 import { MenuFilterService } from '../../../core/services/menu-filter.service';
 
@@ -42,7 +44,6 @@ import { ToastService } from '../../../shared/components/toast/toast.service';
     SidebarComponent,
     HeaderComponent,
     OnboardingModalComponent,
-    SubscriptionBannerComponent,
     PaywallOutletComponent,
   ],
   template: `
@@ -75,7 +76,7 @@ import { ToastService } from '../../../shared/components/toast/toast.service';
         >
         </app-header>
 
-        <app-subscription-banner />
+        <!-- S1.2 — No subscription banner here: banner is store-scoped. -->
 
         <!-- Page Content (Scrollable) -->
         <main

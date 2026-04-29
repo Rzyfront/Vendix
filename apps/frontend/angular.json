@@ -5,7 +5,9 @@
     "packageManager": "npm",
     "analytics": "7a68f9b5-b685-411a-82b3-790416b31eb6",
     "cache": {
-      "enabled": false
+      "enabled": true,
+      "environment": "all",
+      "path": ".angular/cache"
     }
   },
   "newProjectRoot": "projects",

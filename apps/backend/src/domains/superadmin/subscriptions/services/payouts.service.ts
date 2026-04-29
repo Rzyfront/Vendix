@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, partner_payout_batch_state_enum } from '@prisma/client';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { VendixHttpException, ErrorCodes } from '../../../../common/errors';
 import { PayoutQueryDto, ApprovePayoutDto } from '../dto';
@@ -9,12 +9,20 @@ export class PayoutsService {
   constructor(private readonly prisma: GlobalPrismaService) {}
 
   async findAll(query: PayoutQueryDto) {
-    const { page = 1, limit = 10, partner_organization_id, state, sort_by = 'created_at', sort_order = 'desc' } = query;
+    const {
+      page = 1,
+      limit = 10,
+      partner_organization_id,
+      state,
+      sort_by = 'created_at',
+      sort_order = 'desc',
+    } = query;
 
     const skip = (page - 1) * Number(limit);
     const where: Prisma.partner_payout_batchesWhereInput = {};
 
-    if (partner_organization_id) where.partner_organization_id = partner_organization_id;
+    if (partner_organization_id)
+      where.partner_organization_id = partner_organization_id;
     if (state) where.state = state;
 
     const [data, total] = await Promise.all([
@@ -49,7 +57,9 @@ export class PayoutsService {
         organization: { select: { id: true, name: true } },
         commissions: {
           include: {
-            invoice: { select: { id: true, invoice_number: true, total: true } },
+            invoice: {
+              select: { id: true, invoice_number: true, total: true },
+            },
           },
         },
       },
@@ -63,20 +73,22 @@ export class PayoutsService {
   }
 
   async approve(id: number, dto: ApprovePayoutDto) {
-    const batch = await this.prisma.partner_payout_batches.findUnique({ where: { id } });
+    const batch = await this.prisma.partner_payout_batches.findUnique({
+      where: { id },
+    });
 
     if (!batch) {
       throw new VendixHttpException(ErrorCodes.SYS_NOT_FOUND_001);
     }
 
-    if (batch.state !== 'pending') {
+    if (batch.state !== partner_payout_batch_state_enum.draft) {
       throw new VendixHttpException(ErrorCodes.PARTNER_004);
     }
 
     const updated = await this.prisma.partner_payout_batches.update({
       where: { id },
       data: {
-        state: 'approved',
+        state: partner_payout_batch_state_enum.approved,
         payout_method: dto.payout_method || batch.payout_method,
         reference: dto.reference || null,
         updated_at: new Date(),
@@ -92,27 +104,37 @@ export class PayoutsService {
   }
 
   async rejectBatch(id: number, reason: string) {
-    const batch = await this.prisma.partner_payout_batches.findUnique({ where: { id } });
+    const batch = await this.prisma.partner_payout_batches.findUnique({
+      where: { id },
+    });
 
     if (!batch) {
       throw new VendixHttpException(ErrorCodes.SYS_NOT_FOUND_001);
     }
 
-    if (!['draft', 'pending', 'sent'].includes(batch.state)) {
+    const REJECTABLE_STATES: partner_payout_batch_state_enum[] = [
+      partner_payout_batch_state_enum.draft,
+      partner_payout_batch_state_enum.approved,
+      partner_payout_batch_state_enum.sent,
+    ];
+    if (!REJECTABLE_STATES.includes(batch.state)) {
       throw new VendixHttpException(
         ErrorCodes.PARTNER_004,
         `Cannot reject batch in state ${batch.state}`,
       );
     }
 
-    const existingMetadata = (batch.metadata && typeof batch.metadata === 'object' && !Array.isArray(batch.metadata))
-      ? (batch.metadata as Prisma.JsonObject)
-      : {};
+    const existingMetadata =
+      batch.metadata &&
+      typeof batch.metadata === 'object' &&
+      !Array.isArray(batch.metadata)
+        ? batch.metadata
+        : {};
 
     const updated = await this.prisma.partner_payout_batches.update({
       where: { id },
       data: {
-        state: 'rejected',
+        state: partner_payout_batch_state_enum.rejected,
         metadata: {
           ...existingMetadata,
           reject_reason: reason,
@@ -132,20 +154,22 @@ export class PayoutsService {
   }
 
   async markPaid(id: number) {
-    const batch = await this.prisma.partner_payout_batches.findUnique({ where: { id } });
+    const batch = await this.prisma.partner_payout_batches.findUnique({
+      where: { id },
+    });
 
     if (!batch) {
       throw new VendixHttpException(ErrorCodes.SYS_NOT_FOUND_001);
     }
 
-    if (batch.state !== 'approved') {
+    if (batch.state !== partner_payout_batch_state_enum.approved) {
       throw new VendixHttpException(ErrorCodes.PARTNER_004);
     }
 
     const updated = await this.prisma.partner_payout_batches.update({
       where: { id },
       data: {
-        state: 'paid',
+        state: partner_payout_batch_state_enum.paid,
         paid_at: new Date(),
         updated_at: new Date(),
       },

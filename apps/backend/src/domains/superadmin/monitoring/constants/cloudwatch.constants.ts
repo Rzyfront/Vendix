@@ -61,11 +61,11 @@ export const RDS_METRICS = [
 ] as const;
 
 /** Cache TTLs for monitoring endpoints (milliseconds) */
-export const CACHE_TTL_OVERVIEW = 120_000;        // 2 min — CloudWatch data doesn't change fast
-export const CACHE_TTL_INFRASTRUCTURE = 120_000;   // 2 min — EC2/RDS detailed metrics
-export const CACHE_TTL_APP = 15_000;               // 15s — app metrics are more volatile
-export const CACHE_TTL_PERFORMANCE = 10_000;       // 10s — near real-time performance data
-export const CACHE_TTL_SERVER = 300_000;            // 5 min — server info is nearly static
+export const CACHE_TTL_OVERVIEW = 120_000; // 2 min — CloudWatch data doesn't change fast
+export const CACHE_TTL_INFRASTRUCTURE = 120_000; // 2 min — EC2/RDS detailed metrics
+export const CACHE_TTL_APP = 15_000; // 15s — app metrics are more volatile
+export const CACHE_TTL_PERFORMANCE = 10_000; // 10s — near real-time performance data
+export const CACHE_TTL_SERVER = 300_000; // 5 min — server info is nearly static
 
 /** @deprecated Use specific TTL constants instead */
 export const MONITORING_CACHE_TTL = 60 * 1000;

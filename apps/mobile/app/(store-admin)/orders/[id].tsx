@@ -1,13 +1,16 @@
 import { useState } from 'react';
 import {
   View,
+  Text,
   ScrollView,
   Pressable,
   ActivityIndicator,
+  StyleSheet,
 } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { OrderService } from '@/features/store/services/order.service';
+import { apiClient, Endpoints } from '@/core/api';
 import {
   Order,
   OrderState,
@@ -31,6 +34,7 @@ import { ConfirmDialog } from '@/shared/components/confirm-dialog/confirm-dialog
 import { toastSuccess, toastError } from '@/shared/components/toast/toast.store';
 import { formatCurrency } from '@/shared/utils/currency';
 import { formatDateTime, formatRelative } from '@/shared/utils/date';
+import { spacing, borderRadius, colorScales, colors } from '@/shared/theme';
 
 const STATE_VARIANT_MAP: Record<string, 'default' | 'success' | 'warning' | 'error' | 'info'> = {
   default: 'default',
@@ -56,7 +60,7 @@ const OrderDetail = () => {
 
   const [payModalVisible, setPayModalVisible] = useState(false);
   const [payAmount, setPayAmount] = useState('');
-  const [payMethodId, setPayMethodId] = useState('');
+  const [payMethodId, setPayMethodId] = useState<number | undefined>();
   const [shipModalVisible, setShipModalVisible] = useState(false);
   const [shipTracking, setShipTracking] = useState('');
   const [shipCarrier, setShipCarrier] = useState('');
@@ -80,6 +84,16 @@ const OrderDetail = () => {
     queryKey: ['order-timeline', orderId],
     queryFn: () => OrderService.timeline(orderId),
     enabled: !!orderId,
+  });
+
+  const { data: paymentMethods = [] } = useQuery({
+    queryKey: ['payment-methods'],
+    queryFn: async () => {
+      const res = await apiClient.get(Endpoints.STORE.PAYMENT_METHODS.LIST);
+      const d = res.data as { data?: any[] } | any[];
+      return Array.isArray(d) ? d : d.data ?? [];
+    },
+    enabled: payModalVisible,
   });
 
   const invalidateOrder = async () => {
@@ -114,7 +128,7 @@ const OrderDetail = () => {
     );
     setPayModalVisible(false);
     setPayAmount('');
-    setPayMethodId('');
+    setPayMethodId(undefined);
   };
 
   const handleShip = () => {
@@ -159,7 +173,7 @@ const OrderDetail = () => {
 
   if (orderLoading || !order) {
     return (
-      <View className="flex-1 items-center justify-center bg-gray-50">
+      <View style={styles.loadingContainer}>
         <Spinner />
       </View>
     );
@@ -176,13 +190,13 @@ const OrderDetail = () => {
   const showFastTrack = order.state !== 'cancelled' && order.state !== 'refunded';
 
   return (
-    <View className="flex-1 bg-gray-50">
-      <ScrollView contentContainerClassName="p-4 pb-32">
-        <View className="flex-row items-center gap-3 mb-4">
+    <View style={styles.container}>
+      <ScrollView contentContainerStyle={styles.scrollContent}>
+        <View style={styles.headerRow}>
           <Pressable onPress={() => router.back()}>
-            <Icon name="arrow-left" size={24} color="#374151" />
+            <Icon name="arrow-left" size={24} color={colorScales.gray[700]} />
           </Pressable>
-          <View className="flex-1">
+          <View style={styles.flex1}>
             <ListItem title={`Orden #${order.order_number}`} />
           </View>
           <Badge
@@ -191,8 +205,8 @@ const OrderDetail = () => {
           />
         </View>
 
-        <Card className="mb-3">
-          <View className="flex-row justify-between items-center">
+        <Card style={styles.cardMargin}>
+          <View style={styles.rowBetween}>
             <View>
               {order.channel && (
                 <ListItem
@@ -205,12 +219,12 @@ const OrderDetail = () => {
         </Card>
 
         {order.customer && (
-          <Card className="mb-3">
+          <Card style={styles.cardMargin}>
             <ListItem
               title="Cliente"
               subtitle={`${order.customer.first_name} ${order.customer.last_name}`}
             />
-            <View className="mt-2 gap-1">
+            <View style={styles.mt2Gap1}>
               <ListItem title={order.customer.email} />
               {order.customer.phone && (
                 <ListItem title={order.customer.phone} />
@@ -219,22 +233,23 @@ const OrderDetail = () => {
           </Card>
         )}
 
-        <Card className="mb-3">
+        <Card style={styles.cardMargin}>
           <ListItem title="Timeline" />
-          <View className="mt-2 ml-2">
+          <View style={styles.timelineContainer}>
             {timeline.map((entry: OrderTimelineEntry, idx: number) => (
-              <View key={idx} className="flex-row gap-3 mb-3">
-                <View className="items-center">
+              <View key={idx} style={styles.timelineRow}>
+                <View style={styles.timelineDotColumn}>
                   <View
-                    className={`w-3 h-3 rounded-full ${
-                      idx === 0 ? 'bg-primary-600' : 'bg-gray-300'
-                    }`}
+                    style={[
+                      styles.timelineDot,
+                      idx === 0 ? styles.timelineDotActive : styles.timelineDotInactive,
+                    ]}
                   />
                   {idx < timeline.length - 1 && (
-                    <View className="w-0.5 flex-1 bg-gray-200" />
+                    <View style={styles.timelineLine} />
                   )}
                 </View>
-                <View className="flex-1 pb-2">
+                <View style={styles.timelineContent}>
                   <ListItem title={entry.description} />
                   <ListItem title={formatRelative(entry.created_at)} />
                 </View>
@@ -243,15 +258,15 @@ const OrderDetail = () => {
           </View>
         </Card>
 
-        <Card className="mb-3">
+        <Card style={styles.cardMargin}>
           <ListItem title="Productos" />
-          <View className="mt-2">
+          <View style={styles.mt2}>
             {(order.order_items ?? []).map((item) => (
               <View
                 key={item.id}
-                className="flex-row justify-between items-start py-2 border-b border-gray-100 last:border-b-0"
+                style={styles.itemRow}
               >
-                <View className="flex-1">
+                <View style={styles.flex1}>
                   <ListItem title={item.product_name} />
                   {item.variant_sku && (
                     <ListItem title={`SKU: ${item.variant_sku}`} />
@@ -266,28 +281,28 @@ const OrderDetail = () => {
           </View>
         </Card>
 
-        <Card className="mb-3">
+        <Card style={styles.cardMargin}>
           <ListItem title="Resumen de Pago" />
-          <View className="mt-2 gap-1">
-            <View className="flex-row justify-between">
+          <View style={styles.mt2Gap1}>
+            <View style={styles.rowBetween}>
               <ListItem title="Subtotal" />
               <ListItem title={formatCurrency(order.subtotal_amount)} />
             </View>
-            <View className="flex-row justify-between">
+            <View style={styles.rowBetween}>
               <ListItem title="Impuestos" />
               <ListItem title={formatCurrency(order.tax_amount)} />
             </View>
-            <View className="flex-row justify-between">
+            <View style={styles.rowBetween}>
               <ListItem title="Envío" />
               <ListItem title={formatCurrency(order.shipping_cost)} />
             </View>
             {order.discount_amount > 0 && (
-              <View className="flex-row justify-between">
+              <View style={styles.rowBetween}>
                 <ListItem title="Descuento" />
                 <ListItem title={`-${formatCurrency(order.discount_amount)}`} />
               </View>
             )}
-            <View className="flex-row justify-between pt-2 border-t border-gray-200">
+            <View style={styles.totalRow}>
               <ListItem title="Total" />
               <ListItem title={formatCurrency(order.grand_total)} />
             </View>
@@ -295,13 +310,13 @@ const OrderDetail = () => {
         </Card>
 
         {(order.payments ?? []).length > 0 && (
-          <Card className="mb-3">
+          <Card style={styles.cardMargin}>
             <ListItem title="Pagos" />
-            <View className="mt-2">
+            <View style={styles.mt2}>
               {order.payments!.map((payment) => (
                 <View
                   key={payment.id}
-                  className="flex-row justify-between items-center py-2 border-b border-gray-100 last:border-b-0"
+                  style={styles.paymentRow}
                 >
                   <View>
                     <ListItem
@@ -311,7 +326,7 @@ const OrderDetail = () => {
                     />
                     <ListItem title={formatDateTime(payment.created_at)} />
                   </View>
-                  <View className="flex-row items-center gap-2">
+                  <View style={styles.paymentRight}>
                     <ListItem title={formatCurrency(payment.amount)} />
                     <Badge label={payment.state} variant="default" size="sm" />
                   </View>
@@ -321,7 +336,7 @@ const OrderDetail = () => {
           </Card>
         )}
 
-        <View className="gap-2 mt-2">
+        <View style={styles.actionsGap}>
           {showPay && (
             <Button
               title="Cobrar"
@@ -374,7 +389,33 @@ const OrderDetail = () => {
       </ScrollView>
 
       <Modal visible={payModalVisible} onClose={() => setPayModalVisible(false)} title="Cobrar">
-        <View className="gap-3">
+        <View style={styles.modalGap}>
+          <View style={styles.pmSection}>
+            <Text style={styles.pmLabel}>Método de pago</Text>
+            {paymentMethods.length === 0 ? (
+              <Text style={styles.pmEmpty}>Cargando métodos...</Text>
+            ) : (
+              <View style={styles.pmList}>
+                {paymentMethods.map((pm: { id: number; display_name?: string; name?: string; type?: string }) => (
+                  <Pressable
+                    key={pm.id}
+                    onPress={() => setPayMethodId(pm.id)}
+                    style={[
+                      styles.pmItem,
+                      payMethodId === pm.id ? styles.pmItemSelected : styles.pmItemDefault,
+                    ]}
+                  >
+                    <Text style={[
+                      styles.pmItemText,
+                      payMethodId === pm.id ? styles.pmItemSelectedText : styles.pmItemDefaultText,
+                    ]}>
+                      {pm.display_name ?? pm.name ?? `Método ${pm.id}`}
+                    </Text>
+                  </Pressable>
+                ))}
+              </View>
+            )}
+          </View>
           <Input
             label="Monto a cobrar"
             value={payAmount}
@@ -386,6 +427,7 @@ const OrderDetail = () => {
             title="Confirmar Pago"
             onPress={handlePay}
             loading={actionLoading}
+            disabled={!payMethodId}
           />
         </View>
       </Modal>
@@ -395,7 +437,7 @@ const OrderDetail = () => {
         onClose={() => setShipModalVisible(false)}
         snapPoint="partial"
       >
-        <View className="gap-3 p-4">
+        <View style={styles.bottomSheetContent}>
           <Input
             label="Número de guía"
             value={shipTracking}
@@ -464,5 +506,156 @@ const OrderDetail = () => {
     </View>
   );
 };
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: colorScales.gray[50],
+  },
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colorScales.gray[50],
+  },
+  scrollContent: {
+    padding: spacing[4],
+    paddingBottom: spacing[24],
+  },
+  flex1: {
+    flex: 1,
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[3],
+    marginBottom: spacing[4],
+  },
+  cardMargin: {
+    marginBottom: spacing[3],
+  },
+  rowBetween: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  mt2: {
+    marginTop: spacing[2],
+  },
+  mt2Gap1: {
+    marginTop: spacing[2],
+    gap: spacing[1],
+  },
+  timelineContainer: {
+    marginTop: spacing[2],
+    marginLeft: spacing[2],
+  },
+  timelineRow: {
+    flexDirection: 'row',
+    gap: spacing[3],
+    marginBottom: spacing[3],
+  },
+  timelineDotColumn: {
+    alignItems: 'center',
+  },
+  timelineDot: {
+    width: 12,
+    height: 12,
+    borderRadius: borderRadius.full,
+  },
+  timelineDotActive: {
+    backgroundColor: colors.primary,
+  },
+  timelineDotInactive: {
+    backgroundColor: colorScales.gray[300],
+  },
+  timelineLine: {
+    width: 2,
+    flex: 1,
+    backgroundColor: colorScales.gray[200],
+  },
+  timelineContent: {
+    flex: 1,
+    paddingBottom: spacing[2],
+  },
+  itemRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    paddingVertical: spacing[2],
+    borderBottomWidth: 1,
+    borderBottomColor: colorScales.gray[100],
+  },
+  totalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingTop: spacing[2],
+    borderTopWidth: 1,
+    borderTopColor: colorScales.gray[200],
+  },
+  paymentRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: spacing[2],
+    borderBottomWidth: 1,
+    borderBottomColor: colorScales.gray[100],
+  },
+  paymentRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: spacing[2],
+  },
+  actionsGap: {
+    gap: spacing[2],
+    marginTop: spacing[2],
+  },
+  modalGap: {
+    gap: spacing[3],
+  },
+  pmSection: {
+    gap: spacing[2],
+  },
+  pmLabel: {
+    fontSize: 13,
+    fontWeight: '600' as const,
+    color: colorScales.gray[700],
+  },
+  pmEmpty: {
+    fontSize: 13,
+    color: colorScales.gray[400],
+  },
+  pmList: {
+    gap: spacing[2],
+  },
+  pmItem: {
+    paddingHorizontal: spacing[3],
+    paddingVertical: spacing[3],
+    borderRadius: borderRadius.lg,
+    borderWidth: 1,
+  },
+  pmItemSelected: {
+    backgroundColor: colorScales.blue[50],
+    borderColor: colors.primary,
+  },
+  pmItemDefault: {
+    backgroundColor: colorScales.gray[50],
+    borderColor: colorScales.gray[200],
+  },
+  pmItemText: {
+    fontSize: 14,
+    fontWeight: '500' as const,
+  },
+  pmItemSelectedText: {
+    color: colors.primary,
+  },
+  pmItemDefaultText: {
+    color: colorScales.gray[700],
+  },
+  bottomSheetContent: {
+    gap: spacing[3],
+    padding: spacing[4],
+  },
+});
 
 export default OrderDetail;

@@ -7,12 +7,16 @@ import { ExogenousValidationError } from './interfaces/exogenous.interface';
 export class ExogenousValidatorService {
   constructor(private readonly prisma: StorePrismaService) {}
 
-  async validateCompleteness(fiscal_year: number): Promise<ExogenousValidationError[]> {
+  async validateCompleteness(
+    fiscal_year: number,
+  ): Promise<ExogenousValidationError[]> {
     const context = RequestContextService.getContext()!;
     const errors: ExogenousValidationError[] = [];
 
     // Check invoices without customer NIT (sales invoices)
-    const invoices_without_nit = await (this.prisma as any).client.invoices.findMany({
+    const invoices_without_nit = await (
+      this.prisma as any
+    ).client.invoices.findMany({
       where: {
         organization_id: context.organization_id,
         issue_date: {
@@ -21,10 +25,7 @@ export class ExogenousValidatorService {
         },
         invoice_type: 'FV',
         status: { in: ['validated', 'accepted'] },
-        OR: [
-          { customer_tax_id: null },
-          { customer_tax_id: '' },
-        ],
+        OR: [{ customer_tax_id: null }, { customer_tax_id: '' }],
       },
       select: { id: true, invoice_number: true, customer_name: true },
       take: 100,
@@ -40,7 +41,9 @@ export class ExogenousValidatorService {
     }
 
     // Check invoices without customer name
-    const invoices_without_name = await (this.prisma as any).client.invoices.findMany({
+    const invoices_without_name = await (
+      this.prisma as any
+    ).client.invoices.findMany({
       where: {
         organization_id: context.organization_id,
         issue_date: {
@@ -50,10 +53,7 @@ export class ExogenousValidatorService {
         invoice_type: 'FV',
         status: { in: ['validated', 'accepted'] },
         customer_tax_id: { not: null },
-        OR: [
-          { customer_name: null },
-          { customer_name: '' },
-        ],
+        OR: [{ customer_name: null }, { customer_name: '' }],
       },
       select: { id: true, invoice_number: true, customer_tax_id: true },
       take: 100,
@@ -69,13 +69,12 @@ export class ExogenousValidatorService {
     }
 
     // Check suppliers without tax_id that have invoices or purchase orders
-    const suppliers_without_nit = await (this.prisma as any).client.suppliers.findMany({
+    const suppliers_without_nit = await (
+      this.prisma as any
+    ).client.suppliers.findMany({
       where: {
         organization_id: context.organization_id,
-        OR: [
-          { tax_id: null },
-          { tax_id: '' },
-        ],
+        OR: [{ tax_id: null }, { tax_id: '' }],
         invoices: {
           some: {
             issue_date: {

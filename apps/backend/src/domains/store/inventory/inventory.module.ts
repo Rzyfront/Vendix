@@ -53,4 +53,4 @@ import { CostingService } from './shared/services/costing.service';
     InventoryTransactionsService,
   ],
 })
-export class InventoryModule { }
+export class InventoryModule {}

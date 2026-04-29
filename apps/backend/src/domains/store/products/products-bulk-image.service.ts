@@ -4,7 +4,11 @@ import { v4 as uuidv4 } from 'uuid';
 import { Injectable, BadRequestException } from '@nestjs/common';
 import { StorePrismaService } from '../../../prisma/services/store-prisma.service';
 import { S3Service } from '@common/services/s3.service';
-import { S3PathHelper, S3OrgContext, S3StoreContext } from '@common/helpers/s3-path.helper';
+import {
+  S3PathHelper,
+  S3OrgContext,
+  S3StoreContext,
+} from '@common/helpers/s3-path.helper';
 import { VendixHttpException, ErrorCodes } from '@common/errors';
 import { ImageContext } from '@common/config/image-presets';
 import {
@@ -15,9 +19,18 @@ import {
 } from './dto';
 
 const VALID_IMAGE_EXTENSIONS = [
-  '.jpg', '.jpeg', '.png', '.webp',
-  '.gif', '.bmp', '.tiff', '.tif',
-  '.heic', '.heif', '.avif', '.svg',
+  '.jpg',
+  '.jpeg',
+  '.png',
+  '.webp',
+  '.gif',
+  '.bmp',
+  '.tiff',
+  '.tif',
+  '.heic',
+  '.heif',
+  '.avif',
+  '.svg',
 ];
 const MAX_IMAGES_PER_PRODUCT = 5;
 
@@ -220,7 +233,9 @@ export class ProductsBulkImageService {
 
       if (!product) {
         skuResult.status = 'error';
-        skuResult.errors.push(`No se encontró un producto con SKU "${skuFolder}" en esta tienda`);
+        skuResult.errors.push(
+          `No se encontró un producto con SKU "${skuFolder}" en esta tienda`,
+        );
         withErrors++;
         skus.push(skuResult);
         continue;
@@ -230,11 +245,16 @@ export class ProductsBulkImageService {
       skuResult.product_id = product.id;
       skuResult.product_name = product.name;
       skuResult.current_image_count = product.product_images.length;
-      skuResult.slots_available = Math.max(0, MAX_IMAGES_PER_PRODUCT - product.product_images.length);
+      skuResult.slots_available = Math.max(
+        0,
+        MAX_IMAGES_PER_PRODUCT - product.product_images.length,
+      );
 
       if (skuResult.valid_images === 0) {
         skuResult.status = 'error';
-        skuResult.errors.push('La carpeta no contiene imágenes con formato válido');
+        skuResult.errors.push(
+          'La carpeta no contiene imágenes con formato válido',
+        );
         withErrors++;
         skus.push(skuResult);
         continue;
@@ -242,13 +262,18 @@ export class ProductsBulkImageService {
 
       if (skuResult.slots_available === 0) {
         skuResult.status = 'error';
-        skuResult.errors.push(`El producto ya tiene ${MAX_IMAGES_PER_PRODUCT} imágenes (máximo permitido)`);
+        skuResult.errors.push(
+          `El producto ya tiene ${MAX_IMAGES_PER_PRODUCT} imágenes (máximo permitido)`,
+        );
         withErrors++;
         skus.push(skuResult);
         continue;
       }
 
-      skuResult.images_to_upload = Math.min(skuResult.valid_images, skuResult.slots_available);
+      skuResult.images_to_upload = Math.min(
+        skuResult.valid_images,
+        skuResult.slots_available,
+      );
 
       // Warnings
       if (skuResult.invalid_files.length > 0) {
@@ -266,7 +291,9 @@ export class ProductsBulkImageService {
       }
 
       if (product.state !== 'active') {
-        skuResult.warnings.push(`El producto está en estado "${product.state}"`);
+        skuResult.warnings.push(
+          `El producto está en estado "${product.state}"`,
+        );
         skuResult.status = 'warning';
       }
 
@@ -343,7 +370,9 @@ export class ProductsBulkImageService {
    * Parses a ZIP buffer and groups file entries by SKU folder.
    * Does NOT filter by image extension — consumers handle that.
    */
-  private parseAndGroupZipEntries(fileBuffer: Buffer): Map<string, AdmZip.IZipEntry[]> {
+  private parseAndGroupZipEntries(
+    fileBuffer: Buffer,
+  ): Map<string, AdmZip.IZipEntry[]> {
     if (!fileBuffer || fileBuffer.length < 22) {
       console.error(
         '[bulk-images] Invalid ZIP buffer',
@@ -360,7 +389,8 @@ export class ProductsBulkImageService {
     }
 
     const magic = fileBuffer.slice(0, 4).toString('hex');
-    const isZipMagic = magic === '504b0304' || magic === '504b0506' || magic === '504b0708';
+    const isZipMagic =
+      magic === '504b0304' || magic === '504b0506' || magic === '504b0708';
     if (!isZipMagic) {
       console.error(
         '[bulk-images] File is not a valid ZIP (bad magic)',
@@ -529,10 +559,14 @@ export class ProductsBulkImageService {
 
       const imageKey = `${basePath}/${product.slug}-bulk-${Date.now()}-${i}`;
 
-      const uploadResult = await this.s3Service.uploadImage(imageBuffer, imageKey, {
-        generateThumbnail: true,
-        context: ImageContext.PRODUCT,
-      });
+      const uploadResult = await this.s3Service.uploadImage(
+        imageBuffer,
+        imageKey,
+        {
+          generateThumbnail: true,
+          context: ImageContext.PRODUCT,
+        },
+      );
 
       await this.prisma.product_images.create({
         data: {

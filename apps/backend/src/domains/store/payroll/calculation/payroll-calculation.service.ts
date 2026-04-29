@@ -36,10 +36,10 @@ interface EmployerCostsBreakdown {
 }
 
 interface ProvisionsBreakdown {
-  severance: number;           // proportional_salary * severance_rate (1/12)
-  severance_interest: number;  // severance * (severance_interest_rate / 12)
-  vacation: number;            // proportional_salary * vacation_rate (15/360)
-  bonus: number;               // proportional_salary * bonus_rate (1/12)
+  severance: number; // proportional_salary * severance_rate (1/12)
+  severance_interest: number; // severance * (severance_interest_rate / 12)
+  vacation: number; // proportional_salary * vacation_rate (15/360)
+  bonus: number; // proportional_salary * bonus_rate (1/12)
   total: number;
 }
 
@@ -98,7 +98,8 @@ export class PayrollCalculationService {
     // Pre-fetch advance deductions for all employees
     const advance_deductions_map = new Map<number, number>();
     for (const employee of employees) {
-      const deduction = await this.advances_service.calculateDeductionForPayroll(employee.id);
+      const deduction =
+        await this.advances_service.calculateDeductionForPayroll(employee.id);
       if (deduction > 0) {
         advance_deductions_map.set(employee.id, deduction);
       }
@@ -147,9 +148,18 @@ export class PayrollCalculationService {
       }
 
       // Update payroll run totals
-      const total_earnings = calculations.reduce((sum, c) => sum + c.total_earnings, 0);
-      const total_deductions = calculations.reduce((sum, c) => sum + c.total_deductions, 0);
-      const total_employer_costs = calculations.reduce((sum, c) => sum + c.total_employer_costs, 0);
+      const total_earnings = calculations.reduce(
+        (sum, c) => sum + c.total_earnings,
+        0,
+      );
+      const total_deductions = calculations.reduce(
+        (sum, c) => sum + c.total_deductions,
+        0,
+      );
+      const total_employer_costs = calculations.reduce(
+        (sum, c) => sum + c.total_employer_costs,
+        0,
+      );
       const total_net_pay = calculations.reduce((sum, c) => sum + c.net_pay, 0);
 
       await tx.payroll_runs.update({
@@ -158,7 +168,9 @@ export class PayrollCalculationService {
           status: 'calculated',
           total_earnings: new Prisma.Decimal(this.round(total_earnings)),
           total_deductions: new Prisma.Decimal(this.round(total_deductions)),
-          total_employer_costs: new Prisma.Decimal(this.round(total_employer_costs)),
+          total_employer_costs: new Prisma.Decimal(
+            this.round(total_employer_costs),
+          ),
           total_net_pay: new Prisma.Decimal(this.round(total_net_pay)),
         },
       });
@@ -213,34 +225,56 @@ export class PayrollCalculationService {
     const total_earnings = this.round(proportional_salary + transport_subsidy);
 
     // Deductions (employee portion) - calculated on salary, not on transport subsidy
-    const health_deduction = this.round(proportional_salary * rules.health_employee_rate);
-    const pension_deduction = this.round(proportional_salary * rules.pension_employee_rate);
+    const health_deduction = this.round(
+      proportional_salary * rules.health_employee_rate,
+    );
+    const pension_deduction = this.round(
+      proportional_salary * rules.pension_employee_rate,
+    );
 
     // Simplified retention: 0 if salary < threshold × min wage
     const retention =
       salary >= rules.minimum_wage * rules.retention_exempt_threshold
         ? this.round(proportional_salary * 0.01) // Simplified 1% for high earners
         : 0;
-    const total_deductions = this.round(health_deduction + pension_deduction + retention + advance_deduction);
+    const total_deductions = this.round(
+      health_deduction + pension_deduction + retention + advance_deduction,
+    );
 
     // Employer costs
-    const arl_rate = rules.arl_rates[employee.arl_risk_level || 1] || rules.arl_rates[1];
-    const health_employer = this.round(proportional_salary * rules.health_employer_rate);
-    const pension_employer = this.round(proportional_salary * rules.pension_employer_rate);
+    const arl_rate =
+      rules.arl_rates[employee.arl_risk_level || 1] || rules.arl_rates[1];
+    const health_employer = this.round(
+      proportional_salary * rules.health_employer_rate,
+    );
+    const pension_employer = this.round(
+      proportional_salary * rules.pension_employer_rate,
+    );
     const arl_cost = this.round(proportional_salary * arl_rate);
     const sena_cost = this.round(proportional_salary * rules.sena_rate);
     const icbf_cost = this.round(proportional_salary * rules.icbf_rate);
-    const compensation_fund_cost = this.round(proportional_salary * rules.compensation_fund_rate);
+    const compensation_fund_cost = this.round(
+      proportional_salary * rules.compensation_fund_rate,
+    );
     const total_employer_costs = this.round(
-      health_employer + pension_employer + arl_cost + sena_cost + icbf_cost + compensation_fund_cost,
+      health_employer +
+        pension_employer +
+        arl_cost +
+        sena_cost +
+        icbf_cost +
+        compensation_fund_cost,
     );
 
     // Provisions (monthly accrual)
     const severance = this.round(proportional_salary * rules.severance_rate);
-    const severance_interest = this.round(severance * (rules.severance_interest_rate / 12));
+    const severance_interest = this.round(
+      severance * (rules.severance_interest_rate / 12),
+    );
     const vacation = this.round(proportional_salary * rules.vacation_rate);
     const bonus = this.round(proportional_salary * rules.bonus_rate);
-    const total_provisions = this.round(severance + severance_interest + vacation + bonus);
+    const total_provisions = this.round(
+      severance + severance_interest + vacation + bonus,
+    );
 
     const net_pay = this.round(total_earnings - total_deductions);
 

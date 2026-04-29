@@ -27,7 +27,12 @@ import { OrderEtaService } from './services/order-eta.service';
     ShippingModule,
   ],
   controllers: [OrdersController],
-  providers: [OrdersService, StockLevelManager, InventoryTransactionsService, OrderEtaService],
+  providers: [
+    OrdersService,
+    StockLevelManager,
+    InventoryTransactionsService,
+    OrderEtaService,
+  ],
   exports: [OrdersService, OrderFlowModule, OrderEtaService],
 })
 export class OrdersModule {}

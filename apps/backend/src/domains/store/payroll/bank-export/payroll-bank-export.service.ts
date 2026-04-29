@@ -16,7 +16,8 @@ export class PayrollBankExportService {
   constructor(
     private readonly prisma: StorePrismaService,
     private readonly s3_service: S3Service,
-    @Inject(BANK_BATCH_BUILDER_REGISTRY) private readonly builders: BankBatchBuilder[],
+    @Inject(BANK_BATCH_BUILDER_REGISTRY)
+    private readonly builders: BankBatchBuilder[],
   ) {}
 
   /**
@@ -37,7 +38,8 @@ export class PayrollBankExportService {
     const employees = await this.loadEmployees(payroll_run_id);
 
     const valid: BankBatchEmployee[] = [];
-    const invalid: { employee_id: number; name: string; errors: string[] }[] = [];
+    const invalid: { employee_id: number; name: string; errors: string[] }[] =
+      [];
 
     for (const emp of employees) {
       const errors: string[] = [];
@@ -45,7 +47,8 @@ export class PayrollBankExportService {
       if (!emp.bank_account_number) errors.push('Missing bank account number');
       if (!emp.bank_account_type) errors.push('Missing bank account type');
       if (!emp.bank_name) errors.push('Missing bank name');
-      if (!emp.net_pay || emp.net_pay <= 0) errors.push('Invalid net pay amount');
+      if (!emp.net_pay || emp.net_pay <= 0)
+        errors.push('Invalid net pay amount');
 
       if (errors.length > 0) {
         invalid.push({
@@ -156,7 +159,11 @@ export class PayrollBankExportService {
     const timestamp = Date.now();
     const s3_key = `payroll/ach/${org_id}/${payroll_run.payroll_number}_${bank}_${timestamp}.txt`;
 
-    await this.s3_service.uploadFile(result.file_content, s3_key, result.mime_type);
+    await this.s3_service.uploadFile(
+      result.file_content,
+      s3_key,
+      result.mime_type,
+    );
 
     this.logger.log(
       `ACH file generated: ${result.file_name} (${result.record_count} records, $${result.total_amount})`,
@@ -176,7 +183,9 @@ export class PayrollBankExportService {
   /**
    * Loads employees with their payroll item data for a given payroll run.
    */
-  private async loadEmployees(payroll_run_id: number): Promise<BankBatchEmployee[]> {
+  private async loadEmployees(
+    payroll_run_id: number,
+  ): Promise<BankBatchEmployee[]> {
     const items = await this.prisma.payroll_items.findMany({
       where: { payroll_run_id },
       include: {

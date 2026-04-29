@@ -86,7 +86,10 @@ export class PartnerPlansService {
     });
 
     if (!base_plan) {
-      throw new VendixHttpException(ErrorCodes.SYS_NOT_FOUND_001, 'Base plan not found');
+      throw new VendixHttpException(
+        ErrorCodes.SYS_NOT_FOUND_001,
+        'Base plan not found',
+      );
     }
 
     if (!base_plan.resellable) {
@@ -138,7 +141,10 @@ export class PartnerPlansService {
     });
 
     if (!existing || existing.organization_id !== ctx.organization_id) {
-      throw new VendixHttpException(ErrorCodes.SYS_NOT_FOUND_001, 'Plan override not found');
+      throw new VendixHttpException(
+        ErrorCodes.SYS_NOT_FOUND_001,
+        'Plan override not found',
+      );
     }
 
     if (dto.margin_pct !== undefined) {
@@ -160,11 +166,17 @@ export class PartnerPlansService {
       data: {
         ...(dto.custom_code !== undefined && { custom_code: dto.custom_code }),
         ...(dto.custom_name !== undefined && { custom_name: dto.custom_name }),
-        ...(dto.custom_description !== undefined && { custom_description: dto.custom_description }),
+        ...(dto.custom_description !== undefined && {
+          custom_description: dto.custom_description,
+        }),
         ...(dto.margin_pct !== undefined && { margin_pct: dto.margin_pct }),
-        ...(dto.fixed_surcharge !== undefined && { fixed_surcharge: dto.fixed_surcharge }),
+        ...(dto.fixed_surcharge !== undefined && {
+          fixed_surcharge: dto.fixed_surcharge,
+        }),
         ...(dto.is_active !== undefined && { is_active: dto.is_active }),
-        ...(dto.feature_overrides !== undefined && { feature_overrides: dto.feature_overrides }),
+        ...(dto.feature_overrides !== undefined && {
+          feature_overrides: dto.feature_overrides,
+        }),
         updated_at: new Date(),
       },
       include: {
@@ -192,7 +204,10 @@ export class PartnerPlansService {
     });
 
     if (!existing || existing.organization_id !== ctx.organization_id) {
-      throw new VendixHttpException(ErrorCodes.SYS_NOT_FOUND_001, 'Plan override not found');
+      throw new VendixHttpException(
+        ErrorCodes.SYS_NOT_FOUND_001,
+        'Plan override not found',
+      );
     }
 
     return this.globalPrisma.partner_plan_overrides.update({

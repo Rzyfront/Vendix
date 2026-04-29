@@ -1,0 +1,47 @@
+meta {
+  name: Superadmin Dunning Preview Transition
+  type: http
+  seq: 32
+}
+
+post {
+  url: {{url}}/superadmin/subscriptions/dunning/{{superadmin_dunning_subscription_id}}/preview-transition
+  body: json
+  auth: inherit
+}
+
+settings {
+  encodeUrl: true
+}
+
+body:json {
+  {
+    "target_state": "suspended"
+  }
+}
+
+tests {
+  test("Preview transition returns 200", function() {
+    expect(res.status).to.equal(200);
+  });
+
+  test("Response includes legality flag and current/target state", function() {
+    expect(res.body.data).to.have.property("legal");
+    expect(res.body.data).to.have.property("current_state");
+    expect(res.body.data).to.have.property("target_state");
+    expect(res.body.data.target_state).to.equal("suspended");
+  });
+
+  test("Response includes side_effects with required keys", function() {
+    expect(res.body.data).to.have.property("side_effects");
+    expect(res.body.data.side_effects).to.have.property("emails_to_send");
+    expect(res.body.data.side_effects).to.have.property("features_lost");
+    expect(res.body.data.side_effects).to.have.property("features_gained");
+    expect(res.body.data.side_effects).to.have.property("invoices_affected");
+    expect(res.body.data.side_effects).to.have.property("commissions_affected");
+  });
+
+  test("Response includes warnings array", function() {
+    expect(res.body.data.warnings).to.be.an("array");
+  });
+}

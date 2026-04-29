@@ -18,7 +18,9 @@ export class TicketListeners {
 
   @OnEvent('ticket.assigned')
   async handleTicketAssigned(payload: any) {
-    this.logger.log(`Ticket assigned event received: #${payload.ticket_number} -> user ${payload.assigned_to_user_id}`);
+    this.logger.log(
+      `Ticket assigned event received: #${payload.ticket_number} -> user ${payload.assigned_to_user_id}`,
+    );
     await this.notificationsService.notifyTicketAssigned(payload);
   }
 
@@ -38,7 +40,9 @@ export class TicketListeners {
 
   @OnEvent('ticket.comment_added')
   async handleCommentAdded(payload: any) {
-    this.logger.log(`Comment added event received: ticket #${payload.ticket_id}`);
+    this.logger.log(
+      `Comment added event received: ticket #${payload.ticket_id}`,
+    );
     // Comments can be handled with real-time notifications later
   }
 }

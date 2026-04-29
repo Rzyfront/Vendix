@@ -30,7 +30,7 @@ export class OnboardingWizardController {
   constructor(
     private readonly wizardService: OnboardingWizardService,
     private readonly responseService: ResponseService,
-  ) { }
+  ) {}
 
   @Get('status')
   @HttpCode(HttpStatus.OK)
@@ -281,7 +281,8 @@ export class OnboardingWizardController {
   @HttpCode(HttpStatus.OK)
   @ApiOperation({
     summary: 'Resend verification email (authenticated)',
-    description: 'Resends the verification email for the authenticated user during onboarding',
+    description:
+      'Resends the verification email for the authenticated user during onboarding',
   })
   @ApiResponse({
     status: 200,
@@ -289,7 +290,9 @@ export class OnboardingWizardController {
   })
   async resendVerificationEmail(@Req() req: AuthenticatedRequest) {
     try {
-      const result = await this.wizardService.resendVerificationEmail(req.user.id);
+      const result = await this.wizardService.resendVerificationEmail(
+        req.user.id,
+      );
       return this.responseService.success(result, result.message);
     } catch (error) {
       return this.responseService.error(
@@ -315,7 +318,11 @@ export class OnboardingWizardController {
     @Body() body: { step: string; data: any },
   ) {
     try {
-      await this.wizardService.saveWizardDraft(req.user.id, body.step, body.data);
+      await this.wizardService.saveWizardDraft(
+        req.user.id,
+        body.step,
+        body.data,
+      );
       return this.responseService.success(null, 'Draft saved successfully');
     } catch (error) {
       return this.responseService.error(
@@ -341,8 +348,14 @@ export class OnboardingWizardController {
     @Body() body: { step: string },
   ) {
     try {
-      const draft = await this.wizardService.getWizardDraft(req.user.id, body.step);
-      return this.responseService.success(draft, 'Draft retrieved successfully');
+      const draft = await this.wizardService.getWizardDraft(
+        req.user.id,
+        body.step,
+      );
+      return this.responseService.success(
+        draft,
+        'Draft retrieved successfully',
+      );
     } catch (error) {
       return this.responseService.error(
         error.message || 'Error retrieving draft',

@@ -1,5 +1,6 @@
-import { Modal as RNModal, View, Text, Pressable, ScrollView, type ViewProps } from 'react-native';
+import { Modal as RNModal, View, Text, Pressable, ScrollView, StyleSheet, type ViewStyle, type ViewProps } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { colors, spacing, typography, colorScales } from '@/shared/theme';
 
 interface ModalProps extends ViewProps {
   visible: boolean;
@@ -10,7 +11,51 @@ interface ModalProps extends ViewProps {
   showHeader?: boolean;
   showFooter?: boolean;
   footer?: React.ReactNode;
+  style?: ViewStyle;
 }
+
+const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    backgroundColor: colors.card,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[3],
+    borderBottomWidth: 1,
+    borderBottomColor: colorScales.gray[200],
+  },
+  headerSpacer: {
+    width: 40,
+  },
+  title: {
+    fontSize: typography.fontSize.lg,
+    fontWeight: typography.fontWeight.semibold as any,
+    color: colorScales.gray[900],
+    flex: 1,
+    textAlign: 'center',
+  },
+  closeButton: {
+    width: 40,
+    alignItems: 'flex-end',
+  },
+  closeIcon: {
+    color: colorScales.gray[400],
+    fontSize: typography.fontSize['2xl'],
+  },
+  scrollView: {
+    flex: 1,
+  },
+  footer: {
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[4],
+    borderTopWidth: 1,
+    borderTopColor: colorScales.gray[200],
+  },
+});
 
 export function Modal({
   visible,
@@ -21,7 +66,7 @@ export function Modal({
   showHeader = true,
   showFooter = false,
   footer,
-  className = '',
+  style,
   ...props
 }: ModalProps) {
   const insets = useSafeAreaInsets();
@@ -33,38 +78,36 @@ export function Modal({
       presentationStyle="fullScreen"
       onRequestClose={onClose}
     >
-      <View className={`flex-1 bg-white ${className}`} {...props}>
+      <View style={[styles.root, style]} {...props}>
         {showHeader && (
           <View
-            className="flex-row items-center justify-between px-4 py-3 border-b border-gray-200"
-            style={{ paddingTop: insets.top || 16 }}
+            style={[styles.header, { paddingTop: insets.top || spacing[4] }]}
           >
-            <View className="w-10" />
+            <View style={styles.headerSpacer} />
             {title && (
-              <Text className="text-lg font-semibold text-gray-900 flex-1 text-center">
+              <Text style={styles.title}>
                 {title}
               </Text>
             )}
             {showCloseButton ? (
-              <Pressable onPress={onClose} hitSlop={8} className="w-10 items-end">
-                <Text className="text-gray-400 text-2xl">×</Text>
+              <Pressable onPress={onClose} hitSlop={8} style={styles.closeButton}>
+                <Text style={styles.closeIcon}>×</Text>
               </Pressable>
             ) : (
-              <View className="w-10" />
+              <View style={styles.headerSpacer} />
             )}
           </View>
         )}
         <ScrollView
-          className="flex-1"
-          contentContainerStyle={{ paddingBottom: insets.bottom + 16 }}
+          style={styles.scrollView}
+          contentContainerStyle={{ paddingBottom: insets.bottom + spacing[4] }}
           showsVerticalScrollIndicator={false}
         >
           {children}
         </ScrollView>
         {showFooter && footer && (
           <View
-            className="px-4 py-4 border-t border-gray-200"
-            style={{ paddingBottom: insets.bottom || 16 }}
+            style={[styles.footer, { paddingBottom: insets.bottom || spacing[4] }]}
           >
             {footer}
           </View>

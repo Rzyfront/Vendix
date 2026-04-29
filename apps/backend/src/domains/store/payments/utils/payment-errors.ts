@@ -31,7 +31,8 @@ export class PaymentError extends Error {
 export const LEGACY_TO_NEW: Record<PaymentErrorCodes, ErrorCodeEntry> = {
   [PaymentErrorCodes.INVALID_ORDER]: ErrorCodes.PAY_INVALID_ORDER_001,
   [PaymentErrorCodes.INVALID_AMOUNT]: ErrorCodes.PAY_INVALID_AMOUNT_001,
-  [PaymentErrorCodes.PAYMENT_METHOD_DISABLED]: ErrorCodes.PAY_METHOD_DISABLED_001,
+  [PaymentErrorCodes.PAYMENT_METHOD_DISABLED]:
+    ErrorCodes.PAY_METHOD_DISABLED_001,
   [PaymentErrorCodes.PROCESSOR_ERROR]: ErrorCodes.PAY_PROCESSOR_001,
   [PaymentErrorCodes.VALIDATION_FAILED]: ErrorCodes.PAY_VALIDATE_001,
   [PaymentErrorCodes.INSUFFICIENT_FUNDS]: ErrorCodes.PAY_INVALID_AMOUNT_001,

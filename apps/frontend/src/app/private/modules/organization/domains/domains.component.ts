@@ -21,6 +21,7 @@ import {
   VerifyDomainResult} from './interfaces/domain.interface';
 import { OrganizationDomainsService } from './services/organization-domains.service';
 import { OrganizationStoresService } from '../stores/services/organization-stores.service';
+import { environment } from '../../../../../environments/environment';
 
 import {
   DomainCreateModalComponent,
@@ -247,6 +248,7 @@ interface StoreOption {
         [isVerifying]="isVerifyingDomain()"
         [domain]="selectedDomainForVerify()"
         [verificationResult]="verificationResult()"
+        [edgeHost]="edgeHost()"
         (verify)="verifyDomain($event)"
         (cancel)="onVerifyModalCancel()"
       ></app-domain-verify-modal>
@@ -451,6 +453,13 @@ export class DomainsComponent implements OnInit {
   readonly isVerifyingDomain = signal(false);
   readonly selectedDomainForVerify = signal<Domain | null>(null);
   readonly verificationResult = signal<VerifyDomainResult | null>(null);
+  // Edge host (CloudFront target) for the DNS CNAME value, fetched from
+  // backend `getDnsInstructions().target`. Falls back to the platform domain
+  // from environment so the modal never renders with an empty value.
+  readonly dnsInstructionsTarget = signal<string | null>(null);
+  readonly edgeHost = computed(
+    () => this.dnsInstructionsTarget() ?? environment.vendixDomain,
+  );
 
   readonly isDeleteModalOpen = model<boolean>(false);
   readonly selectedDomainForDelete = signal<Domain | null>(null);
@@ -698,13 +707,32 @@ private loadInitialData(): void {
   openVerifyModal(domain: Domain): void {
     this.selectedDomainForVerify.set(domain);
     this.verificationResult.set(null);
+    this.dnsInstructionsTarget.set(null);
     this.isVerifyModalOpen.set(true);
+
+    // Load DNS instructions from backend so the modal can render the real
+    // edge host (target). If the call fails, the computed `edgeHost` falls
+    // back to environment.vendixDomain.
+    this.domainsService
+      .getDnsInstructions(domain.hostname)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          if (response.success && response.data?.target) {
+            this.dnsInstructionsTarget.set(response.data.target);
+          }
+        },
+        error: (error) => {
+          console.error('Error loading DNS instructions:', error);
+        },
+      });
   }
 
   onVerifyModalCancel(): void {
     this.isVerifyModalOpen.set(false);
     this.selectedDomainForVerify.set(null);
     this.verificationResult.set(null);
+    this.dnsInstructionsTarget.set(null);
   }
 
   verifyDomain(hostname: string): void {

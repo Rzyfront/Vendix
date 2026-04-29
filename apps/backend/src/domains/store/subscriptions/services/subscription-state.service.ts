@@ -30,8 +30,7 @@ interface PaymentFailedEventPayload {
 }
 
 /**
- * Allowed transitions between subscription states. Terminal states
- * (`cancelled`, `expired`) have no outgoing edges.
+ * Allowed transitions between subscription states.
  *
  * `pending_payment` is the parking state for a paid plan whose first invoice
  * has been issued but not yet confirmed by the Wompi webhook. The
@@ -42,6 +41,10 @@ interface PaymentFailedEventPayload {
  * `draft → active` is preserved for FREE plans only (effective_price = 0)
  * which skip the invoice/charge cycle entirely. Paid plans MUST flow through
  * `draft → pending_payment → active`.
+ *
+ * `cancelled` and `expired` admit a single legal exit to `pending_payment`
+ * via the re-subscribe checkout path. The first paid invoice promotes them
+ * back through the existing pending → active flow.
  */
 const TRANSITIONS: Record<State, readonly State[]> = {
   draft: ['pending_payment', 'trial', 'active'],
@@ -52,8 +55,8 @@ const TRANSITIONS: Record<State, readonly State[]> = {
   grace_hard: ['active', 'suspended', 'cancelled'],
   suspended: ['active', 'blocked', 'cancelled'],
   blocked: ['active', 'cancelled'],
-  cancelled: [],
-  expired: [],
+  cancelled: ['pending_payment'],
+  expired: ['pending_payment'],
 };
 
 export interface TransitionOptions {
@@ -68,6 +71,28 @@ export interface TransitionOptions {
  * `subscription_events` audit row, invalidates access cache, and emits a
  * NestJS event. All inside a Serializable transaction with SELECT FOR UPDATE
  * to prevent TOCTOU races.
+ *
+ * Concurrency model
+ * -----------------
+ * Two writers can race on the same subscription:
+ *   (a) `SubscriptionStateEngineJob` — daily cron at 03:00 UTC.
+ *   (b) `SubscriptionStateListener` — webhook-driven (G12), gated by
+ *       `SUBSCRIPTION_EVENT_DRIVEN_STATE`.
+ *
+ * Both go through `transition()`, which takes a row-level FOR UPDATE lock
+ * inside a Serializable tx. The same-state guard makes a second writer's
+ * call a no-op — duplicate webhooks and webhook+cron crossings are safe.
+ * No additional advisory lock is needed (the row lock already serializes).
+ *
+ * Rollout for G12 (event-driven recovery from grace soft/hard, suspended,
+ * blocked):
+ *   1. Deploy with `SUBSCRIPTION_EVENT_DRIVEN_STATE=false` (default).
+ *      Listener emits `STATE_ENGINE_OBSERVATION` log markers but does NOT
+ *      transition. Cron stays as source of truth.
+ *   2. Compare listener observations against cron decisions for ~7 days.
+ *   3. Flip flag to `true` in staging; observe `STATE_ENGINE_EVENT_RECOVERY`
+ *      for ~3 days.
+ *   4. Flip in prod. Cron remains as a redundant safety net (idempotent).
  */
 @Injectable()
 export class SubscriptionStateService {
@@ -88,62 +113,15 @@ export class SubscriptionStateService {
       throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_INTERNAL_ERROR);
     }
 
-    const { fromState, updated } = await this.prisma.$transaction(
-      async (tx: any) => {
-        // FOR UPDATE lock on the subscription row.
-        const locked = (await tx.$queryRaw(
-          Prisma.sql`SELECT id, state FROM store_subscriptions WHERE store_id = ${storeId} FOR UPDATE`,
-        )) as Array<{ id: number; state: State }>;
-
-        if (!locked.length) {
-          throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_001);
-        }
-
-        const current = locked[0];
-        const currentState = current.state;
-
-        if (currentState === toState) {
-          // No-op transition — still log event for auditability but skip update.
-          const existing = await tx.store_subscriptions.findUniqueOrThrow({
-            where: { id: current.id },
-          });
-          return { fromState: currentState, updated: existing };
-        }
-
-        if (!this.isLegalTransition(currentState, toState)) {
-          throw new VendixHttpException(
-            ErrorCodes.SUBSCRIPTION_010,
-            `Illegal transition ${currentState} -> ${toState}`,
-          );
-        }
-
-        const updatedRow = await tx.store_subscriptions.update({
-          where: { id: current.id },
-          data: {
-            state: toState,
-            updated_at: new Date(),
-          },
-        });
-
-        await tx.subscription_events.create({
-          data: {
-            store_subscription_id: current.id,
-            type: 'state_transition',
-            from_state: currentState,
-            to_state: toState,
-            payload: {
-              reason: opts.reason,
-              ...(opts.payload ?? {}),
-            } as Prisma.InputJsonValue,
-            triggered_by_user_id: opts.triggeredByUserId ?? null,
-            triggered_by_job: opts.triggeredByJob ?? null,
-          },
-        });
-
-        return { fromState: currentState, updated: updatedRow };
-      },
+    const result = await this.prisma.$transaction(
+      async (tx: any) => this.transitionInTxInternal(tx, storeId, toState, opts),
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
+
+    // Idempotent no-op: nothing to invalidate / emit. Still return the row.
+    if (result.noop) {
+      return result.updated;
+    }
 
     // Post-commit side effects. Failures here must NOT roll back the
     // transition (it already committed). Log + best-effort only.
@@ -157,18 +135,186 @@ export class SubscriptionStateService {
 
     this.eventEmitter.emit('subscription.state.changed', {
       storeId,
-      fromState,
+      fromState: result.fromState,
       toState,
       reason: opts.reason,
       triggeredByUserId: opts.triggeredByUserId,
       triggeredByJob: opts.triggeredByJob,
     });
 
-    return updated;
+    return result.updated;
+  }
+
+  /**
+   * Variant of `transition` that runs INSIDE an externally-provided
+   * transaction. Does NOT emit events nor invalidate cache — those are the
+   * caller's responsibility to fire AFTER the outer transaction commits, so
+   * we don't run side effects on a rolled-back state change.
+   *
+   * Use this from webhook/payment success paths where the state promotion
+   * must be atomic with the payment row update (so a partial commit can
+   * never leave a payment 'succeeded' but subscription stuck in
+   * 'pending_payment').
+   *
+   * Idempotency: same-state target is a true no-op (no log row, no update,
+   * no throw). Illegal transitions still throw `SUBSCRIPTION_010`.
+   */
+  async transitionInTx(
+    tx: Prisma.TransactionClient,
+    storeId: number,
+    toState: State,
+    opts: TransitionOptions,
+  ): Promise<store_subscriptions> {
+    if (!Number.isInteger(storeId) || storeId <= 0) {
+      throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_INTERNAL_ERROR);
+    }
+    const result = await this.transitionInTxInternal(
+      tx as any,
+      storeId,
+      toState,
+      opts,
+    );
+    return result.updated;
+  }
+
+  /**
+   * Core transition logic shared by `transition()` (opens its own
+   * Serializable tx) and `transitionInTx()` (runs inside the caller's tx).
+   * Returns `{ noop: true }` when the subscription is already in `toState`
+   * so the public API can skip post-commit side effects.
+   */
+  private async transitionInTxInternal(
+    tx: any,
+    storeId: number,
+    toState: State,
+    opts: TransitionOptions,
+  ): Promise<{
+    noop: boolean;
+    fromState: State;
+    updated: store_subscriptions;
+  }> {
+    // FOR UPDATE lock on the subscription row.
+    const locked = (await tx.$queryRaw(
+      Prisma.sql`SELECT id, state FROM store_subscriptions WHERE store_id = ${storeId} FOR UPDATE`,
+    )) as Array<{ id: number; state: State }>;
+
+    if (!locked.length) {
+      throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_001);
+    }
+
+    const current = locked[0];
+    const currentState = current.state;
+
+    // Idempotent short-circuit: same target = true no-op. Log info, skip
+    // update + audit row. This guarantees concurrent webhook + cron retries
+    // for an already-active sub don't emit redundant events nor throw.
+    if (currentState === toState) {
+      this.logger.log(
+        `transition no-op: store ${storeId} already in state '${toState}' (reason=${opts.reason})`,
+      );
+      const existing = await tx.store_subscriptions.findUniqueOrThrow({
+        where: { id: current.id },
+      });
+      return { noop: true, fromState: currentState, updated: existing };
+    }
+
+    if (!this.isLegalTransition(currentState, toState)) {
+      throw new VendixHttpException(
+        ErrorCodes.SUBSCRIPTION_010,
+        `Illegal transition ${currentState} -> ${toState}`,
+      );
+    }
+
+    const updatedRow = await tx.store_subscriptions.update({
+      where: { id: current.id },
+      data: {
+        state: toState,
+        updated_at: new Date(),
+      },
+    });
+
+    await tx.subscription_events.create({
+      data: {
+        store_subscription_id: current.id,
+        type: 'state_transition',
+        from_state: currentState,
+        to_state: toState,
+        payload: {
+          reason: opts.reason,
+          ...(opts.payload ?? {}),
+        } as Prisma.InputJsonValue,
+        triggered_by_user_id: opts.triggeredByUserId ?? null,
+        triggered_by_job: opts.triggeredByJob ?? null,
+      },
+    });
+
+    return { noop: false, fromState: currentState, updated: updatedRow };
   }
 
   isLegalTransition(from: State, to: State): boolean {
     return TRANSITIONS[from]?.includes(to) ?? false;
+  }
+
+  /**
+   * Schedule a subscription to be cancelled at the end of the current billing
+   * period. Sets `scheduled_cancel_at` to the subscription's
+   * `current_period_end` and disables auto-renew.
+   */
+  async scheduleCancel(
+    storeId: number,
+    periodEnd: Date,
+    opts: TransitionOptions,
+  ): Promise<store_subscriptions> {
+    if (!Number.isInteger(storeId) || storeId <= 0) {
+      throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_INTERNAL_ERROR);
+    }
+
+    const updated = await this.prisma.store_subscriptions.update({
+      where: { store_id: storeId },
+      data: {
+        scheduled_cancel_at: periodEnd,
+        auto_renew: false,
+        updated_at: new Date(),
+      },
+    });
+
+    await this.prisma.subscription_events.create({
+      data: {
+        store_subscription_id: updated.id,
+        // TODO: 'scheduled_cancel' is not yet in subscription_event_type_enum.
+        // Until a migration adds it (out of scope this sprint), cast to keep
+        // the audit row distinguishable via payload.kind for now.
+        type: 'scheduled_cancel' as any,
+        from_state: updated.state,
+        to_state: 'cancelled',
+        payload: {
+          reason: opts.reason,
+          kind: 'scheduled_cancel',
+          scheduled_cancel_at: periodEnd.toISOString(),
+        } as Prisma.InputJsonValue,
+        triggered_by_user_id: opts.triggeredByUserId ?? null,
+        triggered_by_job: opts.triggeredByJob ?? null,
+      },
+    });
+
+    try {
+      await this.accessService.invalidateCache(storeId);
+    } catch (err) {
+      this.logger.warn(
+        `Post-schedule-cancel cache invalidation failed for store ${storeId}: ${(err as Error).message}`,
+      );
+    }
+
+    this.eventEmitter.emit('subscription.state.changed', {
+      storeId,
+      fromState: updated.state,
+      toState: 'cancelled',
+      reason: opts.reason,
+      triggeredByUserId: opts.triggeredByUserId,
+      triggeredByJob: opts.triggeredByJob,
+    });
+
+    return updated;
   }
 
   /**
@@ -359,10 +505,7 @@ export class SubscriptionStateService {
       return payload.subscriptionId;
     }
 
-    if (
-      !Number.isInteger(payload.invoiceId) ||
-      payload.invoiceId <= 0
-    ) {
+    if (!Number.isInteger(payload.invoiceId) || payload.invoiceId <= 0) {
       return null;
     }
 
@@ -423,9 +566,8 @@ export class SubscriptionStateService {
     }
 
     try {
-      const subscriptionId = await this.resolveSubscriptionIdFromPayload(
-        payload,
-      );
+      const subscriptionId =
+        await this.resolveSubscriptionIdFromPayload(payload);
 
       if (!subscriptionId) {
         this.logger.warn(

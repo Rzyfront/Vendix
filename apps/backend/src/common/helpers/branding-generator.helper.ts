@@ -117,8 +117,10 @@ export class BrandingGeneratorHelper {
       // Use snake_case format for API consistency
       primary_color: palette.primary,
       secondary_color: palette.secondary,
-      background_color: options.backgroundColor || this.DEFAULT_BRANDING.background_color,
-      surface_color: options.surfaceColor || this.DEFAULT_BRANDING.surface_color,
+      background_color:
+        options.backgroundColor || this.DEFAULT_BRANDING.background_color,
+      surface_color:
+        options.surfaceColor || this.DEFAULT_BRANDING.surface_color,
       text_color: palette.text,
       accent_color: options.accentColor || this.DEFAULT_BRANDING.accent_color,
       border_color: palette.border,
@@ -160,10 +162,7 @@ export class BrandingGeneratorHelper {
    * @param secondary - Secondary color in hex format
    * @returns Complete color palette
    */
-  generateColorPalette(
-    primary: string,
-    secondary: string,
-  ): ColorPalette {
+  generateColorPalette(primary: string, secondary: string): ColorPalette {
     return {
       primary,
       secondary,

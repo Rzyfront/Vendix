@@ -17,7 +17,13 @@ export class EventsService {
       throw new VendixHttpException(ErrorCodes.SUBSCRIPTION_001);
     }
 
-    const { page = 1, limit = 10, type, sort_by = 'created_at', sort_order = 'desc' } = query;
+    const {
+      page = 1,
+      limit = 10,
+      type,
+      sort_by = 'created_at',
+      sort_order = 'desc',
+    } = query;
 
     const skip = (page - 1) * Number(limit);
     const where: Prisma.subscription_eventsWhereInput = {
@@ -48,7 +54,13 @@ export class EventsService {
   }
 
   async findAll(query: EventsQueryDto) {
-    const { page = 1, limit = 10, type, sort_by = 'created_at', sort_order = 'desc' } = query;
+    const {
+      page = 1,
+      limit = 10,
+      type,
+      sort_by = 'created_at',
+      sort_order = 'desc',
+    } = query;
 
     const skip = (page - 1) * Number(limit);
     const where: Prisma.subscription_eventsWhereInput = {};

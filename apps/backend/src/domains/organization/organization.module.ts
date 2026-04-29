@@ -36,4 +36,4 @@ import { OrganizationOrdersModule } from './orders/organization-orders.module';
   providers: [OrganizationPrismaService],
   exports: [OrganizationPrismaService],
 })
-export class OrganizationDomainModule { }
+export class OrganizationDomainModule {}

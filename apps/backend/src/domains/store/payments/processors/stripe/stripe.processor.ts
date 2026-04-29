@@ -23,7 +23,11 @@ export class StripeProcessor extends BasePaymentProcessor {
           : crypto.randomUUID();
 
       if (this.isTestMode()) {
-        return this.simulateTestPayment(paymentData, transactionId, idempotencyKey);
+        return this.simulateTestPayment(
+          paymentData,
+          transactionId,
+          idempotencyKey,
+        );
       }
 
       // NOTE: When the real Stripe SDK is wired up here, pass the key as the
@@ -84,10 +88,10 @@ export class StripeProcessor extends BasePaymentProcessor {
     try {
       return Boolean(
         paymentData.amount > 0 &&
-          paymentData.currency &&
-          paymentData.orderId &&
-          paymentData.storeId &&
-          this.config.credentials?.secretKey,
+        paymentData.currency &&
+        paymentData.orderId &&
+        paymentData.storeId &&
+        this.config.credentials?.secretKey,
       );
     } catch (error) {
       return false;

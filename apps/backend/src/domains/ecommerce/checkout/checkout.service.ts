@@ -14,7 +14,7 @@ import { StockLevelManager } from '../../store/inventory/shared/services/stock-l
 import { StockValidatorService } from '../../store/inventory/shared/services/stock-validator.service';
 import { PriceResolverService } from '../../store/products/services/price-resolver.service';
 import { Logger, BadRequestException, NotFoundException } from '@nestjs/common';
-import { WompiClient } from '../../store/payments/processors/wompi/wompi.client';
+import { WompiClientFactory } from '../../store/payments/processors/wompi/wompi.factory';
 import { WompiEnvironment } from '../../store/payments/processors/wompi/wompi.types';
 import { WompiProcessor } from '../../store/payments/processors/wompi/wompi.processor';
 import { PaymentEncryptionService } from '../../store/payments/services/payment-encryption.service';
@@ -38,7 +38,7 @@ export class CheckoutService {
     private readonly stockLevelManager: StockLevelManager,
     private readonly stockValidatorService: StockValidatorService,
     private readonly priceResolverService: PriceResolverService,
-    private readonly wompiClient: WompiClient,
+    private readonly wompiClientFactory: WompiClientFactory,
     private readonly wompiProcessor: WompiProcessor,
     private readonly paymentEncryption: PaymentEncryptionService,
     private readonly reservationsService: ReservationsService,
@@ -146,7 +146,8 @@ export class CheckoutService {
       throw new VendixHttpException(ErrorCodes.ECOM_CART_001);
     }
 
-    const cart_currency = cart?.currency || await this.settingsService.getStoreCurrency();
+    const cart_currency =
+      cart?.currency || (await this.settingsService.getStoreCurrency());
 
     // store_id se aplica automáticamente
     const payment_method = await this.prisma.store_payment_methods.findFirst({
@@ -176,15 +177,18 @@ export class CheckoutService {
       );
 
       if (shouldTrack) {
-        const availability = await this.stockValidatorService.validateAvailability(
-          item.product_id,
-          item.product_variant_id ?? undefined,
-          item.quantity,
-        );
+        const availability =
+          await this.stockValidatorService.validateAvailability(
+            item.product_id,
+            item.product_variant_id ?? undefined,
+            item.quantity,
+          );
 
         if (!availability.isAvailable) {
           const productName = item.product.name;
-          const variantInfo = item.product_variant?.name ? ` (${item.product_variant.name})` : '';
+          const variantInfo = item.product_variant?.name
+            ? ` (${item.product_variant.name})`
+            : '';
           throw new VendixHttpException(
             ErrorCodes.ECOM_CART_003,
             `Insufficient stock for ${productName}${variantInfo}: requested ${item.quantity}, available ${availability.available}`,
@@ -325,15 +329,25 @@ export class CheckoutService {
           product: {
             base_price: Number(productWithTaxes.base_price),
             is_on_sale: productWithTaxes.is_on_sale,
-            sale_price: productWithTaxes.sale_price != null ? Number(productWithTaxes.sale_price) : null,
+            sale_price:
+              productWithTaxes.sale_price != null
+                ? Number(productWithTaxes.sale_price)
+                : null,
             track_inventory: productWithTaxes.track_inventory,
           },
           variant: item.product_variant
             ? {
-                price_override: item.product_variant.price_override != null ? Number(item.product_variant.price_override) : null,
+                price_override:
+                  item.product_variant.price_override != null
+                    ? Number(item.product_variant.price_override)
+                    : null,
                 is_on_sale: item.product_variant.is_on_sale,
-                sale_price: item.product_variant.sale_price != null ? Number(item.product_variant.sale_price) : null,
-                track_inventory_override: item.product_variant.track_inventory_override,
+                sale_price:
+                  item.product_variant.sale_price != null
+                    ? Number(item.product_variant.sale_price)
+                    : null,
+                track_inventory_override:
+                  item.product_variant.track_inventory_override,
               }
             : undefined,
         });
@@ -447,10 +461,11 @@ export class CheckoutService {
     for (const item of cart_items) {
       if (!item.product.track_inventory) continue;
       try {
-        const location_id = await this.stockLevelManager.getDefaultLocationForProduct(
-          item.product_id,
-          item.product_variant_id || undefined,
-        );
+        const location_id =
+          await this.stockLevelManager.getDefaultLocationForProduct(
+            item.product_id,
+            item.product_variant_id || undefined,
+          );
         await this.stockLevelManager.reserveStock(
           item.product_id,
           item.product_variant_id || undefined,
@@ -462,7 +477,9 @@ export class CheckoutService {
           false, // Already validated stock above
         );
       } catch (error) {
-        this.logger.warn(`Stock reservation failed for product ${item.product_id}: ${error.message}`);
+        this.logger.warn(
+          `Stock reservation failed for product ${item.product_id}: ${error.message}`,
+        );
       }
     }
 
@@ -481,9 +498,13 @@ export class CheckoutService {
             order_id: order.id,
             skip_availability_check: false,
           });
-          this.logger.log(`Booking created for product ${booking.product_id} linked to order ${order.id}`);
+          this.logger.log(
+            `Booking created for product ${booking.product_id} linked to order ${order.id}`,
+          );
         } catch (error) {
-          this.logger.warn(`Failed to create booking for product ${booking.product_id}: ${error.message}`);
+          this.logger.warn(
+            `Failed to create booking for product ${booking.product_id}: ${error.message}`,
+          );
           // Don't fail the entire checkout if a booking fails
           // The order is already created; booking can be retried manually
         }
@@ -645,15 +666,18 @@ export class CheckoutService {
       );
 
       if (shouldTrack) {
-        const availability = await this.stockValidatorService.validateAvailability(
-          item.product_id,
-          item.product_variant_id ?? undefined,
-          item.quantity,
-        );
+        const availability =
+          await this.stockValidatorService.validateAvailability(
+            item.product_id,
+            item.product_variant_id ?? undefined,
+            item.quantity,
+          );
 
         if (!availability.isAvailable) {
           const productName = item.product.name;
-          const variantInfo = item.product_variant?.name ? ` (${item.product_variant.name})` : '';
+          const variantInfo = item.product_variant?.name
+            ? ` (${item.product_variant.name})`
+            : '';
           throw new VendixHttpException(
             ErrorCodes.ECOM_CART_003,
             `Insufficient stock for ${productName}${variantInfo}: requested ${item.quantity}, available ${availability.available}`,
@@ -685,15 +709,25 @@ export class CheckoutService {
           product: {
             base_price: Number(productWithTaxes.base_price),
             is_on_sale: productWithTaxes.is_on_sale,
-            sale_price: productWithTaxes.sale_price != null ? Number(productWithTaxes.sale_price) : null,
+            sale_price:
+              productWithTaxes.sale_price != null
+                ? Number(productWithTaxes.sale_price)
+                : null,
             track_inventory: productWithTaxes.track_inventory,
           },
           variant: item.product_variant
             ? {
-                price_override: item.product_variant.price_override != null ? Number(item.product_variant.price_override) : null,
+                price_override:
+                  item.product_variant.price_override != null
+                    ? Number(item.product_variant.price_override)
+                    : null,
                 is_on_sale: item.product_variant.is_on_sale,
-                sale_price: item.product_variant.sale_price != null ? Number(item.product_variant.sale_price) : null,
-                track_inventory_override: item.product_variant.track_inventory_override,
+                sale_price:
+                  item.product_variant.sale_price != null
+                    ? Number(item.product_variant.sale_price)
+                    : null,
+                track_inventory_override:
+                  item.product_variant.track_inventory_override,
               }
             : undefined,
         });
@@ -738,7 +772,11 @@ export class CheckoutService {
     let wa_shipping_method_id: number | null = null;
     let wa_shipping_rate_id: number | null = null;
     let wa_shipping_cost = 0;
-    let wa_delivery_type: 'pickup' | 'home_delivery' | 'direct_delivery' | 'other' = 'other';
+    let wa_delivery_type:
+      | 'pickup'
+      | 'home_delivery'
+      | 'direct_delivery'
+      | 'other' = 'other';
 
     if (dto.shipping_rate_id) {
       const rate = await this.store_prisma.shipping_rates.findFirst({
@@ -748,7 +786,10 @@ export class CheckoutService {
       if (!rate || rate.shipping_zone.store_id !== wa_store_id) {
         throw new VendixHttpException(ErrorCodes.ORD_SHIP_RATE_MISMATCH_001);
       }
-      if (dto.shipping_method_id && rate.shipping_method_id !== dto.shipping_method_id) {
+      if (
+        dto.shipping_method_id &&
+        rate.shipping_method_id !== dto.shipping_method_id
+      ) {
         throw new VendixHttpException(ErrorCodes.ORD_SHIP_RATE_MISMATCH_001);
       }
       wa_shipping_method_id = rate.shipping_method_id;
@@ -757,7 +798,11 @@ export class CheckoutService {
       wa_delivery_type = deriveDeliveryType(rate.shipping_method.type);
     } else if (dto.shipping_method_id) {
       const method = await this.store_prisma.shipping_methods.findFirst({
-        where: { id: dto.shipping_method_id, store_id: wa_store_id, is_active: true },
+        where: {
+          id: dto.shipping_method_id,
+          store_id: wa_store_id,
+          is_active: true,
+        },
       });
       if (!method) {
         throw new VendixHttpException(ErrorCodes.ORD_SHIP_INVALID_METHOD_001);
@@ -828,10 +873,11 @@ export class CheckoutService {
     for (const item of cart_items) {
       if (!item.product.track_inventory) continue;
       try {
-        const location_id = await this.stockLevelManager.getDefaultLocationForProduct(
-          item.product_id,
-          item.product_variant_id || undefined,
-        );
+        const location_id =
+          await this.stockLevelManager.getDefaultLocationForProduct(
+            item.product_id,
+            item.product_variant_id || undefined,
+          );
         await this.stockLevelManager.reserveStock(
           item.product_id,
           item.product_variant_id || undefined,
@@ -843,7 +889,9 @@ export class CheckoutService {
           false, // Already validated stock above
         );
       } catch (error) {
-        this.logger.warn(`Stock reservation failed for product ${item.product_id}: ${error.message}`);
+        this.logger.warn(
+          `Stock reservation failed for product ${item.product_id}: ${error.message}`,
+        );
       }
     }
 
@@ -922,16 +970,20 @@ export class CheckoutService {
     redirect_url?: string;
   }) {
     // Find Wompi payment method for this store
-    const wompiMethod = await this.store_prisma.store_payment_methods.findFirst({
-      where: {
-        state: 'enabled',
-        system_payment_method: { type: 'wompi' },
+    const wompiMethod = await this.store_prisma.store_payment_methods.findFirst(
+      {
+        where: {
+          state: 'enabled',
+          system_payment_method: { type: 'wompi' },
+        },
+        include: { system_payment_method: true },
       },
-      include: { system_payment_method: true },
-    });
+    );
 
     if (!wompiMethod?.custom_config) {
-      throw new BadRequestException('Wompi no está configurado para esta tienda');
+      throw new BadRequestException(
+        'Wompi no está configurado para esta tienda',
+      );
     }
 
     const config = this.paymentEncryption.decryptConfig(
@@ -939,20 +991,20 @@ export class CheckoutService {
       'wompi',
     );
 
-    // Use a per-call isolated client to avoid concurrent calls racing
-    // on the singleton's mutable `config` (the singleton's
-    // `generateIntegritySignature()` reads `this.config.integrity_secret`
-    // synchronously after an `await getAcceptanceTokens()`, leaving a
-    // window where another concurrent `configure()` could swap creds).
-    const client = this.wompiClient.withConfig({
+    const wompiConfig = {
       public_key: config.public_key,
       private_key: config.private_key,
       events_secret: config.events_secret || '',
       integrity_secret: config.integrity_secret || '',
-      environment: (config.environment as WompiEnvironment) || WompiEnvironment.SANDBOX,
-    });
+      environment:
+        (config.environment as WompiEnvironment) || WompiEnvironment.SANDBOX,
+    };
 
     const storeId = RequestContextService.getStoreId();
+    const client = this.wompiClientFactory.getClient(
+      `store-${storeId}`,
+      wompiConfig,
+    );
 
     // Resolve the most-recent payment row for this order so we can REUSE its
     // gateway_reference if one was already issued (e.g. user refreshed the
@@ -1041,9 +1093,7 @@ export class CheckoutService {
     try {
       parsed = new URL(rawUrl);
     } catch {
-      throw new BadRequestException(
-        'La URL de redirección no es válida',
-      );
+      throw new BadRequestException('La URL de redirección no es válida');
     }
 
     const isProd = process.env.NODE_ENV === 'production';
@@ -1084,9 +1134,7 @@ export class CheckoutService {
     // Always allow the platform's own root domain in dev (so the dev
     // ecommerce served from localhost / vendix.app works).
     const host = parsed.hostname.toLowerCase();
-    const isAllowed = allowed.some(
-      (h) => host === h || host.endsWith(`.${h}`),
-    );
+    const isAllowed = allowed.some((h) => host === h || host.endsWith(`.${h}`));
 
     if (!isAllowed) {
       // In dev, log + allow; in prod, hard reject.
@@ -1139,7 +1187,13 @@ export class CheckoutService {
 
     // Idempotency: if payment is already in a terminal state, skip the
     // Wompi roundtrip and return current state.
-    const terminal = ['succeeded', 'captured', 'failed', 'cancelled', 'refunded'];
+    const terminal = [
+      'succeeded',
+      'captured',
+      'failed',
+      'cancelled',
+      'refunded',
+    ];
     if (terminal.includes(payment.state)) {
       const order = await this.store_prisma.orders.findUnique({
         where: { id: orderId },
@@ -1155,16 +1209,20 @@ export class CheckoutService {
 
     // Resolve Wompi credentials for this store. We use the store's enabled
     // Wompi method (same lookup as `prepareWompiPayment`).
-    const wompiMethod = await this.store_prisma.store_payment_methods.findFirst({
-      where: {
-        state: 'enabled',
-        system_payment_method: { type: 'wompi' },
+    const wompiMethod = await this.store_prisma.store_payment_methods.findFirst(
+      {
+        where: {
+          state: 'enabled',
+          system_payment_method: { type: 'wompi' },
+        },
+        include: { system_payment_method: true },
       },
-      include: { system_payment_method: true },
-    });
+    );
 
     if (!wompiMethod?.custom_config) {
-      throw new BadRequestException('Wompi no está configurado para esta tienda');
+      throw new BadRequestException(
+        'Wompi no está configurado para esta tienda',
+      );
     }
 
     const config = this.paymentEncryption.decryptConfig(
@@ -1172,14 +1230,17 @@ export class CheckoutService {
       'wompi',
     );
 
-    // Configure the shared client with the store's credentials before polling.
-    this.wompiClient.configure({
+    const wompiConfig = {
       public_key: config.public_key,
       private_key: config.private_key,
       events_secret: config.events_secret || '',
       integrity_secret: config.integrity_secret || '',
-      environment: (config.environment as WompiEnvironment) || WompiEnvironment.SANDBOX,
-    });
+      environment:
+        (config.environment as WompiEnvironment) || WompiEnvironment.SANDBOX,
+    };
+
+    const cacheKey = `store-${payment.orders?.stores?.id ?? 'unknown'}`;
+    const client = this.wompiClientFactory.getClient(cacheKey, wompiConfig);
 
     // Try to fetch the Wompi transaction:
     //   1. By real transaction id if we already have it
@@ -1195,14 +1256,14 @@ export class CheckoutService {
       payment.transaction_id.length > 0
     ) {
       try {
-        const status = await this.wompiProcessor.getPaymentStatus(payment.transaction_id);
-        // `getPaymentStatus` swallows errors and returns 'failed' with no
-        // gatewayResponse, so verify we got a real txn back.
-        if (status?.gatewayResponse?.id) {
-          txn = status.gatewayResponse;
+        const response = await client.getTransaction(payment.transaction_id);
+        if (response?.data?.id) {
+          txn = response.data;
         }
       } catch (err) {
-        this.logger.warn(`Wompi getPaymentStatus failed: ${(err as Error).message}`);
+        this.logger.warn(
+          `Wompi getTransaction failed: ${(err as Error).message}`,
+        );
       }
     }
 
@@ -1213,7 +1274,22 @@ export class CheckoutService {
           'No Wompi reference or transaction id available to confirm this payment',
         );
       }
-      txn = await this.wompiProcessor.getTransactionByReference(reference);
+      try {
+        const response = await client.getTransactionsByReference(reference);
+        const txns = response?.data ?? [];
+        if (txns.length > 0) {
+          txn = txns.reduce((latest: any, candidate: any) => {
+            if (!latest) return candidate;
+            return new Date(candidate.created_at) > new Date(latest.created_at)
+              ? candidate
+              : latest;
+          }, txns[0]);
+        }
+      } catch (err) {
+        this.logger.warn(
+          `Wompi getTransactionsByReference failed: ${(err as Error).message}`,
+        );
+      }
     }
 
     if (!txn) {

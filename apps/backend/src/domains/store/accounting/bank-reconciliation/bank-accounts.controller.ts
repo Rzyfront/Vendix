@@ -1,6 +1,9 @@
 import { PermissionsGuard } from '../../../auth/guards/permissions.guard';
 import { Permissions } from '../../../auth/decorators/permissions.decorator';
-import { ModuleFlowGuard, RequireModuleFlow } from '../../../../common/guards/module-flow.guard';
+import {
+  ModuleFlowGuard,
+  RequireModuleFlow,
+} from '../../../../common/guards/module-flow.guard';
 import { UseGuards } from '@nestjs/common';
 import {
   Controller,
@@ -48,7 +51,10 @@ export class BankAccountsController {
   @HttpCode(HttpStatus.CREATED)
   async create(@Body() create_dto: CreateBankAccountDto) {
     const result = await this.bank_accounts_service.create(create_dto);
-    return this.response_service.success(result, 'Bank account created successfully');
+    return this.response_service.success(
+      result,
+      'Bank account created successfully',
+    );
   }
 
   @Patch(':id')
@@ -58,7 +64,10 @@ export class BankAccountsController {
     @Body() update_dto: UpdateBankAccountDto,
   ) {
     const result = await this.bank_accounts_service.update(+id, update_dto);
-    return this.response_service.success(result, 'Bank account updated successfully');
+    return this.response_service.success(
+      result,
+      'Bank account updated successfully',
+    );
   }
 
   @Delete(':id')
@@ -66,6 +75,9 @@ export class BankAccountsController {
   @HttpCode(HttpStatus.NO_CONTENT)
   async remove(@Param('id') id: string) {
     await this.bank_accounts_service.remove(+id);
-    return this.response_service.success(null, 'Bank account closed successfully');
+    return this.response_service.success(
+      null,
+      'Bank account closed successfully',
+    );
   }
 }

@@ -60,7 +60,10 @@ export class UsersController {
   async invite(@Body() inviteDto: InviteUserDto) {
     try {
       const result = await this.usersService.invite(inviteDto);
-      return this.responseService.created(result, 'Invitación enviada exitosamente');
+      return this.responseService.created(
+        result,
+        'Invitación enviada exitosamente',
+      );
     } catch (error) {
       return this.responseService.error(
         error.message || 'Error al enviar la invitación',

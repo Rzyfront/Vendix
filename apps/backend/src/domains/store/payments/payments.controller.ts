@@ -37,7 +37,7 @@ export class PaymentsController {
   constructor(
     private readonly paymentsService: PaymentsService,
     private readonly responseService: ResponseService,
-  ) { }
+  ) {}
 
   @Post()
   @ApiOperation({ summary: 'Process payment for existing order' })
@@ -48,8 +48,14 @@ export class PaymentsController {
     @Body() createPaymentDto: CreatePaymentDto,
     @Request() req,
   ) {
-    const result = await this.paymentsService.processPayment(createPaymentDto, req.user);
-    return this.responseService.success(result, 'Payment processed successfully');
+    const result = await this.paymentsService.processPayment(
+      createPaymentDto,
+      req.user,
+    );
+    return this.responseService.success(
+      result,
+      'Payment processed successfully',
+    );
   }
 
   @Post('with-order')
@@ -67,7 +73,10 @@ export class PaymentsController {
       createOrderPaymentDto,
       req.user,
     );
-    return this.responseService.created(result, 'Order created and payment processed');
+    return this.responseService.created(
+      result,
+      'Order created and payment processed',
+    );
   }
 
   @Post(':paymentId/refund')
@@ -84,7 +93,10 @@ export class PaymentsController {
       refundPaymentDto,
       req.user,
     );
-    return this.responseService.success(result, 'Payment refunded successfully');
+    return this.responseService.success(
+      result,
+      'Payment refunded successfully',
+    );
   }
 
   @Get(':paymentId/status')
@@ -95,7 +107,10 @@ export class PaymentsController {
     @Param('paymentId') paymentId: string,
     @Request() req,
   ) {
-    const result = await this.paymentsService.getPaymentStatus(paymentId, req.user);
+    const result = await this.paymentsService.getPaymentStatus(
+      paymentId,
+      req.user,
+    );
     return this.responseService.success(result, 'Payment status retrieved');
   }
 
@@ -105,7 +120,10 @@ export class PaymentsController {
       'Force-confirm a POS Wompi payment by polling Wompi and applying the canonical state',
   })
   @ApiResponse({ status: 200, description: 'Payment state synced from Wompi' })
-  @ApiResponse({ status: 400, description: 'Not a Wompi payment / config missing' })
+  @ApiResponse({
+    status: 400,
+    description: 'Not a Wompi payment / config missing',
+  })
   @ApiResponse({ status: 404, description: 'Payment not found' })
   async confirmPosWompiPayment(
     @Param('paymentId', ParseIntPipe) paymentId: number,
@@ -123,12 +141,15 @@ export class PaymentsController {
   @ApiResponse({ status: 200, description: 'Payments retrieved successfully' })
   async findAll(@Query() query: PaymentQueryDto, @Request() req) {
     const result = await this.paymentsService.findAll(query, req.user);
-    // Assuming findAll returns { data, total, page, limit } or similar, 
-    // but ResponseService.paginated needs explicit args. 
+    // Assuming findAll returns { data, total, page, limit } or similar,
+    // but ResponseService.paginated needs explicit args.
     // If result is just array or standard paginated object, we need to adapt.
     // Ideally PaymentsService.findAll returns a standard paginated structure.
     // For now, wrapping in success to be safe if structure varies.
-    return this.responseService.success(result, 'Payments retrieved successfully');
+    return this.responseService.success(
+      result,
+      'Payments retrieved successfully',
+    );
   }
 
   @Post('pos')
@@ -177,7 +198,10 @@ export class PaymentsController {
       createPosPaymentDto,
       req.user,
     );
-    return this.responseService.created(result, 'POS payment processed successfully');
+    return this.responseService.created(
+      result,
+      'POS payment processed successfully',
+    );
   }
 
   @Get('payment-methods')
@@ -198,7 +222,10 @@ export class PaymentsController {
       req.user.store_id,
       req.user,
     );
-    return this.responseService.success(result, 'Payment methods retrieved successfully');
+    return this.responseService.success(
+      result,
+      'Payment methods retrieved successfully',
+    );
   }
 
   @Get(':paymentId')
@@ -207,7 +234,10 @@ export class PaymentsController {
   @ApiResponse({ status: 404, description: 'Payment not found' })
   async findOne(@Param('paymentId') paymentId: string, @Request() req) {
     const result = await this.paymentsService.findOne(paymentId, req.user);
-    return this.responseService.success(result, 'Payment retrieved successfully');
+    return this.responseService.success(
+      result,
+      'Payment retrieved successfully',
+    );
   }
 
   @Get('stores/:storeId/payment-methods')
@@ -224,7 +254,10 @@ export class PaymentsController {
       parseInt(storeId),
       req.user,
     );
-    return this.responseService.success(result, 'Payment methods retrieved successfully');
+    return this.responseService.success(
+      result,
+      'Payment methods retrieved successfully',
+    );
   }
 
   @Post('stores/:storeId/payment-methods')
@@ -243,6 +276,9 @@ export class PaymentsController {
       createPaymentMethodDto,
       req.user,
     );
-    return this.responseService.created(result, 'Payment method created successfully');
+    return this.responseService.created(
+      result,
+      'Payment method created successfully',
+    );
   }
 }

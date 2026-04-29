@@ -9,10 +9,7 @@ import { DomainGeneratorHelper } from '../../../common/helpers/domain-generator.
 @Module({
   imports: [PrismaModule, ResponseModule, MulterModule.register()],
   controllers: [EcommerceController],
-  providers: [
-    EcommerceService,
-    DomainGeneratorHelper,
-  ],
+  providers: [EcommerceService, DomainGeneratorHelper],
   exports: [EcommerceService],
 })
 export class StoreEcommerceModule {}

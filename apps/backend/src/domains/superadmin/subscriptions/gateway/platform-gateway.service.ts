@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { GlobalPrismaService } from '../../../../prisma/services/global-prisma.service';
 import { PaymentEncryptionService } from '../../../store/payments/services/payment-encryption.service';
-import { WompiClient } from '../../../store/payments/processors/wompi/wompi.client';
+import { WompiClientFactory } from '../../../store/payments/processors/wompi/wompi.factory';
 import {
   WompiConfig,
   WompiEnvironment,
@@ -86,7 +86,7 @@ export class PlatformGatewayService {
   constructor(
     private readonly prisma: GlobalPrismaService,
     private readonly encryption: PaymentEncryptionService,
-    private readonly wompiClient: WompiClient,
+    private readonly wompiClientFactory: WompiClientFactory,
     private readonly validator: PlatformWompiConfigValidator,
   ) {}
 
@@ -165,10 +165,26 @@ export class PlatformGatewayService {
   ): Promise<MaskedGatewayView> {
     this.assertProcessor(processor);
 
-    // 1. Schema + cross-field validation (production requires confirm flag).
+    // 1. Schema + confirm_production validation.
     await this.validator.validate(dto);
 
-    // 2. Production activation requires a recent successful test against
+    // 2. Load previous row once and decrypt stored secrets so we can
+    //    merge with the incoming DTO. Any secret omitted in the DTO
+    //    falls back to the stored value (= "do not rotate").
+    const previous = await this.findRow(processor);
+    const previousValue = previous ? this.parseValue(previous.value) : null;
+    const previousDecrypted = previousValue
+      ? this.decryptStoredConfig(processor, previousValue)
+      : null;
+
+    const effectiveCreds = this.mergeCredentials(dto, previousDecrypted);
+
+    // 3. Cross-field rule (post-merge): the EFFECTIVE keys must match
+    //    the declared environment. Done here — not in the validator —
+    //    because under partial PATCH the keys may come from storage.
+    this.assertKeysMatchEnvironment(effectiveCreds, dto.environment);
+
+    // 4. Production activation requires a recent successful test against
     //    the SAME credentials (or the existing stored ones if they are
     //    being reactivated). We don't run the test here — operator must
     //    POST /test first.
@@ -176,9 +192,7 @@ export class PlatformGatewayService {
       dto.environment === PlatformGatewayEnvironmentEnum.PRODUCTION &&
       dto.is_active === true
     ) {
-      const existing = await this.findRow(processor);
-      const existingValue = existing ? this.parseValue(existing.value) : null;
-      const fresh = this.hasFreshSuccessfulTest(existingValue);
+      const fresh = this.hasFreshSuccessfulTest(previousValue);
       if (!fresh) {
         throw new VendixHttpException(
           ErrorCodes.SUBSCRIPTION_GATEWAY_002,
@@ -187,33 +201,28 @@ export class PlatformGatewayService {
       }
     }
 
-    // 3. Build and encrypt the stored value.
-    const plainConfig = {
-      public_key: dto.public_key,
-      private_key: dto.private_key,
-      events_secret: dto.events_secret,
-      integrity_secret: dto.integrity_secret,
-    };
+    // 5. Encrypt the EFFECTIVE credentials (post-merge, plaintext).
     const encryptedConfig = this.encryption.encryptConfig(
-      plainConfig,
+      {
+        public_key: effectiveCreds.public_key,
+        private_key: effectiveCreds.private_key,
+        events_secret: effectiveCreds.events_secret,
+        integrity_secret: effectiveCreds.integrity_secret,
+      },
       'wompi',
     );
 
-    // Preserve last_test_* fields from previous row if the credentials
-    // are unchanged (so PATCHing only is_active doesn't wipe history).
-    const previous = await this.findRow(processor);
-    const previousValue = previous ? this.parseValue(previous.value) : null;
+    // 6. credentialsChanged compares EFFECTIVE plaintext against stored
+    //    plaintext. When every secret was omitted, this is false and
+    //    we preserve last_tested_at/last_test_result — which is exactly
+    //    what we want for an is_active / environment-only toggle.
     const credentialsChanged =
-      !previousValue ||
-      previousValue.config.public_key !== dto.public_key ||
-      previousValue.config.environment !== dto.environment ||
-      // Compare by re-encrypting is unsafe (random IV). Compare decrypted.
-      !this.sameSecret(previousValue.config.private_key, dto.private_key) ||
-      !this.sameSecret(previousValue.config.events_secret, dto.events_secret) ||
-      !this.sameSecret(
-        previousValue.config.integrity_secret,
-        dto.integrity_secret,
-      );
+      !previousDecrypted ||
+      previousDecrypted.public_key !== effectiveCreds.public_key ||
+      previousDecrypted.private_key !== effectiveCreds.private_key ||
+      previousDecrypted.events_secret !== effectiveCreds.events_secret ||
+      previousDecrypted.integrity_secret !== effectiveCreds.integrity_secret ||
+      previousValue?.config.environment !== dto.environment;
 
     const now = new Date();
     const newValue: StoredGatewayValue = {
@@ -227,10 +236,10 @@ export class PlatformGatewayService {
       is_active: dto.is_active ?? false,
       last_tested_at: credentialsChanged
         ? null
-        : previousValue?.last_tested_at ?? null,
+        : (previousValue?.last_tested_at ?? null),
       last_test_result: credentialsChanged
         ? null
-        : previousValue?.last_test_result ?? null,
+        : (previousValue?.last_test_result ?? null),
       updated_by_user_id: userId,
       updated_at: now.toISOString(),
     };
@@ -273,15 +282,16 @@ export class PlatformGatewayService {
   ): Promise<TestConnectionResult> {
     this.assertProcessor(processor);
 
-    const credsForTest = await this.resolveCredsForTest(
-      processor,
-      providedDto,
-    );
+    const credsForTest = await this.resolveCredsForTest(processor, providedDto);
 
     let result: TestConnectionResult;
     try {
-      this.wompiClient.configure(this.toWompiConfig(credsForTest));
-      const tokens = await this.wompiClient.getAcceptanceTokens();
+      const wompiConfig = this.toWompiConfig(credsForTest);
+      const client = this.wompiClientFactory.getClient(
+        'platform-test',
+        wompiConfig,
+      );
+      const tokens = await client.getAcceptanceTokens();
       // We don't expose the merchant id explicitly via getAcceptanceTokens,
       // but a non-empty acceptance_token proves the merchant endpoint
       // accepted our public_key + private_key auth.
@@ -311,7 +321,9 @@ export class PlatformGatewayService {
 
   // ── Internals ────────────────────────────────────────────────────
 
-  private assertProcessor(processor: string): asserts processor is PlatformProcessor {
+  private assertProcessor(
+    processor: string,
+  ): asserts processor is PlatformProcessor {
     if (!SUPPORTED_PROCESSORS.has(processor as PlatformProcessor)) {
       throw new VendixHttpException(
         ErrorCodes.SYS_VALIDATION_001,
@@ -385,8 +397,7 @@ export class PlatformGatewayService {
         events_secret: masked.events_secret,
         integrity_secret: masked.integrity_secret,
       },
-      updated_at:
-        value.updated_at ?? rowUpdatedAt?.toISOString?.() ?? null,
+      updated_at: value.updated_at ?? rowUpdatedAt?.toISOString?.() ?? null,
     };
   }
 
@@ -411,11 +422,11 @@ export class PlatformGatewayService {
 
     if (hasFullProvided) {
       return {
-        public_key: providedDto!.public_key!,
-        private_key: providedDto!.private_key!,
-        events_secret: providedDto!.events_secret!,
-        integrity_secret: providedDto!.integrity_secret!,
-        environment: providedDto!.environment!,
+        public_key: providedDto.public_key!,
+        private_key: providedDto.private_key!,
+        events_secret: providedDto.events_secret!,
+        integrity_secret: providedDto.integrity_secret!,
+        environment: providedDto.environment!,
       };
     }
 
@@ -470,6 +481,85 @@ export class PlatformGatewayService {
           ? WompiEnvironment.PRODUCTION
           : WompiEnvironment.SANDBOX,
     };
+  }
+
+  /**
+   * Merge incoming DTO with previously stored (decrypted) credentials.
+   * A secret omitted in the DTO is preserved from storage — that's the
+   * partial-PATCH contract: "no value" means "do not rotate".
+   *
+   * If a secret is omitted AND there is no previous value, throw — we
+   * can't persist an empty credential.
+   */
+  private mergeCredentials(
+    dto: UpsertGatewayDto,
+    previous: DecryptedCreds | null,
+  ): {
+    public_key: string;
+    private_key: string;
+    events_secret: string;
+    integrity_secret: string;
+  } {
+    const pick = (
+      incoming: string | undefined,
+      stored: string | undefined,
+      label: string,
+    ): string => {
+      if (incoming !== undefined) return incoming;
+      if (stored !== undefined && stored !== '') return stored;
+      throw new VendixHttpException(
+        ErrorCodes.SUBSCRIPTION_GATEWAY_001,
+        `Las 4 credenciales son requeridas en el primer alta de la pasarela (falta: ${label}).`,
+      );
+    };
+
+    return {
+      public_key: pick(dto.public_key, previous?.public_key, 'public_key'),
+      private_key: pick(dto.private_key, previous?.private_key, 'private_key'),
+      events_secret: pick(
+        dto.events_secret,
+        previous?.events_secret,
+        'events_secret',
+      ),
+      integrity_secret: pick(
+        dto.integrity_secret,
+        previous?.integrity_secret,
+        'integrity_secret',
+      ),
+    };
+  }
+
+  /**
+   * Cross-field check on the EFFECTIVE keys (post-merge): pub_prod_/prv_prod_
+   * must pair with environment=production and pub_test_/prv_test_ with
+   * environment=sandbox. Lives in the service (not the validator)
+   * because under partial PATCH the keys may come from stored values.
+   */
+  private assertKeysMatchEnvironment(
+    creds: { public_key: string; private_key: string },
+    environment: PlatformGatewayEnvironmentEnum,
+  ): void {
+    const isProductionEnv =
+      environment === PlatformGatewayEnvironmentEnum.PRODUCTION;
+    const looksProdKey =
+      creds.public_key.startsWith('pub_prod_') ||
+      creds.private_key.startsWith('prv_prod_');
+    const looksTestKey =
+      creds.public_key.startsWith('pub_test_') ||
+      creds.private_key.startsWith('prv_test_');
+
+    if (isProductionEnv && looksTestKey) {
+      throw new VendixHttpException(
+        ErrorCodes.SUBSCRIPTION_GATEWAY_001,
+        'Estás declarando ambiente production pero las credenciales son de prueba (pub_test_/prv_test_).',
+      );
+    }
+    if (!isProductionEnv && looksProdKey) {
+      throw new VendixHttpException(
+        ErrorCodes.SUBSCRIPTION_GATEWAY_001,
+        'Estás declarando ambiente sandbox pero las credenciales son de producción (pub_prod_/prv_prod_).',
+      );
+    }
   }
 
   /**

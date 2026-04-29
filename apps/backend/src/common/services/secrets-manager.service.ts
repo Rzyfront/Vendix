@@ -23,7 +23,9 @@ export class SecretsManagerService implements OnModuleInit {
 
     // Use IAM Role or explicit credentials (same pattern as S3Service)
     const accessKeyId = this.configService.get<string>('AWS_ACCESS_KEY_ID');
-    const secretAccessKey = this.configService.get<string>('AWS_SECRET_ACCESS_KEY');
+    const secretAccessKey = this.configService.get<string>(
+      'AWS_SECRET_ACCESS_KEY',
+    );
 
     if (accessKeyId && secretAccessKey) {
       clientConfig.credentials = {
@@ -44,16 +46,25 @@ export class SecretsManagerService implements OnModuleInit {
         this.loadSecretsToEnv();
         this.logger.log('AWS Secrets Manager loaded successfully');
       } catch (error) {
-        this.logger.error(`Failed to load secrets from AWS Secrets Manager: ${error.message}`);
+        this.logger.error(
+          `Failed to load secrets from AWS Secrets Manager: ${error.message}`,
+        );
 
         // In production, this should fail fast
-        const nodeEnv = this.configService.get<string>('NODE_ENV', 'development');
+        const nodeEnv = this.configService.get<string>(
+          'NODE_ENV',
+          'development',
+        );
         if (nodeEnv === 'production') {
-          throw new Error('Cannot start production application without AWS Secrets Manager');
+          throw new Error(
+            'Cannot start production application without AWS Secrets Manager',
+          );
         }
 
         // In development, warn and continue with .env
-        this.logger.warn('Falling back to environment variables for development');
+        this.logger.warn(
+          'Falling back to environment variables for development',
+        );
       }
     } else {
       this.logger.log('Secrets Manager disabled, using .env files');
@@ -62,7 +73,10 @@ export class SecretsManagerService implements OnModuleInit {
 
   private shouldUseSecretsManager(): boolean {
     const nodeEnv = this.configService.get<string>('NODE_ENV', 'development');
-    const useSecrets = this.configService.get<string>('USE_SECRETS_MANAGER', 'false');
+    const useSecrets = this.configService.get<string>(
+      'USE_SECRETS_MANAGER',
+      'false',
+    );
 
     // Use Secrets Manager in production or explicitly enabled
     return nodeEnv === 'production' || useSecrets === 'true';
@@ -111,7 +125,9 @@ export class SecretsManagerService implements OnModuleInit {
       }
     }
 
-    this.logger.log(`Loaded ${Object.keys(this.secretsCache).length} secrets into environment variables`);
+    this.logger.log(
+      `Loaded ${Object.keys(this.secretsCache).length} secrets into environment variables`,
+    );
   }
 
   async getSecret(key: string): Promise<string | undefined> {
@@ -139,7 +155,11 @@ export class SecretsManagerService implements OnModuleInit {
     return this.shouldUseSecretsManager();
   }
 
-  getHealthStatus(): { usingSecretsManager: boolean; cacheExpiry: number; secretsCount: number } {
+  getHealthStatus(): {
+    usingSecretsManager: boolean;
+    cacheExpiry: number;
+    secretsCount: number;
+  } {
     return {
       usingSecretsManager: this.isUsingSecretsManager(),
       cacheExpiry: this.cacheExpiry,

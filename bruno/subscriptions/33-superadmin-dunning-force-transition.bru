@@ -1,0 +1,23 @@
+meta {
+  name: Superadmin Dunning Force Transition
+  type: http
+  seq: 33
+}
+
+# NOTE: Endpoint POST /:id/transition with target_state body is NOT implemented.
+# Existing dunning actions: /remind, /cancel, /retry-payment.
+# As a closest-equivalent smoke test we assert /cancel transitions a subscription
+# out of dunning. Re-enable the generic /transition route once available.
+
+post {
+  url: {{url}}/superadmin/subscriptions/dunning/{{superadmin_dunning_subscription_id}}/cancel
+  body: none
+  auth: inherit
+}
+
+tests {
+  test("Force-cancel transition succeeds", function() {
+    expect(res.status).to.equal(200);
+    expect(res.body.success).to.be.true;
+  });
+}

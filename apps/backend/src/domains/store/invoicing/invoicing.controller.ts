@@ -19,7 +19,10 @@ import { Permissions } from '../../auth/decorators/permissions.decorator';
 import { CreateInvoiceDto } from './dto/create-invoice.dto';
 import { UpdateInvoiceDto } from './dto/update-invoice.dto';
 import { QueryInvoiceDto } from './dto/query-invoice.dto';
-import { CreateCreditNoteDto, CreateDebitNoteDto } from './credit-notes/dto/create-credit-note.dto';
+import {
+  CreateCreditNoteDto,
+  CreateDebitNoteDto,
+} from './credit-notes/dto/create-credit-note.dto';
 
 @Controller('store/invoicing')
 export class InvoicingController {
@@ -60,7 +63,10 @@ export class InvoicingController {
   @HttpCode(HttpStatus.CREATED)
   async create(@Body() create_dto: CreateInvoiceDto) {
     const result = await this.invoicing_service.create(create_dto);
-    return this.response_service.success(result, 'Invoice created successfully');
+    return this.response_service.success(
+      result,
+      'Invoice created successfully',
+    );
   }
 
   @Post('from-order/:orderId')
@@ -78,9 +84,8 @@ export class InvoicingController {
   @Permissions('invoicing:write')
   @HttpCode(HttpStatus.CREATED)
   async createFromSalesOrder(@Param('salesOrderId') salesOrderId: string) {
-    const result = await this.invoicing_service.createFromSalesOrder(
-      +salesOrderId,
-    );
+    const result =
+      await this.invoicing_service.createFromSalesOrder(+salesOrderId);
     return this.response_service.success(
       result,
       'Invoice created from sales order successfully',
@@ -136,7 +141,10 @@ export class InvoicingController {
   @Permissions('invoicing:write')
   async update(@Param('id') id: string, @Body() update_dto: UpdateInvoiceDto) {
     const result = await this.invoicing_service.update(+id, update_dto);
-    return this.response_service.success(result, 'Invoice updated successfully');
+    return this.response_service.success(
+      result,
+      'Invoice updated successfully',
+    );
   }
 
   @Patch(':id/validate')

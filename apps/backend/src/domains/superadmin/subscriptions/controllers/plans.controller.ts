@@ -42,7 +42,13 @@ export class PlansController {
   @ApiOperation({ summary: 'List all subscription plans' })
   async findAll(@Query() query: PlanQueryDto) {
     const result = await this.plansService.findAll(query);
-    return this.responseService.paginated(result.data, result.meta.total, result.meta.page, result.meta.limit, 'Plans retrieved');
+    return this.responseService.paginated(
+      result.data,
+      result.meta.total,
+      result.meta.page,
+      result.meta.limit,
+      'Plans retrieved',
+    );
   }
 
   @Permissions('superadmin:subscriptions:plans:read')
@@ -56,7 +62,10 @@ export class PlansController {
   @Permissions('superadmin:subscriptions:plans:update')
   @Patch(':id')
   @ApiOperation({ summary: 'Update a subscription plan' })
-  async update(@Param('id', ParseIntPipe) id: number, @Body() dto: UpdatePlanDto) {
+  async update(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: UpdatePlanDto,
+  ) {
     const result = await this.plansService.update(id, dto);
     return this.responseService.updated(result, 'Plan updated');
   }

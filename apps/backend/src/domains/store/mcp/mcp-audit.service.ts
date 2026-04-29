@@ -30,10 +30,7 @@ export class McpAuditService {
         store_id: entry.store_id,
         user_id: entry.user_id,
         model:
-          entry.tool_name ||
-          entry.resource_uri ||
-          entry.prompt_name ||
-          'mcp',
+          entry.tool_name || entry.resource_uri || entry.prompt_name || 'mcp',
         prompt_tokens: 0,
         completion_tokens: 0,
         cost_usd: 0,

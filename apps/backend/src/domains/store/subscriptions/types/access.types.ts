@@ -47,6 +47,7 @@ export interface ResolvedSubscription {
   found: boolean;
   storeId: number;
   state: store_subscription_state_enum;
+  planId: number | null;
   planCode: string;
   partnerOrgId: number | null;
   overlayActive: boolean;
@@ -63,6 +64,10 @@ export interface AccessCheckResult {
   severity: 'info' | 'warning' | 'critical' | 'blocker';
   reason?: string;
   subscription_state: store_subscription_state_enum;
+  /** Resolved subscription plan id, or null when no record exists. */
+  plan_id: number | null;
+  /** Whether a `store_subscriptions` row exists for this store. */
+  has_record: boolean;
   remaining?: { tokens?: number; messages?: number; jobs?: number };
 }
 

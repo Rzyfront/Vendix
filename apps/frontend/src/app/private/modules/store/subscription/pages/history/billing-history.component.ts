@@ -1,17 +1,21 @@
 import { Component, OnInit, inject, signal, computed, DestroyRef } from '@angular/core';
 import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
 import { CurrencyPipe } from '@angular/common';
+import { Router } from '@angular/router';
 import {
   StatsComponent,
   InputsearchComponent,
   ResponsiveDataViewComponent,
   EmptyStateComponent,
   CardComponent,
+  StickyHeaderComponent,
   TableColumn,
+  TableAction,
   ItemListCardConfig,
   ToastService,
 } from '../../../../../../shared/components/index';
 import { StoreSubscriptionService } from '../../services/store-subscription.service';
+import { SubscriptionFacade } from '../../../../../../core/store/subscription/subscription.facade';
 import { Invoice } from '../../interfaces/store-subscription.interface';
 
 @Component({
@@ -23,10 +27,21 @@ import { Invoice } from '../../interfaces/store-subscription.interface';
     ResponsiveDataViewComponent,
     EmptyStateComponent,
     CardComponent,
+    StickyHeaderComponent,
     CurrencyPipe,
   ],
   template: `
     <div class="w-full">
+      <app-sticky-header
+        title="Historial de Facturación"
+        [subtitle]="headerSubtitle()"
+        icon="receipt"
+        [showBackButton]="true"
+        backRoute="/admin/subscription"
+        [badgeText]="headerBadgeText()"
+        [badgeColor]="headerBadgeColor()"
+      />
+
       <!-- Stats -->
       <div class="stats-container !mb-0 md:!mb-8 sticky top-0 z-20 bg-background md:static md:bg-transparent">
         <app-stats
@@ -60,7 +75,7 @@ import { Invoice } from '../../interfaces/store-subscription.interface';
       </div>
 
       <!-- Search Section -->
-      <div class="sticky top-[99px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
+      <div class="sticky top-[155px] z-10 bg-background px-2 py-1.5 -mt-[5px] md:mt-0 md:static md:bg-transparent md:px-6 md:py-4 md:border-b md:border-border">
         <div class="flex flex-col gap-2 md:flex-row md:justify-between md:items-center md:gap-4">
           <h2 class="text-[13px] font-bold text-gray-600 tracking-wide md:text-lg md:font-semibold md:text-text-primary">
             Historial de Facturación ({{ invoices().length }})
@@ -87,6 +102,7 @@ import { Invoice } from '../../interfaces/store-subscription.interface';
           icon="file-text"
           title="Sin facturas"
           description="Aún no hay historial de facturación"
+          [showActionButton]="false"
         ></app-empty-state>
       }
 
@@ -97,7 +113,9 @@ import { Invoice } from '../../interfaces/store-subscription.interface';
               [data]="filteredInvoices()"
               [columns]="columns"
               [cardConfig]="cardConfig"
+              [actions]="rowActions"
               [loading]="loading()"
+              (rowClick)="goToDetail($event)"
             ></app-responsive-data-view>
           </div>
         </app-card>
@@ -109,6 +127,100 @@ export class BillingHistoryComponent implements OnInit {
   private destroyRef = inject(DestroyRef);
   private subscriptionService = inject(StoreSubscriptionService);
   private toastService = inject(ToastService);
+  private router = inject(Router);
+  private facade = inject(SubscriptionFacade);
+
+  readonly headerBadgeText = computed(() => {
+    const s = this.facade.status();
+    const labels: Record<string, string> = {
+      active: 'Activa',
+      trial: 'Prueba',
+      trialing: 'Prueba',
+      past_due: 'Vencida',
+      cancelled: 'Cancelada',
+      expired: 'Expirada',
+      grace_soft: 'Gracia',
+      grace_hard: 'Gracia',
+      blocked: 'Bloqueada',
+      none: 'Sin suscripción',
+    };
+    return labels[s] || s;
+  });
+
+  readonly headerBadgeColor = computed(() => {
+    const s = this.facade.status();
+    if (s === 'active' || s === 'trial' || s === 'trialing') return 'green';
+    if (s === 'past_due' || s === 'grace_soft' || s === 'grace_hard') return 'yellow';
+    if (s === 'blocked') return 'red';
+    if (s === 'cancelled' || s === 'expired') return 'gray';
+    return 'blue';
+  });
+
+  readonly headerSubtitle = computed(() => {
+    const count = this.stats().totalCount;
+    return count + ' factura' + (count !== 1 ? 's' : '') + ' registrada' + (count !== 1 ? 's' : '');
+  });
+
+  readonly rowActions: TableAction[] = [
+    {
+      label: 'Ver detalle',
+      icon: 'eye',
+      tooltip: 'Ver detalle de la factura',
+      variant: 'ghost',
+      action: (item: Invoice) => this.goToDetail(item),
+    },
+    {
+      label: 'Descargar PDF',
+      icon: 'download',
+      tooltip: 'Descargar factura como PDF',
+      variant: 'ghost',
+      action: (item: Invoice) => this.downloadPdf(item),
+    },
+  ];
+
+  goToDetail(invoice: Invoice): void {
+    if (!invoice?.id) {
+      return;
+    }
+    this.router.navigate(['/admin/subscription/invoices', invoice.id]);
+  }
+
+  /**
+   * S3.1 — Streams the invoice PDF and triggers a save-dialog via a
+   * transient anchor element. The download is allowed even when the
+   * subscription is suspended.
+   */
+  downloadPdf(invoice: Invoice): void {
+    if (!invoice?.id) {
+      return;
+    }
+    this.subscriptionService
+      .downloadInvoicePdf(invoice.id)
+      .pipe(takeUntilDestroyed(this.destroyRef))
+      .subscribe({
+        next: (response) => {
+          const blob = response.body;
+          if (!blob) {
+            this.toastService.error('No se pudo generar el PDF');
+            return;
+          }
+          const cd = response.headers.get('content-disposition');
+          const match = cd ? /filename="?([^";]+)"?/i.exec(cd) : null;
+          const filename = match?.[1] ?? `factura-${invoice.invoice_number}.pdf`;
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = filename;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+        },
+        error: () => {
+          this.toastService.error('Error al descargar el PDF');
+        },
+      });
+  }
 
   readonly invoices = signal<Invoice[]>([]);
   readonly filteredInvoices = signal<Invoice[]>([]);

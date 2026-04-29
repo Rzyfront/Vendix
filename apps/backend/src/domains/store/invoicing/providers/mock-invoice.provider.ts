@@ -16,7 +16,9 @@ import { CufeCalculator } from '../utils/cufe-calculator';
 export class MockInvoiceProvider implements InvoiceProviderAdapter {
   private readonly logger = new Logger(MockInvoiceProvider.name);
 
-  async sendInvoice(invoiceData: ProviderInvoiceData): Promise<ProviderResponse> {
+  async sendInvoice(
+    invoiceData: ProviderInvoiceData,
+  ): Promise<ProviderResponse> {
     this.logger.log(
       `[MOCK] Sending invoice ${invoiceData.invoice_number} to provider`,
     );
@@ -25,7 +27,8 @@ export class MockInvoiceProvider implements InvoiceProviderAdapter {
     const cufe = CufeCalculator.generate({
       invoice_number: invoiceData.invoice_number,
       issue_date: invoiceData.issue_date,
-      issue_time: new Date().toISOString().split('T')[1].split('.')[0] + '-05:00',
+      issue_time:
+        new Date().toISOString().split('T')[1].split('.')[0] + '-05:00',
       total_before_tax: invoiceData.subtotal_amount,
       tax_iva: invoiceData.tax_amount,
       total_amount: invoiceData.total_amount,
@@ -53,7 +56,9 @@ export class MockInvoiceProvider implements InvoiceProviderAdapter {
     };
   }
 
-  async sendCreditNote(creditNoteData: ProviderInvoiceData): Promise<ProviderResponse> {
+  async sendCreditNote(
+    creditNoteData: ProviderInvoiceData,
+  ): Promise<ProviderResponse> {
     this.logger.log(
       `[MOCK] Sending credit note ${creditNoteData.invoice_number} to provider`,
     );
@@ -82,7 +87,10 @@ export class MockInvoiceProvider implements InvoiceProviderAdapter {
     };
   }
 
-  async cancelInvoice(invoiceId: string, reason: string): Promise<ProviderResponse> {
+  async cancelInvoice(
+    invoiceId: string,
+    reason: string,
+  ): Promise<ProviderResponse> {
     this.logger.log(
       `[MOCK] Cancelling invoice ${invoiceId}. Reason: ${reason}`,
     );

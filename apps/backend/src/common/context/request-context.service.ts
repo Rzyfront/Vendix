@@ -10,6 +10,7 @@ export interface RequestContext {
   is_super_admin: boolean;
   is_owner: boolean;
   email?: string;
+  request_id?: string;
 }
 
 @Injectable()
@@ -62,6 +63,13 @@ export class RequestContextService {
    */
   static getUserId(): number | undefined {
     return this.getContext()?.user_id;
+  }
+
+  /**
+   * Obtiene el request_id actual (X-Request-Id)
+   */
+  static getRequestId(): string | undefined {
+    return this.getContext()?.request_id;
   }
 
   /**

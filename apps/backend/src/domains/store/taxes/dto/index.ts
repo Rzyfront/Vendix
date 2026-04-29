@@ -1,4 +1,8 @@
-export { IcaRatesQueryDto, IcaCalculateDto, IcaReportQueryDto } from './ica-query.dto';
+export {
+  IcaRatesQueryDto,
+  IcaCalculateDto,
+  IcaReportQueryDto,
+} from './ica-query.dto';
 
 import {
   IsString,

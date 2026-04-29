@@ -9,7 +9,7 @@ import { Permissions } from '../../auth/decorators/permissions.decorator';
 @Controller('organization/settings')
 @UseGuards(PermissionsGuard)
 export class SettingsController {
-  constructor(private readonly settingsService: SettingsService) { }
+  constructor(private readonly settingsService: SettingsService) {}
 
   @Get()
   @Permissions('organization:settings:read')

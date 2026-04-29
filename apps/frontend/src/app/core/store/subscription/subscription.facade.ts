@@ -4,6 +4,7 @@ import { toSignal } from '@angular/core/rxjs-interop';
 import * as SubscriptionActions from './subscription.actions';
 import * as SubscriptionSelectors from './subscription.selectors';
 import { SubscriptionState } from './subscription.reducer';
+import { DunningState, AppliedCoupon, CouponValidationReason } from './subscription.actions';
 
 @Injectable({ providedIn: 'root' })
 export class SubscriptionFacade {
@@ -26,6 +27,24 @@ export class SubscriptionFacade {
   readonly bannerLevel$ = this.store.select(
     SubscriptionSelectors.selectBannerLevel,
   );
+  readonly scheduledCancelAt$ = this.store.select(
+    SubscriptionSelectors.selectScheduledCancelAt,
+  );
+  readonly dunning$ = this.store.select(SubscriptionSelectors.selectDunning);
+  readonly retryingPayment$ = this.store.select(
+    SubscriptionSelectors.selectRetryingPayment,
+  );
+
+  // S2.1 — Coupon redemption
+  readonly appliedCoupon$ = this.store.select(
+    SubscriptionSelectors.selectAppliedCoupon,
+  );
+  readonly couponValidating$ = this.store.select(
+    SubscriptionSelectors.selectCouponValidating,
+  );
+  readonly couponError$ = this.store.select(
+    SubscriptionSelectors.selectCouponError,
+  );
 
   readonly current = toSignal(this.current$, { initialValue: null as any });
   readonly status = toSignal(this.status$, { initialValue: 'none' as string });
@@ -44,27 +63,67 @@ export class SubscriptionFacade {
   readonly invoices = toSignal(this.invoices$, { initialValue: [] as any[] });
   readonly preview = toSignal(this.preview$, { initialValue: null as any });
   readonly bannerLevel = toSignal(this.bannerLevel$, {
-    initialValue: 'none' as 'none' | 'info' | 'warning' | 'danger',
+    initialValue: 'none' as 'none' | 'info' | 'warning' | 'danger' | 'terminal',
+  });
+  readonly scheduledCancelAt = toSignal(this.scheduledCancelAt$, {
+    initialValue: null as string | null,
+  });
+  readonly dunning = toSignal(this.dunning$, {
+    initialValue: null as DunningState | null,
+  });
+  readonly retryingPayment = toSignal(this.retryingPayment$, {
+    initialValue: false,
+  });
+
+  readonly appliedCoupon = toSignal(this.appliedCoupon$, {
+    initialValue: null as AppliedCoupon | null,
+  });
+  readonly couponValidating = toSignal(this.couponValidating$, {
+    initialValue: false,
+  });
+  readonly couponError = toSignal(this.couponError$, {
+    initialValue: null as CouponValidationReason | string | null,
   });
 
   readonly isActive = computed(() => {
     const s = this.status();
-    return s === 'active' || s === 'trialing';
+    return s === 'active' || s === 'trial' || s === 'trialing';
   });
 
   readonly isBlocked = computed(() => {
     const s = this.status();
     return (
-      s === 'blocked' || s === 'cancelled' || s === 'expired' || s === 'canceled'
+      s === 'blocked' ||
+      s === 'cancelled' ||
+      s === 'expired' ||
+      s === 'canceled' ||
+      s === 'suspended'
     );
   });
 
-  readonly isTrial = computed(() => this.status() === 'trialing');
+  readonly isTrial = computed(() => {
+    const s = this.status();
+    return s === 'trial' || s === 'trialing';
+  });
 
   readonly isInGrace = computed(() => {
     const s = this.status();
     return s === 'grace_soft' || s === 'grace_hard';
   });
+
+  /**
+   * S1.2 — Notify the subscription feature that the active store context
+   * changed. Wipes any data tied to the previous store and (when storeId is
+   * not null) chains a fresh `loadCurrent()` via the effect.
+   *
+   * Pass `null` for ORG_ADMIN / SUPER_ADMIN / logout — banner is hidden in
+   * those scopes regardless.
+   */
+  contextChanged(storeId: number | null): void {
+    this.store.dispatch(
+      SubscriptionActions.subscriptionContextChanged({ storeId }),
+    );
+  }
 
   loadCurrent(): void {
     this.store.dispatch(SubscriptionActions.loadCurrent());
@@ -82,6 +141,10 @@ export class SubscriptionFacade {
 
   cancel(reason?: string): void {
     this.store.dispatch(SubscriptionActions.cancel({ reason }));
+  }
+
+  scheduleCancel(reason?: string): void {
+    this.store.dispatch(SubscriptionActions.scheduleCancel({ reason }));
   }
 
   changePlan(planId: string): void {
@@ -104,6 +167,23 @@ export class SubscriptionFacade {
 
   loadSubscription(): void {
     this.store.dispatch(SubscriptionActions.loadSubscription());
+  }
+
+  loadDunningState(): void {
+    this.store.dispatch(SubscriptionActions.loadDunningState());
+  }
+
+  retryPayment(): void {
+    this.store.dispatch(SubscriptionActions.retryPayment());
+  }
+
+  // S2.1 — Coupon redemption
+  validateCoupon(code: string): void {
+    this.store.dispatch(SubscriptionActions.validateCoupon({ code }));
+  }
+
+  clearCoupon(): void {
+    this.store.dispatch(SubscriptionActions.clearCoupon());
   }
 
   getCurrent(): any {
@@ -137,7 +217,7 @@ export class SubscriptionFacade {
     return this.daysUntilDue();
   }
 
-  getBannerLevel(): 'none' | 'info' | 'warning' | 'danger' {
+  getBannerLevel(): 'none' | 'info' | 'warning' | 'danger' | 'terminal' {
     return this.bannerLevel();
   }
 }

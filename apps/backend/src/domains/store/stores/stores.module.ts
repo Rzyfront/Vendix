@@ -7,9 +7,14 @@ import { StoreEcommerceModule } from '../ecommerce/ecommerce.module';
 import { LocationsModule } from '../inventory/locations/locations.module';
 
 @Module({
-  imports: [ResponseModule, PrismaModule, StoreEcommerceModule, LocationsModule],
+  imports: [
+    ResponseModule,
+    PrismaModule,
+    StoreEcommerceModule,
+    LocationsModule,
+  ],
   controllers: [StoresController],
   providers: [StoresService],
   exports: [StoresService],
 })
-export class StoresModule { }
+export class StoresModule {}

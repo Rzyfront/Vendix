@@ -320,9 +320,17 @@ export const ERROR_MESSAGES: Record<string, string> = {
   SUBSCRIPTION_009: 'Suscripcion bloqueada. Regulariza tu pago para continuar.',
   SUBSCRIPTION_010: 'El plan seleccionado no es valido.',
   SUBSCRIPTION_INTERNAL_ERROR: 'Ocurrio un error al procesar tu suscripcion. Intenta de nuevo.',
+  SUBSCRIPTION_VALIDATION: 'Hay datos faltantes o invalidos. Revisa los campos del formulario.',
   SUBSCRIPTION_PAY_001: 'No se pudo procesar el pago de la suscripcion. Verifica tu metodo de pago.',
   SUBSCRIPTION_PRORATION_001: 'No se pudo calcular el ajuste prorrateado del cambio de plan.',
   SUBSCRIPTION_PROMO_002: 'Este plan promocional ya no es elegible para tu tienda.',
+  SUBSCRIPTION_TOKEN_INVALID: 'El metodo de pago caduco o no es valido. Reemplaza la tarjeta para continuar.',
+  SUBSCRIPTION_CARD_DECLINED: 'Tu tarjeta fue rechazada. Verifica los datos o usa otro medio de pago.',
+  SUBSCRIPTION_PROVIDER_UNAVAILABLE: 'La pasarela de pago no responde. Intentalo nuevamente en unos minutos.',
+  SUBSCRIPTION_GATEWAY_001: 'Las credenciales de la pasarela no son validas. Contacta al administrador.',
+  SUBSCRIPTION_GATEWAY_002: 'La pasarela aun no fue probada. Pidele al administrador que ejecute una prueba de conexion.',
+  SUBSCRIPTION_GATEWAY_003: 'Pagos no disponibles temporalmente. La pasarela de Vendix no esta activa; contacta al soporte.',
+  PROMO_NOT_ELIGIBLE: 'El cupon no aplica para esta tienda. Verifica el codigo o las condiciones del cupon.',
 
   // Partner / Reseller
   PARTNER_001: 'Esta organizacion no es un partner revendedor.',

@@ -104,7 +104,8 @@ export class SendGridProvider implements EmailProvider {
       this.logger.error('SendGrid send error (with attachments):', error);
       return {
         success: false,
-        error: error.message || 'Failed to send email with attachments via SendGrid',
+        error:
+          error.message || 'Failed to send email with attachments via SendGrid',
       };
     }
   }

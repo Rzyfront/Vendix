@@ -18,7 +18,7 @@ describe('PromotionalService', () => {
         delete: jest.fn(),
       },
     };
-    service = new PromotionalService(prisma as any);
+    service = new PromotionalService(prisma);
   });
 
   function promoFixture(overrides: Partial<any> = {}) {
@@ -56,7 +56,11 @@ describe('PromotionalService', () => {
       prisma.subscription_plans.findUnique.mockResolvedValue(promoFixture());
       let err: any = null;
       try {
-        await service.create({ code: 'black-friday', name: 'x', base_price: 1 } as any);
+        await service.create({
+          code: 'black-friday',
+          name: 'x',
+          base_price: 1,
+        } as any);
       } catch (e) {
         err = e;
       }
@@ -88,7 +92,10 @@ describe('PromotionalService', () => {
       prisma.subscription_plans.findFirst.mockResolvedValue(promoFixture());
       prisma.subscription_plans.update.mockResolvedValue(promoFixture());
 
-      await service.update(1, { name: 'Renamed', is_promotional: false } as any);
+      await service.update(1, {
+        name: 'Renamed',
+        is_promotional: false,
+      } as any);
 
       const args = prisma.subscription_plans.update.mock.calls[0][0];
       expect(args.data.name).toBe('Renamed');
@@ -117,7 +124,9 @@ describe('PromotionalService', () => {
 
       const findArgs = prisma.subscription_plans.findFirst.mock.calls[0][0];
       expect(findArgs.where.is_promotional).toBe(true);
-      expect(prisma.subscription_plans.delete).toHaveBeenCalledWith({ where: { id: 1 } });
+      expect(prisma.subscription_plans.delete).toHaveBeenCalledWith({
+        where: { id: 1 },
+      });
     });
 
     it('throws SYS_NOT_FOUND_001 when promo plan does not exist', async () => {

@@ -42,7 +42,9 @@ describe('PartnerCommissionsService', () => {
   }
 
   it('accrueCommission upserts row with state=accrued (create payload)', async () => {
-    prismaMock.subscription_invoices.findUnique.mockResolvedValue(invoiceFixture());
+    prismaMock.subscription_invoices.findUnique.mockResolvedValue(
+      invoiceFixture(),
+    );
     prismaMock.partner_commissions.upsert.mockResolvedValue({ id: 1 });
 
     await service.accrueCommission(500);
@@ -70,7 +72,9 @@ describe('PartnerCommissionsService', () => {
   });
 
   it('accrueCommission concurrent calls produce exactly one row (upsert is invoked once per call, idempotent at DB layer)', async () => {
-    prismaMock.subscription_invoices.findUnique.mockResolvedValue(invoiceFixture());
+    prismaMock.subscription_invoices.findUnique.mockResolvedValue(
+      invoiceFixture(),
+    );
     // Simulate Prisma's upsert behavior: the second+ concurrent caller reuses
     // the existing row via the unique-on-conflict path (returns same row).
     let resolved = false;
@@ -94,7 +98,9 @@ describe('PartnerCommissionsService', () => {
   });
 
   it('accrueCommission catches P2002 from upsert and logs warn without re-throw', async () => {
-    prismaMock.subscription_invoices.findUnique.mockResolvedValue(invoiceFixture());
+    prismaMock.subscription_invoices.findUnique.mockResolvedValue(
+      invoiceFixture(),
+    );
     const p2002 = Object.assign(new Error('Unique constraint failed'), {
       code: 'P2002',
     });
@@ -113,7 +119,9 @@ describe('PartnerCommissionsService', () => {
   });
 
   it('accrueCommission re-throws non-P2002 errors (e.g. P1001 connection)', async () => {
-    prismaMock.subscription_invoices.findUnique.mockResolvedValue(invoiceFixture());
+    prismaMock.subscription_invoices.findUnique.mockResolvedValue(
+      invoiceFixture(),
+    );
     const p1001 = Object.assign(new Error('Connection refused'), {
       code: 'P1001',
     });
@@ -159,9 +167,18 @@ describe('PartnerCommissionsService', () => {
 
   it('getPartnerSummary aggregates by state (accrued, pending_payout, paid)', async () => {
     prismaMock.partner_commissions.aggregate
-      .mockResolvedValueOnce({ _sum: { amount: new Prisma.Decimal(100) }, _count: 5 })
-      .mockResolvedValueOnce({ _sum: { amount: new Prisma.Decimal(50) }, _count: 2 })
-      .mockResolvedValueOnce({ _sum: { amount: new Prisma.Decimal(200) }, _count: 8 });
+      .mockResolvedValueOnce({
+        _sum: { amount: new Prisma.Decimal(100) },
+        _count: 5,
+      })
+      .mockResolvedValueOnce({
+        _sum: { amount: new Prisma.Decimal(50) },
+        _count: 2,
+      })
+      .mockResolvedValueOnce({
+        _sum: { amount: new Prisma.Decimal(200) },
+        _count: 8,
+      });
 
     const summary = await service.getPartnerSummary(42);
 

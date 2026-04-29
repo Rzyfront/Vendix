@@ -1,7 +1,14 @@
-import { Injectable, Logger, Inject, forwardRef, Optional } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  Inject,
+  forwardRef,
+  Optional,
+} from '@nestjs/common';
 import { EventEmitter2 } from '@nestjs/event-emitter';
 import { Prisma } from '@prisma/client';
 import { StorePrismaService } from '../../../../prisma/services/store-prisma.service';
+import * as crypto from 'crypto';
 import { StoreContextRunner } from '@common/context/store-context-runner.service';
 import { WebhookEvent } from '../interfaces';
 import { OrderFlowService } from '../../orders/order-flow/order-flow.service';
@@ -29,12 +36,33 @@ export class WebhookHandlerService {
     private readonly storeContextRunner: StoreContextRunner,
     @Inject(forwardRef(() => OrderFlowService))
     private orderFlowService: OrderFlowService,
-    @Optional() @Inject(forwardRef(() => PaymentLinksService))
+    @Optional()
+    @Inject(forwardRef(() => PaymentLinksService))
     private readonly paymentLinksService?: PaymentLinksService,
   ) {}
 
   async handleWebhook(event: WebhookEvent): Promise<void> {
     try {
+      // Deduplication: INSERT ON CONFLICT DO NOTHING at the start of every
+      // webhook handler. If this event was already processed, return 200
+      // immediately so the gateway stops retrying.
+      const dedupKey = this.extractDedupKey(event);
+      if (dedupKey) {
+        const inserted = await this.prisma.withoutScope().$executeRaw<number>(
+          Prisma.sql`
+            INSERT INTO webhook_event_dedup (processor, event_id, event_type, received_at)
+            VALUES (${event.processor}, ${dedupKey}, ${event.eventType}, NOW())
+            ON CONFLICT (processor, event_id) DO NOTHING
+          `,
+        );
+        if (inserted === 0) {
+          this.logger.log(
+            `Duplicate webhook detected for ${event.processor}:${dedupKey}, returning 200`,
+          );
+          return;
+        }
+      }
+
       this.logger.log(
         `Processing webhook from ${event.processor}: ${event.eventType}`,
       );
@@ -66,6 +94,35 @@ export class WebhookHandlerService {
       );
       throw error;
     }
+  }
+
+  /**
+   * Extracts a deterministic deduplication key from a webhook event.
+   * Falls back to a SHA-256 hash of the raw body when no canonical id
+   * is present.
+   */
+  private extractDedupKey(event: WebhookEvent): string | null {
+    const data = event.data;
+
+    if (data?.id && typeof data.id === 'string') {
+      return data.id;
+    }
+    if (data?.transaction?.id && typeof data.transaction.id === 'string') {
+      return data.transaction.id;
+    }
+    if (data?.transactionId && typeof data.transactionId === 'string') {
+      return data.transactionId;
+    }
+    if (data?.resource?.id && typeof data.resource.id === 'string') {
+      return data.resource.id;
+    }
+
+    // Fallback: hash the raw body so duplicate payloads always match
+    if (event.rawBody) {
+      return crypto.createHash('sha256').update(event.rawBody).digest('hex');
+    }
+
+    return null;
   }
 
   private async handleStripeWebhook(event: WebhookEvent): Promise<void> {
@@ -159,8 +216,9 @@ export class WebhookHandlerService {
     shouldConfirmOrder: boolean;
   }> {
     try {
-      const result = await this.prisma.withoutScope().$transaction(
-        async (tx) => {
+      const result = await this.prisma
+        .withoutScope()
+        .$transaction(async (tx) => {
           // Resolve the payment row. If the caller already located it via the
           // Wompi multi-key priority (`findWompiPayment`), reuse that row to
           // avoid a redundant lookup and guarantee both code paths target the
@@ -178,7 +236,9 @@ export class WebhookHandlerService {
           }
 
           if (!payment) {
-            this.logger.warn(`Payment not found for transaction: ${transactionId}`);
+            this.logger.warn(
+              `Payment not found for transaction: ${transactionId}`,
+            );
             return {
               paymentId: null,
               orderId: null,
@@ -188,7 +248,11 @@ export class WebhookHandlerService {
           }
 
           // Idempotency: short-circuit if already in a terminal state.
-          if ((PAYMENT_TERMINAL_STATES as readonly string[]).includes(payment.state)) {
+          if (
+            (PAYMENT_TERMINAL_STATES as readonly string[]).includes(
+              payment.state,
+            )
+          ) {
             this.logger.log(
               `Payment ${payment.id} already in final state '${payment.state}', skipping duplicate webhook`,
             );
@@ -241,7 +305,10 @@ export class WebhookHandlerService {
           // because OrderFlowService opens its own tx and would deadlock here.
           let shouldConfirmOrder = false;
           if (status === 'succeeded' || status === 'captured') {
-            shouldConfirmOrder = await this.updateOrderStatus(payment.order_id, tx);
+            shouldConfirmOrder = await this.updateOrderStatus(
+              payment.order_id,
+              tx,
+            );
           }
 
           return {
@@ -250,8 +317,7 @@ export class WebhookHandlerService {
             transitioned: true,
             shouldConfirmOrder,
           };
-        },
-      );
+        });
 
       // Post-commit side effects: confirm or cancel the order via
       // OrderFlowService, which manages its own tx, events, and audit log.
@@ -264,7 +330,9 @@ export class WebhookHandlerService {
       }
 
       if (result.paymentId) {
-        this.logger.log(`Payment ${result.paymentId} updated to status: ${status}`);
+        this.logger.log(
+          `Payment ${result.paymentId} updated to status: ${status}`,
+        );
       }
       return result;
     } catch (error) {
@@ -299,9 +367,12 @@ export class WebhookHandlerService {
         gatewayResponse?.transaction?.status_message ||
         `Payment ${paymentStatus}`;
 
-      await this.storeContextRunner.runInStoreContext(order.store_id, async () => {
-        await this.orderFlowService.cancelOrder(orderId, { reason });
-      });
+      await this.storeContextRunner.runInStoreContext(
+        order.store_id,
+        async () => {
+          await this.orderFlowService.cancelOrder(orderId, { reason });
+        },
+      );
       this.logger.log(
         `Order ${orderId} auto-cancelled via OrderFlowService due to payment ${paymentStatus}`,
       );
@@ -364,10 +435,15 @@ export class WebhookHandlerService {
       }
 
       // No outer tx — safe to invoke OrderFlowService directly.
-      await this.storeContextRunner.runInStoreContext(order.store_id, async () => {
-        await this.orderFlowService.confirmPayment(orderId);
-      });
-      this.logger.log(`Order ${orderId} payment confirmed via OrderFlowService`);
+      await this.storeContextRunner.runInStoreContext(
+        order.store_id,
+        async () => {
+          await this.orderFlowService.confirmPayment(orderId);
+        },
+      );
+      this.logger.log(
+        `Order ${orderId} payment confirmed via OrderFlowService`,
+      );
       return true;
     } catch (error) {
       this.logger.error(
@@ -389,10 +465,15 @@ export class WebhookHandlerService {
       if (!order) return;
       if (order.state !== 'pending_payment') return;
 
-      await this.storeContextRunner.runInStoreContext(order.store_id, async () => {
-        await this.orderFlowService.confirmPayment(orderId);
-      });
-      this.logger.log(`Order ${orderId} payment confirmed via OrderFlowService`);
+      await this.storeContextRunner.runInStoreContext(
+        order.store_id,
+        async () => {
+          await this.orderFlowService.confirmPayment(orderId);
+        },
+      );
+      this.logger.log(
+        `Order ${orderId} payment confirmed via OrderFlowService`,
+      );
     } catch (err) {
       this.logger.error(
         `Failed to confirm order ${orderId} after payment: ${err.message}`,
@@ -453,7 +534,9 @@ export class WebhookHandlerService {
 
     const mappedStatus = statusMap[txn.status];
     if (!mappedStatus) {
-      this.logger.log(`Wompi transaction ${txn.id} still PENDING (status=${txn.status})`);
+      this.logger.log(
+        `Wompi transaction ${txn.id} still PENDING (status=${txn.status})`,
+      );
       return null;
     }
 
@@ -474,7 +557,10 @@ export class WebhookHandlerService {
     const paymentLinkId = txn.payment_link_id;
     if (paymentLinkId && mappedStatus === 'succeeded') {
       try {
-        await this.paymentLinksService?.handlePaymentCompleted(paymentLinkId, txn);
+        await this.paymentLinksService?.handlePaymentCompleted(
+          paymentLinkId,
+          txn,
+        );
       } catch (error) {
         this.logger.warn(`Failed to update payment link: ${error.message}`);
       }
@@ -566,7 +652,8 @@ export class WebhookHandlerService {
 
     await this.updatePaymentStatus(lookupKey, status, gatewayResponse, {
       matchedPayment: payment,
-      extraUpdate: Object.keys(extraUpdate).length > 0 ? extraUpdate : undefined,
+      extraUpdate:
+        Object.keys(extraUpdate).length > 0 ? extraUpdate : undefined,
     });
   }
 

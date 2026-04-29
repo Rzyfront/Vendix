@@ -355,7 +355,7 @@ export interface BusinessHours {
 // RESERVATIONS - Booking reminders, confirmation, and check-in settings
 // ============================================================================
 export interface BookingReminderRule {
-  time_before: string;       // '30m' | '1h' | '2h' | '24h' | '48h' | '1w'
+  time_before: string; // '30m' | '1h' | '2h' | '24h' | '48h' | '1w'
   channels: ('email' | 'push' | 'whatsapp' | 'in_app')[];
   enabled: boolean;
 }

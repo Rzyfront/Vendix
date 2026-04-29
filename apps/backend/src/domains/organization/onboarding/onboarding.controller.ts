@@ -28,7 +28,7 @@ import {
 @Controller('organization/onboarding')
 @UseGuards(RolesGuard, PermissionsGuard)
 export class OnboardingController {
-  constructor(private readonly onboardingService: OnboardingService) { }
+  constructor(private readonly onboardingService: OnboardingService) {}
 
   // ===== USER ONBOARDING ENDPOINTS =====
 
@@ -47,8 +47,13 @@ export class OnboardingController {
     @Req() req: AuthenticatedRequest,
   ): Promise<OrganizationOnboardingStatusDto> {
     const orgId = Number(organizationId);
-    if (req.user.organization_id !== orgId && !req.user.user_roles?.some(r => r.roles?.name === UserRole.SUPER_ADMIN)) {
-      throw new UnauthorizedException('You can only access your own organization onboarding status');
+    if (
+      req.user.organization_id !== orgId &&
+      !req.user.user_roles?.some((r) => r.roles?.name === UserRole.SUPER_ADMIN)
+    ) {
+      throw new UnauthorizedException(
+        'You can only access your own organization onboarding status',
+      );
     }
     return this.onboardingService.getOrganizationOnboardingStatus(orgId);
   }
@@ -61,8 +66,13 @@ export class OnboardingController {
     @Req() req: AuthenticatedRequest,
   ): Promise<OrganizationOnboardingStatusDto> {
     const orgId = Number(organizationId);
-    if (req.user.organization_id !== orgId && !req.user.user_roles?.some(r => r.roles?.name === UserRole.SUPER_ADMIN)) {
-      throw new UnauthorizedException('You can only complete your own organization onboarding');
+    if (
+      req.user.organization_id !== orgId &&
+      !req.user.user_roles?.some((r) => r.roles?.name === UserRole.SUPER_ADMIN)
+    ) {
+      throw new UnauthorizedException(
+        'You can only complete your own organization onboarding',
+      );
     }
     return this.onboardingService.completeOrganizationOnboarding(
       orgId,

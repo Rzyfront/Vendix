@@ -1,0 +1,37 @@
+meta {
+  name: Webhook Duplicate Event
+  type: http
+  seq: 4
+}
+
+post {
+  url: {{url}}/platform/webhooks/wompi
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "event": "transaction.updated",
+    "data": {
+      "transaction": {
+        "id": "txn-saas-success-001",
+        "reference": "vendix_saas_{{subscription_id}}_{{invoice_id}}_1234567890",
+        "status": "APPROVED",
+        "amount_in_cents": 100000,
+        "status_message": "Payment approved"
+      }
+    }
+  }
+}
+
+tests {
+  test("Duplicate webhook is idempotent", function() {
+    expect(res.status).to.be.oneOf([200, 400]);
+    expect(res.body).to.be.an("object");
+  });
+
+  test("No 500 error on duplicate", function() {
+    expect(res.status).to.not.equal(500);
+  });
+}

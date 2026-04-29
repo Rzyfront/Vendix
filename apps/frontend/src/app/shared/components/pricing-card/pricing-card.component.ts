@@ -31,7 +31,7 @@ export interface PricingCardPlan {
   imports: [ButtonComponent, IconComponent, CurrencyPipe],
   template: `
     <article
-      class="relative flex flex-col h-full rounded-2xl overflow-hidden transition-all duration-300"
+      class="relative flex flex-col h-full rounded-2xl transition-all duration-300"
       [class.shadow-sm]="!isPopular()"
       [class.shadow-2xl]="isPopular()"
       [class.bg-white]="!isPopular() && !loading()"

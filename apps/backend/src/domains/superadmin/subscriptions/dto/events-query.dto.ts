@@ -15,7 +15,23 @@ export class EventsQueryDto {
   limit?: number = 10;
 
   @IsOptional()
-  @IsEnum(['created', 'activated', 'renewed', 'trial_started', 'trial_ended', 'payment_succeeded', 'payment_failed', 'state_transition', 'plan_changed', 'cancelled', 'reactivated', 'promotional_applied', 'partner_override_applied', 'partner_commission_accrued', 'partner_commission_paid'])
+  @IsEnum([
+    'created',
+    'activated',
+    'renewed',
+    'trial_started',
+    'trial_ended',
+    'payment_succeeded',
+    'payment_failed',
+    'state_transition',
+    'plan_changed',
+    'cancelled',
+    'reactivated',
+    'promotional_applied',
+    'partner_override_applied',
+    'partner_commission_accrued',
+    'partner_commission_paid',
+  ])
   type?: string;
 
   @IsOptional()

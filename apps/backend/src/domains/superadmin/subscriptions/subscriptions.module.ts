@@ -19,6 +19,8 @@ import { EventsController } from './controllers/events.controller';
 import { EventsService } from './services/events.service';
 import { SubscriptionsStatsController } from './controllers/stats.controller';
 import { SubscriptionsStatsService } from './services/stats.service';
+import { SubscriptionMetricsController } from './controllers/metrics.controller';
+import { SubscriptionMetricsService } from './services/subscription-metrics.service';
 import { PlatformGatewayModule } from './gateway/gateway.module';
 
 @Module({
@@ -38,6 +40,7 @@ import { PlatformGatewayModule } from './gateway/gateway.module';
     PayoutsController,
     EventsController,
     SubscriptionsStatsController,
+    SubscriptionMetricsController,
   ],
   providers: [
     PlansService,
@@ -48,6 +51,7 @@ import { PlatformGatewayModule } from './gateway/gateway.module';
     PayoutsService,
     EventsService,
     SubscriptionsStatsService,
+    SubscriptionMetricsService,
   ],
   exports: [
     PlansService,
@@ -58,6 +62,7 @@ import { PlatformGatewayModule } from './gateway/gateway.module';
     PayoutsService,
     EventsService,
     SubscriptionsStatsService,
+    SubscriptionMetricsService,
     PlatformGatewayModule,
   ],
 })

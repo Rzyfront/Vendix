@@ -115,9 +115,11 @@ export class HelpCenterAdminService {
     const finalSlug = existing ? `${slug}-${Date.now()}` : slug;
 
     // Verify category exists
-    const category = await this.globalPrisma.help_article_categories.findUnique({
-      where: { id: dto.category_id },
-    });
+    const category = await this.globalPrisma.help_article_categories.findUnique(
+      {
+        where: { id: dto.category_id },
+      },
+    );
 
     if (!category) {
       throw new BadRequestException('Category not found');
@@ -181,18 +183,20 @@ export class HelpCenterAdminService {
 
     // If category_id changed, verify it exists
     if (dto.category_id && dto.category_id !== article.category_id) {
-      const category = await this.globalPrisma.help_article_categories.findUnique({
-        where: { id: dto.category_id },
-      });
+      const category =
+        await this.globalPrisma.help_article_categories.findUnique({
+          where: { id: dto.category_id },
+        });
       if (!category) {
         throw new BadRequestException('Category not found');
       }
     }
 
     // Sanitize cover_image_url
-    const cover_image_url = dto.cover_image_url !== undefined
-      ? this.s3Service.sanitizeForStorage(dto.cover_image_url)
-      : undefined;
+    const cover_image_url =
+      dto.cover_image_url !== undefined
+        ? this.s3Service.sanitizeForStorage(dto.cover_image_url)
+        : undefined;
 
     const updated = await this.globalPrisma.help_articles.update({
       where: { id },
@@ -200,7 +204,9 @@ export class HelpCenterAdminService {
         ...(dto.title && { title: dto.title }),
         ...(slug && { slug }),
         ...(dto.summary && { summary: dto.summary }),
-        ...(dto.content !== undefined && { content: this.s3Service.sanitizeMarkdownContent(dto.content) }),
+        ...(dto.content !== undefined && {
+          content: this.s3Service.sanitizeMarkdownContent(dto.content),
+        }),
         ...(dto.type && { type: dto.type as any }),
         ...(dto.status && { status: dto.status as any }),
         ...(dto.category_id && { category_id: dto.category_id }),
@@ -277,9 +283,11 @@ export class HelpCenterAdminService {
   async createCategory(dto: CreateCategoryDto) {
     const slug = this.generateSlug(dto.name);
 
-    const existing = await this.globalPrisma.help_article_categories.findUnique({
-      where: { slug },
-    });
+    const existing = await this.globalPrisma.help_article_categories.findUnique(
+      {
+        where: { slug },
+      },
+    );
 
     const finalSlug = existing ? `${slug}-${Date.now()}` : slug;
 
@@ -296,9 +304,11 @@ export class HelpCenterAdminService {
   }
 
   async updateCategory(id: number, dto: UpdateCategoryDto) {
-    const category = await this.globalPrisma.help_article_categories.findUnique({
-      where: { id },
-    });
+    const category = await this.globalPrisma.help_article_categories.findUnique(
+      {
+        where: { id },
+      },
+    );
 
     if (!category) {
       throw new NotFoundException('Category not found');
@@ -308,9 +318,10 @@ export class HelpCenterAdminService {
     let slug: string | undefined;
     if (dto.name && dto.name !== category.name) {
       const newSlug = this.generateSlug(dto.name);
-      const existing = await this.globalPrisma.help_article_categories.findFirst({
-        where: { slug: newSlug, id: { not: id } },
-      });
+      const existing =
+        await this.globalPrisma.help_article_categories.findFirst({
+          where: { slug: newSlug, id: { not: id } },
+        });
       slug = existing ? `${newSlug}-${Date.now()}` : newSlug;
     }
 
@@ -319,7 +330,9 @@ export class HelpCenterAdminService {
       data: {
         ...(dto.name && { name: dto.name }),
         ...(slug && { slug }),
-        ...(dto.description !== undefined && { description: dto.description || null }),
+        ...(dto.description !== undefined && {
+          description: dto.description || null,
+        }),
         ...(dto.icon !== undefined && { icon: dto.icon || null }),
         ...(dto.sort_order !== undefined && { sort_order: dto.sort_order }),
         ...(dto.is_active !== undefined && { is_active: dto.is_active }),
@@ -329,10 +342,12 @@ export class HelpCenterAdminService {
   }
 
   async deleteCategory(id: number) {
-    const category = await this.globalPrisma.help_article_categories.findUnique({
-      where: { id },
-      include: { _count: { select: { articles: true } } },
-    });
+    const category = await this.globalPrisma.help_article_categories.findUnique(
+      {
+        where: { id },
+        include: { _count: { select: { articles: true } } },
+      },
+    );
 
     if (!category) {
       throw new NotFoundException('Category not found');
@@ -359,12 +374,21 @@ export class HelpCenterAdminService {
     }
 
     const allowedMimes = [
-      'image/jpeg', 'image/png', 'image/webp', 'image/gif',
-      'image/bmp', 'image/tiff', 'image/svg+xml',
-      'image/heic', 'image/heif', 'image/avif',
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'image/gif',
+      'image/bmp',
+      'image/tiff',
+      'image/svg+xml',
+      'image/heic',
+      'image/heif',
+      'image/avif',
     ];
     if (!allowedMimes.includes(file.mimetype)) {
-      throw new BadRequestException('Only image files are allowed (JPEG, PNG, WebP, GIF, BMP, TIFF, SVG, HEIC, AVIF)');
+      throw new BadRequestException(
+        'Only image files are allowed (JPEG, PNG, WebP, GIF, BMP, TIFF, SVG, HEIC, AVIF)',
+      );
     }
 
     const MAX_SIZE = 10 * 1024 * 1024; // 10MB

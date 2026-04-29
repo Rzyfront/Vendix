@@ -24,7 +24,11 @@ export class PaypalProcessor extends BasePaymentProcessor {
           : crypto.randomUUID();
 
       if (this.isTestMode()) {
-        return this.simulateTestPayment(paymentData, transactionId, idempotencyKey);
+        return this.simulateTestPayment(
+          paymentData,
+          transactionId,
+          idempotencyKey,
+        );
       }
 
       // NOTE: When the real PayPal SDK/HTTP client is wired up, send the key as
@@ -91,11 +95,11 @@ export class PaypalProcessor extends BasePaymentProcessor {
     try {
       return Boolean(
         paymentData.amount > 0 &&
-          paymentData.currency &&
-          paymentData.orderId &&
-          paymentData.storeId &&
-          this.config.credentials?.clientId &&
-          this.config.credentials?.clientSecret,
+        paymentData.currency &&
+        paymentData.orderId &&
+        paymentData.storeId &&
+        this.config.credentials?.clientId &&
+        this.config.credentials?.clientSecret,
       );
     } catch (error) {
       return false;

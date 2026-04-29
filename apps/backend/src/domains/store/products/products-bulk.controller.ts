@@ -40,7 +40,7 @@ export class ProductsBulkController {
   constructor(
     private readonly productsBulkService: ProductsBulkService,
     private readonly responseService: ResponseService,
-  ) { }
+  ) {}
 
   /**
    * Carga masiva desde JSON directo
@@ -257,7 +257,9 @@ export class ProductsBulkController {
 
       // Fallback: mensaje real del error si está disponible, truncado
       const rawMsg =
-        typeof error?.message === 'string' ? error.message : 'Error en carga masiva';
+        typeof error?.message === 'string'
+          ? error.message
+          : 'Error en carga masiva';
       const truncated =
         rawMsg.length > 200 ? rawMsg.slice(0, 200) + '...' : rawMsg;
 

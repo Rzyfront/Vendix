@@ -1,11 +1,10 @@
 const { getDefaultConfig } = require('expo/metro-config');
 const path = require('path');
-const { withNativewind } = require('nativewind/metro');
 
 const projectRoot = __dirname;
 const monorepoRoot = path.resolve(projectRoot, '../..');
 
-let config = getDefaultConfig(projectRoot);
+const config = getDefaultConfig(projectRoot);
 
 config.watchFolders = [monorepoRoot];
 config.resolver.nodeModulesPaths = [
@@ -13,7 +12,5 @@ config.resolver.nodeModulesPaths = [
   path.resolve(monorepoRoot, 'node_modules'),
 ];
 config.resolver.disableHierarchicalLookup = true;
-
-config = withNativewind(config, { inlineRem: 16 });
 
 module.exports = config;

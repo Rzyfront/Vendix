@@ -1,4 +1,8 @@
-import { Injectable, ConflictException, BadRequestException } from '@nestjs/common';
+import {
+  Injectable,
+  ConflictException,
+  BadRequestException,
+} from '@nestjs/common';
 import { StorePrismaService } from '../../../../../prisma/services/store-prisma.service';
 import { StockLevelManager } from './stock-level-manager.service';
 
@@ -37,10 +41,10 @@ export interface AvailabilityResult {
 
 /**
  * StockValidatorService
- * 
+ *
  * Provides read-only stock validation using StockLevelManager.
  * Source of truth: stock_levels.quantity_available (NOT denormalized stock_quantity)
- * 
+ *
  * Key rules:
  * - Uses StockLevelManager for all stock queries (no direct prisma access to stock_levels)
  * - Validates effective tracking before checking stock
@@ -55,11 +59,11 @@ export class StockValidatorService {
 
   /**
    * Resolves effective inventory tracking for a product/variant combination.
-   * 
+   *
    * Rule:
    * - If variant.track_inventory_override != null, use that value
    * - Otherwise, fall back to product.track_inventory
-   * 
+   *
    * @returns true if inventory should be tracked, false otherwise
    */
   resolveEffectiveTracking(
@@ -77,10 +81,10 @@ export class StockValidatorService {
 
   /**
    * Validates stock availability for an entire cart.
-   * 
+   *
    * Uses stock_levels.quantity_available as the source of truth.
    * Does NOT use the denormalized stock_quantity on products/variants.
-   * 
+   *
    * @param cart Array of cart items with product_id, variant_id (optional), and quantity
    * @param allowOversell If true, returns validation result without throwing
    * @param locationId Optional specific location to validate; if not provided, checks across all locations
@@ -148,7 +152,7 @@ export class StockValidatorService {
 
   /**
    * Validates availability of a specific product/variant quantity.
-   * 
+   *
    * @param productId Product ID
    * @param variantId Optional variant ID
    * @param quantity Required quantity
@@ -242,9 +246,7 @@ export class StockValidatorService {
       variantId,
     );
 
-    return (
-      stockLevels.find((sl) => sl.location_id === locationId) ?? null
-    );
+    return stockLevels.find((sl) => sl.location_id === locationId) ?? null;
   }
 
   /**

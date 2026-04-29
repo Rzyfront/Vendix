@@ -7,7 +7,7 @@ import { SupplierQueryDto } from './dto/supplier-query.dto';
 
 @Injectable()
 export class SuppliersService {
-  constructor(private prisma: StorePrismaService) { }
+  constructor(private prisma: StorePrismaService) {}
 
   create(createSupplierDto: CreateSupplierDto) {
     const { organization_id, ...data } = createSupplierDto;

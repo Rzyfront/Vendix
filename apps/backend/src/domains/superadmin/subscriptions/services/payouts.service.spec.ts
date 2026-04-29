@@ -17,7 +17,7 @@ describe('PayoutsService', () => {
         updateMany: jest.fn(),
       },
     };
-    service = new PayoutsService(prisma as any);
+    service = new PayoutsService(prisma);
   });
 
   function batchFixture(overrides: Partial<any> = {}) {
@@ -73,11 +73,18 @@ describe('PayoutsService', () => {
 
   describe('approve', () => {
     it('transitions pending → approved and flips commissions to pending_payout', async () => {
-      prisma.partner_payout_batches.findUnique.mockResolvedValue(batchFixture());
-      prisma.partner_payout_batches.update.mockResolvedValue(batchFixture({ state: 'approved' }));
+      prisma.partner_payout_batches.findUnique.mockResolvedValue(
+        batchFixture(),
+      );
+      prisma.partner_payout_batches.update.mockResolvedValue(
+        batchFixture({ state: 'approved' }),
+      );
       prisma.partner_commissions.updateMany.mockResolvedValue({ count: 3 });
 
-      await service.approve(1, { payout_method: 'bank_transfer', reference: 'REF-42' } as any);
+      await service.approve(1, {
+        payout_method: 'bank_transfer',
+        reference: 'REF-42',
+      } as any);
 
       const updateArgs = prisma.partner_payout_batches.update.mock.calls[0][0];
       expect(updateArgs.data.state).toBe('approved');

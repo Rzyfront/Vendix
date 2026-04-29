@@ -85,7 +85,10 @@ export class SubscriptionAccessController {
       return this.responseService.success({ features: {} }, 'Usage retrieved');
     }
 
-    const features: Record<string, { used: number; cap: number | null; period: string }> = {};
+    const features: Record<
+      string,
+      { used: number; cap: number | null; period: string }
+    > = {};
 
     for (const feature of AI_FEATURE_KEYS) {
       const quotaCfg = FEATURE_QUOTA_CONFIG[feature];

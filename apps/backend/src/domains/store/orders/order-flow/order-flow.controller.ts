@@ -41,8 +41,12 @@ export class OrderFlowController {
   @Get('transitions')
   @Permissions('store:orders:order_flow:read')
   async getValidTransitions(@Param('orderId', ParseIntPipe) orderId: number) {
-    const transitions = await this.orderFlowService.getValidTransitions(orderId);
-    return this.responseService.success(transitions, 'Valid transitions retrieved');
+    const transitions =
+      await this.orderFlowService.getValidTransitions(orderId);
+    return this.responseService.success(
+      transitions,
+      'Valid transitions retrieved',
+    );
   }
 
   @Get('available-actions')
@@ -90,7 +94,10 @@ export class OrderFlowController {
   @HttpCode(HttpStatus.OK)
   async confirmDelivery(@Param('orderId', ParseIntPipe) orderId: number) {
     const order = await this.orderFlowService.confirmDelivery(orderId);
-    return this.responseService.success(order, 'Delivery confirmed successfully');
+    return this.responseService.success(
+      order,
+      'Delivery confirmed successfully',
+    );
   }
 
   @Post('confirm-payment')
@@ -98,7 +105,10 @@ export class OrderFlowController {
   @HttpCode(HttpStatus.OK)
   async confirmPayment(@Param('orderId', ParseIntPipe) orderId: number) {
     const order = await this.orderFlowService.confirmPayment(orderId);
-    return this.responseService.success(order, 'Payment confirmed successfully');
+    return this.responseService.success(
+      order,
+      'Payment confirmed successfully',
+    );
   }
 
   @Post('cancel-payment')
@@ -111,9 +121,17 @@ export class OrderFlowController {
     @Body() dto: CancelPaymentDto,
     @Req() req: AuthenticatedRequest,
   ) {
-    const cancelledBy = req.user?.email || req.user?.id?.toString() || 'unknown';
-    const order = await this.orderFlowService.cancelPayment(orderId, dto, cancelledBy);
-    return this.responseService.success(order, 'Payment cancelled successfully');
+    const cancelledBy =
+      req.user?.email || req.user?.id?.toString() || 'unknown';
+    const order = await this.orderFlowService.cancelPayment(
+      orderId,
+      dto,
+      cancelledBy,
+    );
+    return this.responseService.success(
+      order,
+      'Payment cancelled successfully',
+    );
   }
 
   @Post('credit-payment')
@@ -123,8 +141,14 @@ export class OrderFlowController {
     @Param('orderId', ParseIntPipe) orderId: number,
     @Body() dto: PayOrderDto,
   ) {
-    const result = await this.orderFlowService.registerCreditPayment(orderId, dto);
-    return this.responseService.success(result, 'Credit payment registered successfully');
+    const result = await this.orderFlowService.registerCreditPayment(
+      orderId,
+      dto,
+    );
+    return this.responseService.success(
+      result,
+      'Credit payment registered successfully',
+    );
   }
 
   @Post('installments/:installmentId/forgive')
@@ -136,8 +160,14 @@ export class OrderFlowController {
     @Param('orderId', ParseIntPipe) orderId: number,
     @Param('installmentId', ParseIntPipe) installmentId: number,
   ) {
-    const result = await this.orderFlowService.forgiveInstallment(orderId, installmentId);
-    return this.responseService.success(result, 'Installment forgiven successfully');
+    const result = await this.orderFlowService.forgiveInstallment(
+      orderId,
+      installmentId,
+    );
+    return this.responseService.success(
+      result,
+      'Installment forgiven successfully',
+    );
   }
 
   @Post('fast-track')
@@ -148,7 +178,10 @@ export class OrderFlowController {
     @Body() dto: FastTrackOrderDto,
   ) {
     const order = await this.orderFlowService.fastTrackOrder(orderId, dto);
-    return this.responseService.success(order, 'Order fast-tracked successfully');
+    return this.responseService.success(
+      order,
+      'Order fast-tracked successfully',
+    );
   }
 
   @Post('cancel')

@@ -37,7 +37,12 @@ export class BookingSnapshotListener {
         label: v.field?.label,
         field_type: v.field?.field_type,
         display_mode: v.field?.display_mode,
-        value: v.value_text ?? v.value_number ?? v.value_bool ?? v.value_date ?? v.value_json,
+        value:
+          v.value_text ??
+          v.value_number ??
+          v.value_bool ??
+          v.value_date ??
+          v.value_json,
       }));
 
       await this.prisma.booking_metadata_snapshots.create({
@@ -49,9 +54,13 @@ export class BookingSnapshotListener {
         },
       });
 
-      this.logger.log(`Created metadata snapshot for booking ${event.booking_id}`);
+      this.logger.log(
+        `Created metadata snapshot for booking ${event.booking_id}`,
+      );
     } catch (error: any) {
-      this.logger.error(`Failed to create snapshot for booking ${event.booking_id}: ${error.message}`);
+      this.logger.error(
+        `Failed to create snapshot for booking ${event.booking_id}: ${error.message}`,
+      );
     }
   }
 }

@@ -78,7 +78,10 @@ export class OrderPdfBuilder {
         doc.text(`Payment: ${data.payment_status}`, MARGIN, y);
         y += 30;
 
-        doc.moveTo(MARGIN, y).lineTo(PAGE_WIDTH - MARGIN, y).stroke();
+        doc
+          .moveTo(MARGIN, y)
+          .lineTo(PAGE_WIDTH - MARGIN, y)
+          .stroke();
         y += 20;
 
         doc.font('Helvetica-Bold').fontSize(11);
@@ -93,7 +96,10 @@ export class OrderPdfBuilder {
         }
         y += 20;
 
-        doc.moveTo(MARGIN, y).lineTo(PAGE_WIDTH - MARGIN, y).stroke();
+        doc
+          .moveTo(MARGIN, y)
+          .lineTo(PAGE_WIDTH - MARGIN, y)
+          .stroke();
         y += 15;
 
         const col1X = MARGIN;
@@ -116,18 +122,28 @@ export class OrderPdfBuilder {
             y = MARGIN;
           }
 
-          const itemName = item.description.length > 40
-            ? item.description.substring(0, 40) + '...'
-            : item.description;
+          const itemName =
+            item.description.length > 40
+              ? item.description.substring(0, 40) + '...'
+              : item.description;
 
           doc.text(itemName, col1X, y, { width: 280 });
-          doc.text(item.quantity.toString(), col4X, y, { width: 50, align: 'right' });
-          doc.text(formatCurrency(item.unit_price, data.currency), col5X, y, { width: 70, align: 'right' });
+          doc.text(item.quantity.toString(), col4X, y, {
+            width: 50,
+            align: 'right',
+          });
+          doc.text(formatCurrency(item.unit_price, data.currency), col5X, y, {
+            width: 70,
+            align: 'right',
+          });
           y += 18;
         }
 
         y += 10;
-        doc.moveTo(MARGIN, y).lineTo(PAGE_WIDTH - MARGIN, y).stroke();
+        doc
+          .moveTo(MARGIN, y)
+          .lineTo(PAGE_WIDTH - MARGIN, y)
+          .stroke();
         y += 20;
 
         const rightAlignX = PAGE_WIDTH - MARGIN - 150;
@@ -135,34 +151,56 @@ export class OrderPdfBuilder {
 
         doc.fontSize(10).font('Helvetica');
         doc.text('Subtotal:', rightAlignX, y, { width: 80, align: 'right' });
-        doc.text(formatCurrency(data.subtotal, data.currency), valueX, y, { width: 70, align: 'right' });
+        doc.text(formatCurrency(data.subtotal, data.currency), valueX, y, {
+          width: 70,
+          align: 'right',
+        });
         y += 15;
 
         if (data.discount_amount > 0) {
           doc.text('Discount:', rightAlignX, y, { width: 80, align: 'right' });
-          doc.text(`-${formatCurrency(data.discount_amount, data.currency)}`, valueX, y, { width: 70, align: 'right' });
+          doc.text(
+            `-${formatCurrency(data.discount_amount, data.currency)}`,
+            valueX,
+            y,
+            { width: 70, align: 'right' },
+          );
           y += 15;
         }
 
         if (data.tax_amount > 0) {
           doc.text('Tax:', rightAlignX, y, { width: 80, align: 'right' });
-          doc.text(formatCurrency(data.tax_amount, data.currency), valueX, y, { width: 70, align: 'right' });
+          doc.text(formatCurrency(data.tax_amount, data.currency), valueX, y, {
+            width: 70,
+            align: 'right',
+          });
           y += 15;
         }
 
         if (data.shipping_amount > 0) {
           doc.text('Shipping:', rightAlignX, y, { width: 80, align: 'right' });
-          doc.text(formatCurrency(data.shipping_amount, data.currency), valueX, y, { width: 70, align: 'right' });
+          doc.text(
+            formatCurrency(data.shipping_amount, data.currency),
+            valueX,
+            y,
+            { width: 70, align: 'right' },
+          );
           y += 15;
         }
 
         y += 5;
-        doc.moveTo(rightAlignX, y).lineTo(PAGE_WIDTH - MARGIN, y).stroke();
+        doc
+          .moveTo(rightAlignX, y)
+          .lineTo(PAGE_WIDTH - MARGIN, y)
+          .stroke();
         y += 10;
 
         doc.fontSize(12).font('Helvetica-Bold');
         doc.text('TOTAL:', rightAlignX, y, { width: 80, align: 'right' });
-        doc.text(formatCurrency(data.total_amount, data.currency), valueX, y, { width: 70, align: 'right' });
+        doc.text(formatCurrency(data.total_amount, data.currency), valueX, y, {
+          width: 70,
+          align: 'right',
+        });
 
         doc.end();
       } catch (error) {

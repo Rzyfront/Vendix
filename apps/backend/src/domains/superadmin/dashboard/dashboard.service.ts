@@ -8,13 +8,21 @@ export class DashboardService {
 
   async getDashboardStats() {
     const now = new Date();
-    const currentMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1));
-    const lastMonthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1));
-    const lastMonthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0));
+    const currentMonthStart = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
+    );
+    const lastMonthStart = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1),
+    );
+    const lastMonthEnd = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0),
+    );
 
     const dayOfWeek = now.getUTCDay();
     const startOfWeek = new Date(now);
-    startOfWeek.setUTCDate(now.getUTCDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1));
+    startOfWeek.setUTCDate(
+      now.getUTCDate() - (dayOfWeek === 0 ? 6 : dayOfWeek - 1),
+    );
     startOfWeek.setUTCHours(0, 0, 0, 0);
 
     const [
@@ -86,7 +94,13 @@ export class DashboardService {
       this.prisma.users.findMany({
         orderBy: { created_at: 'desc' },
         take: 2,
-        select: { id: true, first_name: true, last_name: true, email: true, created_at: true },
+        select: {
+          id: true,
+          first_name: true,
+          last_name: true,
+          email: true,
+          created_at: true,
+        },
       }),
       this.prisma.stores.findMany({
         orderBy: { created_at: 'desc' },
@@ -161,7 +175,14 @@ export class DashboardService {
 
       this.prisma.subscription_events.findMany({
         where: {
-          type: { in: ['created', 'activated', 'payment_succeeded', 'state_transition'] },
+          type: {
+            in: [
+              'created',
+              'activated',
+              'payment_succeeded',
+              'state_transition',
+            ],
+          },
           created_at: { gte: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) },
         },
         orderBy: { created_at: 'desc' },
@@ -204,14 +225,22 @@ export class DashboardService {
       return Math.round(((current - lastMonth) / lastMonth) * 100);
     };
 
-    const organizationGrowth = calculateGrowth(currentMonthOrganizations, lastMonthOrganizations);
+    const organizationGrowth = calculateGrowth(
+      currentMonthOrganizations,
+      lastMonthOrganizations,
+    );
     const userGrowth = calculateGrowth(currentMonthUsers, lastMonthUsers);
     const storeGrowth = calculateGrowth(currentMonthStores, lastMonthStores);
-    const platformGrowth = Math.round((organizationGrowth + userGrowth + storeGrowth) / 3);
+    const platformGrowth = Math.round(
+      (organizationGrowth + userGrowth + storeGrowth) / 3,
+    );
 
     const currentMonthRevenue = Number(currentMonthRevenueAgg._sum.total || 0);
     const lastMonthRevenue = Number(lastMonthRevenueAgg._sum.total || 0);
-    const revenueGrowth = calculateGrowth(currentMonthRevenue, lastMonthRevenue);
+    const revenueGrowth = calculateGrowth(
+      currentMonthRevenue,
+      lastMonthRevenue,
+    );
 
     const mrr = Number(mrrAgg._sum.effective_price ?? new Prisma.Decimal(0));
 
@@ -220,7 +249,10 @@ export class DashboardService {
 
     const churnRate =
       activeAtMonthStart > 0
-        ? Math.round(((cancelledThisMonth + expiredThisMonth) / activeAtMonthStart) * 10000) / 100
+        ? Math.round(
+            ((cancelledThisMonth + expiredThisMonth) / activeAtMonthStart) *
+              10000,
+          ) / 100
         : 0;
 
     const weekDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -244,7 +276,12 @@ export class DashboardService {
           }),
         ]);
 
-        return { week: day, organizations: dayOrgs, users: dayUsers, stores: dayStores };
+        return {
+          week: day,
+          organizations: dayOrgs,
+          users: dayUsers,
+          stores: dayStores,
+        };
       }),
     );
 
@@ -289,11 +326,13 @@ export class DashboardService {
         action: 'payment_succeeded',
         description: 'Pago de suscripción recibido',
         timestamp: pay.paid_at,
-        entityName:
-          pay.invoice?.store_subscription?.store?.name || 'Tienda',
+        entityName: pay.invoice?.store_subscription?.store?.name || 'Tienda',
       })),
     ]
-      .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())
+      .sort(
+        (a, b) =>
+          new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime(),
+      )
       .slice(0, 8);
 
     const topOrganizations = await Promise.all(
@@ -306,19 +345,23 @@ export class DashboardService {
 
         let revenue = 0;
         if (storeIds.length > 0) {
-          const revenueResult = await this.prisma.subscription_invoices.aggregate({
-            where: {
-              store_id: { in: storeIds },
-              state: { in: ['paid', 'partially_paid'] },
-              created_at: { gte: currentMonthStart },
-            },
-            _sum: { total: true },
-          });
+          const revenueResult =
+            await this.prisma.subscription_invoices.aggregate({
+              where: {
+                store_id: { in: storeIds },
+                state: { in: ['paid', 'partially_paid'] },
+                created_at: { gte: currentMonthStart },
+              },
+              _sum: { total: true },
+            });
           revenue = Number(revenueResult._sum.total || 0);
         }
 
         const currentMonthStoresCount = await this.prisma.stores.count({
-          where: { organization_id: org.id, created_at: { gte: currentMonthStart } },
+          where: {
+            organization_id: org.id,
+            created_at: { gte: currentMonthStart },
+          },
         });
         const lastMonthStoresCount = await this.prisma.stores.count({
           where: {
@@ -327,7 +370,10 @@ export class DashboardService {
           },
         });
 
-        const growth = calculateGrowth(currentMonthStoresCount, lastMonthStoresCount);
+        const growth = calculateGrowth(
+          currentMonthStoresCount,
+          lastMonthStoresCount,
+        );
 
         let subscriptionState: string | null = null;
         if (storeIds.length > 0) {
@@ -382,11 +428,29 @@ export class DashboardService {
   }
 
   private async getMonthlyTrend(now: Date) {
-    const months: { month: string; revenue: number; newOrganizations: number; newUsers: number; newStores: number; newSubscriptions: number }[] = [];
+    const months: {
+      month: string;
+      revenue: number;
+      newOrganizations: number;
+      newUsers: number;
+      newStores: number;
+      newSubscriptions: number;
+    }[] = [];
 
     for (let i = 5; i >= 0; i--) {
-      const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
-      const monthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i + 1, 0, 23, 59, 59));
+      const monthStart = new Date(
+        Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1),
+      );
+      const monthEnd = new Date(
+        Date.UTC(
+          now.getUTCFullYear(),
+          now.getUTCMonth() - i + 1,
+          0,
+          23,
+          59,
+          59,
+        ),
+      );
 
       const monthLabel = monthStart.toLocaleString('en-US', { month: 'short' });
 

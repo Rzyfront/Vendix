@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { View, Text, ScrollView, Pressable } from 'react-native';
+import { View, Text, ScrollView, Pressable, StyleSheet } from 'react-native';
 import { useRouter } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ProductService } from '@/features/store/services';
@@ -9,6 +9,7 @@ import { Button } from '@/shared/components/button/button';
 import { Badge } from '@/shared/components/badge/badge';
 import { Spinner } from '@/shared/components/spinner/spinner';
 import { toastSuccess, toastError } from '@/shared/components/toast/toast.store';
+import { spacing, borderRadius, typography, colorScales, colors } from '@/shared/theme';
 
 const STATE_OPTIONS: { label: string; value: ProductState }[] = [
   { label: 'Activo', value: 'active' },
@@ -81,9 +82,9 @@ export default function CreateProductScreen() {
   };
 
   return (
-    <View className="flex-1 bg-white">
+    <View style={styles.container}>
       <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-        <View className="p-4 gap-4">
+        <View style={styles.formContent}>
           <Input
             label="Nombre *"
             value={name}
@@ -124,20 +125,22 @@ export default function CreateProductScreen() {
             keyboardType="number-pad"
           />
 
-          <View className="gap-2">
-            <Text className="text-xs font-semibold text-gray-500 uppercase tracking-widest">Estado</Text>
-            <View className="flex-row gap-2">
+          <View style={styles.sectionGap}>
+            <Text style={styles.sectionLabel}>Estado</Text>
+            <View style={styles.rowGap2}>
               {STATE_OPTIONS.map((opt) => (
                 <Pressable
                   key={opt.value}
                   onPress={() => setState(opt.value)}
-                  className={`px-4 py-2 rounded-lg ${
-                    state === opt.value ? 'bg-primary-600' : 'bg-gray-100'
-                  }`}
+                  style={[
+                    styles.stateButton,
+                    state === opt.value ? styles.stateButtonActive : styles.stateButtonInactive,
+                  ]}
                 >
-                  <Text className={`text-sm font-medium ${
-                    state === opt.value ? 'text-white' : 'text-gray-700'
-                  }`}>
+                  <Text style={[
+                    styles.stateButtonText,
+                    state === opt.value ? styles.stateTextActive : styles.stateTextInactive,
+                  ]}>
                     {opt.label}
                   </Text>
                 </Pressable>
@@ -146,9 +149,9 @@ export default function CreateProductScreen() {
           </View>
 
           {categories.length > 0 && (
-            <View className="gap-2">
-              <Text className="text-xs font-semibold text-gray-500 uppercase tracking-widest">Categorías</Text>
-              <View className="flex-row gap-2 flex-wrap">
+            <View style={styles.sectionGap}>
+              <Text style={styles.sectionLabel}>Categorías</Text>
+              <View style={styles.wrapRow}>
                 {categories.map((cat: ProductCategory) => (
                   <Pressable key={cat.id} onPress={() => toggleCategory(cat.id)}>
                     <Badge
@@ -163,9 +166,9 @@ export default function CreateProductScreen() {
           )}
 
           {brands.length > 0 && (
-            <View className="gap-2">
-              <Text className="text-xs font-semibold text-gray-500 uppercase tracking-widest">Marca</Text>
-              <View className="flex-row gap-2 flex-wrap">
+            <View style={styles.sectionGap}>
+              <Text style={styles.sectionLabel}>Marca</Text>
+              <View style={styles.wrapRow}>
                 <Pressable onPress={() => setSelectedBrand(undefined)}>
                   <Badge
                     label="Sin marca"
@@ -188,7 +191,7 @@ export default function CreateProductScreen() {
         </View>
       </ScrollView>
 
-      <View className="p-4 border-t border-gray-200">
+      <View style={styles.footer}>
         <Button
           title="Crear Producto"
           onPress={handleSubmit}
@@ -199,3 +202,59 @@ export default function CreateProductScreen() {
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  formContent: {
+    padding: spacing[4],
+    gap: spacing[4],
+  },
+  sectionGap: {
+    gap: spacing[2],
+  },
+  sectionLabel: {
+    fontSize: typography.fontSize.xs,
+    fontWeight: typography.fontWeight.semibold,
+    color: colorScales.gray[500],
+    textTransform: 'uppercase',
+    letterSpacing: 1.2,
+  },
+  rowGap2: {
+    flexDirection: 'row',
+    gap: spacing[2],
+  },
+  wrapRow: {
+    flexDirection: 'row',
+    gap: spacing[2],
+    flexWrap: 'wrap',
+  },
+  stateButton: {
+    paddingHorizontal: spacing[4],
+    paddingVertical: spacing[2],
+    borderRadius: borderRadius.lg,
+  },
+  stateButtonActive: {
+    backgroundColor: colors.primary,
+  },
+  stateButtonInactive: {
+    backgroundColor: colorScales.gray[100],
+  },
+  stateButtonText: {
+    fontSize: typography.fontSize.sm,
+    fontWeight: typography.fontWeight.medium,
+  },
+  stateTextActive: {
+    color: colors.background,
+  },
+  stateTextInactive: {
+    color: colorScales.gray[700],
+  },
+  footer: {
+    padding: spacing[4],
+    borderTopWidth: 1,
+    borderTopColor: colorScales.gray[200],
+  },
+});

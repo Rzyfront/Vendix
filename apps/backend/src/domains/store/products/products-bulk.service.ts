@@ -34,6 +34,7 @@ import * as XLSX from 'xlsx';
 export class ProductsBulkService {
   private readonly logger = new Logger(ProductsBulkService.name);
   private readonly MAX_BATCH_SIZE = 1000;
+  private readonly NULL_MARKER = '__NULL__';
 
   // Mapa de encabezados en Español a claves del DTO
   private readonly HEADER_MAP = {
@@ -55,6 +56,22 @@ export class ProductsBulkService {
     'Codigo Bodega': 'warehouse_code',
     'Nombre Bodega': 'warehouse_name',
     Tipo: 'product_type',
+    'Duración Servicio (min)': 'service_duration_minutes',
+    'Modalidad Servicio': 'service_modality',
+    'Tipo Precio Servicio': 'service_pricing_type',
+    'Requiere Reserva': 'requires_booking',
+    'Modo Reserva': 'booking_mode',
+    'Buffer (min)': 'buffer_minutes',
+    'Es Recurrente': 'is_recurring',
+    'Instrucciones Servicio': 'service_instructions',
+    'Tiempo Preparación (min)': 'preparation_time_minutes',
+    'Stock Mínimo': 'min_stock_level',
+    'Stock Máximo': 'max_stock_level',
+    'Punto Reorden': 'reorder_point',
+    'Cantidad Reorden': 'reorder_quantity',
+    'Maneja Series': 'requires_serial_numbers',
+    'Maneja Lotes': 'requires_batch_tracking',
+    'Tipo Precio': 'pricing_type',
   };
 
   private readonly HEADER_TRANSLATIONS: Record<string, string> = {
@@ -86,6 +103,37 @@ export class ProductsBulkService {
     type: 'product_type',
     'tipo producto': 'product_type',
     'product type': 'product_type',
+    'duracion servicio': 'service_duration_minutes',
+    'duracion servicio (min)': 'service_duration_minutes',
+    duracion: 'service_duration_minutes',
+    'modalidad servicio': 'service_modality',
+    modalidad: 'service_modality',
+    'tipo precio servicio': 'service_pricing_type',
+    'requiere reserva': 'requires_booking',
+    'modo reserva': 'booking_mode',
+    buffer: 'buffer_minutes',
+    'buffer (min)': 'buffer_minutes',
+    'es recurrente': 'is_recurring',
+    recurrente: 'is_recurring',
+    'instrucciones servicio': 'service_instructions',
+    instrucciones: 'service_instructions',
+    'tiempo preparacion': 'preparation_time_minutes',
+    'tiempo preparacion (min)': 'preparation_time_minutes',
+    preparacion: 'preparation_time_minutes',
+    'stock minimo': 'min_stock_level',
+    'stock mínimo': 'min_stock_level',
+    minimo: 'min_stock_level',
+    'stock maximo': 'max_stock_level',
+    'stock máximo': 'max_stock_level',
+    maximo: 'max_stock_level',
+    'punto reorden': 'reorder_point',
+    reorden: 'reorder_point',
+    'cantidad reorden': 'reorder_quantity',
+    'maneja series': 'requires_serial_numbers',
+    series: 'requires_serial_numbers',
+    'maneja lotes': 'requires_batch_tracking',
+    lotes: 'requires_batch_tracking',
+    'tipo precio': 'pricing_type',
   };
 
   constructor(
@@ -142,11 +190,32 @@ export class ProductsBulkService {
         row.forEach((cellValue, index) => {
           const key = headerMap[index];
           if (key) {
-            // Normalizar valores vacíos
-            const val =
+            const raw =
               cellValue === undefined || cellValue === null ? '' : cellValue;
+            const val =
+              typeof raw === 'string' ? raw.trim() : raw;
 
-            // Si es numérico en DTO, intentar convertir
+            if (
+              val === '' ||
+              val === null ||
+              val === undefined
+            ) {
+              return;
+            }
+
+            const strVal =
+              typeof val === 'string' ? val : String(val);
+
+            if (
+              strVal.toUpperCase() === 'NULL' ||
+              strVal === '-' ||
+              strVal === '--'
+            ) {
+              product[key] = this.NULL_MARKER;
+              hasData = true;
+              return;
+            }
+
             if (
               [
                 'base_price',
@@ -155,24 +224,38 @@ export class ProductsBulkService {
                 'weight',
                 'sale_price',
                 'profit_margin',
+                'service_duration_minutes',
+                'buffer_minutes',
+                'preparation_time_minutes',
+                'min_stock_level',
+                'max_stock_level',
+                'reorder_point',
+                'reorder_quantity',
               ].includes(key)
             ) {
-              const num = parseFloat(val);
-              product[key] = isNaN(num) ? 0 : num;
-            } else if (['brand_id'].includes(key)) {
-              // Enteros opcionales: vacío → null (no 0, no "")
-              const strVal = val.toString().trim();
-              if (strVal === '') {
-                product[key] = null;
-              } else {
-                const num = parseInt(strVal, 10);
-                product[key] = isNaN(num) ? val : num;
+              const num = parseFloat(strVal);
+              if (!isNaN(num)) {
+                product[key] = num;
+                hasData = true;
               }
-            } else {
-              product[key] = val;
+              return;
             }
 
-            if (val !== '') hasData = true;
+            if (['brand_id'].includes(key)) {
+              const trimmed = strVal.trim();
+              const num = parseInt(trimmed, 10);
+              if (!isNaN(num)) {
+                product[key] = num;
+                hasData = true;
+              } else {
+                product[key] = trimmed;
+                hasData = true;
+              }
+              return;
+            }
+
+            product[key] = val;
+            hasData = true;
           }
         });
 
@@ -287,7 +370,11 @@ export class ProductsBulkService {
       }
 
       // Resolve track_inventory: explicit > default-by-type
-      if (product.track_inventory !== undefined && product.track_inventory !== null && product.track_inventory !== '') {
+      if (
+        product.track_inventory !== undefined &&
+        product.track_inventory !== null &&
+        product.track_inventory !== ''
+      ) {
         if (typeof product.track_inventory === 'boolean') {
           item.track_inventory = product.track_inventory;
         } else {
@@ -312,13 +399,25 @@ export class ProductsBulkService {
 
       // Validate required fields
       if (!item.name) {
-        item.errors.push('Nombre es requerido');
+        item.errors.push({
+          code: 'MISSING_NAME',
+          message: 'Nombre es requerido',
+          field: 'name',
+        });
       }
       if (!item.sku) {
-        item.errors.push('SKU es requerido');
+        item.errors.push({
+          code: 'MISSING_SKU',
+          message: 'SKU es requerido',
+          field: 'sku',
+        });
       }
       if (item.base_price < 0) {
-        item.errors.push('Precio de venta no puede ser negativo');
+        item.errors.push({
+          code: 'INVALID_PRICE',
+          message: 'Precio de venta no puede ser negativo',
+          field: 'base_price',
+        });
       }
 
       // Check margin -> price calculation
@@ -330,18 +429,22 @@ export class ProductsBulkService {
 
       // Check for no price at all
       if (item.base_price === 0 && item.cost_price === 0 && margin === 0) {
-        item.warnings.push(
-          'No se especificó precio de venta ni costo con margen',
-        );
+        item.warnings.push({
+          code: 'NO_PRICE_SPECIFIED',
+          message: 'No se especificó precio de venta ni costo con margen',
+          field: 'base_price',
+        });
       }
 
       // Check duplicate SKU in batch
       if (item.sku) {
         const skuLower = item.sku.toLowerCase();
         if (seenSkus.has(skuLower)) {
-          item.warnings.push(
-            `SKU duplicado en el archivo (primera aparición en fila ${seenSkus.get(skuLower)})`,
-          );
+          item.warnings.push({
+            code: 'DUPLICATE_SKU_IN_BATCH',
+            message: `SKU duplicado en el archivo (primera aparición en fila ${seenSkus.get(skuLower)})`,
+            field: 'sku',
+          });
         } else {
           seenSkus.set(skuLower, item.row_number);
         }
@@ -364,18 +467,22 @@ export class ProductsBulkService {
           if (found) {
             item.brand_name = found.name;
           } else {
-            item.warnings.push(
-              `Marca con ID ${brandId} no encontrada, se ignorará`,
-            );
+            item.warnings.push({
+              code: 'BRAND_ID_NOT_FOUND',
+              message: `Marca con ID ${brandId} no encontrada, se ignorará`,
+              field: 'brand_id',
+            });
           }
         } else if (brandVal) {
           item.brand_name = brandVal;
           const exists = brandMap.has(brandVal.toLowerCase());
           if (!exists) {
             item.brand_will_create = true;
-            item.warnings.push(
-              `Se creará la marca "${brandVal}" automáticamente`,
-            );
+            item.warnings.push({
+              code: 'AUTO_CREATE_BRANDS',
+              message: `Se creará la marca "${brandVal}" automáticamente`,
+              field: 'brand_id',
+            });
           }
         }
       }
@@ -404,9 +511,11 @@ export class ProductsBulkService {
             if (found) {
               catNames.push(found.name);
             } else {
-              item.warnings.push(
-                `Categoría con ID ${catId} no encontrada, se ignorará`,
-              );
+              item.warnings.push({
+                code: 'CATEGORY_ID_NOT_FOUND',
+                message: `Categoría con ID ${catId} no encontrada, se ignorará`,
+                field: 'category_ids',
+              });
             }
           } else {
             catNames.push(cat);
@@ -419,18 +528,162 @@ export class ProductsBulkService {
         item.category_names = catNames;
         item.categories_will_create = catsToCreate;
         if (catsToCreate.length > 0) {
-          item.warnings.push(
-            `Se crearán ${catsToCreate.length} categoría(s) automáticamente: ${catsToCreate.join(', ')}`,
-          );
+          item.warnings.push({
+            code: 'AUTO_CREATE_CATEGORIES',
+            message: `Se crearán ${catsToCreate.length} categoría(s) automáticamente: ${catsToCreate.join(', ')}`,
+            field: 'category_ids',
+          });
         }
       }
 
       // Service with stock warning
       if (item.product_type === 'service' && item.stock_quantity > 0) {
-        item.warnings.push(
-          'Los servicios no manejan stock. Se ignorará la cantidad.',
-        );
+        item.warnings.push({
+          code: 'SERVICE_NO_STOCK',
+          message: 'Los servicios no manejan stock. Se ignorará la cantidad.',
+          field: 'stock_quantity',
+        });
       }
+
+      // Cross-field validations (only when BOTH fields are explicitly present)
+      if (
+        item.product_type === 'service' &&
+        item.action === 'create' &&
+        product.service_duration_minutes === undefined
+      ) {
+        item.warnings.push({
+          code: 'SERVICE_NO_DURATION',
+          message:
+            'Los productos de servicio deberían tener duración definida.',
+          field: 'service_duration_minutes',
+        });
+      }
+
+      if (
+        item.product_type === 'service' &&
+        item.action === 'create' &&
+        product.service_pricing_type === undefined
+      ) {
+        item.warnings.push({
+          code: 'SERVICE_NO_PRICING_TYPE',
+          message:
+            'Los productos de servicio deberían tener tipo de precio definido.',
+          field: 'service_pricing_type',
+        });
+      }
+
+      if (
+        product.requires_booking !== undefined &&
+        product.service_modality === undefined
+      ) {
+        item.warnings.push({
+          code: 'BOOKING_NO_MODALITY',
+          message:
+            'Si requiere reserva, se recomienda definir modalidad.',
+          field: 'service_modality',
+        });
+      }
+
+      if (
+        product.min_stock_level !== undefined &&
+        product.max_stock_level !== undefined &&
+        Number(product.min_stock_level) > Number(product.max_stock_level)
+      ) {
+        item.warnings.push({
+          code: 'MIN_GT_MAX_STOCK',
+          message: 'Stock mínimo no puede ser mayor que stock máximo.',
+          field: 'min_stock_level',
+        });
+      }
+
+      if (
+        product.reorder_point !== undefined &&
+        product.max_stock_level !== undefined &&
+        Number(product.reorder_point) > Number(product.max_stock_level)
+      ) {
+        item.warnings.push({
+          code: 'REORDER_GT_MAX',
+          message: 'Punto de reorden no puede ser mayor que stock máximo.',
+          field: 'reorder_point',
+        });
+      }
+
+      if (
+        product.requires_batch_tracking !== undefined &&
+        product.track_inventory !== undefined &&
+        product.requires_batch_tracking === true &&
+        product.track_inventory === false
+      ) {
+        item.warnings.push({
+          code: 'BATCH_REQUIRES_INVENTORY',
+          message:
+            'Manejo de lotes requiere control de inventario activo.',
+          field: 'requires_batch_tracking',
+        });
+      }
+
+      // Deprecation warning for stock fields
+      if (product.stock_quantity > 0 || product.cost_price > 0) {
+        item.warnings.push({
+          code: 'STOCK_FIELD_DEPRECATED',
+          message:
+            'El stock será ignorado en futuras versiones. Usa Inventario > POP > Carga masiva para ingresar mercancía con costo y respaldo contable.',
+          field:
+            product.stock_quantity > 0 ? 'stock_quantity' : 'cost_price',
+        });
+      }
+
+      // Compute modified vs nulled fields for sparse update preview
+      const modifiedFields: string[] = [];
+      const nulledFields: string[] = [];
+
+      const FIELDS_TO_TRACK = [
+        'name',
+        'sku',
+        'description',
+        'base_price',
+        'cost_price',
+        'profit_margin',
+        'stock_quantity',
+        'state',
+        'product_type',
+        'track_inventory',
+        'available_for_ecommerce',
+        'is_on_sale',
+        'sale_price',
+        'weight',
+        'brand_id',
+        'category_ids',
+        'pricing_type',
+        'service_duration_minutes',
+        'service_modality',
+        'service_pricing_type',
+        'requires_booking',
+        'booking_mode',
+        'buffer_minutes',
+        'is_recurring',
+        'service_instructions',
+        'preparation_time_minutes',
+        'min_stock_level',
+        'max_stock_level',
+        'reorder_point',
+        'reorder_quantity',
+        'requires_serial_numbers',
+        'requires_batch_tracking',
+      ];
+
+      for (const field of FIELDS_TO_TRACK) {
+        const value = (product as any)[field];
+        if (value === undefined) continue; // sparse: not provided → don't touch
+        if (value === this.NULL_MARKER) {
+          nulledFields.push(field);
+        } else {
+          modifiedFields.push(field);
+        }
+      }
+
+      item.modified_fields = modifiedFields;
+      item.nulled_fields = nulledFields;
 
       // Determine final status
       if (item.errors.length > 0) {
@@ -523,55 +776,503 @@ export class ProductsBulkService {
         'Nombre',
         'SKU',
         'Tipo',
+        'Estado',
+        'Controla Inventario',
         'Precio Venta',
         'Precio Compra',
-        'Cantidad Inicial',
       ];
       exampleData = [
-        { Nombre: 'Camiseta Básica Blanca', SKU: 'CAM-BAS-BLA-001', Tipo: 'Producto', 'Precio Venta': 15000, 'Precio Compra': 8000, 'Cantidad Inicial': 50 },
-        { Nombre: 'Pantalón Jean Clásico', SKU: 'PAN-JEA-CLA-032', Tipo: 'Producto', 'Precio Venta': 45000, 'Precio Compra': 22000, 'Cantidad Inicial': 30 },
-        { Nombre: 'Asesoría Contable', SKU: 'SVC-ASE-CON-001', Tipo: 'Servicio', 'Precio Venta': 80000, 'Precio Compra': 30000, 'Cantidad Inicial': 0 },
-        { Nombre: 'Protector Solar FPS 50', SKU: 'PRO-SOL-FPS-050', Tipo: 'Producto', 'Precio Venta': 32000, 'Precio Compra': 18000, 'Cantidad Inicial': 80 },
-        { Nombre: 'Instalación Técnica', SKU: 'SVC-INS-TEC-001', Tipo: 'Servicio', 'Precio Venta': 120000, 'Precio Compra': 50000, 'Cantidad Inicial': 0 },
-        { Nombre: 'Café Orgánico 500g', SKU: 'CAF-ORG-500-012', Tipo: 'Producto', 'Precio Venta': 28000, 'Precio Compra': 15000, 'Cantidad Inicial': 120 },
-        { Nombre: 'Balón Fútbol Profesional', SKU: 'BAL-FUT-PRO-005', Tipo: 'Producto', 'Precio Venta': 75000, 'Precio Compra': 38000, 'Cantidad Inicial': 25 },
-        { Nombre: 'Mochila Escolar 40L', SKU: 'MOC-ESC-40L-018', Tipo: 'Producto', 'Precio Venta': 55000, 'Precio Compra': 27000, 'Cantidad Inicial': 40 },
-        { Nombre: 'Lámpara LED Escritorio', SKU: 'LAM-LED-ESC-003', Tipo: 'Producto', 'Precio Venta': 42000, 'Precio Compra': 19000, 'Cantidad Inicial': 0 },
-        { Nombre: 'Toalla Microfibra XL', SKU: 'TOA-MIC-XL-025', Tipo: 'Producto', 'Precio Venta': 18000, 'Precio Compra': 7500, 'Cantidad Inicial': 200 },
+        {
+          Nombre: 'Producto Ejemplo 1',
+          SKU: 'SKU-001',
+          Tipo: 'físico',
+          Estado: 'activo',
+          'Controla Inventario': 'sí',
+          'Precio Venta': 15000,
+          'Precio Compra': 8000,
+        },
+        {
+          Nombre: 'Producto Ejemplo 2',
+          SKU: 'SKU-002',
+          Tipo: 'físico',
+          Estado: 'activo',
+          'Controla Inventario': 'sí',
+          'Precio Venta': 25000,
+          'Precio Compra': 12000,
+        },
+        {
+          Nombre: 'Producto Ejemplo 3',
+          SKU: 'SKU-003',
+          Tipo: 'físico',
+          Estado: 'activo',
+          'Controla Inventario': 'sí',
+          'Precio Venta': 42000,
+          'Precio Compra': 19000,
+        },
+        {
+          Nombre: 'Producto Ejemplo 4',
+          SKU: 'SKU-004',
+          Tipo: 'físico',
+          Estado: 'activo',
+          'Controla Inventario': 'no',
+          'Precio Venta': 85000,
+          'Precio Compra': 45000,
+        },
+        {
+          Nombre: 'Producto Ejemplo 5',
+          SKU: 'SKU-005',
+          Tipo: 'físico',
+          Estado: 'activo',
+          'Controla Inventario': 'sí',
+          'Precio Venta': 32000,
+          'Precio Compra': 18000,
+        },
+        {
+          Nombre: 'Producto Ejemplo 6',
+          SKU: 'SKU-006',
+          Tipo: 'físico',
+          Estado: 'activo',
+          'Controla Inventario': 'sí',
+          'Precio Venta': 55000,
+          'Precio Compra': 27000,
+        },
+        {
+          Nombre: 'Producto Ejemplo 7',
+          SKU: 'SKU-007',
+          Tipo: 'físico',
+          Estado: 'activo',
+          'Controla Inventario': 'sí',
+          'Precio Venta': 18000,
+          'Precio Compra': 9000,
+        },
+        {
+          Nombre: 'Servicio Ejemplo 1',
+          SKU: 'SVC-001',
+          Tipo: 'servicio',
+          Estado: 'activo',
+          'Controla Inventario': 'no',
+          'Precio Venta': 50000,
+          'Precio Compra': 0,
+        },
+        {
+          Nombre: 'Servicio Ejemplo 2',
+          SKU: 'SVC-002',
+          Tipo: 'servicio',
+          Estado: 'activo',
+          'Controla Inventario': 'no',
+          'Precio Venta': 35000,
+          'Precio Compra': 0,
+        },
+        {
+          Nombre: 'Producto Ejemplo 8',
+          SKU: 'SKU-008',
+          Tipo: 'físico',
+          Estado: 'inactivo',
+          'Controla Inventario': 'sí',
+          'Precio Venta': 18000,
+          'Precio Compra': 9000,
+        },
       ];
     } else {
       headers = [
         'Nombre',
         'SKU',
         'Tipo',
+        'Estado',
+        'Controla Inventario',
         'Precio Venta',
         'Precio Compra',
         'Margen',
-        'Cantidad Inicial',
-        'Controla Inventario',
-        'Codigo Bodega',
-        'Nombre Bodega',
         'Descripción',
         'Marca',
         'Categorías',
-        'Estado',
+        'Tipo Precio',
         'Disponible Ecommerce',
         'Peso',
         'En Oferta',
         'Precio Oferta',
+        'Duración Servicio (min)',
+        'Modalidad Servicio',
+        'Tipo Precio Servicio',
+        'Requiere Reserva',
+        'Modo Reserva',
+        'Buffer (min)',
+        'Es Recurrente',
+        'Instrucciones Servicio',
+        'Tiempo Preparación (min)',
+        'Stock Mínimo',
+        'Stock Máximo',
+        'Punto Reorden',
+        'Cantidad Reorden',
+        'Maneja Series',
+        'Maneja Lotes',
       ];
       exampleData = [
-        { Nombre: 'Zapatillas Running Pro', SKU: 'ZAP-RUN-PRO-42', Tipo: 'Producto', 'Precio Venta': 85000, 'Precio Compra': 45000, Margen: 45, 'Cantidad Inicial': 20, 'Controla Inventario': 'Si', 'Codigo Bodega': 'BOD-001', 'Nombre Bodega': '', Descripción: 'Zapatillas ideales para correr largas distancias.', Marca: 'Nike', Categorías: 'Deportes, Calzado, Running', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 0.8, 'En Oferta': 'No', 'Precio Oferta': 0 },
-        { Nombre: 'Asesoría Tributaria', SKU: 'SVC-ASE-TRI-001', Tipo: 'Servicio', 'Precio Venta': 150000, 'Precio Compra': 60000, Margen: 60, 'Cantidad Inicial': 0, 'Controla Inventario': 'No', 'Codigo Bodega': '', 'Nombre Bodega': '', Descripción: 'Asesoría tributaria profesional por sesión.', Marca: '', Categorías: 'Servicios, Contabilidad', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 0, 'En Oferta': 'No', 'Precio Oferta': 0 },
-        { Nombre: 'Leche Entera 1L', SKU: 'LEC-ENT-1L-COL', Tipo: 'Producto', 'Precio Venta': 5200, 'Precio Compra': 3800, Margen: 37, 'Cantidad Inicial': 200, 'Controla Inventario': 'Si', 'Codigo Bodega': 'BOD-001', 'Nombre Bodega': '', Descripción: 'Leche entera pasteurizada de origen colombiano.', Marca: 'Colanta', Categorías: 'Alimentos, Lácteos', Estado: 'activo', 'Disponible Ecommerce': 'No', Peso: 1.05, 'En Oferta': 'No', 'Precio Oferta': 0 },
-        { Nombre: 'Camiseta Dry-Fit Running', SKU: 'CAM-DRY-RUN-M01', Tipo: 'Producto', 'Precio Venta': 65000, 'Precio Compra': 32000, Margen: 50, 'Cantidad Inicial': 35, 'Controla Inventario': 'Si', 'Codigo Bodega': '', 'Nombre Bodega': '', Descripción: 'Camiseta deportiva transpirable para hombre.', Marca: 'Adidas', Categorías: 'Deportes, Ropa Deportiva', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 0.15, 'En Oferta': 'No', 'Precio Oferta': 0 },
-        { Nombre: 'Consultoría On-Demand', SKU: 'PRO-CON-DEM-001', Tipo: 'Producto', 'Precio Venta': 250000, 'Precio Compra': 100000, Margen: 150, 'Cantidad Inicial': 0, 'Controla Inventario': 'No', 'Codigo Bodega': '', 'Nombre Bodega': '', Descripción: 'Producto físico entregado bajo disponibilidad (sin tracking de inventario).', Marca: '', Categorías: 'Servicios', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 0, 'En Oferta': 'No', 'Precio Oferta': 0 },
-        { Nombre: 'Escritorio Plegable Madera', SKU: 'ESC-PLE-MAD-120', Tipo: 'Producto', 'Precio Venta': 180000, 'Precio Compra': 95000, Margen: 47, 'Cantidad Inicial': 8, 'Controla Inventario': 'Si', 'Codigo Bodega': 'BOD-002', 'Nombre Bodega': '', Descripción: 'Escritorio plegable de madera 120x60cm para home office.', Marca: 'Muebles Express', Categorías: 'Hogar, Muebles, Oficina', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 15, 'En Oferta': 'Si', 'Precio Oferta': 155000 },
-        { Nombre: 'Aceite de Oliva Extra Virgen 500ml', SKU: 'ACE-OLI-EXV-500', Tipo: 'Producto', 'Precio Venta': 38000, 'Precio Compra': 24000, Margen: 58, 'Cantidad Inicial': 60, 'Controla Inventario': 'Si', 'Codigo Bodega': '', 'Nombre Bodega': 'Bodega Principal', Descripción: 'Aceite de oliva importado, primera prensada en frío.', Marca: 'Olivetto', Categorías: 'Alimentos, Aceites', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 0.55, 'En Oferta': 'No', 'Precio Oferta': 0 },
-        { Nombre: 'Teclado Mecánico RGB', SKU: 'TEC-MEC-RGB-K70', Tipo: 'Producto', 'Precio Venta': 320000, 'Precio Compra': 180000, Margen: 78, 'Cantidad Inicial': 12, 'Controla Inventario': 'Si', 'Codigo Bodega': '', 'Nombre Bodega': '', Descripción: 'Teclado mecánico con switches Cherry MX e iluminación RGB.', Marca: 'Corsair', Categorías: 'Tecnología, Periféricos, Gaming', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 1.2, 'En Oferta': 'Si', 'Precio Oferta': 280000 },
-        { Nombre: 'Bloqueador Solar Facial SPF 60', SKU: 'BLO-SOL-FAC-060', Tipo: 'Producto', 'Precio Venta': 48000, 'Precio Compra': 28000, Margen: 71, 'Cantidad Inicial': 45, 'Controla Inventario': 'Si', 'Codigo Bodega': 'BOD-001', 'Nombre Bodega': '', Descripción: 'Protector solar facial oil-free con SPF 60.', Marca: 'La Roche-Posay', Categorías: 'Belleza, Cuidado Personal', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 0.1, 'En Oferta': 'No', 'Precio Oferta': 0 },
-        { Nombre: 'Cuerda de Saltar Profesional', SKU: 'CUE-SAL-PRO-300', Tipo: 'Producto', 'Precio Venta': 22000, 'Precio Compra': 9000, Margen: 59, 'Cantidad Inicial': 0, 'Controla Inventario': 'Si', 'Codigo Bodega': '', 'Nombre Bodega': '', Descripción: 'Cuerda de saltar con rodamientos y mangos antideslizantes.', Marca: 'Everlast', Categorías: 'Deportes, Fitness', Estado: 'inactivo', 'Disponible Ecommerce': 'No', Peso: 0.3, 'En Oferta': 'No', 'Precio Oferta': 0 },
-        { Nombre: 'Set Ollas Antiadherentes x5', SKU: 'SET-OLL-ANT-5PC', Tipo: 'Producto', 'Precio Venta': 145000, 'Precio Compra': 72000, Margen: 50, 'Cantidad Inicial': 18, 'Controla Inventario': 'Si', 'Codigo Bodega': '', 'Nombre Bodega': 'Bodega Secundaria', Descripción: 'Juego de 5 ollas con recubrimiento antiadherente cerámico.', Marca: 'T-fal', Categorías: 'Hogar, Cocina', Estado: 'activo', 'Disponible Ecommerce': 'Si', Peso: 4.5, 'En Oferta': 'Si', 'Precio Oferta': 125000 },
+        {
+          Nombre: 'Zapatillas Running Pro',
+          SKU: 'ZAP-RUN-PRO-42',
+          Tipo: 'físico',
+          Estado: 'activo',
+          'Controla Inventario': 'sí',
+          'Precio Venta': 85000,
+          'Precio Compra': 45000,
+          Margen: 45,
+          Descripción: 'Zapatillas ideales para correr largas distancias.',
+          Marca: 'Nike',
+          Categorías: 'Deportes, Calzado',
+          'Tipo Precio': 'unidad',
+          'Disponible Ecommerce': 'sí',
+          Peso: 0.8,
+          'En Oferta': 'no',
+          'Precio Oferta': 0,
+          'Duración Servicio (min)': '',
+          'Modalidad Servicio': '',
+          'Tipo Precio Servicio': '',
+          'Requiere Reserva': '',
+          'Modo Reserva': '',
+          'Buffer (min)': '',
+          'Es Recurrente': '',
+          'Instrucciones Servicio': '',
+          'Tiempo Preparación (min)': '',
+          'Stock Mínimo': 10,
+          'Stock Máximo': 200,
+          'Punto Reorden': 20,
+          'Cantidad Reorden': 50,
+          'Maneja Series': 'no',
+          'Maneja Lotes': 'no',
+        },
+        {
+          Nombre: 'Asesoría Tributaria',
+          SKU: 'SVC-ASE-TRI-001',
+          Tipo: 'servicio',
+          Estado: 'activo',
+          'Controla Inventario': 'no',
+          'Precio Venta': 150000,
+          'Precio Compra': 60000,
+          Margen: 60,
+          Descripción: 'Asesoría tributaria profesional por sesión.',
+          Marca: '',
+          Categorías: 'Servicios, Contabilidad',
+          'Tipo Precio': '',
+          'Disponible Ecommerce': 'sí',
+          Peso: 0,
+          'En Oferta': 'no',
+          'Precio Oferta': 0,
+          'Duración Servicio (min)': 60,
+          'Modalidad Servicio': 'presencial',
+          'Tipo Precio Servicio': 'por hora',
+          'Requiere Reserva': 'sí',
+          'Modo Reserva': 'proveedor',
+          'Buffer (min)': 15,
+          'Es Recurrente': 'no',
+          'Instrucciones Servicio': 'Traer cédula y comprobante de pago.',
+          'Tiempo Preparación (min)': 15,
+          'Stock Mínimo': '',
+          'Stock Máximo': '',
+          'Punto Reorden': '',
+          'Cantidad Reorden': '',
+          'Maneja Series': '',
+          'Maneja Lotes': '',
+        },
+        {
+          Nombre: 'Leche Entera 1L',
+          SKU: 'LEC-ENT-1L-COL',
+          Tipo: 'físico',
+          Estado: 'activo',
+          'Controla Inventario': 'sí',
+          'Precio Venta': 5200,
+          'Precio Compra': 3800,
+          Margen: 37,
+          Descripción: 'Leche entera pasteurizada de origen colombiano.',
+          Marca: 'Colanta',
+          Categorías: 'Alimentos, Lácteos',
+          'Tipo Precio': 'unidad',
+          'Disponible Ecommerce': 'no',
+          Peso: 1.05,
+          'En Oferta': 'no',
+          'Precio Oferta': 0,
+          'Duración Servicio (min)': '',
+          'Modalidad Servicio': '',
+          'Tipo Precio Servicio': '',
+          'Requiere Reserva': '',
+          'Modo Reserva': '',
+          'Buffer (min)': '',
+          'Es Recurrente': '',
+          'Instrucciones Servicio': '',
+          'Tiempo Preparación (min)': '',
+          'Stock Mínimo': 50,
+          'Stock Máximo': 500,
+          'Punto Reorden': 100,
+          'Cantidad Reorden': 200,
+          'Maneja Series': 'no',
+          'Maneja Lotes': 'sí',
+        },
+        {
+          Nombre: 'Camiseta Dry-Fit Running',
+          SKU: 'CAM-DRY-RUN-M01',
+          Tipo: 'físico',
+          Estado: 'activo',
+          'Controla Inventario': 'sí',
+          'Precio Venta': 65000,
+          'Precio Compra': 32000,
+          Margen: 50,
+          Descripción: 'Camiseta deportiva transpirable para hombre.',
+          Marca: 'Adidas',
+          Categorías: 'Deportes, Ropa Deportiva',
+          'Tipo Precio': 'unidad',
+          'Disponible Ecommerce': 'sí',
+          Peso: 0.15,
+          'En Oferta': 'no',
+          'Precio Oferta': 0,
+          'Duración Servicio (min)': '',
+          'Modalidad Servicio': '',
+          'Tipo Precio Servicio': '',
+          'Requiere Reserva': '',
+          'Modo Reserva': '',
+          'Buffer (min)': '',
+          'Es Recurrente': '',
+          'Instrucciones Servicio': '',
+          'Tiempo Preparación (min)': '',
+          'Stock Mínimo': '',
+          'Stock Máximo': '',
+          'Punto Reorden': '',
+          'Cantidad Reorden': '',
+          'Maneja Series': 'no',
+          'Maneja Lotes': 'no',
+        },
+        {
+          Nombre: 'Consultoría Estratégica Virtual',
+          SKU: 'SVC-CON-EST-001',
+          Tipo: 'servicio',
+          Estado: 'activo',
+          'Controla Inventario': 'no',
+          'Precio Venta': 250000,
+          'Precio Compra': 100000,
+          Margen: 150,
+          Descripción: 'Consultoría estratégica virtual por sesión de 90 minutos.',
+          Marca: '',
+          Categorías: 'Servicios, Consultoría',
+          'Tipo Precio': '',
+          'Disponible Ecommerce': 'sí',
+          Peso: 0,
+          'En Oferta': 'no',
+          'Precio Oferta': 0,
+          'Duración Servicio (min)': 90,
+          'Modalidad Servicio': 'virtual',
+          'Tipo Precio Servicio': 'por sesión',
+          'Requiere Reserva': 'sí',
+          'Modo Reserva': 'libre',
+          'Buffer (min)': 10,
+          'Es Recurrente': 'no',
+          'Instrucciones Servicio': 'Conexión por Zoom 5 minutos antes de la sesión.',
+          'Tiempo Preparación (min)': 10,
+          'Stock Mínimo': '',
+          'Stock Máximo': '',
+          'Punto Reorden': '',
+          'Cantidad Reorden': '',
+          'Maneja Series': '',
+          'Maneja Lotes': '',
+        },
+        {
+          Nombre: 'Escritorio Plegable Madera',
+          SKU: 'ESC-PLE-MAD-120',
+          Tipo: 'físico',
+          Estado: 'activo',
+          'Controla Inventario': 'sí',
+          'Precio Venta': 180000,
+          'Precio Compra': 95000,
+          Margen: 47,
+          Descripción:
+            'Escritorio plegable de madera 120x60cm para home office.',
+          Marca: 'Muebles Express',
+          Categorías: 'Hogar, Muebles, Oficina',
+          'Tipo Precio': 'unidad',
+          'Disponible Ecommerce': 'sí',
+          Peso: 15,
+          'En Oferta': 'sí',
+          'Precio Oferta': 155000,
+          'Duración Servicio (min)': '',
+          'Modalidad Servicio': '',
+          'Tipo Precio Servicio': '',
+          'Requiere Reserva': '',
+          'Modo Reserva': '',
+          'Buffer (min)': '',
+          'Es Recurrente': '',
+          'Instrucciones Servicio': '',
+          'Tiempo Preparación (min)': '',
+          'Stock Mínimo': 5,
+          'Stock Máximo': 50,
+          'Punto Reorden': 8,
+          'Cantidad Reorden': 15,
+          'Maneja Series': 'no',
+          'Maneja Lotes': 'no',
+        },
+        {
+          Nombre: 'Aceite de Oliva Extra Virgen 500ml',
+          SKU: 'ACE-OLI-EXV-500',
+          Tipo: 'físico',
+          Estado: 'activo',
+          'Controla Inventario': 'sí',
+          'Precio Venta': 38000,
+          'Precio Compra': 24000,
+          Margen: 58,
+          Descripción: 'Aceite de oliva importado, primera prensada en frío.',
+          Marca: 'Olivetto',
+          Categorías: 'Alimentos, Aceites',
+          'Tipo Precio': 'unidad',
+          'Disponible Ecommerce': 'sí',
+          Peso: 0.55,
+          'En Oferta': 'no',
+          'Precio Oferta': 0,
+          'Duración Servicio (min)': '',
+          'Modalidad Servicio': '',
+          'Tipo Precio Servicio': '',
+          'Requiere Reserva': '',
+          'Modo Reserva': '',
+          'Buffer (min)': '',
+          'Es Recurrente': '',
+          'Instrucciones Servicio': '',
+          'Tiempo Preparación (min)': '',
+          'Stock Mínimo': '',
+          'Stock Máximo': '',
+          'Punto Reorden': '',
+          'Cantidad Reorden': '',
+          'Maneja Series': 'no',
+          'Maneja Lotes': 'sí',
+        },
+        {
+          Nombre: 'Teclado Mecánico RGB',
+          SKU: 'TEC-MEC-RGB-K70',
+          Tipo: 'físico',
+          Estado: 'activo',
+          'Controla Inventario': 'sí',
+          'Precio Venta': 320000,
+          'Precio Compra': 180000,
+          Margen: 78,
+          Descripción:
+            'Teclado mecánico con switches Cherry MX e iluminación RGB.',
+          Marca: 'Corsair',
+          Categorías: 'Tecnología, Periféricos',
+          'Tipo Precio': 'unidad',
+          'Disponible Ecommerce': 'sí',
+          Peso: 1.2,
+          'En Oferta': 'sí',
+          'Precio Oferta': 280000,
+          'Duración Servicio (min)': '',
+          'Modalidad Servicio': '',
+          'Tipo Precio Servicio': '',
+          'Requiere Reserva': '',
+          'Modo Reserva': '',
+          'Buffer (min)': '',
+          'Es Recurrente': '',
+          'Instrucciones Servicio': '',
+          'Tiempo Preparación (min)': '',
+          'Stock Mínimo': '',
+          'Stock Máximo': '',
+          'Punto Reorden': '',
+          'Cantidad Reorden': '',
+          'Maneja Series': 'sí',
+          'Maneja Lotes': 'no',
+        },
+        {
+          Nombre: 'Mantenimiento Preventivo Anual',
+          SKU: 'SVC-MNT-PRE-001',
+          Tipo: 'servicio',
+          Estado: 'activo',
+          'Controla Inventario': 'no',
+          'Precio Venta': 480000,
+          'Precio Compra': 200000,
+          Margen: 71,
+          Descripción: 'Plan de mantenimiento preventivo anual para equipos.',
+          Marca: '',
+          Categorías: 'Servicios, Mantenimiento',
+          'Tipo Precio': '',
+          'Disponible Ecommerce': 'sí',
+          Peso: 0,
+          'En Oferta': 'no',
+          'Precio Oferta': 0,
+          'Duración Servicio (min)': 120,
+          'Modalidad Servicio': 'híbrido',
+          'Tipo Precio Servicio': 'suscripción',
+          'Requiere Reserva': 'no',
+          'Modo Reserva': '',
+          'Buffer (min)': 0,
+          'Es Recurrente': 'sí',
+          'Instrucciones Servicio': 'Coordinar visita técnica con anticipación de 24 horas.',
+          'Tiempo Preparación (min)': 30,
+          'Stock Mínimo': '',
+          'Stock Máximo': '',
+          'Punto Reorden': '',
+          'Cantidad Reorden': '',
+          'Maneja Series': '',
+          'Maneja Lotes': '',
+        },
+        {
+          Nombre: 'Bloqueador Solar Facial SPF 60',
+          SKU: 'BLO-SOL-FAC-060',
+          Tipo: 'físico',
+          Estado: 'inactivo',
+          'Controla Inventario': 'sí',
+          'Precio Venta': 48000,
+          'Precio Compra': 28000,
+          Margen: 71,
+          Descripción: 'Protector solar facial oil-free con SPF 60.',
+          Marca: 'La Roche-Posay',
+          Categorías: 'Belleza, Cuidado Personal',
+          'Tipo Precio': 'unidad',
+          'Disponible Ecommerce': 'no',
+          Peso: 0.1,
+          'En Oferta': 'no',
+          'Precio Oferta': 0,
+          'Duración Servicio (min)': '',
+          'Modalidad Servicio': '',
+          'Tipo Precio Servicio': '',
+          'Requiere Reserva': '',
+          'Modo Reserva': '',
+          'Buffer (min)': '',
+          'Es Recurrente': '',
+          'Instrucciones Servicio': '',
+          'Tiempo Preparación (min)': '',
+          'Stock Mínimo': '',
+          'Stock Máximo': '',
+          'Punto Reorden': '',
+          'Cantidad Reorden': '',
+          'Maneja Series': 'no',
+          'Maneja Lotes': 'sí',
+        },
+        {
+          Nombre: 'Frutas Orgánicas Mix 1kg',
+          SKU: 'FRU-ORG-MIX-1KG',
+          Tipo: 'físico',
+          Estado: 'activo',
+          'Controla Inventario': 'sí',
+          'Precio Venta': 22000,
+          'Precio Compra': 9000,
+          Margen: 59,
+          Descripción: 'Mix de frutas orgánicas de temporada por kilo.',
+          Marca: '',
+          Categorías: 'Alimentos, Orgánicos',
+          'Tipo Precio': 'peso',
+          'Disponible Ecommerce': 'sí',
+          Peso: 1.0,
+          'En Oferta': 'no',
+          'Precio Oferta': 0,
+          'Duración Servicio (min)': '',
+          'Modalidad Servicio': '',
+          'Tipo Precio Servicio': '',
+          'Requiere Reserva': '',
+          'Modo Reserva': '',
+          'Buffer (min)': '',
+          'Es Recurrente': '',
+          'Instrucciones Servicio': '',
+          'Tiempo Preparación (min)': '',
+          'Stock Mínimo': '',
+          'Stock Máximo': '',
+          'Punto Reorden': '',
+          'Cantidad Reorden': '',
+          'Maneja Series': 'no',
+          'Maneja Lotes': 'no',
+        },
       ];
     }
 
@@ -621,6 +1322,15 @@ export class ProductsBulkService {
       const productData = products[rowIndex];
       const rowNumber = rowIndex + 2; // header = fila 1
       try {
+        if ((productData.stock_quantity ?? 0) > 0 || (productData.cost_price ?? 0) > 0) {
+          this.logger.warn('PRODUCT_BULK_DEPRECATED_STOCK_FIELD', {
+            storeId,
+            sku: productData.sku,
+            stock: productData.stock_quantity,
+            cost: productData.cost_price,
+          });
+        }
+
         // Pre-procesar: Crear marcas y categorías si son strings
         await this.preprocessProductData(productData, storeId);
 
@@ -646,7 +1356,7 @@ export class ProductsBulkService {
         let resultProduct;
 
         if (existingProduct) {
-          // Actualizar producto existente
+          // Actualizar producto existente (sparse update: solo campos presentes)
           const updateProductDto = this.mapToUpdateProductDto(productData);
           resultProduct = await this.productsService.update(
             existingProduct.id,
@@ -656,9 +1366,16 @@ export class ProductsBulkService {
           // Asignar stock a bodega si hay cantidad, bodega resuelta y controla inventario
           const isPhysical =
             (productData.product_type || 'physical') !== 'service';
-          const stockQty = productData.stock_quantity || 0;
+          const hasExplicitStock =
+            productData.stock_quantity !== undefined &&
+            String(productData.stock_quantity) !== this.NULL_MARKER;
+          const stockQty =
+            hasExplicitStock && !isNaN(Number(productData.stock_quantity))
+              ? Number(productData.stock_quantity)
+              : 0;
           if (
             isPhysical &&
+            hasExplicitStock &&
             (productData.track_inventory ?? true) &&
             stockQty > 0
           ) {
@@ -672,6 +1389,7 @@ export class ProductsBulkService {
                 quantity_change: stockQty,
                 movement_type: 'adjustment',
                 reason: 'Carga masiva - actualización de stock',
+                source_module: 'product_bulk_legacy',
               });
             }
           }
@@ -689,9 +1407,8 @@ export class ProductsBulkService {
           );
           let createdId: number | null = null;
           try {
-            resultProduct =
-              await this.productsService.create(createProductDto);
-            createdId = (resultProduct as any).id;
+            resultProduct = await this.productsService.create(createProductDto);
+            createdId = resultProduct.id;
 
             // Variantes
             if (productData.variants && productData.variants.length > 0) {
@@ -720,6 +1437,7 @@ export class ProductsBulkService {
                   quantity_change: stockQty,
                   movement_type: 'initial',
                   reason: 'Carga masiva - stock inicial',
+                  source_module: 'product_bulk_legacy',
                 });
               }
             }
@@ -776,25 +1494,29 @@ export class ProductsBulkService {
           }
           errorCode = 'BULK_PROD_VALIDATE_001';
         } else if (error?.code === 'P2003') {
-          userMessage = 'Referencia inválida (marca, categoría u otro campo relacionado)';
+          userMessage =
+            'Referencia inválida (marca, categoría u otro campo relacionado)';
           errorCode = 'BULK_PROD_VALIDATE_001';
         } else if (error?.code === 'P2025') {
           userMessage = 'Registro referenciado no encontrado';
           errorCode = 'BULK_PROD_REF_001';
         } else if (error?.errorCode === 'INV_FIND_001') {
-          userMessage = 'No se encontró ubicación de inventario para asignar stock';
+          userMessage =
+            'No se encontró ubicación de inventario para asignar stock';
           errorCode = 'INV_FIND_001';
         } else if (error?.errorCode === 'INV_CONTEXT_001') {
           userMessage = 'Contexto de tienda/organización inválido';
           errorCode = 'INV_CONTEXT_001';
         } else if (error instanceof Prisma.PrismaClientValidationError) {
-          userMessage = 'Uno de los valores proporcionados tiene un formato inválido. Verifique campos como marca, categoría o peso.';
+          userMessage =
+            'Uno de los valores proporcionados tiene un formato inválido. Verifique campos como marca, categoría o peso.';
           errorCode = 'BULK_PROD_VALIDATE_001';
         } else if (error?.message?.includes('brand_id')) {
           userMessage = 'El valor de marca es inválido';
           errorCode = 'BULK_PROD_VALIDATE_001';
         } else if (error?.message?.includes('Invalid value provided')) {
-          userMessage = 'Uno de los valores proporcionados tiene un formato inválido';
+          userMessage =
+            'Uno de los valores proporcionados tiene un formato inválido';
           errorCode = 'BULK_PROD_VALIDATE_001';
         } else if (error?.message && typeof error.message === 'string') {
           // Fallback: mostrar el mensaje real (truncado) en vez del genérico
@@ -918,6 +1640,85 @@ export class ProductsBulkService {
       );
     }
 
+    if (product.requires_booking !== undefined) {
+      product.requires_booking = normalizeBool(product.requires_booking);
+    }
+
+    if (product.is_recurring !== undefined) {
+      product.is_recurring = normalizeBool(product.is_recurring);
+    }
+
+    if (product.requires_serial_numbers !== undefined) {
+      product.requires_serial_numbers = normalizeBool(
+        product.requires_serial_numbers,
+      );
+    }
+
+    if (product.requires_batch_tracking !== undefined) {
+      product.requires_batch_tracking = normalizeBool(
+        product.requires_batch_tracking,
+      );
+    }
+
+    // Enum normalizations
+    if (
+      product.service_modality !== undefined &&
+      typeof product.service_modality === 'string' &&
+      product.service_modality !== this.NULL_MARKER
+    ) {
+      const v = product.service_modality.toLowerCase().trim();
+      if (v === 'presencial' || v === 'in_person') {
+        product.service_modality = 'in_person';
+      } else if (v === 'virtual') {
+        product.service_modality = 'virtual';
+      } else if (v === 'hibrido' || v === 'híbrido' || v === 'hybrid') {
+        product.service_modality = 'hybrid';
+      }
+    }
+
+    if (
+      product.service_pricing_type !== undefined &&
+      typeof product.service_pricing_type === 'string' &&
+      product.service_pricing_type !== this.NULL_MARKER
+    ) {
+      const v = product.service_pricing_type.toLowerCase().trim();
+      if (v === 'por hora' || v === 'per_hour') {
+        product.service_pricing_type = 'per_hour';
+      } else if (v === 'por sesión' || v === 'por sesion' || v === 'per_session') {
+        product.service_pricing_type = 'per_session';
+      } else if (v === 'paquete' || v === 'package') {
+        product.service_pricing_type = 'package';
+      } else if (v === 'suscripción' || v === 'suscripcion' || v === 'subscription') {
+        product.service_pricing_type = 'subscription';
+      }
+    }
+
+    if (
+      product.booking_mode !== undefined &&
+      typeof product.booking_mode === 'string' &&
+      product.booking_mode !== this.NULL_MARKER
+    ) {
+      const v = product.booking_mode.toLowerCase().trim();
+      if (v === 'proveedor' || v === 'provider_required') {
+        product.booking_mode = 'provider_required';
+      } else if (v === 'libre' || v === 'free_booking') {
+        product.booking_mode = 'free_booking';
+      }
+    }
+
+    if (
+      product.pricing_type !== undefined &&
+      typeof product.pricing_type === 'string' &&
+      product.pricing_type !== this.NULL_MARKER
+    ) {
+      const v = product.pricing_type.toLowerCase().trim();
+      if (v === 'unidad' || v === 'unit') {
+        product.pricing_type = 'unit';
+      } else if (v === 'peso' || v === 'weight') {
+        product.pricing_type = 'weight';
+      }
+    }
+
     // Normalizar Tipo de Producto
     if (product.product_type && typeof product.product_type === 'string') {
       const t = product.product_type.toLowerCase().trim();
@@ -932,7 +1733,11 @@ export class ProductsBulkService {
     }
 
     // Normalizar Controla Inventario (track_inventory)
-    if (product.track_inventory !== undefined && product.track_inventory !== null && product.track_inventory !== '') {
+    if (
+      product.track_inventory !== undefined &&
+      product.track_inventory !== null &&
+      product.track_inventory !== ''
+    ) {
       if (typeof product.track_inventory === 'string') {
         product.track_inventory = normalizeBool(product.track_inventory);
       } else {
@@ -1117,20 +1922,32 @@ export class ProductsBulkService {
     product: BulkProductItemDto,
     storeId: number,
   ): any {
-    return {
+    const resolveValue = (val: any) =>
+      val === this.NULL_MARKER ? null : val;
+
+    const dto: any = {
       name: product.name,
       base_price: product.base_price,
       sku: product.sku,
-      description: product.description,
+      description: resolveValue(product.description),
       slug: product.slug || generateSlug(product.name),
       store_id: storeId,
-      brand_id: product.brand_id && typeof product.brand_id === 'number' ? product.brand_id : undefined,
-      category_ids: product.category_ids,
-      // stock_quantity se gestiona directamente vía StockLevelManager en uploadProducts
-      // para evitar doble asignación (productsService.create también procesa stock_quantity).
+      brand_id:
+        product.brand_id && typeof product.brand_id === 'number'
+          ? product.brand_id
+          : product.brand_id === this.NULL_MARKER
+            ? null
+            : undefined,
+      category_ids:
+        product.category_ids === this.NULL_MARKER
+          ? []
+          : product.category_ids,
       cost_price: product.cost_price,
       profit_margin: product.profit_margin,
-      weight: product.weight && typeof product.weight === 'number' ? product.weight : undefined,
+      weight:
+        product.weight && typeof product.weight === 'number'
+          ? product.weight
+          : undefined,
       is_on_sale: product['is_on_sale'],
       sale_price: product['sale_price'],
       state: product.state,
@@ -1141,25 +1958,129 @@ export class ProductsBulkService {
           ? false
           : (product.track_inventory ?? true),
     };
+
+    const newCatalogFields = [
+      'service_duration_minutes',
+      'service_modality',
+      'service_pricing_type',
+      'requires_booking',
+      'booking_mode',
+      'buffer_minutes',
+      'is_recurring',
+      'service_instructions',
+      'preparation_time_minutes',
+      'min_stock_level',
+      'max_stock_level',
+      'reorder_point',
+      'reorder_quantity',
+      'requires_serial_numbers',
+      'requires_batch_tracking',
+      'pricing_type',
+    ];
+
+    for (const field of newCatalogFields) {
+      if (product[field] !== undefined) {
+        dto[field] = resolveValue(product[field]);
+      }
+    }
+
+    return dto;
   }
 
   private mapToUpdateProductDto(product: BulkProductItemDto): any {
-    return {
-      name: product.name,
-      base_price: product.base_price,
-      sku: product.sku,
-      description: product.description,
-      brand_id: product.brand_id && typeof product.brand_id === 'number' ? product.brand_id : undefined,
-      category_ids: product.category_ids,
-      stock_quantity: product.stock_quantity,
-      cost_price: product.cost_price,
-      profit_margin: product.profit_margin,
-      weight: product.weight && typeof product.weight === 'number' ? product.weight : undefined,
-      is_on_sale: product['is_on_sale'],
-      sale_price: product['sale_price'],
-      state: product.state,
-      available_for_ecommerce: product.available_for_ecommerce,
-    };
+    const resolveValue = (val: any) =>
+      val === this.NULL_MARKER ? null : val;
+
+    const dto: any = {};
+
+    const simpleFields = [
+      'name',
+      'base_price',
+      'sku',
+      'cost_price',
+      'profit_margin',
+      'state',
+    ];
+
+    for (const field of simpleFields) {
+      if (product[field] !== undefined) {
+        dto[field] = resolveValue(product[field]);
+      }
+    }
+
+    if (product.description !== undefined) {
+      dto.description = resolveValue(product.description);
+    }
+
+    if (
+      product.brand_id !== undefined &&
+      product.brand_id !== this.NULL_MARKER &&
+      typeof product.brand_id === 'number'
+    ) {
+      dto.brand_id = product.brand_id;
+    } else if (product.brand_id === this.NULL_MARKER) {
+      dto.brand_id = null;
+    }
+
+    if (product.category_ids !== undefined) {
+      if (product.category_ids === this.NULL_MARKER) {
+        dto.category_ids = [];
+      } else {
+        dto.category_ids = product.category_ids;
+      }
+    }
+
+    if (product.weight !== undefined) {
+      dto.weight =
+        typeof product.weight === 'number' ? product.weight : undefined;
+    }
+
+    if (product['is_on_sale'] !== undefined) {
+      dto.is_on_sale = resolveValue(product['is_on_sale']);
+    }
+
+    if (product['sale_price'] !== undefined) {
+      dto.sale_price = resolveValue(product['sale_price']);
+    }
+
+    if (product.available_for_ecommerce !== undefined) {
+      dto.available_for_ecommerce = resolveValue(product.available_for_ecommerce);
+    }
+
+    if (product.product_type !== undefined) {
+      dto.product_type = resolveValue(product.product_type);
+    }
+
+    if (product.track_inventory !== undefined) {
+      dto.track_inventory = resolveValue(product.track_inventory);
+    }
+
+    const newCatalogFields = [
+      'service_duration_minutes',
+      'service_modality',
+      'service_pricing_type',
+      'requires_booking',
+      'booking_mode',
+      'buffer_minutes',
+      'is_recurring',
+      'service_instructions',
+      'preparation_time_minutes',
+      'min_stock_level',
+      'max_stock_level',
+      'reorder_point',
+      'reorder_quantity',
+      'requires_serial_numbers',
+      'requires_batch_tracking',
+      'pricing_type',
+    ];
+
+    for (const field of newCatalogFields) {
+      if (product[field] !== undefined) {
+        dto[field] = resolveValue(product[field]);
+      }
+    }
+
+    return dto;
   }
 
   private async processProductVariants(
@@ -1186,7 +2107,9 @@ export class ProductsBulkService {
 
     if (!code && !name) return null;
 
-    const cacheKey = code ? `code:${code.toLowerCase()}` : `name:${name!.toLowerCase()}`;
+    const cacheKey = code
+      ? `code:${code.toLowerCase()}`
+      : `name:${name!.toLowerCase()}`;
 
     if (cache.has(cacheKey)) {
       return cache.get(cacheKey);
@@ -1240,6 +2163,7 @@ export class ProductsBulkService {
       quantity_change: quantity,
       movement_type: 'initial',
       reason: 'Carga masiva inicial',
+      source_module: 'product_bulk_legacy',
     });
   }
 
@@ -1262,6 +2186,7 @@ export class ProductsBulkService {
         quantity_change: stockData.quantity || 0,
         movement_type: 'initial',
         reason: stockData.notes || 'Carga masiva por ubicación',
+        source_module: 'product_bulk_legacy',
       });
     }
   }
